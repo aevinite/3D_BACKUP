@@ -50,21 +50,114 @@ body {
 /* The 7 tabs can crowd a mid-width window before the phone layout kicks in;
    let them scroll sideways rather than overflow/wrap awkwardly. min-width:0
    lets the flex item actually shrink so the scroll can engage. */
-.tabs { display: flex; gap: 6px; overflow-x: auto; min-width: 0; scrollbar-width: none; }
+/* A scroll container clips BOTH axes (overflow-x:auto forces overflow-y:auto), so the
+   active tab's focus ring (outline + 2px offset), its soft gold glow and the pulsing
+   red badge were being sliced flat top/bottom/sides. Pad the scroll box so those
+   decorations have room INSIDE it, then pull the padding back with an equal negative
+   margin — the tabs sit at exactly the same x/y and the bar height is unchanged. */
+.tabs {
+  display: flex; align-items: center; gap: 6px;
+  overflow-x: auto; min-width: 0; scrollbar-width: none;
+  padding: 8px 6px; margin: -8px -6px;
+}
 .tabs::-webkit-scrollbar { display: none; }
-/* Phone-drawer parts (☰ burger, dimmed scrim, drawer header) exist in the markup at
-   every width but only DO anything ≤760px — on desktop they stay hidden and the tabs
-   render in the bar exactly as before. */
+/* Drawer parts (☰ burger, dimmed scrim, drawer header) exist in the markup at every
+   width; they only DO anything once app.js puts body in .nav-compact (see below). */
 .nav-burger, .nav-scrim, .tabs-head { display: none; }
 .tab {
   background: transparent; color: var(--muted);
   border: 1px solid transparent; border-radius: 999px;
   padding: 8px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
-  transition: .15s;
+  /* colour-only transition ON PURPOSE: a blanket `transition: .15s` also animated the
+     padding/font-size, so syncNavFit measured a pill that was still mid-resize and
+     wrongly decided the strip fit. Never widen this back to `all`. */
+  transition: background .15s, color .15s, border-color .15s, box-shadow .15s;
   flex: none; white-space: nowrap; /* keep full size + on one line so .tabs scrolls cleanly */
 }
 .tab:hover { color: var(--text); }
 .tab.active { background: var(--gold); color: #2a1d0c; }
+
+/* ── Auto-fitting top nav (2026-07-29) ───────────────────────────────────────
+   With Banquet + Ratings switched on there are NINE tabs, and brand + tabs + the
+   right-hand actions need ~1500px — so on a laptop, a tablet or a narrowed window
+   the strip silently side-scrolled and sliced a tab in half ("Platf…"), with the
+   later tabs unreachable. A fixed breakpoint can't fix that (the strip's width
+   depends on how many tabs the restaurant has), so app.js MEASURES the strip against
+   the room the bar can actually give it (syncNavFit) and picks one of three modes:
+
+     (no class)   everything fits — unchanged desktop look
+     .nav-tight   tighter pills + the restaurant name hidden = it fits again
+     .nav-compact it can't fit at any size → the ☰ drawer (phones always land here)
+
+   Nothing is ever cut, and no width is hard-coded. */
+/* while syncNavFit is trying the modes on, freeze every animation in the bar so it
+   measures FINISHED sizes, never a pill halfway through a transition */
+body.nav-measuring .topbar, body.nav-measuring .topbar * { transition: none !important; }
+body.nav-tight .brand-rest { display: none; }
+body.nav-tight .topbar { gap: 14px; }
+body.nav-tight .tab { padding: 7px 11px; font-size: 13px; }
+body.nav-tight .tab-badge { margin-left: 5px; }
+
+/* ☰ hamburger: three bars that cross into an ✕ while the drawer is open */
+body.nav-compact .nav-burger {
+  display: inline-flex; flex-direction: column; justify-content: center; align-items: center;
+  gap: 4px; flex: none;
+  width: 40px; height: 40px; min-height: 40px;      /* comfortable tap target */
+  background: transparent; border: 1px solid var(--line); border-radius: 10px;
+  cursor: pointer; padding: 0;
+}
+body.nav-compact .nav-burger span {
+  display: block; width: 18px; height: 2px; border-radius: 2px;
+  background: var(--text); transition: transform .2s ease, opacity .2s ease;
+}
+body.nav-compact.nav-open .nav-burger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+body.nav-compact.nav-open .nav-burger span:nth-child(2) { opacity: 0; }
+body.nav-compact.nav-open .nav-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* dimmed page behind the open drawer; tapping it closes. Sits inside the topbar's
+   stacking context (z 1) so the drawer (z 2) always paints above it. */
+body.nav-compact .nav-scrim {
+  display: block; position: fixed; inset: 0; z-index: 1;
+  background: rgba(0, 0, 0, .45);
+  opacity: 0; pointer-events: none; transition: opacity .22s ease;
+}
+body.nav-compact.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
+
+/* the SAME .tabs nav (badges, banquet-gating, active state all keep working)
+   restyled as a left drawer: off-screen by default, slides in on body.nav-open */
+body.nav-compact .tabs {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 2;
+  width: min(78vw, 300px);
+  flex-direction: column; align-items: stretch; gap: 4px;
+  background: var(--panel); border-right: 1px solid var(--line);
+  box-shadow: 0 0 40px rgba(0, 0, 0, .35);
+  padding: calc(12px + var(--sat)) 12px calc(16px + var(--sab)); /* --sat/--sab: real insets even inside the iframe (env() reads 0 there) */
+  margin: 0;                                    /* cancel the in-bar ring-room negative margin (would shove the fixed drawer off-screen) */
+  overflow-y: auto; overflow-x: hidden;
+  transform: translateX(-110%); transition: transform .25s ease;
+}
+body.nav-compact.nav-open .tabs { transform: translateX(0); }
+
+/* drawer header: "Sections" + ✕ close */
+body.nav-compact .tabs-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 6px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line);
+  font-weight: 700; font-size: 14px; color: var(--muted);
+  letter-spacing: .4px; text-transform: uppercase;
+}
+body.nav-compact .tabs-head button {
+  background: transparent; border: 1px solid var(--line); border-radius: 10px;
+  width: 36px; height: 36px; font-size: 15px; color: var(--text); cursor: pointer;
+}
+body.nav-compact .tab {
+  flex: 0 0 auto; width: 100%; text-align: left;
+  padding: 12px 14px; font-size: 15px; white-space: nowrap;
+  min-height: 44px; border-radius: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tabs, .nav-scrim, .nav-burger span { transition: none; }
+}
+
 .tab-badge[hidden] { display: none; }
 .tab-badge {
   display: inline-flex; align-items: center; justify-content: center;
@@ -1261,93 +1354,30 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
      3. Multi-column forms / grids collapse to a single column.
    Nothing here changes desktop; it's purely additive for narrow viewports. */
 
-/* ── NAV: ☰ drawer for PHONES **AND TABLETS** (<= 1279px) ────────────────────
-   The nine tabs (Editor · Bills · Tables · Platform · Banquet · Dashboard ·
-   Ratings · Log · Settings) plus the brand and the connection pill need ~1300px
-   to sit in one row. On an iPad (1194px) the row silently CLIPPED: Ratings was
-   cut mid-word and Log + Settings were unreachable, with no ☰ to fall back on
-   because the drawer only existed under 760px. Aangan's staff work on a tablet,
-   so that made three sections unopenable on their main device (found on AV live
-   2026-07-28). These NAV rules therefore run up to 1279px; the phone LAYOUT
-   rules (single column, swipe list) stay at <= 760px where they belong. */
-@media (max-width: 1279px) {
-  /* --- top bar: ONE slim row (☰ + brand + actions); the tabs move into a left
-     slide-in drawer opened by the ☰ button (owner request 2026-07-20 — the old
-     wrap-to-many-rows tab strip ate a third of the phone screen). --- */
+/* ── NAV: the ☰ drawer is no longer tied to a breakpoint ─────────────────────
+   PR #527 gave phones AND tablets (<= 1279px) the drawer, because on an iPad the
+   nine-tab row silently CLIPPED (Ratings cut mid-word, Log + Settings unreachable)
+   — Aangan's staff work on a tablet, so three sections were unopenable. That fix
+   stands, but a fixed breakpoint can only ever be a guess: the strip's width
+   depends on how many tabs the restaurant has, so at 1300-1500px a nine-tab bar
+   still got sliced. app.js now MEASURES instead (syncNavFit → body.nav-tight /
+   body.nav-compact, see the auto-fitting nav block near the top of this file), and
+   a touch device always skips straight to the drawer so the tap targets stay 44px.
+   Only the phone LAYOUT rules (single column, swipe list, wrapped top bar) remain
+   width-based, below. */
+@media (max-width: 760px) {
+  /* --- top bar: ONE slim row (☰ + brand + actions); the tabs live in the drawer
+     (owner request 2026-07-20 — the old wrap-to-many-rows tab strip ate a third of
+     the phone screen). --- */
   .topbar {
     height: auto; flex-wrap: wrap; gap: 8px 10px; padding: 10px 12px;
   }
   .brand { font-size: 18px; }
   .conn { margin-left: auto; }              /* stays top-right, on the brand's row */
 
-  /* ☰ hamburger: three bars that cross into an ✕ while the drawer is open */
-  .nav-burger {
-    display: inline-flex; flex-direction: column; justify-content: center; align-items: center;
-    gap: 4px; flex: none;
-    width: 40px; height: 40px; min-height: 40px;      /* comfortable tap target */
-    background: transparent; border: 1px solid var(--line); border-radius: 10px;
-    cursor: pointer; padding: 0;
-  }
-  .nav-burger span {
-    display: block; width: 18px; height: 2px; border-radius: 2px;
-    background: var(--text); transition: transform .2s ease, opacity .2s ease;
-  }
-  body.nav-open .nav-burger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
-  body.nav-open .nav-burger span:nth-child(2) { opacity: 0; }
-  body.nav-open .nav-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
-
-  /* dimmed page behind the open drawer; tapping it closes. Sits inside the topbar's
-     stacking context (z 1) so the drawer (z 2) always paints above it. */
-  .nav-scrim {
-    display: block; position: fixed; inset: 0; z-index: 1;
-    background: rgba(0, 0, 0, .45);
-    opacity: 0; pointer-events: none; transition: opacity .22s ease;
-  }
-  body.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
-
-  /* the SAME .tabs nav (badges, banquet-gating, active state all keep working)
-     restyled as a left drawer: off-screen by default, slides in on body.nav-open */
-  .tabs {
-    position: fixed; top: 0; left: 0; bottom: 0; z-index: 2;
-    width: min(78vw, 300px);
-    flex-direction: column; align-items: stretch; gap: 4px;
-    background: var(--panel); border-right: 1px solid var(--line);
-    box-shadow: 0 0 40px rgba(0, 0, 0, .35);
-    padding: calc(12px + var(--sat)) 12px calc(16px + var(--sab)); /* --sat/--sab: real insets even inside the iframe (env() reads 0 there) */
-    overflow-y: auto; overflow-x: hidden;
-    transform: translateX(-110%); transition: transform .25s ease;
-  }
-  body.nav-open .tabs { transform: translateX(0); }
-
-  /* drawer header: "Sections" + ✕ close */
-  .tabs-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 2px 6px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line);
-    font-weight: 700; font-size: 14px; color: var(--muted);
-    letter-spacing: .4px; text-transform: uppercase;
-  }
-  .tabs-head button {
-    background: transparent; border: 1px solid var(--line); border-radius: 10px;
-    width: 36px; height: 36px; font-size: 15px; color: var(--text); cursor: pointer;
-  }
-
-  .tab {
-    flex: 0 0 auto; width: 100%; text-align: left;
-    padding: 12px 14px; font-size: 15px; white-space: nowrap;
-    min-height: 44px; border-radius: 12px;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .tabs, .nav-scrim, .nav-burger span { transition: none; }
-  }
-}
-
-/* ── PHONE-ONLY LAYOUT (<= 760px) ────────────────────────────────────────────
-   One column, the dish list becomes a horizontal swipe strip, forms collapse.
-   A tablet keeps the two-pane layout — it only borrows the ☰ nav drawer above. */
-@media (max-width: 760px) {
   /* belt-and-braces: never let a stray wide element scroll the whole page sideways */
   html, body { overflow-x: hidden; }
+
 
   /* --- main layout: single column, page scrolls instead of fixed panes --- */
   .layout { grid-template-columns: 1fr; height: auto; }
