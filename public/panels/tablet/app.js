@@ -469,7 +469,12 @@ function mySection() {
 const sectioned = () => mySection() !== null;
 function inMySection(i) {
   const my = mySection();
-  return my === null || my.includes(String(parseInt(i, 10)));
+  if (my === null) return true;
+  if (my.includes(String(parseInt(i, 10)))) return true;
+  // A table number ABOVE the floor plan is in nobody's section (the editor only offers
+  // 1…table_count), so hiding it would strand an open bill nobody could reach. Found live:
+  // tables 47-48 still carried orders on a 30-table floor. Mirrors allows() on the server.
+  return Number(i) > tableCount();
 }
 
 // "1 2 3 4 5 6"  →  "1-6";  "1 2 4 9 10"  →  "1-2, 4, 9-10". A waiter reads their own

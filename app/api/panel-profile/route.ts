@@ -31,7 +31,8 @@ export async function GET(req: NextRequest) {
   // hold from their own profile screen, without asking a manager. Read-only here; only a
   // manager/owner/admin can change it. null = not restricted (the module is off for this
   // restaurant, or they aren't a waiter) → the screen shows nothing about sections.
-  const myTables = u.restaurant_id ? await waiterTables(u, u.restaurant_id) : null;
+  const limit = u.restaurant_id ? await waiterTables(u, u.restaurant_id) : null;
+  const myTables = limit ? limit.tables : null;   // just the numbers for display
   const base = {
     username: u.username, role: u.role, name: u.name, phone: u.phone,
     myTables,
