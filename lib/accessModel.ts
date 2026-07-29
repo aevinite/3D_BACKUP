@@ -172,6 +172,16 @@ export const PERMISSIONS: Perm[] = [
     moduleLabel: "Table types (VIP / Family / Guest) + pay later", name: "Table types (VIP / Family / Guest)",
     what: "Marking a table so the floor shows who's sitting there.",
     sub: [{ id: "tag_set", name: "Mark / remove a table's type", what: "Puts or clears the VIP / Family / Owner's-guest ribbon on a table." }] },
+  // Waiter sections (mig 222). Deliberately NO `tablet` rung: a waiter never assigns
+  // sections, so there is nothing to hand down to the tablet — the ladder stops at the
+  // manager (same shape as `platform` above). The manager grant is BACKFILLED ON
+  // (owner 2026-07-29: managers run the floor), which is safe because the module itself
+  // ships off, so nothing appears anywhere until an admin turns it on.
+  { id: "table_assign", group: "floor", kind: "ladder", power: "table_assign", ownerUse: "manager",
+    module: { allowed: "table_assign_allowed", control: "table_assign_owner_control", enabled: "table_assign_enabled" },
+    name: "Give waiters their own tables",
+    what: "Split the floor into sections: each waiter's tablet then shows ONLY the tables they were given, and the server refuses anything else. A table can be given to two waiters, or to one. With this off, every waiter sees the whole floor (today's behaviour).",
+    sub: [{ id: "table_assign_edit", name: "Change who serves which table", what: "Opens the section editor in Settings → Tables." }] },
 
   // ───────────────────────────── KITCHEN (admin switch) ────────────────────
   { id: "auto_print_kot", group: "kitchen", kind: "switch", adminSwitch: "auto_print_kot_allowed", adminOnly: true, name: "Auto-print kitchen tickets",

@@ -17,6 +17,7 @@ import { userFromCookie, USER_COOKIE, hashSecret, verifySecret, normalizeLoginNa
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { payrollLadder } from "@/lib/tableTags";
+import { waiterTables } from "@/lib/tableAssign";
 import { completeness, hasProfile, mergeProfilePatch, SELF_PROFILE_FIELDS, todayIST } from "@/lib/staffProfile";
 
 export const dynamic = "force-dynamic";
@@ -26,8 +27,14 @@ export async function GET(req: NextRequest) {
   // No staff cookie = admin super-access (or a signed-out tab). Not an error → 200.
   // `error` stays in the body so callers that test `j.error` keep skipping the profile UI.
   if (!u) return NextResponse.json({ staff: false, error: "not logged in" });
+  // Their own section (waiter sections, mig 222) — so a waiter can see which tables they
+  // hold from their own profile screen, without asking a manager. Read-only here; only a
+  // manager/owner/admin can change it. null = not restricted (the module is off for this
+  // restaurant, or they aren't a waiter) → the screen shows nothing about sections.
+  const myTables = u.restaurant_id ? await waiterTables(u, u.restaurant_id) : null;
   const base = {
     username: u.username, role: u.role, name: u.name, phone: u.phone,
+    myTables,
     hasPin: !!u.pin_hash,
     needsProfile: !u.profile_confirmed, // one-time setup card shown until confirmed once
     canSelfReset: u.can_self_reset,

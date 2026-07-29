@@ -40,6 +40,9 @@
         </div>
       </div>
       <div class="floor-nav" id="floorNav"></div>
+      <!-- Waiter sections (mig 222): "Your tables · 1-6". Stays empty (and takes no
+           space) for anyone who isn't restricted to a section. Filled by renderFloor. -->
+      <div class="my-section" id="mySection" hidden></div>
       <!-- Skeleton tiles show instantly on open; the first render of #tiles (app.js)
            replaces them with the live floor. Six is enough to fill the first row. -->
       <div class="tiles" id="tiles">

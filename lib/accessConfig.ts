@@ -39,7 +39,12 @@ export const MP_DEFAULT: Record<string, boolean> = {
   // platform: ON for managers by default (matches parcel — the board was manager-visible
   // everywhere before mig 209). The module itself is off for NEW restaurants, so the whoami
   // overlay hides it until the admin turns the module on; then the manager has it immediately.
+  // table_assign: ON for managers (owner 2026-07-29 — managers run the floor, so they can
+  // hand out sections out of the box; the owner can still revoke it). Matches the mig-221
+  // backfill, which wrote the same `true` onto every restaurant that already existed —
+  // display and truth agree. Harmless until the admin turns the module itself on.
   khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true, platform: true,
+  table_assign: true,
 };
 
 // New-restaurant DEFAULT tablet caps (mirrors lib/settingsClone.ts). take_orders 'on'.

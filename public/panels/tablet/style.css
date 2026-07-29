@@ -192,6 +192,17 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 /* On wide screens the count chips beside the brand are the filter, so the
    floor-nav row is redundant — hide it. On narrow it's the only filter. */
 @media (min-width: 761px) { .floor-nav { display: none; } }
+/* Waiter sections (mig 222) — the "Your tables · 1-6" strip above the floor. Shown only
+   to a waiter who has been given a section; app.js toggles display inline (an author
+   display rule here would beat the `hidden` attribute, so it never relies on that). */
+.my-section { align-items: center; gap: 9px; flex-wrap: wrap; margin: 0 0 12px; padding: 8px 13px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; font-size: 13px; }
+.my-section .ms-key { color: var(--muted); font-weight: 600; }
+.my-section b { font-size: 15px; font-weight: 800; letter-spacing: .01em; }
+.my-section .ms-n { margin-left: auto; color: var(--muted); font-size: 12px; font-weight: 600; }
+/* Nothing assigned: the strip is the warning, so it reads as "needs attention", not decoration. */
+.my-section .ms-none { color: var(--red, #ef4444); font-weight: 700; }
+
 /* shift-to-table picker: a grid of free-table buttons */
 .shiftgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
 .shiftpick { padding: 16px 8px; font-size: 16px; font-weight: 800; }

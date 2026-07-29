@@ -59,6 +59,7 @@ const PERM_COPY: Record<string, [string, string]> = {
   take_orders: ["Take orders", "Start a new dine-in order at a table, like the waiter tablet"],
   parcel: ["Parcel / takeaway", "Punch in a quick takeaway (parcel) order from the floor — shows in the Platform board"],
   platform: ["Platform board", "See & manage online delivery orders (Zomato / Swiggy / website) in the 🛵 Platform tab"],
+  table_assign: ["Give waiters their own tables", "Decide which tables each waiter's tablet shows — turn this off to keep sections in your hands only"],
 };
 const PERMS: [string, string, string][] = MANAGER_POWER_FLAGS.map((f) => {
   const p = PERM_BY_ID[f];
