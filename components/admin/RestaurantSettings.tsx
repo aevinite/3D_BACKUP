@@ -125,6 +125,10 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
   const previewKot = () => {
     const now = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
     const name = String(draft.restaurant_name || restaurant.name || "Restaurant");
+    // Show the sample on a REAL table label, so a restaurant that renamed its tables
+    // sees on the test print exactly what a live KOT will say ("A5", not "Table 5").
+    const sampleNames = (draft.table_names || {}) as Record<string, string>;
+    const sampleTable = (sampleNames["5"] || "").trim() || "Table 5";
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sample KOT</title>
       <style>body{font-family:ui-monospace,monospace;max-width:280px;margin:0 auto;padding:12px;color:#000}
       h2{text-align:center;margin:2px 0 6px;font-size:16px} .r{display:flex;justify-content:space-between;font-size:13px;margin:3px 0}
@@ -132,7 +136,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
       <body onload="setTimeout(function(){window.print()},80)">
         <h2>KITCHEN TICKET</h2>
         <div class="r"><span>${name.replace(/</g, "&lt;")}</span><span>#SAMPLE</span></div>
-        <div class="r"><span>Table 5</span><span>${now}</span></div>
+        <div class="r"><span>${sampleTable.replace(/</g, "&lt;")}</span><span>${now}</span></div>
         <hr>
         <div class="r"><b>2×</b><span>Margherita Pizza</span></div>
         <div class="r"><b>1×</b><span>Garlic Bread</span></div>
