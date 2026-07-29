@@ -260,6 +260,14 @@ export default function StaffProfilePage() {
             </div>
           </div>
           <div className="sp-acts">
+            {/* This page IS the profile; visiting the panel they work on is a separate action
+                (owner 2026-07-29 — the two were easy to mix up). New tab, so this page stays. */}
+            {(staff.role === "manager" || staff.role === "tablet") && (
+              <a className="sp-btn" href={staff.role === "manager" ? "/manager" : "/tablet"} target="_blank" rel="noopener"
+                title={`Open the ${staff.role === "manager" ? "manager" : "waiter"} panel — the screen ${who} works on`}>
+                <i className="fas fa-up-right-from-square" /> Visit their panel
+              </a>
+            )}
             <button className="sp-btn" onClick={() => router.push(scopePin ? `/owner/staff?rid=${scopePin}` : "/owner/staff")}>
               <i className="fas fa-arrow-left" /> Back to team
             </button>
