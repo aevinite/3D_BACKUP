@@ -2512,3 +2512,5 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
 /* the "1 kg = 1000 g" line stays INLINE on every width (it reads as a sentence) */
 .inv-pop label.inv-factor { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
 .inv-pop label.inv-factor input { display: inline-block; width: 90px; flex: none; margin: 0; }
+/* Stage 2: recipes + usage view */
+.inv-row-val.in { color: #22c55e; } .inv-row-val.out { color: #ef4444; }
