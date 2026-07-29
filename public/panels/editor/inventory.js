@@ -117,6 +117,8 @@
       S.can.stock && { id: "purchases", label: "🧾 Purchases" },
       S.can.stock && { id: "count", label: "🔢 Count" },
       S.can.stock && { id: "waste", label: "🗑️ Waste" },
+      S.can.stock && { id: "recipes", label: "🍛 Recipes" },
+      S.can.stock && { id: "usage", label: "📊 Usage" },
       S.can.expenses && { id: "expenses", label: "💸 Expenses" },
     ].filter(Boolean);
     if (!pills.length) {
@@ -156,6 +158,12 @@
       } else if (S.view === "waste") {
         S.waste = (await inv("GET", "/waste?days=30")).waste || [];
         renderWaste(body);
+      } else if (S.view === "recipes") {
+        S.recipes = await inv("GET", "/recipes");
+        renderRecipes(body);
+      } else if (S.view === "usage") {
+        S.usage = await inv("GET", "/usage?days=" + (S.usageDays || 7));
+        renderUsage(body);
       } else if (S.view === "expenses") {
         S.expenses = await inv("GET", "/expenses" + (S.expMonth ? `?month=${S.expMonth}` : ""));
         renderExpenses(body);
@@ -655,6 +663,188 @@
           refreshView();
         } catch (e) { toastMsg("⚠️ " + e.message); }
       };
+    });
+  }
+
+  // ═════════════════════════════ RECIPES (Stage 2) ═════════════════════════════
+  // A dish's recipe = ingredients per ONE plate, typed in BASE units (250 g, 30 ml —
+  // exactly how recipes are written). Plate cost = Σ qty × current average cost.
+  const dishLines = (slug) => (S.recipes.lines || []).filter((l) => l.owner_type === "dish" && l.owner_key === slug);
+  const prepLines = (id) => (S.recipes.lines || []).filter((l) => l.owner_type === "prep" && l.owner_key === id);
+  const linesCost = (lines) => lines.reduce((s, l) => { const it = itemById(l.item_id); return s + Number(l.qty_base) * Number(it ? it.avg_cost : 0); }, 0);
+
+  function renderRecipes(body) {
+    const dishes = S.recipes.dishes || [];
+    const preps = S.items.filter((i) => i.active && i.recipe_batch_base);
+    const mapped = dishes.filter((d) => dishLines(d.slug).length);
+    body.innerHTML = `
+      <div class="inv-note soft">Map each dish's ingredients once — stock then deducts itself the moment an order reaches the kitchen, and the 📊 Usage view starts explaining where stock goes.</div>
+      <div class="inv-statrow">
+        <div class="inv-stat"><span>Dishes with a recipe</span><b>${mapped.length} / ${dishes.length}</b></div>
+        <div class="inv-stat"><span>Prep recipes</span><b>${preps.length}</b></div>
+      </div>
+      <div class="inv-toolbar">
+        <input id="rcSearch" class="inv-search" type="search" placeholder="Search dishes…" />
+        <button class="btn" id="rcAddPrep">+ Prep recipe</button>
+      </div>
+      <div id="rcPrepList">${preps.length ? `<div class="inv-cat">Prep items (made in batches)</div>` + preps.map((p) => {
+        const cost = linesCost(prepLines(p.id)) ;
+        return `<div class="inv-row static">
+          <span class="inv-row-name">🍲 ${esc(p.name)} <span class="dim">batch of ${inBuy(p, p.recipe_batch_base)} ≈ ${inr(cost)}</span></span>
+          <button class="btn" data-editprep="${p.id}">✎ Recipe</button>
+          <button class="btn primary" data-makeprep="${p.id}">Make a batch</button>
+        </div>`;
+      }).join("") : ""}</div>
+      <div class="inv-cat">Dishes</div>
+      <div id="rcDishList"></div>`;
+    const drawDishes = (q) => {
+      const rows = dishes.filter((d) => !q || d.title.toLowerCase().includes(q));
+      $("#rcDishList").innerHTML = rows.map((d) => {
+        const lines = dishLines(d.slug);
+        const cost = linesCost(lines);
+        const margin = d.price > 0 && lines.length ? Math.round((1 - cost / d.price) * 100) : null;
+        return `<button class="inv-row" data-dish="${esc(d.slug)}">
+          <span class="inv-row-name">${esc(d.title)}${lines.length ? "" : ` <span class="inv-badge low">no recipe</span>`}</span>
+          <span class="inv-row-qty">${lines.length ? `cost ${inr(cost)} / ₹${d.price}` : `₹${d.price}`}</span>
+          <span class="inv-row-val${margin != null && margin < 50 ? " out" : ""}">${margin != null ? margin + "% margin" : "—"}</span>
+        </button>`;
+      }).join("") || `<div class="empty">No dishes match.</div>`;
+      body.querySelectorAll("[data-dish]").forEach((r) => { r.onclick = () => recipePop("dish", r.dataset.dish, dishes.find((d) => d.slug === r.dataset.dish)); });
+    };
+    drawDishes("");
+    $("#rcSearch").oninput = (e) => drawDishes(e.target.value.trim().toLowerCase());
+    body.querySelectorAll("[data-editprep]").forEach((b) => { b.onclick = () => recipePop("prep", b.dataset.editprep, itemById(b.dataset.editprep)); });
+    body.querySelectorAll("[data-makeprep]").forEach((b) => { b.onclick = () => makeBatchPop(itemById(b.dataset.makeprep)); });
+    $("#rcAddPrep").onclick = () => {
+      const candidates = S.items.filter((i) => i.active && i.track_level !== "EXPENSE" && !i.recipe_batch_base);
+      if (!candidates.length) return toastMsg("Add the prep item as an ingredient first (e.g. “Gravy base”), then give it a recipe here.");
+      openPop("inv-pickprep", `<h3>🍲 New prep recipe</h3>
+        <p class="dim">Pick the ingredient this recipe MAKES (add it in Stock first if it doesn't exist yet — e.g. “Gravy base”).</p>
+        <label>Prep item <select id="ppkItem">${candidates.map((i) => `<option value="${i.id}">${esc(i.name)}</option>`).join("")}</select></label>
+        <div class="inv-pop-actions"><button class="btn" id="ppkCancel">Cancel</button><span style="flex:1"></span><button class="btn primary" id="ppkGo">Next</button></div>`,
+        (pop) => {
+          $("#ppkCancel", pop).onclick = closePop;
+          $("#ppkGo", pop).onclick = () => { const it = itemById($("#ppkItem", pop).value); recipePop("prep", it.id, it); };
+        });
+    };
+  }
+
+  // The shared recipe editor: for a DISH (per plate, shows margin) or a PREP item
+  // (per batch, asks the batch size). Lines are typed in each ingredient's BASE unit.
+  function recipePop(kind, key, subject) {
+    const existing = (kind === "dish" ? dishLines(key) : prepLines(key)).map((l) => ({ item_id: l.item_id, qty_base: Number(l.qty_base) }));
+    const lines = existing.slice();
+    const pickable = S.items.filter((i) => i.active && i.track_level !== "EXPENSE" && i.id !== key);
+    const title = kind === "dish" ? (subject ? subject.title : key) : (subject ? subject.name : "Prep");
+    openPop("inv-recipe", `
+      <h3>🍛 ${esc(title)} — recipe</h3>
+      ${kind === "prep" ? `<label class="inv-factor">One batch makes <input id="rpBatch" type="number" inputmode="decimal" min="0.001" step="any"
+          value="${subject && subject.recipe_batch_base ? Math.round((Number(subject.recipe_batch_base) / Number(subject.purchase_factor)) * 100) / 100 : ""}" /> <span>${esc(subject ? subject.purchase_uom : "")}</span></label>`
+        : `<p class="dim">Ingredients for ONE plate. Stock deducts automatically when an order reaches the kitchen.</p>`}
+      <div class="inv-lines" id="rpLines"></div>
+      <div class="inv-addline">
+        <select id="rpItem"><option value="">+ ingredient…</option>${pickable.map((i) => `<option value="${i.id}">${esc(i.name)}</option>`).join("")}</select>
+        <input id="rpQty" type="number" inputmode="decimal" min="0" step="any" placeholder="qty" />
+        <span id="rpUom" class="dim"></span>
+        <button class="btn" id="rpAdd">Add</button>
+      </div>
+      <div class="inv-total" id="rpTotal"></div>
+      <div class="inv-pop-actions">
+        <button class="btn" id="rpCancel">Cancel</button><span style="flex:1"></span>
+        <button class="btn primary" id="rpSave">Save recipe</button>
+      </div>`, (pop) => {
+      const sel = $("#rpItem", pop);
+      sel.onchange = () => { const it = itemById(sel.value); $("#rpUom", pop).textContent = it ? it.base_uom : ""; };
+      const redraw = () => {
+        $("#rpLines", pop).innerHTML = lines.map((l, n) => {
+          const it = itemById(l.item_id) || { name: "?", base_uom: "", avg_cost: 0 };
+          return `<div class="inv-line"><span>${esc(it.name)}</span><span>${l.qty_base} ${esc(it.base_uom)}</span><b>${inr(l.qty_base * Number(it.avg_cost))}</b><button class="inv-x" data-n="${n}">✕</button></div>`;
+        }).join("") || `<div class="empty">No ingredients yet.</div>`;
+        const cost = linesCost(lines);
+        const priceBit = kind === "dish" && subject && subject.price > 0 && lines.length
+          ? ` · sells ₹${subject.price} · <b>${Math.round((1 - cost / subject.price) * 100)}% margin</b>` : "";
+        $("#rpTotal", pop).innerHTML = `${kind === "dish" ? "Plate cost" : "Batch cost"}: <b>${inr(cost)}</b>${priceBit}`;
+        pop.querySelectorAll(".inv-x").forEach((x) => { x.onclick = () => { lines.splice(Number(x.dataset.n), 1); redraw(); }; });
+      };
+      redraw();
+      $("#rpAdd", pop).onclick = () => {
+        const it = itemById(sel.value); const qty = Number($("#rpQty", pop).value);
+        if (!it) return toastMsg("Pick an ingredient");
+        if (!(qty > 0)) return toastMsg("Enter the quantity");
+        const ex = lines.find((l) => l.item_id === it.id);
+        if (ex) ex.qty_base = qty; else lines.push({ item_id: it.id, qty_base: qty });
+        sel.value = ""; $("#rpQty", pop).value = ""; $("#rpUom", pop).textContent = "";
+        redraw();
+      };
+      $("#rpCancel", pop).onclick = closePop;
+      $("#rpSave", pop).onclick = async () => {
+        const payload = { lines };
+        if (kind === "prep") {
+          const b = Number($("#rpBatch", pop).value);
+          if (!(b > 0)) return toastMsg("Say how much one batch makes");
+          payload.batch_base = b * Number(subject.purchase_factor);
+        }
+        try {
+          await inv("POST", `/recipes/${kind}/${encodeURIComponent(key)}`, payload);
+          toastMsg("Recipe saved");
+          closePop();
+          await reloadItems();
+          refreshView();
+        } catch (e) { toastMsg("⚠️ " + e.message); }
+      };
+    });
+  }
+
+  function makeBatchPop(it) {
+    openPop("inv-batch", `
+      <h3>🍲 Make a batch — ${esc(it.name)}</h3>
+      <p class="dim">Ingredients come out of stock, the made quantity goes in — at the batch's real cost.</p>
+      <label class="inv-factor">Made <input id="mbQty" type="number" inputmode="decimal" min="0.001" step="any"
+        value="${Math.round((Number(it.recipe_batch_base) / Number(it.purchase_factor)) * 100) / 100}" /> <span>${esc(it.purchase_uom)}</span></label>
+      <div class="inv-pop-actions"><button class="btn" id="mbCancel">Cancel</button><span style="flex:1"></span><button class="btn primary" id="mbGo">Record batch</button></div>`,
+      (pop) => {
+        $("#mbCancel", pop).onclick = closePop;
+        $("#mbGo", pop).onclick = async () => {
+          const qty = Number($("#mbQty", pop).value);
+          if (!(qty > 0)) return toastMsg("Enter how much you made");
+          const btn = $("#mbGo", pop); btn.disabled = true;
+          try {
+            const r = await inv("POST", "/production", { item_id: it.id, qty_base: qty * Number(it.purchase_factor) });
+            toastMsg(`Batch recorded — cost ${inr(r.cost)}`);
+            closePop();
+            await reloadItems();
+            refreshView();
+          } catch (e) { toastMsg("⚠️ " + e.message); btn.disabled = false; }
+        };
+      });
+  }
+
+  // ═════════════════════════════ USAGE / VARIANCE (Stage 2) ═════════════════════
+  // Where did stock go: bought in, used by orders (from recipes), wasted, and count
+  // corrections — the corrections column IS the unexplained difference the counts found.
+  function renderUsage(body) {
+    const rows = (S.usage.rows || []).map((r) => ({ ...r, it: itemById(r.item_id) })).filter((r) => r.it);
+    const tot = (k) => rows.reduce((s, r) => s + Number(r[k] || 0), 0);
+    const days = S.usage.days;
+    rows.sort((a, b) => Math.abs(Number(b.adjusted_val)) - Math.abs(Number(a.adjusted_val)));
+    body.innerHTML = `
+      <div class="inv-toolbar">
+        <span class="inv-inline">${[7, 30, 90].map((d) => `<button class="inv-pill${days === d ? " on" : ""}" data-days="${d}">${d} days</button>`).join("")}</span>
+      </div>
+      <div class="inv-statrow">
+        <div class="inv-stat"><span>Used by orders</span><b>${inr(-tot("consumed_val"))}</b></div>
+        <div class="inv-stat"><span>Wasted</span><b>${inr(-tot("wasted_val"))}</b></div>
+        <div class="inv-stat${tot("adjusted_val") < -1 ? " bad" : ""}"><span>Count corrections</span><b>${inr(tot("adjusted_val"))}</b></div>
+      </div>
+      <div class="inv-note soft">“Count corrections” is stock the counts found missing (−) or extra (+) beyond orders and logged waste — the closest thing to a leak meter. Map more recipes to make it sharper.</div>
+      ${rows.length ? rows.map((r) => `
+        <div class="inv-row static">
+          <span class="inv-row-name">${esc(r.it.name)}
+            <span class="dim block">bought ${inBuy(r.it, r.purchased_base)} · used ${inBuy(r.it, -r.consumed_base)} · wasted ${inBuy(r.it, -r.wasted_base)}</span></span>
+          <span class="inv-row-val ${Number(r.adjusted_val) < -0.01 ? "out" : Number(r.adjusted_val) > 0.01 ? "in" : "dim"}">${Number(r.adjusted_base) ? (Number(r.adjusted_base) > 0 ? "+" : "") + inBuy(r.it, r.adjusted_base) + " · " + inr(r.adjusted_val) : "—"}</span>
+        </div>`).join("") : `<div class="empty">No stock movement in the last ${days} days.</div>`}`;
+    body.querySelectorAll("[data-days]").forEach((b) => {
+      b.onclick = () => { S.usageDays = Number(b.dataset.days); refreshView(); };
     });
   }
 

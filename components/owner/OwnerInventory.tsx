@@ -18,6 +18,7 @@ type Payload = {
   expenses: ExpenseRow[]; expTotals: Record<string, number>;
   purchases: { id: string; kind: string; vendor_name: string | null; bill_no: string | null; bill_date: string; total: number; created_by: string | null; voided_at: string | null }[];
   wasteByReason: Record<string, number>;
+  usage?: { usedByOrders: number; corrections: number; top: { name: string; consumedVal: number; adjustedVal: number }[] };
   cachedAt?: string;
 };
 
@@ -156,6 +157,22 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
                 ))}
               </div>
 
+              {data.usage && (data.usage.usedByOrders !== 0 || data.usage.corrections !== 0 || data.usage.top.length > 0) && (
+                <div className="adm-card">
+                  <h3>📊 Usage &amp; corrections</h3>
+                  <p className="adm-muted">
+                    Recipes used {inr(data.usage.usedByOrders)} of stock this month; the counts corrected {inr(data.usage.corrections)} beyond orders and logged waste — the closest thing to a leak meter.
+                  </p>
+                  {data.usage.top.map((u) => (
+                    <div key={u.name} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0" }}>
+                      <span>{u.name}<span className="adm-muted"> · used {inr(u.consumedVal)}</span></span>
+                      <b style={{ color: u.adjustedVal < -0.01 ? "#ef4444" : u.adjustedVal > 0.01 ? "#22c55e" : undefined }}>
+                        {u.adjustedVal ? `corrected ${inr(u.adjustedVal)}` : "—"}
+                      </b>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className="adm-card">
                 <h3>🗑️ Waste by reason</h3>
                 {Object.keys(data.wasteByReason).length === 0 && <div className="adm-empty">Nothing logged as wasted in {monthLabel}.</div>}

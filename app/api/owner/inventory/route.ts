@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
       force,
       fingerprint,
       compute: async () => {
-        const [summary, lowItems, negItems, expenses, purchases, waste] = await Promise.all([
+        const [summary, lowItems, negItems, expenses, purchases, waste, usage] = await Promise.all([
           sb.rpc("lfh_inv_stock_summary", { p_restaurant: rid, p_from: from, p_to: to }),
           sb.from("inv_items")
             .select("id, name, category, qty_base, par_qty, purchase_uom, purchase_factor")
@@ -71,6 +71,10 @@ export async function GET(req: NextRequest) {
             .order("bill_date", { ascending: false }).limit(100),
           sb.from("inv_waste_entries").select("reason, qty_base, unit_cost_snap, voided_at")
             .eq("restaurant_id", rid).gte("waste_date", from).lte("waste_date", to).limit(500),
+          // Stage 2: month's per-ingredient movement totals (one SQL aggregate) — feeds
+          // the owner's "used by orders / count corrections" card. IST day bounds, so
+          // the month's edges line up with the waste/expense cards beside it.
+          sb.rpc("lfh_inv_usage_report", { p_restaurant: rid, p_from: `${from}T00:00:00+05:30`, p_to: `${to}T23:59:59+05:30` }),
         ]);
         const sum = (summary.data as Record<string, unknown>[] | null)?.[0] || {};
         const low = (lowItems.data || [])
@@ -96,6 +100,26 @@ export async function GET(req: NextRequest) {
           if (w.voided_at) continue;
           wasteByReason[w.reason] = (wasteByReason[w.reason] || 0) + Number(w.qty_base) * Number(w.unit_cost_snap);
         }
+        // Names for the usage card resolve from the already-fetched low/neg pools plus
+        // one extra scoped select for whatever's missing (still bounded + column-listed).
+        const usageRows = ((usage.data || []) as Record<string, unknown>[])
+          .map((u) => ({
+            item_id: String(u.item_id),
+            consumedVal: -Number(u.consumed_val || 0),
+            adjustedVal: Number(u.adjusted_val || 0),
+          }))
+          .filter((u) => Math.abs(u.consumedVal) > 0.01 || Math.abs(u.adjustedVal) > 0.01)
+          .sort((a, b) => Math.abs(b.adjustedVal) - Math.abs(a.adjustedVal))
+          .slice(0, 10);
+        let usageNamed: { name: string; consumedVal: number; adjustedVal: number }[] = [];
+        if (usageRows.length) {
+          const nm = await sb.from("inv_items").select("id, name").eq("restaurant_id", rid)
+            .in("id", usageRows.map((u) => u.item_id)).limit(10);
+          const byId = new Map((nm.data || []).map((n) => [n.id as string, n.name as string]));
+          usageNamed = usageRows.map((u) => ({ name: byId.get(u.item_id) || "?", consumedVal: u.consumedVal, adjustedVal: u.adjustedVal }));
+        }
+        const usedByOrders = ((usage.data || []) as Record<string, unknown>[]).reduce((s, u) => s - Number(u.consumed_val || 0), 0);
+        const corrections = ((usage.data || []) as Record<string, unknown>[]).reduce((s, u) => s + Number(u.adjusted_val || 0), 0);
         return {
           month, rid,
           summary: {
@@ -112,6 +136,7 @@ export async function GET(req: NextRequest) {
           expTotals,
           purchases: purchases.data || [],
           wasteByReason,
+          usage: { usedByOrders: Math.round(usedByOrders * 100) / 100, corrections: Math.round(corrections * 100) / 100, top: usageNamed },
         };
       },
     });

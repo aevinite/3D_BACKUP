@@ -113,7 +113,7 @@ async function postMovement(p: {
 }
 
 // Column lists (explicit everywhere — never select * on these paths).
-const ITEM_COLS = "id, name, category, storage_area, track_level, base_uom, purchase_uom, purchase_factor, par_qty, min_qty, qty_base, avg_cost, last_rate, default_vendor_id, active";
+const ITEM_COLS = "id, name, category, storage_area, track_level, base_uom, purchase_uom, purchase_factor, par_qty, min_qty, qty_base, avg_cost, last_rate, default_vendor_id, active, recipe_batch_base";
 const PURCHASE_COLS = "id, kind, vendor_id, vendor_name, bill_no, bill_date, photo_url, subtotal, tax, total, note, created_by, created_at, voided_at, void_reason";
 const EXPENSE_COLS = "id, category, title, amount, expense_date, note, photo_url, created_by, created_at, voided_at, void_reason, voided_by";
 const WASTE_COLS = "id, item_id, qty_base, reason, note, photo_url, unit_cost_snap, waste_date, created_by, created_at, voided_at";
@@ -245,6 +245,38 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       return ok({ items: r.data });
     }
 
+    // ── Stage 2: recipes / usage reads ────────────────────────────────────────
+    // All dishes + every dish recipe line in two scoped selects. Costs are computed
+    // client-side from the already-loaded item avg_costs (no extra reads).
+    if (path[0] === "recipes" && !path[1]) {
+      const [dishes, lines] = await Promise.all([
+        sb.from("menu_items").select("slug, title, price").eq("restaurant_id", rid).order("title").limit(500),
+        sb.from("inv_recipe_lines").select("owner_type, owner_key, item_id, qty_base")
+          .eq("restaurant_id", rid).limit(3000),
+      ]);
+      if (dishes.error) return err(dishes.error.message, 500);
+      // A failed lines read must be an ERROR, never an empty list — otherwise every
+      // dish renders "no recipe" and a well-meaning Save would wipe the real lines.
+      if (lines.error) return err(lines.error.message, 500);
+      return ok({
+        dishes: (dishes.data || []).map((d) => ({
+          slug: d.slug,
+          title: typeof d.title === "object" && d.title ? ((d.title as Record<string, string>).en || Object.values(d.title as Record<string, string>)[0]) : String(d.title || d.slug),
+          price: Number(d.price) || 0,
+        })),
+        lines: lines.data || [],
+      });
+    }
+
+    // Usage / variance: one SQL aggregate per window (never sum the ledger client-side).
+    if (path[0] === "usage") {
+      const days = Math.min(Math.max(num(q.get("days")) || 7, 1), 90);
+      const from = new Date(Date.now() - days * 86400_000).toISOString();
+      const r = await sb.rpc("lfh_inv_usage_report", { p_restaurant: rid, p_from: from, p_to: new Date().toISOString() });
+      if (r.error) return err(r.error.message, 500);
+      return ok({ days, rows: r.data || [] });
+    }
+
     // Per-item ledger (the "Item Activity" view) — newest 50 movements.
     if (path[0] === "movements") {
       const item = q.get("item") || "";
@@ -309,6 +341,89 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
 
     // Everything below is the stock register.
     if (!(await invCan(g, rid, "inv_stock"))) return denied("manage stock");
+
+    // ── Stage 2: recipe writes + prep production ──────────────────────────────
+    // Replace a dish's (or prep item's) ingredient list in one go. Lines are validated
+    // against THIS restaurant's items; a prep recipe may not contain itself.
+    if (path[0] === "recipes" && (path[1] === "dish" || path[1] === "prep") && path[2]) {
+      const ownerType = path[1];
+      const ownerKey = decodeURIComponent(path[2]);
+      const { body } = await readBody(req);
+      // Server-side last-wins dedupe by item_id: a payload with the same ingredient
+      // twice must never reach the delete-then-insert (the UNIQUE index would fail the
+      // insert AFTER the old lines were deleted — a wiped recipe). Never trust the UI.
+      const byItem = new Map<string, number>();
+      for (const l of Array.isArray(body.lines) ? (body.lines as Record<string, unknown>[]) : []) {
+        const id = String(l.item_id || "");
+        const qty = num(l.qty_base);
+        if (!id || !Number.isFinite(qty) || qty <= 0) return err("Bad recipe line.");
+        byItem.set(id, qty);
+      }
+      if (byItem.size > 60) return err("Too many ingredients (max 60).");
+      const ids = [...byItem.keys()];
+      if (ids.includes(ownerKey)) return err("A prep recipe can't contain itself.");
+      let batch: number | null = null;
+      if (ownerType === "dish") {
+        const dish = await sb.from("menu_items").select("slug").eq("restaurant_id", rid).eq("slug", ownerKey).maybeSingle();
+        if (!dish.data) return err("Dish not found.", 404);
+      } else {
+        const prep = await sb.from("inv_items").select("id").eq("restaurant_id", rid).eq("id", ownerKey).maybeSingle();
+        if (!prep.data) return err("Prep ingredient not found.", 404);
+        batch = num(body.batch_base);
+        if (!Number.isFinite(batch) || batch <= 0) return err("Say how much one batch makes.");
+      }
+      if (ids.length) {
+        const found = await sb.from("inv_items").select("id").eq("restaurant_id", rid).in("id", ids).limit(100);
+        if ((found.data || []).length !== ids.length) return err("A line refers to an unknown ingredient.");
+      }
+      // All validation passed — only now write anything (no partial saves).
+      if (ownerType === "prep") {
+        await sb.from("inv_items").update({ recipe_batch_base: batch, updated_at: new Date().toISOString() })
+          .eq("restaurant_id", rid).eq("id", ownerKey);
+      }
+      const lines = ids.map((id) => ({ restaurant_id: rid, owner_type: ownerType, owner_key: ownerKey, item_id: id, qty_base: byItem.get(id)! }));
+      const del = await sb.from("inv_recipe_lines").delete().eq("restaurant_id", rid).eq("owner_type", ownerType).eq("owner_key", ownerKey);
+      if (del.error) return err(del.error.message, 500);
+      if (lines.length) {
+        const ins = await sb.from("inv_recipe_lines").insert(lines);
+        if (ins.error) return err(ins.error.message, 500);
+      }
+      await logAction("manager", "inv_recipe_save", { restaurant_id: rid, actor, actor_id: actorId, detail: `${ownerType} ${ownerKey}: ${lines.length} ingredients` });
+      return ok({ lines: lines.length });
+    }
+
+    // Make a batch of a prep item: consume its recipe's ingredients (scaled), add the
+    // produced quantity to stock at the batch's real cost. Keys ride the request's
+    // idempotency id, so a replay can never brew the batch twice.
+    if (path[0] === "production") {
+      const { body } = await readBody(req);
+      const itemId = String(body.item_id || "");
+      const madeBase = num(body.qty_base);
+      if (!itemId || !Number.isFinite(madeBase) || madeBase <= 0) return err("How much did you make?");
+      const it = await sb.from("inv_items").select("id, name, recipe_batch_base").eq("restaurant_id", rid).eq("id", itemId).maybeSingle();
+      if (!it.data) return err("Ingredient not found.", 404);
+      if (!it.data.recipe_batch_base) return err("This ingredient has no prep recipe yet.");
+      const lines = await sb.from("inv_recipe_lines").select("item_id, qty_base")
+        .eq("restaurant_id", rid).eq("owner_type", "prep").eq("owner_key", itemId).limit(100);
+      if (!lines.data?.length) return err("This ingredient has no prep recipe yet.");
+      const scale = madeBase / Number(it.data.recipe_batch_base);
+      const costs = await sb.from("inv_items").select("id, avg_cost").eq("restaurant_id", rid)
+        .in("id", lines.data.map((l) => l.item_id)).limit(100);
+      const costOf = new Map((costs.data || []).map((c) => [c.id, Number(c.avg_cost)]));
+      const prodId = req.headers.get("x-lfh-action-id") || crypto.randomUUID();
+      let batchCost = 0;
+      for (const l of lines.data) {
+        const use = Number(l.qty_base) * scale;
+        batchCost += use * (costOf.get(l.item_id) || 0);
+        await postMovement({ rid, item: l.item_id, qty: -use, kind: "production", dedupe: `prod:${prodId}:in:${l.item_id}`, refType: "production", refId: prodId, by: actor });
+      }
+      await postMovement({
+        rid, item: itemId, qty: madeBase, kind: "production", dedupe: `prod:${prodId}:out`,
+        unitCost: madeBase > 0 ? batchCost / madeBase : 0, refType: "production", refId: prodId, by: actor,
+      });
+      await logAction("manager", "inv_production", { restaurant_id: rid, actor, actor_id: actorId, detail: `${it.data.name}: batch of ${madeBase} (₹${Math.round(batchCost * 100) / 100})` });
+      return ok({ cost: Math.round(batchCost * 100) / 100 });
+    }
 
     // ── items ──────────────────────────────────────────────────────────────────
     if (path[0] === "items" && !path[1]) {
