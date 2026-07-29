@@ -3465,6 +3465,9 @@ window.addEventListener("online", () => load().catch(() => {}));
     '<button class="dw-close" type="button" aria-label="Close menu">✕</button>' +
     '<div><div class="dw-prof">Signed in as</div><div class="dw-name" id="dwName">…</div><div class="dw-prof" id="dwRole"></div></div>' +
     '<div class="dw-row"><span>Restaurant</span><span class="dw-prof" id="dwRest"></span></div>' +
+    // My profile & pay (mig 220) — hidden until the server confirms this restaurant has the
+    // feature and this person has a profile (no dead button for restaurants without it).
+    '<div class="dw-row" id="dwMeRow" hidden><span>My profile &amp; pay</span><button class="btn small" id="dwMe" type="button">Open</button></div>' +
     '<div class="dw-row"><span>Theme</span><button class="btn small" id="dwTheme" type="button">Light / Dark</button></div>' +
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
@@ -3515,6 +3518,7 @@ window.addEventListener("online", () => load().catch(() => {}));
   backdrop.onclick = closeDrawer;
   drawer.querySelector(".dw-close").onclick = closeDrawer;
   drawer.querySelector("#dwTheme").onclick = () => document.getElementById("themeToggle")?.click();
+  { const meBtn = drawer.querySelector("#dwMe"); if (meBtn) meBtn.onclick = () => { closeDrawer(); if (window.LFH_ME) window.LFH_ME.open(); }; }
   const bqDrawerBtn = drawer.querySelector("#dwBanquet");
   if (bqDrawerBtn) bqDrawerBtn.onclick = () => { closeDrawer(); openBanquet(); };
   const pcDrawerBtn = drawer.querySelector("#dwParcel");
@@ -3532,6 +3536,11 @@ window.addEventListener("online", () => load().catch(() => {}));
       if (!j.error) {
         drawer.querySelector("#dwName").textContent = j.name || j.username || "Staff";
         drawer.querySelector("#dwRole").textContent = [j.role, j.username].filter(Boolean).join(" · ");
+        // Reveal "My profile & pay" only when this restaurant actually has the feature.
+        // .hidden alone loses to a display rule, so clear the display too (a bug this
+        // codebase has already been bitten by).
+        const meRow = drawer.querySelector("#dwMeRow");
+        if (meRow && j.profileModule) { meRow.hidden = false; meRow.style.display = ""; }
         profileLoaded = true;
       }
     } catch { /* offline — leave the placeholder */ }
