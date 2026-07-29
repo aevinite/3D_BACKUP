@@ -4,11 +4,17 @@
 // render its own <html>/<body>. It records the crash in the Everything Log and shows a minimal
 // recoverable page. Kept dependency-free (inline styles) since the app's CSS may not have loaded.
 import { useEffect } from "react";
-import { reportClientError } from "@/lib/errorReport";
+import { panelFromPath, reportClientError } from "@/lib/errorReport";
 
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
-    reportClientError("menu", error?.message || "root error", error?.digest);
+    // Record WHICH page crashed, not just "menu". This boundary is the root one, so it also
+    // catches owner/staff-panel crashes; hardcoding "menu" filed them under the guest menu and
+    // left no clue where to look (owner-dashboard crashes showed as "menu screen error").
+    // Same idea as naming the endpoint on a server route_error.
+    const path = window.location.pathname || "";
+    const digest = error?.digest ? ` #${error.digest}` : "";
+    reportClientError(panelFromPath(path), error?.message || "root error", `${path}${digest}`);
   }, [error]);
 
   return (

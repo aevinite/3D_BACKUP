@@ -11,8 +11,10 @@ export default function AdminError({ error, reset }: { error: Error & { digest?:
   useEffect(() => {
     // Surface it in the console for debugging; no user secrets are logged.
     console.error("[admin] page error:", error);
-    // Also record it in the Everything Log so it shows red in Admin → Logs.
-    reportClientError("admin", error?.message || "admin page error", error?.digest);
+    // Also record it in the Everything Log so it shows red in Admin → Logs — with the exact
+    // admin page it happened on, so the log line is actionable ("… @ /aevinite/rate-limits").
+    const digest = error?.digest ? ` #${error.digest}` : "";
+    reportClientError("admin", error?.message || "admin page error", `${window.location.pathname}${digest}`);
   }, [error]);
 
   return (
