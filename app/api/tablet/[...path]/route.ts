@@ -24,7 +24,7 @@ import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersL
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { effectiveTaxRate } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
-import { waiterTables, allows, normTable, blockedReason } from "@/lib/tableAssign";
+import { waiterTables, allows, normTable, blockedReason, type SectionLimit } from "@/lib/tableAssign";
 
 export const dynamic = "force-dynamic";
 
@@ -171,7 +171,7 @@ function overlayUserPerms<T extends Record<string, any> | null>(settings: T, use
 // hold simply never reaches the device. `blocklist` is deliberately LEFT ALONE: it is a
 // restaurant-wide ban list keyed by phone/device with no table at all, and the waiter
 // needs it to see that the guest in front of them is blocked.
-function narrowSummary(summary: Record<string, any>, limit: string[] | null): void {
+function narrowSummary(summary: Record<string, any>, limit: SectionLimit | null): void {
   if (limit === null || !summary) return;
   const keep = (t: unknown) => allows(limit, t);
   const tiles = summary.tiles && typeof summary.tiles === "object" ? summary.tiles : {};
@@ -198,7 +198,7 @@ function narrowSummary(summary: Record<string, any>, limit: string[] | null): vo
 
 // Keep only the rows whose table_number the waiter holds. `members` and `items` carry no
 // table_number — they are narrowed by the session/order ids that survived instead.
-const narrowRows = <T extends { table_number?: unknown }>(rows: T[] | null | undefined, limit: string[] | null): T[] =>
+const narrowRows = <T extends { table_number?: unknown }>(rows: T[] | null | undefined, limit: SectionLimit | null): T[] =>
   limit === null ? (rows || []) : (rows || []).filter((r) => allows(limit, r?.table_number));
 
 const nowIso = () => new Date().toISOString();
@@ -339,7 +339,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // `null` = not restricted (admin / manager looking in / module off) → draw everything.
       const body: Record<string, unknown> = {
         ...summary,
-        my_tables: myTables,
+        // Just the numbers — the client already knows table_count from settings, so it can
+        // apply the same "off the floor plan stays visible" rule without a second field.
+        my_tables: myTables ? myTables.tables : null,
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
         settings: setOut, categories: must(categories),
         restaurant: must(restaurant) || null,

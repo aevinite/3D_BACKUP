@@ -45,25 +45,56 @@ export function assignedOf(user: StaffUser | null | undefined): string[] {
 }
 
 /**
- * The set of tables this caller is limited to, or `null` when they are not limited.
+ * What this caller is limited to, or `null` when they are not limited at all.
  *
  * `null` (unrestricted) for: the admin super-user (`user === null`), anyone who isn't a
- * waiter, and every restaurant where the module isn't effective. An ARRAY (possibly
- * EMPTY) only for a real waiter at a restaurant using sections — and empty deliberately
- * means "sees nothing", which is the owner's chosen behaviour for an unassigned waiter.
+ * waiter, and every restaurant where the module isn't effective. A LIMIT object (whose
+ * `tables` may be EMPTY) only for a real waiter at a restaurant using sections — empty
+ * deliberately means "sees nothing", the owner's chosen behaviour for an unassigned waiter.
+ *
+ * `floor` is the restaurant's table_count, and it is the second half of the rule — see
+ * allows() for why a table number ABOVE it is never hidden.
  */
+export type SectionLimit = { tables: string[]; floor: number };
+
 export async function waiterTables(
   user: StaffUser | null | undefined,
   rid: string,
-): Promise<string[] | null> {
+): Promise<SectionLimit | null> {
   if (!user) return null;              // admin super-user
   if (user.role !== "tablet") return null; // manager/owner oversight keeps the full floor
-  if (!(await tableAssignLadder(rid)).effective) return null; // module off for this restaurant
-  return assignedOf(user);
+  // One settings read gives BOTH the ladder and the floor size — no extra query.
+  const { data } = await sb.from("settings")
+    .select("table_assign_allowed, table_assign_owner_control, table_assign_enabled, table_count")
+    .eq("restaurant_id", rid).maybeSingle();
+  const allowed = data?.table_assign_allowed === true;
+  const ownerControl = data?.table_assign_owner_control === true;
+  const enabled = data?.table_assign_enabled !== false;
+  if (!(allowed && (!ownerControl || enabled))) return null; // module off for this restaurant
+  return { tables: assignedOf(user), floor: Math.max(0, Number(data?.table_count) || 0) };
 }
 
-export const allows = (limit: string[] | null, table: unknown): boolean =>
-  limit === null || limit.includes(normTable(table));
+/**
+ * Is this table within the caller's reach?
+ *
+ * Two ways to be allowed:
+ *  1. it's in their section, or
+ *  2. it is OUTSIDE the restaurant's floor plan (number > table_count, or not a number).
+ *
+ * Rule 2 exists because of a real state found on the live backup: tables 47 and 48 still
+ * carried live orders while the floor was set to 30 (a leftover from when the restaurant
+ * had more tables). Such a table is in NOBODY's section — it can't be, the section editor
+ * only offers 1…table_count — so hiding it would strand an open bill that no waiter could
+ * reach or settle. An off-plan table is an anomaly staff must be able to clear, so it stays
+ * visible to everyone; sections only ever divide up the REAL floor.
+ */
+export const allows = (limit: SectionLimit | null, table: unknown): boolean => {
+  if (limit === null) return true;
+  const t = normTable(table);
+  if (!t) return true;                       // not a table number at all → not ours to hide
+  if (limit.tables.includes(t)) return true; // in their section
+  return Number(t) > limit.floor;            // off the floor plan → visible to everyone
+};
 
 // ── Resolving "which table does this write touch?" ───────────────────────────
 //
@@ -192,13 +223,13 @@ export const notYoursMessage = (t: string) =>
  * proceed, or the refusal message when it may not.
  */
 export async function blockedReason(
-  limit: string[] | null,
+  limit: SectionLimit | null,
   a: string, b: string | undefined, c: string | undefined,
   body: Record<string, unknown> | null | undefined,
 ): Promise<string | null> {
   if (limit === null) return null;                       // not a restricted caller
   const { tables, unknown } = await affectedTables(a, b, c, body);
   if (unknown) return notYoursMessage("");
-  const bad = tables.find((t) => t && !limit.includes(t));
+  const bad = tables.find((t) => t && !allows(limit, t));
   return bad ? notYoursMessage(bad) : null;
 }
