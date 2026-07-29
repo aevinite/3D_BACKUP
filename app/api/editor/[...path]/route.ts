@@ -274,7 +274,10 @@ const editErrMsg = (reason?: string) =>
   : reason === "sold_out" ? "That dish is sold out — can't add it."
   : reason === "unknown_item" ? "That dish isn't on the menu."
   : reason === "empty_order" ? "Nothing to add."
-  : (reason || "Couldn't edit the order.");
+  // An open-price (as-per-MRP) dish carries no menu price, so the pricer refuses a line with
+  // none. Without this the raw token "price_required" reached the staff toast.
+  : reason === "price_required" ? "Type a price for that dish first — it's priced as-per-MRP."
+  : "Couldn't edit the order — please try again.";
 
 const ORDER_STATUSES = ["received", "preparing", "served", "cancelled"];
 // Generic CRUD tables: which Supabase table + its unique key.
@@ -1398,6 +1401,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_place_order", {
         p_table: t, p_items: items, p_allergies: Array.isArray(allergies) ? allergies : [], p_note: note || null,
         p_restaurant_id: rid,
+        // Pass the "send anyway" flag through, exactly like the tablet route: the RPC runs its
+        // OWN double-tap guard atomically under a per-table lock (mig 202), which is what
+        // catches two truly-simultaneous identical sends (the JS pre-check above races). Without
+        // this, confirming "Send it anyway?" skipped only the JS guard and the RPC still refused
+        // — so a deliberate re-send was impossible for 3s and answered {ok:false}.
+        p_confirm_duplicate: body?.confirmDuplicate === true,
       });
       if (error) throw new Error(error.message);
       // A manager placed this, so it's already confirmed — skip the kitchen "accept" step

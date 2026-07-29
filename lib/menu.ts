@@ -279,6 +279,10 @@ export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_R
   if (item.error) throw new Error(`Failed to load item "${slug}": ${item.error.message}`);
   if (!item.data) return null;
   const mapped = mapRow(item.data, (agg.data as RatingAgg | null) ?? undefined);
+  // Open-price dishes are hidden from the guest menu (see getMenuItems) — so a guest must not
+  // reach one by typing/sharing its /item/<slug> URL either. Answer "no such dish" (the page
+  // 404s) rather than showing a dish a guest can never order: staff set its price at the table.
+  if (mapped.openPrice) return null;
   // Replace the (now always-empty) seeded reviews with the real ones.
   mapped.reviews = revs;
   return mapped;

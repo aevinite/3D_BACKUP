@@ -217,7 +217,12 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
     // two. A fast double-click on an action (e.g. "Send to kitchen") fired this twice before
     // the trigger button disabled, stacking two identical dialogs — confirming both could
     // place a duplicate. If one is already open, suppress this second call (resolve "no").
-    if (document.querySelector(".confirm-overlay")) { resolve(false); return; }
+    // ...but an overlay that has ALREADY answered and is only mid-fade-out doesn't count. It
+    // lingers in the DOM for 200ms after close(), and a follow-up confirm can legitimately land
+    // inside that window (e.g. "Send" answered → the server replies "duplicate?" in <200ms).
+    // Matching it made that second dialog resolve false instantly: no prompt, no toast, the
+    // action silently dropped. `data-closing` is stamped by close() the moment it resolves.
+    if (document.querySelector(".confirm-overlay:not([data-closing])")) { resolve(false); return; }
     const wrap = document.createElement("div");
     // opts.floorwide marks confirms that hit EVERY table at once (Close all).
     // They get a deliberately different, scarier look so muscle-memory built on
@@ -241,6 +246,7 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
     // only visible INSIDE itself, which threw "esc2 is not defined" from close().
     function esc2(e) { if (e.key === "Escape") close(false); }
     const close = (val) => {
+      wrap.setAttribute("data-closing", "1"); // answered — stop it blocking the NEXT confirm mid-fade
       wrap.classList.remove("show");
       setTimeout(() => wrap.remove(), 200);
       document.removeEventListener("keydown", esc2); // don't leak the Escape listener
@@ -298,6 +304,7 @@ function promptDialog(message, opts = {}) {
     requestAnimationFrame(() => { wrap.classList.add("show"); try { input.focus(); } catch {} });
     function esc2(e) { if (e.key === "Escape") close(null); else if (e.key === "Enter") submit(); }
     const close = (val) => {
+      wrap.setAttribute("data-closing", "1"); // answered — stop it blocking the NEXT confirm mid-fade
       wrap.classList.remove("show");
       setTimeout(() => wrap.remove(), 200);
       document.removeEventListener("keydown", esc2);
@@ -5967,7 +5974,11 @@ function floorHtml() {
   const collapsedNow = isPhoneLayout() || state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null);
   // General "New Parcel" (takeaway) button — sits at the top of the floor, not tied to
   // any table. Opens the take-order picker in parcel mode → a takeaway Platform order
-  // (owner, 2026-07-25). Gated by the take_orders x-ray + server (hidden for staff without it).
+  // (owner, 2026-07-25). Gated by the **parcel** x-ray (XRAY_CONTROLS → [data-new-parcel])
+  // + the matching server gate managerCan(…, "parcel") — NOT take_orders, which this comment
+  // used to claim and which made a reviewer read it as a door/room mismatch. Verified
+  // 2026-07-29: a manager with parcel granted but take_orders absent sees 🥡 New Parcel and
+  // no per-table "+ Take order", which is exactly right.
   const parcelBtn = `<button class="btn primary ed-parcel-btn" data-new-parcel="1" title="Start a takeaway / parcel order — no table needed">🥡 New&nbsp;Parcel</button>`;
   // Waiter sections (mig 222) — the entry point that ACTUALLY works for a manager.
   // The full editor also sits in Settings → Tables, but that whole tab is gated by the
@@ -7355,10 +7366,20 @@ function openTakeOrder(table, rerender, opts = {}) {
       // the flagged dish can be fixed and resent — never toast "sent" for an order that wasn't.
       if (!r || r.ok !== true) {
         const reason = r && r.reason, item = r && r.item;
+        // The RPC runs its OWN double-tap guard under a per-table lock (mig 202) and answers 200
+        // with duplicateWarning — a different shape from the route's 409 handled below. Re-offer
+        // "send anyway" here too, or a genuine re-send would dead-end.
+        if (r && r.duplicateWarning) {
+          if (await confirmDialog("This looks identical to an order you just sent for this table. Send it AGAIN anyway?", "Send anyway")) return send(true);
+          sendBtns.forEach((b) => (b.disabled = !cart.length));
+          return;
+        }
+        // Plain language only — never surface a raw reason code to staff.
         const msg = reason === "sold_out" ? `😕 ${item || "A dish"} just sold out — remove it from the order and send again.`
           : reason === "unknown_item" ? `😕 ${item || "A dish"} is no longer on the menu — remove it and send again.`
           : reason === "price_required" ? `💰 ${item || "A dish"} needs a price — tap its amount in the order list and enter one.`
-          : "Couldn't send the order: " + (reason || "unknown") + (item ? ` (${item})` : "") + ". Please try again.";
+          : reason === "empty_order" ? "There's nothing in this order yet — add a dish first."
+          : `Couldn't send the order${item ? ` (${item})` : ""}. Nothing was sent — please try again.`;
         toast(msg, "err");
         sendBtns.forEach((b) => (b.disabled = !cart.length));
         return;
