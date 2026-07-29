@@ -46,19 +46,29 @@ async function recentlyAlerted(key: string): Promise<boolean> {
 //              owner's phone on 2026-07-29 — Android's per-channel vibration overrode it.)
 //   • Telegram → disable_notification: true = the message appears in the chat silently.
 // Nothing is ever hidden or dropped — silent means quiet, not invisible.
-type AlertOpts = { silent?: boolean; title?: string };
+// QUIET IS THE DEFAULT (owner 2026-07-29, second pass): error pings were still making his phone
+// sound and vibrate all through service. So EVERY alert now goes out quiet unless a caller
+// deliberately asks to be heard with `silent: false`. Today the ONLY loud one is the wrong-password
+// warning for his own ADMIN login (his choice — that one is about his top-level panel).
+// Trade-off he accepted: a genuine break during service no longer buzzes the phone; it still lands
+// in the notification list, the admin bell and the Everything Log, so nothing is hidden.
+type AlertOpts = { silent?: boolean; title?: string; tags?: string };
 
 // ── ONE shape for every alert (owner 2026-07-29: "structure it, one long plain line is hard to
-// read"). A headline first (that's the line the phone shows before you open it), a thin rule, then
-// one "Label: value" per fact, and an optional closing note. Empty facts are dropped, so a caller
-// can pass everything it might know and the message stays tight.
+// read"): one "Label: value" per fact, then an optional closing note. Empty facts are dropped, so
+// a caller can pass everything it might know and the message stays tight.
 //
 // Deliberately PLAIN text, not Markdown: the ntfy Android app shows markdown syntax literally, so
 // **bold** would arrive as asterisks. Newlines are the formatting.
+//
+// NO HEADLINE HERE ON PURPOSE (owner 2026-07-29: "it already says limit reached at the top, why
+// again at the bottom?"). The SUMMARY lives in `opts.title` — which ntfy shows as the bold first
+// line — so the body carries only the details, each fact exactly once. Telegram has no title
+// field, so sendOwnerAlert puts the summary on top of the text there instead.
 export type AlertField = [label: string, value: string | number | null | undefined];
 
-export function alertText(headline: string, fields: AlertField[], note?: string | null): string {
-  const lines = [headline, "━".repeat(16)];
+export function alertText(fields: AlertField[], note?: string | null): string {
+  const lines: string[] = [];
   for (const [label, value] of fields) {
     const v = value === null || value === undefined ? "" : String(value).trim();
     if (v) lines.push(`${label}: ${v}`);
@@ -76,6 +86,9 @@ function headerSafe(s: string): string {
   return `=?UTF-8?B?${Buffer.from(s, "utf8").toString("base64")}?=`;
 }
 
+// Quiet unless a caller explicitly says `silent: false` (see AlertOpts above).
+const isQuiet = (o?: AlertOpts) => o?.silent !== false;
+
 async function pushNtfy(text: string, o?: AlertOpts): Promise<void> {
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return;
@@ -84,8 +97,8 @@ async function pushNtfy(text: string, o?: AlertOpts): Promise<void> {
     method: "POST",
     headers: {
       Title: headerSafe(o?.title || "Restaurant alert"),
-      Priority: o?.silent ? "min" : "high",
-      Tags: o?.silent ? "traffic_light" : "warning",
+      Priority: isQuiet(o) ? "min" : "high",
+      Tags: o?.tags || (isQuiet(o) ? "traffic_light" : "warning"),
       Markdown: "no", // the body is plain text on purpose — see alertText()
     },
     body: text,
@@ -99,7 +112,11 @@ async function pushTelegram(text: string, o?: AlertOpts): Promise<void> {
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ chat_id: chat, text, disable_notification: !!o?.silent }),
+    body: JSON.stringify({
+      chat_id: chat,
+      text: o?.title ? `${o.title}\n\n${text}` : text,
+      disable_notification: isQuiet(o),
+    }),
   });
 }
 

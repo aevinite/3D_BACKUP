@@ -76,13 +76,12 @@ export async function POST(req: NextRequest) {
     // response is sent — a bare fire-and-forget gets frozen on Vercel and drops the alert
     // (proven flaky in a live test 2026-07-24). The response stays instant; the push runs after.
     after(sendOwnerAlert(
-      alertText("⚠️ A screen showed an error", [
-        ["Panel", panel],
+      alertText([
         ["Problem", message.slice(0, 160)],
         ["Screen", where || null],
       ], "Open admin → Logs to see the full detail."),
       `client:${panel}`,
-      { title: `Screen error in ${panel}` },
+      { title: `Screen error in ${panel}`, tags: "warning" },
     ).catch(() => {}));
 
     return NextResponse.json({ ok: true });
