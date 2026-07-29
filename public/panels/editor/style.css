@@ -1147,10 +1147,6 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
 /* side control cards */
 .fc-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
 .fc-card h3 { margin: 0 0 12px; font-size: 14px; }
-.fc-card h4 { margin: 16px 0 9px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-.fc-sub { margin-top: 10px; padding-left: 4px; display: flex; flex-direction: column; gap: 10px; }
-.fc-geo { display: flex; flex-direction: column; gap: 8px; margin-bottom: 11px; }
-.fc-geo .sx-input-sm { max-width: none; }
 .fc-toggle { display: flex; align-items: center; gap: 11px; font-size: 13px; cursor: pointer; }
 .fc-toggle input { display: none; }
 .fc-sw { width: 40px; height: 23px; border-radius: 999px; background: var(--line); position: relative; transition: .18s; flex: 0 0 auto; }
@@ -1200,9 +1196,6 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
 /* quick action button on a tile */
 .ft-quick { margin-top: 10px; }
 .ftq { width: 100%; }
-/* labelled location fields */
-.fc-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
-.fc-field .sx-input { font-size: 13px; }
 /* drag-to-resize divider for the side panel: styled in ONE place further down
    ("the middle divider" block) — an earlier duplicate rule here used to fight it
    (whole strip flashed gold + changed width on hover). Only the hide-on-mobile
