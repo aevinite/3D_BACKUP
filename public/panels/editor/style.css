@@ -2435,3 +2435,12 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
 .inv-pop-actions.sticky { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); margin-top: 10px; }
 @media (min-width: 700px) { .inv-pop-backdrop { align-items: center; } .inv-pop { border-radius: 18px; } }
 @media (max-width: 480px) { .inv-grid2, .inv-grid3 { grid-template-columns: 1fr; } .inv-row-val { font-size: 13px; } }
+/* QA sweep 2026-07-29: retired-ingredients toggle + copy-fallback textarea */
+.inv-retired-toggle { display: block; width: 100%; text-align: center; margin-top: 14px; padding: 10px;
+  border-radius: 12px; border: 1px dashed var(--line); background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; }
+.inv-row.retiredrow { opacity: .6; }
+.inv-copyta { width: 100%; min-height: 180px; padding: 10px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--text); font-size: 14px; }
+/* the "1 kg = 1000 g" line stays INLINE on every width (it reads as a sentence) */
+.inv-pop label.inv-factor { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
+.inv-pop label.inv-factor input { display: inline-block; width: 90px; flex: none; margin: 0; }

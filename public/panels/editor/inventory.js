@@ -85,10 +85,15 @@
 
   // ── data loads (each view loads only what it shows) ─────────────────────────
   async function loadCore() {
-    const [w, items] = await Promise.all([inv("GET", "/whoami"), inv("GET", "/items")]);
+    // ?all=1: keep RETIRED items in memory too — retired rows stay reachable from a
+    // "show retired" toggle (a mis-tapped Active used to make an item unrecoverable
+    // from the UI, QA sweep 2026-07-29), and old purchase/waste rows can still name
+    // an ingredient that was retired later. Pickers filter to active themselves.
+    const [w, items] = await Promise.all([inv("GET", "/whoami"), inv("GET", "/items?all=1")]);
     S.can = w.can; S.role = w.role; S.items = items.items || []; S.loaded = true;
     if (!S.can.stock && S.can.expenses) S.view = "expenses";
   }
+  const reloadItems = async () => { S.items = (await inv("GET", "/items?all=1")).items || []; };
   const loadVendors = async () => { S.vendors = (await inv("GET", "/vendors")).vendors || []; };
 
   // ── render root ─────────────────────────────────────────────────────────────
@@ -137,7 +142,7 @@
     if (!body) return;
     try {
       if (S.view === "stock") {
-        if (force) S.items = (await inv("GET", "/items")).items || [];
+        if (force) await reloadItems();
         S.negative = (await inv("GET", "/negative")).items || [];
         renderStock(body);
       } else if (S.view === "order") {
@@ -163,6 +168,7 @@
   // ═════════════════════════════ STOCK ═════════════════════════════
   function renderStock(body) {
     const active = S.items.filter((i) => i.active);
+    const retired = S.items.filter((i) => !i.active);
     const cats = [...new Set(active.map((i) => i.category))].sort();
     const totalValue = active.reduce((s, i) => s + Math.max(0, Number(i.qty_base)) * Number(i.avg_cost), 0);
     const low = active.filter((i) => i.par_qty != null && Number(i.qty_base) < Number(i.par_qty));
@@ -178,13 +184,22 @@
         <input id="invSearch" class="inv-search" type="search" placeholder="Search ingredients…" />
         <button class="btn primary" id="invAddItem">+ Ingredient</button>
       </div>
-      <div id="invStockList">${stockListHtml(active, cats, "")}</div>`;
+      <div id="invStockList">${stockListHtml(active, cats, "")}</div>
+      ${retired.length ? `<button class="inv-retired-toggle" id="invShowRetired">${S.showRetired ? "Hide" : "Show"} retired ingredients (${retired.length})</button>` : ""}
+      ${S.showRetired && retired.length ? `<div id="invRetiredList">${retired.map((i) => `
+        <button class="inv-row retiredrow" data-item="${i.id}">
+          <span class="inv-row-name">${esc(i.name)} <span class="inv-badge neg">retired</span></span>
+          <span class="inv-row-qty">${inBuy(i, i.qty_base)}</span>
+          <span class="inv-row-val dim">tap to restore</span>
+        </button>`).join("")}</div>` : ""}`;
     $("#invAddItem").onclick = () => itemPop(null);
     $("#invSearch").oninput = (e) => {
       const q = e.target.value.trim().toLowerCase();
       $("#invStockList").innerHTML = stockListHtml(active, cats, q);
       bindStockRows();
     };
+    const rt = $("#invShowRetired");
+    if (rt) rt.onclick = () => { S.showRetired = !S.showRetired; renderStock(body); };
     bindStockRows();
   }
   function stockListHtml(active, cats, q) {
@@ -221,15 +236,15 @@
         <label>Bought as <input id="ipBuyUom" value="${esc(v.purchase_uom)}" maxlength="12" /></label>
         <label>Counted in <select id="ipBaseUom" ${!isNew ? "data-locked=1" : ""}>
           ${["g", "ml", "pc"].map((u) => `<option value="${u}"${v.base_uom === u ? " selected" : ""}>${u}</option>`).join("")}</select></label>
-        <label>1 <span id="ipBuyEcho">${esc(v.purchase_uom)}</span> = <input id="ipFactor" type="number" inputmode="decimal" value="${esc(v.purchase_factor)}" min="0.001" step="any" /> <span id="ipBaseEcho">${esc(v.base_uom)}</span></label>
+        <label class="inv-factor">1 <span id="ipBuyEcho">${esc(v.purchase_uom)}</span> = <input id="ipFactor" type="number" inputmode="decimal" value="${esc(v.purchase_factor)}" min="0.001" step="any" /> <span id="ipBaseEcho">${esc(v.base_uom)}</span></label>
       </div>
       <p class="inv-sentence" id="ipSentence"></p>
       <div class="inv-grid3">
-        <label>Par level <input id="ipPar" type="number" inputmode="decimal" value="${v.par_qty ?? ""}" step="any" placeholder="in ${esc(v.base_uom)}" /></label>
-        <label>Urgent below <input id="ipMin" type="number" inputmode="decimal" value="${v.min_qty ?? ""}" step="any" placeholder="in ${esc(v.base_uom)}" /></label>
+        <label>Par level (<span class="ipBuyEchoN">${esc(v.purchase_uom)}</span>) <input id="ipPar" type="number" inputmode="decimal" value="${v.par_qty != null ? Math.round((Number(v.par_qty) / Number(v.purchase_factor)) * 100) / 100 : ""}" step="any" placeholder="e.g. 5" /></label>
+        <label>Urgent below (<span class="ipBuyEchoN">${esc(v.purchase_uom)}</span>) <input id="ipMin" type="number" inputmode="decimal" value="${v.min_qty != null ? Math.round((Number(v.min_qty) / Number(v.purchase_factor)) * 100) / 100 : ""}" step="any" placeholder="e.g. 2" /></label>
         <label>Rate (₹/<span id="ipRateEcho">${esc(v.purchase_uom)}</span>) <input id="ipRate" type="number" inputmode="decimal" value="${v.last_rate ?? ""}" min="0" step="any" /></label>
       </div>
-      ${isNew ? `<label>Opening stock (in <span id="ipOpenEcho">${esc(v.base_uom)}</span>, optional) <input id="ipOpening" type="number" inputmode="decimal" min="0" step="any" placeholder="what's on the shelf right now" /></label>` : ""}
+      ${isNew ? `<label>Opening stock (in <span class="ipBuyEchoN">${esc(v.purchase_uom)}</span>, optional) <input id="ipOpening" type="number" inputmode="decimal" min="0" step="any" placeholder="what's on the shelf right now" /></label>` : ""}
       <label class="inv-check"><input id="ipCountOnly" type="checkbox" ${v.track_level === "COUNT_ONLY" ? "checked" : ""}/> Count-only (never used in recipes — salt, foil…)</label>
       ${!isNew ? `<label class="inv-check"><input id="ipActive" type="checkbox" ${v.active ? "checked" : ""}/> Active (untick to retire this ingredient)</label>` : ""}
       <div class="inv-pop-actions">
@@ -245,7 +260,7 @@
         const buy = $("#ipBuyUom", pop).value || "?", base = $("#ipBaseUom", pop).value, f = $("#ipFactor", pop).value || "?";
         $("#ipSentence", pop).textContent = `You buy ${$("#ipName", pop).value || "this"} in ${buy}. 1 ${buy} = ${f} ${base}. Stock and counts are kept in ${base}.`;
         $("#ipBuyEcho", pop).textContent = buy; $("#ipBaseEcho", pop).textContent = base; $("#ipRateEcho", pop).textContent = buy;
-        const oe = $("#ipOpenEcho", pop); if (oe) oe.textContent = base;
+        pop.querySelectorAll(".ipBuyEchoN").forEach((el) => { el.textContent = buy; });
       };
       ["ipName", "ipBuyUom", "ipBaseUom", "ipFactor"].forEach((id) => { const el = $("#" + id, pop); el.oninput = sentence; el.onchange = sentence; });
       sentence();
@@ -259,18 +274,20 @@
           purchase_uom: $("#ipBuyUom", pop).value.trim() || "kg",
           base_uom: $("#ipBaseUom", pop).value,
           purchase_factor: Number($("#ipFactor", pop).value),
-          par_qty: $("#ipPar", pop).value === "" ? null : Number($("#ipPar", pop).value),
-          min_qty: $("#ipMin", pop).value === "" ? null : Number($("#ipMin", pop).value),
+          // Par / urgent / opening are TYPED in purchase units (kg/L — how people think)
+          // and stored in base units: convert with the factor as typed in this form.
+          par_qty: $("#ipPar", pop).value === "" ? null : Number($("#ipPar", pop).value) * Number($("#ipFactor", pop).value || 1),
+          min_qty: $("#ipMin", pop).value === "" ? null : Number($("#ipMin", pop).value) * Number($("#ipFactor", pop).value || 1),
           last_rate: $("#ipRate", pop).value === "" ? null : Number($("#ipRate", pop).value),
           track_level: $("#ipCountOnly", pop).checked ? "COUNT_ONLY" : "FULL",
         };
-        if (isNew && $("#ipOpening", pop).value !== "") payload.opening_qty = Number($("#ipOpening", pop).value);
+        if (isNew && $("#ipOpening", pop).value !== "") payload.opening_qty = Number($("#ipOpening", pop).value) * Number($("#ipFactor", pop).value || 1);
         if (!isNew) payload.active = $("#ipActive", pop).checked;
         try {
           await inv("POST", isNew ? "/items" : "/items/" + it.id, payload);
           toastMsg(isNew ? "Ingredient added" : "Saved");
           closePop();
-          S.items = (await inv("GET", "/items")).items || [];
+          await reloadItems();
           refreshView();
         } catch (e) { toastMsg("⚠️ " + e.message); }
       };
@@ -310,9 +327,26 @@
             <span class="inv-row-val"><b>buy ${i.suggest} ${esc(i.purchase_uom)}</b></span>
           </div>`).join("")}` : `<div class="empty">🎉 Nothing to order — everything is at or above its par level.</div>`}`;
     const btn = $("#invCopyList");
-    if (btn) btn.onclick = () => {
+    if (btn) btn.onclick = async () => {
       const text = list.map((i) => `${i.name} — ${i.suggest} ${i.purchase_uom}`).join("\n");
-      navigator.clipboard?.writeText(text).then(() => toastMsg("List copied — paste it into WhatsApp"));
+      // navigator.clipboard only exists in secure contexts — a manager tablet on a LAN
+      // IP doesn't have it. Fall back to the legacy textarea copy, then to showing the
+      // text so it can always be selected by hand (QA sweep 2026-07-29).
+      let done = false;
+      try { await navigator.clipboard.writeText(text); done = true; } catch {}
+      if (!done) {
+        try {
+          const ta = document.createElement("textarea");
+          ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+          document.body.appendChild(ta); ta.select();
+          done = document.execCommand("copy");
+          ta.remove();
+        } catch {}
+      }
+      if (done) toastMsg("List copied — paste it into WhatsApp");
+      else openPop("inv-copy", `<h3>🛒 Order list</h3><textarea class="inv-copyta" readonly>${esc(text)}</textarea>
+        <div class="inv-pop-actions"><span style="flex:1"></span><button class="btn" id="icClose">Close</button></div>`,
+        (pop) => { $("#icClose", pop).onclick = closePop; $(".inv-copyta", pop).select(); });
     };
   }
 
@@ -404,7 +438,7 @@
           await inv("POST", "/purchases", payload, photo);
           toastMsg("Purchase saved — stock updated");
           closePop();
-          S.items = (await inv("GET", "/items")).items || [];
+          await reloadItems();
           refreshView();
         } catch (e) { toastMsg("⚠️ " + e.message); btn.disabled = false; }
       };
@@ -434,7 +468,7 @@
           await inv("POST", `/purchases/${id}/void`, { reason: reason.trim() });
           toastMsg("Purchase voided — stock reversed");
           closePop();
-          S.items = (await inv("GET", "/items")).items || [];
+          await reloadItems();
           refreshView();
         } catch (e) { toastMsg("⚠️ " + e.message); }
       };
@@ -527,7 +561,7 @@
         const r = await inv("POST", `/counts/${S.count.id}/submit`);
         const cid = S.count.id;
         S.count = null;
-        S.items = (await inv("GET", "/items")).items || [];
+        await reloadItems();
         toastMsg(`Count done — ${r.adjusted} item${r.adjusted === 1 ? "" : "s"} corrected`);
         varianceSummaryPop(cid);
         refreshView();
@@ -582,7 +616,7 @@
         try {
           await inv("POST", `/waste/${x.dataset.void}/void`, { reason: reason.trim() });
           toastMsg("Struck out — stock restored");
-          S.items = (await inv("GET", "/items")).items || [];
+          await reloadItems();
           refreshView();
         } catch (err2) { toastMsg("⚠️ " + err2.message); }
       };
@@ -618,7 +652,7 @@
           await inv("POST", "/waste", { item_id: it.id, qty_base: qty * Number(it.purchase_factor), reason, note: $("#wpNote", pop).value.trim() || null }, $("#wpPhoto", pop).files[0] || null);
           toastMsg("Waste logged");
           closePop();
-          S.items = (await inv("GET", "/items")).items || [];
+          await reloadItems();
           refreshView();
         } catch (e) { toastMsg("⚠️ " + e.message); }
       };
