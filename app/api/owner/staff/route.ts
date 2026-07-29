@@ -24,6 +24,7 @@ import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/li
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
+import { fullFloorFor } from "@/lib/tableAssign";
 import {
   PROFILE_FIELDS, hasProfile, completeness, mergeProfilePatch, jobPatchFrom, paymentFrom,
   payAccessWith, todayIST, type PayAccess,
@@ -421,6 +422,10 @@ export async function POST(req: NextRequest) {
       }
     }
   }
+  // Waiter sections (mig 222/223): a new waiter starts holding the WHOLE floor, so adding
+  // someone mid-service can never hand them a blank tablet. Sections are only ever a
+  // subtraction from there. (owner 2026-07-29 — "all will have full access")
+  if (role === "tablet") row.assigned_tables = await fullFloorFor(rid);
   const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name, restaurant_id").single();
   if (error) {
     // The pre-check above and this insert aren't atomic — two staff added at once (or a

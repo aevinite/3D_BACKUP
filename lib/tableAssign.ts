@@ -161,6 +161,26 @@ export async function affectedTables(
   return { tables: [], unknown: true };
 }
 
+/**
+ * The section a BRAND-NEW waiter starts with: the whole floor (owner, 2026-07-29 —
+ * "whoever the users are created, all will have full access").
+ *
+ * The alternative — starting empty — means a waiter added halfway through service gets a
+ * blank tablet and cannot work until someone remembers to assign them. Starting full means
+ * sections are only ever a SUBTRACTION: a manager takes tables away deliberately, and
+ * nobody is ever accidentally locked out. Matches the mig-223 backfill of existing waiters,
+ * so "every waiter has full access unless someone chose otherwise" is true for the whole
+ * team, not just the people who existed on the day this shipped.
+ *
+ * Returns [] (harmless) if the restaurant has no settings row yet.
+ */
+export async function fullFloorFor(rid: string): Promise<number[]> {
+  const { data } = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+  const n = Math.max(1, Number(data?.table_count) || 0);
+  if (!data?.table_count) return [];
+  return Array.from({ length: n }, (_, i) => i + 1);
+}
+
 // The message a blocked waiter sees. Deliberately plain and non-alarming: this is a
 // rota, not a telling-off.
 export const notYoursMessage = (t: string) =>
