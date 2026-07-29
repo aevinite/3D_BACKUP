@@ -383,6 +383,15 @@ export default function OwnerStaffPage() {
                         <i className="fas fa-id-card" /> Open profile
                       </a>
                     )}
+                    {/* Two DIFFERENT things, kept apart (owner 2026-07-29): "Open profile" is the
+                        person's record; "Visit panel" is the app THEY use, opened in a new tab so
+                        you don't lose your place in the roster. */}
+                    {(s.role === "manager" || s.role === "tablet") && (
+                      <a className="ost-mini" href={s.role === "manager" ? "/manager" : "/tablet"} target="_blank" rel="noopener"
+                        title={`Open the ${s.role === "manager" ? "manager" : "waiter"} panel — the screen ${s.name || s.username} works on`}>
+                        <i className="fas fa-up-right-from-square" /> Visit panel
+                      </a>
+                    )}
                     <select className="ost-mini" value={s.role} disabled={busy} onChange={(e) => setRole(s, e.target.value)} aria-label="Role">
                       {ROLES.map((ro) => <option key={ro} value={ro}>{ro}</option>)}
                     </select>
