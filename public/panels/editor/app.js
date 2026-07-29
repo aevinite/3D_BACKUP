@@ -1251,13 +1251,19 @@ function tableSeatingCardHtml(s) {
 // hard-wired to its own table number — the QR you print on table 3 always opens table 3's menu, it
 // never expires, and it can't reach another table. Shown half (the meaningful tail) + a Copy button
 // that grabs the FULL url, so you can paste it into any QR-code maker.
+//
+// ADMIN/OWNER-ONLY (owner 2026-07-29): printing/renewing a table's guest QR is an admin job —
+// the real manager panel doesn't show this card at all. It carries data-mgr-hide so XRAY_CONTROLS
+// hides it for a real manager and tints it (still usable) for a higher role looking in. The admin's
+// own copy — with permanent /q/<code> codes, a QR download and a print sheet — lives in the
+// restaurant detail's ⚙ Settings tab (components/admin/RestaurantSettings.tsx).
 function tableQrLinksCardHtml(s) {
   const n = Math.max(1, parseInt(s.table_count, 10) || 12);
   const names = s.table_names && typeof s.table_names === "object" ? s.table_names : {};
   const seats = s.table_seats && typeof s.table_seats === "object" ? s.table_seats : {};
   const slug = (state.data.restaurant || {}).slug || "";
   const origin = location.origin;
-  if (!slug) return `<div class="card"><h3>Guest QR links</h3><p style="color:var(--muted);font-size:13px">Couldn't read this restaurant's web address yet — reload the panel and try again.</p></div>`;
+  if (!slug) return `<div class="card" data-mgr-hide="table_qr"><h3>Guest QR links</h3><p style="color:var(--muted);font-size:13px">Couldn't read this restaurant's web address yet — reload the panel and try again.</p></div>`;
   let rows = "";
   for (let i = 1; i <= n; i++) {
     const nm = (names[String(i)] || "").trim();
@@ -1271,7 +1277,7 @@ function tableQrLinksCardHtml(s) {
       <button class="btn small" type="button" data-copy-link="${esc(full)}" title="Copy this table's full link">⧉ Copy</button>
     </div>`;
   }
-  return `<div class="card"><h3>Guest QR links · one per table</h3>
+  return `<div class="card" data-mgr-hide="table_qr"><h3>Guest QR links · one per table</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
       A <b>permanent</b> link for each table — it always opens the guest menu for <b>that table only</b>
       (table 3's link can never reach table 6), and it never expires. Tap <b>Copy</b> and paste it into
@@ -9280,16 +9286,33 @@ const XRAY_CONTROLS = [
   { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
   { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff", label: "Access settings" },
-  // ADMIN/OWNER-only settings (owner 2026-07-28): a real manager only handles per-table
-  // name + seats + QR. Billing, KOT printing, dining sessions and the table COUNT are set
-  // from the admin panel (components/admin/RestaurantSettings.tsx). "admin_only_setting" is
-  // never a real manager power, so these HIDE for the manager and stay tinted-but-usable for
-  // a higher role (admin/owner) looking in — same pattern as Users/Access above.
+  // ADMIN/OWNER-only settings (owner 2026-07-28, extended 2026-07-29): a real manager only
+  // handles per-table name + seats. Billing, KOT printing, dining sessions, the table COUNT
+  // and the guest QR links are set from the admin panel
+  // (components/admin/RestaurantSettings.tsx). "admin_only_setting" is never a real manager
+  // power, so these HIDE for the manager and stay tinted-but-usable for a higher role
+  // (admin/owner) looking in — same pattern as Users/Access above.
   { selector: '.list-item[data-settings-section="billing"]', flag: "admin_only_setting", label: "Billing settings" },
   { selector: '.list-item[data-settings-section="kitchen"]', flag: "admin_only_setting", label: "Kitchen settings" },
   { selector: '.list-item[data-settings-section="sessions"]', flag: "admin_only_setting", label: "Dining sessions" },
   { selector: '[data-mgr-hide="table_count"]', flag: "admin_only_setting", label: "Number of tables" },
+  { selector: '[data-mgr-hide="table_qr"]', flag: "admin_only_setting", label: "Guest QR links per table" },
+  // TODAY-ONLY dashboard for a real manager (owner 2026-07-29): the 30-day and 12-month
+  // views are admin/owner reporting surfaces, so their sub-nav rows disappear for a manager
+  // (and in the actual-manager-view mode). "higher_only_view" has NO admin switch on purpose
+  // — it isn't a toggle, it's who the screen belongs to — so the zones list shows no
+  // "⚙ change" link for it. The server clamps the range too (app/api/editor stats).
+  { selector: '[data-dash-range="30d"]', flag: "higher_only_view", label: "30-day dashboard" },
+  { selector: '[data-dash-range="year"]', flag: "higher_only_view", label: "12-month dashboard" },
 ];
+// The two SYNTHETIC flags above are never real manager powers (whoami never returns them, so
+// xrayGrantedForManager is always false for them). This maps each to honest words + whether a
+// higher role can jump to a control for it, instead of the plain-power "turned off by the
+// owner" wording, which was wrong for them (nobody switched these off — they're admin-owned).
+const XRAY_NEVER = {
+  admin_only_setting: { by: "admin only", why: "it's set from the admin panel", settable: true },
+  higher_only_view: { by: "admin / owner only", why: "the manager panel only shows today", settable: false },
+};
 // `var`, not `let`: this is read by render/permission helpers defined FAR earlier
 // in the file (canDeleteBill, platformHtml, the Bills sub-nav…). With `let`, boot's
 // setTab(state.tab) → renderEditor() runs BEFORE this line and hit the temporal dead
@@ -9314,6 +9337,14 @@ function xraySettingUrl(flag) {
 
 (function injectXrayStyles() {
   const css = `
+  /* HIDDEN MEANS GONE. A .list-item has an explicit display:flex in style.css, which
+     OVERRIDES the browser's built-in [hidden]{display:none} — so every sidebar row the
+     X-ray hid (Billing / Kitchen / Dining sessions / Users / Access, and the dashboard's
+     30-day + Year rows) stayed fully VISIBLE for the real manager and in the actual-view
+     mode; tapping one just snapped back, which read as "there but broken" (owner
+     2026-07-29). Same trap as .field[hidden] below. Force it for every element the X-ray
+     hides, whatever its own display is. */
+  .list-item[hidden], .card[hidden], .tab[hidden], .subtab[hidden], [data-mgr-hide][hidden] { display: none !important; }
   /* GREYED OUT (off-for-staff) — a neutral mid-grey cue, clearly dimmer than enabled
      controls but never near-black; stays fully clickable for the higher role (owner
      2026-07-28: "grey, not golden"). Generic since Phase 2: tabs AND in-tab controls. */
@@ -9460,8 +9491,19 @@ function xrayGrantedForManager(flag) {
   if (XRAY_WHO.effectivePowers) return XRAY_WHO.effectivePowers[flag] === true;
   return !!(XRAY_WHO.managerPermissions && XRAY_WHO.managerPermissions[flag] === true);
 }
-// Who turned it off — names the right rung in the zone list + toast.
-function xrayOffBy(flag) { return XRAY_WHO && XRAY_WHO.offByAdmin && XRAY_WHO.offByAdmin[flag] ? "admin" : "owner"; }
+// Who turned it off — names the right rung in the zone list + toast. The synthetic
+// admin-owned flags (XRAY_NEVER) were never "switched off" by anyone, so they get their
+// own words instead of a misleading "turned off by the owner".
+function xrayOffBy(flag) {
+  if (XRAY_NEVER[flag]) return XRAY_NEVER[flag].by;
+  return XRAY_WHO && XRAY_WHO.offByAdmin && XRAY_WHO.offByAdmin[flag] ? "admin" : "owner";
+}
+// The tint tooltip for a higher role: says WHY it's off for staff and that they can still use it.
+function xrayTintTitle(label, flag) {
+  const nv = XRAY_NEVER[flag];
+  if (nv) return `Not available to the manager — ${label} is ${nv.by} (${nv.why}). You can still use it from this view.`;
+  return `Not available — ${label} isn't enabled for this restaurant's staff (turned off by the ${xrayOffBy(flag)}). You can still use it from this view.`;
+}
 
 // Conditional DOM writes: only touch what actually changes, so the steady-state pass
 // is mutation-free and the MutationObserver below can never loop on its own writes.
@@ -9521,7 +9563,7 @@ function applyHierarchyView() {
     if (!higher) { xraySetHidden(btn, true); xraySetTint(btn, false); continue; }  // real manager → hide entirely
     // higher role → TINT (colour only), still fully usable. Record it as a zone.
     xraySetHidden(btn, false);
-    xraySetTint(btn, true, `Not available — ${entry.label} isn't enabled for this restaurant's staff (turned off by the ${xrayOffBy(entry.flag)}). You can still use it from this view.`);
+    xraySetTint(btn, true, xrayTintTitle(entry.label, entry.flag));
     zones.push({ ...entry, el: btn });
   }
   // A real manager must never be LEFT ON a tab that just got hidden (e.g. the default
@@ -9544,7 +9586,7 @@ function applyHierarchyView() {
       if (granted) { xraySetHidden(el, false); xraySetTint(el, false); return; }
       if (!higher) { xraySetHidden(el, true); xraySetTint(el, false); return; }
       xraySetHidden(el, false);
-      xraySetTint(el, true, `Not available — ${entry.label} isn't enabled for this restaurant's staff (turned off by the ${xrayOffBy(entry.flag)}). You can still use it from this view.`);
+      xraySetTint(el, true, xrayTintTitle(entry.label, entry.flag));
       if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
     });
   }
@@ -9677,8 +9719,16 @@ function toggleXrayZones(zones) {
     ? `<div class="zsep"></div><button class="zrow zsim" id="xraySimRow" title="Reload this tab showing exactly what the real manager sees — same limited access, fully working">` +
       `<span class="dot" style="background:#6b7280"></span>👁 See the actual manager panel</button>`
     : "";
-  zp.innerHTML = `<div class="zh">Off for staff on this page</div>` + (zones.length
-    ? zones.map((z, i) => `<button class="zrow" data-zi="${i}"><span class="dot"></span>${z.label} <small>by ${xrayOffBy(z.flag)}</small><small class="zgo" data-zgo="${i}" title="Open the setting that controls this">⚙ change</small></button>`).join("")
+  // A synthetic admin-owned zone (XRAY_NEVER) reads "admin only" and, when there's no
+  // switch for it (higher_only_view), carries no "⚙ change" link — there's nothing to open.
+  zp.innerHTML = `<div class="zh">Not in the manager's panel</div>` + (zones.length
+    ? zones.map((z, i) => {
+        const nv = XRAY_NEVER[z.flag];
+        const by = nv ? esc(nv.by) : `by ${xrayOffBy(z.flag)}`;
+        const go = !nv || nv.settable
+          ? `<small class="zgo" data-zgo="${i}" title="Open the setting that controls this">⚙ change</small>` : "";
+        return `<button class="zrow" data-zi="${i}"><span class="dot"></span>${z.label} <small>${by}</small>${go}</button>`;
+      }).join("")
     : `<div class="zrow" style="cursor:default">Nothing is off here.</div>`) + simRow;
   document.getElementById("xrayRibbon").appendChild(zp);
   const simBtn = zp.querySelector("#xraySimRow");
@@ -9702,9 +9752,12 @@ function toggleXrayZones(zones) {
       if (el) {
         el.scrollIntoView({ behavior: "smooth", block: "nearest", inline: "center" });
         el.classList.remove("xray-pulse"); void el.offsetWidth; el.classList.add("xray-pulse");
-        toast(`${z.label}: off for staff (by the ${xrayOffBy(z.flag)}). Tap ⚙ change to open its setting.`, "ok");
+        const nv = XRAY_NEVER[z.flag];
+        toast(nv
+          ? `${z.label}: ${nv.by} — ${nv.why}. The manager panel doesn't show it at all.`
+          : `${z.label}: off for staff (by the ${xrayOffBy(z.flag)}). Tap ⚙ change to open its setting.`, "ok");
       } else {
-        toast(`${z.label} isn't on this screen right now — tap ⚙ change to open its setting.`, "ok");
+        toast(`${z.label} isn't on this screen right now${XRAY_NEVER[z.flag] && !XRAY_NEVER[z.flag].settable ? "." : " — tap ⚙ change to open its setting."}`, "ok");
       }
     };
   });
@@ -9727,7 +9780,17 @@ document.addEventListener("click", (e) => {
   else window.prompt("Copy this table's link:", url);
 });
 
-api("GET", "/whoami").then((w) => { XRAY_WHO = w; applyHierarchyView();
+api("GET", "/whoami").then((w) => { XRAY_WHO = w;
+  // TODAY-ONLY dashboard for a real manager (owner 2026-07-29). The 30-day / 12-month rows are
+  // hidden for them (XRAY_CONTROLS), so a range REMEMBERED in localStorage from an earlier
+  // admin/owner session on this device would otherwise leave them on a wide view with no way
+  // back. Snap it to today before the first dashboard paint; the server clamps it too.
+  if (!w.higherView && dashRange !== "today") {
+    dashRange = "today";
+    try { localStorage.setItem("lfh_dash_range", "today"); } catch {}
+    if (state.tab === "dash") { renderList(); loadDashboard(); }
+  }
+  applyHierarchyView();
   // The module tabs (Banquet, Platform) grant depends on WHO is viewing, so re-sync them once
   // whoami resolves (they first paint with higher-view assumed while whoami is still pending).
   try { syncBanquetTab(); syncPlatformTab(); } catch (e) {}

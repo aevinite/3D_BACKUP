@@ -359,7 +359,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
         <h2>🪑 Tables / seating</h2>
         <p className="hint">
           How many tables the restaurant has — this drives its live floor map. Admin-only: the manager can
-          rename tables and set seats, but only you can add or remove tables.
+          rename tables and set seats, but only you can add or remove tables or hand out a table&apos;s QR.
         </p>
         <div style={{ maxWidth: 200 }}>
           {field("Number of tables", "table_count", { type: "number", min: 1, max: 500, step: 1 })}
@@ -401,6 +401,8 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           for <b>that table only</b>. Because the table number isn&apos;t in the link, typing a different value in the
           address bar shows an error page, never another table. Print a QR once and it works forever; if a
           sticker is damaged or misused, give just that table a <b>new code</b> (the old QR goes dead).
+          <br /><b>Admin only:</b> the manager panel doesn&apos;t show table QR links at all — this is the one
+          place they live, so a printed code can only be renewed by you.
         </p>
         {draftCount !== savedCount && (
           <p className="hint" style={{ color: "var(--adm-warn, #d97706)" }}>You changed the number of tables — Save first, then the new tables get their codes here.</p>
