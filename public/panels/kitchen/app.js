@@ -9,7 +9,7 @@
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const state = { orders: [], items: [], dishes: [], platform: [], platformAccept: false, knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
+const state = { orders: [], items: [], dishes: [], platform: [], platformAccept: false, tableNames: {}, knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
 // Platform (Zomato/Swiggy/Website/Parcel) source badges shown on a platform ticket.
 const PLAT_META = {
   zomato:   { label: "ZOMATO",  cls: "z" },
@@ -49,6 +49,16 @@ const api = async (method, path, body) => {
   if (!r.ok) throw new Error((j && j.error) || r.statusText);
   return j;
 };
+// ── table naming (mig 131) ───────────────────────────────────────────────────
+// The restaurant's OWN name for a table ("A1", "Patio"), from settings.table_names.
+// Empty string when that table has no name, so callers fall back to the number.
+const tname = (t) => (((state.tableNames || {})[String(t)]) || "").trim();
+// What a cook should READ for table t. The floor name wins whenever there is one:
+// if the owner renamed table 1 to "A1", the ticket and the printed KOT must say "A1",
+// because that is what is written on the table (owner 2026-07-29). No name → the plain
+// number. Display only — every id/bill still uses the number.
+const tshort = (t) => tname(t) || `T${t}`;              // tight spots (ticket header)
+const tlong = (t) => (t == null || t === "" ? "Table ?" : (tname(t) || `Table ${t}`)); // prints, toasts
 const timeAgo = (ts) => {
   const m = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
   if (m < 1) return "just now";
@@ -201,7 +211,7 @@ function ticketHtml(o, rows) {
   const tb = TAG_BADGE[o.tag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${o.tag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl">T${esc(o.table_number)}</span>${tagBadge}<span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="Table ${esc(o.table_number)}">${esc(tshort(o.table_number))}</span>${tagBadge}<span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
@@ -455,7 +465,7 @@ function markItemReady(id, btn) {
     // dish back to where it was (owner undo bar, 2026-07-22).
     if (window.LFH_UNDO) LFH_UNDO.show({
       message: `${it.title || "Dish"} marked ready`,
-      sub: o ? `Table ${o.table_number} · tap undo to put it back` : "Tap undo to put it back",
+      sub: o ? `${tlong(o.table_number)} · tap undo to put it back` : "Tap undo to put it back",
       icon: "🔥",
       onUndo: () => undoReady([{ id, prev }]),
     });
@@ -537,7 +547,7 @@ function markOrderReady(orderId) {
     if (snap.length && window.LFH_UNDO) {
       LFH_UNDO.show({
         message: "All dishes marked ready",
-        sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+        sub: o ? `${tlong(o.table_number)} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
         icon: "🔥",
         onUndo: () => undoReady(snap, orderId),
       });
@@ -554,7 +564,7 @@ function reprintOrder(id) {
   if (!o) { toast("That order isn't on the board any more."); return; }
   const rows = (state.items || []).filter((it) => it.order_id === id); // empty for legacy orders → printKot falls back to o.items
   printKot(o, rows, state.restaurant);
-  toast(`Reprinting KOT #${o.kot_no ?? "—"} · Table ${o.table_number}`);
+  toast(`Reprinting KOT #${o.kot_no ?? "—"} · ${tlong(o.table_number)}`);
 }
 
 // ── the 86 board (sold-out toggles) ──────────────────────────────────────────
@@ -653,6 +663,10 @@ function boardSig(d) {
     // autoPrintKot drives whether the per-ticket 🖨 reprint button renders, so a change to it
     // must flip the signature and force a repaint (read from state — it's not on every caller's d).
     state.autoPrintKot,
+    // Table names are DRAWN on every ticket header, so renaming a table in the manager panel
+    // must repaint the board — the orders themselves don't change, so without this the ticket
+    // would keep showing the old label until the cook manually refreshed.
+    state.tableNames,
   ]);
 }
 let lastSig = null;
@@ -779,7 +793,9 @@ async function loadTables(tables) {
 function printKot(order, itemRows, restaurant) {
   try {
     const rname = restDisplayName(restaurant).replace(/\*/g, "") || "Kitchen";
-    const tnum = order.table_number != null ? order.table_number : "?";
+    // The table as the FLOOR knows it — its name when the owner gave it one ("A1"), else
+    // "Table 7". Printing the raw number on a renamed table sends staff to the wrong table.
+    const tlab = tlong(order.table_number);
     const kot = order.kot_no != null ? order.kot_no : "—";
     const when = order.created_at ? new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const rows = (itemRows && itemRows.length)
@@ -811,7 +827,7 @@ function printKot(order, itemRows, restaurant) {
         .kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
     </style></head><body>
       <div class="h">${esc(rname)}<br>KITCHEN TICKET</div>
-      <div class="meta"><span>KOT #${esc(String(kot))}</span><span>Table ${esc(String(tnum))}</span></div>
+      <div class="meta"><span>KOT #${esc(String(kot))}</span><span>${esc(tlab)}</span></div>
       <div class="meta"><span>${esc(when)}</span></div>
       ${linesHtml || "<div>(no items)</div>"}
       ${allerg}
@@ -899,6 +915,9 @@ async function load() {
   const seq = ++loadSeq;
   const data = await api("GET", "/board");
   if (seq !== loadSeq) return; // a newer refresh started — drop this stale response
+  // Table display names FIRST — before any auto-print below, or a ticket printed in the
+  // boot window would fall back to the raw number on a renamed table.
+  state.tableNames = data.tableNames || {};
   // Chime only for orders we have NEVER seen (not on the very first load) — dine-in
   // 'received', a GUEST order born 'preparing' (auto-accepted follow-up, mig 164 —
   // member_id set; waiter orders have member_id null and stay silent), OR a
