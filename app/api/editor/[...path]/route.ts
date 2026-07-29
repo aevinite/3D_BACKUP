@@ -829,7 +829,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "stats") {
       if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
       // Range: today | 30d | year. Buckets the revenue series by hour / day / month.
-      const range = new URL(req.url).searchParams.get("range") || "30d";
+      // TODAY ONLY for real staff (owner 2026-07-29): the 30-day and 12-month dashboards are
+      // admin/owner reporting surfaces — the manager panel shows today's numbers. The panel
+      // hides the other two sub-nav rows; this is the matching server rule, so asking for a
+      // wide range in the URL just returns today instead. The OWNER (their own restaurants)
+      // and the admin super-user (no staff cookie) keep every range.
+      const askedRange = new URL(req.url).searchParams.get("range") || "30d";
+      const range = g.user && g.user.role !== "owner" ? "today" : askedRange;
       const now = new Date();
       let since: Date;
       if (range === "today") { since = new Date(businessDayStartIso()); } // 05:00 IST business day

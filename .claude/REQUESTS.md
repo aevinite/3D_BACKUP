@@ -501,3 +501,36 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
   prompt now states the whole loop, and the AV-live one says to ask once and then ship to AV live
   itself. The Fix-NOW toast in admin → Repair now promises the same. Verified LIVE on 3-d-backup
   (new wording present in the deployed bundle, old wording gone). (PR #523)
+
+## 2026-07-29 — Manager panel: admin-only things must VANISH, not sit there greyed (owner: "it appears, but you can't click it — it should disappear")
+
+- [x] **The real cause of "there but broken": `[hidden]` was losing to `display:flex`.** Every
+  Settings sidebar row the X-ray "hid" for a real manager (Billing, Kitchen, Dining sessions,
+  and Users/Access when `manage_staff` is off) is a `.list-item`, which sets its own
+  `display:flex` — that beats the browser's `[hidden]{display:none}`, so the rows stayed fully
+  on screen and merely bounced back to General when tapped. One CSS line in the X-ray style
+  block now forces `display:none` for every element the X-ray hides (`.list-item`, `.card`,
+  `.tab`, `.subtab`, `[data-mgr-hide]`). Same trap that `.field[hidden]` was already fixed for.
+- [x] **Guest QR links per table — removed from the manager panel entirely** (the feature the
+  owner spotted as missing from the admin-only list). The card carries `data-mgr-hide="table_qr"`
+  and joined `XRAY_CONTROLS` under `admin_only_setting`: gone for a real manager, greyed but
+  still usable for an admin/owner looking in. The admin's own copy (permanent `/q/<code>` codes,
+  QR download, print-all sheet, per-table "new code") already lives in restaurant detail →
+  ⚙ Settings → Tables & QR, and now says out loud that the manager panel never shows QR links.
+- [x] **Manager dashboard = TODAY only.** The 30-day and 12-month sub-nav rows are admin/owner
+  reporting surfaces, so they disappear for a real manager (new `higher_only_view` flag — no
+  admin switch, because it isn't a toggle, it's whose screen it is). A wide range remembered on
+  the device snaps back to Today at boot, and `/api/editor/stats` clamps any wide range to today
+  for a real staff login, so the rule holds even if the request asks for a year.
+- [x] **"See the actual manager panel" now really is the actual panel.** With the CSS fix the
+  simulated view shows exactly what the manager sees — nothing greyed left behind. Verified: the
+  tab strip in actual view matches the real manager's (Editor · Bills · Tables · Platform ·
+  Dashboard · Log — Settings and Ratings gone), and the slim ribbon keeps the way back.
+- [x] **Honest wording in the "zones" dropdown** (top right, admin view): admin-owned items now
+  read "admin only" / "admin / owner only" instead of the misleading "by owner", the dropdown
+  header reads "Not in the manager's panel", and the ⚙ change link only appears when there IS a
+  switch to open.
+- [x] **New guard `scripts/verify-manager-hidden.mjs`** — 34 headless checks across all three
+  views (real manager · admin view · admin actual view), desktop 1280 AND phone 390, on
+  french-house AND pizza-palace: all pass. Replaces `scripts/verify-table-qr.mjs`, whose rule
+  (manager sees the QR card) is now reversed and could only ever fail.
