@@ -76,7 +76,8 @@ function rangeDates(r: Range, cFrom: string, cTo: string): { from: string; to: s
 type BodyKey =
   | "daysummary" | "sales" | "avgbill" | "volume" | "weekday"
   | "payments" | "discounts" | "cancellations" | "tax"
-  | "dishes" | "categories" | "menu" | "hourly" | "daypart";
+  | "dishes" | "categories" | "menu" | "hourly" | "daypart"
+  | "staffpay" | "staffperf";
 const BODY_KIND: Record<BodyKey, DataKind> = {
   daysummary: "daysummary",
   sales: "money", avgbill: "money", volume: "money", weekday: "money",
@@ -84,6 +85,7 @@ const BODY_KIND: Record<BodyKey, DataKind> = {
   payments: "payments",
   dishes: "dishes", menu: "dishes", categories: "categories",
   hourly: "hourly", daypart: "hourly",
+  staffpay: "staffpay", staffperf: "staffperf",
 };
 type OpenOpts = { sub?: string; pay?: "discounts" | "cancellations" };
 type OpenReport = (k: RKey, opts?: OpenOpts) => void;
@@ -101,6 +103,10 @@ const SUBTABS: Record<RKey, SubTab[]> = {
     { key: "items", label: "Items", icon: "fa-utensils", body: "dishes" },
     { key: "categories", label: "Categories", icon: "fa-layer-group", body: "categories" },
     { key: "menu", label: "Menu engineering", icon: "fa-lightbulb", body: "menu" },
+  ],
+  team: [
+    { key: "pay", label: "Pay & cost", icon: "fa-indian-rupee-sign", body: "staffpay" },
+    { key: "perf", label: "Performance", icon: "fa-chart-line", body: "staffperf" },
   ],
   timing: [
     { key: "hours", label: "By hour", icon: "fa-clock", body: "hourly" },
@@ -123,7 +129,11 @@ type PayRow = { method: string; revenue: number; orders: number };
 type DishRow = { title: string; qty: number; revenue: number };
 type CatRow = { category: string; qty: number; revenue: number };
 type HourRow = { hour: number; orders: number; revenue: number };
-type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: PayRow[]; bucket?: string; drillBucket?: string; drillRows?: unknown[] };
+type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: PayRow[]; bucket?: string; drillBucket?: string; drillRows?: unknown[];
+  staffPay?: { paidOut: number; people: number; entries: number } | null;
+  // Team & pay (mig 220): its own shapes — cash view, cost view, per-person, and the
+  // performance rows share `rows`.
+  cashRows?: unknown[]; monthRows?: unknown[]; people?: unknown[] };
 type Entry = { loading?: boolean; error?: string; data?: Payload };
 
 const apiType = (kind: DataKind): string =>
@@ -365,8 +375,12 @@ export default function OwnerReports() {
     if (Object.keys(settled).length) writeSnap(snapKey, { rid, entries: settled });
   }, [snapKey, store, rid]);
 
+  // Does this owner have the Staff-profiles-&-pay module anywhere? Off ⇒ the Team & pay
+  // report card isn't rendered at all (mig 220).
+  const [hasPayroll, setHasPayroll] = useState(false);
   useEffect(() => {
     fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json()).then((o) => {
+      setHasPayroll(o?.modules?.payroll === true);
       // Overview returns camelCase (accentColor) — reading accent_color left every chart
       // on the fallback green instead of the restaurant's own brand accent.
       const list: Rest[] = (o.restaurants ?? []).map((r: Record<string, unknown>) => ({
@@ -630,7 +644,7 @@ export default function OwnerReports() {
 
       {!sel ? (
         <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={openReport}
-          rests={rests} rid={rid} onPickRest={setRid}
+          rests={rests} rid={rid} onPickRest={setRid} hasPayroll={hasPayroll}
           briefQs={`type=byrestaurant&range=${range}${range === "custom" ? `&from=${cFrom}&to=${cTo}` : ""}${scp}`} />
       ) : (
         <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
@@ -643,9 +657,10 @@ export default function OwnerReports() {
 }
 
 // ── The hub: hero snapshot + per-restaurant brief + categorised report cards ──
-function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs }: {
+function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll }: {
   range: Range; money?: Entry; restName: string; accent: string; onOpen: (k: RKey) => void;
   rests: Rest[]; rid: string; onPickRest: (id: string) => void; briefQs: string;
+  hasPayroll: boolean;   // mig 220 — hides the Team & pay card when the module is off
 }) {
   // Per-restaurant brief (owner 2026-07-26: "in the all-restaurants view there will be a
   // brief report about all the restaurants"). Fetched only when viewing ALL of a
@@ -723,7 +738,9 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
         </div>
       )}
 
-      {CATEGORIES.map((cat) => (
+      {/* A restaurant without the Staff-profiles-&-pay module doesn't get the Team card at
+          all — no dead tile that opens onto "not enabled". */}
+      {CATEGORIES.filter((cat) => cat.key !== "team" || hasPayroll).map((cat) => (
         <div key={cat.key}>
           <div className="rs-catrow">
             <span className="ic"><i className={`fas ${cat.icon}`} aria-hidden /></span>
@@ -834,6 +851,136 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
   const cser = (pick: (r: MoneyRow) => number) => chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: pick(r) }));
   const series = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), revenue: r.revenue }));
 
+  // ── TEAM & PAY (mig 220) ────────────────────────────────────────────────────
+  // TWO money truths, deliberately labelled as such (owner's choice 2026-07-29):
+  //   CASH  — what left the till on the day it left. Matches the day book.
+  //   COST  — what a month's team was worth vs what was paid for that month.
+  // A salary is lumpy (one big day), so showing only the cash view makes pay-day look like a
+  // disaster; showing only the cost view hides when money actually moved. Hence both.
+  if (bk === "staffpay") {
+    const cash = (data.cashRows ?? []) as { bucket: string; paid_out: number; people: number; entries: number }[];
+    const months = (data.monthRows ?? []) as { bucket: string; expected: number; paid: number; owed: number; people: number; est_excluded: number }[];
+    const people = (data.people ?? []) as { staff_id: string; name: string; role: string; designation: string | null; pay_type: string | null; pay_amount: number; paid: number; salary: number; advance: number; bonus: number; overtime: number; other: number; advanceOutstanding: number; lastPaidOn: string | null; entries: number }[];
+    const tt = (data.totals ?? {}) as { paidOut: number; expected: number; owed: number; people: number; advanceOutstanding: number; estExcluded: number };
+    if (!people.length && !cash.length)
+      return <EmptyCard text="No staff payments recorded in this period. Record one from Team & pay → open a person → Payments." />;
+    const cashSeries = cash.map((r) => ({ label: bucketLabel(r.bucket, bucket === "month" ? "month" : "day"), value: r.paid_out }));
+    return (
+      <>
+        <div className="rs-stats">
+          <Stat label="Paid out" value={inr(tt.paidOut || 0)} sub="money that actually left" tone="bad" icon="fa-arrow-up-from-bracket" big />
+          <Stat label="Team cost" value={inr(tt.expected || 0)} sub="what these months were worth" tone="info" icon="fa-scale-balanced" />
+          <Stat label="Still owed" value={inr(tt.owed || 0)} sub={tt.owed ? "not yet paid for those months" : "nothing pending"} tone={tt.owed ? "warn" : "good"} icon="fa-hourglass-half" />
+          <Stat label="Advances out" value={inr(tt.advanceOutstanding || 0)} sub="to recover from later salary" tone={tt.advanceOutstanding ? "warn" : "good"} icon="fa-hand-holding-dollar" />
+          <Stat label="People paid" value={nfmt(tt.people || 0)} sub="in this period" tone="accent" icon="fa-users" />
+        </div>
+
+        <Panel title="Cash view — the day the money left" hint="This is the line that shows in your day book as money out." id="team-cash">
+          {cashSeries.filter((d) => d.value > 0).length < 2
+            ? <div className="rs-empty">
+                {cashSeries.length === 1
+                  ? <>Only one payment day in this period: <b>{cashSeries[0].label} · {inr(cashSeries[0].value)}</b>. A chart needs at least two.</>
+                  : <>No payments in this period.</>}
+              </div>
+            : <div style={{ padding: 12 }}><ToggleChart data={cashSeries} color={accent} money height={230} name="Paid out" /></div>}
+        </Panel>
+
+        <Panel title="Cost view — what each month was worth" hint="Salary due for that month vs what you have paid for it. People on a daily or hourly rate are left out of “worth” until attendance exists." id="team-cost">
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Month</th><th className="num">People</th><th className="num">Team cost</th><th className="num">Paid for it</th><th className="num">Still owed</th></tr></thead>
+              <tbody>
+                {months.map((m) => (
+                  <tr key={m.bucket}>
+                    <td>{new Date(m.bucket).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: TZ })}</td>
+                    <td className="num">{nfmt(m.people)}{m.est_excluded ? <span className="rs-mut"> +{m.est_excluded} hourly</span> : null}</td>
+                    <td className="num">{inr(m.expected)}</td>
+                    <td className="num" style={{ color: "var(--adm-ok)" }}>{inr(m.paid)}</td>
+                    <td className="num" style={{ color: m.owed ? "var(--adm-warn)" : "var(--muted)" }}>{inr(m.owed)}</td>
+                  </tr>
+                ))}
+                {!months.length && <tr><td colSpan={5} className="rs-mut">No months in this period.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+          {tt.estExcluded ? <div className="rs-note">{tt.estExcluded} {tt.estExcluded === 1 ? "person is" : "people are"} on a daily/hourly rate, so their cost can&apos;t be predicted without attendance — what you actually paid them IS included in “Paid for it”.</div> : null}
+        </Panel>
+
+        <Panel title="Who you paid" hint="Every person with money against them in this period." id="team-people">
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Person</th><th>Rate</th><th className="num">Salary</th><th className="num">Advance</th><th className="num">Bonus / OT</th><th className="num">Total paid</th><th className="num">Advance left</th><th>Last paid</th></tr></thead>
+              <tbody>
+                {people.map((r) => (
+                  <tr key={r.staff_id}>
+                    <td><b>{r.name}</b> <span className="rs-mut">{r.designation || (r.role === "tablet" ? "waiter" : r.role)}</span></td>
+                    <td className="rs-mut">{r.pay_amount ? `${inr(r.pay_amount)}${r.pay_type === "monthly" ? "/mo" : r.pay_type === "daily" ? "/day" : r.pay_type === "hourly" ? "/hr" : ""}` : "not set"}</td>
+                    <td className="num">{inr(r.salary)}</td>
+                    <td className="num">{inr(r.advance)}</td>
+                    <td className="num">{inr(r.bonus + r.overtime + r.other)}</td>
+                    <td className="num"><b>{inr(r.paid)}</b></td>
+                    <td className="num" style={{ color: r.advanceOutstanding ? "var(--adm-warn)" : "var(--muted)" }}>{inr(r.advanceOutstanding)}</td>
+                    <td className="rs-mut">{r.lastPaidOn ? new Date(r.lastPaidOn + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
+      </>
+    );
+  }
+
+  // ── TEAM PERFORMANCE (mig 220) — owner-only leaderboard ─────────────────────
+  if (bk === "staffperf") {
+    const rows = (data.rows ?? []) as { staff_id: string; name: string; role: string; designation: string | null; active: boolean; daysActive: number; hours: number; orders: number; value: number; tables: number; sittings: number; discount: number; ratings: number; avgRating: number | null; paid: number }[];
+    const tt = (data.totals ?? {}) as { people: number; active: number; orders: number; value: number; hours: number; paid: number };
+    const worked = rows.filter((r) => r.daysActive > 0 || r.orders > 0);
+    if (!worked.length)
+      return <EmptyCard text="Nothing recorded for anyone in this period yet. Numbers build up as staff sign in and punch orders — work done before 29 Jul 2026 isn't attributed to a person." />;
+    const bars = worked.slice(0, 12).map((r) => ({ id: r.staff_id, name: r.name, revenue: r.value, orders: r.orders, accentColor: accent }));
+    return (
+      <>
+        <div className="rs-stats">
+          <Stat label="People working" value={nfmt(tt.active || 0)} sub={`of ${nfmt(tt.people || 0)} on the team`} tone="accent" icon="fa-users" big />
+          <Stat label="Orders punched" value={nfmt(tt.orders || 0)} sub="by staff, not guests" tone="info" icon="fa-list-check" />
+          <Stat label="Value punched" value={inr(tt.value || 0)} sub="what they put through" tone="good" icon="fa-indian-rupee-sign" />
+          <Stat label="Hours on shift" value={nfmt(Math.round(tt.hours || 0))} sub="first to last action each day" tone="accent" icon="fa-clock" />
+        </div>
+
+        <Panel title="Who put through the most" hint="Value of the orders each person punched in this period." id="perf-leader">
+          {bars.filter((b) => b.revenue > 0).length < 2
+            ? <div className="rs-empty">Only one person has punched orders in this period ({bars[0]?.name} · {inr(bars[0]?.revenue || 0)}). A comparison needs two.</div>
+            : <LeaderBar data={bars} />}
+        </Panel>
+
+        <Panel title="Everyone, side by side" hint="Sorted by value punched. Ratings come from guests who rated an order that person took." id="perf-table">
+          <div className="rs-tablewrap">
+            <table className="rs-table">
+              <thead><tr><th>Person</th><th className="num">Days</th><th className="num">Hours</th><th className="num">Orders</th><th className="num">Value</th><th className="num">Tables</th><th className="num">Discount</th><th className="num">Rating</th><th className="num">Paid</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.staff_id} style={{ opacity: r.active ? 1 : 0.55 }}>
+                    <td><b>{r.name}</b> <span className="rs-mut">{r.designation || (r.role === "tablet" ? "waiter" : r.role)}{r.active ? "" : " · disabled"}</span></td>
+                    <td className="num">{nfmt(r.daysActive)}</td>
+                    <td className="num">{r.hours ? r.hours.toFixed(1) : "—"}</td>
+                    <td className="num">{nfmt(r.orders)}</td>
+                    <td className="num"><b>{inr(r.value)}</b></td>
+                    <td className="num">{nfmt(r.tables)}</td>
+                    <td className="num">{r.discount ? inr(r.discount) : "—"}</td>
+                    <td className="num">{r.avgRating ? `${r.avgRating}★` : "—"}<span className="rs-mut">{r.ratings ? ` (${r.ratings})` : ""}</span></td>
+                    <td className="num">{inr(r.paid)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="rs-note">Days and hours come from sign-ins and actions; orders, value and tables from what each person punched. Anything done before 29 Jul 2026 has no person attached to it — the app only started recording who from then.</div>
+        </Panel>
+      </>
+    );
+  }
+
   // ── DAY SUMMARY ──
   if (bk === "daysummary") {
     if (!t) return <EmptyCard text="Nothing in this period yet." />;
@@ -855,6 +1002,15 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
           <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
           <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} onClick={() => onOpenReport("payments", { pay: "cancellations" })} title="Open the Cancellations report" />
+          {/* STAFF PAY OUT (mig 220) — money that LEFT on this day, so the sheet shows both
+              directions. Rendered only when the restaurant has the module (a null payload
+              keeps the tile off entirely rather than printing a meaningless ₹0). */}
+          {data.staffPay && (
+            <Stat label="Staff pay out" tone="bad" icon="fa-arrow-up-from-bracket"
+              value={inr(data.staffPay.paidOut)}
+              sub={data.staffPay.entries ? `${nfmt(data.staffPay.entries)} payment${data.staffPay.entries === 1 ? "" : "s"} to ${nfmt(data.staffPay.people)} ${data.staffPay.people === 1 ? "person" : "people"}` : "nothing paid out"}
+              onClick={() => onOpenReport("team")} title="Open the Team & pay report" />
+          )}
         </div>
 
         <div className="rs-daysheet">

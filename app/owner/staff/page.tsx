@@ -13,8 +13,15 @@ import { asSuffix } from "@/lib/ownerPin";
 import { MANAGER_POWER_FLAGS, ABSENT_ON_POWERS, PERM_BY_ID } from "@/lib/accessModel";
 
 type Perms = Record<string, boolean>;
-type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean> };
-type Staff = { id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; restaurant_id: string; hasPin: boolean; last_seen_at?: string | null; permissions?: Record<string, string> };
+type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean>; payAccess?: PayAccess };
+type Staff = { id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; restaurant_id: string; hasPin: boolean; last_seen_at?: string | null; permissions?: Record<string, string>;
+  // Profiles & pay (mig 220). profileEligible is false for KITCHEN (no profile, owner's call)
+  // and for any restaurant without the module — the row then shows account actions only.
+  profileEligible?: boolean; completeness?: { filled: number; total: number } | null;
+  joined_on?: string | null; designation?: string | null;
+  pay_type?: string | null; pay_amount?: number | null;
+  paidThisMonth?: number; advanceOutstanding?: number; lastPaidOn?: string | null; payHidden?: boolean };
+type PayAccess = { moduleOn: boolean; canSeePay: boolean; canRecordPay: boolean; canEditProfile: boolean; canEditJobPay: boolean };
 
 // Per-user override caps for a WAITER (tablet) account — the tablet_* keys tabletPerm enforces.
 // The module gate (or null) is what the admin must have enabled for the restaurant; a gated cap
@@ -58,6 +65,10 @@ const PERMS: [string, string, string][] = MANAGER_POWER_FLAGS.map((f) => {
   return [f, PERM_COPY[f]?.[0] || p?.name || f, PERM_COPY[f]?.[1] || p?.what || ""];
 });
 const ROLES = ["manager", "kitchen", "tablet"];
+// Powers that only exist while the "Staff profiles & pay" module is on for that restaurant
+// (mig 220). With the module off these would be dead switches, so they're not rendered at all.
+const PAYROLL_POWERS = new Set(["see_staff_pay", "record_staff_payment", "edit_staff_profiles"]);
+const money = (n: number | null | undefined) => "\u20b9" + Math.round(Number(n || 0)).toLocaleString("en-IN");
 
 export default function OwnerStaffPage() {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
@@ -76,6 +87,11 @@ export default function OwnerStaffPage() {
   const [, forceRerender] = useState(0);
   // Inline rename / edit-phone editor: which row is open + its draft values.
   const [editing, setEditing] = useState<{ id: string; name: string; phone: string } | null>(null);
+  // Two views of the same page: the PEOPLE (a roster you open a profile from) and the POWERS
+  // (what managers here may do). Splitting them stopped the page being one long scroll where
+  // the person list was buried under toggles. ?tab=powers deep-links the second one.
+  const [tab, setTab] = useState<"team" | "powers">(() =>
+    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "powers" ? "powers" : "team");
   // Synchronous re-entry guard so a fast double-click on "Add" can't fire twice before
   // React flushes the disabled state (the exact race that showed a raw duplicate-key error).
   const addingRef = useRef(false);
@@ -86,6 +102,8 @@ export default function OwnerStaffPage() {
   // real owner (server scopes them by membership and ignores the param anyway).
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
+  // Same pin, but for a PAGE link (the profile route) rather than an API call.
+  const withRid = useCallback((p: string) => (scopePin ? `${p}?rid=${scopePin}` : p), [scopePin]);
   const withScope = useCallback(
     (p: string) => (scopePin ? `${p}${p.includes("?") ? "&" : "?"}scope=${scopePin}${asSuffix()}` : p),
     [scopePin]);
@@ -169,7 +187,18 @@ export default function OwnerStaffPage() {
       const role = String(fd.get("role") || "manager");
       const password = String(fd.get("password") || "").trim();
       if (name.length < 2) { setErr("Name must be at least 2 characters."); return; }
-      const d = await call(withScope("/api/owner/staff"), { method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: rid }) });
+      // Optional details typed on the same form. Only non-empty ones are sent, so a bare
+      // add is exactly the request it always was.
+      const opt: Record<string, unknown> = {};
+      const put = (k: string, v: FormDataEntryValue | null) => { const x = String(v ?? "").trim(); if (x) opt[k] = x; };
+      put("phone", fd.get("phone"));
+      put("designation", fd.get("designation"));
+      put("joined_on", fd.get("joined_on"));
+      put("pay_type", fd.get("pay_type"));
+      put("pay_amount", fd.get("pay_amount"));
+      const fullName = String(fd.get("full_name") || "").trim();
+      if (fullName) opt.profile = { full_name: fullName };
+      const d = await call(withScope("/api/owner/staff"), { method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: rid, ...opt }) });
       setReveal({ name: d.name, password: d.password }); setCopied(false);
       form.reset();
       await load();
@@ -239,7 +268,18 @@ export default function OwnerStaffPage() {
 
   return (
     <>
-      <div className="own-bar"><div className="own-crumb"><span className="cur">Staff &amp; powers</span></div></div>
+      <div className="own-bar"><div className="own-crumb"><span className="cur">Team &amp; pay</span></div></div>
+
+      {/* People first, toggles second — the roster is what an owner opens this page for. */}
+      <div className="ost-tabs" role="tablist">
+        <button role="tab" aria-selected={tab === "team"} className="ost-tab" onClick={() => setTab("team")}>
+          <i className="fas fa-users" /> Team
+          <span className="ost-tcount">{staff.filter((s) => s.active).length}</span>
+        </button>
+        <button role="tab" aria-selected={tab === "powers"} className="ost-tab" onClick={() => setTab("powers")}>
+          <i className="fas fa-shield-halved" /> Powers
+        </button>
+      </div>
 
       {err && <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 14 }}><b>Something went wrong.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span> <button className="ost-x" onClick={() => setErr(null)}>dismiss</button></div>}
 
@@ -265,7 +305,8 @@ export default function OwnerStaffPage() {
               <div><div className="ost-name">{r.name}</div><div className="adm-muted" style={{ fontSize: 12 }}>{r.slug} · {team.length} staff</div></div>
             </div>
 
-            {/* Manager powers */}
+            {/* ── POWERS tab: what a manager here may do ─────────────────────────── */}
+            {tab === "powers" && <>
             <div className="ost-section-t">Manager powers <span className="adm-muted" style={{ fontWeight: 500 }}>· what a manager here may do</span>
               <span className="reach-legend" title="Each power shows how far it reaches. M = passed down to your managers."><span className="reach-chip on" aria-hidden="true">M</span> reaches managers</span>
             </div>
@@ -276,6 +317,10 @@ export default function OwnerStaffPage() {
                 // and clicking it jumps to the admin Access hub instead of toggling.
                 const exists = r.ownerEntitlements?.[`power_${key}`] !== false;
                 if (!exists && actor !== "admin") return null;
+                // A power belonging to a module the restaurant doesn't have isn't hidden
+                // information — it doesn't exist. Rendering it would be a switch that does
+                // nothing (and the server refuses it anyway).
+                if (PAYROLL_POWERS.has(key) && !r.modules?.payroll) return null;
                 // absentOn flags (view_logs): an ABSENT grant means ON — the toggle must show
                 // what the server enforces, never "off" while managers genuinely have it.
                 const on = ABSENT_ON_POWERS.has(key) ? r.managerPermissions?.[key] !== false : !!r.managerPermissions?.[key];
@@ -297,20 +342,47 @@ export default function OwnerStaffPage() {
               })}
             </div>
             {!canEditPowers && <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 4 }}>Only the owner can change these.</div>}
+            </>}
 
-            {/* Staff list */}
+            {/* ── TEAM tab: the roster ───────────────────────────────────────────── */}
+            {tab === "team" && <>
             <div className="ost-section-t" style={{ marginTop: 16 }}>Team</div>
             <div className="ost-team">
               {team.length === 0 && <div className="adm-empty" style={{ padding: "10px 0" }}>No staff yet — add the first below.</div>}
               {team.map((s) => (
                 <div key={s.id} className={`ost-row ${s.active ? "" : "off"}`}>
                   <div className="ost-who">
-                    <span className="ost-rolebadge" data-role={s.role}>{s.role}</span>
+                    <span className="ost-rolebadge" data-role={s.role}>{s.role === "tablet" ? "waiter" : s.role}</span>
                     <span className="ost-pn">{s.name || s.username}</span>
                     {s.phone && <span className="adm-muted" style={{ fontSize: 11.5 }}>{s.phone}</span>}
                     {!s.active && <span className="ost-disabled">disabled</span>}
+                    {/* How complete their record is, and where their money stands. Kitchen rows
+                        show neither — they have no profile (owner's call 2026-07-29). */}
+                    {s.profileEligible && s.completeness && (
+                      <a className="ost-prog" href={withRid(`/owner/staff/${s.id}`)}
+                         title={`${s.completeness.filled} of ${s.completeness.total} details filled — open their profile`}>
+                        <span className={`ost-bar ${s.completeness.filled < s.completeness.total ? "part" : ""}`}>
+                          <i style={{ width: `${Math.round((s.completeness.filled / Math.max(1, s.completeness.total)) * 100)}%` }} />
+                        </span>
+                        <span className="adm-muted" style={{ fontSize: 11 }}>
+                          {s.completeness.filled === s.completeness.total ? "complete" : `${s.completeness.filled} of ${s.completeness.total} filled`}
+                        </span>
+                      </a>
+                    )}
+                    {s.profileEligible && !s.payHidden && (s.pay_amount ? (
+                      <span className="adm-muted" style={{ fontSize: 11.5 }}>
+                        {money(s.pay_amount)}{s.pay_type === "monthly" ? "/mo" : s.pay_type === "daily" ? "/day" : s.pay_type === "hourly" ? "/hr" : ""}
+                        {" · "}<b style={{ color: s.paidThisMonth ? "var(--adm-ok)" : "var(--muted)" }}>{money(s.paidThisMonth)}</b> paid this month
+                        {s.advanceOutstanding ? <span style={{ color: "var(--adm-warn)" }}> · {money(s.advanceOutstanding)} advance</span> : null}
+                      </span>
+                    ) : <span className="ost-nopay">pay not set</span>)}
                   </div>
                   <div className="ost-actions">
+                    {s.profileEligible && (
+                      <a className="ost-mini open" href={withRid(`/owner/staff/${s.id}`)}>
+                        <i className="fas fa-id-card" /> Open profile
+                      </a>
+                    )}
                     <select className="ost-mini" value={s.role} disabled={busy} onChange={(e) => setRole(s, e.target.value)} aria-label="Role">
                       {ROLES.map((ro) => <option key={ro} value={ro}>{ro}</option>)}
                     </select>
@@ -331,7 +403,7 @@ export default function OwnerStaffPage() {
                   )}
                   {/* Per-user tablet permissions — only for waiter accounts, only the owner can set.
                       A cap the admin hasn't enabled for this restaurant is greyed (and refused server-side). */}
-                  {s.role === "tablet" && canEditPowers && (
+                  {s.role === "tablet" && canEditPowers && !r.modules?.payroll && (
                     <div style={{ marginTop: 10, paddingTop: 10, borderTop: "var(--border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
                       {WAITER_CAPS.map(([key, label, gate]) => {
                         const gated = !!gate && !(r.modules?.[gate]);
@@ -361,10 +433,35 @@ export default function OwnerStaffPage() {
             {/* Add staff */}
             <form className="ost-add" onSubmit={(e) => { e.preventDefault(); addStaff(r.id, e.currentTarget); }}>
               <input className="ost-in" name="name" placeholder="Username (their login)" autoComplete="off" maxLength={80} required />
-              <select className="ost-in" name="role" defaultValue="manager">{ROLES.map((ro) => <option key={ro} value={ro}>{ro}</option>)}</select>
+              <select className="ost-in" name="role" defaultValue="manager">{ROLES.map((ro) => <option key={ro} value={ro}>{ro === "tablet" ? "waiter" : ro}</option>)}</select>
               <input className="ost-in" name="password" placeholder="Password (blank = auto)" autoComplete="off" />
               <button className="ost-btn" type="submit" disabled={busy}><i className="fas fa-user-plus" /> Add</button>
+              {/* Fill the person in right away — or skip it entirely and finish their profile
+                  later. Every field here is optional; the server ignores the job/pay ones for a
+                  kitchen login and for a manager who may not set pay. */}
+              {r.modules?.payroll && (
+                <details className="ost-more">
+                  <summary>Add their details now <span className="adm-muted">· optional, you can do this later</span></summary>
+                  <div className="ost-moregrid">
+                    <input className="ost-in" name="phone" placeholder="Phone" autoComplete="off" inputMode="tel" />
+                    <input className="ost-in" name="full_name" placeholder="Full name" autoComplete="off" maxLength={80} />
+                    <input className="ost-in" name="designation" placeholder="Designation (e.g. Senior waiter)" autoComplete="off" maxLength={80} />
+                    <label className="ost-lbl">Joined on<input className="ost-in" name="joined_on" type="date" /></label>
+                    {r.payAccess?.canEditJobPay && <>
+                      <select className="ost-in" name="pay_type" defaultValue="">
+                        <option value="">Pay type…</option>
+                        <option value="monthly">Monthly salary</option>
+                        <option value="daily">Daily wage</option>
+                        <option value="hourly">Hourly</option>
+                        <option value="per_shift">Per shift</option>
+                      </select>
+                      <input className="ost-in" name="pay_amount" placeholder="Amount (\u20b9)" autoComplete="off" inputMode="numeric" />
+                    </>}
+                  </div>
+                </details>
+              )}
             </form>
+            </>}
           </div>
         );
       })}
@@ -390,20 +487,35 @@ export default function OwnerStaffPage() {
         .reach-chip.off { color: var(--muted); border-color: color-mix(in srgb, var(--fg, #888) 20%, transparent); background: transparent; }
         .reach-legend { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; font-size: 11px; font-weight: 600; color: var(--muted); vertical-align: middle; }
         @media (prefers-reduced-motion: reduce) { .reach-chip { transition: none; } }
+        .ost-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; border-bottom: var(--border); }
+        .ost-tab { min-height: 40px; padding: 0 14px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 13px; font-weight: 800; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; }
+        .ost-tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+        .ost-tcount { min-width: 18px; padding: 0 5px; border-radius: 6px; background: var(--muted2); font-size: 10.5px; }
+        .ost-prog { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+        .ost-bar { display: block; width: 74px; height: 6px; border-radius: 99px; background: var(--muted2); overflow: hidden; }
+        .ost-bar i { display: block; height: 100%; background: var(--adm-ok, #34d399); }
+        .ost-bar.part i { background: var(--adm-warn, #fbbf24); }
+        .ost-nopay { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--adm-warn) 16%, transparent); color: var(--adm-warn); }
+        .ost-mini.open { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
+        .ost-mini.open:hover { border-color: var(--accent); }
         .ost-team { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; }
-        .ost-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 9px 10px; border-radius: 9px; background: color-mix(in srgb, var(--fg, #888) 4%, transparent); }
+        .ost-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 9px; background: color-mix(in srgb, var(--fg, #888) 4%, transparent); }
         .ost-row.off { opacity: .6; }
-        .ost-who { display: flex; align-items: center; gap: 9px; min-width: 0; }
+        .ost-who { display: flex; align-items: center; gap: 9px; min-width: 0; flex-wrap: wrap; }
         .ost-pn { font-weight: 700; font-size: 13.5px; }
         .ost-rolebadge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; background: rgba(128,128,128,.18); color: var(--muted); }
         .ost-rolebadge[data-role="manager"] { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
         .ost-disabled { font-size: 10.5px; color: var(--adm-danger, #c0392b); font-weight: 700; }
-        .ost-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+        .ost-actions { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; margin-top: 8px; }
         .ost-editrow { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: var(--border); }
         .ost-mini { font: inherit; font-size: 11.5px; font-weight: 700; padding: 5px 9px; border-radius: 7px; border: var(--border); background: var(--card); color: var(--fg, inherit); cursor: pointer; }
         .ost-mini:hover:not(:disabled) { border-color: var(--accent); }
         .ost-mini.danger:hover:not(:disabled) { border-color: var(--adm-danger, #c0392b); color: var(--adm-danger, #c0392b); }
         .ost-add { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: var(--border); }
+        .ost-more { flex-basis: 100%; margin-top: 4px; }
+        .ost-more summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--muted); padding: 4px 0; }
+        .ost-moregrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .ost-lbl { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 700; color: var(--muted); flex: 1 1 150px; }
         .ost-in { font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 8px; border: var(--border); background: var(--card); color: var(--fg, inherit); flex: 1 1 150px; }
         .ost-btn { font: inherit; font-size: 13px; font-weight: 700; padding: 8px 14px; border-radius: 8px; border: none; background: var(--accent); color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
         .ost-btn:disabled { opacity: .6; cursor: default; }

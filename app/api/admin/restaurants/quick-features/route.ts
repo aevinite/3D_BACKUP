@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
 const isUuid = (v: unknown): v is string =>
   typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
-const SELECT = "banquet_allowed, banquet_owner_control, banquet_enabled, auto_print_kot_allowed, auto_print_kot, platform_allowed, platform_owner_control, platform_enabled";
+const SELECT = "banquet_allowed, banquet_owner_control, banquet_enabled, auto_print_kot_allowed, auto_print_kot, platform_allowed, platform_owner_control, platform_enabled, payroll_allowed, payroll_owner_control, payroll_enabled";
 type Row = Record<string, unknown> | null;
 const effective = (s: Row) => ({
   // moduleLadder formula (lib/tableTags.ts): enabled defaults to true unless explicitly false.
@@ -34,6 +34,8 @@ const effective = (s: Row) => ({
   auto_print_kot: s?.auto_print_kot_allowed === true && s?.auto_print_kot === true,
   // Platform board — same moduleLadder formula (mig 209).
   platform: s?.platform_allowed === true && (s?.platform_owner_control !== true || s?.platform_enabled !== false),
+  // Staff profiles & pay — same moduleLadder formula (mig 220).
+  payroll: s?.payroll_allowed === true && (s?.payroll_owner_control !== true || s?.payroll_enabled !== false),
 });
 
 // The column writes that make each feature effective-ON or effective-OFF.
@@ -44,6 +46,9 @@ const PATCH: Record<string, { on: Record<string, boolean>; off: Record<string, b
   auto_print_kot: { on: { auto_print_kot_allowed: true, auto_print_kot: true }, off: { auto_print_kot_allowed: false } },
   // Platform board — ON: allow + enabled; OFF: drop the entitlement (board hidden, webhooks refused).
   platform: { on: { platform_allowed: true, platform_enabled: true }, off: { platform_allowed: false } },
+  // Staff profiles & pay — ON: allow + enabled; OFF: drop the entitlement, which hides profiles,
+  // salary records and the performance report everywhere and makes the server refuse them too.
+  payroll: { on: { payroll_allowed: true, payroll_enabled: true }, off: { payroll_allowed: false } },
 };
 
 export async function GET(req: NextRequest) {

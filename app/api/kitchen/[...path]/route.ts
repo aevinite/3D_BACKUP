@@ -140,7 +140,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const dev = deviceIdFrom(req); // which device (kitchen screen) is acting
     // Admin panel-view actions (no staff cookie) get the actor_id='admin:view' marker so the
     // ADMIN's log surfaces can attribute them; staff/owner reads mask it (owner 2026-07-28).
-    const adminMark = g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID };
+    // The signed-in kitchen user's name + stable id ride along so the Operation log says WHO
+    // accepted/readied a ticket, not just "kitchen". (Kitchen has no staff PROFILE — the owner
+    // ruled that out 2026-07-29 — but the log itself should still be honest about who acted.)
+    const adminMark = g.user
+      ? { actor: g.user.name || g.user.username, actor_id: g.user.id }
+      : { actor_id: ADMIN_VIEW_ACTOR_ID };
     // A staff-blocked device can't do anything from the kitchen screen.
     if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
 

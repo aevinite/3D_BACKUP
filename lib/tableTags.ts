@@ -88,6 +88,13 @@ export const takeOrdersLadder = (rid: string) =>
 export const parcelLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" });
 
+// Staff profiles, salary records & the performance report (mig 220). A brand-new module:
+// every rung starts OFF, so no restaurant sees profiles or pay until the admin grants it
+// from the restaurant's Main-features section (owner, 2026-07-29: "this is an additional
+// feature — if they want it, only then give it to them").
+export const payrollLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "payroll_allowed", control: "payroll_owner_control", enabled: "payroll_enabled" });
+
 // Platform board (Zomato / Swiggy / Website takeaway) — the 🛵 Platform tab (mig 209). A rung
 // on a PRE-EXISTING feature: _allowed is BACKFILLED true for every restaurant that existed at
 // mig 209 (the board was already live for all of them), while new restaurants default OFF.

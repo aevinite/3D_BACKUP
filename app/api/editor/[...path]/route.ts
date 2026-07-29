@@ -1231,7 +1231,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   const actorName = g.user?.name || g.user?.username || null;
   // Admin panel-view actions (no staff cookie) get the actor_id='admin:view' marker so the
   // ADMIN's log surfaces can attribute them; staff/owner log reads mask it (owner 2026-07-28).
-  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
+  // actor_id (the STABLE staff uuid) rides along too, not just the display name: a rename
+  // used to orphan every past row, and "what did this person do" / the performance report
+  // can only join on an id. (2026-07-29)
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? { actor_id: g.user.id } : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
@@ -1333,10 +1336,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (placedId) {
         const cur = (await sb.from("orders").select("items").eq("id", placedId).eq("restaurant_id", rid).single()).data as { items?: any[] } | null;
         const its = Array.isArray(cur?.items) ? cur!.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-        await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", placedId).eq("restaurant_id", rid);
+        // WHO punched this order rides along on the SAME update (no extra round trip), so the
+        // performance report can say "this manager punched 412 bills". NULL keeps meaning
+        // "the guest ordered it themselves". (mig 220 added the columns; 2026-07-29)
+        await sb.from("orders")
+          .update({ items: its, status: "preparing", placed_by_id: g.user?.id ?? null, placed_by: actorName })
+          .eq("id", placedId).eq("restaurant_id", rid);
         await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
       }
-      await log("editor", "order_place", { restaurant_id: rid, table_number: t, device_id: dev });
+      await log("editor", "order_place", { restaurant_id: rid, table_number: t, device_id: dev, order_id: placedId ?? null });
       return ok(data);
     }
 
@@ -2619,7 +2627,10 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   const actorName = g.user?.name || g.user?.username || null;
   // Admin panel-view actions (no staff cookie) get the actor_id='admin:view' marker so the
   // ADMIN's log surfaces can attribute them; staff/owner log reads mask it (owner 2026-07-28).
-  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
+  // actor_id (the STABLE staff uuid) rides along too, not just the display name: a rename
+  // used to orphan every past row, and "what did this person do" / the performance report
+  // can only join on an id. (2026-07-29)
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? { actor_id: g.user.id } : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
@@ -2735,7 +2746,10 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const actorName = g.user?.name || g.user?.username || null;
   // Admin panel-view actions (no staff cookie) get the actor_id='admin:view' marker so the
   // ADMIN's log surfaces can attribute them; staff/owner log reads mask it (owner 2026-07-28).
-  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? {} : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
+  // actor_id (the STABLE staff uuid) rides along too, not just the display name: a rename
+  // used to orphan every past row, and "what did this person do" / the performance report
+  // can only join on an id. (2026-07-29)
+  const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? { actor_id: g.user.id } : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.

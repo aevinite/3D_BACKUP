@@ -25,12 +25,12 @@ import { AnimatedStatValue } from "@/components/owner/AnimatedNumber";
 //   • payments= settlement + discounts + cancellations (the last two open as detail overlays)
 //   • items   = item sales + category mix + menu engineering (sub-tabs)
 //   • timing  = busy hours + day parts + day of the week (sub-tabs)
-export type RKey = "daysummary" | "sales" | "payments" | "tax" | "items" | "timing";
+export type RKey = "daysummary" | "sales" | "payments" | "tax" | "items" | "timing" | "team";
 
 // Which server payload a report reads. Merged reports may pull a SECOND payload on demand
 // (items also fetches categories; timing also fetches the money series for day-of-week) —
 // the page requests that extra shape when the report opens.
-export type DataKind = "money" | "daysummary" | "payments" | "dishes" | "categories" | "hourly";
+export type DataKind = "money" | "daysummary" | "payments" | "dishes" | "categories" | "hourly" | "staffpay" | "staffperf";
 export type Tone = "accent" | "good" | "warn" | "bad" | "info";
 
 export type ReportMeta = {
@@ -45,6 +45,9 @@ export const REPORTS: Record<RKey, ReportMeta> = {
   tax:        { key: "tax",        label: "Tax / GST",     icon: "fa-landmark",            kind: "money",      tone: "accent", blurb: "GST collected with the CGST/SGST split — ready for filing." },
   items:      { key: "items",      label: "Items & menu",  icon: "fa-utensils",            kind: "dishes",     tone: "accent", blurb: "Every dish and category: what sells, what earns, and what to push, price, fix or drop." },
   timing:     { key: "timing",     label: "Busy times",    icon: "fa-clock",               kind: "hourly",     tone: "accent", blurb: "When the business comes in — by hour, by part of the day, and by day of the week." },
+  // Staff profiles & pay module (mig 220). Two views: what the team COST and was PAID, and how
+  // each person is doing. Both owner-only; the card is hidden unless the module is on.
+  team:       { key: "team",       label: "Team & pay",    icon: "fa-users",               kind: "staffpay",   tone: "accent", blurb: "Salary and advances you paid out — as cash leaving on the day, and as what each month cost — plus how every person is performing." },
 };
 
 export const CATEGORIES: ReportCat[] = [
@@ -52,6 +55,7 @@ export const CATEGORIES: ReportCat[] = [
   { key: "money",    label: "Money & tax",         icon: "fa-sack-dollar", keys: ["payments", "tax"] },
   { key: "menu",     label: "Menu & items",        icon: "fa-utensils",    keys: ["items"] },
   { key: "ops",      label: "Operations & timing", icon: "fa-clock",       keys: ["timing"] },
+  { key: "team",     label: "Team & pay",          icon: "fa-users",       keys: ["team"] },
 ];
 
 // ── Shared formatting ───────────────────────────────────────────────────────

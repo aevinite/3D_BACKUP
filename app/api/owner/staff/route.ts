@@ -24,6 +24,10 @@ import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/li
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
+import {
+  PROFILE_FIELDS, hasProfile, completeness, mergeProfilePatch, jobPatchFrom, paymentFrom,
+  payAccessWith, todayIST, type PayAccess,
+} from "@/lib/staffProfile";
 
 // GAP-B (owner ceiling): a tablet cap gated by an admin module may only be granted to a
 // waiter if that module is EFFECTIVE for the restaurant. The money caps (discount/mark_paid/
@@ -147,15 +151,51 @@ async function scope(req: NextRequest): Promise<Scope> {
 // power toggle from the real owner and TINT it for the admin (mig 133).
 const slim = (r: Restaurant) => ({ id: r.id, name: r.name, slug: r.slug, accentColor: r.accent_color || "#e3c06f", managerPermissions: r.manager_permissions || {}, ownerEntitlements: mergeOwnerEntitlements(r.owner_entitlements) });
 
+// ── Staff profiles & pay (mig 220) ───────────────────────────────────────────
+// Columns the ROSTER needs on every person. Kept explicit (never select *) and free of the
+// pay numbers, which are stripped again below for a caller who may not see money.
+const PROFILE_COLS =
+  "profile, joined_on, left_on, designation, employment_type, shift_label, weekly_off, " +
+  "pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay";
+
+// Batch-read whether the payroll module is effective for several restaurants at once, so the
+// roster costs ONE settings read instead of one ladder read per restaurant.
+async function payrollByRid(ids: string[]): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  if (!ids.length) return out;
+  const { data } = await sb.from("settings")
+    .select("restaurant_id, payroll_allowed, payroll_owner_control, payroll_enabled").in("restaurant_id", ids);
+  for (const r of (data || []) as any[]) {
+    out[r.restaurant_id] = r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false);
+  }
+  return out;
+}
+
+// Strip everything about money from one person's row — used for a caller without the
+// "See staff pay" power, so salary never even travels to their browser.
+const withoutPay = (row: Record<string, unknown>) => {
+  const out = { ...row };
+  for (const k of ["pay_type", "pay_amount", "pay_day", "pay_mode", "pay_extras", "paidThisMonth", "advanceOutstanding", "lastPaidOn"]) delete out[k];
+  out.payHidden = true;
+  return out;
+};
+
 export async function GET(req: NextRequest) {
   const s = await scope(req); if (!s.ok) return s.resp;
   const ids = s.restaurants.map((r) => r.id);
+  const sp = req.nextUrl.searchParams;
+
+  // ── ONE person's full profile (the profile page). Loads only when opened, so the roster
+  //    never carries payment histories it doesn't show. ────────────────────────────────
+  const detailId = sp.get("staff");
+  if (detailId) return await staffDetail(s, detailId, sp);
+
   let staff: any[] = [];
   if (ids.length) {
     // Hierarchy: a manager's list contains ONLY the roles they may manage (kitchen +
     // tablet) — they never even SEE other managers' or owners' accounts.
     const { data, error } = await sb.from("staff_users")
-      .select("id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions")
+      .select(`id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions, ${PROFILE_COLS}`)
       .in("restaurant_id", ids).in("role", assignableFor(s.actor)).order("created_at", { ascending: true }).limit(2000);
     if (error) return bad("Something went wrong, please try again.", 500);
     // Never ship hashes; expose only whether a PIN exists.
@@ -177,12 +217,178 @@ export async function GET(req: NextRequest) {
       parcel: eff(r, "parcel_allowed", "parcel_owner_control", "parcel_enabled"),
     };
   }
-  return ok({ actor: s.actor, restaurants: s.restaurants.map((r) => ({ ...slim(r), modules: modsByRid[r.id] || {} })), staff });
+  // ── Profiles & pay: the module state + this caller's rights, per restaurant ─────────
+  const payrollOn = await payrollByRid(ids);
+  const accessByRid: Record<string, PayAccess> = {};
+  for (const r of s.restaurants) accessByRid[r.id] = payAccessWith(s.actor, r, payrollOn[r.id] === true);
+
+  // Money totals per person, for the restaurants where this caller may see money. One RPC per
+  // restaurant (a tiny grouped result), never one per person.
+  const money: Record<string, { paid: number; advance: number; last: string | null }> = {};
+  const from = todayIST().slice(0, 8) + "01";                 // 1st of this month
+  const to = todayIST();
+  for (const r of s.restaurants) {
+    if (!accessByRid[r.id]?.canSeePay) continue;
+    const { data } = await sb.rpc("lfh_staff_pay_summary", { p_restaurant: r.id, p_from: from, p_to: to });
+    for (const row of (data || []) as any[]) {
+      money[row.staff_id] = { paid: Number(row.paid || 0), advance: Number(row.advance_outstanding || 0), last: row.last_paid_on || null };
+    }
+  }
+
+  const staffOut = staff.map((u) => {
+    const acc = accessByRid[u.restaurant_id];
+    // KITCHEN keeps its login row (so accounts stay manageable) but has NO profile — the
+    // owner ruled that out. `profileEligible:false` is what hides the profile UI for them.
+    const eligible = hasProfile(u.role) && acc?.moduleOn === true;
+    const c = completeness(u);
+    const m = money[u.id];
+    const row: Record<string, unknown> = {
+      ...u,
+      profileEligible: eligible,
+      completeness: eligible ? { filled: c.filled, total: c.total } : null,
+      paidThisMonth: m?.paid ?? 0,
+      advanceOutstanding: m?.advance ?? 0,
+      lastPaidOn: m?.last ?? null,
+    };
+    return acc?.canSeePay ? row : withoutPay(row);
+  });
+
+  return ok({
+    actor: s.actor,
+    restaurants: s.restaurants.map((r) => ({
+      ...slim(r), modules: { ...(modsByRid[r.id] || {}), payroll: payrollOn[r.id] === true },
+      payAccess: accessByRid[r.id],
+    })),
+    staff: staffOut,
+  });
+}
+
+// ── One person: profile + pay history + their own performance ─────────────────
+// Separate from the roster on purpose (egress): a payment list and a performance query only
+// run when someone actually opens that person.
+async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLSearchParams) {
+  const ids = s.restaurants.map((r) => r.id);
+  const { data: rows } = await sb.from("staff_users")
+    .select(`id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions, can_self_reset, can_self_set_pin, ${PROFILE_COLS}`)
+    .eq("id", id).in("restaurant_id", ids).limit(1);
+  const u = (rows || [])[0] as any;
+  if (!u) return bad("That person isn't on your staff.", 404);
+  if (!assignableFor(s.actor).includes(u.role)) return bad("You can't open accounts at or above your own level.", 403);
+  const r = s.restaurants.find((x) => x.id === u.restaurant_id)!;
+  const acc = await (async () => {
+    const on = (await payrollByRid([u.restaurant_id]))[u.restaurant_id] === true;
+    return payAccessWith(s.actor, r, on);
+  })();
+  if (!acc.moduleOn) return ok({ disabled: true, error: "Staff profiles & pay aren't enabled for this restaurant — contact Aevidine." }, 403);
+  if (!hasProfile(u.role)) return ok({ notEligible: true, error: "Kitchen logins don't have a profile.", role: u.role }, 200);
+
+  // Kicked off BEFORE the pay reads so it overlaps them instead of queueing behind.
+  const perfQ = (s.actor === "owner" || s.actor === "admin") && sp.get("perf") !== "0"
+    ? sb.rpc("lfh_staff_performance", {
+        p_restaurant: u.restaurant_id,
+        p_from: new Date(todayIST().slice(0, 8) + "01T00:00:00+05:30").toISOString(),
+        p_to: new Date().toISOString(),
+      })
+    : null;
+
+  const { pin_hash, ...safe } = u;
+  const c = completeness(u);
+  const person = { ...safe, hasPin: !!pin_hash, completeness: c };
+  const out: Record<string, unknown> = {
+    // Strip the pay SETUP too when this caller may not see money. The roster already did
+    // this; the detail didn't, so a manager without "See staff pay" was handed the salary
+    // in the JSON even though no UI showed it — hidden in the UI is not hidden. (found while
+    // verifying, 2026-07-29)
+    staff: acc.canSeePay ? person : withoutPay(person),
+    payAccess: acc,
+    restaurant: slim(r),
+  };
+
+  if (acc.canSeePay) {
+    // All four reads fire TOGETHER. Run one after another they added up to ~1.9s on the
+    // Mumbai DB and the page sat on "Loading…"; in parallel it's one round-trip's worth.
+    const yearStart = todayIST().slice(0, 4) + "-01-01";
+    const monthStart = todayIST().slice(0, 8) + "01";
+    const [paysQ, sumQ, sumMQ] = await Promise.all([
+      // Newest 60 entries — a year of monthly salary plus advances, and enough to scroll.
+      sb.from("staff_payments")
+        .select("id, kind, amount, for_period, mode, paid_on, note, recorded_by, created_at, voided_at, void_reason, voided_by")
+        .eq("staff_id", id).eq("restaurant_id", u.restaurant_id)
+        .order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(60),
+      sb.rpc("lfh_staff_pay_summary", { p_restaurant: u.restaurant_id, p_from: yearStart, p_to: todayIST() }),
+      sb.rpc("lfh_staff_pay_summary", { p_restaurant: u.restaurant_id, p_from: monthStart, p_to: todayIST() }),
+    ]);
+    out.payments = paysQ.data || [];
+    const mine = ((sumQ.data || []) as any[]).find((x) => x.staff_id === id) || null;
+    const mineM = ((sumMQ.data || []) as any[]).find((x) => x.staff_id === id) || null;
+    out.summary = {
+      thisMonth: Number(mineM?.paid || 0),
+      thisYear: Number(mine?.paid || 0),
+      advanceOutstanding: Number(mine?.advance_outstanding || 0),
+      lastPaidOn: mine?.last_paid_on || null,
+      entries: Number(mine?.entries || 0),
+    };
+  }
+
+  // Performance is OWNER-ONLY (owner's call 2026-07-29 — a manager gets no access to it).
+  if (perfQ) out.performance = (((await perfQ).data || []) as any[]).find((x) => x.staff_id === id) || null;
+  return ok(out);
+}
+
+// A human label for whoever is acting, resolved from the SESSION (never the request body) —
+// it lands in the pay ledger's "recorded by" and must be trustworthy.
+async function actorLabel(s: Extract<Scope, { ok: true }>): Promise<string> {
+  if (!s.actorId) return "Aevidine admin";
+  const a = (await sb.from("staff_users").select("name, username, role").eq("id", s.actorId).maybeSingle()).data as
+    { name?: string | null; username?: string; role?: string } | null;
+  if (!a) return s.actor;
+  const nm = a.name || a.username || s.actor;
+  return a.role === "manager" ? `${nm} (manager)` : nm;
+}
+
+// Resolve one target person + this caller's pay rights for their restaurant. Every
+// profile/pay write goes through here, so scoping + the ladder are checked exactly once.
+async function target(s: Extract<Scope, { ok: true }>, id: string) {
+  const ids = s.restaurants.map((r) => r.id);
+  const u = (await sb.from("staff_users").select(`id, username, role, name, restaurant_id, profile, ${PROFILE_COLS}`)
+    .eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0] as any;
+  if (!u) return { err: bad("That person isn't on your staff.", 404) };
+  if (!assignableFor(s.actor).includes(u.role)) return { err: bad("You can't manage accounts at or above your own level.", 403) };
+  const r = s.restaurants.find((x) => x.id === u.restaurant_id)!;
+  const on = (await payrollByRid([u.restaurant_id]))[u.restaurant_id] === true;
+  const acc = payAccessWith(s.actor, r, on);
+  if (!acc.moduleOn) return { err: bad("Staff profiles & pay aren't enabled for this restaurant.", 403) };
+  if (!hasProfile(u.role)) return { err: bad("Kitchen logins don't have a profile or pay record.", 400) };
+  return { u, acc };
 }
 
 export async function POST(req: NextRequest) {
   const s = await scope(req); if (!s.ok) return s.resp;
   let body: any = {}; try { body = await req.json(); } catch {}
+
+  // ── Record a payment (salary / advance / bonus / overtime / reimbursement / deduction) ──
+  // Append-only: nothing here can ever edit or delete an existing entry (see void_payment).
+  if (String(body?.action || "") === "record_payment") {
+    const t = await target(s, String(body?.staff_id || "")); if ("err" in t) return t.err;
+    if (!t.acc.canRecordPay) return bad("Your owner hasn't given managers permission to record staff payments.", 403);
+    let p: ReturnType<typeof paymentFrom>;
+    try { p = paymentFrom(body); } catch (e) { return bad(e instanceof Error ? e.message : "Bad payment."); }
+    // WHO recorded it comes from the SESSION, never from the request body — a label the
+    // client could set would make the ledger's "recorded by" worthless.
+    const who = await actorLabel(s);
+    const { data, error } = await sb.from("staff_payments").insert({
+      restaurant_id: t.u.restaurant_id, staff_id: t.u.id, kind: p.kind, amount: p.amount,
+      for_period: p.for_period, mode: p.mode, paid_on: p.paid_on, note: p.note,
+      recorded_by: who, recorded_by_id: s.actorId,
+    }).select("id, kind, amount, for_period, mode, paid_on, note, recorded_by, created_at").single();
+    if (error) return bad("Couldn't save that payment — please try again.", 500);
+    await logAction("owner", "staff_payment", {
+      restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId,
+      detail: `recorded ₹${p.amount} ${p.kind} for "${t.u.username}" (${p.mode}, paid ${p.paid_on})`,
+    });
+    return ok({ ok: true, payment: data });
+  }
+
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
   const role = String(body?.role || "") as Role;
@@ -197,7 +403,24 @@ export async function POST(req: NextRequest) {
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   if (password.length > 128) return bad("Password is too long (max 128 characters).");
-  const row = { username: key, role, restaurant_id: rid, password_hash: await hashSecret(password), name: display, phone: String(body?.phone || "").trim().slice(0, 20) || null };
+  const row: Record<string, unknown> = { username: key, role, restaurant_id: rid, password_hash: await hashSecret(password), name: display, phone: String(body?.phone || "").trim().slice(0, 20) || null };
+  // ── Fill the profile RIGHT HERE at creation (owner 2026-07-29: "while creating the user…
+  //    make it almost perfect"). Every part is optional — an owner in a hurry still just types
+  //    a name and a role. Personal details need the profile power; job & pay are owner/admin only.
+  {
+    const r = s.restaurants.find((x) => x.id === rid)!;
+    const on = (await payrollByRid([rid]))[rid] === true;
+    const acc = payAccessWith(s.actor, r, on);
+    if (acc.moduleOn && hasProfile(role)) {
+      if (acc.canEditProfile && body?.profile && typeof body.profile === "object") {
+        row.profile = mergeProfilePatch({}, body.profile as Record<string, unknown>, PROFILE_FIELDS);
+      }
+      if (acc.canEditJobPay) {
+        try { Object.assign(row, jobPatchFrom(body)); }
+        catch (e) { return bad(e instanceof Error ? e.message : "Bad job details."); }
+      }
+    }
+  }
   const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name, restaurant_id").single();
   if (error) {
     // The pre-check above and this insert aren't atomic — two staff added at once (or a
@@ -216,6 +439,80 @@ export async function PATCH(req: NextRequest) {
   const s = await scope(req); if (!s.ok) return s.resp;
   let body: any = {}; try { body = await req.json(); } catch {}
   const id = String(body?.id || ""); const action = String(body?.action || "");
+
+  // ── Profile & pay actions (mig 220) ─────────────────────────────────────────────────
+  // set_profile  — personal details (owner/admin, or a manager granted "Edit staff profiles")
+  // set_job      — job + pay SETUP (owner/admin only; never a manager)
+  // set_own_pay  — may this person see their own pay in their panel (owner/admin only)
+  // void_payment — cancel a ledger entry WITH a reason; the row stays, struck through
+  if (action === "set_profile" || action === "set_job" || action === "set_own_pay") {
+    const t = await target(s, id); if ("err" in t) return t.err;
+    if (action === "set_profile") {
+      if (!t.acc.canEditProfile) return bad("Your owner hasn't given managers permission to edit staff profiles.", 403);
+      const patch = body?.profile;
+      if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing profile fields.");
+      const merged = mergeProfilePatch(t.u.profile, patch as Record<string, unknown>, PROFILE_FIELDS);
+      const { error } = await sb.from("staff_users").update({ profile: merged }).eq("id", id);
+      if (error) return bad("Couldn't save those details — please try again.", 500);
+      const changed = Object.keys(patch).slice(0, 8).join(", ");
+      await logAction("owner", "staff_profile_edit", {
+        restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId,
+        detail: `updated "${t.u.username}" profile (${changed})`,
+      });
+      const c = completeness({ ...t.u, profile: merged });
+      return ok({ ok: true, profile: merged, completeness: c });
+    }
+    if (action === "set_job") {
+      if (!t.acc.canEditJobPay) return bad("Only the owner can set someone's job and pay.", 403);
+      let patch: Record<string, unknown>;
+      try { patch = jobPatchFrom(body); } catch (e) { return bad(e instanceof Error ? e.message : "Bad value."); }
+      if (!Object.keys(patch).length) return bad("Nothing to change.");
+      const { error } = await sb.from("staff_users").update(patch).eq("id", id);
+      if (error) return bad("Couldn't save those changes — please try again.", 500);
+      await logAction("owner", "staff_job_edit", {
+        restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId,
+        detail: `updated "${t.u.username}" job/pay (${Object.keys(patch).join(", ")})`,
+      });
+      const c = completeness({ ...t.u, ...patch } as any);
+      return ok({ ok: true, ...patch, completeness: c });
+    }
+    // set_own_pay
+    if (!t.acc.canEditJobPay) return bad("Only the owner can change this.", 403);
+    if (typeof body?.can_see_own_pay !== "boolean") return bad("`can_see_own_pay` must be true or false.");
+    const { error } = await sb.from("staff_users").update({ can_see_own_pay: body.can_see_own_pay }).eq("id", id);
+    if (error) return bad("Couldn't save that — please try again.", 500);
+    await logAction("owner", "staff_own_pay_visibility", {
+      restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId,
+      detail: `"${t.u.username}" can${body.can_see_own_pay ? "" : "not"} see their own pay`,
+    });
+    return ok({ ok: true, can_see_own_pay: body.can_see_own_pay });
+  }
+
+  if (action === "void_payment") {
+    const t = await target(s, String(body?.staff_id || "")); if ("err" in t) return t.err;
+    if (!t.acc.canRecordPay) return bad("Your owner hasn't given managers permission to change staff payments.", 403);
+    const payId = String(body?.payment_id || "");
+    const reason = String(body?.reason || "").trim().slice(0, 200);
+    // A reason is REQUIRED: a voided entry with no explanation is exactly the hole this
+    // ledger is designed not to have.
+    if (!payId) return bad("Missing payment id.");
+    if (reason.length < 3) return bad("Say why you're cancelling this entry (a few words is enough).");
+    const existing = (await sb.from("staff_payments").select("id, amount, kind, voided_at")
+      .eq("id", payId).eq("staff_id", t.u.id).eq("restaurant_id", t.u.restaurant_id).limit(1)).data?.[0] as any;
+    if (!existing) return bad("That payment entry doesn't exist.", 404);
+    if (existing.voided_at) return bad("That entry is already cancelled.");
+    const { error } = await sb.from("staff_payments").update({
+      voided_at: new Date().toISOString(), void_reason: reason,
+      voided_by: await actorLabel(s), voided_by_id: s.actorId,
+    }).eq("id", payId).eq("restaurant_id", t.u.restaurant_id);
+    if (error) return bad("Couldn't cancel that entry — please try again.", 500);
+    await logAction("owner", "staff_payment_void", {
+      restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId, level: "warn",
+      detail: `cancelled a ₹${existing.amount} ${existing.kind} entry for "${t.u.username}" — ${reason}`,
+    });
+    return ok({ ok: true });
+  }
+
   if (!id) return bad("Missing staff id.");
   const ids = s.restaurants.map((r) => r.id);
   const u = (await sb.from("staff_users").select("*").eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0];
