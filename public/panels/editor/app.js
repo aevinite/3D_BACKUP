@@ -8906,7 +8906,89 @@ window.addEventListener("resize", () => {
   }
   if (state.floatingTables.length) layoutFloatingRow();
 });
-// ---- Phone nav drawer (≤760px) ----
+// ---- Auto-fitting top nav (2026-07-29) ----
+// With Banquet + Ratings on there are NINE tabs; brand + tabs + the right-hand actions
+// then need ~1500px, so on a laptop or a narrowed window the strip used to side-scroll
+// silently and slice a tab in half ("Platf…") with the rest unreachable. A hard-coded
+// breakpoint can't solve that (the strip's width depends on how many tabs the restaurant
+// actually has), so MEASURE and pick the roomiest mode that still shows EVERY tab:
+//   nothing      → the strip fits as-is (normal desktop look)
+//   .nav-tight   → tighter pills + restaurant name hidden, and now it fits
+//   .nav-compact → it can't fit at any size → the ☰ drawer (phones always land here)
+// Each candidate is applied and re-measured in the SAME frame: the browser reflows but
+// never paints an in-between state, so there is no flicker and no guesswork.
+// This REPLACES the fixed <=1279px drawer breakpoint from PR #527 and keeps its promise:
+// a touch device (Aangan's tablet) skips the tight stage entirely and goes to the drawer,
+// because shrinking the pills would leave fiddly tap targets instead of 44px rows.
+let navFitBusy = false;
+function syncNavFit() {
+  const bar = document.querySelector(".topbar");
+  const tabs = document.getElementById("mainTabs");
+  if (!bar || !tabs || navFitBusy) return;
+  navFitBusy = true;
+  try {
+    const body = document.body;
+    body.classList.add("nav-measuring"); // freeze bar transitions → measure settled sizes
+    const set = (tight, compact) => {
+      body.classList.toggle("nav-tight", tight);
+      body.classList.toggle("nav-compact", compact);
+      if (!compact) navDrawerSet(false); // leaving drawer mode with it open would strand the scrim
+    };
+    if (window.innerWidth <= 760) { set(false, true); return; }  // phone: always the drawer
+    // Room the bar can give the strip = its inner width minus the brand and the actions.
+    const room = () => {
+      const cs = getComputedStyle(bar);
+      const gap = parseFloat(cs.columnGap) || 0;
+      const w = (el) => (el ? el.getBoundingClientRect().width : 0);
+      return bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+        - w(bar.querySelector(".brand")) - w(bar.querySelector(".top-actions")) - gap * 2 - 4;
+    };
+    const touch = window.matchMedia("(pointer: coarse)").matches;
+    set(false, false);
+    if (tabs.scrollWidth <= room()) return;   // fits as-is
+    if (!touch) {
+      set(true, false);
+      if (tabs.scrollWidth <= room()) return; // fits once tightened (mouse only)
+    }
+    set(false, true);                         // → drawer
+  } finally {
+    document.body.classList.remove("nav-measuring");
+    navFitBusy = false;
+  }
+}
+// Re-fit on the next frame, never straight inside an observer callback (changing layout
+// from inside a ResizeObserver is what produces the "ResizeObserver loop" console noise).
+let navFitQueued = false;
+function queueNavFit() {
+  if (navFitQueued) return;
+  navFitQueued = true;
+  requestAnimationFrame(() => { navFitQueued = false; syncNavFit(); });
+}
+{
+  const tabs = document.getElementById("mainTabs");
+  const bar = document.querySelector(".topbar");
+  // Re-fit when the bar resizes (window/iframe/sidebar) AND when the tab set itself
+  // changes — Banquet un-hides and the red badges appear only after settings/orders load.
+  // Watch the bar's CHILDREN too, not just the bar: the connection pill / Profile button
+  // are mounted by other scripts a second after boot and the bar's own box never changes,
+  // so watching only .topbar left the panel stuck in the wrong mode until the next resize.
+  const acts = bar && bar.querySelector(".top-actions");
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(queueNavFit);
+    [bar, acts, tabs, bar && bar.querySelector(".brand")].forEach((el) => el && ro.observe(el));
+  }
+  if (acts && window.MutationObserver) new MutationObserver(queueNavFit).observe(acts, { childList: true });
+  if (tabs && window.MutationObserver) {
+    // NOT "class": setTab flips .active on every tab click and that never changes widths.
+    new MutationObserver(queueNavFit).observe(tabs, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "style"] });
+  }
+  window.addEventListener("resize", queueNavFit);
+  window.addEventListener("load", queueNavFit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(queueNavFit); // the display font lands late and changes every tab's width
+  syncNavFit();
+}
+
+// ---- Nav drawer (phones, and any width where the tabs can't fit) ----
 // The ☰ button slides the .tabs nav in from the left as a drawer (CSS does the
 // showing/hiding off body.nav-open; here we just flip that class). Registered with
 // LFH_BACK so the phone's hardware BACK closes the drawer instead of leaving the
@@ -8931,8 +9013,9 @@ function navDrawerSet(open) {
   if (scrim) scrim.onclick = () => navDrawerSet(false);
   const close = document.getElementById("navClose");
   if (close) close.onclick = () => navDrawerSet(false);
-  // widen past the phone breakpoint with the drawer open → drop the class + back layer
-  window.matchMedia("(max-width: 760px)").addEventListener("change", (e) => { if (!e.matches) navDrawerSet(false); });
+  // crossing the phone breakpoint → re-decide the nav mode (syncNavFit closes an open
+  // drawer itself whenever the tabs go back into the bar)
+  window.matchMedia("(max-width: 760px)").addEventListener("change", () => syncNavFit());
 }
 // Top tabs + Editor sub-nav switch views — but first guard any unsaved edits.
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) { setTab(t.dataset.tab); navDrawerSet(false); } }));
