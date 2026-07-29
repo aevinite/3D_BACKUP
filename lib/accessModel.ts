@@ -62,6 +62,7 @@ export const GROUPS: { id: string; name: string; blurb: string; icon: string }[]
   { id: "floor", name: "Tables & floor", blurb: "Taking orders and moving parties around the floor.", icon: "grip" },
   { id: "kitchen", name: "Kitchen", blurb: "Kitchen ticket printing (admin-only hardware setting).", icon: "fire" },
   { id: "banquet", name: "Banquet & events", blurb: "Per-plate event billing. A special feature the admin switches on.", icon: "sparkles" },
+  { id: "inventory", name: "Inventory & expenses", blurb: "Stock, purchases, counting, waste and the expense book. A special feature the admin switches on.", icon: "box" },
   { id: "reports", name: "Reports & insights", blurb: "Numbers, ratings and the activity log.", icon: "chart" },
   { id: "staff", name: "Staff & settings", blurb: "Managing people and the restaurant's own settings.", icon: "users" },
   { id: "panels", name: "Staff apps", blurb: "Which of the four staff apps this restaurant has. Off refuses the login.", icon: "grid" },
@@ -262,6 +263,27 @@ export const PERMISSIONS: Perm[] = [
     module: { allowed: "payroll_allowed", control: "payroll_owner_control", enabled: "payroll_enabled" },
     moduleLabel: "Staff profiles & pay", name: "Record a staff payment",
     what: "Log money handed over — a salary, or a cash advance on a Sunday. Entries can be cancelled with a reason, never deleted." },
+
+  // ── INVENTORY MANAGEMENT + EXPENSE BOOK (mig 221, owner 2026-07-29) ──────
+  // One MODULE (inventory_*) the admin grants per restaurant, with two manager reaches
+  // under it — the khata/staff-profiles "one module, several capabilities" pattern, so
+  // the admin sees ONE "Inventory & expenses" toggle. Both grants read ABSENT as OFF
+  // (money-adjacent; the owner hands them over deliberately). Recipes get a third power
+  // in Stage 2 — deliberately NOT listed yet so the panel never shows a dead switch.
+  { id: "inv_stock", group: "inventory", kind: "ladder", power: "inv_stock", ownerUse: "panel",
+    module: { allowed: "inventory_allowed", control: "inventory_owner_control", enabled: "inventory_enabled" },
+    moduleLabel: "Inventory & expenses", name: "Run the stock register",
+    what: "The stock side: ingredients, purchase bills (including quick cash market buys), stock counting, waste log and the what-to-order list.",
+    sub: [
+      { id: "inv_items", name: "Add / edit ingredients", what: "The ingredient list — names, units, par levels." },
+      { id: "inv_purchase", name: "Enter a purchase", what: "A vendor bill or a quick cash market buy, with the bill photo." },
+      { id: "inv_count", name: "Count stock", what: "The physical stock count — type what's actually on the shelf." },
+      { id: "inv_waste", name: "Log waste", what: "Spoiled, burnt, spilled — with a reason and photo." },
+    ] },
+  { id: "inv_expenses", group: "inventory", kind: "ladder", power: "inv_expenses", ownerUse: "panel",
+    module: { allowed: "inventory_allowed", control: "inventory_owner_control", enabled: "inventory_enabled" },
+    moduleLabel: "Inventory & expenses", name: "Record an expense",
+    what: "The expense book: something broke or money went out (a lamp, a repair, the electricity bill) — recorded with a photo. Every entry shows to the owner with who wrote it; wrong entries are struck out with a reason, never deleted." },
 
   // ───────────────────────────── STAFF APPS (admin switch) ─────────────────
   { id: "panel_manager", group: "panels", kind: "switch", panel: "manager", name: "Manager panel", what: "The full control room. Off refuses a manager login at the door." },

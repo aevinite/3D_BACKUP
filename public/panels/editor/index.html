@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=20260729navfit" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=20260729inv1" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js"></script>
 </head>
@@ -37,6 +37,8 @@
       <button class="tab" data-tab="platform">🛵 Platform<span id="platformBadge" class="tab-badge" hidden></span></button>
       <!-- Banquet module (mig 130): admin-entitled per restaurant — unhidden by syncBanquetTab() only when settings.banquet_allowed. -->
       <button class="tab" data-tab="banquet" hidden>🎪 Banquet</button>
+      <!-- Inventory module (mig 221): admin-entitled per restaurant — unhidden by syncInventoryTab(). -->
+      <button class="tab" data-tab="inventory" hidden>📦 Inventory</button>
       <button class="tab" data-tab="dash">Dashboard</button>
       <!-- Guest ratings (mig 140): gated by the view_ratings manager power via XRAY_TABS. -->
       <button class="tab" data-tab="ratings">⭐ Ratings</button>
@@ -112,8 +114,10 @@
   <script src="/panels/undobar.js?v=3"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
   <script src="/panels/fitnums.js?v=1" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
+  <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
+  <script src="/panels/editor/inventory.js?v=1"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260729navfit"></script>
+  <script src="/panels/editor/app.js?v=20260729inv1"></script>
 </body>
 </html>

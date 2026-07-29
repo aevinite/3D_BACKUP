@@ -95,6 +95,13 @@ export const parcelLadder = (rid: string) =>
 export const payrollLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "payroll_allowed", control: "payroll_owner_control", enabled: "payroll_enabled" });
 
+// Inventory management + the expense book (mig 221). A brand-new module: every rung starts
+// OFF, so no restaurant sees stock/expense screens until the admin grants it. One module
+// carries the whole area (stock register, purchases, counts, waste, expenses; recipes in
+// Stage 2) — the khata/table-types "one module, several capabilities" pattern.
+export const inventoryLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "inventory_allowed", control: "inventory_owner_control", enabled: "inventory_enabled" });
+
 // Platform board (Zomato / Swiggy / Website takeaway) — the 🛵 Platform tab (mig 209). A rung
 // on a PRE-EXISTING feature: _allowed is BACKFILLED true for every restaurant that existed at
 // mig 209 (the board was already live for all of them), while new restaurants default OFF.

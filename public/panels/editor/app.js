@@ -28,7 +28,7 @@ const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", gener
 // (/aevinite). Leaving it here let a browser whose last-used tab was "features" boot
 // straight into the removed guest-feature toggle grid (owner could flip admin-controlled
 // flags from the manager panel). A stale saved "features" now falls back to "items".
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet", "ratings"];
+const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet", "ratings", "inventory"];
 // Remember which tab you were on so a refresh keeps you there (e.g. stay on
 // Orders during a busy service instead of snapping back to Dishes).
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
@@ -42,7 +42,10 @@ const MENU_TABS = ["items", "categories", "filters"];
 // so the editor looks native, not the manager panel's gold. ?skin=light|dark comes from the
 // owner Menu page. Match the editor's base data-theme too so hardcoded per-theme rules align.
 const MENU_SKIN = new URLSearchParams(location.search).get("skin") === "dark" ? "dark" : "light";
-if (MENU_ONLY) { try { document.documentElement.setAttribute("data-theme", MENU_SKIN); } catch (e) {} }
+// ?invonly=1 (mig 221): same embed idea for the owner panel's Inventory page — ONLY the
+// 📦 Inventory tab, chrome hidden via the same body.menu-only rules.
+const INV_ONLY = new URLSearchParams(location.search).get("invonly") === "1";
+if (MENU_ONLY || INV_ONLY) { try { document.documentElement.setAttribute("data-theme", MENU_SKIN); } catch (e) {} }
 // Tiny localStorage helpers so a refresh keeps you exactly where you were —
 // not just the tab, but the SUB-VIEW too (Orders: live/previous/calls; Log:
 // customer/operation). Wrapped so a blocked localStorage never throws.
@@ -53,7 +56,8 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 // currently being edited, the search text, and the live tables board. Whenever
 // state changes we re-draw the affected part of the screen from it.
 const state = {
-  tab: MENU_ONLY ? (MENU_TABS.includes(savedTab) ? savedTab : "items") // menu-only: never open a non-menu tab
+  tab: INV_ONLY ? "inventory" // inventory-only embed: the 📦 tab is the whole panel
+    : MENU_ONLY ? (MENU_TABS.includes(savedTab) ? savedTab : "items") // menu-only: never open a non-menu tab
     : savedTab === "sessions" ? "tables" : (VALID_TABS.includes(savedTab) ? savedTab : "items"), // "sessions" merged into "tables"
   data: { items: [], categories: [], filters: [], orders: [], calls: [], settings: { id: "site", bubbles_enabled: true, service_mode: false } },
   sel: null,      // working copy of the record being edited
@@ -423,6 +427,7 @@ async function loadAll() {
   if (brandEl) brandEl.textContent = restName ? "· " + restName : "";
   syncBanquetTab(); // Banquet tab follows the admin entitlement (mig 130)
   syncPlatformTab(); // Platform tab follows the platform/parcel modules (mig 209)
+  syncInventoryTab(); // Inventory tab follows the inventory module (mig 221)
   $("#conn").textContent = "connected";
   $("#conn").className = "conn ok";
   renderList();
@@ -3892,6 +3897,13 @@ function renderEditor() {
     ed.innerHTML = banquetHtml();
     bindBanquet();
     if (!state.banquet.loaded) loadBanquet(); // re-renders when the items land
+    return;
+  }
+  if (state.tab === "inventory") {
+    // The Inventory tab is fully owned by inventory.js (LFH_INV) — app.js only hands
+    // it the container. Guard: if the script failed to load, say so instead of a blank.
+    if (window.LFH_INV) window.LFH_INV.render(ed);
+    else ed.innerHTML = `<div class="empty">Inventory module failed to load — refresh the page.</div>`;
     return;
   }
   if (state.tab === "orders") {
@@ -8421,6 +8433,7 @@ function setTab(tab) {
   // Menu-only embed: the only reachable tabs are the menu ones — redirect any other target
   // (boot fallbacks, realtime handlers) to Dishes, and mark the body so the CSS hides the rest.
   if (MENU_ONLY) { document.body.classList.add("menu-only", "skin-" + MENU_SKIN); if (!MENU_TABS.includes(tab)) tab = "items"; }
+  if (INV_ONLY) { document.body.classList.add("menu-only", "skin-" + MENU_SKIN); if (tab !== "inventory") tab = "inventory"; }
   // Leaving the Dashboard: destroy its live Chart.js instances so their detached canvases +
   // resize handlers don't linger until the next Dashboard visit.
   if (state.tab === "dash" && tab !== "dash") { dashCharts.forEach((c) => { try { c.destroy(); } catch {} }); dashCharts = []; }
@@ -8457,7 +8470,7 @@ function setTab(tab) {
     sub.querySelectorAll(".subtab").forEach((s) => s.classList.toggle("active", s.dataset.tab === tab));
   }
   // The search box and "+ New" don't apply to the General/Orders/Tables tabs.
-  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "platform" || tab === "log" || tab === "features" || tab === "dash" || tab === "banquet" || tab === "ratings";
+  const noList = tab === "general" || tab === "orders" || tab === "tables" || tab === "platform" || tab === "log" || tab === "features" || tab === "dash" || tab === "banquet" || tab === "ratings" || tab === "inventory";
   $("#newBtn").style.display = noList ? "none" : "";
   // Multi-select is Dishes-only; leaving the Dishes tab exits it. syncBulkBtn shows/hides
   // the "Select" button and reflects the current mode.
@@ -8469,7 +8482,7 @@ function setTab(tab) {
   // The floor already has its own left tiles + right detail, so it takes the full
   // width — the .no-sidebar class collapses the grid's first column to nothing.
   const layout = document.querySelector(".layout");
-  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform" || tab === "banquet" || tab === "ratings");
+  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform" || tab === "banquet" || tab === "ratings" || tab === "inventory");
   renderCatFilter(); // show category chips on Dishes, hide elsewhere
   renderList();
   renderEditor();
@@ -9340,6 +9353,22 @@ function syncPlatformTab() {
   if (!show && state.tab === "platform") setTab("tables");
 }
 
+// Show/hide the 📦 Inventory tab from the inventory module (mig 221). Same ladder shape as
+// banquet: admin switch AND (owner's toggle when transferred) AND — for a real manager —
+// EITHER owner→manager grant (inv_stock runs the stock register, inv_expenses records
+// expenses; the tab's sub-views hide individually via /api/inventory/whoami).
+function syncInventoryTab() {
+  if (INV_ONLY) return; // owner embed: the tab IS the panel; the server gates every call anyway
+  const btn = document.querySelector('.tabs .tab[data-tab="inventory"]');
+  if (!btn) return;
+  const s = state.data.settings || {};
+  const eff = s.inventory_allowed === true && (s.inventory_owner_control !== true || s.inventory_enabled !== false);
+  const granted = !XRAY_WHO || XRAY_WHO.higherView || xrayGrantedForManager("inv_stock") || xrayGrantedForManager("inv_expenses");
+  const show = eff && granted;
+  btn.hidden = !show;
+  if (!show && state.tab === "inventory") setTab("items");
+}
+
 // Extend XRAY_TABS as more tabs become permission-gated. Grant rule matches the
 // server's managerCan(): a manager is granted ONLY when the flag is explicitly true.
 // ══════════════════════════════════════════════════════════════════════════════
@@ -9876,7 +9905,7 @@ api("GET", "/whoami").then((w) => { XRAY_WHO = w;
   applyHierarchyView();
   // The module tabs (Banquet, Platform) grant depends on WHO is viewing, so re-sync them once
   // whoami resolves (they first paint with higher-view assumed while whoami is still pending).
-  try { syncBanquetTab(); syncPlatformTab(); } catch (e) {}
+  try { syncBanquetTab(); syncPlatformTab(); syncInventoryTab(); } catch (e) {}
   // Repaint the active view now that we know WHO is viewing — the floor first paints
   // before whoami resolves, so admin-view-only cues (e.g. a VIP/guest tag when the
   // feature is off for staff) were missing until a click forced a redraw (owner

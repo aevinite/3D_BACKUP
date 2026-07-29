@@ -43,6 +43,10 @@ const GROUPS: NavGroup[] = [
       // restaurant (ent key injected by the layout), NOT a separate admin section toggle — so
       // it appears only for restaurants that actually have pay-later on (no dead section).
       { href: "/owner/khata", label: "Pay Later", icon: "fa-book", ent: "khata_book" },
+      // Inventory & expenses (mig 221): gated on the inventory MODULE being effective for the
+      // restaurant (ent key injected by the layout from inventoryLadder), same as Pay Later —
+      // it appears only for restaurants the admin gave the module to (no dead section).
+      { href: "/owner/inventory", label: "Inventory & expenses", icon: "fa-boxes-stacked", ent: "inventory" },
       { href: "/owner/issues", label: "Feedback & complaints", icon: "fa-triangle-exclamation", ent: "issues" },
     ],
   },
@@ -56,7 +60,6 @@ const GROUPS: NavGroup[] = [
     label: "Coming soon",
     quiet: true,
     items: [
-      { href: "/owner/inventory", label: "Inventory", icon: "fa-boxes-stacked", soon: true },
       { href: "/owner/marketing", label: "Marketing", icon: "fa-bullhorn", soon: true },
       { href: "/owner/online", label: "Online & apps", icon: "fa-truck-fast", soon: true },
     ],
