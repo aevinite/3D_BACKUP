@@ -534,3 +534,43 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
   views (real manager · admin view · admin actual view), desktop 1280 AND phone 390, on
   french-house AND pizza-palace: all pass. Replaces `scripts/verify-table-qr.mjs`, whose rule
   (manager sees the QR card) is now reversed and could only ever fail.
+## 2026-07-29 — Login-limit alerts: say WHO/WHERE, arrive silently, and be structured (owner)
+
+- [x] **The "limit reached" alert now names the restaurant, the role and the person.** It used to say
+  only the typed name (`"ravi"`), so the owner couldn't tell whose restaurant it was or whether it
+  was a manager, a kitchen screen, a waiter tablet or an owner. On a wall hit (and ONLY then — the
+  normal login path still does no extra read before the counter) the app now looks the name up and
+  writes e.g. `Waiter tablet “Rahul Verma” (diagt5) at Sakura Sushi`, or
+  `Unknown name “ravvi-typo” — no active account has that name` when nobody has that name. That one
+  line is stored on the event, so the phone ping, the bell AND the Problems/limits pages all show it.
+  Verified live on dev: #1 restaurant via the plain door, a NON-#1 restaurant (Sakura Sushi) via its
+  own `/r/<slug>/login` door, and an unknown name. (`lib/userAuth.ts` `describeLoginTarget`,
+  `lib/rateLimit.ts`, `app/api/panel-login/route.ts`)
+- [x] **Limit pings arrive SILENTLY** — visible in the notification list, no sound, no vibration
+  (ntfy `Priority: low`, Telegram `disable_notification`). Real breakage/complaints stay audible.
+  The ADMIN-login warning also stays audible on purpose (it's about the owner's own panel).
+  Verified: captured pings show `priority: low` for limits, `high` for errors/complaints.
+- [x] **EVERY phone alert is now structured**, not one long line: a headline, a rule, then
+  `Label: value` per fact, then a closing note. One shared builder (`alertText` in `lib/alerts.ts`)
+  is used by all four alert types — limit reached, something-went-wrong, screen error, new complaint.
+  Plain text on purpose (the ntfy Android app shows Markdown syntax literally).
+- [x] Bell card for a limit hit now wraps onto its own line instead of truncating the longer "who"
+  text. Checked at desktop and 390px phone width.
+- [x] **Rule written into `CLAUDE.md`**: our own sessions must never set these limits off (sign in
+  once and reuse the session, never loop a login, clean up + say so if a test must reach a wall,
+  never widen a limit or hide an alert to make a test pass).
+- [x] Gotchas recorded: ntfy titles are HTTP headers (ASCII only, else mojibake — now auto-encoded),
+  and "silent" means ntfy `low`, not `min`.
+- [x] **Follow-up same morning — `low` priority STILL vibrated his phone → dropped to ntfy `min`**
+  (lands in the notification drawer + the ntfy list, no sound, no vibration, no pop-over). Verified:
+  captured push shows `priority: min`.
+- [x] **Root cause of "why do I keep getting these at all" FIXED: a login that SUCCEEDS now clears
+  the counter.** The limiter counted every attempt, right or wrong — so six normal sign-ins in five
+  minutes walled the person and pinged the phone. That is exactly what a shared waiter tablet looks
+  like in real service (and what our own "open it in Chrome" scripts do). A correct password now
+  resets the counter and marks any earlier wall handled; wrong-password bursts still count and still
+  wall. Verified live: 8 good logins in a row → 8×200, no wall, no ping; 6 wrong passwords → 5×401
+  then 429 with exactly ONE silent ping. (`rateResetOnSuccess`, no migration needed.)
+- [x] Identified who was setting it off: two OTHER sessions' Playwright "show it in Chrome" scripts
+  (`show-backup-live.mjs` at ~06:55, `show-both3.mjs`) — each browser context signs in again, ~9s
+  apart. The CLAUDE.md rule now names that exact trap (log in once, reuse the context).

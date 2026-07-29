@@ -517,6 +517,37 @@ do it automatically, without being asked. Reuse the existing engine, don't reinv
   restaurant on a timer (wasted work on idle tenants); the lazy compute-on-view + fingerprint
   is the pattern. Pairs with the egress rules in the SaaS efficiency playbook.
 
+## 🚦 NEVER set off the app's own limits while building or testing (owner, 2026-07-29 — EVERY session)
+
+The "limit reached" alerts exist for REAL trouble in a real restaurant. Our OWN sessions were
+setting them off — a test session signing in over and over made *"limit reached"* pings land on
+the owner's phone about himself. That is pure noise, and noise is how a real alert gets ignored.
+So tripping a limit during our own work counts as a BUG in the test, not a finding:
+
+- **Sign in ONCE per session and reuse that session** (keep the cookie / the Playwright context /
+  the logged-in tab). Never put a login inside a loop, a retry, or a per-request helper.
+- **The trap that actually caused this (2026-07-29):** the "open it in Chrome so the owner can look"
+  scripts (`scripts/view-device.mjs`, `scripts/sweep/login.mjs`, any `show-*.mjs`) sign in AGAIN for
+  every browser context / role / restaurant they open. Two sessions doing that a few seconds apart
+  put six `diagm1` logins inside five minutes and pinged the owner's phone about himself. If a script
+  opens several views, **log in once and reuse that context's cookies for the rest**, and never run
+  the same show-script back-to-back in a loop.
+- **Never repeat a limited action just to "see what happens".** The limited ones are: staff/owner
+  login (5 per 5 min), manager PIN, guest orders, waiter calls, join-table, OTP requests
+  (`rate_limit_rules`, mig 205).
+- **If a test genuinely must reach the wall** (verifying the wall itself, or the alert wording):
+  do it ONCE, prefer a throwaway/unknown name over a real account, then **CLEAN UP in the same
+  turn** — delete the `rate_limit_events` + `rate_limit_counters` rows you created, reset
+  `failed_count`/`locked_until` on any account you touched — and TELL the owner in chat that a
+  test ping went to his phone.
+- **Never widen or switch off a limit rule to make a test pass**, and **never add code that
+  suppresses, filters or hides a limit event or its alert** (his no-hiding rule — silent is fine,
+  invisible is not). If a limit is genuinely too tight for real service, change the NUMBER in
+  `/aevinite` → rate limits and say so.
+- **Don't leave anything re-logging in on a timer** (watchers, polling scripts, parallel panels).
+
+Code: `lib/rateLimit.ts` (counter + alert), `lib/alerts.ts` (phone ping), mig 205/208/214.
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The
@@ -531,6 +562,13 @@ do it automatically, without being asked. Reuse the existing engine, don't reinv
   session field needs NO `boardSig` change now; if you add a new heartbeat-y column,
   add it to `RT_VOLATILE`. Guarded by `scripts/verify-board-sig.mjs`. (The separate
   "latest-wins" seq guard in each loader is a DIFFERENT mechanism — don't conflate.)
+- **Phone-ping titles are HTTP HEADERS — ASCII only.** ntfy's `Title` (and `Tags`) travel as
+  headers, so a `·`, a curly quote or an emoji in the TITLE arrives as mojibake on the phone
+  (`Limit reached � Staff / owner login`, caught 2026-07-29). Pretty characters belong in the
+  message BODY, which is UTF-8 and renders fine. `lib/alerts.ts`.
+- **A "silent" phone ping means ntfy `Priority: low`, not `min`.** `low` = arrives, visible in the
+  list, no sound/vibration; `min` can be missed entirely. Telegram's equivalent is
+  `disable_notification: true`. Used for limit-reached pings; real breakage stays `high`.
 - **Supabase HEAD lies about Cache-Control.** Use GET with `Range: bytes=0-0`
   for header checks. `scripts/set-glb-cache.mjs` has this bug.
 - **Light mode works and persists** (`lfh_theme`) via the theme toggle.

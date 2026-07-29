@@ -2,11 +2,11 @@
 // created for them. On success sets the role-scoped USER_COOKIE and tells the
 // client which panel to go to (+ whether first-login profile capture is needed).
 import { NextRequest, NextResponse } from "next/server";
-import { loginUser, USER_COOKIE } from "@/lib/userAuth";
+import { loginUser, USER_COOKIE, describeLoginTarget } from "@/lib/userAuth";
 import { isPanelEnabled, isRestaurantDeleted, ownerPanelEnabled } from "@/lib/panelAccess";
 import { getRestaurantBySlug } from "@/lib/tenant";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
-import { rateAllowed, subjectFor } from "@/lib/rateLimit";
+import { rateAllowed, subjectFor, rateResetOnSuccess } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -29,7 +29,13 @@ export async function POST(req: NextRequest) {
   const uname = String(body?.username || "");
   if (uname) {
     const label = `"${uname.slice(0, 60)}"${body?.restaurant ? ` @ ${String(body.restaurant).slice(0, 40)}` : ""}`;
-    const okRate = await rateAllowed("staff_login", `${restaurantId || "*"}:${subjectFor(uname)}`, { restaurantId, label });
+    // `describe` runs ONLY if the wall is actually hit, so a normal login still does no extra
+    // read before the counter. It turns "ravi reached the limit" into "Manager “Ravi Kumar”
+    // (ravi) at Aangan" on the phone ping AND in the bell / Problems list (owner 2026-07-29).
+    const okRate = await rateAllowed("staff_login", `${restaurantId || "*"}:${subjectFor(uname)}`, {
+      restaurantId, label, device: dev,
+      describe: () => describeLoginTarget(uname, restaurantId ?? null),
+    });
     if (!okRate) {
       await logAction("admin", "rate_limited", { actor: uname, device_id: dev, restaurant_id: restaurantId ?? null, detail: `login rate limit reached for ${label}` });
       return NextResponse.json({ ok: false, error: "Too many attempts. Please wait a few minutes and try again." }, { status: 429 });
@@ -61,6 +67,9 @@ export async function POST(req: NextRequest) {
   }
   const u = r.user;
   const uWho = u.name || u.username;
+  // They knew the password → clear the login counter, so ordinary repeat sign-ins (a shared waiter
+  // tablet, a staff member switching users) can never build up to a wall or an alert.
+  if (uname) await rateResetOnSuccess("staff_login", `${restaurantId || "*"}:${subjectFor(uname)}`);
   if (u.role === "owner") {
     // OWNERS (2026-07-06): their row's restaurant_id is the #1 "home" namespace, not
     // ownership — deleted/entitlement checks must run against what they actually OWN.

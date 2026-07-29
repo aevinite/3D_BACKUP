@@ -5,7 +5,7 @@
 // (multipart → public `issue-media` bucket → URL), then the issue row is inserted
 // with those URLs. Service-role only; callers gate the request themselves.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { sendOwnerAlert } from "@/lib/alerts";
+import { sendOwnerAlert, alertText } from "@/lib/alerts";
 
 export const ISSUE_BUCKET = "issue-media";
 
@@ -84,10 +84,14 @@ export async function raiseIssue(input: RaiseIssueInput): Promise<void> {
   // no-ops when no alert channel is configured, so it can't break raising the complaint.
   try {
     const { data: rest } = await sb.from("restaurants").select("name").eq("id", input.rid).maybeSingle();
-    const where = rest?.name ? ` · ${rest.name}` : "";
     await sendOwnerAlert(
-      `🚩 New complaint${where}: ${subject} — from ${input.raisedBy} (${input.raisedRole})`,
+      alertText("🚩 New complaint", [
+        ["Restaurant", rest?.name ?? null],
+        ["About", subject],
+        ["From", `${input.raisedBy} (${input.raisedRole})`],
+      ], "Open admin → Repair to reply."),
       `complaint:${ins.data?.id ?? Date.now()}`,
+      { title: "New complaint" },
     );
   } catch {
     /* alerting is best-effort; the complaint is already saved */
