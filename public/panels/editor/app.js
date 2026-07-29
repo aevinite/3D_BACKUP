@@ -6999,6 +6999,49 @@ function tablePanelParts(t) {
   return { sess, os, canFree, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
 }
 
+// Ask the manager for a price at order time — used for "open price" dishes (as-per-MRP /
+// market-price items like a soft-drink can or mineral water, which carry NO price in the
+// menu). Resolves a positive number (rupees), or null if cancelled. Mirrors the waiter
+// tablet's pricePrompt; the server re-validates + clamps, this is only the entry. (2026-07-29)
+const pricePrompt = (title, current) => new Promise((resolve) => {
+  const ov = document.createElement("div");
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  const box = document.createElement("div");
+  Object.assign(box.style, { width: "min(92vw,340px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
+  box.innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin:0 0 6px">💰 Enter price</div>
+    <div style="font-size:13px;color:var(--muted);margin:0 0 12px">Price for <b>${esc(title || "this item")}</b> (per item)</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <span style="font-size:20px;font-weight:800;color:var(--muted)">₹</span>
+      <input class="pr-in" type="text" inputmode="decimal" maxlength="8" placeholder="0" autocomplete="off"
+        value="${current != null && current > 0 ? esc(String(current)) : ""}"
+        style="flex:1;min-width:0;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg,#141009);color:var(--text);font-size:20px;font-weight:800;outline:none" />
+    </div>
+    <div class="pr-err" style="font-size:12px;color:#fca5a5;min-height:16px;margin:6px 2px 0"></div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="pr-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--panel-2);color:var(--text);cursor:pointer">Cancel</button>
+      <button class="pr-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--gold);color:#14110d;cursor:pointer">Add</button>
+    </div>`;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const input = box.querySelector(".pr-in");
+  const errEl = box.querySelector(".pr-err");
+  setTimeout(() => { input.focus(); input.select(); }, 50);
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("editor-price", () => done(null)) : null;
+  const done = (val) => { if (backOff) { backOff(); backOff = null; } ov.remove(); resolve(val); };
+  // Keep only digits + one dot as the manager types.
+  input.oninput = () => { input.value = input.value.replace(/[^0-9.]/g, "").replace(/(\..*)\./g, "$1"); };
+  box.querySelector(".pr-cancel").onclick = () => done(null);
+  box.querySelector(".pr-ok").onclick = () => {
+    const v = Number(input.value);
+    if (!v || v <= 0) { errEl.textContent = "Enter a price greater than 0."; return; }
+    if (v > 100000) { errEl.textContent = "That price looks too high."; return; }
+    done(Math.round(v * 100) / 100);
+  };
+  input.onkeydown = (e) => { if (e.key === "Enter") box.querySelector(".pr-ok").click(); else if (e.key === "Escape") done(null); };
+  ov.onclick = (e) => { if (e.target === ov) done(null); };
+});
+
 // Compact dish-picker modal for ADDING a dish to an already-placed order (staff
 // edit). Lists the live menu with a search; tapping a dish adds it (qty 1) and the
 // bill re-prices itself server-side. Stays open so several can be added. (2026-06-17)
@@ -7009,7 +7052,8 @@ function openAddDishModal(orderId, rerender) {
     const ql = (q || "").trim().toLowerCase();
     const list = dishes.filter((d) => !ql || (d.title || "").toLowerCase().includes(ql));
     return list.length
-      ? list.map((d) => `<button class="add-dish-row" data-add="${esc(d.id)}"><span>${esc(d.title)}</span><span class="muted">${inr(parseFloat(d.price) || 0)}</span></button>`).join("")
+      // An open-price dish has no menu price — say "Set price" instead of a misleading ₹0.
+      ? list.map((d) => `<button class="add-dish-row" data-add="${esc(d.id)}"><span>${esc(d.title)}</span><span class="muted">${d.open_price ? "Set price" : inr(parseFloat(d.price) || 0)}</span></button>`).join("")
       : `<div class="muted" style="padding:14px">No dishes match.</div>`;
   };
   const wrap = el(`<div class="sx-modal-overlay add-dish-overlay"><div class="sx-modal add-dish-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Add a dish</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><input type="search" class="add-dish-search" placeholder="🔎 Search dishes…"><div class="add-dish-list">${rowsFor("")}</div></div></div>`);
@@ -7017,7 +7061,11 @@ function openAddDishModal(orderId, rerender) {
   const listEl = wrap.querySelector(".add-dish-list");
   const bind = () => listEl.querySelectorAll("[data-add]").forEach((b) => (b.onclick = async () => {
     try {
-      const r = await api("POST", `/orders/${orderId}/add-item`, { dishId: b.dataset.add, qty: 1 });
+      // Open-price dish (as-per-MRP): ask for the price first — the server refuses a ₹0 line.
+      const d = dishes.find((x) => String(x.id) === b.dataset.add);
+      let price;
+      if (d && d.open_price) { price = await pricePrompt(d.title); if (price == null) return; }
+      const r = await api("POST", `/orders/${orderId}/add-item`, { dishId: b.dataset.add, qty: 1, ...(price != null ? { price } : {}) });
       if (r && r.ok === false) { toast("Couldn't add: " + (r.reason || "rejected"), "err"); return; }
       toast("Dish added — bill updated", "ok");
       await loadSessions(); if (rerender) rerender();
@@ -7062,13 +7110,32 @@ function openTakeOrder(table, rerender, opts = {}) {
   const editing = new Set();     // cart-line UIDs whose per-dish editor is open
 
   const byUid = (uid) => cart.find((c) => c.uid === uid);
-  const sig = (l) => [...l.avoid].sort().join(",") + "|" + (l.note || "").trim();
+  // A line's identity for de-duping. An open-price line also keys on its PRICE — two
+  // as-per-MRP cans rung at different prices are genuinely different lines and must
+  // never be merged (that would silently drop one of the typed prices).
+  const sig = (l) => [...l.avoid].sort().join(",") + "|" + (l.note || "").trim() + (l.open_price ? "|₹" + l.price : "");
   const isPlain = (l) => !l.avoid.size && !(l.note || "").trim();
   const plainLine = (id) => cart.find((c) => c.id === id && isPlain(c));
   const qtyIn = (id) => cart.filter((c) => c.id === id).reduce((s, c) => s + c.qty, 0);
   // Tapping a dish adds to its PLAIN line only — a line carrying an allergy or note is a
   // distinct variant and is never grown by a tap (fixes "add plain → lands on the dairy one").
   const addOne = (id) => { const l = plainLine(id); if (l) { l.qty = Math.min(99, l.qty + 1); return; } const d = dishes.find((x) => x.id === id); if (d) cart.push({ uid: ++uidSeq, id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "", avoid: new Set() }); };
+  // Open-price (as-per-MRP) dish: the menu carries NO price, so the manager types it at
+  // order time. A first tap opens the price pad; later taps just grow the existing line
+  // (the price is already set — tap the line's ₹ to change it). (2026-07-29)
+  const addOneAsync = async (id) => {
+    const d = dishes.find((x) => x.id === id);
+    if (d && d.open_price) {
+      const l = plainLine(id);
+      if (l) { l.qty = Math.min(99, l.qty + 1); return true; }
+      const p = await pricePrompt(d.title);
+      if (p == null) return false;
+      cart.push({ uid: ++uidSeq, id, title: d.title, price: p, qty: 1, note: "", avoid: new Set(), open_price: true });
+      return true;
+    }
+    addOne(id);
+    return true;
+  };
   const incUid = (uid) => { const l = byUid(uid); if (l) l.qty = Math.min(99, l.qty + 1); };
   const decUid = (uid) => { const i = cart.findIndex((c) => c.uid === uid); if (i < 0) return; if (cart[i].qty > 1) cart[i].qty--; else { cart.splice(i, 1); editing.delete(uid); } };
   // After an edit two lines can end up identical (same dish + allergy + note) — merge them.
@@ -7085,7 +7152,9 @@ function openTakeOrder(table, rerender, opts = {}) {
     // Big image + name/price; the WHOLE tile taps to add (plain). The only button is a
     // large ✎ on the right to set this dish's allergens/note — no +/− (add by tapping,
     // reduce from the order list on the right). ×N shows the running count for this dish.
-    return `<div class="to-dish ${n ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${inr(parseFloat(d.price) || 0)}</span></span><span class="to-dish-side">${n ? `<b class="to-dish-n">×${n}</b>` : ""}<button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button></span></div>`;
+    // Open-price (as-per-MRP) dish: no menu price to show — prompt the manager instead of
+    // printing a misleading ₹0.
+    return `<div class="to-dish ${n ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${d.open_price ? "Set price" : inr(parseFloat(d.price) || 0)}</span></span><span class="to-dish-side">${n ? `<b class="to-dish-n">×${n}</b>` : ""}<button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button></span></div>`;
   };
   const listHtml = () => {
     const ql = q.trim().toLowerCase();
@@ -7106,7 +7175,9 @@ function openTakeOrder(table, rerender, opts = {}) {
           <div class="to-line-main">
             <span class="to-line-t">${esc(c.title)}${cues ? `<span class="to-line-cue">${esc(cues)}</span>` : ""}</span>
             <span class="to-step"><button class="to-q" data-ldec="${c.uid}" aria-label="One fewer">−</button><b>${c.qty}</b><button class="to-q" data-linc="${c.uid}" aria-label="One more">＋</button></span>
-            <span class="to-line-p">${inr((parseFloat(c.price) || 0) * c.qty)}</span>
+            ${c.open_price
+              ? `<button class="to-line-p to-price-edit" data-price="${c.uid}" title="Tap to change this price" style="background:none;border:0;padding:0;color:var(--gold);font:inherit;cursor:pointer;text-decoration:underline dotted">${inr((parseFloat(c.price) || 0) * c.qty)}</button>`
+              : `<span class="to-line-p">${inr((parseFloat(c.price) || 0) * c.qty)}</span>`}
             <button class="to-edit ${open ? "on" : ""}" data-edit="${c.uid}" title="Allergens & note for this dish">✎</button>
             <button class="to-rm" data-rm="${c.uid}" aria-label="Remove">🗑</button>
           </div>
@@ -7166,14 +7237,16 @@ function openTakeOrder(table, rerender, opts = {}) {
     // ✎ on a tile — set this dish's allergens/note (edits the plain line, creating it first).
     listEl.querySelectorAll("[data-tile-edit]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openTileEdit(b.dataset.tileEdit); }));
     // Whole tile is a tap-to-add target (ignore a click that landed on the ✎).
-    listEl.querySelectorAll(".to-dish").forEach((t) => (t.onclick = (e) => { if (e.target.closest("[data-tile-edit]")) return; addOne(t.dataset.dish); paintList(); paintCart(); }));
+    listEl.querySelectorAll(".to-dish").forEach((t) => (t.onclick = async (e) => { if (e.target.closest("[data-tile-edit]")) return; if (!(await addOneAsync(t.dataset.dish))) return; paintList(); paintCart(); }));
   }
   // Per-dish allergen + note popup opened from a dish tile's ✎ — mirrors the tablet's
   // per-item editor. Edits the PLAIN line (adds it first if needed); giving it an
   // allergy/note turns it into its own variant, so a later tap starts a fresh plain line.
-  function openTileEdit(id) {
+  async function openTileEdit(id) {
     let l = plainLine(id);
-    if (!l) { addOne(id); l = plainLine(id); paintList(); paintCart(); }
+    // addOneAsync (not addOne) so an open-price dish still asks for its price here — the ✎
+    // route must never be able to create a ₹0 as-per-MRP line.
+    if (!l) { if (!(await addOneAsync(id))) return; l = plainLine(id); paintList(); paintCart(); }
     if (!l) return;
     wrap.querySelector(".to-tileedit-overlay")?.remove();
     const chips = () => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${l.avoid.has(a.slug) ? "on" : ""}" data-alg="${a.slug}">${esc(a.label)}</span>`).join("");
@@ -7200,6 +7273,13 @@ function openTakeOrder(table, rerender, opts = {}) {
     // per-dish allergen chips + per-dish note (no de-dupe mid-edit so lines don't collapse under you)
     linesEl.querySelectorAll('.to-alg-chip[data-kind="line"]').forEach((chip) => (chip.onclick = () => { const l = byUid(+chip.dataset.line); if (!l) return; const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s); paintList(); paintCart(); }));
     linesEl.querySelectorAll(".to-line-note").forEach((inp) => (inp.oninput = () => { const l = byUid(+inp.dataset.line); if (l) l.note = inp.value; }));
+    // Tap an open-price line's amount to re-type it before sending.
+    linesEl.querySelectorAll("[data-price]").forEach((b) => (b.onclick = async () => {
+      const l = byUid(+b.dataset.price); if (!l) return;
+      const p = await pricePrompt(l.title, l.price);
+      if (p == null) return;
+      l.price = p; dedupe(); paintList(); paintCart();
+    }));
   }
 
   // ── Category scroll-spy: the strip's active chip follows the list scroll, and tapping
@@ -7238,7 +7318,9 @@ function openTakeOrder(table, rerender, opts = {}) {
     // Per-dish avoid + note ride in each item's note (no server change): "⚠ no X, Y · note".
     const items = cart.map((c) => {
       const parts = [c.avoid.size ? `⚠ no ${[...c.avoid].join(", ")}` : "", (c.note || "").trim()].filter(Boolean);
-      return { id: c.id, qty: c.qty, note: parts.join(" · ") || undefined };
+      // The typed price rides along ONLY for an open-price line; the server (lfh_price_order)
+      // honours it just for a dish flagged open_price and prices everything else from the DB.
+      return { id: c.id, qty: c.qty, price: c.open_price ? c.price : undefined, note: parts.join(" · ") || undefined };
     });
     const allergies = [...orderAvoid];
 
@@ -7268,6 +7350,19 @@ function openTakeOrder(table, rerender, opts = {}) {
     try {
       const r = await api("POST", "/order", { table: String(table), items, allergies, note: orderNote || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
       if (r && r.queued) { toast("Saved ✓ — it'll send to the kitchen when you're back online.", "ok"); close(); await loadSessions(); if (rerender) rerender(); return; }
+      // The pricer can REFUSE an order (sold out / off the menu / an open-price line with no
+      // price) and still answer 200 with {ok:false}. Say so honestly and KEEP the cart open so
+      // the flagged dish can be fixed and resent — never toast "sent" for an order that wasn't.
+      if (!r || r.ok !== true) {
+        const reason = r && r.reason, item = r && r.item;
+        const msg = reason === "sold_out" ? `😕 ${item || "A dish"} just sold out — remove it from the order and send again.`
+          : reason === "unknown_item" ? `😕 ${item || "A dish"} is no longer on the menu — remove it and send again.`
+          : reason === "price_required" ? `💰 ${item || "A dish"} needs a price — tap its amount in the order list and enter one.`
+          : "Couldn't send the order: " + (reason || "unknown") + (item ? ` (${item})` : "") + ". Please try again.";
+        toast(msg, "err");
+        sendBtns.forEach((b) => (b.disabled = !cart.length));
+        return;
+      }
       toast(r && r.kot_no != null ? `Sent! Kitchen ticket #${r.kot_no}` : "Order sent to the kitchen", "ok");
       close(); await loadSessions(); if (rerender) rerender();
     } catch (e) {

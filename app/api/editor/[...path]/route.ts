@@ -1379,6 +1379,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const optSig = (opts: any) => (Array.isArray(opts) && opts.length)
         ? opts.map((o: any) => ({ group: o?.group ?? null, label: o?.label ?? null })) : null;
       const remSig = (r: any) => (Array.isArray(r) ? r.map((x: any) => String(x).toLowerCase()).sort() : []);
+      // NOTE: price is deliberately NOT part of the signature. The stored rows always carry a
+      // server-formatted price while an incoming line usually carries none, so comparing it
+      // would make every order look "new" and disable this guard. Two open-price lines at
+      // different prices can therefore trip the warning — it's overridable (confirmDuplicate).
       const lineSig = (i: any) => ({ id: i.id, qty: Number(i.qty) || 1, options: optSig(i.options), removed: remSig(i.removed) });
       const sig = JSON.stringify({ items: items.map(lineSig), allergies: Array.isArray(allergies) ? allergies : [] });
       if (!(body && body.confirmDuplicate === true)) {
@@ -1426,9 +1430,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!(await managerCan(g, rid, "parcel"))) return permDenied("take parcel / takeaway orders");
       const { items, customer, phone, note, allergies, paid, method } = body || {};
       if (!Array.isArray(items) || !items.length) return err("items required");
-      // The client sends only {id, qty, note}; resolve title+price from OUR menu (rid-scoped).
+      // The client sends only {id, qty, note} (+ price for an open-price dish); resolve
+      // title+price from OUR menu (rid-scoped).
       const ids = [...new Set(items.map((i: any) => String(i?.id || "")).filter(Boolean))];
-      const menu = (must(await sb.from("menu_items").select("id,title,price").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown }[];
+      const menu = (must(await sb.from("menu_items").select("id,title,price,open_price").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean }[];
       const byId = new Map(menu.map((d) => [String(d.id), d]));
       const picked: { title: string; qty: number; price: number; note?: string }[] = [];
       let total = 0;
@@ -1436,7 +1441,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const d = byId.get(String(it?.id || ""));
         if (!d) continue;
         const qty = Math.max(1, Math.min(99, Number(it?.qty) || 1));
-        const price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
+        // Open-price dish: the manager typed the price at order time — honour it (clamped),
+        // don't read the (empty) DB price. A missing/zero price on such a line is refused.
+        let price: number;
+        if (d.open_price) {
+          price = Math.max(0, Math.min(100000, Number(String(it?.price ?? "").replace(/[^0-9.]/g, "")) || 0));
+          if (price <= 0) return err(`Enter a price for "${d.title}".`, 400);
+          price = Math.round(price * 100) / 100;
+        } else {
+          price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
+        }
         const line: { title: string; qty: number; price: number; note?: string } = { title: d.title, qty, price };
         const ln = String(it?.note || "").trim().slice(0, 200);
         if (ln) line.note = ln;
@@ -1515,7 +1529,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const channel = reqCh || onChannels[Math.floor(Math.random() * onChannels.length)];
       if (!channel) return err("No delivery channel is turned on for this restaurant.", 400);
       const src = CH2SRC[channel];
-      const dishes = must(await sb.from("menu_items").select("title, price").eq("restaurant_id", rid).limit(50)) || [];
+      // open_price dishes are skipped: they carry no menu price, so a demo order built from
+      // one would show a ₹0 line.
+      const dishes = must(await sb.from("menu_items").select("title, price").eq("restaurant_id", rid).eq("open_price", false).limit(50)) || [];
       const pick: { title: string; qty: number; price: number }[] = [];
       let total = 0;
       const n = 1 + Math.floor(Math.random() * 3);
@@ -2149,6 +2165,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const line = {
         id: dishId,
         qty: Math.max(1, Math.round(Number(body?.qty) || 1)),
+        // Staff-typed price for open-price (as-per-MRP) dishes; the RPC's pricer honours it
+        // ONLY when the dish is flagged open_price, and clamps it — normal dishes stay DB-priced.
+        price: body?.price != null ? String(body.price) : undefined,
         options: Array.isArray(body?.options) ? body.options : undefined,
         removed: Array.isArray(body?.removed) ? body.removed : undefined,
         note: body?.note ? String(body.note) : undefined,
