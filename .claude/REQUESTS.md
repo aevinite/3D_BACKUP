@@ -574,3 +574,24 @@ Design APPROVED: a general **🥡 New Parcel** button at the TOP of the manager 
 - [x] Identified who was setting it off: two OTHER sessions' Playwright "show it in Chrome" scripts
   (`show-backup-live.mjs` at ~06:55, `show-both3.mjs`) — each browser context signs in again, ~9s
   apart. The CLAUDE.md rule now names that exact trap (log in once, reuse the context).
+- [x] **Second pass the same morning (PR #534): quiet is now the DEFAULT for every alert** — `low`
+  priority still vibrated his phone, so limit/error/complaint pings go out at ntfy `min` +
+  Telegram silent. A caller must ask to be heard (`silent: false`); the ONLY loud one left is the
+  wrong-password warning for his own admin login, which he confirmed he wants to feel.
+- [x] **No more repeating itself.** It used to say "Limit reached: Staff / owner login" in the title,
+  then "Limit reached", then "Limit: Staff / owner login" in the body. Now the SUMMARY is the
+  notification title (ntfy shows it bold; Telegram has no title field so it's prepended there) and
+  the body carries only the details. Same for the others: no "Panel: kitchen" under "Screen error in
+  kitchen"; the restaurant name moved into the complaint title. Per-kind emoji rides on the ntfy tag.
+- [x] **LIVE ON BOTH STACKS.** backup-1 `20cd61e9` (PRs #533 + #534, no migration) and AV LIVE
+  `c4e2de5` (owner approved the release; the 8 files were byte-identical to backup's pre-change
+  state first, so no drift). Verified on each: 8 normal sign-ins in a row → all pass, no wall, no
+  ping; a made-up name → wall + exactly ONE quiet, structured ping (checked at `priority: min` off
+  the wire on both). Test rows deleted afterwards on both databases.
+- [x] **The loud pings he kept getting were AV LIVE's own** — it had an open `*:manager` login wall
+  (7 tries, old one-line label). AV live now runs the fix, so ordinary repeat sign-ins by Aangan's
+  staff can't wall them again. That one leftover row clears itself the next time `manager` signs in
+  successfully (or via Allow/Dismiss in admin → Problems).
+- [x] **Owner rule added: ASK before sending a test notification to his phone**, so he can be ready
+  to look at it. Verification otherwise goes through a local push sink (`NTFY_SERVER` pointed at
+  127.0.0.1) which captures the exact title/priority/body without touching his phone.
