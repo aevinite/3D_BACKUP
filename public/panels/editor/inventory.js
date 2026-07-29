@@ -335,13 +335,12 @@
       let done = false;
       try { await navigator.clipboard.writeText(text); done = true; } catch {}
       if (!done) {
+        const ta = document.createElement("textarea");
         try {
-          const ta = document.createElement("textarea");
           ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
           document.body.appendChild(ta); ta.select();
           done = document.execCommand("copy");
-          ta.remove();
-        } catch {}
+        } catch {} finally { ta.remove(); }
       }
       if (done) toastMsg("List copied — paste it into WhatsApp");
       else openPop("inv-copy", `<h3>🛒 Order list</h3><textarea class="inv-copyta" readonly>${esc(text)}</textarea>
