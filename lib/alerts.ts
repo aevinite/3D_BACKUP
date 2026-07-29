@@ -46,14 +46,17 @@ async function recentlyAlerted(key: string): Promise<boolean> {
 //              owner's phone on 2026-07-29 — Android's per-channel vibration overrode it.)
 //   • Telegram → disable_notification: true = the message appears in the chat silently.
 // Nothing is ever hidden or dropped — silent means quiet, not invisible.
-// WHICH ALERTS MAY BUZZ — the owner's final rule (2026-07-29, third pass). LOUD is the default,
-// because a thing that is actually BROKEN on the website must be felt during service:
-//   • LOUD (sound + vibration): something went wrong, a screen error, a new complaint, and the
-//     wrong-password warning for his own ADMIN login.
-//   • SILENT (`silent: true` → arrives in the notification drawer, no sound, no vibration): the
-//     "limit reached" pings — staff/owner login, guest orders, manager PIN, waiter calls, join
-//     table, OTP. Nothing is broken when one of those fires; the person just waits a few minutes.
-// (An earlier pass had made EVERYTHING quiet; he corrected that — errors must buzz.)
+// WHICH ALERTS MAY BUZZ — the owner's final rule (2026-07-29). LOUD is the default, because a thing
+// that is actually BROKEN on the website must be felt during service.
+//   • SILENT — EXACTLY ONE alert in the whole app: the **staff/owner login** limit
+//     (`silent: true` → ntfy "min", Telegram silent: it lands in the notification drawer with no
+//     sound and no vibration). Nothing is broken when that wall is hit; the person waits a few
+//     minutes. It is also the one that fires most often during our own testing.
+//   • LOUD — EVERYTHING else: something went wrong, screen errors, new complaints, the admin-login
+//     warning, and the OTHER limits (guest orders, manager PIN, waiter calls, join table, OTP),
+//     since those can mean real trouble on the floor.
+// (Two earlier passes got this wrong — one made everything loud, one made everything quiet. Do not
+// widen the silent list again without asking him.)
 // Silent still means quiet, never hidden: every alert also lands in the notification list, the
 // admin bell and the Everything Log.
 type AlertOpts = { silent?: boolean; title?: string; tags?: string };

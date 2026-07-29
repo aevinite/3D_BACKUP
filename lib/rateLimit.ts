@@ -60,11 +60,13 @@ async function notifyRateHit(
       ["Tries", tries],
       ["Device", extra?.device ? extra.device.slice(0, 10) : null],
     ], note);
-    // A limit being reached breaks NOTHING — the person just waits — so these are the pings that
-    // arrive silently. The one exception the owner chose: wrong tries on his own ADMIN login stay
-    // audible, because that's his top-level panel. Errors/complaints elsewhere are loud by default.
+    // SILENT applies to EXACTLY ONE alert in the whole app (owner 2026-07-29, final): the
+    // staff/owner LOGIN limit. Nothing is broken when a staff login wall is hit — the person just
+    // waits a few minutes — and it's the one that kept waking him during testing. Every other ping
+    // is audible, including the other limits (guest orders, manager PIN, waiter calls, join table,
+    // OTP) and the admin-login warning: those can mean real trouble on the floor.
     await sendOwnerAlert(body, `ratelimit:${key}:${subject}`, {
-      silent: key !== "admin_login",
+      silent: key === "staff_login",
       title: `Limit reached: ${friendly}`,
     });
   } catch { /* alerts are best-effort */ }
