@@ -92,9 +92,22 @@ export async function GET(req: NextRequest) {
     ? mergeOwnerEntitlements(null)
     : await getOwnerEntitlementsUnion(scope.ids);
 
+  // Which optional MODULES this owner has anywhere in their set (mig 220). Used by the
+  // Reports hub to hide the "Team & pay" card completely for a restaurant that doesn't have
+  // the feature — a card that opens onto "not enabled" is dead UI.
+  const modIds = scope.all ? [] : scope.ids;
+  let payroll = scope.all || !!scope.admin;   // admin sees every card (X-ray)
+  if (!payroll && modIds.length) {
+    const { data: setRows } = await sb.from("settings")
+      .select("payroll_allowed, payroll_owner_control, payroll_enabled").in("restaurant_id", modIds);
+    payroll = (setRows || []).some((r: Record<string, unknown>) =>
+      r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false));
+  }
+
   return NextResponse.json({
     restaurants,
     totals: { ...totals, restaurantCount: restaurants.length },
     entitlements,
+    modules: { payroll },
   });
 }

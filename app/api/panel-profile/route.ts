@@ -16,6 +16,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { userFromCookie, USER_COOKIE, hashSecret, verifySecret, normalizeLoginName } from "@/lib/userAuth";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
+import { payrollLadder } from "@/lib/tableTags";
+import { completeness, hasProfile, mergeProfilePatch, SELF_PROFILE_FIELDS, todayIST } from "@/lib/staffProfile";
 
 export const dynamic = "force-dynamic";
 
@@ -24,13 +26,61 @@ export async function GET(req: NextRequest) {
   // No staff cookie = admin super-access (or a signed-out tab). Not an error → 200.
   // `error` stays in the body so callers that test `j.error` keep skipping the profile UI.
   if (!u) return NextResponse.json({ staff: false, error: "not logged in" });
-  return NextResponse.json({
+  const base = {
     username: u.username, role: u.role, name: u.name, phone: u.phone,
     hasPin: !!u.pin_hash,
     needsProfile: !u.profile_confirmed, // one-time setup card shown until confirmed once
     canSelfReset: u.can_self_reset,
     canSelfSetPin: u.can_self_set_pin, // may they set/change their own PIN? (managers)
-  });
+  };
+
+  // ── Their own profile + their own pay (mig 220) ──────────────────────────────
+  // Only when the restaurant HAS the feature and their role gets a profile (kitchen doesn't).
+  // A person always sees THEIR OWN salary and payments unless the owner switched that off for
+  // them — it's their money, and the ledger is what settles "you never paid me".
+  if (!u.restaurant_id || !hasProfile(u.role)) return NextResponse.json({ ...base, profileModule: false });
+  if (!(await payrollLadder(u.restaurant_id)).effective) return NextResponse.json({ ...base, profileModule: false });
+
+  const row = (await sb.from("staff_users")
+    .select("profile, joined_on, designation, employment_type, shift_label, weekly_off, pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay")
+    .eq("id", u.id).maybeSingle()).data as Record<string, any> | null;
+  const c = completeness({ ...(row || {}), phone: u.phone });
+  const out: Record<string, unknown> = {
+    ...base,
+    profileModule: true,
+    profile: row?.profile || {},
+    // Their JOB is theirs to SEE but not to change (the owner sets it) — the panel renders
+    // these read-only. Sent whatever the pay switch says: a shift and a joining date aren't money.
+    job: {
+      joined_on: row?.joined_on ?? null, designation: row?.designation ?? null,
+      employment_type: row?.employment_type ?? null, shift_label: row?.shift_label ?? null,
+      weekly_off: row?.weekly_off ?? null,
+    },
+    editable: SELF_PROFILE_FIELDS,
+    completeness: { filled: c.selfFilled, total: c.selfTotal, missing: c.missing },
+    canSeeOwnPay: row?.can_see_own_pay !== false,
+  };
+
+  if (row?.can_see_own_pay !== false) {
+    out.pay = {
+      pay_type: row?.pay_type ?? null, pay_amount: row?.pay_amount ?? null,
+      pay_day: row?.pay_day ?? null, pay_mode: row?.pay_mode ?? null, pay_extras: row?.pay_extras ?? [],
+    };
+    const { data: pays } = await sb.from("staff_payments")
+      .select("id, kind, amount, for_period, mode, paid_on, note, voided_at, void_reason")
+      .eq("staff_id", u.id).eq("restaurant_id", u.restaurant_id)
+      .order("paid_on", { ascending: false }).limit(40);
+    out.payments = pays || [];
+    const monthStart = todayIST().slice(0, 8) + "01";
+    const { data: sum } = await sb.rpc("lfh_staff_pay_summary", { p_restaurant: u.restaurant_id, p_from: monthStart, p_to: todayIST() });
+    const mine = ((sum || []) as any[]).find((x) => x.staff_id === u.id) || null;
+    out.paySummary = {
+      thisMonth: Number(mine?.paid || 0),
+      advanceOutstanding: Number(mine?.advance_outstanding || 0),
+      lastPaidOn: mine?.last_paid_on || null,
+    };
+  }
+  return NextResponse.json(out);
 }
 
 export async function POST(req: NextRequest) {
@@ -67,6 +117,29 @@ export async function POST(req: NextRequest) {
       detail: `${u.name || u.username} changed their own password`,
     });
     return NextResponse.json({ ok: true, passwordChanged: true });
+  }
+
+  // ── their own personal details (mig 220) ────────────────────────────────────
+  // Address, emergency contact, date of birth… the things only THEY know. Deliberately NOT
+  // their ID-on-file (the owner is the one who verifies it), their job, or their salary —
+  // nobody should be able to give themselves a raise. Whitelisted by SELF_PROFILE_FIELDS.
+  if (body?.profile !== undefined) {
+    if (!u.restaurant_id || !hasProfile(u.role)) return NextResponse.json({ error: "Your account doesn't have a profile." }, { status: 400 });
+    if (!(await payrollLadder(u.restaurant_id)).effective)
+      return NextResponse.json({ error: "Staff profiles aren't enabled for this restaurant." }, { status: 403 });
+    const p = body.profile;
+    if (!p || typeof p !== "object" || Array.isArray(p)) return NextResponse.json({ error: "Missing profile fields." }, { status: 400 });
+    const cur = (await sb.from("staff_users").select("profile").eq("id", u.id).maybeSingle()).data?.profile as Record<string, unknown> | null;
+    const merged = mergeProfilePatch(cur, p as Record<string, unknown>, SELF_PROFILE_FIELDS);
+    const { error } = await sb.from("staff_users").update({ profile: merged }).eq("id", u.id);
+    if (error) return NextResponse.json({ error: "Couldn't save that — please try again." }, { status: 500 });
+    const who = u.name || u.username;
+    await logAction(u.role, "profile_update", {
+      restaurant_id: u.restaurant_id, actor: who, actor_id: u.id, device_id: deviceIdFrom(req),
+      detail: `${who} updated their own details (${Object.keys(p).slice(0, 6).join(", ")})`,
+    });
+    const c = completeness({ profile: merged, phone: u.phone });
+    return NextResponse.json({ ok: true, profile: merged, completeness: { filled: c.selfFilled, total: c.selfTotal, missing: c.missing } });
   }
 
   // ── name / phone / PIN (the user editing their OWN profile) ─────────────────

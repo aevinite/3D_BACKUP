@@ -243,6 +243,26 @@ export const PERMISSIONS: Perm[] = [
       { id: "set_tables", name: "Tables & floor plan", what: "Adding, renaming, removing tables." },
     ] },
 
+  // ── STAFF PROFILES, SALARY RECORDS & PERFORMANCE (mig 220, owner 2026-07-29) ──
+  // One MODULE (payroll_*) the admin grants per restaurant — "this is an additional feature;
+  // if they want it, only then give it to them" — with three separate manager reaches under
+  // it. Sharing one module across several capabilities follows the khata/table-types pattern,
+  // so the admin sees ONE "Staff profiles & pay" module toggle, not three.
+  // Absent manager grant: OFF for seeing pay, ON for the two low-risk floor powers
+  // (lib/staffProfile.ts ABSENT_ON_PAY_POWERS is the enforcement side of the same rule).
+  { id: "staff_profiles", group: "staff", kind: "ladder", power: "edit_staff_profiles", absentOn: true, ownerUse: "panel",
+    module: { allowed: "payroll_allowed", control: "payroll_owner_control", enabled: "payroll_enabled" },
+    moduleLabel: "Staff profiles & pay", name: "Edit staff profiles",
+    what: "Each person's own page — phone, address, emergency contact, ID on file, joining date. Personal details only: never their salary." },
+  { id: "staff_pay_view", group: "staff", kind: "ladder", power: "see_staff_pay", ownerUse: "panel",
+    module: { allowed: "payroll_allowed", control: "payroll_owner_control", enabled: "payroll_enabled" },
+    moduleLabel: "Staff profiles & pay", name: "See staff pay",
+    what: "Everyone's salary and payment history. OFF for managers unless you deliberately hand it over — a person always sees their own." },
+  { id: "staff_pay_record", group: "staff", kind: "ladder", power: "record_staff_payment", absentOn: true, ownerUse: "panel",
+    module: { allowed: "payroll_allowed", control: "payroll_owner_control", enabled: "payroll_enabled" },
+    moduleLabel: "Staff profiles & pay", name: "Record a staff payment",
+    what: "Log money handed over — a salary, or a cash advance on a Sunday. Entries can be cancelled with a reason, never deleted." },
+
   // ───────────────────────────── STAFF APPS (admin switch) ─────────────────
   { id: "panel_manager", group: "panels", kind: "switch", panel: "manager", name: "Manager panel", what: "The full control room. Off refuses a manager login at the door." },
   { id: "panel_kitchen", group: "panels", kind: "switch", panel: "kitchen", name: "Kitchen display", what: "The New → Cooking → Ready board and the 86 list." },

@@ -417,7 +417,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // Admin panel-view actions (no staff cookie, no PIN) get the actor_id='admin:view' marker
   // so the ADMIN's log surfaces can attribute them; staff/owner reads mask it (2026-07-28).
   const log = (action: string, fields: Record<string, unknown> = {}) =>
-    logAction(tabletPanel, action, { ...(!actor && !pinAuth ? { actor_id: ADMIN_VIEW_ACTOR_ID } : {}), ...(pinAuth ?? {}), ...fields, restaurant_id: rid });
+    logAction(tabletPanel, action, {
+      ...(!actor && !pinAuth ? { actor_id: ADMIN_VIEW_ACTOR_ID } : {}),
+      // WHO did it — the signed-in waiter. Tablet rows used to name only the PANEL, so a
+      // person's own Activity and the performance report had nothing to join on. (2026-07-29)
+      ...(actor ? { actor: actor.name || actor.username, actor_id: actor.id } : {}),
+      // A PIN-gated action still records the MANAGER who approved it (that IS the PIN pill's
+      // whole point), so pinAuth deliberately still wins over the acting waiter here.
+      ...(pinAuth ?? {}), ...fields, restaurant_id: rid });
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   try {
@@ -535,10 +542,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // for consistency with every other by-id write (defense in depth).
         const cur = must(await sb.from("orders").select("items").eq("id", placedId).eq("restaurant_id", rid).single());
         const its = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: i.status === "served" ? "served" : "preparing" })) : [];
-        await sb.from("orders").update({ items: its, status: "preparing" }).eq("id", placedId).eq("restaurant_id", rid);
+        // WHO punched this order rides along on the SAME update (no extra round trip), so the
+        // performance report can say "this waiter punched 412 bills". NULL keeps meaning
+        // "the guest ordered it themselves". (mig 220 added the columns; 2026-07-29)
+        await sb.from("orders")
+          .update({ items: its, status: "preparing", placed_by_id: actor?.id ?? null, placed_by: actor ? (actor.name || actor.username) : null })
+          .eq("id", placedId).eq("restaurant_id", rid);
         await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
       }
-      await log("order_place", { table_number: t, device_id: dev });
+      await log("order_place", { table_number: t, device_id: dev, order_id: placedId ?? null });
       return ok(data);
     }
 

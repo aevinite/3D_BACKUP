@@ -100,6 +100,13 @@ export async function POST(req: NextRequest) {
   // log row is tagged with the role's panel so it shows under that panel.
   await logAction(u.role, "login", {
     actor: u.name || u.username,
+    // The STABLE id, so "days worked / hours active" can be counted from sign-ins (a login is
+    // the first action of a shift) — and so a rename doesn't orphan past rows. (2026-07-29)
+    actor_id: u.id,
+    // …and the row belongs to THEIR restaurant. Omitting this fell back to the column default
+    // (#1), so every tenant's sign-ins were filed under restaurant #1: #1's Log showed other
+    // restaurants' logins and a non-#1 restaurant's Log showed none of its own.
+    restaurant_id: u.restaurant_id ?? null,
     device_id: deviceIdFrom(req),
     detail: `${u.name || "(no name yet)"} logged in · user "${u.username}" · id ${u.id}`,
   });

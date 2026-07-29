@@ -55,6 +55,14 @@ export async function GET(req: NextRequest) {
   }
   // Only the owner-visible severities are selectable (never "error" — excluded above).
   if (level === "warn" || level === "info") q = q.eq("level", level);
+  // Optional ?actor=<staff uuid> — ONE person's record, for the Activity tab on their profile
+  // (mig 220). Indexed by (restaurant_id, actor_id, created_at); it can only NARROW what the
+  // scope above already allows, so it needs no extra permission of its own.
+  const actorId = url.searchParams.get("actor");
+  if (actorId) {
+    if (!/^[0-9a-f-]{36}$/i.test(actorId)) return NextResponse.json({ actions: [] });
+    q = q.eq("actor_id", actorId);
+  }
   if (qText) {
     const safe = qText.replace(/[%,()]/g, " ");
     q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);

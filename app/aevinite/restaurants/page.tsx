@@ -768,6 +768,10 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
 const QUICK_FEATURES = [
   { key: "platform", label: "Platform board (Zomato / Swiggy)", hint: "The 🛵 online-delivery board in the manager panel. Turn it off for restaurants that aren't on the delivery apps. Choose which channels are live below." },
   { key: "banquet", label: "Banquet billing", hint: "Per-plate event billing that runs without a table." },
+  // Staff profiles & pay (mig 220, owner 2026-07-29): an ADDITIONAL feature — off for everyone
+  // until a client asks for it. Off hides the whole thing (profiles, salary records, the
+  // performance report) from the owner, the manager and the staff's own panels.
+  { key: "payroll", label: "Staff profiles & pay", hint: "Each person's profile (details, job, documents), a record of salary and advances paid, and the team performance report. Salary is owner-only unless the owner hands it to a manager." },
 ] as const;
 type QuickKey = (typeof QUICK_FEATURES)[number]["key"];
 
@@ -839,7 +843,7 @@ function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
       .then((r) => r.json())
       .then((j) => {
         if (j.error || typeof j.banquet === "undefined") { setLoadErr(true); return; }
-        setState({ platform: !!j.platform, banquet: !!j.banquet });
+        setState(Object.fromEntries(QUICK_FEATURES.map((f) => [f.key, !!j[f.key]])) as Record<QuickKey, boolean>);
       })
       .catch(() => setLoadErr(true));
   }, [restaurant.id]);
@@ -853,7 +857,9 @@ function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
     try {
       const r = await fetch("/api/admin/restaurants/quick-features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, feature: key, on: next }) });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setState({ platform: !!d.platform, banquet: !!d.banquet }); // trust the server's effective read
+      // Trust the server's effective read for EVERY key (derived from the list, so a new
+      // quick feature can't be silently dropped here the way a hand-typed pair would be).
+      setState(Object.fromEntries(QUICK_FEATURES.map((f) => [f.key, !!d[f.key]])) as Record<QuickKey, boolean>);
     } catch (e) {
       setState((s) => (s ? { ...s, [key]: !next } : s)); // revert
       setErr(e instanceof Error ? e.message : String(e));

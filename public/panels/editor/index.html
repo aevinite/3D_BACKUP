@@ -50,6 +50,9 @@
     <div class="top-actions">
       <button id="themeToggle" class="theme-toggle" type="button"></button>
       <button id="reportIssueBtn" class="theme-toggle" type="button" title="Report an issue to the owner" aria-label="Report an issue">🚩</button>
+      <!-- My profile & pay (mig 220). Starts hidden; myprofile.js reveals it only when this
+           restaurant has the feature and this person has a profile. -->
+      <button id="myProfileBtn" class="theme-toggle" type="button" title="My profile &amp; pay" aria-label="My profile and pay" hidden style="display:none">👤</button>
       <div class="conn" id="conn">connecting…</div>
     </div>
   </header>
@@ -103,6 +106,8 @@
   <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
        BEFORE app.js so openIssueModal() can call it. -->
   <script src="/panels/issue-raise.js?v=1"></script>
+  <!-- My profile & pay (mig 220) — shared with the waiter tablet -->
+  <script src="/panels/myprofile.js?v=1"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
   <script src="/panels/undobar.js?v=3"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->

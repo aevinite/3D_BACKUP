@@ -20,6 +20,7 @@ import { ownerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct } from "@/lib/tax";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
+import { payrollLadder } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic";
 
@@ -173,8 +174,23 @@ export async function GET(req: NextRequest) {
   // The restaurants this call may touch (for the merged all-restaurants shapes).
   const ridList: (string | null)[] = rid ? [rid] : scope.all ? [null] : scope.ids;
 
-  const KNOWN = new Set(["sales", "tax", "discounts", "cancellations", "daysummary", "dishes", "categories", "hourly", "payments", "byrestaurant"]);
+  const KNOWN = new Set(["sales", "tax", "discounts", "cancellations", "daysummary", "dishes", "categories", "hourly", "payments", "byrestaurant", "staffpay", "staffperf"]);
   if (!KNOWN.has(type)) return NextResponse.json({ error: "unknown report type" }, { status: 400 });
+  // ── Team & pay / Team performance (mig 220) ────────────────────────────────
+  // Both are gated by the payroll MODULE, per restaurant, before anything is read or cached:
+  // a restaurant without the feature gets the same calm "not enabled" card as a missing section.
+  // Money out of the owner's pocket and a per-person leaderboard are OWNER-ONLY (owner 2026-07-29
+  // chose "owner only, with a team leaderboard" — a manager gets no access at all), and this
+  // route is already owner/admin-only, so no extra role test is needed here.
+  const staffType = type === "staffpay" || type === "staffperf";
+  if (staffType) {
+    const ids = (rid ? [rid] : scope.all ? [] : scope.ids).filter(Boolean) as string[];
+    if (!ids.length && !rid)
+      return NextResponse.json({ error: "Pick one restaurant to see its team pay.", disabled: true }, { status: 400 });
+    const on = await Promise.all(ids.map((id) => payrollLadder(id).then((l) => l.effective)));
+    if (!on.some(Boolean))
+      return NextResponse.json({ error: "Staff profiles & pay aren't enabled for this restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+  }
   // Compute-on-view snapshot cache (mig 196): a normal open serves the stored JSON instantly;
   // ?refresh=1 (the Refresh button) forces a live recompute + re-store. Keyed by the already-
   // authorized scope, so isolation is unchanged. `cachedAt`/`cached` ride along for the UI.
@@ -197,6 +213,22 @@ export async function GET(req: NextRequest) {
   //     ANCIENT order that shifts neither count nor max-activity is caught by the nightly
   //     rollup refresh (and Refresh always forces a live recompute). Narrow windows keep
   //     the precise scan (it's sub-second there and catches old-order edits immediately).
+  // Staff reports are driven by staff_payments (+ staff_actions for performance), which the
+  // orders fingerprint knows nothing about: a recorded salary would NOT invalidate the snapshot.
+  // Two tiny indexed counts are the change-detector instead.
+  const staffFingerprint = async (): Promise<string> => {
+    const ids = (rid ? [rid] : scope.all ? [] : scope.ids).filter(Boolean) as string[];
+    if (!ids.length) return "0";
+    const [pay, act] = await Promise.all([
+      sb.from("staff_payments").select("id, created_at, voided_at", { count: "exact", head: false })
+        .in("restaurant_id", ids).order("created_at", { ascending: false }).limit(1),
+      type === "staffperf"
+        ? sb.from("staff_actions").select("id", { count: "exact", head: true }).in("restaurant_id", ids)
+        : Promise.resolve({ count: 0 } as { count: number | null }),
+    ]);
+    const last = (pay.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
+    return [pay.count ?? 0, last?.created_at ?? "", last?.voided_at ?? "", (act as { count?: number | null }).count ?? 0].join("|");
+  };
   const moneyType = type === "sales" || type === "tax" || type === "discounts" || type === "cancellations" || type === "daysummary";
   const wideWindow = Date.parse(to) - Date.parse(from) > 35 * DAY;
   const useMonthFp = wideWindow || (bucket === "month" && moneyType);
@@ -204,7 +236,8 @@ export async function GET(req: NextRequest) {
   try {
     const payload = await cachedOwnerPayload({
       key: cacheKey, force,
-      fingerprint: () => (useMonthFp ? reportMonthFingerprint(fpIds, from, to) : ordersFingerprint(fpIds, from, to)),
+      fingerprint: () => (staffType ? staffFingerprint()
+        : useMonthFp ? reportMonthFingerprint(fpIds, from, to) : ordersFingerprint(fpIds, from, to)),
       compute: async () => {
     // ── money reports: one bucketed summary drives sales/tax/discounts/cancellations ──
     // The "daysummary" report reads the SAME money payload and additionally bundles the
@@ -326,7 +359,28 @@ export async function GET(req: NextRequest) {
           .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
           .sort((a, b) => b.revenue - a.revenue);
       }
-      return { type, range, bucket, rows, totals, tax, payments, drillBucket, drillRows };
+      // STAFF PAY paid out in this same window (mig 220) — the day book's "money out" line.
+      // Cash truth: the day the money actually left, matching the Team & pay report's cash view.
+      // Only for a restaurant that HAS the module, and only on the day sheet (one tiny indexed
+      // read; a NULL keeps the line off the sheet entirely rather than printing a fake zero).
+      let staffPay: { paidOut: number; people: number; entries: number } | null = null;
+      if (type === "daysummary") {
+        const payIds = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
+        const enabled: string[] = [];
+        for (const id of payIds) if ((await payrollLadder(id)).effective) enabled.push(id);
+        if (enabled.length) {
+          const per = await mapLimit(enabled, 6, (id) =>
+            sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: from.slice(0, 10), p_to: to.slice(0, 10), p_bucket: "day" }));
+          const rowsSp = per.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[]);
+          if (rowsSp.length) staffPay = {
+            paidOut: rowsSp.reduce((a, r) => a + num(r.paid_out), 0),
+            people: Math.max(...rowsSp.map((r) => Number(r.people) || 0)),
+            entries: rowsSp.reduce((a, r) => a + (Number(r.entries) || 0), 0),
+          };
+          else staffPay = { paidOut: 0, people: 0, entries: 0 };
+        }
+      }
+      return { type, range, bucket, rows, totals, tax, payments, staffPay, drillBucket, drillRows };
     }
 
     // ── breakdown reports: dishes / categories / payments / hourly ──
@@ -390,6 +444,92 @@ export async function GET(req: NextRequest) {
         .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
         .sort((a, b) => b.revenue - a.revenue);
       return { type, range, rows };
+    }
+
+    // ── TEAM & PAY: the two money truths side by side ───────────────────────────
+    //   cash    — what actually left the till, on the day it left (drives the day book line)
+    //   monthly — what the team COST for a month vs what was paid for that month (still owed)
+    //   people  — per-person totals for the table
+    if (type === "staffpay") {
+      const ids = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
+      const f = from.slice(0, 10), t2 = to.slice(0, 10);
+      const per = await mapLimit(ids, 6, async (id) => {
+        const [cash, monthly, people, staff] = await Promise.all([
+          sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: f, p_to: t2, p_bucket: bucket === "month" ? "month" : "day" }),
+          sb.rpc("lfh_staff_pay_monthly_cost", { p_restaurant: id, p_from: f, p_to: t2 }),
+          sb.rpc("lfh_staff_pay_summary", { p_restaurant: id, p_from: f, p_to: t2 }),
+          sb.from("staff_users").select("id, name, username, role, designation, pay_type, pay_amount")
+            .eq("restaurant_id", id).is("deleted_at", null).limit(500),
+        ]);
+        return { cash: cash.data || [], monthly: monthly.data || [], people: people.data || [], staff: staff.data || [] };
+      });
+      const nameOf = new Map<string, { name: string; role: string; designation: string | null; pay_type: string | null; pay_amount: number | null }>();
+      for (const p of per) for (const s2 of p.staff as any[])
+        nameOf.set(s2.id, { name: s2.name || s2.username, role: s2.role, designation: s2.designation, pay_type: s2.pay_type, pay_amount: s2.pay_amount });
+      const cashRows = mergeBy(per.map((p) => p.cash as Row[]), "bucket", ["paid_out", "people", "entries"])
+        .map((r) => ({ bucket: String(r.bucket), paid_out: num(r.paid_out), people: Number(r.people) || 0, entries: Number(r.entries) || 0 }))
+        .sort((a, b) => a.bucket.localeCompare(b.bucket));
+      const monthRows = mergeBy(per.map((p) => p.monthly as Row[]), "bucket", ["expected", "paid", "owed", "people", "est_excluded"])
+        .map((r) => ({ bucket: String(r.bucket), expected: num(r.expected), paid: num(r.paid), owed: num(r.owed), people: Number(r.people) || 0, est_excluded: Number(r.est_excluded) || 0 }))
+        .sort((a, b) => a.bucket.localeCompare(b.bucket));
+      const people = per.flatMap((p) => (p.people as any[]))
+        .filter((r) => Number(r.paid) > 0 || Number(r.advance_outstanding) > 0)
+        .map((r) => ({
+          staff_id: r.staff_id, name: nameOf.get(r.staff_id)?.name || "—", role: nameOf.get(r.staff_id)?.role || "",
+          designation: nameOf.get(r.staff_id)?.designation || null,
+          pay_type: nameOf.get(r.staff_id)?.pay_type || null, pay_amount: num(nameOf.get(r.staff_id)?.pay_amount),
+          paid: num(r.paid), salary: num(r.salary_paid), advance: num(r.advance_paid), bonus: num(r.bonus_paid),
+          overtime: num(r.overtime_paid), other: num(r.other_paid), entries: Number(r.entries) || 0,
+          advanceOutstanding: num(r.advance_outstanding), lastPaidOn: r.last_paid_on || null,
+        }))
+        .sort((a, b) => b.paid - a.paid);
+      const totals = {
+        paidOut: cashRows.reduce((s2, r) => s2 + r.paid_out, 0),
+        expected: monthRows.reduce((s2, r) => s2 + r.expected, 0),
+        owed: monthRows.reduce((s2, r) => s2 + r.owed, 0),
+        people: people.length,
+        advanceOutstanding: people.reduce((s2, r) => s2 + r.advanceOutstanding, 0),
+        estExcluded: monthRows.reduce((s2, r) => Math.max(s2, r.est_excluded), 0),
+      };
+      return { type, range, bucket, cashRows, monthRows, people, totals };
+    }
+
+    // ── TEAM PERFORMANCE: one row per person, owner-only leaderboard ────────────
+    if (type === "staffperf") {
+      const ids = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
+      const per = await mapLimit(ids, 6, async (id) => {
+        const [perf, staff] = await Promise.all([
+          sb.rpc("lfh_staff_performance", { p_restaurant: id, p_from: from, p_to: to }),
+          sb.from("staff_users").select("id, name, username, role, designation, active")
+            .eq("restaurant_id", id).is("deleted_at", null).in("role", ["manager", "tablet"]).limit(500),
+        ]);
+        return { perf: (perf.data || []) as any[], staff: (staff.data || []) as any[] };
+      });
+      const who = new Map<string, { name: string; role: string; designation: string | null; active: boolean }>();
+      for (const p of per) for (const s2 of p.staff)
+        who.set(s2.id, { name: s2.name || s2.username, role: s2.role, designation: s2.designation, active: s2.active });
+      const rows = per.flatMap((p) => p.perf)
+        .filter((r) => who.has(r.staff_id))                       // managers + waiters only
+        .map((r) => ({
+          staff_id: r.staff_id, name: who.get(r.staff_id)!.name, role: who.get(r.staff_id)!.role,
+          designation: who.get(r.staff_id)!.designation, active: who.get(r.staff_id)!.active,
+          daysActive: Number(r.days_active) || 0, hours: num(r.hours_active), actions: Number(r.actions) || 0,
+          orders: Number(r.orders_punched) || 0, value: num(r.value_punched),
+          tables: Number(r.tables_served) || 0, sittings: Number(r.guests_served) || 0,
+          discount: num(r.discount_given), ratings: Number(r.ratings) || 0,
+          avgRating: r.avg_rating === null ? null : num(r.avg_rating), paid: num(r.paid),
+          lastSeen: r.last_seen || null,
+        }))
+        .sort((a, b) => b.value - a.value || b.orders - a.orders);
+      const totals = {
+        people: rows.length,
+        active: rows.filter((r) => r.daysActive > 0 || r.orders > 0).length,
+        orders: rows.reduce((s2, r) => s2 + r.orders, 0),
+        value: rows.reduce((s2, r) => s2 + r.value, 0),
+        hours: rows.reduce((s2, r) => s2 + r.hours, 0),
+        paid: rows.reduce((s2, r) => s2 + r.paid, 0),
+      };
+      return { type, range, rows, totals };
     }
 
         throw new Error("unknown report type");
