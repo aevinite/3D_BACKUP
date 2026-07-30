@@ -129,6 +129,9 @@
       // would quietly overwrite someone else's work (see lib/clash.ts).
       "X-LFH-Queued-At": new Date(item.at || Date.now()).toISOString(),
     };
+    // What the person believed when they acted. Sent on LIVE writes too, not just replays:
+    // two waiters editing the same dish at the same moment is the common case.
+    if (item.expect) headers["X-LFH-Expect"] = JSON.stringify(item.expect);
     if (replay) headers["X-LFH-Replay"] = "1";
     return fetch(item.base + item.path, {
       method: item.method,
@@ -169,8 +172,12 @@
   }
 
   // ── the public send(): fetch-or-queue with the api() contract ───────────────
-  async function send({ base, method, path, body, panel, label }) {
-    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now() };
+  // `expect` = what the person was looking at when they started editing, e.g.
+  // { note: "more spicy" }. It travels with the write so the server can refuse instead of
+  // silently overwriting a change someone else made on another device in the meantime.
+  // Used by the dish-edit modal in both staff panels; see lib/clash.ts fieldClash().
+  async function send({ base, method, path, body, panel, label, expect }) {
+    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now(), expect: expect || null };
 
     // Known offline → don't even try; queue straight away.
     if (navigator.onLine === false) { await enqueue(item); return { ok: true, queued: true, action_id: item.id }; }

@@ -426,11 +426,13 @@ const errText = (e) => (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))
   : ((e && e.message) || "unknown error");
 
 const _inflightGET = new Map(); // coalesce concurrent identical GETs into ONE network hit
-async function api(method, path, body) {
+async function api(method, path, body, opts) {
   // Writes go through the offline outbox (sent now if online, else saved + replayed
   // on reconnect, at-most-once). GETs keep the in-flight-dedup fetch below.
   if (method !== "GET" && window.LFH_OUTBOX) {
-    return window.LFH_OUTBOX.send({ base: "/api/editor", method, path: ridQ(path), body, panel: "editor" });
+    // `expect` (optional) travels as X-LFH-Expect so the server can refuse instead of
+    // overwriting a change someone else made on another device while this person was typing.
+    return window.LFH_OUTBOX.send({ base: "/api/editor", method, path: ridQ(path), body, panel: "editor", expect: opts && opts.expect });
   }
   const url = "/api/editor" + ridQ(path);
   // On boot the page's initial load AND the realtime connect BOTH kick off the same reads
@@ -7036,13 +7038,31 @@ function openDishEditModal(itemId, rerender) {
     const newItemRemoved = [...new Set([...itemRemoved.filter((s) => !removed.includes(s)), ...added])];
     const newOrderAllergies = orderAllergies.filter((s) => !removed.includes(s));
     try {
-      if (note !== String(item.note || "").trim()) await api("POST", `/items/${item.id}/note`, { note });
-      if (!same(newItemRemoved, itemRemoved)) await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved });
+      // Each save carries the value this modal OPENED with. If another device changed the
+      // same thing while it was open, the server refuses and says what it holds now, instead
+      // of one person's "more spicy" silently wiping another's "less spicy".
+      if (note !== String(item.note || "").trim()) {
+        await api("POST", `/items/${item.id}/note`, { note }, { expect: { note: String(item.note || "") } });
+      }
+      if (!same(newItemRemoved, itemRemoved)) {
+        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { removed: itemRemoved } });
+      }
       if (order.id && !same(newOrderAllergies, orderAllergies)) await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies });
       close();
       await loadSessions(); if (rerender) rerender();
       toast("Dish updated", "ok");
-    } catch (e) { toast("Couldn't save: " + e.message, "err"); }
+    } catch (e) {
+      // SOMEONE ELSE GOT THERE FIRST. Close, refresh, and hold the message on screen long
+      // enough to be read — this person's edit did NOT save and they need to know why.
+      const clash = e && e.data && e.data.clash;
+      if (clash) {
+        close();
+        await loadSessions(); if (rerender) rerender();
+        toast(clash.plain + " " + clash.todo, "err", undefined, 9000);
+        return;
+      }
+      toast("Couldn't save: " + errText(e), "err");
+    }
   };
   setTimeout(() => input.focus(), 30);
 }
@@ -10801,6 +10821,10 @@ api("GET", "/whoami").then((w) => { XRAY_WHO = w;
 // If the very first load fails, show "connection failed" so it's obvious the local
 // server probably isn't running.
 const bootPaint = () => { renderCatFilter(); renderList(); renderEditor(); startOrderWatch(); loadPlatform(); applyHierarchyView(); /* refresh the admin ribbon with the restaurant name */ };
+// A read came from this device rather than the server: refetch the board once, quietly, so
+// a single slow reply can't leave the panel showing older data than it needs to.
+window.addEventListener("lfh:stale-refresh", () => { try { pollOrders(); } catch (err) {} });
+
 loadAll()
   .then(bootPaint)
   .catch((e) => {

@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { replayClash, clashJson } from "@/lib/clash";
+import { replayClash, clashJson, fieldClash } from "@/lib/clash";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
@@ -2155,6 +2155,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
     if (a === "items" && c === "note") {
+      // TWO DEVICES, ONE DISH: if someone else changed this while this person had the
+      // edit modal open, refuse instead of overwriting them — the second person is told what
+      // it says now (see lib/clash.ts fieldClash). Only runs when the panel sent what it was
+      // editing from, so an older client or any other caller is unaffected.
+      const fcNote = await fieldClash(req, { table: "order_items", id: b, rid, fields: ["note"], label: "this dish's kitchen note" });
+      if (fcNote) return clashJson(fcNote);
       if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404); // B15 scoping
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
@@ -2172,6 +2178,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // all items"): unlike qty, this never touches money, so served/ready/paid is fine.
     // Still refused for a cancelled order — nothing was ever served, nothing to annotate.
     if (a === "items" && c === "removed") {
+      // TWO DEVICES, ONE DISH: if someone else changed this while this person had the
+      // edit modal open, refuse instead of overwriting them — the second person is told what
+      // it says now (see lib/clash.ts fieldClash). Only runs when the panel sent what it was
+      // editing from, so an older client or any other caller is unaffected.
+      const fcRemoved = await fieldClash(req, { table: "order_items", id: b, rid, fields: ["removed"], label: "this dish's allergens" });
+      if (fcRemoved) return clashJson(fcRemoved);
       const raw = Array.isArray(body?.removed) ? body.removed : [];
       const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
       // Fetch the CURRENT state so we can diff old→new and keep the per-dish edit

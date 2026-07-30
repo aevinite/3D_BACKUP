@@ -95,12 +95,14 @@ const ridQ = (path) => {
   if (PANEL_VIEW_REAL) path += "&view=real";
   return path;
 };
-const api = async (method, path, body) => {
+const api = async (method, path, body, opts) => {
   // Writes go through the offline outbox: sent now if online, else saved on this
   // device and replayed on reconnect (at-most-once via X-LFH-Action-Id). GETs stay
   // a plain fetch. Same return/throw contract as before (see outbox.js send()).
   if (method !== "GET" && window.LFH_OUTBOX) {
-    return window.LFH_OUTBOX.send({ base: "/api/tablet", method, path: ridQ(path), body, panel: "tablet" });
+    // `expect` (optional) travels as X-LFH-Expect so the server can refuse instead of
+    // overwriting a change someone else made on another device while this person was typing.
+    return window.LFH_OUTBOX.send({ base: "/api/tablet", method, path: ridQ(path), body, panel: "tablet", expect: opts && opts.expect });
   }
   let r;
   try {
@@ -124,7 +126,9 @@ const api = async (method, path, body) => {
 const isQueued = (r) => !!(r && r.queued === true);
 // Accurate whether offline (syncs on reconnect) or online-with-a-pending-queue (syncs now).
 const OFFLINE_SAVED_MSG = "Saved ✓ — syncing automatically.";
-const toast = (msg, ok = true) => {
+// `ms` (optional) for the rare message that must not slip past someone — a conflict with
+// another device needs longer than the usual 2.6s glance. Always dismissible via the ✕.
+const toast = (msg, ok = true, ms) => {
   const t = document.createElement("div");
   t.className = "toast" + (ok ? "" : " bad");
   const span = document.createElement("span");
@@ -138,7 +142,7 @@ const toast = (msg, ok = true) => {
   x.onclick = () => t.remove();
   t.appendChild(x);
   $("#toasts").appendChild(t);
-  setTimeout(() => t.remove(), 2600);
+  setTimeout(() => t.remove(), ms || 2600);
 };
 // Two-step confirm (a promise that resolves true/false) — used before sending
 // an order to the kitchen, so a stray tap can't fire a ticket.
@@ -958,13 +962,31 @@ function openDishEditModal(itemId) {
     const newItemRemoved = [...new Set([...itemRemoved.filter((s) => !removed.includes(s)), ...added])];
     const newOrderAllergies = orderAllergies.filter((s) => !removed.includes(s));
     try {
-      if (note !== String(item.note || "").trim()) await api("POST", `/items/${item.id}/note`, { note });
-      if (!same(newItemRemoved, itemRemoved)) await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved });
+      // Each save carries the value this modal OPENED with. If another device changed the
+      // same thing while it was open, the server refuses and says what it holds now, instead
+      // of one waiter's "more spicy" silently wiping another's "less spicy".
+      if (note !== String(item.note || "").trim()) {
+        await api("POST", `/items/${item.id}/note`, { note }, { expect: { note: String(item.note || "") } });
+      }
+      if (!same(newItemRemoved, itemRemoved)) {
+        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { removed: itemRemoved } });
+      }
       if (order.id && !same(newOrderAllergies, orderAllergies)) await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies });
       close();
       await load(); if (!state.ordering) renderPanel();
       toast("Dish updated");
-    } catch (e) { toast("Couldn't save: " + e.message, false); }
+    } catch (e) {
+      // SOMEONE ELSE GOT THERE FIRST. Not an error to shrug at: close the modal, show what it
+      // says now, and refresh — so this person sees the truth rather than their lost edit.
+      const clash = e && e.data && e.data.clash;
+      if (clash) {
+        close();
+        await load(); if (!state.ordering) renderPanel();
+        toast(clash.plain + " " + clash.todo, false, 9000);
+        return;
+      }
+      toast("Couldn't save: " + e.message, false);
+    }
   };
   setTimeout(() => input.focus(), 30);
 }
@@ -3606,6 +3628,9 @@ if (window.LFH_RT) {
 // the optimistic screen reconciles with what actually synced. load() self-guards (seq +
 // offline), so these are safe no-ops when nothing changed / we're still offline.
 window.addEventListener("lfh:outbox-flushed", () => load().catch(() => {}));
+// A read came from this device rather than the server: refetch once, quietly, so a single
+// slow reply can't leave the panel showing older data than it needs to.
+window.addEventListener("lfh:stale-refresh", () => load().catch(() => {}));
 // The moment something is saved on-device (or finally sent, or comes back needing a
 // person), repaint the open table so its "⏳ Waiting to send" block is always current —
 // this is what makes an order taken with no internet visible immediately.

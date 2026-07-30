@@ -28,6 +28,24 @@
 
   function isOffline() { return navigator.onLine === false; }
 
+  // Is the connection ACTUALLY bad? Same source the connection badge reads, so the bar and
+  // the badge can never contradict each other.
+  function connIsBad() {
+    if (isOffline()) return true;
+    try {
+      var rt = window.LFH_RT;
+      if (rt && rt.getStatus) {
+        var st = rt.getStatus();
+        // "online" = live updates are flowing → the connection is fine, whatever one slow
+        // read did. Only a real drop (after we HAD been connected) counts as bad.
+        if (st === "online") return false;
+        if (st === "offline") return true;
+        return !!(rt.everConnected && rt.everConnected()); // reconnecting after a real drop
+      }
+    } catch (e) { /* fall through */ }
+    return false;
+  }
+
   function fmtTime(ts) {
     if (!ts) return "earlier";
     var d = new Date(ts), now = Date.now();
@@ -50,12 +68,36 @@
       if (fromCache) {
         stale.fromCache = true;
         stale.at = Number(res.headers.get("X-LFH-Cached-At") || 0) || Date.now();
+        // AUTO-HEAL: don't wait for the next poll tick. Ask the panel to refetch shortly, and
+        // forget the stale flag by itself if nothing else comes from the device — so a single
+        // slow read can never leave a warning stuck on screen. ("It should autostart and work.")
+        scheduleHeal();
       } else if (res.ok) {
         // A genuinely fresh reply means we're live again — stop claiming we're stale.
         stale.fromCache = false; stale.seenOfflineRead = false; stale.at = 0;
+        if (healTimer) { clearTimeout(healTimer); healTimer = null; }
+        if (forgetTimer) { clearTimeout(forgetTimer); forgetTimer = null; }
       }
       render();
     } catch (e) { /* never let the readout break a real request */ }
+  }
+
+  var healTimer = null, forgetTimer = null;
+  function scheduleHeal() {
+    if (!healTimer) {
+      healTimer = setTimeout(function () {
+        healTimer = null;
+        if (isOffline()) return;                 // nothing to fetch yet
+        // The panels listen for this and reload their own data (same handler as a finished
+        // sync), which is what clears the stale flag for real.
+        try { window.dispatchEvent(new CustomEvent("lfh:stale-refresh")); } catch (e) {}
+      }, 2500);
+    }
+    // And a hard stop: if no further saved replies arrive, drop the flag regardless.
+    clearTimeout(forgetTimer);
+    forgetTimer = setTimeout(function () {
+      stale.fromCache = false; stale.seenOfflineRead = false; stale.at = 0; render();
+    }, 25000);
   }
 
   // ── styles ───────────────────────────────────────────────────────────────────
@@ -138,7 +180,13 @@
       return { tone: "tone-sync", title: "Sending " + waiting + (waiting === 1 ? " saved change" : " saved changes") + "…",
                sub: "Made while you were offline. Keep this panel open until it's done.", action: "See" };
     }
-    if (stale.fromCache) {
+    // ONE saved reply is NOT a crisis. A single read can be answered from this device for a
+    // dull reason (a cold server taking a moment), and shouting "Connection is struggling"
+    // over a panel whose own light says LIVE is worse than saying nothing — the owner saw
+    // exactly that: a green "Live" badge above an orange warning bar. So this bar only
+    // appears when the connection really is bad: we're offline, or live updates aren't
+    // flowing. Otherwise we stay quiet and just refresh in the background.
+    if (stale.fromCache && connIsBad()) {
       return { tone: "tone-stale", title: "Connection is struggling", sub: "Showing saved data from " + fmtTime(stale.at) + " — retrying.", action: null };
     }
     return null; // all good → no bar at all

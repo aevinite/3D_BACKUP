@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { replayClash, clashJson } from "@/lib/clash";
+import { replayClash, clashJson, fieldClash } from "@/lib/clash";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
@@ -1141,6 +1141,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
     if (a === "items" && c === "note") {
+      // TWO DEVICES, ONE DISH: if someone else changed this while this person had the
+      // edit modal open, refuse instead of overwriting them — the second person is told what
+      // it says now (see lib/clash.ts fieldClash). Only runs when the panel sent what it was
+      // editing from, so an older client or any other caller is unaffected.
+      const fcNote = await fieldClash(req, { table: "order_items", id: b, rid, fields: ["note"], label: "this dish's kitchen note" });
+      if (fcNote) return clashJson(fcNote);
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -1154,6 +1160,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // "✎ Edit" modal saves the same way; keeps the per-dish edit markers
     // (added_allergens "＋" / removed_flag "✎−"). Refuses a PAID/cancelled order.
     if (a === "items" && c === "removed") {
+      // TWO DEVICES, ONE DISH: if someone else changed this while this person had the
+      // edit modal open, refuse instead of overwriting them — the second person is told what
+      // it says now (see lib/clash.ts fieldClash). Only runs when the panel sent what it was
+      // editing from, so an older client or any other caller is unaffected.
+      const fcRemoved = await fieldClash(req, { table: "order_items", id: b, rid, fields: ["removed"], label: "this dish's allergens" });
+      if (fcRemoved) return clashJson(fcRemoved);
       const raw = Array.isArray(body?.removed) ? body.removed : [];
       const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — no perm

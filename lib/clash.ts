@@ -60,6 +60,82 @@ export function replayMarkers(req: NextRequest): { queuedAt: Date } | null {
   return { queuedAt: at };
 }
 
+/**
+ * TWO PEOPLE, ONE DISH, AT THE SAME MOMENT.
+ *
+ * Waiter A opens a dish and types "more spicy". Waiter B, on another tablet, opens the same
+ * dish and types "less spicy". Both save within seconds. Without a check the second save
+ * simply overwrites the first, nobody is told, and the kitchen cooks the wrong thing while
+ * BOTH waiters believe their instruction stands.
+ *
+ * So each panel sends what it was editing FROM (`X-LFH-Expect`, e.g. {"note":"mild"}). If
+ * the row no longer holds that value, someone else got there first: we refuse, and tell the
+ * second person exactly what it says now so they can decide. FIRST SAVE WINS — the same rule
+ * as the offline replay check above, so staff learn one behaviour, not two.
+ *
+ * Returns null when the write may proceed (nothing to compare, or nothing changed).
+ * FAILS OPEN on any lookup error — a broken check must never block a real edit.
+ */
+export async function fieldClash(
+  req: NextRequest,
+  opts: { table: string; id: string; rid: string; fields: string[]; label?: string },
+): Promise<ClashInfo | null> {
+  let expect: Record<string, unknown> | null = null;
+  try {
+    const raw = req.headers.get("x-lfh-expect");
+    if (!raw) return null; // older client / not an edit that carries an expectation
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    expect = parsed as Record<string, unknown>;
+  } catch { return null; }
+
+  // Only the fields the caller names are ever compared, so a client can't ask the server to
+  // compare something it shouldn't.
+  const cols = opts.fields.filter((f) => f in (expect as Record<string, unknown>));
+  if (!cols.length) return null;
+
+  try {
+    const res = await sb.from(opts.table).select(cols.join(", ")).eq("id", opts.id).eq("restaurant_id", opts.rid).maybeSingle();
+    if (res.error || !res.data) return null; // can't read it → let the handler decide
+    const row = res.data as unknown as Record<string, unknown>;
+    for (const c of cols) {
+      const mine = expect[c];
+      const theirs = row[c];
+      if (sameValue(mine, theirs)) continue;
+      const what = opts.label || "this";
+      const now = describe(theirs);
+      return {
+        code: "clash_changed_elsewhere",
+        plain: `Someone else changed ${what} while you had it open — it now says ${now}.`,
+        todo: `Your change was NOT saved. Look at what it says now and redo yours if it's still right.`,
+        retryable: false,
+      };
+    }
+    return null;
+  } catch {
+    return null; // fail open
+  }
+}
+
+// Compare loosely enough that formatting isn't treated as a change: trimmed text, and lists
+// compared as sets (the allergen list's order is not meaningful).
+function sameValue(a: unknown, b: unknown): boolean {
+  const norm = (v: unknown) => (v == null ? "" : String(v).trim());
+  if (Array.isArray(a) || Array.isArray(b)) {
+    const arr = (v: unknown) => (Array.isArray(v) ? v.map((x) => norm(x).toLowerCase()).filter(Boolean).sort() : []);
+    const x = arr(a), y = arr(b);
+    return x.length === y.length && x.every((v, i) => v === y[i]);
+  }
+  return norm(a) === norm(b);
+}
+
+// How to say the current value to a person.
+function describe(v: unknown): string {
+  if (Array.isArray(v)) return v.length ? `“no ${v.join(", ")}”` : "nothing to avoid";
+  const s = v == null ? "" : String(v).trim();
+  return s ? `“${s}”` : "nothing";
+}
+
 type SessionRow = Record<string, unknown> & { id?: string; status?: string; closed_at?: string | null; created_at?: string };
 
 const parse = (v: unknown): number => {
