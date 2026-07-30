@@ -9,6 +9,7 @@
 // ever visible is the one-time "copy it now" reveal right after you set it.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
+import { CopyButton } from "@/components/admin/CopyButton";
 
 type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
@@ -143,7 +144,7 @@ export default function AdminUsers() {
           <div style={{ fontSize: 13 }}>Password for <b>{reveal.name}</b> — copy it now, it won&apos;t be shown again:</div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
             <code className="usp-code">{reveal.password}</code>
-            <button className="usp-btn blue" onClick={() => navigator.clipboard?.writeText(reveal.password)}>Copy</button>
+            <CopyButton className="usp-btn blue" text={reveal.password} />
             <button className="usp-btn ghost" onClick={() => setReveal(null)}>Done</button>
           </div>
         </div>
@@ -454,7 +455,7 @@ function EditUserModal({ user, onClose, onChanged, onDeleted }: {
                   <div style={{ fontSize: 12, color: "#86efac" }}>New password — copy it now, it won&apos;t be shown again:</div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
                     <code style={{ fontSize: 17, background: "var(--bg)", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{pwReveal}</code>
-                    <button style={btn("#3b82f6")} onClick={() => navigator.clipboard?.writeText(pwReveal)}>Copy</button>
+                    <CopyButton style={btn("#3b82f6")} text={pwReveal} />
                   </div>
                 </div>
               ) : null}
