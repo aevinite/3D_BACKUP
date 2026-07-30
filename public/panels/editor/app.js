@@ -45,6 +45,11 @@ const MENU_SKIN = new URLSearchParams(location.search).get("skin") === "dark" ? 
 // ?invonly=1 (mig 221): same embed idea for the owner panel's Inventory page — ONLY the
 // 📦 Inventory tab, chrome hidden via the same body.menu-only rules.
 const INV_ONLY = new URLSearchParams(location.search).get("invonly") === "1";
+// ?floorpreview=1 (mig 226): the admin's "Tables per row" preview embeds this panel and drags
+// a slider. Same embed idea again — open straight on the live floor, hide the surrounding
+// chrome — except the number itself arrives by postMessage on every slider step, because
+// re-loading the iframe per step would be slow AND would refetch the whole panel each time.
+const FLOOR_PREVIEW = new URLSearchParams(location.search).get("floorpreview") === "1";
 if (MENU_ONLY || INV_ONLY) { try { document.documentElement.setAttribute("data-theme", MENU_SKIN); } catch (e) {} }
 // Tiny localStorage helpers so a refresh keeps you exactly where you were —
 // not just the tab, but the SUB-VIEW too (Orders: live/previous/calls; Log:
@@ -56,7 +61,8 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 // currently being edited, the search text, and the live tables board. Whenever
 // state changes we re-draw the affected part of the screen from it.
 const state = {
-  tab: INV_ONLY ? "inventory" // inventory-only embed: the 📦 tab is the whole panel
+  tab: FLOOR_PREVIEW ? "tables" // layout-preview embed: the live floor IS the panel
+    : INV_ONLY ? "inventory" // inventory-only embed: the 📦 tab is the whole panel
     : MENU_ONLY ? (MENU_TABS.includes(savedTab) ? savedTab : "items") // menu-only: never open a non-menu tab
     : savedTab === "sessions" ? "tables" : (VALID_TABS.includes(savedTab) ? savedTab : "items"), // "sessions" merged into "tables"
   data: { items: [], categories: [], filters: [], orders: [], calls: [], settings: { id: "site", bubbles_enabled: true, service_mode: false } },
@@ -93,7 +99,10 @@ const state = {
   // resets when no slotted popup remains — so a fresh popup always starts big in the middle
   // (owner, 2026-07-02: "if only 1, size should be big; as I add, it should become small").
   floatCols: 0,
-  floorTileDensity: lsGet("lfh_floor_tile_density", "m"), // s | m | l — how many tiles fit per row in the floor grid
+  // Live "tables per row" override, used ONLY by the admin's layout preview (?floorpreview=1
+  // + a postMessage per slider step). null = use the restaurant's saved settings.floor_per_row.
+  // Nothing here is persisted: dragging the preview slider must never write to the DB.
+  floorPerRowPreview: null,
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
   billSearch: "", billSearchType: "date", billSort: "new", // Bills → Today/Previous search + sort (default to Date picker)
   billHistRows: [], // server-side bills-history search results (bills older than the local 200-row window)
@@ -1341,7 +1350,7 @@ async function saveWaiterTables(userId, tables) {
   const w = (state.sections?.waiters || []).find((x) => x.id === userId);
   const before = w ? (w.assigned_tables || []).slice() : null;
   if (w) w.assigned_tables = tables.slice();           // optimistic — the grid feels instant
-  renderEditor(); repaintSectionPicker(); repaintSectionsModal();
+  renderEditor(); repaintSectionPicker();
   try {
     const r = await fetch(ridQ("/api/editor/table-sections"), {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1354,7 +1363,7 @@ async function saveWaiterTables(userId, tables) {
     if (w && before) w.assigned_tables = before;       // put it back — never lie about what's saved
     toast(e.message || "Couldn't save that change.", "err");
   }
-  renderEditor(); repaintSectionPicker(); repaintSectionsModal();
+  renderEditor(); repaintSectionPicker();
 }
 
 const secTables = (w) => (w.assigned_tables || []).map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
@@ -1507,57 +1516,6 @@ function secEscOff(ov) {
   if (fn) { document.removeEventListener("keydown", fn); secEscMap.delete(ov); }
 }
 
-// The SAME card, opened as a modal from the live Table view — because the Settings tab it
-// otherwise lives in is gated by `edit_settings`, a power a section-granting manager may
-// not have. One builder, two doors: no chance of the two drifting apart.
-function openSectionsModal() {
-  const ov = document.createElement("div");
-  ov.className = "sx-modal-overlay";
-  ov.innerHTML = `<div class="sx-modal sec-modal sec-modal-wide">
-      <div class="sx-modal-head"><h3>Who serves which table</h3><button class="sx-x" type="button" data-sec-close>✕</button></div>
-      <div class="sx-modal-body" data-sec-card>${tableSectionsCardHtml()}</div>
-    </div>`;
-  const close = () => { sectionsModalOpen = false; secEscOff(ov); ov.remove(); };
-  ov.__lfhClose = close;
-  secEscOn(ov, close);
-  sectionsModalOpen = true;
-  ov.addEventListener("click", (e) => {
-    if (e.target === ov || e.target.closest("[data-sec-close]")) return close();
-    const v = e.target.closest("[data-sec-view]");
-    if (v) { state.sectionsView = v.dataset.secView; return repaintSectionsModal(); }
-    const ed2 = e.target.closest("[data-sec-edit]");
-    if (ed2) return openSectionPicker(ed2.dataset.secEdit);
-    const tc = e.target.closest("[data-sec-table]");
-    if (tc) return openTableHolderPicker(Number(tc.dataset.secTable));
-    const fx = e.target.closest("[data-sec-fixgaps]");
-    if (fx) return (async () => {
-      const gaps = secGaps(); if (!gaps.length) return;
-      for (const w of secActiveWaiters()) {
-        await saveWaiterTables(w.id, Array.from(new Set(secTables(w).concat(gaps))).sort((a, b) => a - b));
-      }
-      toast(`${gaps.length} table${gaps.length === 1 ? "" : "s"} now covered.`);
-    })();
-    const al = e.target.closest("[data-sec-all]");
-    if (al) return (async () => {
-      if (!(await confirmDialog("Give every table to every waiter? They'll each see the whole floor again — you can then take tables away one by one.", "Give all"))) return;
-      const all = Array.from({ length: state.sections?.tableCount || 0 }, (_, k) => k + 1);
-      for (const w of secActiveWaiters()) await saveWaiterTables(w.id, all);
-    })();
-    const cl = e.target.closest("[data-sec-clear]");
-    if (cl) return (async () => {
-      if (!(await confirmDialog("Clear every section? Every waiter will be left with NO tables — while sections are switched on, their tablets will be empty until you give them tables again.", "Clear all", { floorwide: true }))) return;
-      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, []);
-    })();
-  });
-  document.body.appendChild(ov);
-  if (!state.sectionsLoaded && !state.sectionsLoading) loadTableSections().then(repaintSectionsModal);
-}
-let sectionsModalOpen = false;
-function repaintSectionsModal() {
-  const host = document.querySelector("[data-sec-card]");
-  if (host && sectionsModalOpen) host.innerHTML = tableSectionsCardHtml();
-}
-
 // ── The picker: tap tables on/off for ONE waiter ─────────────────────────────
 // Uses the .sx-modal-overlay class, which the panel's overlay watcher (wireOverlayBack)
 // already registers with LFH_BACK — so the phone's hardware Back closes the picker
@@ -1680,7 +1638,7 @@ const SETTINGS_SECTIONS = [
   { id: "general", label: "General", sub: "site basics", icon: "fa-gear", title: "General settings" },
   { id: "tables", label: "Tables", sub: "floor & seats", icon: "fa-chair", title: "Table settings" },
   { id: "users", label: "Users", sub: "staff logins", icon: "fa-users", title: "User settings" },
-  { id: "access", label: "Access", sub: "user permissions", icon: "fa-key", title: "Access settings" },
+  { id: "access", label: "Access", sub: "permissions & sections", icon: "fa-key", title: "Access settings" },
   { id: "billing", label: "Billing", sub: "invoice & tax", icon: "fa-file-invoice", title: "Billing settings" },
   { id: "kitchen", label: "Kitchen", sub: "KOT printing", icon: "fa-fire-burner", title: "Kitchen settings" },
   { id: "sessions", label: "Dining sessions", sub: "QR & location", icon: "fa-qrcode", title: "Dining sessions" },
@@ -1730,8 +1688,11 @@ const ACCESS_MODE_LABEL = { on: "On", pin: "On — needs PIN", off: "Off" };
 // accessDefaultsCardHtml: the restaurant-wide defaults — the same three tri-states
 // that used to live in "Tablet panel access", now framed as what EVERYONE inherits
 // unless a per-user override (card below) says otherwise.
+// data-mgr-hide (2026-07-30): this section is now reachable by a manager who only has
+// table_assign (Who-serves-which-table lives here too), so the two staff-power cards need
+// their OWN gate instead of relying on the sidebar row being manage_staff-only.
 function accessDefaultsCardHtml(s) {
-  return `<div class="card"><h3>Defaults for everyone</h3>
+  return `<div class="card" data-mgr-hide="access_defaults"><h3>Defaults for everyone</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       What a waiter can do with a bill on the tablet, unless a person below has their own
       setting. Each starts <b>Off</b> (hidden). <b>On</b> = allowed directly;
@@ -1749,10 +1710,10 @@ function accessDefaultsCardHtml(s) {
 // per change via /api/owner/staff set_permissions; the server's tabletPerm enforces it.
 function accessUsersCardHtml(s) {
   if (!state.staffLoaded) {
-    return `<div class="card"><h3>Per-user access</h3><p class="muted" style="font-size:13px;margin:0">Loading…</p></div>`;
+    return `<div class="card" data-mgr-hide="access_users"><h3>Per-user access</h3><p class="muted" style="font-size:13px;margin:0">Loading…</p></div>`;
   }
   if (state.staffDenied) {
-    return `<div class="card"><h3>Per-user access</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
+    return `<div class="card" data-mgr-hide="access_users"><h3>Per-user access</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
   }
   const waiters = state.staffTeam.filter((u) => u.role === "tablet");
   const selFor = (u, cap) => {
@@ -1780,7 +1741,7 @@ function accessUsersCardHtml(s) {
         <div class="grid cols-3" style="gap:8px">${accessCapsFor().map((c) => selFor(u, c)).join("")}</div>
       </div>`).join("")
     : `<div class="sx-empty">No tablet logins yet — add one in <b>Users</b>.</div>`;
-  return `<div class="card"><h3>Per-user access</h3>
+  return `<div class="card" data-mgr-hide="access_users"><h3>Per-user access</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 14px;line-height:1.5">
       Give a specific waiter more (or less) than the defaults above. <b>Default</b> follows
       the defaults card; a person's own <b>On / On·PIN / Off</b> wins over it. Changes save
@@ -1809,7 +1770,6 @@ function formGeneral(s) {
     <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
   </div>
   ${tableSeatingCardHtml(s)}
-  ${tableSectionsCardHtml()}
   ${tableQrLinksCardHtml(s)}
   <div class="card"><h3>Auto close / restart tables</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
@@ -1831,7 +1791,11 @@ function formGeneral(s) {
     return userSettingCardHtml();
   }
   if (sec === "access") {
-    return accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
+    // Who-serves-which-table lives here (owner, 2026-07-30 — "it should be in the
+    // user / access thing of the settings, a sub setting of access"). It moved out of
+    // Settings → Tables AND off the Tables floor header, so this is now its ONLY home.
+    // It sits FIRST because it's the one card a table_assign-only manager can see.
+    return tableSectionsCardHtml() + accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
   }
   if (sec === "billing") {
     // TWO stacked sections (owner, 2026-07-05 — "manager bill and printable bill, up/down,
@@ -4581,10 +4545,10 @@ function bindEditor() {
   // ---- "User setting" card (Settings tab): the manager's own team ----
   if (state.tab === "general" && !state.staffLoaded) loadStaffTeam();
 
-  // ---- "Who serves which table" card (Settings → Tables): waiter sections, mig 222 ----
-  // Loaded lazily, and ONLY when its own section is open, so a manager who never opens
-  // Tables never pays for the roster fetch.
-  if (state.tab === "general" && state.settingsSection === "tables" && !state.sectionsLoaded && !state.sectionsLoading) loadTableSections();
+  // ---- "Who serves which table" card (Settings → Access): waiter sections, mig 222 ----
+  // Loaded lazily, and ONLY when the Access section is open, so a manager who never opens
+  // it never pays for the roster fetch.
+  if (state.tab === "general" && state.settingsSection === "access" && !state.sectionsLoaded && !state.sectionsLoading) loadTableSections();
   ed.querySelectorAll("[data-sec-view]").forEach((b) => (b.onclick = () => { state.sectionsView = b.dataset.secView; renderEditor(); }));
   ed.querySelectorAll("[data-sec-edit]").forEach((b) => (b.onclick = () => openSectionPicker(b.dataset.secEdit)));
   ed.querySelectorAll("[data-sec-table]").forEach((b) => (b.onclick = () => openTableHolderPicker(Number(b.dataset.secTable))));
@@ -5936,14 +5900,42 @@ function floorStatsHtml() {
 // (with a legend and on-tile quick buttons) and a side panel on the right holding
 // the session toggles, café location, requests queue and blocklist.
 
-// densityBtnsHtml: the S/M/L tile-size control shown beside "Table view". Changes
-// how many tiles fit per row (bigger tiles = fewer per row) via a data-density
-// attribute the CSS keys off of (see .ftile-grid rules). Choice is remembered
-// across reloads (lsSet), same convention as floorSideCollapsed.
-function densityBtnsHtml() {
-  const cur = state.floorTileDensity || "m";
-  const opt = (k, label, title) => `<button class="density-btn${cur === k ? " active" : ""}" data-density-btn="${k}" title="${title}">${label}</button>`;
-  return `<div class="density-btns" role="group" aria-label="Tile size">${opt("s", "S", "Smaller tiles, more per row")}${opt("m", "M", "Normal tile size")}${opt("l", "L", "Larger tiles, fewer per row")}</div>`;
+// floorPerRow: how many table tiles go on one row — and therefore how big each tile is.
+// This REPLACED the old per-device S/M/L buttons (owner, 2026-07-30): a manager's phone and
+// a manager's desktop each remembered a different size and no admin could set it, so the
+// number is now one ADMIN-owned per-restaurant setting (settings.floor_per_row, mig 226).
+//
+// It is a target, not a hard rule. The CSS turns it into a MINIMUM column width and lets
+// auto-fill drop columns when the width isn't there (see .ftile-grid), so a phone or a
+// narrow window shows fewer per row rather than a row of unreadable slivers. That is what
+// keeps a 300-table restaurant usable on any screen.
+const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 6;
+function floorPerRow() {
+  // The admin preview slider wins while it's driving (never persisted — see state).
+  const raw = state.floorPerRowPreview != null
+    ? state.floorPerRowPreview
+    : (state.data.settings || {}).floor_per_row;
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n)) return FLOOR_PER_ROW_DEFAULT;
+  return Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
+}
+
+// The admin layout-preview slider talks to this panel here. Only listened for in preview
+// mode, only from our own origin, and it does exactly one thing: change the CSS variable
+// on the existing grid. It deliberately does NOT re-render or refetch — dragging a slider
+// must not fire a request per step, and reflowing the grid is all that has to happen.
+if (FLOOR_PREVIEW) {
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin) return;
+    const d = e.data;
+    if (!d || d.type !== "lfh:floor-per-row" ) return;
+    const n = Math.round(Number(d.perRow));
+    if (!Number.isFinite(n)) return;
+    state.floorPerRowPreview = Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
+    document.querySelectorAll(".ftile-grid").forEach((g) => {
+      g.style.setProperty("--per-row", String(state.floorPerRowPreview));
+    });
+  });
 }
 
 function floorHtml() {
@@ -5981,7 +5973,7 @@ function floorHtml() {
     for (let i = 1; i <= n; i++) {
       skel += `<div class="ftile ftile-skel" aria-hidden="true"><div class="sk-num"></div><div class="sk-lbl"></div><div class="sk-meta"></div></div>`;
     }
-    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${densityBtnsHtml()}</div>${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${skel}</div></div>`;
+    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2></div>${legend}<div class="ftile-grid" style="--per-row:${floorPerRow()}">${skel}</div></div>`;
     // right: skeleton versions of the side-panel cards so the whole layout is
     // present from the first frame (no empty gutter that fills in late). A card
     // = a title bar + a few placeholder rows of shimmer.
@@ -6003,13 +5995,6 @@ function floorHtml() {
   // Stats strip — the whole floor's health at a glance (Occupied / To pay / Needs you).
   // Built by the shared floorStatsHtml() so the patch path can refresh it identically.
   const statsStrip = floorStatsHtml();
-  // Density buttons live at the far right of .ed-head (its h2 has flex:1, which pushes
-  // anything after it there — a shared rule, not something to special-case here). That's
-  // the SAME corner the collapsed-floor's Open all/Close all bar + the ‹ chevron use
-  // (both position:absolute), so the two overlapped when collapsed (owner screenshot,
-  // 2026-06-30). Simplest correct fix: don't show density controls while collapsed —
-  // that corner is already spoken for there, and re-expanding is one click away.
-  const collapsedNow = isPhoneLayout() || state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null);
   // General "New Parcel" (takeaway) button — sits at the top of the floor, not tied to
   // any table. Opens the take-order picker in parcel mode → a takeaway Platform order
   // (owner, 2026-07-25). Gated by the **parcel** x-ray (XRAY_CONTROLS → [data-new-parcel])
@@ -6018,13 +6003,13 @@ function floorHtml() {
   // 2026-07-29: a manager with parcel granted but take_orders absent sees 🥡 New Parcel and
   // no per-table "+ Take order", which is exactly right.
   const parcelBtn = `<button class="btn primary ed-parcel-btn" data-new-parcel="1" title="Start a takeaway / parcel order — no table needed">🥡 New&nbsp;Parcel</button>`;
-  // Waiter sections (mig 222) — the entry point that ACTUALLY works for a manager.
-  // The full editor also sits in Settings → Tables, but that whole tab is gated by the
-  // SEPARATE `edit_settings` power, so a manager granted only `table_assign` could never
-  // reach it (caught in live testing 2026-07-29). Sections belong to the floor anyway, so
-  // the live Table view is the natural home. Same builder → one source of truth.
-  const sectionsBtn = `<button class="btn" id="floorSections" data-mgr-hide="table_sections" title="Give each waiter their own tables">👥 Who serves what</button>`;
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${sectionsBtn}${parcelBtn}${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
+  // NOTE: the 👥 "Who serves what" button used to sit here. It moved to Settings → Access
+  // (owner, 2026-07-30) — that is now its ONE home. The reason it was ever on the floor was
+  // that Settings is gated by `edit_settings`, so a manager with only `table_assign` had no
+  // way in; that's handled properly now by the Settings tab and the Access row each opening
+  // for "edit_settings|table_assign" / "manage_staff|table_assign" (see XRAY_TABS /
+  // XRAY_CONTROLS). Don't re-add a floor button without re-checking those gates.
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${parcelBtn}</div>${statsStrip}${legend}<div class="ftile-grid" style="--per-row:${floorPerRow()}">${tiles}</div></div>`;
 
   // side panel — everyday floor work only (whole-floor open/close, requests, needs,
   // blocked). The old "Features · rarely changed" card that used to sit at the bottom
@@ -6069,7 +6054,7 @@ function floorHtml() {
   let sideInner;
   if (state.selectedTable != null) {
     const t = state.selectedTable;
-    const parts = tablePanelParts(t);
+    const parts = tablePanelParts(t, "dock"); // rail: every action EXCEPT ＋ Take order
     const { headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
     // Pop this table out into the FLOATING layer (owner request, 2026-07-02 — "movable",
     // "many popups at the same time"). Docking back happens from the floating card's own
@@ -6094,7 +6079,7 @@ function floorHtml() {
   // left/top/width from layoutFloatingRow() right after this markup lands (bindFloor);
   // pinned ones (dragged) keep the exact x/y/w they were dropped at.
   const floatingLayerHtml = state.floatingTables.map((f) => {
-    const parts = tablePanelParts(f.table);
+    const parts = tablePanelParts(f.table, "float");
     const { headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
     const dockBtn = isPhoneLayout() ? "" : `<button class="tp-detail-float" data-float-dock="${esc(f.table)}" title="Dock back to the side panel">⇱ Dock</button>`; // no side panel on a phone → nothing to dock into
     // A PINNED card keeps its dragged/resized geometry (x/y/w/h); a free one gets only its
@@ -6341,7 +6326,6 @@ function bindFloor() {
   // order in the Platform system). Gated by the take_orders x-ray (below) + server.
   ed.querySelectorAll("[data-new-parcel]").forEach((b) => (b.onclick = () => openTakeOrder(null, null, { parcel: true })));
   // Waiter sections (mig 222) — same editor as Settings → Tables, reachable from the floor.
-  { const sb = ed.querySelector("#floorSections"); if (sb) sb.onclick = () => openSectionsModal(); }
   const oa = document.getElementById("floorOpenAll");
   if (oa) oa.onclick = () => openAllTables();
   const ca = document.getElementById("floorCloseAll");
@@ -6377,7 +6361,7 @@ function bindFloor() {
     if (detail) {
       const closeBtn = detail.querySelector("#tpDetailClose");
       if (closeBtn) closeBtn.onclick = () => deselectTable();
-      const parts = tablePanelParts(state.selectedTable);
+      const parts = tablePanelParts(state.selectedTable, "dock"); // must match the render above
       // rerender keeps the detail body's scroll position so serving/deleting a dish
       // doesn't fling the panel back to the top.
       const rerender = () => {
@@ -6408,16 +6392,6 @@ function bindFloor() {
     rz.addEventListener("pointermove", move);
     rz.addEventListener("pointerup", up);
   };
-  // Tile density (S/M/L) — how many tiles fit per row. Persists across reloads.
-  ed.querySelectorAll("[data-density-btn]").forEach((b) => {
-    b.onclick = () => {
-      const d = b.dataset.densityBtn;
-      if (d === state.floorTileDensity) return;
-      state.floorTileDensity = d;
-      lsSet("lfh_floor_tile_density", d);
-      renderEditor();
-    };
-  });
   // Pop the DOCKED detail out into the floating layer (adds it to floatingTables, clears
   // the docked selection — the side panel goes back to controls). Multiple tables can be
   // floating at once; this just adds one more.
@@ -6434,7 +6408,7 @@ function bindFloor() {
     const t = String(card.dataset.floatingTable);
     const detail = card.querySelector("[data-table-detail]");
     if (detail) {
-      const parts = tablePanelParts(t);
+      const parts = tablePanelParts(t, "float"); // must match the render above
       const rerender = () => {
         const body = card.querySelector(".tp-detail-body");
         const top = body ? body.scrollTop : 0;
@@ -6810,7 +6784,13 @@ function openDishEditModal(itemId, rerender) {
 //   • the Tables-tab right side panel — the new master-detail (renders this IN PLACE)
 // Pulling it out means the two views can never drift apart again.
 // Returns the pieces + the computed { sess, os, canFree } so the caller can wire up.
-function tablePanelParts(t) {
+//
+// `host` says WHERE the result is about to be rendered — "dock" (the Tables-tab right
+// side rail), "float" (a popup card) or "modal" (the legacy pop-up). Everything is
+// identical between hosts except ＋ Take order, which is popup-only (see takeOrderBtn).
+// Default "float" so any caller that forgets keeps the fuller footer rather than
+// silently losing a button.
+function tablePanelParts(t, host = "float") {
   const sessionsOn = !!(state.data.settings || {}).sessions_enabled;
   const os = ordersForTable(t);
   const sess = openSessionForTable(t);
@@ -7042,7 +7022,16 @@ function tablePanelParts(t) {
   // ＋ Take order — start a brand-new order for this table, like the waiter tablet.
   // Gated by the take_orders manager power: XRAY_CONTROLS hides it for a manager without
   // the power (and tints it for an admin/owner looking in); the server re-checks too.
-  const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
+  //
+  // ONE HOST ONLY (owner, 2026-07-30): taking an order is a full-attention job, so it
+  // starts from the table POPUP and nowhere else. The docked side rail used to carry the
+  // same button — in a narrow rail the order builder was cramped and it was easy to start
+  // an order on the table you'd merely glanced at. The rail keeps every other action
+  // (pay, discount, print, KOT, end) and "＋ Add dish" on an order that already exists;
+  // only STARTING a new order moved out. Tap a tile → the popup → ＋ Take order.
+  const takeOrderBtn = host === "dock"
+    ? ""
+    : `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
   const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${shiftFallbackBtn}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
   return { sess, os, canFree, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
@@ -8293,7 +8282,7 @@ function renderTablePanel() {
   const savedScroll = prevModal ? prevModal.scrollTop : 0;
   document.querySelector(".tbl-modal-overlay")?.remove();
   const t = state.openSess;
-  const parts = tablePanelParts(t);
+  const parts = tablePanelParts(t, "modal");
   const { headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
   const wrap = el(`<div class="sx-modal-overlay tbl-modal-overlay"><div class="tbl-modal sx-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${parts.kotHeadBtn || ""}<button class="tbl-modal-close" aria-label="Close">✕</button></div>${headMeta}</div><div class="tbl-modal-body">${requestsSec}${sessionSec}${ordersSec}${callsSec}${billSec}</div><div class="tbl-modal-foot">${foot}</div></div></div>`);
   document.body.appendChild(wrap);
@@ -8972,6 +8961,9 @@ function setTab(tab) {
   // Menu-only embed: the only reachable tabs are the menu ones — redirect any other target
   // (boot fallbacks, realtime handlers) to Dishes, and mark the body so the CSS hides the rest.
   if (MENU_ONLY) { document.body.classList.add("menu-only", "skin-" + MENU_SKIN); if (!MENU_TABS.includes(tab)) tab = "items"; }
+  // Layout-preview embed (mig 226): the admin is only looking at tile SIZE, so pin the floor
+  // and let .floor-preview CSS strip the chrome. Same shape as the menu-only redirect above.
+  if (FLOOR_PREVIEW) { document.body.classList.add("floor-preview"); tab = "tables"; }
   if (INV_ONLY) { document.body.classList.add("menu-only", "skin-" + MENU_SKIN); if (tab !== "inventory") tab = "inventory"; }
   // Leaving the Dashboard: destroy its live Chart.js instances so their detached canvases +
   // resize handlers don't linger until the next Dashboard visit.
@@ -9917,7 +9909,11 @@ const XRAY_TABS = [
   // edit_menu is off it flips to a read-only "View menu" (owner 2026-07-25). That is
   // handled by applyMenuReadonly() below, called from applyHierarchyView.
   { tab: "ratings", flag: "view_ratings", label: "Guest ratings" },
-  { tab: "general", flag: "edit_settings", label: "Settings" },
+  // Settings opens for edit_settings OR table_assign (owner, 2026-07-30). Who-serves-which-
+  // table moved OUT of the Tables floor and INTO Settings → Access, and it's a real manager
+  // power, so a manager granted only that must still be able to open the tab. Every card
+  // inside stays individually gated, so they see that one card and nothing else.
+  { tab: "general", flag: "edit_settings|table_assign", label: "Settings" },
   // Activity log (owner 2026-07-26): the "Activity log" manager power now hides the Log tab
   // for a real manager when it's revoked, instead of the tab lingering and its contents
   // 403-ing. view_logs is ABSENT-means-ON (whoami resolves effectivePowers.view_logs=true by
@@ -9936,7 +9932,13 @@ const XRAY_CONTROLS = [
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
   { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
-  { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff", label: "Access settings" },
+  // Access row: manage_staff OR table_assign, because Who-serves-which-table now lives in
+  // this section (owner, 2026-07-30). The two cards that are genuinely about staff powers
+  // carry their own manage_staff gate below, so a table_assign-only manager opening this
+  // row sees the waiter-sections card alone.
+  { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff|table_assign", label: "Access settings" },
+  { selector: '[data-mgr-hide="access_defaults"]', flag: "manage_staff", label: "Who can do what (defaults)" },
+  { selector: '[data-mgr-hide="access_users"]', flag: "manage_staff", label: "Per-person access" },
   // ADMIN/OWNER-only settings (owner 2026-07-28, extended 2026-07-29): a real manager only
   // handles per-table name + seats. Billing, KOT printing, dining sessions, the table COUNT
   // and the guest QR links are set from the admin panel
@@ -9983,6 +9985,7 @@ var XRAY_WHO = null;
 // settings (billing/KOT/sessions/table count) have no Access-page card — their home is the
 // restaurant detail's ⚙ Settings tab on /aevinite/restaurants.
 function xraySettingUrl(flag) {
+  flag = flag.split("|")[0]; // multi-power gate → deep-link to its primary power's control
   if (XRAY_WHO && XRAY_WHO.actor === "admin") {
     if (flag === "admin_only_setting")
       return `/aevinite/restaurants?focus=${encodeURIComponent(PANEL_RID)}&tab=settings`;
@@ -10071,6 +10074,22 @@ function xraySettingUrl(flag) {
     background: color-mix(in srgb, #d97706 12%, var(--panel, #fff));
     border: 1px solid color-mix(in srgb, #d97706 40%, transparent);
     color: #b45309; font-weight: 700; font-size: 12.5px; }
+  /* Layout-preview embed (admin → Tables per row): the admin is judging tile SIZE, so
+     show the live floor and nothing else — no brand bar, no tabs, no admin ribbon, and
+     no side rail stealing the width the tiles are being measured in. Read-only by
+     nature: the preview never saves anything, and pointer-events are off so a drag of
+     the slider can't accidentally open a real table. */
+  body.floor-preview .topbar,
+  body.floor-preview #xrayRibbon,
+  body.floor-preview .sidebar,
+  body.floor-preview .floor-side,
+  body.floor-preview .floor-resizer,
+  body.floor-preview .floor-side-toggle,
+  body.floor-preview .ed-head,
+  body.floor-preview .floor-stats { display: none !important; }
+  body.floor-preview { background: var(--bg) !important; }
+  body.floor-preview .ftile { pointer-events: none !important; }
+  body.floor-preview #editor { padding: 14px !important; }
   /* Menu-only embed (owner panel → Menu): drop the whole manager chrome (brand bar,
      Live/Profile/flag/theme/connection, every other top tab, the admin ribbon) so it
      looks native inside the owner panel. The Dishes/Categories/Tags subtabs live in the
@@ -10144,6 +10163,12 @@ function xraySettingUrl(flag) {
 // older server response.)
 function xrayGrantedForManager(flag) {
   if (!XRAY_WHO) return true;
+  // A gate may name SEVERAL powers ("a|b"), meaning "any one of these opens it". Needed
+  // where one screen is the home of two unrelated capabilities — Settings now holds both
+  // the settings cards (edit_settings) and Who-serves-which-table (table_assign), so a
+  // manager with only the second must still get in (owner, 2026-07-30). Each CARD inside
+  // keeps its own single-power gate, so getting in never means seeing everything.
+  if (flag.includes("|")) return flag.split("|").some((f) => xrayGrantedForManager(f));
   if (XRAY_WHO.effectivePowers) return XRAY_WHO.effectivePowers[flag] === true;
   return !!(XRAY_WHO.managerPermissions && XRAY_WHO.managerPermissions[flag] === true);
 }

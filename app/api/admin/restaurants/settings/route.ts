@@ -13,6 +13,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
+import { clampPerRow } from "@/lib/floorLayout";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ const SETTINGS_COLS = [
   "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone", "gstin",
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
-  "table_count", "table_seats", "table_names", "auto_table_action",
+  "table_count", "table_seats", "table_names", "auto_table_action", "floor_per_row",
 ] as const;
 const SELECT = SETTINGS_COLS.join(", ");
 
@@ -75,6 +76,7 @@ function sanitize(body: Patch): Patch {
     const n = Math.round(Number(body.table_count));
     out.table_count = Number.isFinite(n) ? Math.min(Math.max(n, 1), 500) : 12;
   }
+  if ("floor_per_row" in body) out.floor_per_row = clampPerRow(body.floor_per_row);
   if ("table_seats" in body) {
     const raw = body.table_seats;
     const clean: Record<string, number> = {};

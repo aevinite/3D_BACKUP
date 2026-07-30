@@ -27,6 +27,7 @@ import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
+import { clampPerRow } from "@/lib/floorLayout";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
@@ -2499,7 +2500,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // full access — only a real manager's patch is stripped.
         if (g.user && g.user.role !== "owner") {
           const MANAGER_BLOCKED_SETTINGS = [
-            "table_count",
+            // How many tables exist and how many tiles sit on a row of the floor are both
+            // ADMIN-owned (mig 226): the per-row number replaced a per-device S/M/L toggle
+            // precisely so one restaurant has one answer, not one per manager's phone.
+            "table_count", "floor_per_row",
             "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone",
             "gstin", "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
             "auto_print_kot",
@@ -2521,6 +2525,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           const n = Math.round(Number(body.table_count));
           body.table_count = Number.isFinite(n) ? Math.min(Math.max(n, 1), 500) : 12;
         }
+        // Same clamp as the admin route (mig 226 also has a CHECK constraint) — an
+        // owner/admin saving through this path can't write an out-of-range number either.
+        if ("floor_per_row" in body) body.floor_per_row = clampPerRow(body.floor_per_row);
         for (const k of ["sessions_enabled", "require_location", "require_otp", "auto_print_kot"]) {
           if (k in body) body[k] = body[k] === true || body[k] === "true";
         }
