@@ -29,7 +29,7 @@
  *   - KILL SWITCH: deleting/404-ing this file unregisters it (browser behaviour), and
  *     posting {type:"LFH_SW_KILL"} from the page drops every cache + unregisters.
  */
-const VERSION = "v3"; // v2: 2h expiry (owner's call). v3: the sign-in page is cached too.
+const VERSION = "v4"; // v2: 2h expiry. v3: sign-in page cached. v4: no false "struggling" alarm.
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -38,7 +38,13 @@ const OFFLINE_URL = "/offline.html";
 // A stalled network is the WORST case for staff ("less internet" — it hangs forever and
 // the panel looks frozen). Race every fallback-able request against a timer and fall
 // back to the saved copy instead of spinning.
-const NET_TIMEOUT_MS = 6000;   // navigations + operational reads
+// Falling back FAST is right: on a hanging connection, staff should see the saved board in a
+// few seconds, not stare at nothing for twelve. The owner's "Connection is struggling" false
+// alarm was NOT caused by this — it was the BAR shouting about one slow read while live
+// updates were flowing. That's fixed where it belongs (connIsBad() in panels/offline.js), so
+// the fallback stays quick and only the WARNING is judged on the real connection state.
+const NAV_TIMEOUT_MS = 6000;
+const READ_TIMEOUT_MS = 6000;
 // Assets get a MUCH longer leash than reads. It used to be none at all, which meant a
 // crawling connection could hang a script request forever with no fallback; and before
 // that it was 8s, which cut off a slow 3D model download. Big media is now excluded by
@@ -285,7 +291,7 @@ self.addEventListener("fetch", (event) => {
   const isRsc = req.headers.get("RSC") === "1" || url.searchParams.has("_rsc");
 
   if (isNav) return event.respondWith(handleNav(req, url));
-  if (isRsc) return event.respondWith(networkFirst(req, SHELL, rscKey(req.url), NET_TIMEOUT_MS));
+  if (isRsc) return event.respondWith(networkFirst(req, SHELL, rscKey(req.url), READ_TIMEOUT_MS));
   if (url.pathname.startsWith("/_next/static/")) {
     return event.respondWith(IS_DEV ? networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS) : cacheFirst(req, ASSET));
   }
@@ -303,7 +309,7 @@ self.addEventListener("fetch", (event) => {
     // grounds of slowness. Operational panel reads are small, so a stall there is a real
     // problem and does get the guard.
     const slowByNature = /^\/api\/(owner|admin|inventory)\//.test(url.pathname);
-    return event.respondWith(networkFirst(req, DATA, req.url, slowByNature ? 0 : NET_TIMEOUT_MS, { clientId: event.clientId }));
+    return event.respondWith(networkFirst(req, DATA, req.url, slowByNature ? 0 : READ_TIMEOUT_MS, { clientId: event.clientId }));
   }
   // Everything else same-origin static: /panels/*, /brand/*, fonts, images, /vendor/*.
   return event.respondWith(networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS));
@@ -321,7 +327,7 @@ async function handleNav(req, url) {
   });
   try {
     let timer;
-    const stalled = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("stall")), NET_TIMEOUT_MS); });
+    const stalled = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("stall")), NAV_TIMEOUT_MS); });
     try { return await Promise.race([live, stalled]); } finally { clearTimeout(timer); }
   } catch {
     live.catch(() => {});

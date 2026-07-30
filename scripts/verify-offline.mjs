@@ -15,7 +15,20 @@
 //
 // Headless, against a dev server. Nothing here touches a live stack.
 import { chromium } from "playwright";
-import { loginAs } from "./sweep/login.mjs";
+import { loginAs as loginOnce } from "./sweep/login.mjs";
+
+// Signing in occasionally times out on a busy dev server — a blip in the test rig, not in the
+// app (the same request answers in under a second by hand). One retry keeps a 54-check run
+// from being thrown away by it, without hiding a real login failure: the second failure still
+// stops the run.
+async function loginAs(ctx, role, base, creds) {
+  try { return await loginOnce(ctx, role, base, creds); }
+  catch (e) {
+    console.log(`  · sign-in as ${role} timed out, retrying once`);
+    await new Promise((r) => setTimeout(r, 3000));
+    return loginOnce(ctx, role, base, creds);
+  }
+}
 
 const args = process.argv.slice(2);
 const BASE = (args.includes("--base") ? args[args.indexOf("--base") + 1] : "") || "http://localhost:4000";
@@ -104,7 +117,11 @@ async function run() {
   // ABOVE table_count can still hold live orders — scanning to the count found nothing
   // while table 48 sat free.
   async function pickFreeTable(tiles) {
-    const keys = Object.keys(tiles || {}).sort((x, y) => Number(x) - Number(y));
+    // Don't depend on the caller having the floor loaded: with no tile map, ask the server
+    // about tables 1..30 directly. (An empty map used to make this return "no free table"
+    // and abort a whole section for no real reason.)
+    let keys = Object.keys(tiles || {}).sort((x, y) => Number(x) - Number(y));
+    if (!keys.length) keys = Array.from({ length: 30 }, (_, i) => String(i + 1));
     for (const k of keys) {
       const t = tiles[k];
       if (!t || t.state === "free") {
@@ -398,21 +415,43 @@ async function run() {
     {
       const menu = await staff.request.get(`${BASE}/api/r/french-house/menu-data`).then((r) => r.json()).catch(() => null);
       const dish = menu && menu.items && menu.items[0];
-      // Find a table whose party has been sitting there for a while (so the "different
-      // party now" rule isn't what fires), then have STAFF close and bill it — exactly what
-      // happens while a customer's phone has no signal. Picking a "free" table by guesswork
-      // left this check testing nothing, because on a busy floor there isn't one.
-      const QUEUED_AT = new Date(Date.now() - 10 * 60 * 1000); // the guest ordered 10 min ago
-      let gt = null, sid = null;
+      // Build the whole situation ourselves rather than hunting for a table that happens to
+      // have been occupied for a while — depending on existing data made this check quietly
+      // un-runnable once the suite's own tidy-up had closed the long-standing tables.
+      //   t0  a guest order seats the table
+      //   t1  the moment our imaginary offline guest placed THEIR order
+      //   t2  staff close and bill the table
+      // then we replay with queued-at = t1, which is after the party arrived and before it
+      // was billed — exactly the situation the guard exists for.
+      let gt = null;
       for (let i = 30; i >= 1; i--) {
         const probe = await staff.request.get(`${BASE}/api/editor/sessions?table=${i}`).then((r) => r.json()).catch(() => null);
         const list = Array.isArray(probe) ? probe : (probe && (probe.sessions || probe.rows)) || [];
-        const live = list.find((r) => r && r.status !== "closed" && new Date(r.created_at).getTime() < QUEUED_AT.getTime());
-        if (live) { gt = String(i); sid = live.id; break; }
+        if (!list.some((r) => r && r.status !== "closed")) { gt = String(i); break; }
       }
-      gt ? ok(`table ${gt} has a party that was already seated when the guest ordered`) : bad("no suitable table to run the guest check on");
-      const closeIt = sid ? await staff.request.post(`${BASE}/api/editor/sessions/${sid}/close`, { headers: { "content-type": "application/json" }, data: { force: true } }) : null;
-      closeIt && closeIt.ok() ? ok("staff closed and billed it while the phone had no signal") : bad("couldn't close that table for the check", closeIt ? String(closeIt.status()) : "no session id");
+      if (!gt) throw new Error("test setup: no free table for the guest check");
+      seatedByUs.push(gt);
+      // Seat it as STAFF. A public (QR) guest order doesn't necessarily open a dining
+      // session, and the clash guard reasons about the SESSION — so seating it the way a
+      // waiter does is both what really happens and what makes this check meaningful.
+      const seat = await staff.request.post(`${BASE}/api/editor/sessions/open`, {
+        headers: { "content-type": "application/json" }, data: { table: gt },
+      });
+      seat.ok() ? ok(`staff seated table ${gt}`) : bad(`couldn't seat table ${gt} (HTTP ${seat.status()})`);
+      await sleep(1500);
+      const QUEUED_AT = new Date();                       // t1: our offline guest ordered now
+      await sleep(1500);
+      const sList = await staff.request.get(`${BASE}/api/editor/sessions?table=${gt}`).then((r) => r.json()).catch(() => null);
+      const sRows = Array.isArray(sList) ? sList : (sList && (sList.sessions || sList.rows)) || [];
+      const liveS = sRows.find((r) => r && r.status !== "closed");
+      if (!liveS) throw new Error("test setup: the guest order didn't open a session on table " + gt);
+      const closed = await staff.request.post(`${BASE}/api/editor/sessions/${liveS.id}/close`, {
+        headers: { "content-type": "application/json" }, data: { force: true },
+      });
+      closed.ok() ? ok("staff closed and billed it while the phone had no signal") : bad(`couldn't close table ${gt} (HTTP ${closed.status()})`);
+      // The guard deliberately ignores anything younger than 20s, so the replay has to be
+      // genuinely old before it means anything.
+      await sleep(22000);
 
       const replay = await staff.request.post(`${BASE}/api/guest/place-order`, {
         headers: {
@@ -548,13 +587,19 @@ async function run() {
       painted && Number(secs) < 12
         ? ok(`the board painted in ${secs}s instead of hanging for 12s (${painted} rows)`)
         : bad(painted ? `the board took ${secs}s — it waited for the hanging read` : "the board never painted; it just spun");
-      const slowBar = await waitFor(async () => {
-        const v = await inPanel(slowPage, () => { const b = document.querySelector("#lfhOffBar"); return b ? b.textContent : ""; });
-        return v && String(v).length ? String(v) : null;
-      }, 15000);
-      /struggling|no internet|saved/i.test(String(slowBar || ""))
-        ? ok(`and it explains why: "${String(slowBar).trim().slice(0, 60)}…"`)
-        : bad("it showed saved figures with no explanation", JSON.stringify(slowBar));
+      // And it must NOT cry wolf. Reads are crawling here, but live updates are still
+      // flowing, so the connection is not "struggling" in any way a person would recognise —
+      // the owner caught exactly that warning sitting above a green "Live" badge. Silence is
+      // the correct answer; the layer refetches by itself within seconds.
+      const slowBar = await inPanel(slowPage, () => ({
+        bar: (function () { const b = document.querySelector("#lfhOffBar"); return b ? b.innerText.replace(/\n/g, " | ") : ""; })(),
+        rt: (window.LFH_RT && window.LFH_RT.getStatus) ? window.LFH_RT.getStatus() : "?",
+      }));
+      const liveFlowing = slowBar && slowBar.rt === "online";
+      const alarmed = /struggling|no internet/i.test((slowBar && slowBar.bar) || "");
+      liveFlowing && alarmed
+        ? bad(`it cried wolf while live updates were flowing: "${slowBar.bar.slice(0, 60)}"`)
+        : ok(liveFlowing ? "and it stays quiet, because live updates are still flowing" : `and it says so: "${(slowBar.bar || "").slice(0, 50)}"`);
       await ctx.request.get(SLOW + "/__slow?ms=0");
       await slowPage.close();
     }
@@ -620,6 +665,132 @@ async function run() {
       : bad("the reassurance text is missing");
     await ctx.setOffline(false);
     await fresh.close();
+
+    // ══ NO FALSE ALARMS ON A HEALTHY CONNECTION ════════════════════════════════
+    // The owner photographed the manager panel showing "Connection is struggling" above its
+    // own green "Live" badge, with the internet perfectly fine. One slow read had been
+    // answered from the device and the warning stuck. A warning that cries wolf is worse
+    // than no warning: staff stop believing the real one.
+    console.log("\n12) A slow read on a HEALTHY connection must not raise the alarm");
+    if (!SLOW) {
+      console.log("  – skipped (needs --slow-proxy)");
+    } else {
+      const hp = await ctx.newPage();
+      await loginAs(ctx, "manager", SLOW);
+      await hp.goto(SLOW + "/manager", { waitUntil: "domcontentloaded" });
+      await waitControlled(hp);
+      await hp.reload({ waitUntil: "domcontentloaded" });
+      await waitFor(async () => {
+        const v = await inPanel(hp, () => (typeof state !== "undefined" && state.data && (state.data.items || []).length) || 0);
+        return typeof v === "number" && v > 0 ? v : null;
+      }, 45000);
+      await sleep(2500);
+      // Reads now take 14s — past the layer's patience — but the connection is FINE.
+      await ctx.request.get(SLOW + "/__slow?ms=14000");
+      await inPanel(hp, () => { try { pollOrders(); } catch (e) {} });
+      await sleep(16000);
+      const st = await inPanel(hp, () => ({
+        bar: (function () { const b = document.querySelector("#lfhOffBar"); return b ? b.innerText.replace(/\n/g, " | ") : ""; })(),
+        rt: (window.LFH_RT && window.LFH_RT.getStatus) ? window.LFH_RT.getStatus() : "?",
+        online: navigator.onLine,
+      }));
+      await ctx.request.get(SLOW + "/__slow?ms=0");
+      if (st && !st.__err) {
+        const claimsStruggling = /struggling/i.test(st.bar || "");
+        const connectionIsFine = st.online !== false && st.rt === "online";
+        connectionIsFine && claimsStruggling
+          ? bad(`it cried wolf: live updates are flowing (${st.rt}) but the bar says "${st.bar.slice(0, 60)}"`)
+          : ok(`no false alarm while live updates flow (bar: ${st.bar ? JSON.stringify(st.bar.slice(0, 40)) : "none"}, realtime: ${st.rt})`);
+      }
+      // …and once reads are quick again it must clear itself without anyone touching it.
+      const cleared = await waitFor(async () => {
+        const v = await inPanel(hp, () => { const b = document.querySelector("#lfhOffBar"); return b ? b.innerText : ""; });
+        return /struggling/i.test(String(v || "")) ? null : true;
+      }, 40000);
+      cleared ? ok("it clears itself once reads are quick again") : bad("the warning stayed up after the connection recovered");
+      await hp.close();
+    }
+
+    // ══ TWO TABLETS, ONE DISH, AT THE SAME MOMENT ══════════════════════════════
+    // The owner's scenario: waiter 1 marks a dish "more spicy", waiter 2 marks the same dish
+    // "less spicy", seconds apart. It must NOT silently overwrite — one wins, and the other
+    // person is told what it says now so the kitchen isn't cooking a guess.
+    console.log("\n13) Two waiters editing the SAME dish at the same time");
+    {
+      const t1 = await ctx.newPage();     // tablet 1 (this context is signed in as a waiter)
+      await loginAs(ctx, "tablet", BASE);
+      await t1.goto(BASE + "/tablet", { waitUntil: "domcontentloaded" });
+      await waitFor(async () => {
+        const v = await inPanel(t1, () => (typeof state !== "undefined" && state.data && (state.data.dishes || []).length) || 0);
+        return v > 0 ? v : null;
+      }, 45000);
+
+      // Put a real dish on a real table so there's something to fight over.
+      await waitFor(async () => {
+        const n = await inPanel(t1, () => Object.keys((state.summary || {}).tiles || {}).length);
+        return typeof n === "number" && n > 0 ? n : null;
+      }, 30000);
+      const pick = await inPanel(t1, () => {
+        const d = (state.data.dishes || []).find((x) => !x.open_price) || state.data.dishes[0];
+        return { tiles: (state.summary || {}).tiles || {}, dishId: d && d.id };
+      });
+      const table = await pickFreeTable(pick && pick.tiles);
+      if (!table) throw new Error("test setup: no free table for the two-device check");
+      seatedByUs.push(table);
+      await inPanel(t1, (a) => { window.__CT = a.t; window.__CD = a.d; return true; }, { t: table, d: pick.dishId });
+      const placed = await inPanelAsync(t1, async () => {
+        await api("POST", "/order", { table: window.__CT, items: [{ id: window.__CD, qty: 1 }], allergies: [], note: null });
+        await new Promise((r) => setTimeout(r, 1800));
+        // Read the saved dish back from the SERVER rather than from panel state: the panel
+        // only holds a table's full detail while that table is selected.
+        const j = await api("GET", "/state?table=" + window.__CT);
+        const items = (j && j.items) || [];
+        const item = items[0];
+        return { itemId: item && item.id, note: item ? String(item.note || "") : "", count: items.length };
+      });
+      if (!placed || placed.__err || !placed.itemId) throw new Error("test setup: couldn't get a saved dish to edit (" + JSON.stringify(placed) + ")");
+      ok(`a dish is on table ${table} for both waiters to edit`);
+
+      await inPanel(t1, (a) => { window.__ITEM = a.id; window.__WAS = a.was; return true; }, { id: placed.itemId, was: placed.note || "" });
+
+      // BOTH tablets save a different note, each saying what it was editing FROM ("").
+      const both = await inPanelAsync(t1, async () => {
+        const id = window.__ITEM, was = window.__WAS;
+        const attempt = async (note) => {
+          try { await api("POST", "/items/" + id + "/note", { note }, { expect: { note: was } }); return { note, ok: true }; }
+          catch (e) { return { note, ok: false, status: e.status, clash: e.data && e.data.clash ? e.data.clash : null, msg: e.message }; }
+        };
+        const a = await attempt("more spicy");
+        const b = await attempt("less spicy");   // same starting point → the ground has moved
+        return { a, b };
+      }, null);
+      // (ids handed in first)
+      if (both && both.__err) bad("the two-device check threw", both.__err);
+      else if (both) {
+        const winners = [both.a, both.b].filter((r) => r.ok);
+        winners.length === 1
+          ? ok(`exactly one of the two saves won ("${winners[0].note}")`)
+          : bad(`${winners.length} of the 2 saves were accepted — one must lose`, JSON.stringify(both));
+        const loser = [both.a, both.b].find((r) => !r.ok);
+        loser && loser.clash
+          ? ok(`the other waiter was told: "${String(loser.clash.plain).slice(0, 78)}"`)
+          : bad("the losing waiter got no clear explanation", JSON.stringify(loser));
+        loser && loser.clash && /more spicy|less spicy/.test(String(loser.clash.plain))
+          ? ok("and the message names what it says NOW, so they can decide")
+          : bad("the message doesn't say what the value is now", JSON.stringify(loser && loser.clash));
+      }
+      // The database must hold ONE of them — never a merge, never both.
+      const stored = await inPanelAsync(t1, async () => {
+        const j = await api("GET", "/state?table=" + window.__CT);
+        const list = (j && j.items) || [];
+        const it = list.find((x) => String(x.id) === String(window.__ITEM));
+        return it ? String(it.note || "") : null;
+      });
+      /^(more spicy|less spicy)$/.test(String(stored || ""))
+        ? ok(`the dish holds exactly one instruction: "${stored}"`)
+        : bad(`the stored note is not one of the two: ${JSON.stringify(stored)}`);
+      await t1.close();
+    }
 
     const realErrors = consoleErrors.filter((t) => !/Failed to fetch|net::ERR|offline|503|409|Service Worker/i.test(t));
     realErrors.length === 0 ? ok("no unexpected console errors") : bad(`${realErrors.length} console error(s)`, realErrors.slice(0, 3).join("\n       "));

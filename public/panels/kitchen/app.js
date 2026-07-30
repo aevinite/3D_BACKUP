@@ -917,6 +917,9 @@ if (typeof document !== "undefined") {
   // (a replayed action could have been rejected → the optimistic tile would otherwise stay
   // wrong until the 60s backstop). outbox.js dispatches this after a flush. (audit 2026-07-07)
   window.addEventListener("lfh:outbox-flushed", () => { if (!document.hidden) load().catch(() => {}); });
+  // A read came from this device rather than the server: refetch once, quietly, so a
+  // single slow reply can't leave the panel showing older data than it needs to.
+  window.addEventListener("lfh:stale-refresh", () => { if (!document.hidden) load().catch(() => {}); });
 }
 
 async function load() {
