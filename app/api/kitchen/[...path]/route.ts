@@ -70,7 +70,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // re-reading the whole board. Dishes/platform/settings are table-agnostic and a
       // platform/menu event always forces a FULL pass, so a targeted slice returns ONLY
       // { orders, items } — the panel merges them into the cached board. No param = full board.
-      const tbl = new URL(req.url).searchParams.get("table");
+      // ?table= must be a NUMBER (a non-numeric value reached the query and Postgres threw
+      // "invalid input syntax for type integer", turning a refetch into a 500). A bad param
+      // means "no targeted table" — a full, correct refresh — never an error.
+      const tblRaw = new URL(req.url).searchParams.get("table");
+      const tbl = tblRaw !== null && /^\d{1,6}$/.test(tblRaw.trim()) ? tblRaw.trim() : null;
       if (tbl) {
         // activeOnly=true: the kitchen board only shows received/preparing orders (a served
         // one has left the board), so we filter server-side — no point shipping served rows.
