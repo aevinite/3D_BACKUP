@@ -84,12 +84,37 @@
     lastMsg = message; lastAt = now;
     post({ kind: "error", message: String(message || "error").slice(0, 300), where: String(where || "").slice(0, 120) });
   }
+  // WHERE it broke, in words we can act on. A crash row that only says
+  // "Cannot set properties of null (setting 'innerHTML') @ promise" is unactionable — it
+  // cost a whole repair session guessing which of ~65 places it was (2026-07-30). So pull
+  // the first two frames of the error's own stack ("app.js:7412 <- app.js:9330" = threw
+  // there, called from there): enough to open the line, small enough for the 120-char
+  // `where` field. File name only (no long URL), and a graceful "" when a browser gives
+  // us no usable stack — this must never itself throw or block the report.
+  function frames(err) {
+    var st = (err && err.stack) || "";
+    var out = [], seen = {};
+    // Matches "…/panels/editor/app.js:7412:23" in every engine's stack format.
+    var re = /([A-Za-z0-9_.-]+\.js)\??[^\s:)]*:(\d+):\d+/g, m;
+    while ((m = re.exec(st)) && out.length < 2) {
+      var f = m[1] + ":" + m[2];
+      if (f.indexOf("errlog.js") === 0) continue; // our own listener frame says nothing
+      if (seen[f]) continue;
+      seen[f] = 1; out.push(f);
+    }
+    return out.join(" <- ");
+  }
   window.addEventListener("error", function (e) {
-    reportError(e && e.message ? e.message : "script error", (e && e.filename ? e.filename : "") + (e && e.lineno ? ":" + e.lineno : ""));
+    // filename:lineno is the throw site the browser already resolved; the stack (when
+    // there is one) adds the CALLER, which is usually what explains the crash.
+    var at = (e && e.filename ? String(e.filename).split("/").pop().split("?")[0] : "") + (e && e.lineno ? ":" + e.lineno : "");
+    var chain = frames(e && e.error);
+    reportError(e && e.message ? e.message : "script error", chain || at);
   });
   window.addEventListener("unhandledrejection", function (e) {
     var r = e && e.reason;
-    reportError(r && r.message ? r.message : String(r || "unhandled rejection"), "promise");
+    // "promise" alone told us nothing; keep it only as the fallback when there's no stack.
+    reportError(r && r.message ? r.message : String(r || "unhandled rejection"), frames(r) || "promise");
   });
   // Let panel code report a handled-but-notable failure (e.g. a failed api() call):
   //   window.LFH_ERRLOG.report("save failed", "POST /orders")
