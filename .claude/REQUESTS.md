@@ -641,3 +641,30 @@ assigns sections). Storage is `staff_users.assigned_tables integer[]`, which rid
   accidentally locked out. Verified on the backup DB: 13/13 live waiters hold every table
   (the 14th is on the soft-deleted "ZZ Clone Leak Test", which has no settings row and
   blocks logins anyway), and a freshly created waiter came out with all 30.
+
+## 2026-07-30 — QA sweep of waiter sections (owner: "find other bugs like this too, make sure everything works perfectly")
+
+Hunting the same CLASS as the off-plan-table bug: real data breaking an assumption. Four
+found, all fixed and verified in a real browser.
+
+- [x] **The waiter tablet never drew a table above `table_count`.** The manager panel got
+  this fix on 2026-07-06 (`floorDrawCount`); the tablet was never given it, so the floor
+  simply stopped at `table_count`. **Live impact on the backup: an UNPAID ₹262.50 order on
+  table 48 (30-table floor), sitting since 26 July, that no waiter could see or settle.**
+  The tablet now uses the same helper. Pre-existing — not caused by sections.
+- [x] **Raising the table count orphaned the new tables** (mig **225**). Floor 30 → 34 left
+  T31-T34 in nobody's section: invisible on every tablet and every write refused 403.
+  Verified before the fix. A trigger on `settings.table_count` now hands new tables to every
+  waiter who HAS a section (a benched waiter with an empty section stays benched), plus a
+  one-off backfill for sections that already stopped short.
+- [x] **A DISABLED waiter counted as covering a table.** The "N tables nobody serves" warning
+  stayed silent about a table whose only holder couldn't log in, and the bulk "give them to
+  everyone" buttons handed tables to disabled accounts — so the warning wouldn't clear and
+  the button looked broken. Gap logic + bulk actions now count only waiters who can sign in.
+- [x] **Phantom tables in BOTH floors.** Extending the drawn RANGE to the highest occupied
+  table rendered every number in between as a fictional empty table — 48 tiles on a 30-table
+  floor, and hundreds for a restaurant shrunk from 300. Both panels now draw the floor plan
+  plus the occupied off-plan tables only (31 tiles, verified in-browser on both).
+- [x] **New permanent guard `scripts/verify-sections.mjs`** pins all of it (10 checks;
+  `BASE=… node scripts/verify-sections.mjs`). `verify-board-sig` and `verify-manager-hidden`
+  (34 checks) still pass.

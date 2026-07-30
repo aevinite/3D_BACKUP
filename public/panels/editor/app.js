@@ -1363,11 +1363,20 @@ const secName = (w) => (w.name || w.username || "Waiter").trim();
 function secHolders(i) {
   return (state.sections?.waiters || []).filter((w) => secTables(w).includes(Number(i)));
 }
+// Only a waiter who can actually LOG IN covers a table. A disabled account keeps its
+// section in the database, so counting it made the gap warning go quiet about a table that
+// was in truth invisible on every tablet — the disabled person can't sign in to serve it.
+// (QA sweep 2026-07-30, same class as the off-plan-table bug.)
+const secLiveHolders = (i) => secHolders(i).filter((w) => w.active !== false);
+// The people a bulk fix should hand tables to. Handing a table to a DISABLED account looks
+// like it worked but covers nothing — the gap warning would stay up and the button would
+// seem broken.
+const secActiveWaiters = () => (state.sections?.waiters || []).filter((w) => w.active !== false);
 // Tables nobody serves — the state that silently loses orders.
 function secGaps() {
   const n = state.sections?.tableCount || 0;
   const out = [];
-  for (let i = 1; i <= n; i++) if (!secHolders(i).length) out.push(i);
+  for (let i = 1; i <= n; i++) if (!secLiveHolders(i).length) out.push(i);
   return out;
 }
 // "1 2 3 4 6" → "1–4, 6". Same compaction the waiter sees on their own tablet.
@@ -1450,10 +1459,16 @@ function tableSectionsCardHtml() {
     const n = s.tableCount || 0;
     let cells = "";
     for (let i = 1; i <= n; i++) {
+      // A table is only really covered by someone who can sign in. A disabled holder is
+      // shown (so you can see who it WAS) but the cell still reads as a gap.
       const hold = secHolders(i);
-      cells += `<button class="sec-tcell${hold.length ? "" : " sec-tcell-gap"}" type="button" data-sec-table="${i}">
+      const live = secLiveHolders(i);
+      const label = live.length ? esc(live.map(secName).join(", "))
+        : hold.length ? `${esc(hold.map(secName).join(", "))} — disabled`
+        : "nobody";
+      cells += `<button class="sec-tcell${live.length ? "" : " sec-tcell-gap"}" type="button" data-sec-table="${i}">
         <b>T${i}</b>
-        <span>${hold.length ? esc(hold.map(secName).join(", ")) : "nobody"}</span>
+        <span>${label}</span>
       </button>`;
     }
     list = `<div class="sec-tgrid">${cells}</div>`;
@@ -1517,7 +1532,7 @@ function openSectionsModal() {
     const fx = e.target.closest("[data-sec-fixgaps]");
     if (fx) return (async () => {
       const gaps = secGaps(); if (!gaps.length) return;
-      for (const w of (state.sections?.waiters || [])) {
+      for (const w of secActiveWaiters()) {
         await saveWaiterTables(w.id, Array.from(new Set(secTables(w).concat(gaps))).sort((a, b) => a - b));
       }
       toast(`${gaps.length} table${gaps.length === 1 ? "" : "s"} now covered.`);
@@ -1526,7 +1541,7 @@ function openSectionsModal() {
     if (al) return (async () => {
       if (!(await confirmDialog("Give every table to every waiter? They'll each see the whole floor again — you can then take tables away one by one.", "Give all"))) return;
       const all = Array.from({ length: state.sections?.tableCount || 0 }, (_, k) => k + 1);
-      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, all);
+      for (const w of secActiveWaiters()) await saveWaiterTables(w.id, all);
     })();
     const cl = e.target.closest("[data-sec-clear]");
     if (cl) return (async () => {
@@ -4578,7 +4593,7 @@ function bindEditor() {
   // someone has already set up deliberately.
   { const gb = ed.querySelector("[data-sec-fixgaps]"); if (gb) gb.onclick = async () => {
       const gaps = secGaps(); if (!gaps.length) return;
-      for (const w of (state.sections?.waiters || [])) {
+      for (const w of secActiveWaiters()) {
         await saveWaiterTables(w.id, Array.from(new Set(secTables(w).concat(gaps))).sort((a, b) => a - b));
       }
       toast(`${gaps.length} table${gaps.length === 1 ? "" : "s"} now covered.`);
@@ -4586,7 +4601,7 @@ function bindEditor() {
   { const ab = ed.querySelector("[data-sec-all]"); if (ab) ab.onclick = async () => {
       if (!(await confirmDialog("Give every table to every waiter? They'll each see the whole floor again — you can then take tables away one by one.", "Give all"))) return;
       const all = Array.from({ length: state.sections?.tableCount || 0 }, (_, k) => k + 1);
-      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, all);
+      for (const w of secActiveWaiters()) await saveWaiterTables(w.id, all);
     }; }
   { const cb2 = ed.querySelector("[data-sec-clear]"); if (cb2) cb2.onclick = async () => {
       // floorwide: this is the scarier look, and it earns it — while sections are on, every
@@ -5861,11 +5876,21 @@ function floorNeedsCardHtml() {
 // count can still be OCCUPIED (e.g. the count was lowered while it had a live order). Extend
 // the drawn range to cover any such table so it never vanishes from the grid / "to accept" /
 // stats (and its bill stays reachable/payable). (fixed 2026-07-06)
-function floorDrawCount(baseN) {
-  let hi = baseN;
+// floorTableList(baseN): the table numbers to draw — the floor plan plus any occupied table
+// ABOVE it, and nothing in between. This used to return a bigger MAX instead of a list, so
+// the grid drew every number up to the highest occupied one: a 30-table floor with a stray
+// order on T48 rendered 48 tiles, 17 of them tables that don't exist (and a restaurant that
+// shrank from 300 would render hundreds of phantoms). QA sweep 2026-07-30 — the waiter
+// tablet now uses the identical helper, so the two floors always agree.
+function floorTableList(baseN) {
+  const out = [];
+  for (let i = 1; i <= baseN; i++) out.push(i);
   const tiles = (state.summary && state.summary.tiles) || {};
-  for (const k in tiles) { const num = parseInt(k, 10); if (Number.isFinite(num) && num > hi) hi = num; }
-  return hi;
+  const extras = Object.keys(tiles)
+    .map((k) => parseInt(k, 10))
+    .filter((k) => Number.isFinite(k) && k > baseN)
+    .sort((a, b) => a - b);
+  return out.concat(extras);
 }
 function floorAcceptCardHtml() {
   const s = state.data.settings || {};
@@ -5875,7 +5900,7 @@ function floorAcceptCardHtml() {
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   const rows = [];
-  for (let i = 1; i <= floorDrawCount(n); i++) {
+  for (const i of floorTableList(n)) {
     const ts = tableTileState(i);
     if (ts.hasNew) rows.push({ t: i, meta: ts.meta || "" });
   }
@@ -5895,7 +5920,7 @@ function floorStatsHtml() {
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   let cOcc = 0, cPay = 0, cNew = 0, cCall = 0;
-  for (let i = 1; i <= floorDrawCount(n); i++) {
+  for (const i of floorTableList(n)) {
     const { st, pay, hasNew, hasCall } = tableTileState(i);
     if (st !== "free" && st !== "req") cOcc++;
     if (pay === "red" || st === "bill") cPay++;
@@ -5968,7 +5993,7 @@ function floorHtml() {
   }
 
   let tiles = "";
-  for (let i = 1; i <= floorDrawCount(n); i++) {
+  for (const i of floorTableList(n)) {
     tiles += floorTileHtml(i); // SHARED tile builder — single source of truth (full render + patch)
   }
   // The header keeps ONLY the safe Refresh button. Open all / Close all used to

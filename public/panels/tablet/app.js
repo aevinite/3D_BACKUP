@@ -453,6 +453,34 @@ function needsAttention(i) {
 
 function tableCount() { return Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12); }
 
+// floorDrawCount: how far the grid actually draws. Normally 1…table_count, but a table
+// numbered ABOVE the current count can still be OCCUPIED — the count was lowered while it
+// had a live order, so the summary RPC keeps returning it (generate_series ∪ open sessions
+// ∪ live orders). Without this the waiter's floor simply stops at table_count and that
+// table's bill is unreachable: found on the live backup 2026-07-30 with an UNPAID order
+// sitting on table 48 of a 30-table floor, invisible to every waiter.
+//
+// The manager panel got exactly this fix on 2026-07-06 (floorDrawCount in editor/app.js);
+// the waiter tablet was never given it. This is that same fix, kept deliberately identical.
+// Destination pickers (shift / merge / move) still use tableCount() — you may take a party
+// OFF an off-plan table, but never send one TO a table that isn't on the floor plan.
+// Returns the LIST of table numbers to draw — the floor plan (1…table_count) plus any
+// occupied table ABOVE it, and nothing else. Deliberately a list and not a bigger max:
+// stretching the range to the highest number drew every gap in between as a phantom empty
+// table (a 30-table floor with one order on T48 rendered 48 tiles, 17 of them fictional —
+// and a stress restaurant that shrank from 300 would render hundreds). QA sweep 2026-07-30.
+function floorTableList() {
+  const n = tableCount();
+  const out = [];
+  for (let i = 1; i <= n; i++) out.push(i);
+  const tiles = (state.summary && state.summary.tiles) || {};
+  const extras = Object.keys(tiles)
+    .map((k) => parseInt(k, 10))
+    .filter((k) => Number.isFinite(k) && k > n)
+    .sort((a, b) => a - b);
+  return out.concat(extras);
+}
+
 // ── Waiter sections (mig 222) ────────────────────────────────────────────────
 // `my_tables` comes down with the floor summary: an ARRAY = this waiter only serves
 // those tables; NULL/absent = not restricted (the admin, a manager/owner looking in, or
@@ -674,9 +702,8 @@ function tileHtml(i) {
 // place with byte-identical markup. Their buttons are wired ONCE by bindFloorDelegation on the
 // stable #counts / #floorNav containers, so rewriting innerHTML never orphans a handler.
 function floorFilterCounts() {
-  const n = tableCount();
   let cAll = 0, cNeeds = 0, cOpen = 0, cFree = 0;
-  for (let i = 1; i <= n; i++) {
+  for (const i of floorTableList()) {    // what we DRAW, incl. occupied off-plan tables
     if (!inMySection(i)) continue;       // sections: count MY tables, not the restaurant's
     cAll++;
     if (needsAttention(i)) cNeeds++;
@@ -698,7 +725,7 @@ function floorNavHtml() {
 function renderFloor() {
   bindFloorDelegation(); // attach the ONE delegated tile/quick/chip handler (boolean-guarded)
   const _t0 = performance.now();
-  const n = tableCount();
+
   const countsEl = document.getElementById("counts");
   if (countsEl) countsEl.innerHTML = floorCountsHtml();
   const navEl = document.getElementById("floorNav");
@@ -706,7 +733,7 @@ function renderFloor() {
   renderMySection();               // sections: "Your tables · 1-6" (no-op when unrestricted)
 
   let html = "";
-  for (let i = 1; i <= n; i++) {
+  for (const i of floorTableList()) {       // floor plan + any occupied off-plan table
     if (!passesFilter(i)) continue;        // SHARED predicate — patch path agrees on visibility
     html += tileHtml(i);                   // SHARED tile builder — single source of truth
   }
