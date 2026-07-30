@@ -1858,7 +1858,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // they're already the manager; force=true is their "close anyway" override.
     if (a === "sessions" && c === "close") {
       const result = await closeSession(b, { force: !!(body && body.force === true) }, { panel: "editor", deviceId: dev, restaurantId: rid });
-      if (!result.ok) return err(result.message, result.status);
+      // Carry the REASON CODE, not just the sentence. The panel used to decide whether to
+      // offer "close anyway" by searching the message for the words "owes money" — so the
+      // cooking-only refusal ("still has orders cooking — serve them, or close anyway")
+      // matched nothing and the override button never appeared, leaving the table stuck.
+      // reason is 'unpaid' | 'cooking' | 'both' | 'not_found' (lib/sessionClose.ts).
+      if (!result.ok) return NextResponse.json({ error: result.message, reason: result.reason }, { status: result.status });
       return ok(result.session);
     }
     if (a === "sessions" && c === "auto-approve") {
