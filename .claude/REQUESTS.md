@@ -770,3 +770,25 @@ Owner: "check again for any other bugs, test it, make sure everything works on l
   for ~1s at boot before `whoami` lands and hides them. Pre-existing, cosmetic (the server
   refuses everything meanwhile), and the safe fix changes every panel's boot path — flagged
   for the owner to decide rather than bundled into this change.
+
+## 2026-07-30 — Waiter sections released to AV LIVE (owner: "ship this to av live too")
+
+- [x] **Ported by 3-way MERGE, not a copy.** AV live has its own lines in the same files and
+  has **no payroll module** (mig 220 was never released there), so a wholesale copy both
+  deleted AV-live work and dragged in code that doesn't compile there. `app/api/owner/staff/
+  route.ts` and `app/owner/staff/page.tsx` were rebuilt from AV live's OWN versions with only
+  the sections bits re-applied, and the per-person profile page was dropped.
+- [x] **`npm run build` in the live repo caught the one bad resolution** (a payroll block that
+  had leaked in). It also needed `npm install` first — `qrcode` was declared but not installed
+  locally, a pre-existing AV live issue.
+- [x] **Migrations 222 / 223 / 225 applied to the AV live database** via a guarded applier that
+  refuses unless the project ref is exactly AV live's. **Aangan's waiter now holds all 10
+  tables (A1–B2)** — the owner's requirement that existing tablet users keep full access.
+- [x] **Another session was committing to the AV live repo at the same time** (two commits
+  landed on my branch mid-work, and origin had already moved). Rebased onto the published tip;
+  git skipped both duplicate patches by itself. Nothing of theirs was clobbered.
+- [x] Deployed (35fcba9) and verified on **www.aevinite.shop**: health 200, the shipped panel
+  carries both doors + the create picker, and the section editor endpoint returns Aangan's
+  waiter holding every table. Note aevinite.shop 308-redirects to www — checking without `-L`
+  reads as "the code didn't ship".
+- [x] Both stacks READY. Sections are always on (no admin toggle) on both.
