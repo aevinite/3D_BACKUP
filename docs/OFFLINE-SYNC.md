@@ -37,7 +37,9 @@ browser's dinosaur page, mid-service. Now a service worker keeps three per-devic
 - **`cache.match` must pass `ignoreVary: true`.** Next sends `Vary`, so a lookup by bare
   URL silently missed every saved read (found in testing: the guest menu opened but listed
   no dishes).
-- **A saved copy expires.** Nothing older than **12 hours** is served (`MAX_STALE_MS`), and
+- **A saved copy expires.** Nothing older than **2 hours** is served (`MAX_STALE_MS` — the
+  owner chose the short window on 2026-07-30, accepting that a longer outage comes back to
+  an empty screen rather than a stale board), and
   each cache is capped (`CAPS`) with the oldest entries dropped — so a device can't show
   yesterday's figures, and no cache grows forever.
 - **Slow ≠ offline.** A read that merely hangs falls back to the saved copy after 6s, but the
@@ -156,11 +158,11 @@ to an offline-only test — keep online assertions in any test you add here.
       not cached). Guest menu text/images do.
 - [ ] **Clash checks are table-scoped.** Actions with no table (parcel, banquet standalone,
       menu edits) are not clash-checked — a stale menu edit can still win last-write.
-- [ ] **OWNER DECISION PENDING:** with no internet, a device that is still signed in opens the
+- [x] **OWNER DECISION (settled):** with no internet, a device that is still signed in opens the
       saved screens without reaching the login middleware (a service worker answering from
-      cache never does). Bounded to 12 hours and wiped on sign-in/sign-out. If the owner wants
+      cache never does). Bounded to 2 hours and wiped on sign-in/sign-out. If the owner wants
       it tighter, the options are a shorter expiry or asking for the manager PIN before showing
-      saved figures.
+      saved figures. **DECIDED 2026-07-30: 2 hours.**
 - [ ] **New panels/features** must include the connection badge and wire their writes through
       the outbox + `withIdempotency` (see NEW-FEATURE CHECKLIST in CLAUDE.md).
 - [ ] **Duplicate-ack has no body** — a replay that the server already completed returns
