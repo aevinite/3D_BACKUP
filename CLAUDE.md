@@ -560,6 +560,27 @@ So tripping a limit during our own work counts as a BUG in the test, not a findi
   `/aevinite` → rate limits and say so.
 - **Don't leave anything re-logging in on a timer** (watchers, polling scripts, parallel panels).
 
+**NOW ENFORCED, not just asked for (2026-07-30).** Two more of these slipped through, so the rule
+has teeth:
+
+- **Use the shared helpers, never a hand-rolled login.** `scripts/sweep/login.mjs` exports
+  `loginAs()` — which now CACHES the session, so five browser contexts cost ONE login (proven:
+  1 login row for 5 contexts, all with a working session) — and `adminCookie()`/`adminHeaders()`,
+  which present the admin gate cookie and make **zero** login requests ever.
+- **Never POST to `/api/staff-login` with JSON.** That route reads FORM data, so a JSON body sends
+  an EMPTY password: three "checks" became three wrong-password attempts and raised an
+  `admin_login` limit event about the owner's own panel. If you need admin API access from a
+  script, use `adminHeaders()` — no request, no failed-login row, no alert.
+- **A test that deliberately trips a wall must sweep up in the same run.** Deleting the test users
+  does NOT clear `rate_limit_events` / `rate_limit_counters` / `login_throttle`, and an OPEN event
+  sits in the admin's Problems list looking like a real restaurant in trouble
+  (`verify-staff-accounts.mjs` now clears its own rows).
+- **Guarded by `npm run verify:test-safety`** (`scripts/verify-test-safety.mjs`) — checks each of
+  the mistakes above, proven to fail on all three. It also runs AUTOMATICALLY as a PostToolUse hook
+  after any edit under `scripts/` or `tests/`: silent when clean, and it REFUSES the edit with an
+  explanation when a script could raise an alert. Add a check there when a new way to trip a limit
+  appears.
+
 Code: `lib/rateLimit.ts` (counter + alert), `lib/alerts.ts` (phone ping), mig 205/208/214.
 
 ## 👆 A USER'S TAP MUST NEVER VANISH IN SILENCE (owner, 2026-07-30 — every panel, every dialog)
