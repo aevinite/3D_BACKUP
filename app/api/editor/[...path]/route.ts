@@ -11,7 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { replayClash, clashJson, fieldClash } from "@/lib/clash";
+import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
@@ -1307,6 +1307,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const clash = await replayClash(req, rid, a, b, c, body as Record<string, unknown> | null);
     if (clash) return clashJson(clash);
 
+    // ── NO SILENT OVERWRITES (owner, 2026-07-30) ──────────────────────────────────
+    // If the screen told us what it was editing FROM, refuse when someone else has since
+    // changed it — and tell that person what it says now. One gate for every action here:
+    // a feature opts in from its CALL SITE (see the NEW-FEATURE CHECKLIST in CLAUDE.md), so
+    // this cannot be forgotten on the server side when a new endpoint is added.
+    const overwrite = await expectClash(req, rid);
+    if (overwrite) return clashJson(overwrite);
+
     // customer-capture — save the guest's name+number at bill time, with consent
     // (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent. Records
     // one visit for the table's session (idempotent), links devices, bumps the
@@ -2155,12 +2163,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
     if (a === "items" && c === "note") {
-      // TWO DEVICES, ONE DISH: if someone else changed this while this person had the
-      // edit modal open, refuse instead of overwriting them — the second person is told what
-      // it says now (see lib/clash.ts fieldClash). Only runs when the panel sent what it was
-      // editing from, so an older client or any other caller is unaffected.
-      const fcNote = await fieldClash(req, { table: "order_items", id: b, rid, fields: ["note"], label: "this dish's kitchen note" });
-      if (fcNote) return clashJson(fcNote);
       if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404); // B15 scoping
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
@@ -2178,12 +2180,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // all items"): unlike qty, this never touches money, so served/ready/paid is fine.
     // Still refused for a cancelled order — nothing was ever served, nothing to annotate.
     if (a === "items" && c === "removed") {
-      // TWO DEVICES, ONE DISH: if someone else changed this while this person had the
-      // edit modal open, refuse instead of overwriting them — the second person is told what
-      // it says now (see lib/clash.ts fieldClash). Only runs when the panel sent what it was
-      // editing from, so an older client or any other caller is unaffected.
-      const fcRemoved = await fieldClash(req, { table: "order_items", id: b, rid, fields: ["removed"], label: "this dish's allergens" });
-      if (fcRemoved) return clashJson(fcRemoved);
       const raw = Array.isArray(body?.removed) ? body.removed : [];
       const removed = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
       // Fetch the CURRENT state so we can diff old→new and keep the per-dish edit

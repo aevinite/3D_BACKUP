@@ -757,7 +757,11 @@ async function run() {
       const both = await inPanelAsync(t1, async () => {
         const id = window.__ITEM, was = window.__WAS;
         const attempt = async (note) => {
-          try { await api("POST", "/items/" + id + "/note", { note }, { expect: { note: was } }); return { note, ok: true }; }
+          // The documented shape (CLAUDE.md → NEW-FEATURE CHECKLIST item 11): say WHICH row and
+          // which fields you were editing from. A malformed expectation is ignored by design,
+          // so the test must use the real one or it proves nothing.
+          const expect = { table: "order_items", id, fields: { note: was } };
+          try { await api("POST", "/items/" + id + "/note", { note }, { expect }); return { note, ok: true }; }
           catch (e) { return { note, ok: false, status: e.status, clash: e.data && e.data.clash ? e.data.clash : null, msg: e.message }; }
         };
         const a = await attempt("more spicy");

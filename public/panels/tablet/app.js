@@ -291,13 +291,16 @@ const pricePrompt = (title, current) => new Promise((resolve) => {
 async function actGated(method, path, body, opts = {}) {
   try {
     let r;
+    // opts.expect (optional) says what the screen was editing FROM, so a PIN-gated value edit
+    // (a discount, say) gets the same no-silent-overwrite protection as a plain one.
+    const apiOpts = opts.expect ? { expect: opts.expect } : undefined;
     try {
-      r = await api(method, path, body);
+      r = await api(method, path, body, apiOpts);
     } catch (e) {
       if (!/manager pin/i.test(String(e && e.message))) throw e;
       let pin = await pinPrompt(opts.message);
       while (pin) {
-        try { r = await api(method, path, { ...(body || {}), managerPin: pin }); break; }
+        try { r = await api(method, path, { ...(body || {}), managerPin: pin }, apiOpts); break; }
         catch (e2) {
           if (/manager pin/i.test(String(e2 && e2.message))) { pin = await pinPrompt(opts.message, "That PIN didn't match — try again."); continue; }
           throw e2;
@@ -966,12 +969,14 @@ function openDishEditModal(itemId) {
       // same thing while it was open, the server refuses and says what it holds now, instead
       // of one waiter's "more spicy" silently wiping another's "less spicy".
       if (note !== String(item.note || "").trim()) {
-        await api("POST", `/items/${item.id}/note`, { note }, { expect: { note: String(item.note || "") } });
+        await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
       }
       if (!same(newItemRemoved, itemRemoved)) {
-        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { removed: itemRemoved } });
+        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
       }
-      if (order.id && !same(newOrderAllergies, orderAllergies)) await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies });
+      if (order.id && !same(newOrderAllergies, orderAllergies)) {
+        await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } });
+      }
       close();
       await load(); if (!state.ordering) renderPanel();
       toast("Dish updated");
@@ -1353,11 +1358,12 @@ function renderPanel() {
     const id = chip.dataset.alg, slug = chip.dataset.slug;
     const o = (state.data.orders || []).find((x) => x.id === id);
     if (!o) return;
-    const cur = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
+    const wasAllergies = Array.isArray(o.allergies) ? [...o.allergies] : []; // what the screen showed
+    const cur = new Set(wasAllergies.map((x) => String(x).toLowerCase()));
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
     o.allergies = [...cur];        // OPTIMISTIC: update local state now so any re-render reflects it
     chip.classList.toggle("on");   // INSTANT visual feedback — before this it only hit the server, so the tap felt dead ("allergy not clicking")
-    act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }));
+    act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }));
   }));
   const ob = $("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
@@ -1909,7 +1915,13 @@ const act = async (fn) => {
     const r = await fn();
     if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: offline queue — friendly note, skip the offline GET
     await load();
-  } catch (e) { toast("Failed: " + e.message, false); }
+  } catch (e) {
+    // Someone else changed the same thing first: say so plainly and refresh, rather than
+    // "Failed: clash_changed_elsewhere".
+    const clash = e && e.data && e.data.clash;
+    if (clash) { toast(clash.plain, false, 9000); load().catch(() => {}); return; }
+    toast("Failed: " + e.message, false);
+  }
 };
 
 // Staff qty stepper on an ALREADY-PLACED dish. Reads the LIVE qty from state (never the
@@ -1929,7 +1941,14 @@ function bumpItemQty(itemId, delta) {
   if (next === cur) return;
   it.qty = next;                 // optimistic: local state + the re-rendered buttons now agree
   renderPanel();
-  api("POST", `/items/${itemId}/qty`, { qty: next }).catch((e) => { toast("Failed: " + e.message, false); load().catch(() => {}); });
+  // `expect` = the count this screen was showing. If someone else changed it meanwhile the
+  // server refuses and says what it is now, instead of one waiter's 3 quietly becoming 1.
+  api("POST", `/items/${itemId}/qty`, { qty: next }, { expect: { table: "order_items", id: itemId, fields: { qty: cur } } })
+    .catch((e) => {
+      const clash = e && e.data && e.data.clash;
+      toast(clash ? clash.plain : "Failed: " + e.message, false, clash ? 9000 : undefined);
+      load().catch(() => {});
+    });
   clearTimeout(qtyReconcileTimer);
   qtyReconcileTimer = setTimeout(() => load().catch(() => {}), 700);
 }
@@ -2498,14 +2517,17 @@ function openDiscountModal(order, opts = {}) {
     if (tperm("tablet_discount") === "pin") {
       // PIN entry already masks the round-trip; skip the optimistic write so a cancelled PIN
       // can't leave a discount showing that never saved.
-      actGated("POST", `/orders/${order.id}/discount`, body, { message: "Enter a manager PIN to apply this discount.", toast: amount > 0 ? `Discount ${inr(amount)} applied` : "Discount removed" });
+      actGated("POST", `/orders/${order.id}/discount`, body, { message: "Enter a manager PIN to apply this discount.", toast: amount > 0 ? `Discount ${inr(amount)} applied` : "Discount removed", expect: { table: "orders", id: order.id, fields: { discount: Number(order.discount || 0) } } });
     } else {
       // #13: reflect the discount locally NOW (label + due) so the tap feels instant instead of
       // lagging a ~1s server round-trip; act()'s load() reconciles to server truth right after.
+      // Capture what the discount WAS before that optimistic flip — that's what the server
+      // compares against, so two people discounting the same bill can't overwrite each other.
+      const wasDiscount = Number(order.discount || 0);
       order.discount = amount; order.discount_note = amount > 0 ? note : null;
       patchTileFromSlice(order.table_number);
       if (!state.ordering) renderPanel();
-      act(() => api("POST", `/orders/${order.id}/discount`, body));
+      act(() => api("POST", `/orders/${order.id}/discount`, body, { expect: { table: "orders", id: order.id, fields: { discount: wasDiscount } } }));
     }
   };
   ov.querySelector(".disc-apply-btn").onclick = () => save(discAmount);

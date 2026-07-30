@@ -60,54 +60,70 @@ export function replayMarkers(req: NextRequest): { queuedAt: Date } | null {
   return { queuedAt: at };
 }
 
+// Tables a panel may ask us to compare. An allowlist, so a client can never point the check
+// at something it has no business reading.
+const COMPARABLE_TABLES: Record<string, string> = {
+  order_items: "id",
+  orders: "id",
+  sessions: "id",
+  menu_items: "id",
+  categories: "id",
+  filters: "id",
+  settings: "restaurant_id",   // one row per restaurant
+  staff_users: "id",
+  table_tags: "id",
+};
+
 /**
- * TWO PEOPLE, ONE DISH, AT THE SAME MOMENT.
+ * THE ONE CLASH GATE — "did someone else change this while you had it open?"
  *
- * Waiter A opens a dish and types "more spicy". Waiter B, on another tablet, opens the same
- * dish and types "less spicy". Both save within seconds. Without a check the second save
- * simply overwrites the first, nobody is told, and the kitchen cooks the wrong thing while
- * BOTH waiters believe their instruction stands.
+ * Called once per panel write dispatcher, beside the section and replay gates. It does
+ * nothing at all unless the screen SAID what it was editing from:
  *
- * So each panel sends what it was editing FROM (`X-LFH-Expect`, e.g. {"note":"mild"}). If
- * the row no longer holds that value, someone else got there first: we refuse, and tell the
- * second person exactly what it says now so they can decide. FIRST SAVE WINS — the same rule
- * as the offline replay check above, so staff learn one behaviour, not two.
+ *   api("POST", path, body, { expect: { table: "order_items", id, fields: { note: "mild" } } })
  *
- * Returns null when the write may proceed (nothing to compare, or nothing changed).
- * FAILS OPEN on any lookup error — a broken check must never block a real edit.
+ * If the row no longer holds those values, someone got there first: we refuse and tell the
+ * second person what it says NOW. Adding protection to a new feature is therefore one line at
+ * the CALL SITE — no new server code — which is what makes "check every feature" realistic.
+ *
+ * FIRST SAVE WINS, everywhere, deliberately: the same rule as the offline replay check, so
+ * staff learn one behaviour. FAILS OPEN on any lookup problem.
  */
-export async function fieldClash(
-  req: NextRequest,
-  opts: { table: string; id: string; rid: string; fields: string[]; label?: string },
-): Promise<ClashInfo | null> {
-  let expect: Record<string, unknown> | null = null;
+export async function expectClash(req: NextRequest, rid: string): Promise<ClashInfo | null> {
+  type Want = { table?: string; id?: string; fields?: Record<string, unknown>; label?: string };
+  let want: Want | null = null;
   try {
     const raw = req.headers.get("x-lfh-expect");
-    if (!raw) return null; // older client / not an edit that carries an expectation
+    if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    expect = parsed as Record<string, unknown>;
+    want = parsed as Want;
   } catch { return null; }
 
-  // Only the fields the caller names are ever compared, so a client can't ask the server to
-  // compare something it shouldn't.
-  const cols = opts.fields.filter((f) => f in (expect as Record<string, unknown>));
+  const table = String(want?.table || "");
+  const idCol = COMPARABLE_TABLES[table];
+  const id = String(want?.id || "");
+  const fields = want?.fields;
+  if (!idCol || !id || !fields || typeof fields !== "object") return null;
+
+  const cols = Object.keys(fields).filter((c) => /^[a-z_][a-z0-9_]*$/.test(c)).slice(0, 8);
   if (!cols.length) return null;
 
   try {
-    const res = await sb.from(opts.table).select(cols.join(", ")).eq("id", opts.id).eq("restaurant_id", opts.rid).maybeSingle();
-    if (res.error || !res.data) return null; // can't read it → let the handler decide
+    let q = sb.from(table).select(cols.join(", ")).eq(idCol, id);
+    // Tenant boundary: service-role bypasses RLS, so scope every comparison to this
+    // restaurant — a foreign id must never be readable through this check.
+    if (idCol !== "restaurant_id") q = q.eq("restaurant_id", rid);
+    const res = await q.maybeSingle();
+    if (res.error || !res.data) return null;
     const row = res.data as unknown as Record<string, unknown>;
     for (const c of cols) {
-      const mine = expect[c];
-      const theirs = row[c];
-      if (sameValue(mine, theirs)) continue;
-      const what = opts.label || "this";
-      const now = describe(theirs);
+      if (sameValue((fields as Record<string, unknown>)[c], row[c])) continue;
+      const what = want?.label || readable(c);
       return {
         code: "clash_changed_elsewhere",
-        plain: `Someone else changed ${what} while you had it open — it now says ${now}.`,
-        todo: `Your change was NOT saved. Look at what it says now and redo yours if it's still right.`,
+        plain: `Someone else changed ${what} while you had it open — it now says ${describe(row[c])}.`,
+        todo: "Your change was NOT saved. Look at what it says now and redo yours if it's still right.",
         retryable: false,
       };
     }
@@ -118,7 +134,7 @@ export async function fieldClash(
 }
 
 // Compare loosely enough that formatting isn't treated as a change: trimmed text, and lists
-// compared as sets (the allergen list's order is not meaningful).
+// compared as sets (an allergen list's order is not meaningful).
 function sameValue(a: unknown, b: unknown): boolean {
   const norm = (v: unknown) => (v == null ? "" : String(v).trim());
   if (Array.isArray(a) || Array.isArray(b)) {
@@ -134,6 +150,26 @@ function describe(v: unknown): string {
   if (Array.isArray(v)) return v.length ? `“no ${v.join(", ")}”` : "nothing to avoid";
   const s = v == null ? "" : String(v).trim();
   return s ? `“${s}”` : "nothing";
+}
+
+// Column name → something a person would recognise on screen.
+function readable(col: string): string {
+  const map: Record<string, string> = {
+    note: "this dish's kitchen note",
+    removed: "this dish's allergens",
+    qty: "the quantity",
+    discount: "the discount",
+    discount_note: "the discount note",
+    title: "the name",
+    price: "the price",
+    sold_out: "the sold-out mark",
+    available: "whether it's available",
+    status: "the status",
+    payment_status: "the payment status",
+    table_count: "the number of tables",
+    allergies: "the allergens",
+  };
+  return map[col] || `the ${col.replace(/_/g, " ")}`;
 }
 
 type SessionRow = Record<string, unknown> & { id?: string; status?: string; closed_at?: string | null; created_at?: string };
