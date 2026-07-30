@@ -44,8 +44,8 @@ async function api(path, { method = "GET", body, cookie } = {}) {
 }
 
 const created = []; // {id, name, password}
-async function createUser(name, role, { phone, password } = {}) {
-  const r = await api("/api/admin/users", { method: "POST", cookie: adminCookie, body: { name, role, phone, password } });
+async function createUser(name, role, { phone, password, tables } = {}) {
+  const r = await api("/api/admin/users", { method: "POST", cookie: adminCookie, body: { name, role, phone, password, tables } });
   if (r.status === 200 && r.json?.id) created.push({ id: r.json.id, name, password: r.json.password });
   return r;
 }
@@ -71,10 +71,17 @@ async function createUser(name, role, { phone, password } = {}) {
     "zztest Alpha", "zztest Beta", "zztest Gamma", "zztest Delta", "zztest Echo",
     "zztest Foxtrot", "zztest Golf", "zztest Hotel", "zztest India", "zztest Juliet",
   ];
+  // A WAITER (tablet role) must be given at least one table — that is deliberate product
+  // behaviour, not a bug: "an empty pick is refused rather than quietly creating a waiter whose
+  // tablet shows nothing" (lib/tableAssign.ts, owner's choice). This script predates it, so every
+  // tablet-role create was answered 400 and the user never landed in `created` — which is why it
+  // died later on `undefined.password`. Give waiters a table, the way the real form does. (2026-07-30)
   for (let i = 0; i < names.length; i++) {
     const withPhone = i % 2 === 0;
-    const r = await createUser(names[i], roles[i % 3], withPhone ? { phone: "555000" + i } : {});
-    check(`create #${i + 1} "${names[i]}" (${roles[i % 3]})`, r.status === 200 && !!r.json?.id, `status ${r.status} ${JSON.stringify(r.json)}`);
+    const role = roles[i % 3];
+    const extra = { ...(withPhone ? { phone: "555000" + i } : {}), ...(role === "tablet" ? { tables: [1, 2, 3] } : {}) };
+    const r = await createUser(names[i], role, extra);
+    check(`create #${i + 1} "${names[i]}" (${role})`, r.status === 200 && !!r.json?.id, `status ${r.status} ${JSON.stringify(r.json)}`);
   }
 
   // ── 2. EDGE CASES on creation ─────────────────────────────────────────────
@@ -103,7 +110,11 @@ async function createUser(name, role, { phone, password } = {}) {
   check("profile GET ok + needsProfile true", prof1.status === 200 && prof1.json?.needsProfile === true);
   check("profile GET exposes no password_hash", prof1.json && !("password_hash" in prof1.json));
   // confirm with phone
-  const save1 = await api("/api/panel-profile", { method: "POST", cookie: alphaCookie, body: { name: "zztest Alpha", phone: "5551234567" } });
+  // Setup counts as done only when the welcome card's asks are ALL met. For a manager who is
+  // allowed to set their own PIN that includes the PIN (app/api/panel-profile: "must also HAVE a
+  // PIN before setup is complete"), which arrived after this script was written — so name+phone
+  // alone left needsProfile TRUE and three checks below failed on stale expectations, not a bug.
+  const save1 = await api("/api/panel-profile", { method: "POST", cookie: alphaCookie, body: { name: "zztest Alpha", phone: "5551234567", pin: "4729" } });
   check("profile save (confirm) ok", save1.status === 200 && save1.json?.ok === true);
   const prof2 = await api("/api/panel-profile", { cookie: alphaCookie });
   check("after confirm needsProfile=false", prof2.json?.needsProfile === false);
@@ -131,7 +142,9 @@ async function createUser(name, role, { phone, password } = {}) {
   const gamma = created.find((c) => c.name === "zztest Gamma");
   for (let i = 0; i < 5; i++) await api("/api/panel-login", { method: "POST", body: { username: "zztest Gamma", password: "nope" + i } });
   const locked = await api("/api/panel-login", { method: "POST", body: { username: "zztest Gamma", password: gamma.password } });
-  check("account locks after 5 wrong tries", locked.status === 401 && /minute|too many/i.test(locked.json?.error || ""), locked.json?.error);
+  // A lockout answers 429 Too Many Requests (the honest code for "wait"); this check was
+  // written when it was a flat 401. Accept either so it tests the BEHAVIOUR, not the old code.
+  check("account locks after 5 wrong tries", (locked.status === 429 || locked.status === 401) && /minute|too many/i.test(locked.json?.error || ""), `status ${locked.status} · ${locked.json?.error}`);
 
   // ── 8. ROLE GATE: a tablet cookie can't hit a kitchen-only API ────────────
   const tabUser = created.find((c, i) => names.indexOf(c.name) % 3 === 2); // a tablet role
@@ -162,6 +175,33 @@ async function createUser(name, role, { phone, password } = {}) {
     if (r.status === 200) del++;
   }
   check(`cleanup deleted all ${created.length} test users`, del === created.length, `deleted ${del}`);
+
+  // ── 10b. CLEAR THE LIMIT ROWS THIS RUN CREATED ────────────────────────────
+  // Section 7 deliberately sends 5 wrong passwords to prove the lockout works. That is the one
+  // legitimate reason to reach a limit — but it writes rate_limit_events + a login_throttle row,
+  // and an OPEN event shows up in the admin's Problems list and can ping the owner's PHONE about
+  // a restaurant that is perfectly fine. Alerts only stay useful while every one of them is real,
+  // so a test that trips a wall must sweep up after itself. Deleting the users above does NOT
+  // remove these rows. Service-role only, scoped to the zztest subjects. (2026-07-30)
+  const svcHeaders = {
+    apikey: env.SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${env.SUPABASE_SERVICE_ROLE_KEY}`,
+    "Content-Type": "application/json",
+  };
+  const sbUrl = env.NEXT_PUBLIC_SUPABASE_URL;
+  let swept = 0;
+  try {
+    // The subject for a staff login is the username, so every row we made mentions "zztest".
+    for (const tbl of ["rate_limit_events", "rate_limit_counters"]) {
+      const r = await fetch(`${sbUrl}/rest/v1/${tbl}?subject=like.*zztest*`, { method: "DELETE", headers: svcHeaders });
+      if (r.ok) swept++;
+      const r2 = await fetch(`${sbUrl}/rest/v1/${tbl}?subject_label=like.*zztest*`, { method: "DELETE", headers: svcHeaders });
+      if (r2.ok) swept++;
+    }
+    // and the per-account lockout counter itself
+    await fetch(`${sbUrl}/rest/v1/login_throttle?key=like.*zztest*`, { method: "DELETE", headers: svcHeaders });
+  } catch { /* never fail the suite on cleanup — but DO report it below */ }
+  check("cleared the rate-limit rows the lockout test created (no phantom alert for the owner)", swept > 0, `swept ${swept}`);
 
   console.log(results.join("\n"));
   console.log(`\n${fail === 0 ? "✅ ALL PASS" : "❌ FAILURES"} — ${pass} passed, ${fail} failed\n`);
