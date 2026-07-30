@@ -12,6 +12,7 @@
 // Data + writes: /api/admin/owners (admin-cookie gated, service-role) — unchanged.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
+import { CopyButton } from "@/components/admin/CopyButton";
 
 type OwnedRest = { id: string; slug: string; name: string; active: boolean; primary: boolean };
 type Owner = {
@@ -682,7 +683,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
             <div style={{ fontSize: 12.5, color: "#86efac" }}>New password for <b>{owner.name}</b> — copy it now, it won&apos;t be shown again:</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
               <code style={{ fontSize: 17, background: "var(--bg)", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{pwReveal}</code>
-              <button style={btn("#3b82f6")} onClick={() => navigator.clipboard?.writeText(pwReveal)}>Copy</button>
+              <CopyButton style={btn("#3b82f6")} text={pwReveal} />
               <button style={btn("#374151")} onClick={() => setPwReveal(null)}>Done</button>
             </div>
           </div>
@@ -829,7 +830,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
             <div style={{ fontSize: 12.5, color: "#86efac" }}>Password — copy it now, it won&apos;t be shown again:</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <code style={{ fontSize: 18, background: "var(--bg)", padding: "8px 12px", borderRadius: 8, letterSpacing: 1 }}>{reveal.password}</code>
-              <button style={btn("#3b82f6")} onClick={() => navigator.clipboard?.writeText(reveal.password)}>Copy</button>
+              <CopyButton style={btn("#3b82f6")} text={reveal.password} />
             </div>
             {reveal.warn && <div style={{ fontSize: 12, color: "#fcd34d" }}>{reveal.warn}</div>}
             <button style={btn("#22c55e")} onClick={() => onCreated(reveal.id)}>Done</button>
