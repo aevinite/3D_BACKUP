@@ -97,12 +97,20 @@ const IS_DEV = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(self.location.hostname)
 const isDevPlumbing = (p) => p.startsWith("/_next/webpack-hmr") || p.startsWith("/__nextjs") || p.includes("/_next/static/webpack/");
 
 // ── install / activate ──────────────────────────────────────────────────────────
+// The last-resort page lives in the SHELL cache — which is WIPED on sign-in and sign-out
+// (so one person's saved screens can't be read by the next). That wipe used to take the
+// offline page with it and it was only restored by the NEXT worker install, so a device
+// that had simply been signed into showed the browser's own error page instead of ours.
+// Every wipe now re-stores it immediately.
+async function precacheOffline() {
+  try {
+    const c = await caches.open(SHELL);
+    await c.addAll([OFFLINE_URL]);
+  } catch { /* best-effort: offlinePage() still has an inline fallback */ }
+}
+
 self.addEventListener("install", (e) => {
-  e.waitUntil(
-    caches.open(SHELL)
-      .then((c) => c.addAll([OFFLINE_URL]).catch(() => {})) // fallback page is best-effort
-      .then(() => self.skipWaiting()),
-  );
+  e.waitUntil(precacheOffline().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (e) => {
@@ -119,7 +127,7 @@ self.addEventListener("message", (e) => {
   if (type === "LFH_CLEAR_DATA") {
     // Logout / switched restaurant → forget every saved read so the next person on this
     // device can't see the previous account's numbers while offline.
-    e.waitUntil(caches.delete(DATA).then(() => caches.delete(SHELL)));
+    e.waitUntil(caches.delete(DATA).then(() => caches.delete(SHELL)).then(precacheOffline));
   } else if (type === "LFH_SW_KILL") {
     e.waitUntil((async () => {
       for (const k of await caches.keys()) if (k.startsWith("lfh-")) await caches.delete(k);
@@ -211,6 +219,32 @@ async function cachedCopy(cacheName, key, opts, clientId) {
   return tagged(hit, at);
 }
 
+// The branded last-resort page. `ignoreVary` matters here for the same reason it does for
+// every other lookup: the stored reply carries a Vary header, and a bare match() builds a
+// request whose headers don't match it — so the page was never found and staff got the
+// browser's own error page instead. (Caught on the live client site: with the network cut,
+// a screen that had never been opened on that device showed nothing at all.)
+async function offlinePage() {
+  try {
+    const c = await caches.open(SHELL);
+    const hit = (await c.match(OFFLINE_URL, { ignoreVary: true })) || (await caches.match(OFFLINE_URL, { ignoreVary: true }));
+    if (hit) { precacheOffline(); return hit; } // re-store in the background if it was the global match
+  } catch { /* fall through */ }
+  try { const net = await fetch(OFFLINE_URL); if (net && net.ok) { precacheOffline(); return net; } } catch { /* really offline */ }
+  // Nothing saved and no network: say the important part inline rather than letting the
+  // browser's error page tell staff nothing.
+  return new Response(
+    '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<body style="margin:0;min-height:100dvh;display:grid;place-items:center;background:#0b1020;color:#e7eefc;' +
+    'font:600 15px/1.5 system-ui,sans-serif;text-align:center;padding:24px">' +
+    '<div><h1 style="font-size:20px;margin:0 0 10px">No internet right now</h1>' +
+    '<p style="color:#b8c5de;margin:0 0 14px">This screen hasn\'t been opened on this device yet.</p>' +
+    '<p style="color:#86efac;margin:0">Nothing you did is lost — anything saved on this device will send itself when the connection is back.</p>' +
+    '<p style="margin:16px 0 0"><a href="" onclick="location.reload();return false" style="color:#38bdf8">Try again</a></p></div></body>',
+    { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
+  );
+}
+
 // React client-side navigation fetches the SAME url with an RSC header; it must not
 // share a cache key with the HTML document, so give it its own suffix.
 const rscKey = (url) => url + (url.includes("?") ? "&" : "?") + "__lfh_rsc=1";
@@ -230,7 +264,7 @@ self.addEventListener("fetch", (event) => {
     // Let the logout itself go to the network untouched, but wipe the device's saved
     // pages + saved reads as it goes, so the next person to open this device offline
     // can't page through the previous account's screens.
-    event.waitUntil(caches.delete(DATA).then(() => caches.delete(SHELL)).catch(() => {}));
+    event.waitUntil(caches.delete(DATA).then(() => caches.delete(SHELL)).then(precacheOffline).catch(() => {}));
     return;
   }
   if (isNever(url.pathname)) return;
@@ -283,8 +317,7 @@ async function handleNav(req, url) {
     live.catch(() => {});
     return (await cachedCopy(SHELL, req.url))
       || (await cachedCopy(SHELL, req.url, { ignoreSearch: true }))
-      || (await caches.match(OFFLINE_URL))
-      || new Response("<h1>Offline</h1>", { status: 503, headers: { "Content-Type": "text/html" } });
+      || (await offlinePage()); // always answers: cache → network → an inline branded page
   }
 }
 

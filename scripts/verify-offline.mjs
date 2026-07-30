@@ -549,6 +549,29 @@ async function run() {
       await slowPage.close();
     }
 
+    // ══ A SCREEN THIS DEVICE HAS NEVER OPENED, offline ═════════════════════════
+    // The last-resort case: nothing saved for this URL and no network. Staff must get the
+    // branded "no internet — nothing you did is lost" page, not the browser's own error
+    // page. This was broken on the first release and no test covered it, because every
+    // other check visits a page while online first.
+    console.log("\n10) A screen never opened on this device, with no internet");
+    const fresh = await ctx.newPage();
+    await fresh.goto(BASE + "/login", { waitUntil: "domcontentloaded" });   // installs the worker
+    await waitControlled(fresh);
+    await ctx.setOffline(true);
+    // A URL that certainly has no saved copy on this device.
+    await fresh.goto(BASE + "/never-opened-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
+    await sleep(1500);
+    const lastResort = (await fresh.locator("body").textContent().catch(() => "")) || "";
+    /No internet right now/i.test(lastResort)
+      ? ok("it shows our own page, not the browser's error page")
+      : bad("the branded offline page was not served", JSON.stringify(lastResort.slice(0, 100)));
+    /Nothing you did is lost/i.test(lastResort)
+      ? ok("and it reassures them their work is safe")
+      : bad("the reassurance text is missing");
+    await ctx.setOffline(false);
+    await fresh.close();
+
     const realErrors = consoleErrors.filter((t) => !/Failed to fetch|net::ERR|offline|503|409|Service Worker/i.test(t));
     realErrors.length === 0 ? ok("no unexpected console errors") : bad(`${realErrors.length} console error(s)`, realErrors.slice(0, 3).join("\n       "));
   } catch (e) {
