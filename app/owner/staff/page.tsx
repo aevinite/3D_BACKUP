@@ -269,7 +269,7 @@ export default function OwnerStaffPage() {
 
   return (
     <>
-      <div className="own-bar"><div className="own-crumb"><span className="cur">Team &amp; pay</span></div></div>
+      <div className="own-bar"><div className="own-crumb"><span className="cur">{restaurants.some((r) => r.modules?.payroll) ? "Team & pay" : "Staff & powers"}</span></div></div>
 
       {/* People first, toggles second — the roster is what an owner opens this page for. */}
       <div className="ost-tabs" role="tablist">
