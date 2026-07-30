@@ -25,12 +25,14 @@ import { AnimatedStatValue } from "@/components/owner/AnimatedNumber";
 //   • payments= settlement + discounts + cancellations (the last two open as detail overlays)
 //   • items   = item sales + category mix + menu engineering (sub-tabs)
 //   • timing  = busy hours + day parts + day of the week (sub-tabs)
-export type RKey = "daysummary" | "sales" | "payments" | "tax" | "items" | "timing" | "team";
+export type RKey = "daysummary" | "sales" | "payments" | "tax" | "items" | "timing" | "team" | "inventory";
 
 // Which server payload a report reads. Merged reports may pull a SECOND payload on demand
 // (items also fetches categories; timing also fetches the money series for day-of-week) —
 // the page requests that extra shape when the report opens.
-export type DataKind = "money" | "daysummary" | "payments" | "dishes" | "categories" | "hourly" | "staffpay" | "staffperf";
+export type DataKind = "money" | "daysummary" | "payments" | "dishes" | "categories" | "hourly" | "staffpay" | "staffperf"
+  // Inventory & stock (mig 227) — one kind per sub-tab, each hitting /api/owner/reports?type=inv*
+  | "invstock" | "invpurchases" | "invusage" | "invwaste" | "invexpenses";
 export type Tone = "accent" | "good" | "warn" | "bad" | "info";
 
 export type ReportMeta = {
@@ -48,6 +50,10 @@ export const REPORTS: Record<RKey, ReportMeta> = {
   // Staff profiles & pay module (mig 220). Two views: what the team COST and was PAID, and how
   // each person is doing. Both owner-only; the card is hidden unless the module is on.
   team:       { key: "team",       label: "Team & pay",    icon: "fa-users",               kind: "staffpay",   tone: "accent", blurb: "Salary and advances you paid out — as cash leaving on the day, and as what each month cost — plus how every person is performing." },
+  // Inventory & stock module (migs 221/224/227). Five views: what's left on the shelf, what
+  // you bought, what your dishes ate, what was thrown away, and the expense book. The card
+  // is hidden entirely unless the module is on for at least one restaurant.
+  inventory:  { key: "inventory",  label: "Inventory & stock", icon: "fa-boxes-stacked",   kind: "invstock",   tone: "accent", blurb: "What's on the shelf right now and what it's worth, everything you bought, what your dishes actually ate, waste, and the expense book — with an honest cost-per-dish." },
 };
 
 export const CATEGORIES: ReportCat[] = [
@@ -56,6 +62,7 @@ export const CATEGORIES: ReportCat[] = [
   { key: "menu",     label: "Menu & items",        icon: "fa-utensils",    keys: ["items"] },
   { key: "ops",      label: "Operations & timing", icon: "fa-clock",       keys: ["timing"] },
   { key: "team",     label: "Team & pay",          icon: "fa-users",       keys: ["team"] },
+  { key: "inventory", label: "Inventory & stock",   icon: "fa-boxes-stacked", keys: ["inventory"] },
 ];
 
 // ── Shared formatting ───────────────────────────────────────────────────────

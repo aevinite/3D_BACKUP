@@ -104,10 +104,21 @@ export async function GET(req: NextRequest) {
       r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false));
   }
 
+  // Same treatment for the inventory module (mig 221/227): the Reports hub hides the
+  // "Inventory & stock" card completely when no owned restaurant has the feature, so it
+  // can never open onto a "not enabled" wall.
+  let inventory = scope.all || !!scope.admin;
+  if (!inventory && modIds.length) {
+    const { data: invRows } = await sb.from("settings")
+      .select("inventory_allowed, inventory_owner_control, inventory_enabled").in("restaurant_id", modIds);
+    inventory = (invRows || []).some((r: Record<string, unknown>) =>
+      r.inventory_allowed === true && (r.inventory_owner_control !== true || r.inventory_enabled !== false));
+  }
+
   return NextResponse.json({
     restaurants,
     totals: { ...totals, restaurantCount: restaurants.length },
     entitlements,
-    modules: { payroll },
+    modules: { payroll, inventory },
   });
 }

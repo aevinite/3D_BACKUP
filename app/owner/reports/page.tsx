@@ -26,6 +26,10 @@ import {
 } from "@/components/owner/reports/kit";
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
+import {
+  InvStockReport, InvPurchasesReport, InvUsageReport, InvWasteReport, InvExpensesReport,
+  InvReportStyles, type InvPayload,
+} from "@/components/owner/reports/InventoryReports";
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
 import { readSnap, writeSnap } from "@/lib/ownerSnap";
@@ -77,7 +81,9 @@ type BodyKey =
   | "daysummary" | "sales" | "avgbill" | "volume" | "weekday"
   | "payments" | "discounts" | "cancellations" | "tax"
   | "dishes" | "categories" | "menu" | "hourly" | "daypart"
-  | "staffpay" | "staffperf";
+  | "staffpay" | "staffperf"
+  // Inventory & stock (migs 221/224/227) — one body per sub-tab.
+  | "invstock" | "invpurchases" | "invusage" | "invwaste" | "invexpenses";
 const BODY_KIND: Record<BodyKey, DataKind> = {
   daysummary: "daysummary",
   sales: "money", avgbill: "money", volume: "money", weekday: "money",
@@ -86,6 +92,8 @@ const BODY_KIND: Record<BodyKey, DataKind> = {
   dishes: "dishes", menu: "dishes", categories: "categories",
   hourly: "hourly", daypart: "hourly",
   staffpay: "staffpay", staffperf: "staffperf",
+  invstock: "invstock", invpurchases: "invpurchases", invusage: "invusage",
+  invwaste: "invwaste", invexpenses: "invexpenses",
 };
 type OpenOpts = { sub?: string; pay?: "discounts" | "cancellations" };
 type OpenReport = (k: RKey, opts?: OpenOpts) => void;
@@ -113,6 +121,15 @@ const SUBTABS: Record<RKey, SubTab[]> = {
     { key: "dayparts", label: "Day parts", icon: "fa-sun", body: "daypart" },
     { key: "weekday", label: "Day of week", icon: "fa-calendar-week", body: "weekday" },
   ],
+  // Inventory & stock (mig 227). Five views, one payload shape each — the owner's
+  // "inside the main report all the sub reports will be there" for stock.
+  inventory: [
+    { key: "stock", label: "On the shelf", icon: "fa-boxes-stacked", body: "invstock" },
+    { key: "buy", label: "Purchases", icon: "fa-truck", body: "invpurchases" },
+    { key: "usage", label: "Usage & cost", icon: "fa-utensils", body: "invusage" },
+    { key: "waste", label: "Waste", icon: "fa-trash", body: "invwaste" },
+    { key: "expenses", label: "Expenses", icon: "fa-receipt", body: "invexpenses" },
+  ],
 };
 // The body shown for a report + its active sub-tab (first tab default; no tabs = the report key itself).
 const bodyKeyFor = (sel: RKey, subKey: string): BodyKey => {
@@ -133,7 +150,20 @@ type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: Pa
   staffPay?: { paidOut: number; people: number; entries: number } | null;
   // Team & pay (mig 220): its own shapes — cash view, cost view, per-person, and the
   // performance rows share `rows`.
-  cashRows?: unknown[]; monthRows?: unknown[]; people?: unknown[] };
+  cashRows?: unknown[]; monthRows?: unknown[]; people?: unknown[];
+  // Inventory & stock (mig 227): the five sub-tab payloads share one shape (InvPayload),
+  // and the MONEY reports carry two extra optional blocks — `inventory` (the day-sheet
+  // lines) and `costSeries` (the second line on the sales chart). Both are absent/null
+  // when the module is off, which is what keeps inventory invisible then.
+  summary?: InvPayload["summary"]; coverage?: InvPayload["coverage"]; costDataFrom?: string | null;
+  dishes?: InvPayload["dishes"]; items?: InvPayload["items"]; vendors?: InvPayload["vendors"];
+  series?: InvPayload["series"]; expenses?: InvPayload["expenses"]; waste?: InvPayload["waste"];
+  inventory?: {
+    bought: number; usedActual: number; usedTheoretical: number; wasted: number;
+    expenses: number; stockValue: number; lowCount: number; negativeCount: number;
+    foodCostPct: number | null; coveragePct: number; hasRecipes?: boolean;
+  } | null;
+  costSeries?: { bucket: string; purchased: number; used: number; wasted: number }[] | null };
 type Entry = { loading?: boolean; error?: string; data?: Payload };
 
 const apiType = (kind: DataKind): string =>
@@ -378,9 +408,13 @@ export default function OwnerReports() {
   // Does this owner have the Staff-profiles-&-pay module anywhere? Off ⇒ the Team & pay
   // report card isn't rendered at all (mig 220).
   const [hasPayroll, setHasPayroll] = useState(false);
+  // Same for Inventory & stock (migs 221/224/227): off ⇒ no card, no category, no chance
+  // of opening it — the owner's "when the inventory is off that all will not show".
+  const [hasInventory, setHasInventory] = useState(false);
   useEffect(() => {
     fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json()).then((o) => {
       setHasPayroll(o?.modules?.payroll === true);
+      setHasInventory(o?.modules?.inventory === true);
       // Overview returns camelCase (accentColor) — reading accent_color left every chart
       // on the fallback green instead of the restaurant's own brand accent.
       const list: Rest[] = (o.restaurants ?? []).map((r: Record<string, unknown>) => ({
@@ -644,7 +678,7 @@ export default function OwnerReports() {
 
       {!sel ? (
         <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={openReport}
-          rests={rests} rid={rid} onPickRest={setRid} hasPayroll={hasPayroll}
+          rests={rests} rid={rid} onPickRest={setRid} hasPayroll={hasPayroll} hasInventory={hasInventory}
           briefQs={`type=byrestaurant&range=${range}${range === "custom" ? `&from=${cFrom}&to=${cTo}` : ""}${scp}`} />
       ) : (
         <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
@@ -657,10 +691,11 @@ export default function OwnerReports() {
 }
 
 // ── The hub: hero snapshot + per-restaurant brief + categorised report cards ──
-function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll }: {
+function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll, hasInventory }: {
   range: Range; money?: Entry; restName: string; accent: string; onOpen: (k: RKey) => void;
   rests: Rest[]; rid: string; onPickRest: (id: string) => void; briefQs: string;
   hasPayroll: boolean;   // mig 220 — hides the Team & pay card when the module is off
+  hasInventory: boolean; // migs 221/224/227 — hides the Inventory & stock card when the module is off
 }) {
   // Per-restaurant brief (owner 2026-07-26: "in the all-restaurants view there will be a
   // brief report about all the restaurants"). Fetched only when viewing ALL of a
@@ -740,7 +775,7 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
 
       {/* A restaurant without the Staff-profiles-&-pay module doesn't get the Team card at
           all — no dead tile that opens onto "not enabled". */}
-      {CATEGORIES.filter((cat) => cat.key !== "team" || hasPayroll).map((cat) => (
+      {CATEGORIES.filter((cat) => (cat.key !== "team" || hasPayroll) && (cat.key !== "inventory" || hasInventory)).map((cat) => (
         <div key={cat.key}>
           <div className="rs-catrow">
             <span className="ic"><i className={`fas ${cat.icon}`} aria-hidden /></span>
@@ -787,7 +822,7 @@ function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, res
         <div className="rs-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="rs-stat tone-accent" style={{ opacity: .5 }}><div className="rs-stat-k">Loading…</div><div className="rs-stat-v">—</div></div>)}</div>
       ) : (
         <ReportBody bk={bodyKey} data={data} accent={accent} singleRest={singleRest} onOpenReport={onOpenReport}
-          onPayDetail={onPayDetail} dishesDay={dishesDay} hourlyDay={hourlyDay} />
+          onPayDetail={onPayDetail} dishesDay={dishesDay} hourlyDay={hourlyDay} rangeText={rangeText} />
       )}
       {/* Discount / cancellation DETAIL overlay opened from a Payments KPI box (owner: a
           popup, not a whole extra sub-report). Reads the money payload. */}
@@ -828,7 +863,30 @@ function EmptyCard({ text }: { text: string }) {
   return <Panel><div className="rs-empty"><i className="fas fa-inbox" aria-hidden />{text}</div></Panel>;
 }
 
-function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, dishesDay, hourlyDay }: { bk: BodyKey; data: Payload; accent: string; singleRest: boolean; onOpenReport: OpenReport; onPayDetail?: (d: "" | "discounts" | "cancellations") => void; dishesDay?: Payload; hourlyDay?: Payload }) {
+function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, dishesDay, hourlyDay, rangeText = "" }: { bk: BodyKey; data: Payload; accent: string; singleRest: boolean; onOpenReport: OpenReport; onPayDetail?: (d: "" | "discounts" | "cancellations") => void; dishesDay?: Payload; hourlyDay?: Payload; rangeText?: string }) {
+  // ── INVENTORY & STOCK (mig 227) ─────────────────────────────────────────────
+  // Five sub-tabs, one payload. Rendered before the money plumbing below because these
+  // bodies read `summary`/`items`/`dishes`, not the bucketed money rows. A payload that
+  // hasn't got a summary yet (module just switched on, nothing recorded) still renders —
+  // the components handle empty lists with their own plain-language empty states.
+  if (bk === "invstock" || bk === "invpurchases" || bk === "invusage" || bk === "invwaste" || bk === "invexpenses") {
+    if (!data.summary || !data.coverage) return <EmptyCard text="No stock data for this period yet." />;
+    const d: InvPayload = {
+      summary: data.summary, coverage: data.coverage, costDataFrom: data.costDataFrom ?? null,
+      dishes: data.dishes ?? [], items: data.items ?? [], vendors: data.vendors ?? [],
+      series: data.series ?? [], expenses: data.expenses ?? [], waste: data.waste ?? [],
+    };
+    return (
+      <>
+        <InvReportStyles />
+        {bk === "invstock" && <InvStockReport d={d} />}
+        {bk === "invpurchases" && <InvPurchasesReport d={d} accent={accent} rangeText={rangeText} />}
+        {bk === "invusage" && <InvUsageReport d={d} />}
+        {bk === "invwaste" && <InvWasteReport d={d} />}
+        {bk === "invexpenses" && <InvExpensesReport d={d} />}
+      </>
+    );
+  }
   const bucket = data.bucket || "day";
   const t = data.totals;
   const mrows = (data.rows ?? []) as MoneyRow[];
@@ -1011,6 +1069,30 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
               sub={data.staffPay.entries ? `${nfmt(data.staffPay.entries)} payment${data.staffPay.entries === 1 ? "" : "s"} to ${nfmt(data.staffPay.people)} ${data.staffPay.people === 1 ? "person" : "people"}` : "nothing paid out"}
               onClick={() => onOpenReport("team")} title="Open the Team & pay report" />
           )}
+          {/* INVENTORY on the day sheet (mig 227) — same treatment as staff pay: a null
+              payload (module off) keeps every tile off the sheet entirely. Three DIFFERENT
+              kinds of money, deliberately three tiles and never one total: cash out to
+              suppliers · the cost of what the kitchen used · what's still on the shelf. */}
+          {data.inventory && (
+            <>
+              <Stat label="Stock bought" tone="bad" icon="fa-truck" value={inr(data.inventory.bought)}
+                sub="cash out to suppliers" onClick={() => onOpenReport("inventory", { sub: "buy" })}
+                title="Open the Inventory & stock report" />
+              <Stat label="Ingredients used" tone="warn" icon="fa-utensils" value={inr(data.inventory.usedTheoretical)}
+                sub={data.inventory.foodCostPct != null
+                  ? `${data.inventory.foodCostPct.toFixed(1)}% of those dishes' sales${data.inventory.coveragePct < 99.5 ? ` · ${Math.round(data.inventory.coveragePct)}% of sales mapped` : ""}`
+                  : data.inventory.hasRecipes ? "no dish with a recipe sold today" : "map recipes to see this"}
+                onClick={() => onOpenReport("inventory", { sub: "usage" })} title="Open Usage & cost" />
+              <Stat label="Wasted + expenses" tone="bad" icon="fa-trash"
+                value={inr(data.inventory.wasted + data.inventory.expenses)}
+                sub={`${inr(data.inventory.wasted)} waste · ${inr(data.inventory.expenses)} other`}
+                onClick={() => onOpenReport("inventory", { sub: "waste" })} title="Open the Waste report" />
+              <Stat label="On the shelf" tone="info" icon="fa-boxes-stacked" value={inr(data.inventory.stockValue)}
+                sub={data.inventory.negativeCount ? `${nfmt(data.inventory.negativeCount)} below zero — check bills`
+                  : data.inventory.lowCount ? `${nfmt(data.inventory.lowCount)} running low` : "stock in hand"}
+                onClick={() => onOpenReport("inventory", { sub: "stock" })} title="Open On the shelf" />
+            </>
+          )}
         </div>
 
         <div className="rs-daysheet">
@@ -1097,9 +1179,33 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           <Stat label="GST collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} sub="held for the government" onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
           <Stat label="Discounts" tone="warn" icon="fa-tag" value={inr(t.discount)} onClick={() => onOpenReport("payments", { pay: "discounts" })} title="Open the Discounts report" />
         </div>
-        <Panel title="Revenue over time" pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={240} /></div>
-        </Panel>
+        {/* Revenue — with the INVENTORY COST line beside it when the module is on (mig 227,
+            the long-deferred second line). Costs are matched to revenue rows by IST calendar
+            key, so a point can never land on the wrong day; the overlay is dropped when the
+            chart auto-drilled to a finer grain than the cost series (day), because an hourly
+            revenue bar next to a daily cost bar would be a lie. */}
+        {(() => {
+          const costRows = data.costSeries;
+          const drilled = chartBucket !== bucket;
+          const canOverlay = !!costRows?.length && !drilled;
+          const costBy = new Map((costRows ?? []).map((c) => [c.bucket, c]));
+          const istKey = (iso: string) => {
+            const d = new Date(Date.parse(iso) + 5.5 * 3600_000).toISOString();
+            return bucket === "month" ? d.slice(0, 7) : d.slice(0, 10);
+          };
+          const rows = chartRows.map((r) => {
+            const c = canOverlay ? costBy.get(istKey(r.bucket)) : undefined;
+            return { label: bucketLabel(r.bucket, chartBucket), value: r.revenue, cost: c ? c.purchased : 0 };
+          });
+          const matched = canOverlay && rows.some((r) => r.cost > 0);
+          return (
+            <Panel title="Revenue over time" hint={matched ? "orange = stock bought that day (cash out)" : undefined} pad={false}>
+              <div style={{ padding: 12 }}>
+                <ToggleChart data={rows} color={accent} money height={240} cost={matched} costName="Stock bought" />
+              </div>
+            </Panel>
+          );
+        })()}
         {series.filter((s) => s.revenue > 0).length > 1 && (
           <BestWorst
             series={series.map((s) => ({ label: s.label, value: s.revenue }))}

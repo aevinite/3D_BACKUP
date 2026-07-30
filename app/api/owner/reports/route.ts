@@ -20,7 +20,7 @@ import { ownerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct } from "@/lib/tax";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
-import { payrollLadder } from "@/lib/tableTags";
+import { payrollLadder, inventoryLadder } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic";
 
@@ -174,8 +174,24 @@ export async function GET(req: NextRequest) {
   // The restaurants this call may touch (for the merged all-restaurants shapes).
   const ridList: (string | null)[] = rid ? [rid] : scope.all ? [null] : scope.ids;
 
-  const KNOWN = new Set(["sales", "tax", "discounts", "cancellations", "daysummary", "dishes", "categories", "hourly", "payments", "byrestaurant", "staffpay", "staffperf"]);
+  const KNOWN = new Set(["sales", "tax", "discounts", "cancellations", "daysummary", "dishes", "categories", "hourly", "payments", "byrestaurant", "staffpay", "staffperf",
+    // Inventory & stock (mig 227) — one type per sub-tab of the Inventory report.
+    "invstock", "invpurchases", "invusage", "invwaste", "invexpenses"]);
   if (!KNOWN.has(type)) return NextResponse.json({ error: "unknown report type" }, { status: 400 });
+  // ── Inventory & stock (mig 227) — gated by the inventory MODULE, exactly like the
+  // payroll block below: nothing is read, cached or returned for a restaurant that
+  // doesn't have the feature, so the report card can never open onto dead UI.
+  // Stock is per-restaurant by nature (you can't sum one kitchen's shelf into another's),
+  // so an all-restaurants scope must pick one first.
+  const invType = type.startsWith("inv");
+  if (invType) {
+    const ids = (rid ? [rid] : scope.all ? [] : scope.ids).filter(Boolean) as string[];
+    if (!ids.length)
+      return NextResponse.json({ error: "Pick one restaurant to see its stock.", disabled: true }, { status: 400 });
+    const on = await Promise.all(ids.map((id) => inventoryLadder(id).then((l) => l.effective)));
+    if (!on.some(Boolean))
+      return NextResponse.json({ error: "Inventory isn't enabled for this restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+  }
   // ── Team & pay / Team performance (mig 220) ────────────────────────────────
   // Both are gated by the payroll MODULE, per restaurant, before anything is read or cached:
   // a restaurant without the feature gets the same calm "not enabled" card as a missing section.
@@ -199,7 +215,12 @@ export async function GET(req: NextRequest) {
   // new IST day, the key changes, and the new window computes cold. Without this, the first
   // open of a new day served YESTERDAY'S 30-day window from the stale-while-revalidate row —
   // numbers that no longer match a recount (caught in the 2026-07-27 audit). v2 orphans v1 rows.
-  const cacheKey = `reports:v2:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
+  // v3 (mig 227): the money payloads gained `inventory` + `costSeries`. The fingerprint
+  // only notices DATA changes, so without bumping this version every owner would keep
+  // being served a pre-inventory snapshot — the new day-sheet tiles and the cost line
+  // would silently never appear until the snapshot happened to expire. BUMP THIS VERSION
+  // WHENEVER A PAYLOAD SHAPE CHANGES, not just when the numbers change.
+  const cacheKey = `reports:v3:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
   // Change-detector choice. The precise ordersFingerprint SCANS its window — on a WIDE
@@ -232,11 +253,31 @@ export async function GET(req: NextRequest) {
   const moneyType = type === "sales" || type === "tax" || type === "discounts" || type === "cancellations" || type === "daysummary";
   const wideWindow = Date.parse(to) - Date.parse(from) > 35 * DAY;
   const useMonthFp = wideWindow || (bucket === "month" && moneyType);
+  // Inventory reports are driven by inv_movements / inv_purchases / expenses / recipe rows,
+  // none of which the orders fingerprint knows about — a recorded purchase or a re-mapped
+  // recipe would NOT invalidate the snapshot and the owner would keep reading yesterday's
+  // stock. Cheap indexed heads instead (same shape as staffFingerprint).
+  const invFingerprint = async (): Promise<string> => {
+    const ids = (rid ? [rid] : scope.all ? [] : scope.ids).filter(Boolean) as string[];
+    if (!ids.length) return "0";
+    const [mv, ex, rl] = await Promise.all([
+      sb.from("inv_movements").select("id").in("restaurant_id", ids).order("id", { ascending: false }).limit(1),
+      sb.from("expenses").select("created_at, voided_at").in("restaurant_id", ids).order("created_at", { ascending: false }).limit(1),
+      sb.from("inv_recipe_lines").select("id", { count: "exact", head: true }).in("restaurant_id", ids),
+    ]);
+    const m = (mv.data || [])[0] as { id?: number } | undefined;
+    const e = (ex.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
+    // The dish-cost/coverage views also move when ORDERS move (qty sold), so fold the
+    // orders detector in for the usage view — a new order must refresh the cost of sales.
+    const ordersPart = type === "invusage" ? await ordersFingerprint(fpIds, from, to).catch(() => "x") : "";
+    return [m?.id ?? 0, e?.created_at ?? "", e?.voided_at ?? "", rl.count ?? 0, ordersPart].join("|");
+  };
 
   try {
     const payload = await cachedOwnerPayload({
       key: cacheKey, force,
-      fingerprint: () => (staffType ? staffFingerprint()
+      fingerprint: () => (invType ? invFingerprint()
+        : staffType ? staffFingerprint()
         : useMonthFp ? reportMonthFingerprint(fpIds, from, to) : ordersFingerprint(fpIds, from, to)),
       compute: async () => {
     // ── money reports: one bucketed summary drives sales/tax/discounts/cancellations ──
@@ -380,7 +421,78 @@ export async function GET(req: NextRequest) {
           else staffPay = { paidOut: 0, people: 0, entries: 0 };
         }
       }
-      return { type, range, bucket, rows, totals, tax, payments, staffPay, drillBucket, drillRows };
+      // ── INVENTORY on the money reports (mig 227) ────────────────────────────
+      // Day summary gets the inventory money lines in the SAME shape as staffPay: a
+      // NULL keeps them off the sheet entirely rather than printing fake zeroes, so a
+      // restaurant without the module sees no trace of it. The sales report gets the
+      // bucketed cost SERIES — the second "cost" line on the chart that was deferred
+      // until inventory existed.
+      let inventory: {
+        bought: number; usedActual: number; usedTheoretical: number; wasted: number;
+        expenses: number; stockValue: number; lowCount: number; negativeCount: number;
+        foodCostPct: number | null; coveragePct: number; hasRecipes: boolean;
+      } | null = null;
+      let costSeries: { bucket: string; purchased: number; used: number; wasted: number }[] | null = null;
+      // FAIL-OPEN, like the depletion trigger: inventory is an ADD-ON to these money
+      // reports, so a stock hiccup (a ladder read blipping, an RPC erroring) must never
+      // blank the owner's Sales figures or Day summary. On any failure `inventory` and
+      // `costSeries` simply stay null and the sheet renders exactly as it did before the
+      // module existed.
+      try {
+      if (type === "daysummary" || type === "sales") {
+        const invIds = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
+        const enabledInv: string[] = [];
+        for (const id of invIds) if ((await inventoryLadder(id)).effective) enabledInv.push(id);
+        if (enabledInv.length) {
+          // Sum across the owner's inventory-enabled restaurants (each RPC is per-restaurant).
+          const [sums, covs, dishes, seriesPer] = await Promise.all([
+            mapLimit(enabledInv, 6, (id) => sb.rpc("lfh_inv_report_summary", { p_restaurant: id, p_from: from, p_to: to })),
+            mapLimit(enabledInv, 6, (id) => sb.rpc("lfh_inv_coverage", { p_restaurant: id, p_from: from, p_to: to })),
+            mapLimit(enabledInv, 6, (id) => sb.rpc("lfh_inv_dish_cost", { p_restaurant: id, p_from: from, p_to: to })),
+            type === "sales"
+              ? mapLimit(enabledInv, 6, (id) => sb.rpc("lfh_inv_cost_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" }))
+              : Promise.resolve([] as { data?: unknown; error?: unknown }[]),
+          ]);
+          const sRows = sums.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[]);
+          const cRows = covs.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[]);
+          const dRows = dishes.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[]);
+          const add = (rows: Row[], k: string) => rows.reduce((a, r) => a + num(r[k]), 0);
+          const theoretical = dRows.reduce((a, d) => a + num(d.cost_total), 0);
+          const covRev = add(cRows, "covered_revenue");
+          const totRev = add(cRows, "total_revenue");
+          inventory = {
+            bought: add(sRows, "purchases_amt"),
+            usedActual: add(sRows, "consumed_val"),
+            usedTheoretical: theoretical,
+            wasted: add(sRows, "wasted_val"),
+            expenses: add(sRows, "expenses_amt"),
+            stockValue: add(sRows, "stock_value"),
+            lowCount: sRows.reduce((a, r) => a + (Number(r.low_count) || 0), 0),
+            negativeCount: sRows.reduce((a, r) => a + (Number(r.negative_count) || 0), 0),
+            // Same honesty rule as the inventory report: divide by COVERED revenue only.
+            foodCostPct: covRev > 0 ? (theoretical / covRev) * 100 : null,
+            coveragePct: totRev > 0 ? (covRev / totRev) * 100 : 0,
+            // Lets the tile tell "you haven't mapped any recipes" apart from "recipes exist
+            // but none of those dishes sold in this window" — the same null otherwise.
+            hasRecipes: cRows.some((r) => (Number(r.mapped_recipes) || 0) > 0),
+          };
+          if (type === "sales" && seriesPer.length) {
+            const merged = new Map<string, { bucket: string; purchased: number; used: number; wasted: number }>();
+            for (const p of seriesPer) {
+              if (p.error) continue;
+              for (const r of ((p.data ?? []) as Row[])) {
+                const k = String(r.bucket);
+                const cur = merged.get(k) || { bucket: k, purchased: 0, used: 0, wasted: 0 };
+                cur.purchased += num(r.purchased); cur.used += num(r.used); cur.wasted += num(r.wasted);
+                merged.set(k, cur);
+              }
+            }
+            costSeries = [...merged.values()].sort((a, b) => a.bucket.localeCompare(b.bucket));
+          }
+        }
+      }
+      } catch { inventory = null; costSeries = null; }
+      return { type, range, bucket, rows, totals, tax, payments, staffPay, inventory, costSeries, drillBucket, drillRows };
     }
 
     // ── breakdown reports: dishes / categories / payments / hourly ──
@@ -419,6 +531,114 @@ export async function GET(req: NextRequest) {
         .map((r) => ({ ...r, revenue: num(r.revenue) }));
       rows.sort((a, b) => (type === "hourly" ? Number(a.hour) - Number(b.hour) : Number(b.revenue) - Number(a.revenue)));
       return { type, range, rows };
+    }
+
+    // ══ INVENTORY & STOCK (mig 227) ═══════════════════════════════════════════
+    // One restaurant at a time (stock can't be summed across kitchens — the gate above
+    // already refused an all-restaurants scope). Every sub-tab shares the same summary
+    // hero band so the five views agree with each other by construction.
+    //
+    // THE TWO COST TRUTHS, deliberately both returned (research §1.3):
+    //   theoreticalCost = recipe cost × qty sold  → valid over ANY window, drives the
+    //                     food-cost % and per-dish margins.
+    //   actualUsed      = what the movement ledger recorded → only exists from the day
+    //                     recipes were mapped, so it is NOT a food-cost denominator;
+    //                     it's "what really left the shelf", and the gap vs theoretical
+    //                     is the variance. `costDataFrom` tells the UI when the ledger
+    //                     started, so a 30-day window can't imply 30 days of ledger.
+    if (invType) {
+      // The gate above already guaranteed a single resolvable restaurant here.
+      const one = rid || (scopeIds[0] as string);
+      const [sum, cov, dish, items, vendors, series, firstMv] = await Promise.all([
+        sb.rpc("lfh_inv_report_summary", { p_restaurant: one, p_from: from, p_to: to }),
+        sb.rpc("lfh_inv_coverage", { p_restaurant: one, p_from: from, p_to: to }),
+        sb.rpc("lfh_inv_dish_cost", { p_restaurant: one, p_from: from, p_to: to }),
+        type === "invstock" || type === "invusage" || type === "invwaste"
+          ? sb.rpc("lfh_inv_report_items", { p_restaurant: one, p_from: from, p_to: to })
+          : Promise.resolve({ data: [], error: null }),
+        type === "invpurchases"
+          ? sb.rpc("lfh_inv_report_vendors", { p_restaurant: one, p_from: from, p_to: to })
+          : Promise.resolve({ data: [], error: null }),
+        sb.rpc("lfh_inv_cost_series", { p_restaurant: one, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" }),
+        // When did this restaurant's stock ledger actually start? Anchors the honesty note.
+        sb.from("inv_movements").select("created_at").eq("restaurant_id", one).order("id", { ascending: true }).limit(1),
+      ]);
+      if (sum.error) throw sum.error;
+      const s = ((sum.data ?? []) as Row[])[0] || {};
+      const c = ((cov.data ?? []) as Row[])[0] || {};
+      const dishRows = ((dish.data ?? []) as Row[]).map((d) => ({
+        slug: String(d.slug), title: String(d.title), price: num(d.price),
+        qtySold: num(d.qty_sold), revenue: num(d.revenue),
+        plateCost: num(d.plate_cost), costTotal: num(d.cost_total),
+        ingredients: Number(d.ingredients) || 0,
+        // Margin only means something once BOTH a price and a recipe exist.
+        marginPct: num(d.price) > 0 ? (1 - num(d.plate_cost) / num(d.price)) * 100 : null,
+      }));
+      const theoreticalCost = dishRows.reduce((a, d) => a + d.costTotal, 0);
+      const coveredRevenue = num(c.covered_revenue);
+      const totalRevenue = num(c.total_revenue);
+      // ONLY ever divided by covered revenue — see the migration header. A partially
+      // mapped menu yields an honest "cost % on the dishes you've mapped", never a
+      // flattering number spread over unmapped sales.
+      const foodCostPct = coveredRevenue > 0 ? (theoreticalCost / coveredRevenue) * 100 : null;
+      // DOCUMENT dates here too, so these lists add up to the hero band's totals (which
+      // mig 227 computes on bill_date/expense_date/waste_date) and match the Inventory page.
+      // from/to are UTC ISO instants — shift into IST before taking the calendar date, or
+      // an IST-midnight window reads one day early (the SQL side uses AT TIME ZONE for
+      // exactly this reason). The END bound follows the same rule as mig 227's header:
+      // `to` is "now" for named ranges and an exclusive IST midnight for custom ones, so
+      // take the IST day of (to − 1ms) and compare INCLUSIVELY — a bare `< toDay` drops
+      // everything dated today on every named range.
+      const istDay = (iso: string, backMs = 0) =>
+        new Date(Date.parse(iso) + 5.5 * 3600_000 - backMs).toISOString().slice(0, 10);
+      const dFrom = istDay(from), dTo = istDay(to, 1);
+      const expenses = type === "invexpenses"
+        ? (await sb.from("expenses")
+            .select("id, category, title, amount, expense_date, note, photo_url, created_by, voided_at, void_reason")
+            .eq("restaurant_id", one).gte("expense_date", dFrom).lte("expense_date", dTo)
+            .order("expense_date", { ascending: false }).limit(300)).data || []
+        : [];
+      const waste = type === "invwaste"
+        ? (await sb.from("inv_waste_entries")
+            .select("id, item_id, qty_base, reason, note, unit_cost_snap, waste_date, created_by, voided_at")
+            .eq("restaurant_id", one).gte("waste_date", dFrom).lte("waste_date", dTo)
+            .order("waste_date", { ascending: false }).limit(300)).data || []
+        : [];
+      return {
+        type, range, bucket, rid: one,
+        summary: {
+          stockValue: num(s.stock_value), stockItems: Number(s.stock_items) || 0,
+          lowCount: Number(s.low_count) || 0, negativeCount: Number(s.negative_count) || 0,
+          purchases: num(s.purchases_amt), purchaseCount: Number(s.purchases_count) || 0,
+          actualUsed: num(s.consumed_val), wasted: num(s.wasted_val), wasteCount: Number(s.waste_count) || 0,
+          expenses: num(s.expenses_amt), corrections: num(s.adjust_val),
+          theoreticalCost, foodCostPct,
+        },
+        coverage: {
+          totalRevenue, coveredRevenue,
+          totalDishes: Number(c.total_dishes) || 0, coveredDishes: Number(c.covered_dishes) || 0,
+          mappedRecipes: Number(c.mapped_recipes) || 0, menuDishes: Number(c.menu_dishes) || 0,
+          pct: totalRevenue > 0 ? (coveredRevenue / totalRevenue) * 100 : 0,
+        },
+        costDataFrom: ((firstMv.data ?? []) as Row[])[0]?.created_at ?? null,
+        dishes: dishRows,
+        items: ((items.data ?? []) as Row[]).map((i) => ({
+          id: String(i.item_id), name: String(i.name), category: String(i.category || ""),
+          baseUom: String(i.base_uom), buyUom: String(i.purchase_uom), factor: num(i.purchase_factor) || 1,
+          onHandBase: num(i.on_hand_base), onHandVal: num(i.on_hand_val), parQty: i.par_qty == null ? null : num(i.par_qty),
+          boughtBase: num(i.bought_base), boughtVal: num(i.bought_val),
+          usedBase: num(i.used_base), usedVal: num(i.used_val),
+          wastedBase: num(i.wasted_base), wastedVal: num(i.wasted_val),
+          adjustBase: num(i.adjust_base), adjustVal: num(i.adjust_val),
+        })),
+        vendors: ((vendors.data ?? []) as Row[]).map((v) => ({
+          vendor: String(v.vendor), bills: Number(v.bills) || 0, amount: num(v.amount), isCash: v.is_cash === true,
+        })),
+        series: ((series.data ?? []) as Row[]).map((r) => ({
+          bucket: String(r.bucket), purchased: num(r.purchased), used: num(r.used), wasted: num(r.wasted),
+        })),
+        expenses, waste,
+      };
     }
 
     // ── per-restaurant brief (all-restaurants hub leaderboard) ──
