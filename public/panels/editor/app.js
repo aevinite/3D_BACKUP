@@ -1316,7 +1316,11 @@ function newWaiterTablesHtml() {
   for (let i = 1; i <= n; i++) {
     cells += `<button type="button" class="sec-pick nw-pick${picked.includes(i) ? " on" : ""}" data-nw-table="${i}"><b>${picked.includes(i) ? "✓ " : ""}T${i}</b></button>`;
   }
-  return `<div class="nw-tables" id="usrNewTables" hidden>
+  // NOT the `hidden` attribute: nwSync() shows this by clearing the inline display, and an
+  // empty inline display falls straight back to hidden's display:none (.nw-tables sets no
+  // display of its own) — so the picker never appeared at all. Start it closed with an
+  // explicit inline style instead, which nwSync can genuinely toggle. (QA sweep 2026-07-30.)
+  return `<div class="nw-tables" id="usrNewTables" style="display:none">
     <div class="nw-head">
       <b>Tables this waiter will serve</b>
       <button class="btn small" type="button" data-nw-all>Select all</button>
@@ -4800,7 +4804,7 @@ function bindEditor() {
     const box = $("#usrNewTables");
     if (!box) return;
     const isWaiter = ($("#usrNewRole")?.value || "") === "tablet";
-    box.style.display = isWaiter ? "" : "none";
+    box.style.display = isWaiter ? "block" : "none";   // explicit both ways — see newWaiterTablesHtml
     const add = $("#usrAddStaff");
     // The owner's call: a waiter must be given at least one table, so the button stays
     // disabled until one is picked rather than creating someone with a blank tablet.

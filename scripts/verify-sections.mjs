@@ -125,6 +125,13 @@ async function main() {
     ck(js.includes("tableSectionsCardHtml"), "the section card itself is present in the shipped panel");
     const css = await (await fetch(`${BASE}/panels/editor/style.css`, { cache: "no-store" })).text();
     ck(css.includes("sec-modal-wide"), "the modal's stylesheet shipped too");
+    // The manager's create-a-waiter picker must be able to SHOW. It shipped with the `hidden`
+    // attribute while nwSync only cleared the inline display — an empty inline display falls
+    // back to hidden's display:none, so the picker never appeared (QA sweep 2026-07-30).
+    ck(!/id="usrNewTables"[^>]*\shidden/.test(js),
+      "the new-waiter table picker is not shipped with the `hidden` attribute (it would never show)");
+    ck(/box\.style\.display = isWaiter \? "block"/.test(js),
+      "…and it is shown with an explicit display value, not an empty string");
 
     // ── creating a waiter REQUIRES a table pick (owner 2026-07-30) ───────────
     let cr = await manager("/api/owner/staff", { method: "POST", body: JSON.stringify({ name: "zz guard probe", role: "tablet", restaurant_id: RID, tables: [] }) });
