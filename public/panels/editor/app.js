@@ -1421,7 +1421,7 @@ async function saveWaiterTables(userId, tables) {
   const w = (state.sections?.waiters || []).find((x) => x.id === userId);
   const before = w ? (w.assigned_tables || []).slice() : null;
   if (w) w.assigned_tables = tables.slice();           // optimistic — the grid feels instant
-  renderEditor(); repaintSectionPicker();
+  renderEditor(); repaintSectionPicker(); repaintSectionsModal();
   try {
     const r = await fetch(ridQ("/api/editor/table-sections"), {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -1434,7 +1434,7 @@ async function saveWaiterTables(userId, tables) {
     if (w && before) w.assigned_tables = before;       // put it back — never lie about what's saved
     toast(e.message || "Couldn't save that change.", "err");
   }
-  renderEditor(); repaintSectionPicker();
+  renderEditor(); repaintSectionPicker(); repaintSectionsModal();
 }
 
 const secTables = (w) => (w.assigned_tables || []).map(Number).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
@@ -1591,6 +1591,54 @@ function secEscOff(ov) {
 // Uses the .sx-modal-overlay class, which the panel's overlay watcher (wireOverlayBack)
 // already registers with LFH_BACK — so the phone's hardware Back closes the picker
 // instead of leaving the panel, with no hand-rolled history here.
+// The SAME card, opened as a modal from the live Table view — because the Settings tab it
+// otherwise lives in is gated by `edit_settings`, a power a section-granting manager may not
+// have. One builder, two doors.
+let sectionsModalOpen = false;
+function repaintSectionsModal() {
+  const host = document.querySelector("[data-sec-card]");
+  if (host && sectionsModalOpen) host.innerHTML = tableSectionsCardHtml();
+}
+function openSectionsModal() {
+  const ov = document.createElement("div");
+  ov.className = "sx-modal-overlay";
+  ov.innerHTML = `<div class="sx-modal sec-modal sec-modal-wide">
+      <div class="sx-modal-head"><h3>Who serves which table</h3><button class="sx-x" type="button" data-sec-close>✕</button></div>
+      <div class="sx-modal-body" data-sec-card>${tableSectionsCardHtml()}</div>
+    </div>`;
+  const close = () => { sectionsModalOpen = false; secEscOff(ov); ov.remove(); };
+  ov.__lfhClose = close;
+  secEscOn(ov, close);
+  sectionsModalOpen = true;
+  ov.addEventListener("click", (e) => {
+    if (e.target === ov || e.target.closest("[data-sec-close]")) return close();
+    const v = e.target.closest("[data-sec-view]");
+    if (v) { state.sectionsView = v.dataset.secView; return repaintSectionsModal(); }
+    const ed2 = e.target.closest("[data-sec-edit]");
+    if (ed2) return openSectionPicker(ed2.dataset.secEdit);
+    const tc = e.target.closest("[data-sec-table]");
+    if (tc) return openTableHolderPicker(Number(tc.dataset.secTable));
+    if (e.target.closest("[data-sec-fixgaps]")) return (async () => {
+      const gaps = secGaps(); if (!gaps.length) return;
+      for (const w of secActiveWaiters()) {
+        await saveWaiterTables(w.id, Array.from(new Set(secTables(w).concat(gaps))).sort((a, b) => a - b));
+      }
+      toast(`${gaps.length} table${gaps.length === 1 ? "" : "s"} now covered.`);
+    })();
+    if (e.target.closest("[data-sec-all]")) return (async () => {
+      if (!(await confirmDialog("Give every table to every waiter? They'll each see the whole floor again — you can then take tables away one by one.", "Give all"))) return;
+      const all = Array.from({ length: state.sections?.tableCount || 0 }, (_, k) => k + 1);
+      for (const w of secActiveWaiters()) await saveWaiterTables(w.id, all);
+    })();
+    if (e.target.closest("[data-sec-clear]")) return (async () => {
+      if (!(await confirmDialog("Clear every section? Every waiter will be left with NO tables — while sections are switched on, their tablets will be empty until you give them tables again.", "Clear all", { floorwide: true }))) return;
+      for (const w of (state.sections?.waiters || [])) await saveWaiterTables(w.id, []);
+    })();
+  });
+  document.body.appendChild(ov);
+  if (!state.sectionsLoaded && !state.sectionsLoading) loadTableSections().then(repaintSectionsModal);
+}
+
 let sectionPickerId = null;
 function repaintSectionPicker() {
   const host = document.querySelector("[data-sec-picker-body]");
@@ -6108,7 +6156,13 @@ function floorHtml() {
   // way in; that's handled properly now by the Settings tab and the Access row each opening
   // for "edit_settings|table_assign" / "manage_staff|table_assign" (see XRAY_TABS /
   // XRAY_CONTROLS). Don't re-add a floor button without re-checking those gates.
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${parcelBtn}</div>${statsStrip}${legend}<div class="ftile-grid" style="--per-row:${floorPerRow()}">${tiles}</div></div>`;
+  // Waiter sections (migs 222-225) — the entry point that ACTUALLY works for a manager.
+  // The same editor also sits in Settings → Tables, but that whole tab is gated by the
+  // SEPARATE `edit_settings` power, so a manager granted only `table_assign` could never
+  // reach it. Sections belong to the floor anyway, so the live Table view is the natural
+  // home. Same builder → one source of truth, no chance of the two drifting.
+  const sectionsBtn = `<button class="btn" id="floorSections" data-mgr-hide="table_sections" title="Give each waiter their own tables">👥 Who serves what</button>`;
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${sectionsBtn}${parcelBtn}</div>${statsStrip}${legend}<div class="ftile-grid" style="--per-row:${floorPerRow()}">${tiles}</div></div>`;
 
   // side panel — everyday floor work only (whole-floor open/close, requests, needs,
   // blocked). The old "Features · rarely changed" card that used to sit at the bottom
@@ -6424,6 +6478,8 @@ function bindFloor() {
   // New Parcel → the take-order dish picker in PARCEL mode (no table → a takeaway
   // order in the Platform system). Gated by the take_orders x-ray (below) + server.
   ed.querySelectorAll("[data-new-parcel]").forEach((b) => (b.onclick = () => openTakeOrder(null, null, { parcel: true })));
+  // Waiter sections (migs 222-225) — same editor as Settings → Tables, reachable from the floor.
+  { const sb = ed.querySelector("#floorSections"); if (sb) sb.onclick = () => openSectionsModal(); }
   // Waiter sections (mig 222) — same editor as Settings → Tables, reachable from the floor.
   const oa = document.getElementById("floorOpenAll");
   if (oa) oa.onclick = () => openAllTables();

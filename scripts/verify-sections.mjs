@@ -123,6 +123,19 @@ async function main() {
     r = await manager("/api/editor/table-sections", { method: "POST", body: JSON.stringify({ user_id: WAITER, tables: [1, 2, COUNT + 99, 0, 2] }) });
     const d = await r.json().catch(() => ({}));
     ck(r.ok && String(d.user?.assigned_tables) === "1,2", "the editor drops out-of-range and duplicate table numbers", JSON.stringify(d.user?.assigned_tables));
+
+    // ── STATIC: the editor must have BOTH doors ──────────────────────────────
+    // The Settings tab is gated by the SEPARATE `edit_settings` power, so a manager granted
+    // only `table_assign` can reach the section editor ONLY through the floor button. That
+    // button was silently lost once in a rebase and shipped missing (2026-07-30) — the
+    // server said the manager had the power while the UI gave them no way in. Pin both.
+    const js = await (await fetch(`${BASE}/panels/editor/app.js`, { cache: "no-store" })).text();
+    ck(js.includes("floorSections") && js.includes("openSectionsModal"),
+      "the FLOOR button + its modal are present in the shipped panel (the only door a manager without edit_settings has)",
+      `floorSections=${js.includes("floorSections")} openSectionsModal=${js.includes("openSectionsModal")}`);
+    ck(js.includes("tableSectionsCardHtml"), "the section card itself is present in the shipped panel");
+    const css = await (await fetch(`${BASE}/panels/editor/style.css`, { cache: "no-store" })).text();
+    ck(css.includes("sec-modal-wide"), "the modal's stylesheet shipped too");
   } finally {
     await restore();
   }

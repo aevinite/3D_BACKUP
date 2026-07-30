@@ -743,3 +743,30 @@ brightness and show me how the manager table view will actually look."*
   the same src `PanelFrame` uses, with a 🖥/📱 toggle. Each step is one `postMessage` — no
   request, no refetch, no DB write — and it reads the resulting column count back to say
   "· this screen fits 8" when the guard rail lowers it. Nothing saves until "Use this number".
+
+## 2026-07-30 — Live sweep: the "second door" had been LOST in a rebase (my mistake)
+
+Owner: "check again for any other bugs, test it, make sure everything works on live."
+
+- [x] **THE REAL FIND — the floor button was never shipped.** PR #542 claimed a manager
+  without `edit_settings` could reach the section editor via a **👥 Who serves what** button
+  on the live Table view. That code (`#floorSections` + `openSectionsModal` + its CSS) was
+  wiped by a `git rebase --abort` after I had already screenshot-verified it, and I shipped
+  without re-checking the diff. On live, `whoami` said the manager HAD the power while the UI
+  gave them no way in. Restored, and now pinned by a guard that fetches the SHIPPED
+  `app.js`/`style.css` and fails if either door is missing.
+- [x] **Verified on live, end to end (18 checks):** the admin's own switch turns the module
+  on; a new waiter is created holding every table; two waiters SHARE table 3 and both see it;
+  a restricted waiter opens a table, takes a real order, accepts and serves it with no 403;
+  the other waiter is refused on both that table AND that order (resolved via the order id).
+- [x] **Verified in a live browser:** a manager WITHOUT `edit_settings` opens the editor from
+  the floor, sees the gap warning, ticks a table — and an already-open waiter tablet picks it
+  up with **no reload** (realtime).
+- [x] Test data cleaned up. The two test orders could NOT be hard-deleted — the billing
+  compliance lock refused it ("an issued bill cannot be hard-deleted") — so they were
+  soft-deleted through the app with a reason, which is the compliant path. That lock working
+  is itself a good result.
+- [ ] **NOT fixed, reported instead:** admin-only tabs (Settings/Dashboard ranges) are visible
+  for ~1s at boot before `whoami` lands and hides them. Pre-existing, cosmetic (the server
+  refuses everything meanwhile), and the safe fix changes every panel's boot path — flagged
+  for the owner to decide rather than bundled into this change.
