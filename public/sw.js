@@ -28,7 +28,7 @@
  *   - KILL SWITCH: deleting/404-ing this file unregisters it (browser behaviour), and
  *     posting {type:"LFH_SW_KILL"} from the page drops every cache + unregisters.
  */
-const VERSION = "v1";
+const VERSION = "v2"; // v2: saved copies expire after 2h (owner's call, 2026-07-30)
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -50,9 +50,12 @@ const CAPS = { data: 150, shell: 60, asset: 400 };
 const MAX_DATA_BYTES = 3_000_000; // don't cache a huge report payload
 
 // A saved copy is only good for so long. After this, being offline shows the "no internet"
-// page instead of yesterday's screens and figures — which also bounds how long a device
-// that was left signed in keeps anything readable on it.
-const MAX_STALE_MS = 12 * 60 * 60 * 1000; // 12 hours
+// page instead of stale screens and figures. This ALSO bounds how long a device that was
+// left signed in keeps anything readable on it — which is why the owner chose a short
+// window (2026-07-30): a tablet left lying around goes blank quickly, and the trade-off he
+// accepted is that an outage longer than this comes back to an empty screen rather than
+// the last known board.
+const MAX_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 // Never cached, ever: anything to do with signing in, or a one-shot action route.
 const NEVER = [
@@ -314,10 +317,19 @@ async function networkFirst(req, cacheName, key, timeout, opts) {
     // A real server error (500/404) is the truth — pass it through rather than papering
     // over it with stale data; only a dead or hung network falls back.
     return res;
-  } catch {
+  } catch (e) {
+    const stalled = e && e.message === "stall";
     live.catch(() => {}); // keep it alive to update the saved copy; just don't wait for it
     const hit = noFallback ? null : await cachedCopy(cacheName, key, null, opts && opts.clientId);
     if (hit) return hit;
+    // A STALL with nothing saved to show instead is not a reason to fail: that's simply a
+    // slow FIRST load (a cold server, a heavy query), and before this layer existed the
+    // page would just have waited. Keep waiting. Only a genuinely dead network falls
+    // through to the answers below. (Caught by a flaky run of the verify script: the first
+    // load after a fresh build got a 503 "offline" while perfectly online.)
+    if (stalled) {
+      try { return await live; } catch { /* really gone → answer below */ }
+    }
     // Nothing saved: answer reads with a shape the panels already understand
     // (an error object) instead of a network exception that blanks the screen.
     if (cacheName === DATA) {
