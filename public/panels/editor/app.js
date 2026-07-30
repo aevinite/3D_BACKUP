@@ -3174,7 +3174,11 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   if (paidIds.length && picked.cust) {
     try {
       const t = payable[0] && payable[0].table_number;
-      if (t != null) { const rc = await api("POST", "/customer-capture", { table: String(t), phone: picked.cust.phone, name: picked.cust.name, consent: picked.cust.consent === true }); if (rc && rc.ok) toast(`📇 Saved ${picked.cust.name || "customer"}`, "ok"); }
+      // Send the SESSION of the bill we just settled, not only its table: the visit + the
+      // device links must land on THIS party even if the table gets re-seated a moment later
+      // (mig 233 — resolving by table number booked them onto the next party).
+      const sid = payable[0] && payable[0].session_id;
+      if (t != null) { const rc = await api("POST", "/customer-capture", { table: String(t), session: sid || null, phone: picked.cust.phone, name: picked.cust.name, consent: picked.cust.consent === true }); if (rc && rc.ok) toast(`📇 Saved ${picked.cust.name || "customer"}`, "ok"); }
     } catch { /* best-effort; bill already paid */ }
   }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
@@ -5311,7 +5315,13 @@ function mergeTableSlice(t, selBoard, selOrders, selCalls) {
   // already does; this brings the editor's merge in line with it.
   const oldSids = new Set((b.sessions || []).filter((s) => String(s.table_number) === t).map((s) => s.id));
   for (const s of freshSessions) oldSids.add(s.id);
-  const oldOids = new Set((state.data.orders || []).filter((o) => String(o.table_number) === t).map((o) => o.id));
+  // ARCHIVED rows are NOT part of a table slice any more. Since the floor slice began asking
+  // the server for the CURRENT party only (so a new party can never be handed the last one's
+  // food), the response no longer contains that table's finished bills — and purging them here
+  // would quietly empty them out of the Bills tab, which shares state.data.orders. So the slice
+  // is authoritative for the table's LIVE rows only; anything already archived stays cached
+  // until a real /orders fetch replaces it.
+  const oldOids = new Set((state.data.orders || []).filter((o) => String(o.table_number) === t && !o.archived).map((o) => o.id));
   for (const o of freshOrders) oldOids.add(o.id);
 
   let orders = dedupeById((state.data.orders || []).filter((o) => !oldOids.has(o.id)).concat(freshOrders));

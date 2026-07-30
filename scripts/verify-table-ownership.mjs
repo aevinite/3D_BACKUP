@@ -186,12 +186,20 @@ if (!BASE) {
     !/Due ₹/.test(detail) ? pass("manager detail shows no money due on the new table") : fail("manager detail shows money due that isn't this party's");
     !/Preparing/.test(detail) ? pass('manager detail is not "Preparing"') : fail('manager detail says "Preparing" on a table nobody has ordered at');
 
-    // NOTHING IS HIDDEN: the old order is still in the records.
-    const hist = await ctx.request.get(`${BASE}/api/editor/orders?table=${T}`);
-    const rows = await hist.json();
-    Array.isArray(rows) && rows.some((o) => o.id === ghost.id)
-      ? pass("the old order is still listed in Orders/Bills history (off the floor, not erased)")
-      : fail("the old order vanished from the records — taking it off the floor must never hide it");
+    // TWO SEPARATE PROMISES, and they must BOTH hold:
+    //  (a) the FLOOR slice (?table=) carries only the party sitting there now — since the
+    //      server-side scoping, the browser isn't even sent another party's orders;
+    //  (b) the RECORDS still contain that order (?history= / the Bills list) — off the floor
+    //      must never mean hidden, or we'd be hiding a sale.
+    const floorRows = await (await ctx.request.get(`${BASE}/api/editor/orders?table=${T}`)).json();
+    const inFloor = Array.isArray(floorRows) && floorRows.some((o) => o.id === ghost.id);
+    !inFloor
+      ? pass(`the floor slice returned ${Array.isArray(floorRows) ? floorRows.length : "?"} row(s) and none of them is the old party's`)
+      : fail("the floor slice still hands the panel the previous party's order — the panel must not have to filter it out");
+    const recRows = await (await ctx.request.get(`${BASE}/api/editor/orders?history=1&type=table&q=${T}`)).json();
+    Array.isArray(recRows) && recRows.some((o) => o.id === ghost.id)
+      ? pass("the old order is still findable in the records (Bills search) — off the floor, not erased")
+      : fail("the old order is not in the records search — taking it off the floor must never hide it");
 
     // CROSS-TABLE SWEEP (owner, 2026-07-30): walk tile → tile and check the detail always
     // describes the table you actually clicked, and its dish count matches that tile.
