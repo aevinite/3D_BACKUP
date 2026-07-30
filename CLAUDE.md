@@ -658,6 +658,37 @@ guests for it. Two rules came out of it; keep BOTH true forever:
   browser pass): panel source, a floor-wide data scan, the close behaviour, and a tile-by-tile
   click sweep proving each tile and its detail describe the SAME table. `/bug-test` §5b runs it.
 
+## 🩺 A GREEN TEST SUITE IS NOT EVIDENCE THAT THE SCREEN IS RIGHT (2026-07-30 — after two faults reached the owner)
+
+Two faults reached the owner's screen on the same day, and **every check that was running passed**,
+because in both cases the source was valid and the data was fine — only what a person SAW was
+wrong:
+
+1. A `<script>` tag was inserted INSIDE an HTML comment. The comment ended early, so the manager's
+   top bar displayed *"…the pill was inserted at the far LEFT of the topbar. -->"* to every user.
+2. An orange *"Connection is struggling"* bar sat directly above the panel's own green *"Live"*
+   badge. Nothing was broken; the UI contradicted itself, from ONE slow read.
+
+The root cause of BOTH was the same, and it is the thing to guard against: **I verified my work
+with checks that could not have caught the failure** — the wrong surface (offline-only tests), the
+wrong artefact (source instead of the served file), or the wrong signal (skimming output instead of
+an exit code). So, permanently:
+
+- **`npm run verify:ui`** — static, instant, and wired into the PostToolUse hook: refuses an edit
+  that leaves an HTML comment open, strands a panel script inside a comment, or commits a
+  merge-conflict marker. Both faults above are reproduced in it as tests.
+- **`npm run verify:live -- --base <url>`** — run this against the DEPLOYED site after every
+  deploy. It reads the RENDERED text of every panel and page and fails on leaked code
+  (`-->`, `${`, `[object Object]`, `undefined`, `NaN`), on a screen that renders empty, on console
+  errors, and on **UI that contradicts itself** (an alarm bar while the badge says Live).
+- **Never derive a claim from data that doesn't support it.** A status warning must read the SAME
+  signal the existing indicator reads, expire on its own, and self-heal — one slow request is not a
+  connection verdict.
+- **For AV live, verification is READ-ONLY** (no logins, no test orders — see the rule above): fetch
+  the served files, check the panel HTML comments balance, and diff them against the backup site.
+  `node scripts/verify-avlive-offline-complete.mjs` proves a surgical release landed COMPLETELY —
+  a patcher that skips a file writes nothing and says so in one line among many.
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The
