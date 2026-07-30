@@ -50,7 +50,7 @@ export async function GET(req: NextRequest) {
   if (!(await payrollLadder(u.restaurant_id)).effective) return NextResponse.json({ ...base, profileModule: false });
 
   const row = (await sb.from("staff_users")
-    .select("profile, joined_on, designation, employment_type, shift_label, weekly_off, pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay")
+    .select("profile, joined_on, designation, employment_type, shift_label, weekly_off, pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay, in_payroll")
     .eq("id", u.id).maybeSingle()).data as Record<string, any> | null;
   const c = completeness({ ...(row || {}), phone: u.phone });
   const out: Record<string, unknown> = {
@@ -66,10 +66,13 @@ export async function GET(req: NextRequest) {
     },
     editable: SELF_PROFILE_FIELDS,
     completeness: { filled: c.selfFilled, total: c.selfTotal, missing: c.missing },
-    canSeeOwnPay: row?.can_see_own_pay !== false,
+    canSeeOwnPay: row?.can_see_own_pay !== false && row?.in_payroll === true,
+    onPayList: row?.in_payroll === true,
   };
 
-  if (row?.can_see_own_pay !== false) {
+  // Their pay section exists only if they're actually ON the pay list (mig 221) AND the owner
+  // hasn't switched off their own-pay view. Someone not on the list has no pay to show.
+  if (row?.can_see_own_pay !== false && row?.in_payroll === true) {
     out.pay = {
       pay_type: row?.pay_type ?? null, pay_amount: row?.pay_amount ?? null,
       pay_day: row?.pay_day ?? null, pay_mode: row?.pay_mode ?? null, pay_extras: row?.pay_extras ?? [],

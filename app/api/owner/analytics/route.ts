@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
+import { payrollLadder } from "@/lib/tableTags";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +101,20 @@ const fpFor = (ids: string[] | null, from: string, to: string) =>
   Date.parse(to) - Date.parse(from) > WIDE_FP_MS
     ? reportMonthFingerprint(ids, from, to)
     : ordersFingerprint(ids, from, to);
+
+// The dashboard now shows STAFF PAY as an expense, and that money lives in staff_payments —
+// which the orders fingerprint knows nothing about. Without this, recording a salary left the
+// cached dashboard showing the OLD "after staff pay" number until an order happened to change.
+// One tiny indexed count + the newest row's timestamps, appended to the orders fingerprint.
+async function fpWithStaffPay(ids: string[] | null, from: string, to: string): Promise<string | null> {
+  const base = await fpFor(ids, from, to);
+  if (!ids || !ids.length || base === null) return base;
+  const q = await sb.from("staff_payments")
+    .select("created_at, voided_at", { count: "exact" })
+    .in("restaurant_id", ids).order("created_at", { ascending: false }).limit(1);
+  const last = (q.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
+  return `${base}|sp:${q.count ?? 0}:${last?.created_at ?? ""}:${last?.voided_at ?? ""}`;
+}
 
 // A thrown Supabase/PostgREST error is a plain object, not an Error — String(e) on it
 // renders the literal "[object Object]" the owner saw in the red banner. Pull the
@@ -193,6 +208,27 @@ export async function GET(req: NextRequest) {
     scope.ids = allowed;
   }
   const { from, to, bucket } = windowFor(range, sp);
+
+  // ── STAFF PAY AS AN EXPENSE (mig 221, owner 2026-07-30: "it should also reduce main profit
+  //    because it all counts as expense") ─────────────────────────────────────────────────
+  // Cash truth: money that actually left in this window, pay-list members only (a payment can
+  // only exist for someone on the list). ONE indexed sum, and only for restaurants that have
+  // the module — a restaurant without it gets `null` and the dashboard shows no such tile.
+  const staffPayExpense = async (): Promise<{ paidOut: number; people: number; entries: number } | null> => {
+    const ids = (rid ? [rid] : scope.all ? [] : scope.ids).filter(Boolean) as string[];
+    if (!ids.length) return null;
+    const on: string[] = [];
+    for (const id of ids) if ((await payrollLadder(id)).effective) on.push(id);
+    if (!on.length) return null;
+    const q = await sb.rpc("lfh_staff_pay_expense", {
+      p_restaurant: on.length === 1 ? on[0] : null,
+      p_from: from.slice(0, 10), p_to: to.slice(0, 10),
+      p_ids: on.length === 1 ? null : on,
+    });
+    const r = (q.data || [])[0] as Record<string, unknown> | undefined;
+    if (!r) return { paidOut: 0, people: 0, entries: 0 };
+    return { paidOut: num(r.paid_out), people: Number(r.people) || 0, entries: Number(r.entries) || 0 };
+  };
   // cache keys must distinguish two different custom windows
   const rangeKey = range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : range;
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
@@ -211,7 +247,7 @@ export async function GET(req: NextRequest) {
         // fingerprint happens to change (found 2026-07-26).
         key: `analytics:v5:group:${scopeKeyOf(null, scope.all, gIds)}:${rangeKey}:c${compare ? 1 : 0}`,
         force: sp.get("refresh") === "1",
-        fingerprint: () => fpFor(scope.all ? null : gIds, from, to),
+        fingerprint: () => fpWithStaffPay(scope.all ? null : gIds, from, to),
         compute: async () => {
       const allow = scope.all ? null : new Set(scope.ids);
       const pIds = scope.all ? null : scope.ids; // DB-side scope (mig 138) — no whole-platform scan
@@ -316,7 +352,7 @@ export async function GET(req: NextRequest) {
       const heatmap = ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({
         dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue),
       }));
-      return { scope: "group", range, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev };
+      return { scope: "group", range, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev, staffPay: await staffPayExpense() };
         },
       });
       return NextResponse.json(groupPayload);
@@ -347,7 +383,7 @@ export async function GET(req: NextRequest) {
     const restBase = await cachedOwnerPayload({
       key: `analytics:v5:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
       force: sp.get("refresh") === "1",
-      fingerprint: () => fpFor([rid], from, to),
+      fingerprint: () => fpWithStaffPay([rid], from, to),
       compute: async () => {
     const [meta, ts, dishes, cats, hourly, heat, pm, sameHour, payTrend, prevTs] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
@@ -404,6 +440,7 @@ export async function GET(req: NextRequest) {
       scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
       kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: 0, topDish: dishRows[0]?.title || "—" },
+      staffPay: await staffPayExpense(),
       timeseries: tsRows,
       timeseriesPrev: tsPrevRows,
       dishes: dishRows,

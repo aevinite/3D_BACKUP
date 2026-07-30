@@ -157,7 +157,10 @@ const slim = (r: Restaurant) => ({ id: r.id, name: r.name, slug: r.slug, accentC
 // pay numbers, which are stripped again below for a caller who may not see money.
 const PROFILE_COLS =
   "profile, joined_on, left_on, designation, employment_type, shift_label, weekly_off, " +
-  "pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay";
+  "pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay, " +
+  // mig 221 — being on the PAY LIST is opt-in per person. Having a profile is not the same
+  // as being paid through the app, and only pay-list members count as an expense.
+  "in_payroll, payroll_added_at, payroll_added_by";
 
 // Batch-read whether the payroll module is effective for several restaurants at once, so the
 // roster costs ONE settings read instead of one ladder read per restaurant.
@@ -378,6 +381,11 @@ export async function POST(req: NextRequest) {
   if (String(body?.action || "") === "record_payment") {
     const t = await target(s, String(body?.staff_id || "")); if ("err" in t) return t.err;
     if (!t.acc.canRecordPay) return bad("Your owner hasn't given managers permission to record staff payments.", 403);
+    // Opt-in gate (mig 221): no payment can exist for someone the owner hasn't put on the pay
+    // list. Enforced HERE, not just hidden in the UI, so the expense totals can never include
+    // a person the owner never enrolled.
+    if (!t.u.in_payroll)
+      return bad(`${t.u.name || t.u.username} isn't on the pay list yet — add them to it first.`, 409);
     let p: ReturnType<typeof paymentFrom>;
     try { p = paymentFrom(body); } catch (e) { return bad(e instanceof Error ? e.message : "Bad payment."); }
     // WHO recorded it comes from the SESSION, never from the request body — a label the
@@ -482,6 +490,11 @@ export async function PATCH(req: NextRequest) {
       let patch: Record<string, unknown>;
       try { patch = jobPatchFrom(body); } catch (e) { return bad(e instanceof Error ? e.message : "Bad value."); }
       if (!Object.keys(patch).length) return bad("Nothing to change.");
+      // Only a pay-list member gets a RATE. Their joining date, shift and designation are
+      // ordinary job facts and stay editable either way (mig 221).
+      const PAY_ONLY = ["pay_type", "pay_amount", "pay_day", "pay_mode", "pay_extras"];
+      if (!t.u.in_payroll && PAY_ONLY.some((k) => k in patch))
+        return bad(`${t.u.name || t.u.username} isn't on the pay list — add them to it before setting a rate.`, 409);
       const { error } = await sb.from("staff_users").update(patch).eq("id", id);
       if (error) return bad("Couldn't save those changes — please try again.", 500);
       await logAction("owner", "staff_job_edit", {
@@ -501,6 +514,30 @@ export async function PATCH(req: NextRequest) {
       detail: `"${t.u.username}" can${body.can_see_own_pay ? "" : "not"} see their own pay`,
     });
     return ok({ ok: true, can_see_own_pay: body.can_see_own_pay });
+  }
+
+  // ── the pay list itself (mig 221) ───────────────────────────────────────────
+  // Owner/admin only. Removing someone KEEPS their history (nothing is erased) but stops
+  // them counting as an expense and stops new payments — the same "never delete money"
+  // discipline as a cancelled entry.
+  if (action === "set_payroll") {
+    const t = await target(s, id); if ("err" in t) return t.err;
+    if (!t.acc.canEditJobPay) return bad("Only the owner can change who is on the pay list.", 403);
+    if (typeof body?.in_payroll !== "boolean") return bad("`in_payroll` must be true or false.");
+    const on = body.in_payroll;
+    if (t.u.in_payroll === on) return ok({ ok: true, in_payroll: on });   // already there
+    const who = await actorLabel(s);
+    const { error } = await sb.from("staff_users").update({
+      in_payroll: on,
+      payroll_added_at: on ? new Date().toISOString() : null,
+      payroll_added_by: on ? who : null,
+    }).eq("id", id);
+    if (error) return bad("Couldn't update the pay list — please try again.", 500);
+    await logAction("owner", on ? "payroll_add" : "payroll_remove", {
+      restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId, level: on ? "info" : "warn",
+      detail: `${on ? "added" : "removed"} "${t.u.username}" ${on ? "to" : "from"} the pay list`,
+    });
+    return ok({ ok: true, in_payroll: on, payroll_added_by: on ? who : null });
   }
 
   if (action === "void_payment") {

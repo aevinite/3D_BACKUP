@@ -20,7 +20,8 @@ type Staff = { id: string; username: string; role: string; name: string | null; 
   profileEligible?: boolean; completeness?: { filled: number; total: number } | null;
   joined_on?: string | null; designation?: string | null;
   pay_type?: string | null; pay_amount?: number | null;
-  paidThisMonth?: number; advanceOutstanding?: number; lastPaidOn?: string | null; payHidden?: boolean };
+  paidThisMonth?: number; advanceOutstanding?: number; lastPaidOn?: string | null; payHidden?: boolean;
+  in_payroll?: boolean };
 type PayAccess = { moduleOn: boolean; canSeePay: boolean; canRecordPay: boolean; canEditProfile: boolean; canEditJobPay: boolean };
 
 // Per-user override caps for a WAITER (tablet) account — the tablet_* keys tabletPerm enforces.
@@ -176,6 +177,17 @@ export default function OwnerStaffPage() {
 
   // Per-user override for a waiter's tablet cap (Default/On/PIN/Off). Server (GAP-B) refuses a
   // grant beyond the restaurant's ceiling; the UI also greys those, so this only ever sends valid ones.
+  // Add / remove someone from the PAY LIST (mig 221). Having a profile is not the same as
+  // being paid through the app: only people on this list get a rate, can be paid, and count
+  // as an expense in the reports and on the dashboard.
+  async function setPayroll(s2: Staff, on: boolean) {
+    if (!on && !confirm(`Remove ${s2.name || s2.username} from the pay list?\n\nTheir past payments stay on the record, but they'll stop counting as an expense and you won't be able to record new payments for them.`)) return;
+    try {
+      await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s2.id, action: "set_payroll", in_payroll: on }) });
+      await load();
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  }
+
   async function setUserPerm(u: Staff, key: string, v: string) {
     setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: { ...(x.permissions || {}), [key]: v } } : x));
     try {
@@ -379,13 +391,23 @@ export default function OwnerStaffPage() {
                         </span>
                       </a>
                     )}
-                    {s.profileEligible && !s.payHidden && (s.pay_amount ? (
+                    {/* Pay only exists for people ON the pay list. Off-list people show a
+                        plain invitation instead of a misleading "pay not set". */}
+                    {s.profileEligible && !s.payHidden && !s.in_payroll && (
+                      canEditPowers
+                        ? <button className="ost-mini paylist" disabled={busy} onClick={() => setPayroll(s, true)}
+                            title="Put this person on the pay list so you can set a rate and record payments">
+                            <i className="fas fa-plus" /> Add to pay list
+                          </button>
+                        : <span className="ost-nopay">not on the pay list</span>
+                    )}
+                    {s.profileEligible && !s.payHidden && s.in_payroll && (s.pay_amount ? (
                       <span className="adm-muted" style={{ fontSize: 11.5 }}>
                         {money(s.pay_amount)}{s.pay_type === "monthly" ? "/mo" : s.pay_type === "daily" ? "/day" : s.pay_type === "hourly" ? "/hr" : ""}
                         {" · "}<b style={{ color: s.paidThisMonth ? "var(--adm-ok)" : "var(--muted)" }}>{money(s.paidThisMonth)}</b> paid this month
                         {s.advanceOutstanding ? <span style={{ color: "var(--adm-warn)" }}> · {money(s.advanceOutstanding)} advance</span> : null}
                       </span>
-                    ) : <span className="ost-nopay">pay not set</span>)}
+                    ) : <span className="ost-nopay">on pay list · rate not set</span>)}
                   </div>
                   <div className="ost-actions">
                     {s.profileEligible && (
@@ -548,6 +570,7 @@ export default function OwnerStaffPage() {
         .ost-bar { display: block; width: 74px; height: 6px; border-radius: 99px; background: var(--muted2); overflow: hidden; }
         .ost-bar i { display: block; height: 100%; background: var(--adm-ok, #34d399); }
         .ost-bar.part i { background: var(--adm-warn, #fbbf24); }
+        .ost-mini.paylist { color: var(--own-cta, var(--accent)); border-color: color-mix(in srgb, var(--own-cta, var(--accent)) 45%, transparent); }
         .ost-nopay { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .02em; padding: 2px 8px; border-radius: 999px; background: color-mix(in srgb, var(--adm-warn) 16%, transparent); color: var(--adm-warn); }
         .ost-mini.open { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }
         .ost-mini.open:hover { border-color: var(--accent); }

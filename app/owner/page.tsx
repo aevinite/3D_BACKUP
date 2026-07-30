@@ -73,7 +73,7 @@ type TsPrevRow = { bucket: string; revenue: number };
 type Pay = { method: string; revenue: number; orders: number };
 type HeatRow = { dow: number; hr: number; orders: number; revenue: number };
 type Prev = { revenue: number; orders: number } | null;
-type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; paymentMethods: Pay[]; heatmap?: HeatRow[]; categories?: { category: string; qty: number; revenue: number }[]; prev: Prev; cachedAt?: string };
+type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; paymentMethods: Pay[]; heatmap?: HeatRow[]; categories?: { category: string; qty: number; revenue: number }[]; prev: Prev; cachedAt?: string; staffPay?: { paidOut: number; people: number; entries: number } | null };
 type Dish = { title: string; qty: number; revenue: number };
 type Records = {
   bestDay?: { date: string; revenue: number } | null;
@@ -86,6 +86,9 @@ type RestA = {
   scope: "restaurant"; prev: Prev;
   restaurant: { id: string; slug: string; name: string; accentColor: string; heroTitle: string };
   kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; openTables: number; topDish: string };
+  // Staff pay that LEFT in this window (mig 221). null = this restaurant doesn't have the
+  // Staff-profiles-&-pay module, so no such tile is drawn at all.
+  staffPay?: { paidOut: number; people: number; entries: number } | null;
   timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
   heatmap?: HeatRow[]; records?: Records; cachedAt?: string;
@@ -665,12 +668,12 @@ export default function OwnerDashboard() {
     const p = pl(range);
     if (!p) return null;
     if (p.scope === "restaurant") {
-      return { revenue: p.kpis.revenue, orders: p.kpis.orders, paidOrders: p.kpis.paidOrders ?? p.kpis.orders, avg: p.kpis.avgOrder, prev: p.prev, ts: p.timeseries };
+      return { revenue: p.kpis.revenue, orders: p.kpis.orders, paidOrders: p.kpis.paidOrders ?? p.kpis.orders, avg: p.kpis.avgOrder, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null };
     }
     const revenue = p.restaurantRevenue.reduce((a, r) => a + r.revenue, 0);
     const orders = p.restaurantRevenue.reduce((a, r) => a + r.orders, 0);
     const paidOrders = p.paymentMethods.reduce((a, m) => a + (m.orders || 0), 0);
-    return { revenue, orders, paidOrders, avg: paidOrders ? revenue / paidOrders : 0, prev: p.prev, ts: p.timeseries };
+    return { revenue, orders, paidOrders, avg: paidOrders ? revenue / paidOrders : 0, prev: p.prev, ts: p.timeseries, staffPay: p.staffPay ?? null };
   }, [pl]);
 
   // Sparkline points (per bucket) for a range — group sums across restaurants.
@@ -1081,6 +1084,19 @@ export default function OwnerDashboard() {
       <Kpi k="Lost to cancellations" href={reportHref("cancellations")} v={money === "err" ? "—" : ((money as MoneyTotals | undefined)?.cancelledValue ?? 0)} money
         loading={!money}
         sub={money === "err" ? "couldn't total for this range" : ((money as MoneyTotals | undefined)?.cancelledOrders ? `${(money as MoneyTotals).cancelledOrders} order${(money as MoneyTotals).cancelledOrders === 1 ? "" : "s"}` : "none — great")} />
+      {/* STAFF PAY AS AN EXPENSE (owner 2026-07-30). Only drawn when the restaurant has the
+          module — otherwise the tiles don't exist, same as everywhere else. "After staff pay"
+          is the number he asked for: revenue minus what actually went out to the team. */}
+      {kMain?.staffPay && (
+        <>
+          <Kpi k="Staff pay out" href={reportHref("team")} v={kMain.staffPay.paidOut} money loading={!kMain}
+            sub={kMain.staffPay.entries
+              ? `${kMain.staffPay.entries} payment${kMain.staffPay.entries === 1 ? "" : "s"} · ${kMain.staffPay.people} on the pay list`
+              : "nothing paid out yet"} />
+          <Kpi k="After staff pay" href={reportHref("team")} v={(kMain.revenue ?? 0) - kMain.staffPay.paidOut} money loading={!kMain}
+            sub="revenue minus what went out to the team" />
+        </>
+      )}
     </div>
   );
 
