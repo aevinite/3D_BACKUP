@@ -772,10 +772,6 @@ const QUICK_FEATURES = [
   // until a client asks for it. Off hides the whole thing (profiles, salary records, the
   // performance report) from the owner, the manager and the staff's own panels.
   { key: "payroll", label: "Staff profiles & pay", hint: "Each person's profile (details, job, documents), a record of salary and advances paid, and the team performance report. Salary is owner-only unless the owner hands it to a manager." },
-  // Waiter sections (mig 222, owner 2026-07-29). Worth reading the hint before flipping it:
-  // ON is the moment waiters stop seeing the whole floor, and a waiter with nothing assigned
-  // sees NOTHING. Assignments are kept when it's switched back off.
-  { key: "table_assign", label: "Give waiters their own tables", hint: "Splits the floor into sections — each waiter's tablet then shows ONLY the tables they were given. Set who serves what in the manager panel → Settings → Tables. Careful: a waiter with no tables assigned sees an empty floor, so fill the sections in right after switching this on." },
 ] as const;
 type QuickKey = (typeof QUICK_FEATURES)[number]["key"];
 

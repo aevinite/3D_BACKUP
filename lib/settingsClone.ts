@@ -107,13 +107,6 @@ export function cleanClonedSettings(
   base.platform_owner_control = false;
   base.platform_enabled = true;
   base.platform_channels = {};
-  // Waiter sections — "give waiters their own tables" (mig 222): a brand-new module, so the
-  // whole ladder starts at the admin's feet. This one matters more than most: with the module
-  // ON and nobody assigned, every waiter's floor is EMPTY, so a new restaurant must never
-  // inherit it switched on from #1. There is no tablet rung (waiters don't assign sections).
-  base.table_assign_allowed = false;
-  base.table_assign_owner_control = false;
-  base.table_assign_enabled = true;
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;

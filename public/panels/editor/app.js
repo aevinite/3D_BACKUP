@@ -1296,6 +1296,33 @@ function userSettingCardHtml() {
       <input class="sx-input" id="usrNewPassword" placeholder="Password (blank = auto)" style="flex:1 1 150px"/>
       <button class="btn primary" id="usrAddStaff">+ Add</button>
     </div>
+    ${newWaiterTablesHtml()}
+  </div>`;
+}
+
+// ── Which tables a NEW waiter gets (owner 2026-07-30) ────────────────────────
+// "when you create a tablet user you will assign tables to them — there should be just a
+// select all option." Shown ONLY while the sections module is on and the chosen role is
+// `tablet`; with sections off there is nothing to choose (nobody is restricted) and the
+// server seeds the whole floor. At least ONE table is required — the owner's call — so a
+// waiter is never created blind; "Select all" makes the whole floor one tap.
+function newWaiterTablesHtml() {
+  const s = state.data.settings || {};
+  const n = Math.max(1, parseInt(s.table_count, 10) || 12);
+  const picked = state.newWaiterTables || [];
+  let cells = "";
+  for (let i = 1; i <= n; i++) {
+    cells += `<button type="button" class="sec-pick nw-pick${picked.includes(i) ? " on" : ""}" data-nw-table="${i}"><b>${picked.includes(i) ? "✓ " : ""}T${i}</b></button>`;
+  }
+  return `<div class="nw-tables" id="usrNewTables" hidden>
+    <div class="nw-head">
+      <b>Tables this waiter will serve</b>
+      <button class="btn small" type="button" data-nw-all>Select all</button>
+      <button class="btn small" type="button" data-nw-none>Clear</button>
+      <span class="muted" style="margin-left:auto;font-size:12px">${picked.length} of ${n} picked</span>
+    </div>
+    <div class="sec-pickgrid">${cells}</div>
+    ${picked.length ? "" : `<div class="nw-warn">Pick at least one table — their tablet shows only the tables you give them.</div>`}
   </div>`;
 }
 
@@ -4765,6 +4792,35 @@ function bindEditor() {
       renderEditor(); // refresh the "· custom" marker + Default(...) labels
     } catch (e) { toast("Failed: " + e.message, "err"); renderEditor(); }
   }));
+  // The table picker only makes sense for a WAITER, so it follows the role dropdown.
+  const nwSync = () => {
+    const box = $("#usrNewTables");
+    if (!box) return;
+    const isWaiter = ($("#usrNewRole")?.value || "") === "tablet";
+    box.style.display = isWaiter ? "" : "none";
+    const add = $("#usrAddStaff");
+    // The owner's call: a waiter must be given at least one table, so the button stays
+    // disabled until one is picked rather than creating someone with a blank tablet.
+    if (add) {
+      const need = isWaiter && !(state.newWaiterTables || []).length;
+      add.disabled = need;
+      add.title = need ? "Pick at least one table for this waiter first" : "";
+    }
+  };
+  { const rs = $("#usrNewRole"); if (rs) rs.onchange = nwSync; }
+  ed.querySelectorAll("[data-nw-table]").forEach((b) => (b.onclick = () => {
+    const i = Number(b.dataset.nwTable);
+    const cur = state.newWaiterTables || [];
+    state.newWaiterTables = cur.includes(i) ? cur.filter((x) => x !== i) : cur.concat(i).sort((a, b2) => a - b2);
+    renderEditor();
+  }));
+  { const ab = ed.querySelector("[data-nw-all]"); if (ab) ab.onclick = () => {
+      const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+      state.newWaiterTables = Array.from({ length: n }, (_, k) => k + 1);
+      renderEditor();
+    }; }
+  { const nb = ed.querySelector("[data-nw-none]"); if (nb) nb.onclick = () => { state.newWaiterTables = []; renderEditor(); }; }
+  nwSync();
   const usrAdd = $("#usrAddStaff");
   if (usrAdd) usrAdd.onclick = async () => {
     const name = ($("#usrNewName")?.value || "").trim();
@@ -4772,9 +4828,12 @@ function bindEditor() {
     const password = ($("#usrNewPassword")?.value || "").trim();
     if (name.length < 2) { toast("Name must be at least 2 characters.", "err"); return; }
     if (!state.staffRestaurantId) { toast("Couldn't tell which restaurant to add to — reload and try again.", "err"); return; }
+    const tables = role === "tablet" ? (state.newWaiterTables || []) : undefined;
+    if (role === "tablet" && !tables.length) { toast("Pick at least one table for this waiter.", "err"); return; }
     try {
-      const d = await staffCall({ method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: state.staffRestaurantId }) });
+      const d = await staffCall({ method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: state.staffRestaurantId, tables }) });
       state.staffReveal = { name: d.name, password: d.password };
+      state.newWaiterTables = [];               // fresh choice for the next person
       await loadStaffTeam();
     } catch (e) { toast("Failed: " + e.message, "err"); }
   };

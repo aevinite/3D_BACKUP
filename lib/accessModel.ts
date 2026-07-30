@@ -177,8 +177,10 @@ export const PERMISSIONS: Perm[] = [
   // manager (same shape as `platform` above). The manager grant is BACKFILLED ON
   // (owner 2026-07-29: managers run the floor), which is safe because the module itself
   // ships off, so nothing appears anywhere until an admin turns it on.
+  // NOT a module (owner 2026-07-30: "it's not a feature, it should always be on — no need
+  // for a toggle"). Giving each waiter a section is simply how the tablet works; this rung
+  // only controls who may EDIT the sections.
   { id: "table_assign", group: "floor", kind: "ladder", power: "table_assign", ownerUse: "manager",
-    module: { allowed: "table_assign_allowed", control: "table_assign_owner_control", enabled: "table_assign_enabled" },
     name: "Give waiters their own tables",
     what: "Split the floor into sections: each waiter's tablet then shows ONLY the tables they were given, and the server refuses anything else. A table can be given to two waiters, or to one. With this off, every waiter sees the whole floor (today's behaviour).",
     sub: [{ id: "table_assign_edit", name: "Change who serves which table", what: "Opens the section editor in Settings → Tables." }] },

@@ -16,7 +16,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { logAction } from "@/lib/oplog";
-import { fullFloorFor } from "@/lib/tableAssign";
+import { newWaiterTables } from "@/lib/tableAssign";
 
 export const dynamic = "force-dynamic";
 
@@ -88,10 +88,12 @@ export async function POST(req: NextRequest) {
     name: display,
     phone: String(body?.phone || "").trim().slice(0, 20) || null,
   };
-  // Waiter sections (mig 222/223): a new waiter starts with the whole floor — see
-  // fullFloorFor(). Same rule as the owner/manager create path, so it can't matter which
-  // screen the person was added from.
-  if (role === "tablet") (row as Record<string, unknown>).assigned_tables = await fullFloorFor(restaurantId);
+  // Waiter sections (migs 222-225) — same rule as the owner/manager create screen, so it
+  // can't matter which screen the person was added from. See newWaiterTables().
+  if (role === "tablet") {
+    try { (row as Record<string, unknown>).assigned_tables = await newWaiterTables(restaurantId, body?.tables); }
+    catch (e) { return bad(e instanceof Error ? e.message : "Pick at least one table."); }
+  }
   const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name").single();
   if (error) return bad(error.message, 500);
   await logAction("admin", "user_create", { actor: "admin", restaurant_id: restaurantId, detail: `created ${role} "${display}" · id ${data!.id}` });

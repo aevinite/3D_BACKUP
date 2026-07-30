@@ -24,7 +24,7 @@ import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/li
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
-import { fullFloorFor } from "@/lib/tableAssign";
+import { newWaiterTables } from "@/lib/tableAssign";
 import {
   PROFILE_FIELDS, hasProfile, completeness, mergeProfilePatch, jobPatchFrom, paymentFrom,
   payAccessWith, todayIST, type PayAccess,
@@ -254,11 +254,17 @@ export async function GET(req: NextRequest) {
     return acc?.canSeePay ? row : withoutPay(row);
   });
 
+  // Waiter sections: the Add form needs each restaurant's floor size to draw the table
+  // picker. One tiny scoped read for the restaurants already in scope.
+  const tcRows = (await sb.from("settings").select("restaurant_id, table_count").in("restaurant_id", s.restaurants.map((r) => r.id))).data || [];
+  const tcByRid: Record<string, number> = Object.fromEntries(tcRows.map((t) => [t.restaurant_id as string, Number(t.table_count) || 0]));
+
   return ok({
     actor: s.actor,
     restaurants: s.restaurants.map((r) => ({
       ...slim(r), modules: { ...(modsByRid[r.id] || {}), payroll: payrollOn[r.id] === true },
       payAccess: accessByRid[r.id],
+      tableCount: tcByRid[r.id] || 0,
     })),
     staff: staffOut,
   });
@@ -422,10 +428,14 @@ export async function POST(req: NextRequest) {
       }
     }
   }
-  // Waiter sections (mig 222/223): a new waiter starts holding the WHOLE floor, so adding
-  // someone mid-service can never hand them a blank tablet. Sections are only ever a
-  // subtraction from there. (owner 2026-07-29 — "all will have full access")
-  if (role === "tablet") row.assigned_tables = await fullFloorFor(rid);
+  // Waiter sections (migs 222-225): with sections ON you CHOOSE this waiter's tables as you
+  // create them (body.tables, "Select all" is one tap in the form) and an empty pick is
+  // refused; with sections off there's nothing to choose, so they're seeded with the whole
+  // floor. One rule, shared with the admin screen — see newWaiterTables().
+  if (role === "tablet") {
+    try { row.assigned_tables = await newWaiterTables(rid, body?.tables); }
+    catch (e) { return bad(e instanceof Error ? e.message : "Pick at least one table."); }
+  }
   const { data, error } = await sb.from("staff_users").insert(row).select("id, username, role, name, restaurant_id").single();
   if (error) {
     // The pre-check above and this insert aren't atomic — two staff added at once (or a

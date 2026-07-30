@@ -13,7 +13,7 @@ import { asSuffix } from "@/lib/ownerPin";
 import { MANAGER_POWER_FLAGS, ABSENT_ON_POWERS, PERM_BY_ID } from "@/lib/accessModel";
 
 type Perms = Record<string, boolean>;
-type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean>; payAccess?: PayAccess };
+type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean>; payAccess?: PayAccess; tableCount?: number };
 type Staff = { id: string; username: string; role: string; name: string | null; phone: string | null; active: boolean; restaurant_id: string; hasPin: boolean; last_seen_at?: string | null; permissions?: Record<string, string>;
   // Profiles & pay (mig 220). profileEligible is false for KITCHEN (no profile, owner's call)
   // and for any restaurant without the module — the row then shows account actions only.
@@ -83,6 +83,11 @@ export default function OwnerStaffPage() {
   const pwRef = useRef<HTMLInputElement>(null);
   const revealRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
+  // Waiter sections: which tables the person being added will serve, and which restaurant's
+  // Add form is currently showing the waiter role. A waiter must be given at least one table
+  // (owner 2026-07-30), so the Add button stays disabled until one is picked.
+  const [newRole, setNewRole] = useState<Record<string, string>>({});
+  const [newTables, setNewTables] = useState<Record<string, number[]>>({});
   // Bumped only to force a re-render so a controlled <select> snaps back to the real value
   // when the owner cancels a role change (otherwise the native picker keeps the chosen row).
   const [, forceRerender] = useState(0);
@@ -199,9 +204,13 @@ export default function OwnerStaffPage() {
       put("pay_amount", fd.get("pay_amount"));
       const fullName = String(fd.get("full_name") || "").trim();
       if (fullName) opt.profile = { full_name: fullName };
-      const d = await call(withScope("/api/owner/staff"), { method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: rid, ...opt }) });
+      const tables = role === "tablet" ? (newTables[rid] || []) : undefined;
+      if (role === "tablet" && !tables!.length) { setErr("Pick at least one table for this waiter."); return; }
+      const d = await call(withScope("/api/owner/staff"), { method: "POST", body: JSON.stringify({ name, role, password: password || undefined, restaurant_id: rid, tables, ...opt }) });
       setReveal({ name: d.name, password: d.password }); setCopied(false);
       form.reset();
+      setNewRole((m) => ({ ...m, [rid]: "manager" }));
+      setNewTables((m) => ({ ...m, [rid]: [] }));
       await load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { addingRef.current = false; }
@@ -443,9 +452,43 @@ export default function OwnerStaffPage() {
             {/* Add staff */}
             <form className="ost-add" onSubmit={(e) => { e.preventDefault(); addStaff(r.id, e.currentTarget); }}>
               <input className="ost-in" name="name" placeholder="Username (their login)" autoComplete="off" maxLength={80} required />
-              <select className="ost-in" name="role" defaultValue="manager">{ROLES.map((ro) => <option key={ro} value={ro}>{ro === "tablet" ? "waiter" : ro}</option>)}</select>
+              <select className="ost-in" name="role" defaultValue="manager"
+                onChange={(e) => setNewRole((m) => ({ ...m, [r.id]: e.target.value }))}>
+                {ROLES.map((ro) => <option key={ro} value={ro}>{ro === "tablet" ? "waiter" : ro}</option>)}
+              </select>
               <input className="ost-in" name="password" placeholder="Password (blank = auto)" autoComplete="off" />
-              <button className="ost-btn" type="submit" disabled={busy}><i className="fas fa-user-plus" /> Add</button>
+              <button className="ost-btn" type="submit"
+                disabled={busy || (newRole[r.id] === "tablet" && !(newTables[r.id] || []).length)}
+                title={newRole[r.id] === "tablet" && !(newTables[r.id] || []).length ? "Pick at least one table for this waiter first" : ""}>
+                <i className="fas fa-user-plus" /> Add
+              </button>
+              {/* Waiter sections: a waiter's tablet shows ONLY the tables picked here, so the
+                  choice is made as they're created. "Select all" is the whole floor in one tap. */}
+              {newRole[r.id] === "tablet" && (
+                <div className="ost-tables">
+                  <div className="ost-tables-head">
+                    <b>Tables this waiter will serve</b>
+                    <button type="button" className="ost-btn sm" onClick={() => setNewTables((m) => ({ ...m, [r.id]: Array.from({ length: r.tableCount || 0 }, (_, k) => k + 1) }))}>Select all</button>
+                    <button type="button" className="ost-btn sm" onClick={() => setNewTables((m) => ({ ...m, [r.id]: [] }))}>Clear</button>
+                    <span className="adm-muted">{(newTables[r.id] || []).length} of {r.tableCount || 0} picked</span>
+                  </div>
+                  <div className="ost-tgrid">
+                    {Array.from({ length: r.tableCount || 0 }, (_, k) => k + 1).map((i) => {
+                      const on = (newTables[r.id] || []).includes(i);
+                      return (
+                        <button key={i} type="button" className={on ? "on" : ""}
+                          onClick={() => setNewTables((m) => {
+                            const cur = m[r.id] || [];
+                            return { ...m, [r.id]: on ? cur.filter((x) => x !== i) : [...cur, i].sort((a, b) => a - b) };
+                          })}>{on ? "\u2713 " : ""}T{i}</button>
+                      );
+                    })}
+                  </div>
+                  {!(newTables[r.id] || []).length && (
+                    <div className="ost-tables-warn">Pick at least one table — their tablet shows only the tables you give them.</div>
+                  )}
+                </div>
+              )}
               {/* Fill the person in right away — or skip it entirely and finish their profile
                   later. Every field here is optional; the server ignores the job/pay ones for a
                   kitchen login and for a manager who may not set pay. */}
@@ -522,6 +565,16 @@ export default function OwnerStaffPage() {
         .ost-mini:hover:not(:disabled) { border-color: var(--accent); }
         .ost-mini.danger:hover:not(:disabled) { border-color: var(--adm-danger, #c0392b); color: var(--adm-danger, #c0392b); }
         .ost-add { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: var(--border); }
+        /* Waiter sections: the table picker inside the Add form. Full width so it sits under
+           the name/role/password row rather than squeezing them. */
+        .ost-tables { flex: 1 1 100%; border: var(--border); border-radius: 12px; padding: 11px 12px; background: color-mix(in srgb, var(--fg, #888) 4%, transparent); }
+        .ost-tables-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; font-size: 13px; }
+        .ost-tables-head .adm-muted { margin-left: auto; font-size: 12px; }
+        .ost-btn.sm { min-height: 30px; padding: 0 10px; font-size: 12px; }
+        .ost-tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; max-height: 190px; overflow-y: auto; padding-right: 4px; }
+        .ost-tgrid button { min-height: 36px; border-radius: 9px; border: var(--border); background: var(--bg); color: var(--muted); font: inherit; font-size: 12px; font-weight: 800; cursor: pointer; }
+        .ost-tgrid button.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: var(--accent); color: var(--adm-ok); }
+        .ost-tables-warn { margin-top: 9px; font-size: 12.5px; font-weight: 700; color: var(--adm-bad, #ef4444); }
         .ost-more { flex-basis: 100%; margin-top: 4px; }
         .ost-more summary { cursor: pointer; font-size: 12px; font-weight: 700; color: var(--muted); padding: 4px 0; }
         .ost-moregrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
