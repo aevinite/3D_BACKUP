@@ -2563,6 +2563,13 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
   background: var(--panel); color: inherit; }
 .inv-addline select { flex: 2; min-width: 130px; } .inv-addline input { flex: 1; min-width: 70px; }
 .inv-countrow { display: flex; align-items: center; gap: 10px; padding: 8px 4px; border-bottom: 1px solid var(--line); }
+/* Counting is a thumb walking DOWN a list, so every box must sit at the same x. The unit
+   label's natural width differs per row ("kg" vs "L" vs "pc"), which pushed each input to
+   its own position (measured 221/222/230px at 390px wide). Fix the unit's width and let a
+   long ingredient name truncate instead of shoving the box around. (QA sweep 2026-07-30) */
+.inv-countrow .inv-row-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inv-countrow .inv-countin { flex: none; }
+.inv-countrow > .dim { flex: none; width: 30px; text-align: left; }
 .inv-countin { width: 110px; padding: 12px; font-size: 17px; text-align: right; border-radius: 10px;
   border: 1px solid var(--line); background: var(--panel); color: inherit; }
 .inv-reasons { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin: 10px 0; }
