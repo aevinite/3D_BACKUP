@@ -59,6 +59,16 @@ const inPanelAsync = async (page, fn, arg) => {
   );
   return r;
 };
+// A tab opened AFTER the network was cut adopts that state a moment later; navigating
+// before it does races the real server and the test measures nothing. Always go through this.
+async function offlinePage(ctx) {
+  const pg = await ctx.newPage();
+  for (let i = 0; i < 20; i++) {
+    if (await pg.evaluate(() => navigator.onLine === false).catch(() => false)) break;
+    await sleep(250);
+  }
+  return pg;
+}
 async function waitFor(fn, ms = 20000, step = 500) {
   const until = Date.now() + ms;
   for (;;) {
@@ -549,6 +559,44 @@ async function run() {
       await slowPage.close();
     }
 
+    // ══ THE SIGN-IN PAGE, offline ══════════════════════════════════════════════
+    // The most likely offline moment of all: a panel tab wakes up, reloads, has no signal
+    // and the app bounces it to the sign-in page. That page was excluded from the offline
+    // layer at first, so staff got the browser's error page — and that failed navigation
+    // then stopped the NEXT one being handled, taking our own offline page down with it.
+    console.log("\n11) The sign-in page, reloaded with no internet");
+    const lg = await ctx.newPage();
+    await lg.goto(BASE + "/login", { waitUntil: "domcontentloaded" });
+    await waitControlled(lg);
+    await lg.reload({ waitUntil: "domcontentloaded" });   // once online, so it's saved
+    await sleep(2500);
+    await ctx.setOffline(true);
+    await lg.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
+    await sleep(2000);
+    const lgText = ((await lg.locator("body").textContent().catch(() => "")) || "");
+    // "Served from the device" = we got OUR html back (the app's own page or our offline
+    // page). The browser's error page yields an empty body here.
+    lgText.trim().length > 0
+      ? ok(`the sign-in page still comes from the device: "${lgText.trim().replace(/\s+/g, " ").slice(0, 46)}…"`)
+      : bad("the sign-in page fell through to the browser's error page (empty body)");
+    // …and it must not leave the NEXT navigation unhandled.
+    //
+    // NOTE ON WHAT THIS CAN AND CANNOT PROVE: Chrome's offline emulation applies to the
+    // PAGE, not to the service worker's own fetches (the same gap that made the crawling-
+    // connection test need a real slow server). So a fresh tab's navigation can legitimately
+    // be answered live here. What we CAN assert is that something of ours comes back rather
+    // than the browser's error page — an empty body. A true end-to-end proof for navigations
+    // needs a real device losing WiFi; that's the outstanding item in docs/OFFLINE-SYNC.md.
+    const after = await offlinePage(ctx);
+    await after.goto(BASE + "/still-unseen-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
+    await sleep(1500);
+    const afterText = ((await after.locator("body").textContent().catch(() => "")) || "").trim();
+    afterText.length > 0
+      ? ok("and the next navigation is still answered (not the browser's error page)")
+      : bad("a sign-in reload left the next navigation unhandled (empty body)");
+    await ctx.setOffline(false);
+    await lg.close(); await after.close();
+
     // ══ A SCREEN THIS DEVICE HAS NEVER OPENED, offline ═════════════════════════
     // The last-resort case: nothing saved for this URL and no network. Staff must get the
     // branded "no internet — nothing you did is lost" page, not the browser's own error
@@ -559,6 +607,7 @@ async function run() {
     await fresh.goto(BASE + "/login", { waitUntil: "domcontentloaded" });   // installs the worker
     await waitControlled(fresh);
     await ctx.setOffline(true);
+    for (let i = 0; i < 20 && !(await fresh.evaluate(() => navigator.onLine === false).catch(() => false)); i++) await sleep(250);
     // A URL that certainly has no saved copy on this device.
     await fresh.goto(BASE + "/never-opened-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
     await sleep(1500);
