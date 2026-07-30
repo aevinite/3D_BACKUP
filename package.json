@@ -11,7 +11,8 @@
     "build:vendor": "node scripts/build-vendor.mjs",
     "test:money": "node --test tests/money.test.mjs",
     "test:totals": "node --test tests/order-totals.e2e.mjs",
-    "cache-models": "node scripts/set-glb-cache.mjs"
+    "cache-models": "node scripts/set-glb-cache.mjs",
+    "verify:taps": "node scripts/verify-tap-guard.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",

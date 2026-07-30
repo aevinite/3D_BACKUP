@@ -142,14 +142,27 @@ const toast = (msg, ok = true) => {
 };
 // Two-step confirm (a promise that resolves true/false) — used before sending
 // an order to the kitchen, so a stray tap can't fire a ticket.
+// ONE dialog at a time. This box is a single shared element in index.html whose Yes/No
+// handlers are reassigned per call — so a second call while one was open replaced those
+// handlers and the FIRST promise never resolved: its caller sat awaiting forever and that
+// action died with nothing on screen. (Same family as the manager's swallowed "Close
+// anyway" tap, 2026-07-29.) The second call is now refused — answered "no" so it returns
+// cleanly — and the question already on screen SHAKES so the waiter sees what's waiting.
+let confirmOpen = false;
 const confirmDialog = (text, yesLabel = "Yes, send it") => new Promise((resolve) => {
+  if (confirmOpen) {
+    const box = $("#confirmOverlay");
+    if (box) { box.classList.remove("cf-nudge"); void box.offsetWidth; box.classList.add("cf-nudge"); }
+    resolve(false); return;
+  }
+  confirmOpen = true;
   $("#confirmText").textContent = text;
   $("#confirmYes").textContent = yesLabel;
   $("#confirmOverlay").hidden = false;
   // Register with the back-stack so the hardware/browser back button closes THIS
   // dialog (as a cancel) instead of the layer underneath / the whole panel.
   let off = null;
-  const finish = (val) => { $("#confirmOverlay").hidden = true; if (off) { off(); off = null; } resolve(val); };
+  const finish = (val) => { confirmOpen = false; $("#confirmOverlay").hidden = true; $("#confirmOverlay").classList.remove("cf-nudge"); if (off) { off(); off = null; } resolve(val); };
   off = window.LFH_BACK ? LFH_BACK.layer("tablet-confirm", () => finish(false)) : null;
   $("#confirmYes").onclick = () => finish(true);
   $("#confirmNo").onclick = () => finish(false);

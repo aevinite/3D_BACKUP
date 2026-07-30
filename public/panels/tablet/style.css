@@ -304,6 +304,15 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .confirm-box { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 20px; width: min(92vw, 380px); }
 .confirm-box p { margin: 0 0 16px; font-size: 15px; line-height: 1.5; }
 .confirm-actions { display: flex; gap: 10px; justify-content: flex-end; }
+/* A second question asked while one is already up is refused — the box on screen shakes so
+   the waiter sees which one is waiting, instead of the tap vanishing. (2026-07-30) */
+.confirm-overlay.cf-nudge .confirm-box { animation: cf-shake 0.24s ease-in-out; }
+@keyframes cf-shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-5px); }
+  75% { transform: translateX(5px); }
+}
+@media (prefers-reduced-motion: reduce) { .confirm-overlay.cf-nudge .confirm-box { animation: none; } }
 
 /* ── editor-quality detail panel ───────────────────────────────────────────── */
 /* the panel becomes a column so the action row + attend bar can pin to the bottom */

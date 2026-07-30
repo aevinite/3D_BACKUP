@@ -548,6 +548,36 @@ So tripping a limit during our own work counts as a BUG in the test, not a findi
 
 Code: `lib/rateLimit.ts` (counter + alert), `lib/alerts.ts` (phone ping), mig 205/208/214.
 
+## 👆 A USER'S TAP MUST NEVER VANISH IN SILENCE (owner, 2026-07-30 — every panel, every dialog)
+
+A button that swallows a tap is indistinguishable from a broken button, and it leaves no trace
+to debug. This cost a real close on a live client's floor: the manager's confirm box ignores
+clicks for its first 350ms (so the tail of a double-tap can't answer a question nobody read),
+and "Close anyway" is a CHAINED dialog — it appears only when the server's refusal lands, so it
+pops up under a finger already tapping, in the same spot. A normal tap 200–300ms later was
+dropped with nothing on screen; the owner closed two tables and the third "didn't work"
+(PR #554, then the sibling paths in the follow-up).
+
+Whenever you write a dialog, overlay, or any handler that can decline a tap:
+
+- **Never `return` on a user action without a trace.** Either HOLD the action and run it when
+  you can (`tapGuard().act()` in the manager panel), or refuse it VISIBLY — a shake
+  (`.confirm-nudge` / `.cf-nudge`), a toast, a disabled state. Silent `resolve(false)` is banned.
+- **Never leave a promise unresolved.** A shared dialog element whose handlers get reassigned
+  orphans the earlier `await` forever and that action dies mid-flight (the tablet's
+  `#confirmOverlay` did this — fixed with a `confirmOpen` re-entry guard that answers the
+  second call).
+- **Any overlay wearing the shared `.confirm-overlay` class must stamp `data-closing` when it
+  closes**, or `confirmDialog()` silently answers "no" during its 200ms fade-out.
+- **Never decide UI behaviour by pattern-matching a server's prose.** Send a reason CODE and
+  branch on that (`reason: 'unpaid' | 'cooking' | 'both'` from `lib/sessionClose.ts`). The old
+  `/owes money/` text-match missed the cooking-only refusal, so a paid-but-unserved table had
+  no "close anyway" button at all.
+- **Guarded by `npm run verify:taps`** (`scripts/verify-tap-guard.mjs`) — 9 static checks, each
+  mapped to a bug that actually happened. It also runs AUTOMATICALLY as a PostToolUse hook after
+  any edit to `public/panels/*/{app.js,style.css,index.html}`: silent when clean, and it fails
+  the edit with an explanation if a check breaks. Add a check there when you add a dialog.
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The
