@@ -97,6 +97,45 @@ export default function AdminRestaurants() {
     window.addEventListener("adm:focus-restaurant", onFocus);
     return () => window.removeEventListener("adm:focus-restaurant", onFocus);
   }, []);
+  // Opening a restaurant's DETAIL puts ?focus=<slug> in the address bar, so a REFRESH comes
+  // back to the same restaurant instead of dumping the admin on the list and making them find
+  // the row again (owner, 2026-07-30: "whenever I refresh it takes me back to the restaurant
+  // [list] — it should keep me on the same page"). The ?focus= reader below already knew how to
+  // reopen a detail; nothing was ever WRITING it when you simply clicked a row.
+  // replaceState, not pushState: this page's own back arrow owns the history, and pushing would
+  // make the browser's Back button look like it did nothing.
+  const writeFocusUrl = (slug: string | null) => {
+    try {
+      const u = new URL(window.location.href);
+      if (slug) u.searchParams.set("focus", slug);
+      else { u.searchParams.delete("focus"); u.searchParams.delete("tab"); }
+      window.history.replaceState(window.history.state, "", u.pathname + u.search);
+    } catch {}
+  };
+  const openRestaurant = (r: Restaurant) => { writeFocusUrl(r.slug); setSelected(r); };
+
+  // Going BACK has to clear ?focus= as well, or a refresh from the list would bounce you into
+  // a detail you'd just left. Clearing it inside onBack is NOT enough: the detail registers with
+  // the back-stack (useBackClose), so leaving it can run history.back(), whose popstate lands
+  // AFTER our replaceState and restores the URL that still had ?focus=. So the address bar is
+  // re-synced from what is actually on screen — on every change AND after any history move.
+  // `hadDetail` is what stops this from eating its own homework: on MOUNT `selected` is still
+  // null (the list has to load before ?focus= can be matched to a row), so an ungated "no
+  // selection → strip the URL" effect wipes ?focus and ?tab a beat BEFORE the page reads them —
+  // which silently undid the whole refresh fix. Only clear once a detail has actually been shown.
+  const selectedRef = useRef<Restaurant | null>(null);
+  selectedRef.current = selected;
+  const hadDetail = useRef(false);
+  useEffect(() => {
+    if (selected) { hadDetail.current = true; return; }
+    if (hadDetail.current) writeFocusUrl(null);
+  }, [selected]);
+  useEffect(() => {
+    const sync = () => { if (!selectedRef.current && hadDetail.current) writeFocusUrl(null); };
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
   useEffect(() => {
     if (!focusSlug || !list) return;
     // Matched by slug (the original contract) OR id — the panels' "zones off" dropdown
@@ -133,7 +172,8 @@ export default function AdminRestaurants() {
   if (selected) {
     // Re-read the freshest copy from the list so the owner shows correctly after a round-trip.
     const fresh = (list || []).find((r) => r.id === selected.id) || selected;
-    return <RestaurantDetail key={fresh.id} restaurant={fresh} owners={owners} onBack={() => { setSelected(null); loadList(); }} onChanged={loadList} />;
+    return <RestaurantDetail key={fresh.id} restaurant={fresh} owners={owners}
+      onBack={() => { writeFocusUrl(null); setSelected(null); loadList(); }} onChanged={loadList} />;
   }
 
   const needle = q.trim().toLowerCase();
@@ -214,7 +254,7 @@ export default function AdminRestaurants() {
                 key={r.id}
                 id={`rest-row-${r.slug}`}
                 className="adm-logrow"
-                onClick={() => setSelected(r)}
+                onClick={() => openRestaurant(r)}
                 style={{
                   gridTemplateColumns: "1.2fr 0.9fr 1fr 96px 80px 80px", width: "100%", border: 0, color: "var(--text)", cursor: "pointer", textAlign: "left", font: "inherit",
                   // The ?focus= row gets a quiet accent highlight so the eye lands on it.
@@ -927,6 +967,79 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // Overview; everything configurable (features, review, branding, billing, KOT,
   // sessions, tables & QR) lives together under Settings.
   const [tab, setTab] = useState<"overview" | "settings">("overview");
+  // Which TAB you were on survives a refresh too — landing back on Overview after reloading
+  // while editing Settings is the same "lost my place" complaint (owner, 2026-07-30).
+  useEffect(() => {
+    try { if (new URLSearchParams(window.location.search).get("tab") === "settings") setTab("settings"); } catch {}
+  }, []);
+  const goTab = (t: "overview" | "settings") => {
+    setTab(t);
+    try {
+      const u = new URL(window.location.href);
+      u.searchParams.set("tab", t);
+      window.history.replaceState(window.history.state, "", u.pathname + u.search);
+    } catch {}
+  };
+
+  // …and so does the SCROLL position ("same page and same scroll level"). Kept in
+  // sessionStorage per restaurant + tab: it's per-tab-of-the-browser, dies when the tab
+  // closes, and never touches the database.
+  useEffect(() => {
+    const key = `adm:rest-scroll:${restaurant.id}:${tab}`;
+    // The admin's scrollport is NOT the window: it's `.adm-main` on desktop and `.adm` on a
+    // phone (verified in-browser at 390px, where the document itself doesn't scroll at all —
+    // so a window.scrollTo fallback silently did nothing there). Same pair useAdminModal
+    // freezes when a dialog opens; pick whichever is actually scrolling right now.
+    const scrolls = (el: HTMLElement | null): el is HTMLElement => !!el && el.scrollHeight > el.clientHeight + 4;
+    const port = (): HTMLElement | null => {
+      for (const sel of [".adm-main", ".adm"]) {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (scrolls(el)) return el;
+      }
+      return null;
+    };
+    const readTop = () => { const p = port(); return p ? p.scrollTop : window.scrollY; };
+    const writeTop = (v: number) => { const p = port(); if (p) p.scrollTop = v; else window.scrollTo(0, v); };
+
+    // RESTORE. The cards below fetch their own data, so the page keeps GROWING for a second or
+    // two after mount — one scrollTop on mount would land short. Re-apply briefly, and abandon
+    // it the instant the admin scrolls themselves so we never fight a real gesture.
+    let stop = false;
+    const giveUp = () => { stop = true; };
+    let want = 0;
+    try { want = Number(sessionStorage.getItem(key) || 0); } catch {}
+    const gestures = ["wheel", "touchstart", "keydown"] as const;
+    if (want > 0) {
+      gestures.forEach((e) => window.addEventListener(e, giveUp, { passive: true }));
+      const deadline = Date.now() + 2000;
+      const tick = () => {
+        if (stop || Date.now() > deadline) return;
+        writeTop(want);
+        window.setTimeout(tick, 120);
+      };
+      window.setTimeout(tick, 60);
+    }
+
+    // REMEMBER (debounced — scrolling fires continuously).
+    let t: number | undefined;
+    const onScroll = () => {
+      window.clearTimeout(t);
+      t = window.setTimeout(() => { try { sessionStorage.setItem(key, String(readTop())); } catch {} }, 150);
+    };
+    // Listen on BOTH candidates plus the window: which one scrolls depends on the width, and
+    // the page can still be growing when this runs, so we don't try to pick just one here.
+    const targets: (HTMLElement | Window)[] = [
+      ...([".adm-main", ".adm"].map((sel) => document.querySelector(sel)).filter(Boolean) as HTMLElement[]),
+      window,
+    ];
+    targets.forEach((el) => el.addEventListener("scroll", onScroll, { passive: true }));
+    return () => {
+      stop = true;
+      window.clearTimeout(t);
+      targets.forEach((el) => el.removeEventListener("scroll", onScroll));
+      gestures.forEach((e) => window.removeEventListener(e, giveUp));
+    };
+  }, [restaurant.id, tab]);
   // ?tab=settings deep-link (owner 2026-07-28): the panels' "zones off" dropdown sends the
   // admin here for admin-only settings (billing/KOT/sessions/table count). Post-mount, not
   // in the initializer, so SSR and first paint stay identical (no hydration mismatch).
@@ -1107,10 +1220,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           everything changeable — features, Google review, branding, billing, KOT printing,
           dining sessions, tables & QR — lives together under Settings. */}
       <div className="adm-dettabs" role="tablist" aria-label="Restaurant detail tabs">
-        <button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "on" : ""} onClick={() => setTab("overview")}>
+        <button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "on" : ""} onClick={() => goTab("overview")}>
           <i className="fas fa-gauge" aria-hidden="true" style={{ marginRight: 7 }} />Overview
         </button>
-        <button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>
+        <button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "on" : ""} onClick={() => goTab("settings")}>
           <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 7 }} />Settings
         </button>
       </div>

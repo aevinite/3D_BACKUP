@@ -792,3 +792,26 @@ Owner: "check again for any other bugs, test it, make sure everything works on l
   waiter holding every table. Note aevinite.shop 308-redirects to www — checking without `-L`
   reads as "the code didn't ship".
 - [x] Both stacks READY. Sections are always on (no admin toggle) on both.
+
+## 2026-07-30 — Tables-per-row auto-saves; the admin detail keeps your place on refresh
+
+Owner: *"there is no auto save — I change value to 8 and it doesn't auto save, add that. And
+whenever I refresh it takes me back to the restaurant [list], it should keep me there on the
+same page and same scroll level."*
+
+- [x] **"Tables per row" saves itself** — debounced 600ms, so a fast edit or a drag writes ONCE
+  (verified: typing "12" fired exactly 1 request, not 3). Shows "✓ Saved", and the Save bar
+  stays down because the saved value is folded back into the form's baseline. The server's
+  clamped answer is what lands in the field, so 40 becomes 12 on screen, not just in the DB.
+  Also fires when the preview's "Use this number" is pressed.
+- [x] **NOT auto-saved: everything else on that tab** — and deliberately. "Number of tables"
+  would fire mid-typing (30 passes through "3" → floor shrunk to 3 tables + section backfill),
+  and text fields would persist half-typed GSTINs. They keep the explicit Save bar.
+- [x] **A refresh keeps the restaurant open** — clicking a row now writes `?focus=<slug>`; the
+  reader for it already existed, nothing was writing it. Going Back clears it again.
+- [x] **…the same tab** (`?tab=settings`) and **the same scroll position** (sessionStorage per
+  restaurant + tab, re-applied briefly while the async cards grow the page, and abandoned the
+  moment you scroll yourself so it never fights a gesture).
+- [x] **Works on the phone too** — the admin's scrollport is `.adm-main` on desktop but `.adm`
+  at 390px, where the document itself doesn't scroll at all; the first version only checked
+  `.adm-main` and silently did nothing on a phone. Verified 390px and 1500px.
