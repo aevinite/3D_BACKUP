@@ -25,7 +25,7 @@
 //     still applies, and a clash check breaking must never stop a restaurant working.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { affectedTables } from "@/lib/tableAssign";
+import { affectedTables } from "@/lib/tableOfAction";
 
 // A change is only judged as a REPLAY once it's this old. An online write goes through
 // the same outbox helper (so it carries the same header) but is milliseconds old — this
