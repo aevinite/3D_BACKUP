@@ -79,11 +79,25 @@ branch is just git's word for the code line and exists in BOTH stacks).
   (`supabase/migrations/` here). Every schema change: written once here → run on the
   DEV DB → verified → reaches AV LIVE only through the release step below. NEVER write a
   migration only on AV LIVE, and never let the two schemas fork.
+- **🚫 NEVER TEST ON AV LIVE — not once, not "just a quick check" (owner, 2026-07-30,
+  ABSOLUTE).** AV live carries real clients taking real orders; a test bill lands on a real
+  kitchen screen, in a real Z-report and in real GST numbers, and it cannot be un-rung. So:
+  no test orders, no test tables, no test dishes, no test staff, no test logins, no
+  "place one order to confirm the fix", no seeding, no scripts pointed at AV live's URL or
+  keys, no Playwright/Chrome driving an AV live panel, no deliberately tripping a limit.
+  **ALL testing happens on the backup/dev stack against the dev database — always.**
+  Verification of an AV live release is **READ-ONLY, and only these**: the deployment state,
+  the served asset actually containing the change, `/api/health`, and a read of the error log
+  / a data read. If something can only be proven by writing to AV live, it does NOT get
+  proven — say so plainly in the report instead of doing it. (Reads still get announced in
+  chat first, per the rule above.)
 - **Release to AV LIVE = a deliberate, asked-first ritual, every time:** (1) build +
-  tests green here, verified on dev; (2) ASK the owner explicitly; (3) on yes: scripted
-  one-way code copy dev-repo → live-repo (never hand-edit the live repo — that's how
-  drift starts), run pending migrations on the AV LIVE DB, deploy; (4) verify AV LIVE
-  end-to-end (health + a real order loop) and report honestly, including anything failed.
+  tests green here, verified on dev; (2) ASK the owner explicitly; (3) on yes: one-way port
+  dev-repo → live-repo, run pending migrations on the AV LIVE DB, deploy. AV live usually
+  runs BEHIND backup, so a whole-file copy drags unreleased work onto live clients — port the
+  specific change (hand-apply the hunks if the patch won't apply) and re-run the relevant
+  guard scripts against the live repo before pushing; (4) verify READ-ONLY per the rule above
+  and report honestly, including anything you could NOT verify and why.
 - **Secrets discipline applies doubly to `.env.AV.live`:** never print, echo, or
   commit any value from it; masked reads only.
 

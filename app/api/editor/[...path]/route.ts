@@ -24,6 +24,7 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { raiseIssue } from "@/lib/issues";
 import { effectiveTaxRate, taxComponents } from "@/lib/tax";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
+import { openTableSession } from "@/lib/openSession";
 import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
@@ -2262,7 +2263,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           // A concurrent open (two waiters, or a waiter tap-open racing the guest's own open) can both
           // pass the check above; the one-open-session-per-table unique index (mig 082) rejects the
           // loser. Treat that as success ("already open") rather than a raw duplicate-key 500. (B22)
-          const ins = await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid });
+          const ins = { error: await openTableSession(rid, String(reqRow.table_number)).then(() => null).catch((e: unknown) => ({ message: e instanceof Error ? e.message : String(e) })) }; // race-tolerant (2026-07-30)
           if (ins.error && !/duplicate|unique/i.test(ins.error.message)) throw new Error(ins.error.message);
         }
       }
@@ -2285,7 +2286,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
       await clearTableSignals(rid, t); // the B12 fix — no ghost waiter-call bell on the emptied table
       const setg = (await sb.from("settings").select("sessions_enabled").eq("restaurant_id", rid).maybeSingle()).data as { sessions_enabled?: boolean } | null;
-      if (setg?.sessions_enabled && !openSess) await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid });
+      if (setg?.sessions_enabled && !openSess) await openTableSession(rid, String(t)); // race-tolerant (2026-07-30)
       await log("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
@@ -2502,6 +2503,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (isCreate && (a === "categories" || a === "filters") && body && typeof body === "object" && body.slug) {
         const clash = (await sb.from(t.name).select("slug").eq("restaurant_id", rid).eq("slug", String(body.slug)).maybeSingle()).data;
         if (clash) return err(`A ${a === "categories" ? "category" : "filter"} with that name already exists.`, 409);
+      }
+      // Same required-column courtesy the dish create gets: categories/filters need slug + name
+      // (both NOT NULL, no default). Without this a create that omitted one reached the DB as a
+      // raw "null value in column ... violates not-null constraint" 500. (2026-07-30)
+      if (isCreate && (a === "categories" || a === "filters") && body && typeof body === "object") {
+        const kindWord = a === "categories" ? "category" : "tag";
+        const nm = (body as { name?: unknown }).name;
+        const nameEmpty = nm == null
+          || (typeof nm === "string" && !nm.trim())
+          || (typeof nm === "object" && !Object.values(nm as Record<string, unknown>).some((v) => String(v ?? "").trim()));
+        if (nameEmpty) return err(`Give the ${kindWord} a name first.`, 400);
+        if (!String((body as { slug?: unknown }).slug ?? "").trim()) return err(`Give the ${kindWord} a name first.`, 400);
       }
       // Settings save is owner-only unless the owner has granted a manager the power
       // (owner role always passes managerCan). Previously this endpoint had NO gate — any
@@ -2733,7 +2746,28 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const onConflict = a === "settings" ? "restaurant_id"
         : (a === "categories" || a === "filters") ? "restaurant_id,slug"
         : t.key;
-      const data = must(await sb.from(t.name).upsert(body, { onConflict }).select());
+      // EDITING an existing row UPDATEs it; only a genuinely new row goes through upsert.
+      //
+      // WHY (crash fixed 2026-07-30): an upsert is an INSERT with ON CONFLICT, so PostgREST
+      // has to build a COMPLETE row — and Postgres checks NOT NULL while forming that row,
+      // before the conflict is resolved. So any PARTIAL save of an existing row (a sold-out /
+      // tag toggle, a reorder, an active flip — all of which send just a few columns) blew up
+      // with a raw `null value in column "title"/"slug"/"image" violates not-null constraint`
+      // 500 instead of saving. Reproduced against the dev DB: the same body as an UPDATE
+      // returns 200, as an upsert it returns 23502. It hit a live client's menu on 2026-07-30.
+      // menu_items requires id, slug, title, price, image, category; categories/filters
+      // require slug + name — so all three kinds were exposed. An UPDATE only touches the
+      // columns actually sent, which is what a partial save means.
+      const existingRow = (a === "items" || a === "categories" || a === "filters") && !isCreate
+        ? (a === "items"
+            ? (await sb.from(t.name).select("id").eq("restaurant_id", rid).eq("id", String(body.id ?? "")).maybeSingle()).data
+            : (await sb.from(t.name).select("slug").eq("restaurant_id", rid).eq("slug", String(body.slug ?? "")).maybeSingle()).data)
+        : null;
+      const data = must(existingRow
+        ? await (a === "items"
+            ? sb.from(t.name).update(body).eq("restaurant_id", rid).eq("id", String(body.id)).select()
+            : sb.from(t.name).update(body).eq("restaurant_id", rid).eq("slug", String(body.slug)).select())
+        : await sb.from(t.name).upsert(body, { onConflict }).select());
       // Any of items/categories/filters/settings changes the SHARED guest menu →
       // bust this restaurant's cached bundle so guests see it within seconds.
       bustMenuCache(rid);
