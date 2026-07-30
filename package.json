@@ -14,6 +14,7 @@
     "cache-models": "node scripts/set-glb-cache.mjs",
     "verify:taps": "node scripts/verify-tap-guard.mjs",
     "verify:table-ownership": "node scripts/verify-table-ownership.mjs",
+    "verify:live-rush": "node scripts/verify-manager-live-rush.mjs",
     "verify:owner-home": "npx esbuild scripts/verify-owner-home.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/verify-owner-home.mjs --log-level=warning && node --env-file=.env.local node_modules/.cache/verify-owner-home.mjs",
     "verify:test-safety": "node scripts/verify-test-safety.mjs"
   },
