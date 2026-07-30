@@ -37,9 +37,12 @@ const OFFLINE_URL = "/offline.html";
 // A stalled network is the WORST case for staff ("less internet" — it hangs forever and
 // the panel looks frozen). Race every fallback-able request against a timer and fall
 // back to the saved copy instead of spinning.
-// Applied to NAVIGATIONS AND READS ONLY. Assets are never raced against a clock: cutting
-// off a file that is downloading fine is worse than waiting for it.
-const NET_TIMEOUT_MS = 6000;
+const NET_TIMEOUT_MS = 6000;   // navigations + operational reads
+// Assets get a MUCH longer leash than reads. It used to be none at all, which meant a
+// crawling connection could hang a script request forever with no fallback; and before
+// that it was 8s, which cut off a slow 3D model download. Big media is now excluded by
+// path (isBigMedia), so a generous guard is safe and still rescues a hung script.
+const ASSET_TIMEOUT_MS = 25000;
 
 // Caps, so no cache can grow without limit (SHELL collects a key per visited URL, ASSET
 // one per chunk of every deploy). Oldest entries go first.
@@ -237,7 +240,7 @@ self.addEventListener("fetch", (event) => {
   if (isNav) return event.respondWith(handleNav(req, url));
   if (isRsc) return event.respondWith(networkFirst(req, SHELL, rscKey(req.url), NET_TIMEOUT_MS));
   if (url.pathname.startsWith("/_next/static/")) {
-    return event.respondWith(IS_DEV ? networkFirst(req, ASSET, req.url, 0) : cacheFirst(req, ASSET));
+    return event.respondWith(IS_DEV ? networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS) : cacheFirst(req, ASSET));
   }
   if (url.pathname.startsWith("/api/")) {
     if (!isData(url.pathname)) return;
@@ -256,10 +259,7 @@ self.addEventListener("fetch", (event) => {
     return event.respondWith(networkFirst(req, DATA, req.url, slowByNature ? 0 : NET_TIMEOUT_MS, { clientId: event.clientId }));
   }
   // Everything else same-origin static: /panels/*, /brand/*, fonts, images, /vendor/*.
-  // NO timeout here: a stall-timeout on a script/style would abort a big file that was
-  // downloading perfectly well. Assets fall back to the saved copy only on a real network
-  // error; the stall guard is for pages and reads, where a hang is what hurts staff.
-  return event.respondWith(networkFirst(req, ASSET, req.url, 0));
+  return event.respondWith(networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS));
 });
 
 // Pages: always try the network, fall back to this page's saved HTML, then to a

@@ -73,6 +73,44 @@ async function run() {
   const browser = await chromium.launch({ headless: !KEEP });
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const consoleErrors = [];
+  // A separate STAFF context used only for setup/cleanup and for acting as "the other
+  // device". Kept apart from `ctx` so signing in as a manager never disturbs the tablet's
+  // own session.
+  const staff = await browser.newContext();
+  const seatedByUs = [];   // tables this run put an order on, so it can tidy up after itself
+
+  const sessionsOn = async (t) => {
+    const j = await staff.request.get(`${BASE}/api/editor/sessions?table=${t}`).then((r) => r.json()).catch(() => null);
+    const list = Array.isArray(j) ? j : (j && (j.sessions || j.rows)) || [];
+    return list.filter((r) => r && r.status !== "closed");
+  };
+  const closeSession = (id) => staff.request.post(`${BASE}/api/editor/sessions/${id}/close`, {
+    headers: { "content-type": "application/json" }, data: { force: true },
+  }).catch(() => null);
+
+  // A genuinely FREE table to test on. On a real floor (and after a few runs of this
+  // script) there may not be one, so if every table is occupied we free the longest-running
+  // one first. Scans the tile keys themselves rather than 1..table_count, because a table
+  // ABOVE table_count can still hold live orders — scanning to the count found nothing
+  // while table 48 sat free.
+  async function pickFreeTable(tiles) {
+    const keys = Object.keys(tiles || {}).sort((x, y) => Number(x) - Number(y));
+    for (const k of keys) {
+      const t = tiles[k];
+      if (!t || t.state === "free") {
+        if ((await sessionsOn(k)).length === 0) return String(k);
+      }
+    }
+    // Nothing free → borrow one by closing its bill (this is a dev database).
+    for (const k of keys) {
+      const live = await sessionsOn(k);
+      if (live.length) {
+        const r = await closeSession(live[0].id);
+        if (r && r.ok() && (await sessionsOn(k)).length === 0) return String(k);
+      }
+    }
+    return null;
+  }
 
   try {
     // ══ MANAGER: can it be opened and read with no internet? ═══════════════════
@@ -188,20 +226,17 @@ async function run() {
     await sleep(3000);
 
     // Pick a FREE table and a normal (non open-price) dish, so this is a clean new order.
-    const target = await inPanel(tab, () => {
+    await loginAs(staff, "manager", BASE); // the setup/cleanup + "other device" identity
+    const picked = await inPanel(tab, () => {
       const d = state.data || {};
       // summary.tiles is an OBJECT keyed by table number, e.g. { "1": { state:"free", … } }.
-      const tiles = (state.summary || {}).tiles || {};
-      const count = Number((d.settings || {}).table_count || 0) || Object.keys(tiles).length || 10;
-      let free = null;
-      for (let i = 1; i <= count; i++) {
-        const t = tiles[String(i)];
-        if (!t || t.state === "free") { free = String(i); break; }
-      }
       const dish = (d.dishes || []).find((x) => !x.open_price && x.available !== false && !x.sold_out) || (d.dishes || [])[0];
-      return { free, dishId: dish && dish.id, dishName: dish && (dish.title_en || dish.title || dish.name) };
+      return { tiles: (state.summary || {}).tiles || {}, dishId: dish && dish.id, dishName: dish && dish.title };
     });
-    if (!target || target.__err || !target.free || !target.dishId) bad("couldn't find a free table + dish to test with", JSON.stringify(target));
+    const target = { free: await pickFreeTable(picked && picked.tiles), dishId: picked && picked.dishId };
+    if (!target.free || !target.dishId) throw new Error("test setup: no usable table + dish (" + JSON.stringify(picked && Object.keys(picked.tiles || {}).length) + " tiles)");
+    ok(`testing on table ${target.free} with "${picked.dishName}"`);
+    seatedByUs.push(target.free);
 
     // Hand the picked table + dish into the panel (a Function() built inside the iframe
     // can't close over this script's scope, so the values go via window).
@@ -262,16 +297,13 @@ async function run() {
     // signal returns, the saved order must NOT be quietly added (it would land on a
     // settled bill, or on the next party's) — it must come back to a person, explained.
     console.log("\n5) A change that clashes with another device");
-    const mgrCtx = await browser.newContext({ viewport: { width: 1280, height: 900 } }); // stays ONLINE
-    try {
-      const clashTarget = await inPanel(tab, () => {
-        const tiles = (state.summary || {}).tiles || {};
-        const count = Number(((state.data || {}).settings || {}).table_count || 0) || Object.keys(tiles).length || 10;
-        let free = null;
-        for (let i = 1; i <= count; i++) { const t = tiles[String(i)]; if (!t || t.state === "free") { free = String(i); break; } }
+      const clashPick = await inPanel(tab, () => {
         const d = (state.data.dishes || []).find((x) => !x.open_price) || state.data.dishes[0];
-        return { free, dishId: d && d.id };
+        return { tiles: (state.summary || {}).tiles || {}, dishId: d && d.id };
       });
+      const clashTarget = { free: await pickFreeTable(clashPick && clashPick.tiles), dishId: clashPick && clashPick.dishId };
+      if (!clashTarget.free) throw new Error("test setup: no table available for the clash check");
+      seatedByUs.push(clashTarget.free);
       await inPanel(tab, (arg) => { window.__T2 = arg.free; window.__D2 = arg.dishId; return true; }, clashTarget);
 
       // 1. Seat the table for real, ONLINE, so there's a live bill to clash with.
@@ -282,14 +314,14 @@ async function run() {
       });
       // The session id comes from the OTHER device (the manager's own read), which is
       // also more honest: that's the device that will close the table.
-      await loginAs(mgrCtx, "manager", BASE);
-      const sessResp = await mgrCtx.request.get(`${BASE}/api/editor/sessions?table=${clashTarget.free}`);
+      // Read from the OTHER device (the staff context, which stays online) — that's the
+      // device that will close the table, so this is the honest way round.
+      const sessResp = await staff.request.get(`${BASE}/api/editor/sessions?table=${clashTarget.free}`);
       const sessBody = await sessResp.json().catch(() => null);
       const rows = Array.isArray(sessBody) ? sessBody : (sessBody && (sessBody.sessions || sessBody.rows)) || [];
       const live = rows.find((s) => s && s.status !== "closed");
-      live && live.id
-        ? ok(`table ${clashTarget.free} is open with a live bill`)
-        : bad("couldn't seat a table to clash with", JSON.stringify({ seeded, got: sessBody && Object.keys(sessBody) }));
+      if (!live || !live.id) throw new Error("test setup: couldn't seat table " + clashTarget.free + " to clash with (" + JSON.stringify(seeded) + ")");
+      ok(`table ${clashTarget.free} is open with a live bill`);
 
       // 2. The waiter's device drops offline and takes ANOTHER order for that table.
       await ctx.setOffline(true);
@@ -300,11 +332,12 @@ async function run() {
       ok("a second order was taken on the offline device");
 
       // 3. MEANWHILE, on another device that still has signal, the manager closes+bills it.
-      const closeRes = await mgrCtx.request.post(`${BASE}/api/editor/sessions/${live && live.id}/close`, {
+      const closeRes = await staff.request.post(`${BASE}/api/editor/sessions/${live.id}/close`, {
         headers: { "content-type": "application/json" },
         data: { force: true },
       });
-      closeRes.ok() ? ok("another device closed and billed that table") : bad(`couldn't close the table from the other device (HTTP ${closeRes.status()})`);
+      if (!closeRes.ok()) throw new Error("test setup: the other device couldn't close the table (HTTP " + closeRes.status() + ")");
+      ok("another device closed and billed that table");
 
       // 4. The replay guard only judges a change that is genuinely OLD (so live writes are
       //    never touched) — wait past that threshold before reconnecting.
@@ -320,10 +353,12 @@ async function run() {
       if (!needsYou) bad("the clashing order was NOT flagged — it may have been applied to a closed bill");
       else {
         const f = needsYou.failed[0];
-        ok(`it came back needing a person: "${(f.plain || f.error || "").slice(0, 90)}"`);
-        /closed|billed|different party/i.test(f.plain || f.error || "")
-          ? ok("the reason is in plain words a waiter can act on")
-          : bad("the reason is not plain language", JSON.stringify(f.error));
+        // Insist it failed for the RIGHT reason. Just checking "something failed" let a
+        // setup error ("valid table required") tick this box green.
+        const isClash = /closed and billed|different party now/i.test(String(f.plain || ""));
+        isClash
+          ? ok(`it came back needing a person: "${String(f.plain).slice(0, 90)}"`)
+          : bad("it failed, but NOT with a clash explanation — this check proved nothing", JSON.stringify({ error: f.error, plain: f.plain }));
         f.todo ? ok(`it says what to do: "${String(f.todo).slice(0, 80)}"`) : bad("it doesn't say what to do next");
         f.retryable === false ? ok("it is not offered as a pointless 'try again'") : bad("it offers a retry that cannot work");
       }
@@ -343,10 +378,47 @@ async function run() {
         return window.LFH_OUTBOX.getSnapshot().failed.length;
       });
       cleared === 0 ? ok("\"Not needed anymore\" clears it from the list") : bad("dismissing it didn't clear it");
-    } finally {
-      await mgrCtx.close();
-    }
     await tab.close();
+
+    // ══ A GUEST's offline order gets the same protection ═══════════════════════
+    // A customer's own phone is the device most likely to lose signal in a restaurant, so
+    // this is the likeliest replay of all. It must not be added to a bill that has been
+    // closed, or to whoever is sitting at that table now.
+    console.log("\n5b) A guest order replayed onto a table that moved on");
+    {
+      const menu = await staff.request.get(`${BASE}/api/r/french-house/menu-data`).then((r) => r.json()).catch(() => null);
+      const dish = menu && menu.items && menu.items[0];
+      // Find a table whose party has been sitting there for a while (so the "different
+      // party now" rule isn't what fires), then have STAFF close and bill it — exactly what
+      // happens while a customer's phone has no signal. Picking a "free" table by guesswork
+      // left this check testing nothing, because on a busy floor there isn't one.
+      const QUEUED_AT = new Date(Date.now() - 10 * 60 * 1000); // the guest ordered 10 min ago
+      let gt = null, sid = null;
+      for (let i = 30; i >= 1; i--) {
+        const probe = await staff.request.get(`${BASE}/api/editor/sessions?table=${i}`).then((r) => r.json()).catch(() => null);
+        const list = Array.isArray(probe) ? probe : (probe && (probe.sessions || probe.rows)) || [];
+        const live = list.find((r) => r && r.status !== "closed" && new Date(r.created_at).getTime() < QUEUED_AT.getTime());
+        if (live) { gt = String(i); sid = live.id; break; }
+      }
+      gt ? ok(`table ${gt} has a party that was already seated when the guest ordered`) : bad("no suitable table to run the guest check on");
+      const closeIt = sid ? await staff.request.post(`${BASE}/api/editor/sessions/${sid}/close`, { headers: { "content-type": "application/json" }, data: { force: true } }) : null;
+      closeIt && closeIt.ok() ? ok("staff closed and billed it while the phone had no signal") : bad("couldn't close that table for the check", closeIt ? String(closeIt.status()) : "no session id");
+
+      const replay = await staff.request.post(`${BASE}/api/guest/place-order`, {
+        headers: {
+          "content-type": "application/json",
+          "X-LFH-Action-Id": "test-" + Date.now(),
+          "X-LFH-Replay": "1",
+          "X-LFH-Queued-At": QUEUED_AT.toISOString(), // taken before staff closed the table
+        },
+        data: { mode: "public", table: gt, items: [{ id: dish && dish.id, qty: 1 }], allergies: [] },
+      });
+      const rBody = await replay.json().catch(() => null);
+      replay.status() === 409 && rBody && rBody.clash
+        ? ok(`the guest's stale order was refused: "${String(rBody.clash.plain).slice(0, 70)}"`)
+        : bad(`a stale guest order was NOT refused (HTTP ${replay.status()})`, JSON.stringify(rBody));
+      rBody && rBody.clash && rBody.clash.todo ? ok("with what to do about it") : bad("no guidance came back with it");
+    }
 
     // ══ KITCHEN ════════════════════════════════════════════════════════════════
     // The kitchen screen used to come back EMPTY after an offline reload — a cook would
@@ -482,6 +554,16 @@ async function run() {
   } catch (e) {
     bad("the run stopped early", e.stack || e.message);
   } finally {
+    // Leave the floor as we found it. Without this, each run seated another table and
+    // eventually there was none left to test with — which is exactly how this suite
+    // started failing on its own leftovers.
+    try {
+      for (const t of [...new Set(seatedByUs)]) {
+        for (const live of await sessionsOn(t)) await closeSession(live.id);
+      }
+      if (seatedByUs.length) console.log(`\n  · tidied up tables ${[...new Set(seatedByUs)].join(", ")}`);
+    } catch { /* cleanup is best-effort */ }
+    await staff.close().catch(() => {});
     console.log(`\n${fail === 0 ? "✅ PASS" : "❌ FAIL"} — ${pass} passed, ${fail} failed\n`);
     if (!KEEP) await browser.close();
     process.exit(fail === 0 ? 0 : 1);

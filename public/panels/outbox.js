@@ -272,7 +272,9 @@
     const it = failed.filter((x) => x.id === id)[0];
     if (!it) return;
     failed = failed.filter((x) => x.id !== id);
-    it.status = "queued"; it.error = undefined; it.plain = undefined; it.todo = undefined;
+    // Reset the attempt counter too: a person choosing "Try again" is asking for a fresh
+    // go, not for the one attempt left over from the automatic retries.
+    it.status = "queued"; it.error = undefined; it.plain = undefined; it.todo = undefined; it.tries = 0;
     queued.push(it);
     await idbPut(it);
     notify();

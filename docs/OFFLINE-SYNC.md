@@ -49,6 +49,8 @@ browser's dinosaur page, mid-service. Now a service worker keeps three per-devic
 - **Big media is untouched:** `/models/`, `.glb`, video. They have their own in-memory loader
   and a 1-year immutable header; an earlier version raced them against a timeout and broke
   the 3D viewer.
+- **Bump `VERSION` in `public/sw.js` whenever you change the caching RULES.** The `activate`
+  sweep renames the caches, and that is the only way to force every device off the old rules.
 - **Kill switch:** any URL with `?nosw=1` unregisters the worker and clears the caches;
   404-ing `/sw.js` does the same by browser behaviour. `vercel.json` sends
   `Cache-Control: max-age=0, must-revalidate` for `/sw.js` so an update always lands.
