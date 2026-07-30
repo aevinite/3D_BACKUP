@@ -302,7 +302,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
 
     if (path.join("/") === "summary") {
-      const tbl = new URL(req.url).searchParams.get("table");
+      // ?table= must be a NUMBER (a non-numeric value reached the query and Postgres threw
+      // "invalid input syntax for type integer", turning a refetch into a 500). A bad param
+      // means "no targeted table" — a full, correct refresh — never an error.
+      const tblRaw = new URL(req.url).searchParams.get("table");
+      const tbl = tblRaw !== null && /^\d{1,6}$/.test(tblRaw.trim()) ? tblRaw.trim() : null;
       // ?nomenu=1 → skip the big dishes list (the panel keeps its on-device cached menu and
       // refetches dishes only when the realtime `menu` topic says it changed, boot, or a ~10min
       // safety-net). The recurring floor refresh (60s poll / ops reloads) is the common case, and
@@ -405,7 +409,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // orders/items/requests; settings/dishes/categories/restaurant are table-agnostic and a
       // menu event always forces a FULL pass, so they're left OUT of a targeted slice (the panel
       // keeps its cached copies). Members/items are scoped by the table's open-session ids.
-      const tbl = new URL(req.url).searchParams.get("table");
+      // ?table= must be a NUMBER (a non-numeric value reached the query and Postgres threw
+      // "invalid input syntax for type integer", turning a refetch into a 500). A bad param
+      // means "no targeted table" — a full, correct refresh — never an error.
+      const tblRaw = new URL(req.url).searchParams.get("table");
+      const tbl = tblRaw !== null && /^\d{1,6}$/.test(tblRaw.trim()) ? tblRaw.trim() : null;
       // WAITER SECTIONS (mig 222). Resolved once for both branches below.
       const limit = await waiterTables(g.user, rid);
       if (tbl) {

@@ -859,7 +859,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // at 300 tables vs ~315 kB for the full bundle. The selected table's FULL detail still
       // comes from /sessions?table=N (tier 2). ?table=N → just that ONE tile (targeted refetch,
       // ~5 kB) for pollTables; no param → the whole-floor grid. Aggregates always returned.
-      const tbl = new URL(req.url).searchParams.get("table");
+      // ?table= must be a NUMBER. A non-numeric value reached the RPC and Postgres threw
+      // "invalid input syntax for type integer" — 15 of those landed in the error log in one
+      // burst, and each one is a 500 that blanks the caller's refetch. A bad param should
+      // simply mean "no targeted table" (a full, correct refresh), never an error.
+      const tblRaw = new URL(req.url).searchParams.get("table");
+      const tbl = tblRaw !== null && /^\d{1,6}$/.test(tblRaw.trim()) ? tblRaw.trim() : null;
       const { data, error } = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl || null });
       if (error) throw new Error(error.message);
       return ok(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] });
