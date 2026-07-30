@@ -9,6 +9,8 @@
 // codes, mig 210). The KOT switch reuses the quick-features endpoint so it stays the
 // single source of truth with Main features + Access.
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { FLOOR_PER_ROW_MAX, FLOOR_PER_ROW_MIN, clampPerRow } from "@/lib/floorLayout";
+import FloorLayoutPreview from "./FloorLayoutPreview";
 
 type Rest = { id: string; slug: string; name: string };
 type TaxComp = { label: string; rate: number | string };
@@ -19,7 +21,7 @@ const KEYS = [
   "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone", "gstin",
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
-  "table_count", "table_seats", "table_names", "auto_table_action",
+  "table_count", "table_seats", "table_names", "auto_table_action", "floor_per_row",
 ] as const;
 
 const inputStyle: React.CSSProperties = {
@@ -42,6 +44,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
   const [kot, setKot] = useState<boolean | null>(null);
   const [kotBusy, setKotBusy] = useState(false);
   const [qrBusy, setQrBusy] = useState<string | null>(null);
+  const [showFloorPreview, setShowFloorPreview] = useState(false);
 
   // Success/error notes fade on their own (errors linger a little longer to be read).
   useEffect(() => {
@@ -237,6 +240,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
   const setComp = (i: number, key: "label" | "rate", v: string) =>
     set("tax_components", comps.map((c, j) => (j === i ? { ...c, [key]: v } : c)));
 
+  const perRow = clampPerRow(draft.floor_per_row);
   const draftCount = Math.min(Math.max(Math.round(Number(draft.table_count)) || 12, 1), 500);
   const savedCount = Math.min(Math.max(Math.round(Number(base.table_count)) || 12, 1), 500);
   const seats = (draft.table_seats || {}) as Record<string, number | string>;
@@ -365,10 +369,53 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           How many tables the restaurant has — this drives its live floor map. Admin-only: the manager can
           rename tables and set seats, but only you can add or remove tables or hand out a table&apos;s QR.
         </p>
-        <div style={{ maxWidth: 200 }}>
-          {field("Number of tables", "table_count", { type: "number", min: 1, max: 500, step: 1 })}
+        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ width: 200 }}>
+            {field("Number of tables", "table_count", { type: "number", min: 1, max: 500, step: 1 })}
+          </div>
+          <div style={{ width: 200 }}>
+            {field("Tables per row", "floor_per_row", {
+              type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1,
+              hint: `${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}. Fewer = bigger tiles.`,
+            })}
+          </div>
+        </div>
+        <p className="hint" style={{ marginTop: 10 }}>
+          <b>Tables per row</b>{" "}sets how many table boxes sit on one line in the manager&apos;s floor view — and so how big
+          each box is. It&apos;s a target, not a hard rule: a narrow screen (a phone, or the side panel open) shows fewer
+          per row rather than shrinking the boxes until nobody can read them.
+        </p>
+        {/* Two previews, cheapest first. The shape strip answers "how big is a box?" at a
+            glance with zero loading; the button opens the REAL manager floor with a slider
+            when the admin wants to be sure before saving. */}
+        <div style={{ marginTop: 12, display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: "1 1 260px", minWidth: 220, maxWidth: 420 }}>
+            <div style={{ fontSize: 11.5, marginBottom: 5, opacity: 0.75 }}>Box shape at {perRow} per row</div>
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${perRow}, 1fr)`, gap: 6 }}>
+              {Array.from({ length: perRow }, (_, i) => (
+                <div key={i} style={{
+                  aspectRatio: "1 / 1", borderRadius: 8, border: "var(--border)", background: "var(--bg)",
+                  display: "grid", placeItems: "center", fontSize: Math.max(9, Math.min(15, Math.round(90 / perRow))),
+                  fontWeight: 800, opacity: 0.85, overflow: "hidden",
+                }}>{i + 1}</div>
+              ))}
+            </div>
+          </div>
+          <button className="adm-btn" disabled={!loadOk} onClick={() => setShowFloorPreview(true)}
+            title="Open the real manager floor and slide through every option">
+            👁 Preview on the real floor
+          </button>
         </div>
       </div>
+
+      {showFloorPreview && (
+        <FloorLayoutPreview
+          restaurant={restaurant}
+          value={perRow}
+          onPick={(nextPerRow) => set("floor_per_row", nextPerRow)}
+          onClose={() => setShowFloorPreview(false)}
+        />
+      )}
 
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Table setting</h2>

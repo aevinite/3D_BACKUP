@@ -668,3 +668,46 @@ found, all fixed and verified in a real browser.
 - [x] **New permanent guard `scripts/verify-sections.mjs`** pins all of it (10 checks;
   `BASE=… node scripts/verify-sections.mjs`). `verify-board-sig` and `verify-manager-hidden`
   (34 checks) still pass.
+
+## 2026-07-30 — Floor tile SIZE is admin-set; take-order is popup-only (mig 226)
+
+Owner: *"from the admin panel I should be able to set the no of boxes on 1 line in restaurant
+detail → table settings … and in small it should stay SQUARE, not rectangle … remove taking
+order from the right side completely, only from the popup … and why is 'who serves what' here,
+it should be a sub-setting of Access."* Plus: *"add a preview button … scroll it like phone
+brightness and show me how the manager table view will actually look."*
+
+- [x] **New admin setting "Tables per row" (2–12, default 6)** — `settings.floor_per_row`
+  (mig 226 + CHECK), in the admin restaurant detail → Settings → 🪑 Tables / seating, beside
+  "Number of tables". Clamped in `lib/floorLayout.ts` (one source of truth), in the admin save
+  route, and in the manager save route — where it's also added to `MANAGER_BLOCKED_SETTINGS`
+  so a manager can never change it. Verified: 4→4, 11→11, 99→12, 1→2.
+- [x] **It CANNOT break a big/small restaurant.** The number is a target, not a rule: the CSS
+  turns it into a minimum column width and lets `auto-fill` drop columns rather than shrink a
+  tile below `--ftile-floor` (116px, measured not guessed). Verified asking for 10/row:
+  1440px→7 cols, 1024px→6, 820px→6, 500px→3, 390px→2, 360px→2 — always square, never a sliver.
+- [x] **Tiles are SQUARE at every size** (`aspect-ratio: 1/1` + `align-items: start`). The old
+  fixed `min-height` was what made a narrowed tile go portrait. Text/padding/buttons now scale
+  in `cqw` (each tile is its own container query), so a small tile shrinks in proportion
+  instead of clipping. Verified 503px → 104px: ratio 1.00, zero overflow on every tile state.
+- [x] **A busy tile no longer clips.** An occupied + tagged tile needed 162px inside a 104px
+  square (content was silently cut off). Below 152px the tag's text pill is dropped — the
+  corner ribbon + tag-coloured border already say VIP/Family/Guest — and `.ft-meta` is capped
+  at 2 lines so a long amount can't add a third. Nothing operational is hidden.
+- [x] **S/M/L tile buttons REMOVED** from the manager floor (+ their state and localStorage
+  key). One restaurant now has one answer instead of one per device, which no admin could see.
+- [x] **＋ Take order removed from the docked right rail** — popup only. `tablePanelParts`
+  takes a `host` ("dock" | "float" | "modal") and emits the button for everything but the
+  rail; both render AND rebind sites pass the same host. The rail keeps every other action
+  (serve, pay, discount, split, shift, print, restart, end). Verified: rail 0, popup 1.
+- [x] **"Who serves which table" moved to Settings → Access** (was Settings → Tables + a 👥
+  button on the floor). The floor button and its now-dead modal wrapper (~90 lines) are gone;
+  the in-page card is the single home. Because Settings is gated by `edit_settings` and the
+  Access row by `manage_staff`, both gates now accept EITHER power (`"a|b"` support added to
+  `xrayGrantedForManager`) so a manager granted only `table_assign` keeps access — and the two
+  genuinely staff-power cards got their own `manage_staff` gate so getting in ≠ seeing all.
+- [x] **Preview button → live slider on the REAL panel.** `👁 Preview on the real floor` opens
+  a brightness-style slider (2–12, ticks, ←/→ keys) over the actual manager floor embedded via
+  the same src `PanelFrame` uses, with a 🖥/📱 toggle. Each step is one `postMessage` — no
+  request, no refetch, no DB write — and it reads the resulting column count back to say
+  "· this screen fits 8" when the guard rail lowers it. Nothing saves until "Use this number".
