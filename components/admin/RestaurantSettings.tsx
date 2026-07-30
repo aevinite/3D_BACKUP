@@ -8,7 +8,7 @@
 // Data: GET/POST /api/admin/restaurants/settings (single scoped row + per-table QR
 // codes, mig 210). The KOT switch reuses the quick-features endpoint so it stays the
 // single source of truth with Main features + Access.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FLOOR_PER_ROW_MAX, FLOOR_PER_ROW_MIN, clampPerRow } from "@/lib/floorLayout";
 import FloorLayoutPreview from "./FloorLayoutPreview";
 
@@ -109,6 +109,42 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const discard = () => { setDraft(JSON.parse(JSON.stringify(base))); setErr(null); setMsg(null); };
+
+  // ── AUTO-SAVE, for discrete controls only (owner, 2026-07-30: "I change value to 8 and it
+  // doesn't auto save"). Debounced so a drag or fast typing writes ONCE, not per keystroke.
+  //
+  // Deliberately NOT the whole form. A text field would save half-typed rubbish (a partial
+  // GSTIN, an incomplete bill footer), and "Number of tables" is outright dangerous to
+  // auto-save: typing 30 passes through "3", which would shrink the floor to three tables and
+  // fire the section backfill. Those keep the explicit Save bar. Only bounded values with no
+  // data consequence are auto-saved — the same "saves instantly per change" habit the Access
+  // per-person selects already use.
+  const autoTimer = useRef<number | null>(null);
+  const [autoSaved, setAutoSaved] = useState<string | null>(null);
+  useEffect(() => () => { if (autoTimer.current) window.clearTimeout(autoTimer.current); }, []);
+  const autoSave = (k: string, v: unknown) => {
+    if (autoTimer.current) window.clearTimeout(autoTimer.current);
+    autoTimer.current = window.setTimeout(async () => {
+      setErr(null);
+      try {
+        const r = await fetch("/api/admin/restaurants/settings", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ restaurant_id: restaurant.id, [k]: v }),
+        });
+        const d = await r.json();
+        if (!r.ok) throw new Error(d.error || "Couldn't save.");
+        // Trust the SERVER's value, not ours — it clamps (99 → 12), so the field must show
+        // what was really stored rather than what was typed.
+        const stored = d.settings && k in d.settings ? d.settings[k] : v;
+        setDraft((x) => ({ ...x, [k]: stored }));
+        setBase((b) => ({ ...b, [k]: stored })); // keeps the Save bar from lighting up for it
+        setAutoSaved(k);
+        window.setTimeout(() => setAutoSaved((cur) => (cur === k ? null : cur)), 1800);
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      }
+    }, 600);
+  };
 
   const toggleKot = async () => {
     if (kot === null || kotBusy) return;
@@ -219,16 +255,41 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
   // Both default ON when the column is missing (a fresh restaurant), matching mig 227.
   const custRequired = draft.bill_customer_required !== false;
   const custPrint = draft.bill_customer_print !== false;
-  const field = (label: string, k: string, opts: { type?: string; ph?: string; hint?: string; min?: number; max?: number; step?: string | number; maxWidth?: number } = {}) => (
+  const field = (label: string, k: string, opts: { type?: string; ph?: string; hint?: string; min?: number; max?: number; step?: string | number; maxWidth?: number; auto?: boolean } = {}) => (
     <label style={{ ...labelStyle, ...(opts.maxWidth ? { maxWidth: opts.maxWidth } : {}) }}>
       {label}
       <input
         type={opts.type || "text"} value={String(draft[k] ?? "")} placeholder={opts.ph}
         min={opts.min} max={opts.max} step={opts.step} disabled={!loadOk || busy}
-        onChange={(e) => set(k, opts.type === "number" ? e.target.value : e.target.value)}
+        onChange={(e) => {
+          set(k, e.target.value);
+          // opts.auto: this field saves itself (debounced) — see autoSave. Only fires once the
+          // typed value is a real number in range, so a momentarily empty box saves nothing.
+          if (opts.auto) {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n) && n >= (opts.min ?? -Infinity) && n <= (opts.max ?? Infinity)) autoSave(k, n);
+          }
+        }}
+        onBlur={opts.auto ? (e) => {
+          // Leaving the box settles it. Typing 40 in a 2-12 field is skipped by the onChange
+          // guard above (we must not write nonsense), which would otherwise leave the field
+          // SHOWING 40 while the floor is still on 8 — a control lying about the saved value.
+          // On blur we clamp and save, so what you see is always what is stored.
+          const raw = e.target.value.trim();
+          const lo = opts.min ?? -Infinity, hi = opts.max ?? Infinity;
+          const n = Number(raw);
+          const fixed = raw === "" || !Number.isFinite(n) ? Number(base[k]) : Math.min(Math.max(n, lo), hi);
+          if (Number.isFinite(fixed) && String(fixed) !== raw) set(k, fixed);
+          if (Number.isFinite(fixed) && fixed !== Number(base[k])) autoSave(k, fixed);
+        } : undefined}
         style={{ ...inputStyle, marginTop: 4 }}
       />
       {opts.hint && <span className="adm-muted" style={hintStyle}>{opts.hint}</span>}
+      {opts.auto && (
+        <span style={{ ...hintStyle, color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
+          {autoSaved === k ? "✓ Saved" : "Saves on its own"}
+        </span>
+      )}
     </label>
   );
   const boolToggle = (label: string, k: string, on: boolean) => (
@@ -416,7 +477,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           </div>
           <div style={{ width: 200 }}>
             {field("Tables per row", "floor_per_row", {
-              type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1,
+              type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1, auto: true,
               hint: `${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}. Fewer = bigger tiles.`,
             })}
           </div>
@@ -453,7 +514,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
         <FloorLayoutPreview
           restaurant={restaurant}
           value={perRow}
-          onPick={(nextPerRow) => set("floor_per_row", nextPerRow)}
+          onPick={(nextPerRow) => { set("floor_per_row", nextPerRow); autoSave("floor_per_row", nextPerRow); }}
           onClose={() => setShowFloorPreview(false)}
         />
       )}
