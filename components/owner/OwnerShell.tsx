@@ -33,7 +33,7 @@ const GROUPS: NavGroup[] = [
       // "View menu" when the admin turned menu editing off (enforced in the editor panel).
       { href: "/owner/menu", label: "Menu", icon: "fa-book-open", ent: "menu" },
       { href: "/owner/reports", label: "Reports", icon: "fa-file-invoice", ent: "reports" },
-      { href: "/owner/staff", label: "Team & pay", icon: "fa-users-gear", ent: "staff" },
+      { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", ent: "staff" },
       { href: "/owner/customers", label: "Customers", icon: "fa-user-group", ent: "customers" },
       // Activity = the owner's read-only log of everything their staff did (staff_actions,
       // scoped server-side). No `ent` gate — it's a core transparency view every owner gets;
