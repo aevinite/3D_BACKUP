@@ -252,7 +252,7 @@ export function TimeBar({ data, color, height = 240 }: { data: { label: string; 
 
 // ── LeaderBar — "who earns more" across restaurants (3+ scope). Clickable. ──
 export type RevDatum = { id: string; name: string; revenue: number; orders: number; accentColor: string };
-export function LeaderBar({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: string) => void }) {
+export function LeaderBar({ data, onSelect, valueLabel = "Revenue" }: { data: RevDatum[]; onSelect?: (id: string) => void; valueLabel?: string }) {
   if (!data.length) return <Empty />;
   const max = Math.max(1, ...data.map((d) => d.revenue));
   // Ranking bars: comfortable row height, but past ~8 rows the card would grow
@@ -267,7 +267,7 @@ export function LeaderBar({ data, onSelect }: { data: RevDatum[]; onSelect?: (id
           <XAxis type="number" domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} allowDecimals={false} />
           <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11.5, fill: AXIS }} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
-          <Bar dataKey="revenue" name="Revenue" radius={[0, 6, 6, 0]} cursor={onSelect ? "pointer" : undefined}
+          <Bar dataKey="revenue" name={valueLabel} radius={[0, 6, 6, 0]} cursor={onSelect ? "pointer" : undefined}
             onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>
             {data.map((d) => <Cell key={d.id} fill={d.accentColor} />)}
           </Bar>

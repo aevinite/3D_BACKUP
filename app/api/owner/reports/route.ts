@@ -547,8 +547,115 @@ export async function GET(req: NextRequest) {
     //                     is the variance. `costDataFrom` tells the UI when the ledger
     //                     started, so a 30-day window can't imply 30 days of ledger.
     if (invType) {
-      // The gate above already guaranteed a single resolvable restaurant here.
-      const one = rid || (scopeIds[0] as string);
+      // ── ALL-RESTAURANTS (merged) mode ────────────────────────────────────────
+      // A multi-restaurant owner viewing "All restaurants" must NOT be shown one
+      // kitchen's shelf labelled as the whole group's — that was the behaviour when this
+      // block assumed a single restaurant (it silently used scopeIds[0]). Totals DO merge
+      // meaningfully, so they are summed across the owner's inventory-enabled restaurants
+      // and a per-restaurant breakdown is returned beside them.
+      // What deliberately does NOT merge: COST PER DISH. A slug belongs to one
+      // restaurant's menu, so summing "classic-cheeseburger" across kitchens would invent
+      // a dish that doesn't exist. In merged mode the dish table is empty and `merged`
+      // tells the UI to say "open one restaurant to see cost per dish".
+      const invIdsAll = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
+      const invEnabled: string[] = [];
+      for (const id of invIdsAll) if ((await inventoryLadder(id)).effective) invEnabled.push(id);
+      if (!rid && invEnabled.length > 1) {
+        const names = new Map(((await sb.from("restaurants").select("id, name").in("id", invEnabled)).data || [])
+          .map((r) => [r.id as string, r.name as string]));
+        const per = await mapLimit(invEnabled, 6, async (id) => {
+          const [s, c, it, vd, sr] = await Promise.all([
+            sb.rpc("lfh_inv_report_summary", { p_restaurant: id, p_from: from, p_to: to }),
+            sb.rpc("lfh_inv_coverage", { p_restaurant: id, p_from: from, p_to: to }),
+            sb.rpc("lfh_inv_report_items", { p_restaurant: id, p_from: from, p_to: to }),
+            sb.rpc("lfh_inv_report_vendors", { p_restaurant: id, p_from: from, p_to: to }),
+            sb.rpc("lfh_inv_cost_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" }),
+          ]);
+          const dq = await sb.rpc("lfh_inv_dish_cost", { p_restaurant: id, p_from: from, p_to: to });
+          return { id, s: ((s.data ?? []) as Row[])[0] || {}, c: ((c.data ?? []) as Row[])[0] || {},
+            items: (it.data ?? []) as Row[], vendors: (vd.data ?? []) as Row[], series: (sr.data ?? []) as Row[],
+            theo: ((dq.data ?? []) as Row[]).reduce((a, d) => a + num(d.cost_total), 0) };
+        });
+        const S = (k: string) => per.reduce((a, p) => a + num(p.s[k]), 0);
+        const C = (k: string) => per.reduce((a, p) => a + num(p.c[k]), 0);
+        const I = (k: string) => per.reduce((a, p) => a + (Number(p.s[k]) || 0), 0);
+        const theoreticalCost = per.reduce((a, p) => a + p.theo, 0);
+        const coveredRevenue = C("covered_revenue"), totalRevenue = C("total_revenue");
+        // Ingredients merge on (name + buying unit) — same name in a different unit stays a
+        // separate row rather than being added to something it isn't.
+        const iMap = new Map<string, Record<string, number | string | null>>();
+        for (const p of per) for (const i of p.items) {
+          const k = `${String(i.name).toLowerCase()}|${i.purchase_uom}`;
+          const cur = iMap.get(k) || { id: k, name: String(i.name), category: String(i.category || ""),
+            baseUom: String(i.base_uom), buyUom: String(i.purchase_uom), factor: num(i.purchase_factor) || 1,
+            onHandBase: 0, onHandVal: 0, parQty: null, boughtBase: 0, boughtVal: 0, usedBase: 0, usedVal: 0,
+            wastedBase: 0, wastedVal: 0, adjustBase: 0, adjustVal: 0 };
+          for (const [dst, src] of [["onHandBase", "on_hand_base"], ["onHandVal", "on_hand_val"], ["boughtBase", "bought_base"],
+            ["boughtVal", "bought_val"], ["usedBase", "used_base"], ["usedVal", "used_val"], ["wastedBase", "wasted_base"],
+            ["wastedVal", "wasted_val"], ["adjustBase", "adjust_base"], ["adjustVal", "adjust_val"]] as const)
+            (cur as Record<string, number>)[dst] = num((cur as Record<string, number>)[dst]) + num(i[src]);
+          if (i.par_qty != null) cur.parQty = num(cur.parQty) + num(i.par_qty);
+          iMap.set(k, cur);
+        }
+        const vMap = new Map<string, { vendor: string; bills: number; amount: number; isCash: boolean }>();
+        for (const p of per) for (const v of p.vendors) {
+          const k = String(v.vendor);
+          const cur = vMap.get(k) || { vendor: k, bills: 0, amount: 0, isCash: v.is_cash === true };
+          cur.bills += Number(v.bills) || 0; cur.amount += num(v.amount);
+          vMap.set(k, cur);
+        }
+        const sMap = new Map<string, { bucket: string; purchased: number; used: number; wasted: number }>();
+        for (const p of per) for (const r of p.series) {
+          const k = String(r.bucket);
+          const cur = sMap.get(k) || { bucket: k, purchased: 0, used: 0, wasted: 0 };
+          cur.purchased += num(r.purchased); cur.used += num(r.used); cur.wasted += num(r.wasted);
+          sMap.set(k, cur);
+        }
+        const dFromM = new Date(Date.parse(from) + 5.5 * 3600_000).toISOString().slice(0, 10);
+        const dToM = new Date(Date.parse(to) + 5.5 * 3600_000 - 1).toISOString().slice(0, 10);
+        const [expM, wasteM] = await Promise.all([
+          type === "invexpenses"
+            ? sb.from("expenses").select("id, category, title, amount, expense_date, note, photo_url, created_by, voided_at, void_reason, restaurant_id")
+                .in("restaurant_id", invEnabled).gte("expense_date", dFromM).lte("expense_date", dToM)
+                .order("expense_date", { ascending: false }).limit(300)
+            : Promise.resolve({ data: [] as Row[] }),
+          type === "invwaste"
+            ? sb.from("inv_waste_entries").select("id, item_id, qty_base, reason, note, unit_cost_snap, waste_date, created_by, voided_at")
+                .in("restaurant_id", invEnabled).gte("waste_date", dFromM).lte("waste_date", dToM)
+                .order("waste_date", { ascending: false }).limit(300)
+            : Promise.resolve({ data: [] as Row[] }),
+        ]);
+        return {
+          type, range, bucket, merged: true,
+          summary: {
+            stockValue: S("stock_value"), stockItems: I("stock_items"),
+            lowCount: I("low_count"), negativeCount: I("negative_count"),
+            purchases: S("purchases_amt"), purchaseCount: I("purchases_count"),
+            actualUsed: S("consumed_val"), wasted: S("wasted_val"), wasteCount: I("waste_count"),
+            expenses: S("expenses_amt"), corrections: S("adjust_val"),
+            theoreticalCost, foodCostPct: coveredRevenue > 0 ? (theoreticalCost / coveredRevenue) * 100 : null,
+          },
+          coverage: {
+            totalRevenue, coveredRevenue,
+            totalDishes: C("total_dishes"), coveredDishes: C("covered_dishes"),
+            mappedRecipes: C("mapped_recipes"), menuDishes: C("menu_dishes"),
+            pct: totalRevenue > 0 ? (coveredRevenue / totalRevenue) * 100 : 0,
+          },
+          costDataFrom: null,
+          dishes: [],                       // per-menu — never merged across restaurants
+          perRestaurant: per.map((p) => ({
+            name: names.get(p.id) || "Restaurant",
+            stockValue: num(p.s.stock_value), purchases: num(p.s.purchases_amt),
+            expenses: num(p.s.expenses_amt), wasted: num(p.s.wasted_val), theoreticalCost: p.theo,
+          })).sort((a, b) => b.stockValue - a.stockValue),
+          items: [...iMap.values()],
+          vendors: [...vMap.values()].sort((a, b) => b.amount - a.amount),
+          series: [...sMap.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)),
+          expenses: expM.data || [], waste: wasteM.data || [],
+        };
+      }
+      // ── single restaurant (explicit ?rid, or the owner only has one with the module) ──
+      const one = rid || invEnabled[0] || (scopeIds[0] as string);
       const [sum, cov, dish, items, vendors, series, firstMv] = await Promise.all([
         sb.rpc("lfh_inv_report_summary", { p_restaurant: one, p_from: from, p_to: to }),
         sb.rpc("lfh_inv_coverage", { p_restaurant: one, p_from: from, p_to: to }),
