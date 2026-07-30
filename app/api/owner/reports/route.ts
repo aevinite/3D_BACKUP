@@ -433,6 +433,12 @@ export async function GET(req: NextRequest) {
         foodCostPct: number | null; coveragePct: number; hasRecipes: boolean;
       } | null = null;
       let costSeries: { bucket: string; purchased: number; used: number; wasted: number }[] | null = null;
+      // FAIL-OPEN, like the depletion trigger: inventory is an ADD-ON to these money
+      // reports, so a stock hiccup (a ladder read blipping, an RPC erroring) must never
+      // blank the owner's Sales figures or Day summary. On any failure `inventory` and
+      // `costSeries` simply stay null and the sheet renders exactly as it did before the
+      // module existed.
+      try {
       if (type === "daysummary" || type === "sales") {
         const invIds = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
         const enabledInv: string[] = [];
@@ -485,6 +491,7 @@ export async function GET(req: NextRequest) {
           }
         }
       }
+      } catch { inventory = null; costSeries = null; }
       return { type, range, bucket, rows, totals, tax, payments, staffPay, inventory, costSeries, drillBucket, drillRows };
     }
 
@@ -578,19 +585,23 @@ export async function GET(req: NextRequest) {
       // mig 227 computes on bill_date/expense_date/waste_date) and match the Inventory page.
       // from/to are UTC ISO instants — shift into IST before taking the calendar date, or
       // an IST-midnight window reads one day early (the SQL side uses AT TIME ZONE for
-      // exactly this reason).
-      const istDay = (iso: string) => new Date(Date.parse(iso) + 5.5 * 3600_000).toISOString().slice(0, 10);
-      const dFrom = istDay(from), dTo = istDay(to);
+      // exactly this reason). The END bound follows the same rule as mig 227's header:
+      // `to` is "now" for named ranges and an exclusive IST midnight for custom ones, so
+      // take the IST day of (to − 1ms) and compare INCLUSIVELY — a bare `< toDay` drops
+      // everything dated today on every named range.
+      const istDay = (iso: string, backMs = 0) =>
+        new Date(Date.parse(iso) + 5.5 * 3600_000 - backMs).toISOString().slice(0, 10);
+      const dFrom = istDay(from), dTo = istDay(to, 1);
       const expenses = type === "invexpenses"
         ? (await sb.from("expenses")
             .select("id, category, title, amount, expense_date, note, photo_url, created_by, voided_at, void_reason")
-            .eq("restaurant_id", one).gte("expense_date", dFrom).lt("expense_date", dTo)
+            .eq("restaurant_id", one).gte("expense_date", dFrom).lte("expense_date", dTo)
             .order("expense_date", { ascending: false }).limit(300)).data || []
         : [];
       const waste = type === "invwaste"
         ? (await sb.from("inv_waste_entries")
             .select("id, item_id, qty_base, reason, note, unit_cost_snap, waste_date, created_by, voided_at")
-            .eq("restaurant_id", one).gte("waste_date", dFrom).lt("waste_date", dTo)
+            .eq("restaurant_id", one).gte("waste_date", dFrom).lte("waste_date", dTo)
             .order("waste_date", { ascending: false }).limit(300)).data || []
         : [];
       return {

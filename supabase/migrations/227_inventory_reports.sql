@@ -13,6 +13,14 @@
 -- Each RPC below returns them as separate columns and the UI labels them separately,
 -- because summing any two of these is the classic inventory-reporting error.
 --
+-- ── THE WINDOW RULE FOR DOCUMENT DATES (bill_date / expense_date / waste_date) ──
+-- p_to arrives EITHER as an exclusive IST midnight (custom ranges) OR as the instant
+-- "now" (every named range: today / 7d / 30d / month / fy / all). Comparing
+-- `date_col < (p_to)::date` is correct for the first and silently DROPS EVERYTHING DATED
+-- TODAY for the second — a bill entered this morning would vanish from "This month".
+-- So the end bound is always `<= ((p_to - 1 microsecond) AT TIME ZONE 'Asia/Kolkata')::date`,
+-- which is right for both shapes. Never change this back to a bare `<`.
+--
 -- ── THE COVERAGE RULE (this is what prevents a lying percentage) ─────────────
 -- Recipes may cover ALL dishes or only SOME (the owner's words). A food-cost % of
 -- "ingredient cost ÷ ALL revenue" is therefore wrong whenever coverage is partial —
@@ -70,11 +78,11 @@ CREATE OR REPLACE FUNCTION lfh_inv_report_summary(
     COALESCE((SELECT SUM(total) FROM inv_purchases
                WHERE restaurant_id = p_restaurant AND voided_at IS NULL
                  AND bill_date >= (p_from AT TIME ZONE 'Asia/Kolkata')::date
-                 AND bill_date <  (p_to   AT TIME ZONE 'Asia/Kolkata')::date), 0),
+                 AND bill_date <= ((p_to - interval '1 microsecond') AT TIME ZONE 'Asia/Kolkata')::date), 0),
     (SELECT COUNT(*)::int FROM inv_purchases
               WHERE restaurant_id = p_restaurant AND voided_at IS NULL
                 AND bill_date >= (p_from AT TIME ZONE 'Asia/Kolkata')::date
-                AND bill_date <  (p_to   AT TIME ZONE 'Asia/Kolkata')::date),
+                AND bill_date <= ((p_to - interval '1 microsecond') AT TIME ZONE 'Asia/Kolkata')::date),
     -- Movement-sourced costs, signed so the UI never has to guess: outflows are stored
     -- negative, so -SUM() yields a positive "this much was used / lost".
     COALESCE((SELECT -SUM(qty_base * unit_cost) FROM inv_movements
@@ -86,11 +94,11 @@ CREATE OR REPLACE FUNCTION lfh_inv_report_summary(
     (SELECT COUNT(*)::int FROM inv_waste_entries
               WHERE restaurant_id = p_restaurant AND voided_at IS NULL
                 AND waste_date >= (p_from AT TIME ZONE 'Asia/Kolkata')::date
-                AND waste_date <  (p_to   AT TIME ZONE 'Asia/Kolkata')::date),
+                AND waste_date <= ((p_to - interval '1 microsecond') AT TIME ZONE 'Asia/Kolkata')::date),
     COALESCE((SELECT SUM(amount) FROM expenses
                WHERE restaurant_id = p_restaurant AND voided_at IS NULL
                  AND expense_date >= (p_from AT TIME ZONE 'Asia/Kolkata')::date
-                 AND expense_date <  (p_to   AT TIME ZONE 'Asia/Kolkata')::date), 0),
+                 AND expense_date <= ((p_to - interval '1 microsecond') AT TIME ZONE 'Asia/Kolkata')::date), 0),
     COALESCE((SELECT SUM(qty_base * unit_cost) FROM inv_movements
                WHERE restaurant_id = p_restaurant AND kind = 'count_adjust'
                  AND created_at >= p_from AND created_at < p_to), 0),
@@ -152,7 +160,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
     FROM inv_purchases
    WHERE restaurant_id = p_restaurant AND voided_at IS NULL
      AND bill_date >= (p_from AT TIME ZONE 'Asia/Kolkata')::date
-     AND bill_date <  (p_to   AT TIME ZONE 'Asia/Kolkata')::date
+     AND bill_date <= ((p_to - interval '1 microsecond') AT TIME ZONE 'Asia/Kolkata')::date
    GROUP BY 1
    ORDER BY 3 DESC;
 $$;
@@ -181,7 +189,7 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
       FROM inv_purchases
      WHERE restaurant_id = p_restaurant AND voided_at IS NULL
        AND bill_date >= (p_from AT TIME ZONE 'Asia/Kolkata')::date
-       AND bill_date <  (p_to   AT TIME ZONE 'Asia/Kolkata')::date
+       AND bill_date <= ((p_to - interval '1 microsecond') AT TIME ZONE 'Asia/Kolkata')::date
   )
   SELECT k.bk,
          COALESCE((SELECT SUM(total) FROM p WHERE p.bk = k.bk), 0),
