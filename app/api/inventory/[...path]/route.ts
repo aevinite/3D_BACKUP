@@ -579,10 +579,14 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       if (up.error) return err(up.error.message, 500);
       if (!up.data?.length) return err("Purchase not found or already voided.", 404);
       // Reverse each line — keyed on the line id, so a re-run reverses nothing twice.
-      const lines = await sb.from("inv_purchase_lines").select("id, item_id, qty_base")
+      const lines = await sb.from("inv_purchase_lines").select("id, item_id, qty_base, amount")
         .eq("restaurant_id", rid).eq("purchase_id", path[1]).limit(200);
       for (const l of lines.data || []) {
-        await postMovement({ rid, item: l.item_id, qty: -Number(l.qty_base), kind: "purchase_void", dedupe: `purvoid:${path[1]}:${l.id}`, reason, refType: "purchase", refId: path[1], by: actor });
+        // Pass the line's OWN cost per base unit (mig 231). Without it the reversal is
+        // valued at today's average, cancels itself out, and the ingredient stays
+        // over-valued at the wrong price for ever.
+        const origCost = Number(l.qty_base) > 0 ? Number(l.amount) / Number(l.qty_base) : 0;
+        await postMovement({ rid, item: l.item_id, qty: -Number(l.qty_base), kind: "purchase_void", dedupe: `purvoid:${path[1]}:${l.id}`, unitCost: origCost, reason, refType: "purchase", refId: path[1], by: actor });
       }
       await logAction("manager", "inv_purchase_void", { restaurant_id: rid, actor, actor_id: actorId, detail: reason });
       return ok();
@@ -672,11 +676,13 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       const reason = String(body.reason || "").trim();
       if (!reason) return err("A reason is required.");
       const up = await sb.from("inv_waste_entries").update({ voided_at: new Date().toISOString(), void_reason: reason.slice(0, 300), voided_by: actor })
-        .eq("restaurant_id", rid).eq("id", path[1]).is("voided_at", null).select("id, item_id, qty_base");
+        .eq("restaurant_id", rid).eq("id", path[1]).is("voided_at", null).select("id, item_id, qty_base, unit_cost_snap");
       if (up.error) return err(up.error.message, 500);
       if (!up.data?.length) return err("Entry not found or already struck out.", 404);
       const w = up.data[0];
-      await postMovement({ rid, item: w.item_id, qty: Number(w.qty_base), kind: "waste_void", dedupe: `wastevoid:${path[1]}`, reason, refType: "waste", refId: path[1], by: actor });
+      // Restore at the cost the waste was recorded at, so undoing a waste puts back
+      // exactly the value it took out (mig 231's reversal rule).
+      await postMovement({ rid, item: w.item_id, qty: Number(w.qty_base), kind: "waste_void", dedupe: `wastevoid:${path[1]}`, unitCost: Number(w.unit_cost_snap), reason, refType: "waste", refId: path[1], by: actor });
       return ok();
     }
 
