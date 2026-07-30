@@ -26,6 +26,7 @@ import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { effectiveTaxRate } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { waiterTables, allows, normTable, blockedReason, type SectionLimit } from "@/lib/tableAssign";
+import { saveBillCustomer } from "@/lib/billCustomer";
 
 export const dynamic = "force-dynamic";
 
@@ -288,6 +289,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // floor + the table-AGNOSTIC bundle (settings/dishes/categories/restaurant) the grid +
     // order-taking + header need (so the grid no longer pulls the whole board just to get them).
     // The selected table's FULL detail still comes from /state?table=N (tier 2).
+    // customer-search?q=98250 — "who is this number?" while the waiter types it into the
+    // bill's customer box. Same tiny prefix lookup the manager panel uses (mig 227): at most
+    // 6 rows of phone + name + visit count, prefix-anchored on the index.
+    if (path.join("/") === "customer-search") {
+      const q = (new URL(req.url).searchParams.get("q") || "").replace(/\D/g, "").slice(0, 15);
+      if (q.length < 3) return ok({ matches: [] });
+      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: 6 });
+      if (error) throw new Error(error.message);
+      return ok({ matches: Array.isArray(data) ? data : [] });
+    }
+
     if (path.join("/") === "summary") {
       const tbl = new URL(req.url).searchParams.get("table");
       // ?nomenu=1 → skip the big dishes list (the panel keeps its on-device cached menu and
@@ -901,6 +913,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // THIS restaurant's first (service-role bypasses RLS), mirroring the editor invoice guard.
       const ownsGen = (await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
+      // Same rule as the manager panel: when the restaurant requires it, no invoice without
+      // the customer's mobile + name (lib/billCustomer.ts, mig 227). Saved first, so an
+      // issued invoice always carries the customer it was made out to.
+      const custSaveT = await saveBillCustomer(sb, rid, b as string, body);
+      if (!custSaveT.ok) return err(custSaveT.message, 400);
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: null, p_actor: actor?.name || actor?.username || null });
       if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened.", 409); throw new Error(error.message); }
       await log("invoice_generate", { detail: `session ${b}`, device_id: dev });

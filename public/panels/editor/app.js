@@ -3840,15 +3840,24 @@ function printBill(t, sess, os) {
   const s = state.data.settings || {};
   const m = billMath(os);
   const live = os.filter((o) => o.status !== "cancelled");
-  // Item rows: base + each priced add-on as an italic sub-line (the unit price
-  // already includes add-ons, so base = unit − add-ons → the lines sum to subtotal).
+  // Item rows: base + each priced add-on as a sub-line (the unit price already includes
+  // add-ons, so base = unit − add-ons → the lines sum to subtotal). Figures are grouped
+  // Indian-style (1,07,880) and every one is measured, so the money columns below can be
+  // sized to THIS bill instead of a fixed guess.
+  const pn = (n) => Math.round(Number(n) || 0).toLocaleString("en-IN");
+  const widest = { qty: 3, rate: 4, amt: 3 };   // never narrower than the QTY/RATE/AMT headings
+  const measure = (k, v) => { widest[k] = Math.max(widest[k], String(v).length); };
   const rows = live.map((o) => (Array.isArray(o.items) ? o.items : []).map((i) => {
     const q = Number(i.qty) || 1;
     const opts = Array.isArray(i.options) ? i.options.filter((x) => Number(x.price)) : [];
     const addUnit = opts.reduce((a, x) => a + (Number(x.price) || 0), 0);
     const baseUnit = (parseFloat(i.price) || 0) - addUnit;
-    let r = `<tr><td>${esc(i.title)}</td><td class="c">${q}</td><td class="r">${Math.round(baseUnit)}</td><td class="r">${Math.round(baseUnit * q)}</td></tr>`;
-    for (const x of opts) r += `<tr class="ex"><td colspan="2">+ ${esc(x.label)}</td><td class="r">${Math.round(Number(x.price))}</td><td class="r">${Math.round(Number(x.price) * q)}</td></tr>`;
+    measure("qty", pn(q)); measure("rate", pn(baseUnit)); measure("amt", pn(baseUnit * q));
+    let r = `<tr><td class="n">${esc(i.title)}</td><td class="c">${pn(q)}</td><td class="r">${pn(baseUnit)}</td><td class="r">${pn(baseUnit * q)}</td></tr>`;
+    for (const x of opts) {
+      measure("rate", pn(x.price)); measure("amt", pn(Number(x.price) * q));
+      r += `<tr class="ex"><td class="n" colspan="2">+ ${esc(x.label)}</td><td class="r">${pn(x.price)}</td><td class="r">${pn(Number(x.price) * q)}</td></tr>`;
+    }
     return r;
   }).join("")).join("");
   // White-label identity: ALL the fallback logic lives in billIdentity() (shared with
@@ -3861,9 +3870,19 @@ function printBill(t, sess, os) {
   const phone = esc(bi.phone);
   const gstin = esc(bi.gstin);
   const footer = esc(bi.footer);
-  // Customer name: orders carry a customer_name (dine-in head / aggregator buyer);
-  // use the first order that has one. Blank → the line is hidden, never empty.
-  const cust = esc((os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "");
+  // WHO THE BILL IS FOR. Two different things, in priority order:
+  //  1. bill_cust_name / bill_cust_phone — captured at invoice time and stored on the
+  //     bill itself (mig 227). Printing them is the restaurant's own switch
+  //     (settings.bill_customer_print) — the details are always SAVED either way.
+  //  2. customer_name — the guest's own name from their phone / an aggregator buyer.
+  // Blank → the line is hidden, never printed empty.
+  const printCust = s.bill_customer_print !== false;
+  const billCustRow = os.find((o) => (o.bill_cust_name || o.bill_cust_phone)) || {};
+  const cust = esc(printCust ? (billCustRow.bill_cust_name || (os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "")
+                             : "");
+  // 10 digits print as "98250 12345" — easier to read back to a guest than one long run.
+  const custPhoneRaw = printCust ? String(billCustRow.bill_cust_phone || "").replace(/\D/g, "") : "";
+  const custPhone = esc(custPhoneRaw.length === 10 ? custPhoneRaw.slice(0, 5) + " " + custPhoneRaw.slice(5) : custPhoneRaw);
   // Table on the printed bill: the restaurant's OWN name for it when it has one ("A1",
   // "Patio" — mig 131), because the guest and the waiter both know the table by that name
   // (owner 2026-07-29: "print acc to the table name … on the KOT as well as the bill").
@@ -3909,40 +3928,63 @@ function printBill(t, sess, os) {
        left paper edge — a full-width 80mm body loses ~8mm of every line on the right. */
   @page{margin:0}
   @media print{body{margin:0 !important;padding:2mm 5mm !important}
-    /* a bill spanning several 65mm printer pages: print the ITEM header ONCE (browsers
+    /* a bill spanning several printer pages: print the ITEM header ONCE (browsers
        otherwise repeat <thead> on every page — it showed up mid-bill), and never split
        a row across a page boundary (a fragmented flex row shifted every amount one
        line down — owner's 18:04 invoice). Validated in the offline print simulator. */
     thead{display:table-row-group}
-    tr,.t,.g,.kv{break-inside:avoid;page-break-inside:avoid}}
-  body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:22px 34px;color:#111}
-  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.1)}
-  h2{font-family:Georgia,'Times New Roman',serif;font-size:19px;margin:0;text-align:center}
-  .sub{text-align:center;color:#444;font-size:10px;margin-top:3px;line-height:1.5}
-  .dash{border-top:1px dashed #999;margin:11px 0}
-  .kv{display:flex;justify-content:space-between;font-size:10.5px;padding:2px 0}.kv span:first-child{color:#777}
-  table{width:100%;border-collapse:collapse;margin-top:4px}
-  th{font-size:8.5px;text-transform:uppercase;letter-spacing:.05em;color:#777;text-align:left;border-bottom:1px solid #111;padding-bottom:5px}
-  th.c,td.c{text-align:center}th.r,td.r{text-align:right}
-  td{font-size:12px;padding:5px 0;border-bottom:1px dotted #e2e2e2;font-variant-numeric:tabular-nums}
-  tr.ex td{font-size:10px;font-style:italic;color:#777;padding:1px 0 5px 10px;border-bottom:1px dotted #eee}
-  .t{display:flex;justify-content:space-between;font-size:11.5px;padding:3px 0;color:#333}
-  .t.tx{border-top:1px dashed #aaa;margin-top:4px;padding-top:6px;color:#111;font-weight:700}
-  /* Totals section: a solid medium-dark rule separates items from the money summary (#555 prints on thermal; light dotted lines fade out). */
-  .totals{margin-top:8px;border-top:1px solid #555;padding-top:8px}
-  .g{display:flex;justify-content:space-between;border-top:2px solid #111;margin-top:8px;padding-top:8px;font-weight:700;font-size:14px}
-  .foot{text-align:center;color:#555;font-size:10px;margin-top:13px}
+    tr,.t,.g,.kv,h2,.sub{break-inside:avoid;page-break-inside:avoid}}
+  /* ── ONE INK: pure black at NORMAL weight (owner, 2026-07-30) ──────────────────
+     A thermal head can only burn a dot or not — it has no grey, so grey is faked with
+     sparse dots and light text came out broken and pale (the old #777 labels, #444
+     address, #333 totals, #555 footer, dotted #e2e2e2 rules). Everything here is #000
+     at weight 400; hierarchy comes from SIZE, small caps + letter-spacing, spacing and
+     solid rules. Bold is spent on exactly two things: the restaurant name and the TOTAL.
+     Nothing below 10.5px and no italics — both smear at 203 dpi. */
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  body{font-family:'Helvetica Neue',Helvetica,Arial,'Liberation Sans',sans-serif;
+       font-size:12.5px;line-height:1.44;margin:22px 30px;color:#000;font-weight:400;
+       font-variant-numeric:tabular-nums}
+  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.4)}
+  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;margin:0 0 4px}
+  .sub{text-align:center;font-size:11px;line-height:1.5}
+  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:9px 0 8px;padding:4px 0;
+        text-align:center;font-size:11px;letter-spacing:.24em;text-transform:uppercase}
+  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:1.5px 0}
+  .kv span:first-child{font-size:11px;letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}
+  .kv b{font-weight:400;text-align:right}
+  .dash{border-top:1px solid #000;margin:8px 0}
+  /* fixed columns, sized from THIS bill's own figures (see widest{}) so a ₹1,07,880 line
+     and a long dish name can never crowd each other */
+  table{width:100%;border-collapse:collapse;margin-top:2px;table-layout:fixed}
+  th{font-size:11px;letter-spacing:.09em;text-transform:uppercase;text-align:left;font-weight:400;
+     border-bottom:1px solid #000;padding:0 0 4px}
+  th.c,td.c{text-align:center;padding-left:4px}
+  th.r,td.r{text-align:right;padding-left:7px}
+  td{font-size:12.5px;padding:5px 0;vertical-align:top;border:0}
+  td.n{padding-right:4px;word-break:break-word}
+  tr.ex td{font-size:11px;padding:0 0 5px 9px}
+  tbody tr:last-child td{padding-bottom:6px}
+  .t{display:flex;justify-content:space-between;font-size:12px;padding:2.5px 0}
+  .t.tx{border-top:1px solid #000;margin-top:4px;padding-top:5px}
+  .totals{margin-top:6px;border-top:1px solid #000;padding-top:6px}
+  .g{display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid #000;
+     border-bottom:2px solid #000;margin-top:7px;padding:6px 0;font-weight:700;font-size:16px;letter-spacing:.02em}
+  .foot{text-align:center;font-size:11px;margin-top:11px}
 </style>
 ${isDefault ? '<img class="logo" src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png" onerror="this.style.display=\'none\'"/>' : ""}
 <h2>${name}</h2>
-<div class="sub">${addr ? addr + "<br/>" : ""}${phone ? "Phone " + phone : ""}${phone && gstin ? " · " : ""}${gstin ? "GSTIN " + gstin : ""}</div>
-<div class="dash"></div>
+<div class="sub">${addr ? addr + "<br/>" : ""}${phone ? "Ph " + phone : ""}${phone && gstin ? "<br/>" : ""}${gstin ? "GSTIN " + gstin : ""}</div>
+<div class="kind">Tax Invoice</div>
 ${invNo ? `<div class="kv"><span>Invoice</span><b>${invNo}</b></div>` : ""}
-<div class="kv"><span>${billNo !== "" ? "Bill · Table" : "Table"}</span><b>${billNo !== "" ? "#" + billNo + " · " : ""}${tableDisp}</b></div>
-${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
-<div class="kv"><span>Date · Time</span><b>${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></div>
+${billNo !== "" ? `<div class="kv"><span>Bill no</span><b>#${billNo}</b></div>` : ""}
+<div class="kv"><span>Table</span><b>${tableDisp}</b></div>
+<div class="kv"><span>Date</span><b>${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></div>
+${cust || custPhone ? `<div class="dash"></div>${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}${custPhone ? `<div class="kv"><span>Mobile</span><b>${custPhone}</b></div>` : ""}` : ""}
 <div class="dash"></div>
-<table><thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amount</th></tr></thead><tbody>${rows}</tbody></table>
+<table>
+<colgroup><col><col style="width:calc(${widest.qty}ch + 8px)"><col style="width:calc(${widest.rate}ch + 11px)"><col style="width:calc(${widest.amt}ch + 11px)"></colgroup>
+<thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="totals">
   <div class="t"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
   ${m.disc > 0 ? `<div class="t"><span>Discount</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
@@ -3950,7 +3992,21 @@ ${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}
   <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
 </div>
 <div class="foot">${footer}</div>
-<script>setTimeout(()=>print(),300)<\/script>`);
+<script>
+/* The POS-80 queue has its own default page length, so a long bill came out chopped into
+   several sheets (owner, 2026-07-30 — "it prints in four parts"). Measure the finished bill
+   and declare a page exactly that long, so the page MATCHES the roll instead of being
+   smaller/squarer than it (that older case is what CUPS rotates or bottom-anchors). */
+setTimeout(function(){
+  try{
+    var mm = 96/25.4, h = Math.ceil(document.body.scrollHeight/mm) + 6;
+    var st = document.createElement("style");
+    st.textContent = "@media print{@page{size:80mm " + h + "mm;margin:0}}";
+    document.head.appendChild(st);
+  }catch(e){}
+  print();
+}, 300);
+<\/script>`);
   w.document.close();
 }
 
@@ -9220,6 +9276,23 @@ function setTab(tab) {
 // number (one gets overwritten) → a gap in the numbering. Keyed per session so two
 // DIFFERENT bills can still invoice at once; the same bill can't fire twice in flight.
 const _invBusy = new Set();
+// askBillCustomer(session): the mobile-first "who is this bill for?" sheet.
+// Returns { phone, name } to send with the invoice, undefined to send nothing (the
+// restaurant doesn't ask, or this bill already has its customer), or null if the
+// waiter backed out — in which case NO invoice is generated.
+async function askBillCustomer(sid, sess) {
+  const s = state.data.settings || {};
+  const required = s.bill_customer_required !== false;
+  if (!required) return undefined;
+  if (!window.LFH_BILLCUST) return undefined;   // module missing → never block billing
+  // What THIS bill already carries: re-issuing after a reopen opens the sheet pre-filled
+  // with that session's own customer (owner, 2026-07-30). Scoped strictly to this
+  // session_id — one table's customer never appears on another's bill.
+  const row = (state.data.orders || []).find((o) => o.session_id === sid && (o.bill_cust_name || o.bill_cust_phone));
+  const prefill = (sess && sess.cust_phone) ? { phone: sess.cust_phone, name: sess.cust_name }
+    : row ? { phone: row.bill_cust_phone, name: row.bill_cust_name } : null;
+  return LFH_BILLCUST.ask({ api, required, print: s.bill_customer_print !== false, prefill });
+}
 async function generateInvoice(sid) {
   if (_invBusy.has(sid)) return;
   // A RE-issue (a number already exists → the previous was voided) must say WHY — the
@@ -9231,8 +9304,15 @@ async function generateInvoice(sid) {
     reason = await promptDialog("This invoice was voided. Re-issuing assigns a NEW number — why are you re-issuing it?", { confirmLabel: "Re-issue invoice", placeholder: "corrected GST, fixed items…", required: true });
     if (reason == null) return; // cancelled
   }
+  // Who is this bill for? (owner, 2026-07-30 — mobile first, name auto-fills for a
+  // returning number, and no bill at all without both when the restaurant requires it).
+  // A bill that ALREADY carries a customer (re-issue after a void) doesn't ask again.
+  const body = reason ? { reason } : {};
+  const cust = await askBillCustomer(sid, ss);
+  if (cust === null) return;               // cancelled — nothing is issued
+  if (cust) { body.cust_phone = cust.phone; body.cust_name = cust.name; }
   _invBusy.add(sid);
-  try { await api("POST", `/sessions/${sid}/invoice`, reason ? { reason } : {}); await loadOrders(); toast(isReissue ? "Invoice re-issued" : "Invoice generated", "ok"); }
+  try { await api("POST", `/sessions/${sid}/invoice`, body); await loadOrders(); toast(isReissue ? "Invoice re-issued" : "Invoice generated", "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
   finally { _invBusy.delete(sid); }
 }

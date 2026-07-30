@@ -20,6 +20,7 @@ type Draft = Record<string, unknown>;
 const KEYS = [
   "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone", "gstin",
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
+  "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
   "table_count", "table_seats", "table_names", "auto_table_action", "floor_per_row",
 ] as const;
@@ -215,6 +216,9 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
   };
 
   // ── small render helpers ──────────────────────────────────────────────────
+  // Both default ON when the column is missing (a fresh restaurant), matching mig 227.
+  const custRequired = draft.bill_customer_required !== false;
+  const custPrint = draft.bill_customer_print !== false;
   const field = (label: string, k: string, opts: { type?: string; ph?: string; hint?: string; min?: number; max?: number; step?: string | number; maxWidth?: number } = {}) => (
     <label style={{ ...labelStyle, ...(opts.maxWidth ? { maxWidth: opts.maxWidth } : {}) }}>
       {label}
@@ -288,6 +292,43 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
             {field("Invoice prefix", "invoice_prefix")}
           </div>
           {field("Bill footer message", "bill_footer", { hint: "Printed at the very bottom of the customer's bill, e.g. “Thank you — visit again!”." })}
+        </div>
+
+        {/* ── Customer on the bill (owner, 2026-07-30) ──────────────────────────
+            Two separate decisions on purpose: ASK for the guest's mobile + name (which
+            is what builds the repeat-guest list and makes the name auto-fill next time),
+            and PRINT those two lines on the paper. A restaurant can do the first without
+            the second. The (i) below spells that out for whoever flips these. */}
+        <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Customer on the bill</h3>
+        <div style={{ display: "grid", gap: 8, maxWidth: 480 }}>
+          {boolToggle("Ask for mobile + name before a bill", "bill_customer_required", custRequired)}
+          {boolToggle("Print customer name & mobile on the bill", "bill_customer_print", custPrint)}
+          <details className="adm-muted" style={{ fontSize: 12.5, lineHeight: 1.55 }}>
+            <summary style={{ cursor: "pointer", userSelect: "none" }}
+              title="Asking and printing are separate: the details are always saved, the switch only decides whether they appear on the paper.">
+              ⓘ How these two work together
+            </summary>
+            <div style={{ marginTop: 7, display: "grid", gap: 7 }}>
+              <p style={{ margin: 0 }}>
+                <b>Ask for mobile + name</b>{" "}— with this on, the waiter is asked for the guest&apos;s
+                mobile number first, then the name, and <b>no bill can be generated without both</b>.
+                Typing the number searches this restaurant&apos;s own customer list: a number that has
+                been here before fills its name in by itself, a new one shows a small green
+                “New customer”. The pair is saved to the bill and to the customer list either way —
+                that is what makes the name come back on the next visit.
+              </p>
+              <p style={{ margin: 0 }}>
+                <b>Print customer name &amp; mobile</b>{" "}— controls the <b>paper only</b>. On: the bill
+                shows a Customer and a Mobile line above the items. Off: the bill prints without them
+                and the details are still collected and saved exactly the same. Bills already printed
+                never change.
+              </p>
+              <p style={{ margin: 0 }}>
+                Turning <b>asking</b> off also means nothing new is collected, so no name or number can
+                appear on new bills.
+              </p>
+            </div>
+          </details>
         </div>
 
         <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Tax lines on the print</h3>

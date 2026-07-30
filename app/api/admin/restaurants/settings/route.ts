@@ -25,6 +25,7 @@ const isUuid = (v: unknown): v is string =>
 const SETTINGS_COLS = [
   "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone", "gstin",
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
+  "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
   "table_count", "table_seats", "table_names", "auto_table_action", "floor_per_row",
 ] as const;
@@ -62,7 +63,9 @@ function sanitize(body: Patch): Patch {
     const v = parseFloat(String(body.tax_rate));
     out.tax_rate = Number.isFinite(v) && v >= 0 && v <= 1 ? v : null;
   }
-  for (const k of ["sessions_enabled", "require_location", "require_otp"]) {
+  // Customer on the bill (mig 227): asking for the guest's mobile + name, and printing
+  // those two lines, are separate switches — see the (i) note in the admin card.
+  for (const k of ["sessions_enabled", "require_location", "require_otp", "bill_customer_required", "bill_customer_print"]) {
     if (k in body) out[k] = body[k] === true || body[k] === "true";
   }
   for (const k of ["geo_lat", "geo_lng"]) {
