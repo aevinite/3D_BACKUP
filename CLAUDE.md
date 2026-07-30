@@ -637,6 +637,27 @@ Whenever you write a dialog, overlay, or any handler that can decline a tap:
   any edit to `public/panels/*/{app.js,style.css,index.html}`: silent when clean, and it fails
   the edit with an explanation if a check breaks. Add a check there when you add a dialog.
 
+## 🪑 A TABLE SHOWS ONLY ITS OWN PARTY (owner, 2026-07-30 — every floor, every panel)
+
+The owner tapped **Open** on a FREE table and it appeared instantly as *"Preparing · 0/5
+served · ₹1,150 due"* with three KOTs — food ordered nine days earlier by a party whose
+session was long closed. "Mark all paid" / "Generate invoice" would have billed the new
+guests for it. Two rules came out of it; keep BOTH true forever:
+
+- **Ownership is the SESSION, never the table number.** Anything that answers "which orders
+  are at this table?" must match the table's CURRENT open-session id (a session-less row —
+  banquet/legacy — still counts, so no order is ever hidden). `lfh_table_view_summary` always
+  did this; the panels' `ordersForTable` (manager) / `ordersOf` (waiter) did not, which is why
+  the tile flip-flopped between "Preparing" and "Open · waiting for guests".
+- **An order can never outlive its session.** Cleanup lives on the status change itself
+  (mig 232 extends the mig-020/146 close trigger + the delete trigger), so EVERY close —
+  the app path, a script's bare `UPDATE sessions SET status='closed'`, a hand-run SQL fix,
+  anything we write later — cancels the unpaid non-khata work (a visible ✕ record) and
+  archives the rest. Nothing is deleted: reports/Bills never filter `archived`.
+- **Guarded by `npm run verify:table-ownership`** (add `--base http://localhost:4000` for the
+  browser pass): panel source, a floor-wide data scan, the close behaviour, and a tile-by-tile
+  click sweep proving each tile and its detail describe the SAME table. `/bug-test` §5b runs it.
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The

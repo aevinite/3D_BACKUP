@@ -5792,8 +5792,20 @@ const ordersForTable = (t) => {
   // orders belong to a CLOSED session (stale) — the meal's over, nobody's there. Don't
   // paint the tile with them; the table is Free. (Same guard callsForTable uses, so a
   // closed table can never keep showing "Preparing"/"Served" from an old order.)
-  if (sessionsOn && !openSessionForTable(t)) return [];
-  return list;
+  const sess = openSessionForTable(t);
+  if (sessionsOn && !sess) return [];
+  // WHOSE ORDERS ARE THESE? (owner report, 2026-07-30 — the bug this guard exists for.)
+  // An order belongs to the party sitting here NOW only when it carries THIS session's id
+  // (or no session id at all — banquet/legacy rows, which the staff-order path adopts into
+  // the session anyway, mig 049). The guard above only asked "is the table open?", so the
+  // moment a NEW party was seated, a PREVIOUS party's leftover live orders came flooding
+  // back: opening a FREE Aangan table showed it instantly as "Preparing · 5 dishes ·
+  // ₹1,150 due" from three 9-day-old orders whose session had long been closed — and
+  // Mark-all-paid / Generate-invoice would have put them on the new guests' bill.
+  // The SERVER summary (lfh_table_view_summary) has always scoped by session id, which is
+  // why the tile then flip-flopped back to "Open · waiting for guests" on the next poll.
+  // This is the client catching up to that one truth — never widen it back to table_number.
+  return sessionsOn ? list.filter((o) => !o.session_id || o.session_id === sess.id) : list;
 };
 const openSessionForTable = (t) => (state.board.sessions || []).find((s) => String(s.table_number) === String(t) && s.status === "open"); // t's open session
 // sliceLoaded(t): has table t's FULL slice (its session row OR any live order) landed in
