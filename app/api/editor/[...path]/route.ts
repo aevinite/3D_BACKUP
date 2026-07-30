@@ -624,7 +624,27 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           oq = oq.gte("created_at", start.toISOString()).lt("created_at", end.toISOString());
         }
       } else if (tbl) {
-        oq = oq.eq("table_number", tbl);
+        // THE FLOOR SLICE — only the party sitting there NOW.
+        //
+        // This branch is used ONLY by the panel's live table slice (loadTableSlice /
+        // pollTables); bill history goes through the ?history= branch above or the unscoped
+        // list. It used to return the newest 200 orders EVER placed at that table number,
+        // archived ones included — so the browser was handed nine-day-old food belonging to a
+        // party that had long left, and one missing filter in the panel put it on the new
+        // guests' screen and nearly on their bill (owner report, 2026-07-30; PR #578 fixed the
+        // panel, this closes the door on the server side so no future panel can repeat it).
+        //
+        // Rule, identical to lfh_table_view_summary and to the panels: the table's CURRENT
+        // open session, plus session-less rows at that table (banquet/legacy — never hidden).
+        // Sessions OFF ⇒ the table's live rows, exactly as before.
+        const setRow = (await sb.from("settings").select("sessions_enabled").eq("restaurant_id", rid).maybeSingle()).data as { sessions_enabled?: boolean } | null;
+        oq = oq.eq("table_number", tbl).eq("archived", false).is("deleted_at", null);
+        if (setRow?.sessions_enabled) {
+          const liveSess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
+            .eq("table_number", tbl).eq("status", "open")
+            .order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+          oq = liveSess ? oq.or(`session_id.eq.${liveSess.id},session_id.is.null`) : oq.is("session_id", null);
+        }
       }
       const orders = must(await oq.order("created_at", { ascending: false }).limit(200));
       // Attach each order's SESSION invoice/bill state so the merged bill card knows
@@ -1365,11 +1385,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!/^\d+$/.test(t)) return err("valid table required");
       const ent = await getOwnerEntitlements(rid);
       if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
+      // WHOSE BILL: the panel sends the session it just settled. Verified against this
+      // restaurant + table before it is used, and the RPC falls back to the table's OPEN
+      // session when a caller sends nothing. Resolving by table alone used to book the visit
+      // (and the device links) onto whichever party was seated at that table NEXT — mig 233.
+      let capSession: string | null = null;
+      const capSessionRaw = String(body?.session || "").trim();
+      if (/^[0-9a-f-]{36}$/i.test(capSessionRaw)) {
+        const owns = (await sb.from("sessions").select("id").eq("id", capSessionRaw)
+          .eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { id: string } | null;
+        capSession = owns?.id ?? null;
+      }
       const { data, error } = await sb.rpc("lfh_capture_customer", {
         p_restaurant_id: rid, p_table: t,
         p_phone: String(body?.phone || "").slice(0, 20),
         p_name: String(body?.name || "").slice(0, 80),
         p_consent: body?.consent === true,
+        p_session: capSession,
       });
       if (error) return err(error.message, 500);
       if ((data as { ok?: boolean })?.ok) await log("editor", "customer_saved", { restaurant_id: rid, table_number: t, device_id: dev });
@@ -2845,7 +2877,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       }
       if (body.archived !== undefined) patch.archived = body.archived === true;
       if (!Object.keys(patch).length) return err("nothing to update");
-      const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,table_number").eq("id", id).eq("restaurant_id", rid).single());
+      // session_id is read here so a payment revert can reverse THAT party's customer visit
+      // (mig 233) instead of whoever is sitting at the table by the time it happens.
+      const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,table_number,session_id").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
       if (patch.payment_status === "paid" && cur.status === "cancelled")
@@ -2873,7 +2907,15 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
         await log("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
         // Reversing the settle reverses the visit it counted (Customer CRM, mig 212).
         // Idempotent per session, so reverting each order of a multi-order bill is safe.
-        if (cur.table_number != null) await sb.rpc("lfh_uncapture_customer", { p_restaurant_id: rid, p_table: String(cur.table_number) });
+        // Reverse THIS bill's visit — the order row already tells us whose party it was.
+        // Without the session id this deleted the visit of whoever is sitting there NOW (mig 233).
+        if (cur.table_number != null || cur.session_id) {
+          await sb.rpc("lfh_uncapture_customer", {
+            p_restaurant_id: rid,
+            p_table: cur.table_number != null ? String(cur.table_number) : "",
+            p_session: cur.session_id ?? null,
+          });
+        }
       }
       if (patch.archived === false && cur.archived === true) {
         if (tooOld(cur.archived_at)) return err("This bill was freed more than 30 minutes ago and can no longer be restored.", 409);

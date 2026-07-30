@@ -1365,8 +1365,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const phone = String(body?.phone || "").slice(0, 20);
       const name = String(body?.name || "").slice(0, 80);
       const consent = body?.consent === true;
+      // The party being billed, taken from the table's OPEN session (never "the latest party
+      // ever seated here" — that booked the visit onto the NEXT party, mig 233).
+      const capSess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
+        .eq("table_number", t).eq("status", "open").order("last_activity_at", { ascending: false })
+        .limit(1)).data?.[0] as { id: string } | undefined;
       const { data, error } = await sb.rpc("lfh_capture_customer", {
         p_restaurant_id: rid, p_table: t, p_phone: phone, p_name: name, p_consent: consent,
+        p_session: capSess?.id ?? null,
       });
       if (error) return err(error.message, 500);
       if ((data as { ok?: boolean })?.ok) await log("customer_saved", { table_number: t, device_id: dev });
@@ -1519,8 +1525,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // (a refund/correction) — record it for the money-accountability trail either way.
       const reason = String((body && body.reason) || "").trim().slice(0, 120);
       await log("payment_revert", { table_number: t, device_id: dev, detail: reason ? `unpaid: ${reason}` : "undo settle (within grace)" });
-      // Reversing the settle reverses the visit it counted (Customer CRM, mig 212).
-      await sb.rpc("lfh_uncapture_customer", { p_restaurant_id: rid, p_table: t });
+      // Reversing the settle reverses the visit it counted (Customer CRM, mig 212) — for THIS
+      // party. Passing the session is what stops it deleting the visit of whoever is seated at
+      // the table by then (mig 233).
+      await sb.rpc("lfh_uncapture_customer", { p_restaurant_id: rid, p_table: t, p_session: openSess.id });
       return ok({ ok: true, count: paid.length });
     }
 
