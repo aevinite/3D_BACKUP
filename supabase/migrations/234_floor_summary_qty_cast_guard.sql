@@ -1,4 +1,4 @@
--- 233_floor_summary_qty_cast_guard.sql — the SIBLING of mig 229: a malformed QTY can't
+-- 234_floor_summary_qty_cast_guard.sql — the SIBLING of mig 229: a malformed QTY can't
 -- take down the floor view either.
 --
 -- THE BUG (found in the inventory full-wire sweep, 2026-07-30): mig 229 hardened this
