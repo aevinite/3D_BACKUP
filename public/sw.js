@@ -23,12 +23,13 @@
  *   - WRITES ARE NEVER TOUCHED. Anything that isn't a GET goes straight to the network
  *     (the outbox owns offline writes; a service worker replaying a POST would risk a
  *     double bill).
- *   - LOGIN/AUTH IS NEVER CACHED, and the data cache is WIPED on logout / on switching
- *     restaurant, so one device can never show another account's numbers offline.
+ *   - THE AUTH ROUTES are never cached (the sign-in PAGE is — it's public HTML with no data,
+ *     and staff need it to open offline), and the caches are WIPED on sign-in and sign-out,
+ *     so one device can never show another account's screens or numbers offline.
  *   - KILL SWITCH: deleting/404-ing this file unregisters it (browser behaviour), and
  *     posting {type:"LFH_SW_KILL"} from the page drops every cache + unregisters.
  */
-const VERSION = "v2"; // v2: saved copies expire after 2h (owner's call, 2026-07-30)
+const VERSION = "v3"; // v2: 2h expiry (owner's call). v3: the sign-in page is cached too.
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -57,10 +58,19 @@ const MAX_DATA_BYTES = 3_000_000; // don't cache a huge report payload
 // the last known board.
 const MAX_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
-// Never cached, ever: anything to do with signing in, or a one-shot action route.
+// Never cached, ever: the API routes that sign someone in or out, or hand out a code.
+//
+// The sign-in PAGES are deliberately NOT here, and that was a real mistake to fix. They
+// were excluded at first "because login", but the page itself is public HTML with no data
+// on it — the secret only ever travels in the POST to /api/panel-login, which is a write
+// and is never cached anyway. Excluding the page meant the worker refused to handle it, so
+// a device that woke up with no signal and got bounced to /login saw the BROWSER's error
+// page — and worse, that failed navigation stopped the next one being handled too, taking
+// our offline page down with it. This is the single most likely offline moment for staff:
+// tab wakes, reloads, no signal. (Found on the live client site.)
 const NEVER = [
   /^\/api\/(staff-)?login/, /^\/api\/auth/, /^\/api\/owner\/login/,
-  /^\/login/, /^\/staff-login/, /^\/api\/verify/, /^\/api\/health/,
+  /^\/api\/panel-login/, /^\/api\/verify/, /^\/api\/health/,
 ];
 // Signing out is a plain link (a navigation), so the page's JS never gets to run
 // afterwards — the ONLY reliable place to forget this device's saved screens and

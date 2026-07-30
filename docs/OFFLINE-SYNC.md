@@ -97,6 +97,13 @@ worker, so slowing the server is the only truthful way to test that case.
 **Run it against `next build && next start`, not `next dev`** — dev's per-compile chunk URLs
 make the offline shell behave differently from production.
 
+⚠️ **What the headless tests can't prove.** Chrome's offline emulation (`context.setOffline`)
+applies to the PAGE, not to the service worker's own fetches — the same gap that makes the
+crawling-connection test need a real slow server. So the READS are proven honestly (a cached
+reply is tagged `X-LFH-From-Cache`, which only happens when the worker's own fetch failed),
+but a fresh tab's NAVIGATION can be answered live even while the page believes it's offline.
+The remaining honest proof for navigations is a real device losing WiFi — still outstanding.
+
 ⚠️ **Section 1b of that script is not optional.** It checks the ONLINE path (no leftover markup
 in a panel header, a live read really coming from the server, a forced refresh never being
 answered from the device). The first cut of this feature shipped two faults that were invisible
