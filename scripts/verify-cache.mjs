@@ -34,12 +34,17 @@ try {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
+    // The menu preloads ONLY the small (~2MB) tier — the heavy optimized model is preloaded on
+    // the dish page instead (MenuView: "preload only the SMALL models", 2026-06-25), so the menu
+    // never pulls ~9MB in the background. This script used to wait for BOTH here and therefore
+    // timed out for over a month, which meant the no-re-fetch guard it exists to provide was not
+    // running at all. Wait for what the menu actually loads. (2026-07-30)
     await page.waitForFunction(
-      ([s, o]) => {
+      (s) => {
         const l = globalThis.__lfh_modelLoader;
-        return l && l.isLoaded(s) && l.isLoaded(o);
+        return l && l.isLoaded(s);
       },
-      [SMALL, OPT],
+      SMALL,
       { timeout: 120000 }
     );
   });
@@ -57,30 +62,46 @@ try {
     findings.push(`Expected 0 toasts on happy path, saw ${toastCount}.`);
   }
 
-  if (!p1.includes("croissant_small.glb") || !p1.includes("croissant-optimized.glb")) {
+  if (!p1.includes("croissant_small.glb")) {
     verdict = "FAIL";
-    findings.push(
-      "⚠️  Expected both small + optimized GLB fetches on /menu; saw: " + JSON.stringify(p1)
-    );
+    findings.push("⚠️  Expected the small GLB to preload on /menu; saw: " + JSON.stringify(p1));
+  }
+  if (p1.includes("croissant-optimized.glb")) {
+    verdict = "FAIL";
+    findings.push("⚠️  The menu pulled the HEAVY optimized model — it must not (that is ~9MB on a phone): " + JSON.stringify(p1));
   }
 
+  // The dish whose 3D model is the croissant, found from the page rather than hardcoded: dish
+  // URLs became restaurant-scoped (/r/<slug>/item/<dish>, 2026-06-25) and the old
+  // dishHref link no longer exists, so this click had been timing out. Pick the
+  // link for the dish that actually carries the model this script tracks. (2026-07-30)
+  const dishHref = await page.evaluate(() => {
+    const a = [...document.querySelectorAll('a[href*="/item/"]')]
+      .find((x) => /avocado-and-cream-cheese/.test(x.getAttribute("href") || ""));
+    return a ? a.getAttribute("href") : null;
+  });
+  if (!dishHref) throw new Error("could not find the 3D dish's link on /menu");
   const p2 = await phase(
-    "Phase 2: SPA-click into /item/gourmet-burger",
+    `Phase 2: SPA-click into ${dishHref}`,
     async () => {
-      await page.click('a[href="/item/gourmet-burger"]');
-      await page.waitForURL("**/item/gourmet-burger", { timeout: 10000 });
-      await page.waitForSelector("#view-3d-btn", { timeout: 10000 });
+      await page.click(`a[href="${dishHref}"]`);
+      await page.waitForURL("**/item/avocado-and-cream-cheese**", { timeout: 15000 });
+      await page.waitForSelector("#view-3d-btn", { timeout: 15000 });
     }
   );
   log("  GLB requests during phase 2:", p2);
-  if (p2.length !== 0) {
+  // The dish page is where the heavy tier is SUPPOSED to be fetched (so the 3D view opens
+  // instantly). What must never happen is re-fetching something already held — so the small
+  // model must not appear here again.
+  if (p2.some((u) => u.includes("_small.glb"))) {
     verdict = "FAIL";
-    findings.push("⚠️  Item page re-fetched GLBs (should be 0): " + JSON.stringify(p2));
+    findings.push("⚠️  Item page RE-FETCHED a small GLB already in memory: " + JSON.stringify(p2));
   }
 
-  const p3 = await phase("Phase 3: click View in 3D → /view/MP", async () => {
+  // The viewer folder is the dish's model_folder ("Croissant"); it used to be "MP". (2026-07-30)
+  const p3 = await phase("Phase 3: click View in 3D → /view/Croissant", async () => {
     await page.click("#view-3d-btn");
-    await page.waitForURL(/\/view\/MP(\?|$)/, { timeout: 10000 });
+    await page.waitForURL(/\/view\/Croissant(\?|$)/, { timeout: 10000 });
     await page.waitForSelector("#mv", { timeout: 15000 });
     await page.waitForFunction(
       () => {
@@ -100,10 +121,10 @@ try {
   log("\n=== Phase 3b: viewer back button points at source item ===");
   const backHref = await page.getAttribute("a.back-btn", "href");
   log("  back href:", backHref);
-  if (backHref !== "/item/gourmet-burger") {
+  if (backHref !== dishHref) {
     verdict = "FAIL";
     findings.push(
-      `Expected back href "/item/gourmet-burger", got "${backHref}"`
+      `Expected back href "${dishHref}", got "${backHref}"`
     );
   }
 

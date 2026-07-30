@@ -24,7 +24,9 @@ function assert(cond, msg) { if (!cond) { console.error("❌ FAIL:", msg); proce
 
 const main = async () => {
   // 1) Grab any real dish id to order twice (cappuccino if present, else first dish).
-  const dishesRes = await rest("menu_items?select=id,title&limit=50");
+  const dishesRes = await rest("menu_items?select=id,title&restaurant_id=eq.00000000-0000-0000-0000-000000000001&limit=50")  // scoped: the place RPC
+    // defaults to restaurant #1, so an unscoped pick returned another restaurant's dish and the
+    // server answered `unknown_item` — the test was failing on fixture drift. (2026-07-30);
   const dishes = await dishesRes.json();
   const dish = dishes.find((d) => /cappuccino/i.test(d.title)) || dishes[0];
   console.log(`Using dish: ${dish.title} (${dish.id})`);

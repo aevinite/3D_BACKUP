@@ -33,7 +33,10 @@ async function runSql(query) {
 }
 
 // 1) Pick two real, orderable dishes.
-const items = await runSql(`SELECT id, price, title FROM menu_items WHERE NOT ('sold-out' = ANY(tags)) ORDER BY sort_order LIMIT 2;`);
+// Scoped to restaurant #1: the place RPC defaults to that restaurant, so an unscoped pick
+// returned another restaurant's dish and the server answered `unknown_item` — the test was
+// failing on fixture drift, not on an ordering bug. (2026-07-30)
+const items = await runSql(`SELECT id, price, title FROM menu_items WHERE NOT ('sold-out' = ANY(tags)) AND restaurant_id = '00000000-0000-0000-0000-000000000001' ORDER BY sort_order LIMIT 2;`);
 const payload = JSON.stringify([
   { id: items[0].id, qty: 2 },
   { id: items[1].id, qty: 1 },

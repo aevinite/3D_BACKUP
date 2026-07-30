@@ -25,9 +25,18 @@ function clientTotals(lines) {
   return { subtotal: sub, tax, total: sub + tax };
 }
 
+// lfh_price_order is tenant-scoped (mig 118) and DEFAULTS to restaurant #1, so the dishes we
+// price must come from that same restaurant. This test used to ask for dishes with no
+// restaurant filter: once the dev DB held several restaurants, the first rows returned belonged
+// to another one and the server answered `unknown_item` — the test had been failing on fixture
+// drift, not on any money bug (the app never calls lfh_price_order with a mismatched pair;
+// pricing runs inside lfh_staff_place_order, which passes the acting restaurant). Pinning both
+// sides to one restaurant makes the test prove what it claims again. (2026-07-30)
+const RESTAURANT_ID = "00000000-0000-0000-0000-000000000001";
+
 test("server lfh_price_order matches client money math to the cent", async () => {
   // Grab three real, not-sold-out dishes (one with option groups if available).
-  const r = await fetch(`${URL_}/rest/v1/menu_items?select=id,price,options,tags&limit=59`, { headers: HEADERS });
+  const r = await fetch(`${URL_}/rest/v1/menu_items?select=id,price,options,tags&restaurant_id=eq.${RESTAURANT_ID}&limit=59`, { headers: HEADERS });
   const items = (await r.json()).filter((i) => !(i.tags || []).includes("sold-out"));
   assert.ok(items.length >= 3, "need at least 3 orderable dishes");
   const plain = items.slice(0, 2);
@@ -51,7 +60,7 @@ test("server lfh_price_order matches client money math to the cent", async () =>
 
   // Ask the SERVER to price the same cart (read-only function, no order created).
   const rpc = await fetch(`${URL_}/rest/v1/rpc/lfh_price_order`, {
-    method: "POST", headers: HEADERS, body: JSON.stringify({ p_items: cartReq }),
+    method: "POST", headers: HEADERS, body: JSON.stringify({ p_items: cartReq, p_restaurant_id: RESTAURANT_ID }),
   });
   assert.equal(rpc.status, 200, `rpc status ${rpc.status}`);
   const server = await rpc.json();
