@@ -336,8 +336,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // sees every feature, tinted, and it genuinely works); a real owner/manager needs the
     // module effective AND — for a manager — the granted power.
     if (p === "table-sections") {
-      const on = (await tableAssignLadder(rid)).effective;
-      if (g.user && !on) return err("Waiter sections aren't switched on for this restaurant.", 403);
       if (!(await managerCan(g, rid, "table_assign"))) return permDenied("give waiters their own tables");
       const [staff, settings] = await Promise.all([
         sb.from("staff_users").select("id, username, name, role, active, assigned_tables")
@@ -346,7 +344,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("settings").select("table_count, table_names").eq("restaurant_id", rid).maybeSingle(),
       ]);
       return ok({
-        moduleOn: on,
+        moduleOn: true,   // sections are always on (owner 2026-07-30)
         waiters: must(staff) || [],
         tableCount: Number(must(settings)?.table_count) || 12,
         tableNames: must(settings)?.table_names || {},
@@ -1322,8 +1320,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // the waiter would hold a table that doesn't exist. Duplicates collapse, order is
     // stable, and an empty list is a legitimate "this waiter serves nothing yet".
     if (a === "table-sections") {
-      if (g.user && !(await tableAssignLadder(rid)).effective)
-        return err("Waiter sections aren't switched on for this restaurant.", 403);
       if (!(await managerCan(g, rid, "table_assign"))) return permDenied("give waiters their own tables");
       const uid = String(body?.user_id || "").trim();
       if (!uid) return err("Which person? — user_id is required.");

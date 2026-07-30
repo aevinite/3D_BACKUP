@@ -25,7 +25,7 @@ export const dynamic = "force-dynamic";
 const isUuid = (v: unknown): v is string =>
   typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
-const SELECT = "banquet_allowed, banquet_owner_control, banquet_enabled, auto_print_kot_allowed, auto_print_kot, platform_allowed, platform_owner_control, platform_enabled, payroll_allowed, payroll_owner_control, payroll_enabled, table_assign_allowed, table_assign_owner_control, table_assign_enabled";
+const SELECT = "banquet_allowed, banquet_owner_control, banquet_enabled, auto_print_kot_allowed, auto_print_kot, platform_allowed, platform_owner_control, platform_enabled, payroll_allowed, payroll_owner_control, payroll_enabled";
 type Row = Record<string, unknown> | null;
 const effective = (s: Row) => ({
   // moduleLadder formula (lib/tableTags.ts): enabled defaults to true unless explicitly false.
@@ -36,8 +36,6 @@ const effective = (s: Row) => ({
   platform: s?.platform_allowed === true && (s?.platform_owner_control !== true || s?.platform_enabled !== false),
   // Staff profiles & pay — same moduleLadder formula (mig 220).
   payroll: s?.payroll_allowed === true && (s?.payroll_owner_control !== true || s?.payroll_enabled !== false),
-  // Waiter sections — same moduleLadder formula (mig 222).
-  table_assign: s?.table_assign_allowed === true && (s?.table_assign_owner_control !== true || s?.table_assign_enabled !== false),
 });
 
 // The column writes that make each feature effective-ON or effective-OFF.
@@ -51,12 +49,6 @@ const PATCH: Record<string, { on: Record<string, boolean>; off: Record<string, b
   // Staff profiles & pay — ON: allow + enabled; OFF: drop the entitlement, which hides profiles,
   // salary records and the performance report everywhere and makes the server refuse them too.
   payroll: { on: { payroll_allowed: true, payroll_enabled: true }, off: { payroll_allowed: false } },
-  // Waiter sections — ON: allow + enabled. Switching it ON is the moment sections START
-  // applying, so a restaurant that hasn't assigned anything yet will show waiters an empty
-  // floor until someone fills the section editor in (the editor warns about exactly that).
-  // OFF: drop the entitlement — every waiter instantly sees the whole floor again, and the
-  // saved assignments are kept, so turning it back on restores them.
-  table_assign: { on: { table_assign_allowed: true, table_assign_enabled: true }, off: { table_assign_allowed: false } },
 };
 
 export async function GET(req: NextRequest) {

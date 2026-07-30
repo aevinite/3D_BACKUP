@@ -46,7 +46,7 @@ async function login([u, p]) {
 const waiterRow = async () => (await rows("staff_users", `select=id,assigned_tables&username=eq.${WAITER_LOGIN[0]}&restaurant_id=eq.${RID}`))[0];
 
 async function main() {
-  const before = (await rows("settings", `select=table_count,table_assign_allowed,table_assign_owner_control,table_assign_enabled&restaurant_id=eq.${RID}`))[0];
+  const before = (await rows("settings", `select=table_count&restaurant_id=eq.${RID}`))[0];
   const w0 = await waiterRow();
   if (!w0) throw new Error(`no ${WAITER_LOGIN[0]} waiter on restaurant #1 — seed the diag logins first`);
   const WAITER = w0.id, COUNT = Number(before.table_count) || 12;
@@ -54,27 +54,16 @@ async function main() {
 
   const restore = async () => {
     await patch("staff_users", `id=eq.${WAITER}`, { assigned_tables: w0.assigned_tables || [] });
-    await patch("settings", `restaurant_id=eq.${RID}`, {
-      table_count: before.table_count,
-      table_assign_allowed: before.table_assign_allowed,
-      table_assign_owner_control: before.table_assign_owner_control,
-      table_assign_enabled: before.table_assign_enabled,
-    });
+    await patch("settings", `restaurant_id=eq.${RID}`, { table_count: before.table_count });
   };
 
   try {
     const waiter = await login(WAITER_LOGIN), manager = await login(MANAGER_LOGIN);
 
-    // ── the module is a no-op until an admin switches it on ──────────────────
-    await patch("settings", `restaurant_id=eq.${RID}`, { table_assign_allowed: false });
-    let s = await (await waiter("/api/tablet/summary?nomenu=1")).json();
-    ck(s.my_tables === null, "module OFF → the waiter is not restricted at all", JSON.stringify(s.my_tables));
-
-    await patch("settings", `restaurant_id=eq.${RID}`, { table_assign_allowed: true, table_assign_enabled: true, table_assign_owner_control: false });
-
+    // ── sections are ALWAYS on (owner 2026-07-30) — no module toggle any more ─
     // ── a full section takes nothing away (the mig-223 backfill state) ───────
     await patch("staff_users", `id=eq.${WAITER}`, { assigned_tables: ALL });
-    s = await (await waiter("/api/tablet/summary?nomenu=1")).json();
+    let s = await (await waiter("/api/tablet/summary?nomenu=1")).json();
     const full = Object.keys(s.tiles || {}).length;
     ck(full >= COUNT, "a waiter holding every table still sees the whole floor", `${full} tiles`);
 
@@ -136,6 +125,18 @@ async function main() {
     ck(js.includes("tableSectionsCardHtml"), "the section card itself is present in the shipped panel");
     const css = await (await fetch(`${BASE}/panels/editor/style.css`, { cache: "no-store" })).text();
     ck(css.includes("sec-modal-wide"), "the modal's stylesheet shipped too");
+
+    // ── creating a waiter REQUIRES a table pick (owner 2026-07-30) ───────────
+    let cr = await manager("/api/owner/staff", { method: "POST", body: JSON.stringify({ name: "zz guard probe", role: "tablet", restaurant_id: RID, tables: [] }) });
+    ck(!cr.ok, "creating a waiter with NO tables is refused", `${cr.status} ${(await cr.json().catch(() => ({}))).error?.slice(0, 44) || ""}`);
+    cr = await manager("/api/owner/staff", { method: "POST", body: JSON.stringify({ name: "zz guard probe", role: "tablet", restaurant_id: RID, tables: [1, 2] }) });
+    const made = await cr.json().catch(() => ({}));
+    ck(cr.ok, "creating a waiter WITH tables works", String(cr.status));
+    if (made?.id) {
+      const got = (await rows("staff_users", `select=assigned_tables&id=eq.${made.id}`))[0];
+      ck(String(got?.assigned_tables) === "1,2", "the new waiter got exactly the picked tables", JSON.stringify(got?.assigned_tables));
+      await fetch(`${SB}/rest/v1/staff_users?id=eq.${made.id}`, { method: "DELETE", headers: sbh });
+    }
   } finally {
     await restore();
   }

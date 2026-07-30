@@ -15,16 +15,22 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 // The "which table does this write touch?" resolver now lives in its own file so
 // lib/clash.ts (offline clashes) can share it without pulling in this whole module.
 import { affectedTables, normTable, type Affected } from "@/lib/tableOfAction";
-import { moduleLadder } from "@/lib/tableTags";
 import type { StaffUser } from "@/lib/userAuth";
 
-// The admin/owner rungs (mig 222). Brand-new module ⇒ ships OFF everywhere.
-export const tableAssignLadder = (rid: string) =>
-  moduleLadder(rid, {
-    allowed: "table_assign_allowed",
-    control: "table_assign_owner_control",
-    enabled: "table_assign_enabled",
-  });
+/**
+ * ALWAYS ON (owner, 2026-07-30): "giving waiters their own tables is not a feature, it should
+ * always be on — no need for a toggle. Don't make unnecessary features."
+ *
+ * So there is no admin module rung any more. Giving each waiter a section is simply how the
+ * tablet works; who may EDIT the sections is still controlled, by the ordinary
+ * `table_assign` manager power (admin entitlement + owner grant).
+ *
+ * The mig-222 settings columns are left in place (harmless, and dropping them would need
+ * another migration on both databases) but nothing reads them. This helper stays so every
+ * call site keeps one shared answer if that ever changes again.
+ */
+export const tableAssignLadder = async (_rid: string) =>
+  ({ allowed: true, ownerControl: false, enabled: true, effective: true });
 
 // normTable + affectedTables come from lib/tableOfAction.ts; re-exported so every existing
 // importer of this module keeps working unchanged.
@@ -63,14 +69,9 @@ export async function waiterTables(
 ): Promise<SectionLimit | null> {
   if (!user) return null;              // admin super-user
   if (user.role !== "tablet") return null; // manager/owner oversight keeps the full floor
-  // One settings read gives BOTH the ladder and the floor size — no extra query.
-  const { data } = await sb.from("settings")
-    .select("table_assign_allowed, table_assign_owner_control, table_assign_enabled, table_count")
-    .eq("restaurant_id", rid).maybeSingle();
-  const allowed = data?.table_assign_allowed === true;
-  const ownerControl = data?.table_assign_owner_control === true;
-  const enabled = data?.table_assign_enabled !== false;
-  if (!(allowed && (!ownerControl || enabled))) return null; // module off for this restaurant
+  // Sections are ALWAYS on (owner 2026-07-30) — no module rung to consult. One tiny read
+  // for the floor size, which allows() needs to spot an off-plan table.
+  const { data } = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
   return { tables: assignedOf(user), floor: Math.max(0, Number(data?.table_count) || 0) };
 }
 
@@ -110,6 +111,33 @@ export const allows = (limit: SectionLimit | null, table: unknown): boolean => {
  *
  * Returns [] (harmless) if the restaurant has no settings row yet.
  */
+/**
+ * The tables a NEWLY created waiter should start with, given what the person creating them
+ * picked. Owner, 2026-07-30: "new tablet user will have to choose … there should be just a
+ * select all option."
+ *
+ * The choice is REQUIRED: an empty pick is refused (the owner chose "block it — must pick at
+ * least one") rather than quietly creating a waiter whose tablet shows nothing. Numbers are
+ * clamped to the real floor, so a stale form can't grant a table that doesn't exist.
+ *
+ * Returns the sanitised list, or throws with a message meant for the person on screen.
+ */
+export async function newWaiterTables(rid: string, picked: unknown): Promise<number[]> {
+  const floor = await fullFloorFor(rid);
+  const max = floor.length ? floor[floor.length - 1] : 0;
+  const seen = new Set<number>();
+  const out: number[] = [];
+  for (const v of Array.isArray(picked) ? picked : []) {
+    const n = parseInt(String(v), 10);
+    if (Number.isFinite(n) && n >= 1 && n <= max && !seen.has(n)) { seen.add(n); out.push(n); }
+  }
+  out.sort((a, b) => a - b);
+  if (!out.length) {
+    throw new Error("Pick at least one table for this waiter — their tablet shows only the tables you give them. Use “Select all” for the whole floor.");
+  }
+  return out;
+}
+
 export async function fullFloorFor(rid: string): Promise<number[]> {
   const { data } = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
   const n = Math.max(1, Number(data?.table_count) || 0);

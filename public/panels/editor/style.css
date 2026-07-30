@@ -2601,3 +2601,11 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
 .inv-pop label.inv-factor input { display: inline-block; width: 90px; flex: none; margin: 0; }
 /* Stage 2: recipes + usage view */
 .inv-row-val.in { color: #22c55e; } .inv-row-val.out { color: #ef4444; }
+
+/* Waiter sections — the table picker in the manager's "Add user" row (owner 2026-07-30:
+   "when you create a tablet user you assign tables to them — there should be a select all").
+   Full width so it sits under the name/role/password row. */
+.nw-tables { margin-top: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+.nw-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; font-size: 13px; }
+.nw-pick { min-height: 38px; }
+.nw-warn { margin-top: 9px; font-size: 12.5px; font-weight: 700; color: var(--red, #ef4444); }
