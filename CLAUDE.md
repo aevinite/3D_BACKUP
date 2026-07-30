@@ -71,6 +71,27 @@ branch is just git's word for the code line and exists in BOTH stacks).
   and ask the owner an explicit "Should I do this on AV live? yes/no" question (use the
   ask-user-question tool), naming exactly what will change. One yes = that one action
   only, not a standing license.
+- **⛔ ASK-FIRST FOR EVERY SINGLE BIT ON AV LIVE — no change is "too small" (owner,
+  2026-07-30, ABSOLUTE — AV live now has real paying clients on it).** One pixel, one
+  word, one colour, one label, one default, one row of data counts exactly the same as a
+  new feature. There is NO minor-change exemption, NO "while I'm in there" tidy-up, NO
+  bundling an unasked extra into an approved change. **Ask BEFORE doing it, not after**,
+  using the ask-user-question tool, and the question must state:
+  1. **Which restaurant(s)/panel(s)** it lands on (name them — "Aangan's waiter panel", not "the app").
+  2. **What the client will actually SEE change**, in plain words the owner can picture
+     ("the Send button moves under the total and turns green").
+  3. **What it touches underneath** (DB rows? a migration? a deploy of the whole site?).
+  4. A plain **"do you agree — yes / no"**. Only an explicit yes proceeds.
+  **One yes = that one change only.** It does not cover the next change, a follow-up fix,
+  a "same thing on the other restaurant", or a re-deploy later. Ask again each time.
+  If mid-work I discover a second thing that needs changing on AV live: STOP, finish
+  nothing extra, and ask about that one too.
+  **The ONLY exception — the owner has already told me to:** when HE says "put/add this on
+  AV live", "push it to AV live", "fix it live", "make it live" for a specific thing, that
+  IS the permission for that thing — do it straight away, no confirmation question, just
+  report what changed. Anything he did NOT name still needs its own ask.
+  **DEV/TEST (this folder, `3-d-backup`, the demo restaurants) needs no such asking** —
+  build freely there; that's what it's for. The gate is only about AV live.
 - **Even READING AV live (data copy, health check) — announce it in chat first.** Reads
   are allowed, but say you're doing them.
 - **All building & testing happens HERE, against the dev DB, with dev keys.** Never
@@ -79,25 +100,11 @@ branch is just git's word for the code line and exists in BOTH stacks).
   (`supabase/migrations/` here). Every schema change: written once here → run on the
   DEV DB → verified → reaches AV LIVE only through the release step below. NEVER write a
   migration only on AV LIVE, and never let the two schemas fork.
-- **🚫 NEVER TEST ON AV LIVE — not once, not "just a quick check" (owner, 2026-07-30,
-  ABSOLUTE).** AV live carries real clients taking real orders; a test bill lands on a real
-  kitchen screen, in a real Z-report and in real GST numbers, and it cannot be un-rung. So:
-  no test orders, no test tables, no test dishes, no test staff, no test logins, no
-  "place one order to confirm the fix", no seeding, no scripts pointed at AV live's URL or
-  keys, no Playwright/Chrome driving an AV live panel, no deliberately tripping a limit.
-  **ALL testing happens on the backup/dev stack against the dev database — always.**
-  Verification of an AV live release is **READ-ONLY, and only these**: the deployment state,
-  the served asset actually containing the change, `/api/health`, and a read of the error log
-  / a data read. If something can only be proven by writing to AV live, it does NOT get
-  proven — say so plainly in the report instead of doing it. (Reads still get announced in
-  chat first, per the rule above.)
 - **Release to AV LIVE = a deliberate, asked-first ritual, every time:** (1) build +
-  tests green here, verified on dev; (2) ASK the owner explicitly; (3) on yes: one-way port
-  dev-repo → live-repo, run pending migrations on the AV LIVE DB, deploy. AV live usually
-  runs BEHIND backup, so a whole-file copy drags unreleased work onto live clients — port the
-  specific change (hand-apply the hunks if the patch won't apply) and re-run the relevant
-  guard scripts against the live repo before pushing; (4) verify READ-ONLY per the rule above
-  and report honestly, including anything you could NOT verify and why.
+  tests green here, verified on dev; (2) ASK the owner explicitly; (3) on yes: scripted
+  one-way code copy dev-repo → live-repo (never hand-edit the live repo — that's how
+  drift starts), run pending migrations on the AV LIVE DB, deploy; (4) verify AV LIVE
+  end-to-end (health + a real order loop) and report honestly, including anything failed.
 - **Secrets discipline applies doubly to `.env.AV.live`:** never print, echo, or
   commit any value from it; masked reads only.
 
@@ -277,6 +284,23 @@ without being reminded.** When you add anything, wire ALL of these that apply:
      on a shift; that shipped a dup-tile bug, mig 096 + pollTables dedup fixed it).
    - **No new poll faster than the 60s backstop;** realtime channels stay keyed per restaurant
      and drop on hidden/idle. Verify in the Network tab that one change refetches ONLY that table.
+10. **WORKS WITH NO INTERNET (owner, 2026-07-30 — "this is a must thing, for every restaurant").**
+   Every new screen must OPEN and READ offline (the service worker handles this automatically for
+   any `GET /api/...` under the families in `public/sw.js` → `DATA_PATHS`; **add the family if the
+   feature uses a new one**), and every new WRITE must go through the panel's `api()` / the guest
+   outbox so it is saved on-device and replayed at-most-once. If the screen shows saved data it
+   must SAY so (the offline bar / `components/OfflineNotice.tsx`) — never present saved figures as
+   live. Full guide: `docs/OFFLINE-SYNC.md`.
+11. **NO SILENT OVERWRITES — clash-checked (owner, 2026-07-30: "it is for ALL possible options,
+   anywhere clash should not happen").** If two people on two devices can change the same thing,
+   the feature MUST decide who wins and TELL the other person. The rule everywhere is **first save
+   wins**; the loser gets a plain message naming what it says now, and their screen refreshes to
+   the truth. Wiring is one line at the call site — send what the screen was editing FROM:
+   `api("POST", path, body, { expect: { table: "<table>", id, fields: { <col>: <oldValue> } } })`
+   — the one gate in each panel route (`lib/clash.ts` → `expectClash`) does the rest. This is
+   NOT optional and NOT only for new code: **when you touch ANY feature, check it is covered and
+   add it if it isn't.** `node scripts/verify-clash-coverage.mjs` lists every staff write and
+   fails on an editable one that has no expectation — keep it green.
 
 ## Charts / graphs must be DYNAMIC — never a lonely 1-bar plot (owner, 2026-07-25)
 
@@ -627,13 +651,6 @@ Whenever you write a dialog, overlay, or any handler that can decline a tap:
   session field needs NO `boardSig` change now; if you add a new heartbeat-y column,
   add it to `RT_VOLATILE`. Guarded by `scripts/verify-board-sig.mjs`. (The separate
   "latest-wins" seq guard in each loader is a DIFFERENT mechanism — don't conflate.)
-- **Phone-ping titles are HTTP HEADERS — ASCII only.** ntfy's `Title` (and `Tags`) travel as
-  headers, so a `·`, a curly quote or an emoji in the TITLE arrives as mojibake on the phone
-  (`Limit reached � Staff / owner login`, caught 2026-07-29). Pretty characters belong in the
-  message BODY, which is UTF-8 and renders fine. `lib/alerts.ts`.
-- **A "silent" phone ping means ntfy `Priority: low`, not `min`.** `low` = arrives, visible in the
-  list, no sound/vibration; `min` can be missed entirely. Telegram's equivalent is
-  `disable_notification: true`. Used for limit-reached pings; real breakage stays `high`.
 - **Supabase HEAD lies about Cache-Control.** Use GET with `Range: bytes=0-0`
   for header checks. `scripts/set-glb-cache.mjs` has this bug.
 - **Light mode works and persists** (`lfh_theme`) via the theme toggle.

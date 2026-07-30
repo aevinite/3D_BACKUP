@@ -4488,11 +4488,12 @@ function renderEditor() {
         const id = chip.dataset.alg, slug = chip.dataset.slug;
         const o = (state.data.orders || []).find((x) => x.id === id);
         if (!o) return;
+        const wasAllergies = [...(o.allergies || [])];   // what the screen was showing
         const cur = new Set((o.allergies || []).map((x) => String(x).toLowerCase()));
         if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
         o.allergies = [...cur];          // flip the screen now
         opBegin(id); renderEditor();
-        try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }); }
+        try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); }
         catch (e) { toast("Couldn't update allergens: " + e.message, "err"); }
         finally { opEnd(id); }
       };
@@ -7042,12 +7043,14 @@ function openDishEditModal(itemId, rerender) {
       // same thing while it was open, the server refuses and says what it holds now, instead
       // of one person's "more spicy" silently wiping another's "less spicy".
       if (note !== String(item.note || "").trim()) {
-        await api("POST", `/items/${item.id}/note`, { note }, { expect: { note: String(item.note || "") } });
+        await api("POST", `/items/${item.id}/note`, { note }, { expect: { table: "order_items", id: item.id, fields: { note: String(item.note || "") } } });
       }
       if (!same(newItemRemoved, itemRemoved)) {
-        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { removed: itemRemoved } });
+        await api("POST", `/items/${item.id}/removed`, { removed: newItemRemoved }, { expect: { table: "order_items", id: item.id, fields: { removed: itemRemoved } } });
       }
-      if (order.id && !same(newOrderAllergies, orderAllergies)) await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies });
+      if (order.id && !same(newOrderAllergies, orderAllergies)) {
+        await api("POST", `/orders/${order.id}/allergies`, { allergies: newOrderAllergies }, { expect: { table: "orders", id: order.id, fields: { allergies: orderAllergies } } });
+      }
       close();
       await loadSessions(); if (rerender) rerender();
       toast("Dish updated", "ok");
@@ -8439,7 +8442,7 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
     const note = wrap.querySelector("#discNoteInput").value.trim();
     close();
     try {
-      await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" });
+      await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" }, { expect: { table: "orders", id: order.id, fields: { discount: Number(order.discount || 0) } } });
       await loadSessions(); if (rerender) rerender();
       toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(payFor(amount))}` : "Discount removed", "ok");
     } catch (e) { toast("Failed: " + e.message, "err"); }
@@ -8500,9 +8503,18 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   }));
   root.querySelectorAll("[data-done-table]").forEach((b) => (b.onclick = () => { editTables.delete(String(b.dataset.doneTable)); if (rerender) rerender(); }));
   // Quantity −/＋ on one dish: re-prices the bill server-side (clamped 1..99).
-  const editQty = async (id, qty) => { try { await api("POST", `/items/${id}/qty`, { qty }); await loadSessions(); if (rerender) rerender(); } catch (e) { toast("Failed: " + e.message, "err"); } };
-  root.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => editQty(b.dataset.qtyInc, Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1))));
-  root.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", "err"); return; } editQty(b.dataset.qtyDec, q); }));
+  // `was` = the count this screen was showing, so two people stepping the same dish can't
+  // overwrite each other (the server refuses the second and says what it is now).
+  const editQty = async (id, qty, was) => {
+    try { await api("POST", `/items/${id}/qty`, { qty }, { expect: { table: "order_items", id, fields: { qty: was } } }); await loadSessions(); if (rerender) rerender(); }
+    catch (e) {
+      const clash = e && e.data && e.data.clash;
+      toast(clash ? clash.plain : "Failed: " + errText(e), "err", undefined, clash ? 9000 : undefined);
+      if (clash) { await loadSessions(); if (rerender) rerender(); }
+    }
+  };
+  root.querySelectorAll("[data-qty-inc]").forEach((b) => (b.onclick = () => editQty(b.dataset.qtyInc, Math.min(99, (parseInt(b.dataset.qty, 10) || 1) + 1), parseInt(b.dataset.qty, 10) || 1)));
+  root.querySelectorAll("[data-qty-dec]").forEach((b) => (b.onclick = () => { const q = (parseInt(b.dataset.qty, 10) || 1) - 1; if (q < 1) { toast("Use 🗑 to remove the dish", "err"); return; } editQty(b.dataset.qtyDec, q, parseInt(b.dataset.qty, 10) || 1); }));
   // "✎ Edit" on a dish → the unified editor (allergens incl. custom + kitchen note).
   root.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish, rerender)));
   // Per-order allergen toggle chips (edit mode): optimistic flip, then persist.
@@ -8510,10 +8522,11 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     const id = chip.dataset.alg, slug = chip.dataset.slug;
     const o = (state.data.orders || []).find((x) => x.id === id);
     if (!o) return;
+    const wasAllergies = [...(o.allergies || [])];   // what the screen was showing
     const cur = new Set((o.allergies || []).map((x) => String(x).toLowerCase()));
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
     o.allergies = [...cur]; if (rerender) rerender(); // flip the screen now
-    try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }); await loadSessions(); if (rerender) rerender(); }
+    try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); await loadSessions(); if (rerender) rerender(); }
     catch (e) { toast("Couldn't update allergens: " + e.message, "err"); }
   }));
   // Add a dish to THIS order: a compact dish-picker modal → /orders/:id/add-item.

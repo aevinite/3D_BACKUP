@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
-import { replayClash, clashJson } from "@/lib/clash";
+import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
@@ -164,6 +164,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // A LIVE write carries no replay marker, so this returns without a single query.
     const clash = await replayClash(req, rid, a, b, c, body as Record<string, unknown> | null);
     if (clash) return clashJson(clash);
+
+    // ── NO SILENT OVERWRITES (owner, 2026-07-30) ──────────────────────────────────
+    // If the screen told us what it was editing FROM, refuse when someone else has since
+    // changed it — and tell that person what it says now. One gate for every action here.
+    const overwrite = await expectClash(req, rid);
+    if (overwrite) return clashJson(overwrite);
 
     // ── Raise an issue / complaint (photo + voice note optional) ────────────────
     // The kitchen flags a problem (equipment, stock…) for THIS restaurant; owner +
