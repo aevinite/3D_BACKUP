@@ -319,7 +319,19 @@ async function actGated(method, path, body, opts = {}) {
 
 // ── floor helpers ────────────────────────────────────────────────────────────
 const sessionOf = (t) => state.data.sessions.find((s) => String(s.table_number) === String(t) && s.status === "open");
-const ordersOf = (t) => state.data.orders.filter((o) => String(o.table_number) === String(t) && o.status !== "cancelled");
+// ordersOf(t): the orders of the party sitting at table t RIGHT NOW — see the long note on
+// the manager's ordersForTable (owner report, 2026-07-30). An order counts only when it
+// carries this table's OPEN-session id, or no session id at all (banquet/legacy rows).
+// Matching table_number alone let a NEW party inherit a PREVIOUS party's leftover live
+// orders — the manager showed a just-opened table as "Preparing · ₹1,150 due" from 9-day-old
+// dishes, and this panel would have carried them onto the new bill. state.data.sessions only
+// ever holds NON-closed sessions, so an order pointing at a closed session fails this test.
+// `archived` rows are off the floor by definition. Mirrors lfh_table_view_summary.
+const ordersOf = (t) => {
+  const s = sessionOf(t);
+  return state.data.orders.filter((o) => String(o.table_number) === String(t) && o.status !== "cancelled" && !o.archived
+    && (!o.session_id || (s && o.session_id === s.id)));
+};
 // sliceLoaded(t): has table t's FULL slice (session row or a live order) landed yet? The grid
 // runs on the slim summary; a table's full detail slice is only fetched when you tap it. Before
 // that first fetch, sessionOf/ordersOf are empty even for an occupied table — so the detail

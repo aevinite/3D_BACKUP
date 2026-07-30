@@ -82,13 +82,18 @@ export async function closeSession(
   const block = closeBlock(blockers, force);
   if (block) return { ok: false, status: block.status, message: block.message, reason: block.reason };
 
+  // READ THE MONEY STILL OWED **BEFORE** THE SESSION IS CLOSED. Since mig 232 the DB's own
+  // close trigger cancels+archives whatever is still live on the session (so orders can never
+  // outlive their session, however the close happened) — which means asking AFTER the update
+  // would find nothing and this compliance log ("closed with N unpaid order(s), ₹X owed")
+  // would silently stop recording walk-outs. Scoped to THIS session, never the bare table
+  // number, which could hit a different party that later sat at the same table.
+  const owedRows = must(await sb.from("orders").select("total,discount,subtotal,tax")
+    .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
+
   const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", sessionId).select());
   const sess = row[0];
   if (sess) {
-    // Scope cleanup to THIS session (not the bare table number, which could hit a
-    // different party that later sat at the same table).
-    const owedRows = must(await sb.from("orders").select("total,discount,subtotal,tax")
-      .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
     if (owedRows.length) {
       // Discount is stored PRE-TAX, so the amount actually owed drops by discount×(1+rate),
       // not by the bare discount (matching the bill math everywhere else). Derive each order's
