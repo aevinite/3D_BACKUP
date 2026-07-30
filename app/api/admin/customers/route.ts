@@ -1,0 +1,149 @@
+// GET /api/admin/customers — the platform-wide guest list for the admin's Customers page.
+// Every restaurant's customers in one view, each row tagged with the restaurant it belongs
+// to, plus the cross-restaurant picture only the admin can see (one mobile number that eats
+// at several of our restaurants).
+//
+// DELIBERATELY MONEY-FREE. The admin panel never shows a restaurant's earnings (owner's
+// standing rule), so this route returns counts and dates only — no spend, no bill totals.
+// The OWNER's own Customers page is where money appears, for their own restaurants.
+//
+// Egress discipline: explicit column list, server-side search, hard limit + offset paging,
+// one cheap head-count for the true total, and the per-restaurant name map read once.
+import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { cachedOwnerPayload } from "@/lib/ownerCache";
+
+export const dynamic = "force-dynamic";
+
+const COLS = "restaurant_id, phone, name, blocked, visits, consent, first_seen_at, last_seen_at";
+const PAGE = 50;                 // rows per page — the table paginates rather than dumping thousands
+const REPEAT_MIN = 2;            // visits >= 2 = a guest who came back
+const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+
+type Row = {
+  restaurant_id: string; phone: string; name: string | null; blocked: boolean;
+  visits: number; consent: boolean; first_seen_at: string; last_seen_at: string;
+};
+
+export async function GET(req: NextRequest) {
+  if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const sp = req.nextUrl.searchParams;
+  const rid = sp.get("restaurant_id") || "";
+  if (rid && !isUuid(rid)) return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
+  // strip the characters that would break PostgREST's or() filter grammar
+  const search = (sp.get("q") || "").replace(/[,()%*]/g, "").trim().slice(0, 60);
+  const seg = sp.get("seg") || "all";                     // all | regulars | new | blocked
+  const sort = sp.get("sort") === "visits" ? "visits" : "last_seen_at";
+  const page = Math.max(0, Math.min(200, parseInt(sp.get("page") || "0", 10) || 0));
+  const detail = (sp.get("phone") || "").replace(/\D/g, "").slice(0, 15);
+
+  try {
+    // Restaurant names for the row chips + the filter dropdown (small, read once).
+    const rests = ((await sb.from("restaurants").select("id, name, slug, accent_color").order("slug")).data || []) as
+      Array<{ id: string; name: unknown; slug: string; accent_color: string | null }>;
+    // restaurants.name is a JSONB of translations ({ en: "…" }) on some rows and a plain
+    // string on others — read both, fall back to the slug so a chip is never blank.
+    const label = (r: { name: unknown; slug: string }) => {
+      if (typeof r.name === "string" && r.name.trim()) return r.name;
+      if (r.name && typeof r.name === "object") {
+        const n = r.name as Record<string, unknown>;
+        const en = typeof n.en === "string" ? n.en : "";
+        if (en.trim()) return en;
+      }
+      return r.slug;
+    };
+    const nameOf = (id: string) => {
+      const r = rests.find((x) => x.id === id);
+      return r ? label(r) : "—";
+    };
+
+    // ── one customer's detail: the same number across every restaurant it appears in.
+    // This is the admin-only view — "Meera has eaten at 3 of our restaurants".
+    if (detail) {
+      const { data, error } = await sb.from("customers").select(COLS).eq("phone", detail).limit(50);
+      if (error) throw new Error(error.message);
+      const rows = ((data || []) as Row[]).map((c) => ({ ...c, restaurantName: nameOf(c.restaurant_id) }));
+      return NextResponse.json({
+        detail: {
+          phone: detail,
+          name: rows.find((r) => r.name)?.name || null,
+          restaurants: rows.sort((a, b) => (a.last_seen_at < b.last_seen_at ? 1 : -1)),
+          totalVisits: rows.reduce((a, r) => a + (Number(r.visits) || 0), 0),
+          blockedAnywhere: rows.some((r) => r.blocked),
+        },
+      });
+    }
+
+    // ── the list
+    let q = sb.from("customers").select(COLS, { count: "exact" })
+      .order(sort, { ascending: false })
+      .range(page * PAGE, page * PAGE + PAGE - 1);
+    if (rid) q = q.eq("restaurant_id", rid);
+    if (search) q = q.or(`name.ilike.%${search}%,phone.ilike.%${search}%`);
+    if (seg === "regulars") q = q.gte("visits", REPEAT_MIN);
+    if (seg === "new") q = q.lt("visits", REPEAT_MIN);
+    if (seg === "blocked") q = q.eq("blocked", true);
+    const { data, error, count } = await q;
+    if (error) throw new Error(error.message);
+    const customers = ((data || []) as Row[]).map((c) => ({
+      ...c,
+      restaurantName: nameOf(c.restaurant_id),
+      returning: (Number(c.visits) || 0) >= REPEAT_MIN,
+    }));
+
+    // ── the tiles + the per-restaurant bar list are AGGREGATES over every customer row,
+    // so they ride the compute-on-view snapshot cache (standing rule): a normal open reads
+    // ONE stored JSON row, and the heavy counting only re-runs when the fingerprint shows a
+    // customer actually changed. At 500 new guests a day this is the difference between
+    // scanning the table every 60 seconds and scanning it a few times an hour.
+    // The LIST itself stays live — it's a paged, indexed read, not an aggregate.
+    const force = sp.get("refresh") === "1";
+    const agg = await cachedOwnerPayload({
+      key: `admincust:v1:${rid || "all"}`,
+      force,
+      fingerprint: async () => {
+        const { data } = await sb.rpc("lfh_customers_fingerprint", { p_restaurant_id: rid || null });
+        return typeof data === "string" ? data : null;
+      },
+      compute: async () => {
+        function baseCount() {
+          let q0 = sb.from("customers").select("phone", { count: "exact", head: true });
+          if (rid) q0 = q0.eq("restaurant_id", rid);
+          return q0;
+        }
+        const since30 = new Date(Date.now() - 30 * 86400e3).toISOString();
+        const [c1, c2, c3, c4] = await Promise.all([
+          baseCount(),
+          baseCount().gte("visits", REPEAT_MIN),
+          baseCount().eq("blocked", true),
+          baseCount().gte("first_seen_at", since30),
+        ]);
+        // Guests per restaurant — ONE grouped read in the database (mig 228), never
+        // "fetch every customer row and count them here".
+        const { data: spreadRaw } = await sb.rpc("lfh_admin_customer_spread");
+        return {
+          total: c1.count || 0, regulars: c2.count || 0, blocked: c3.count || 0, newThisMonth: c4.count || 0,
+          spreadRaw: (spreadRaw || []) as Array<{ restaurant_id: string; guests: number; regulars: number; blocked: number }>,
+        };
+      },
+    });
+    const { total, regulars, blocked, newThisMonth: fresh } = agg;
+    const spread = agg.spreadRaw
+      .map((s2) => ({ id: s2.restaurant_id, name: nameOf(s2.restaurant_id), count: s2.guests, regulars: s2.regulars }))
+      .filter((s2) => s2.count > 0)
+      .slice(0, 8);
+
+    return NextResponse.json({
+      summary: { total, regulars, blocked, newThisMonth: fresh, matched: count || 0, page, pageSize: PAGE },
+      cachedAt: agg.cachedAt,
+      restaurants: rests.map((r) => ({ id: r.id, name: label(r) })),
+      spread,
+      customers,
+    });
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  }
+}
