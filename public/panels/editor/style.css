@@ -759,7 +759,24 @@ body {
   background: linear-gradient(180deg, #f05252, var(--red)); color: #fff; border-color: transparent;
   box-shadow: 0 6px 16px rgba(239,68,68,0.35);
 }
-@media (prefers-reduced-motion: reduce) { .confirm-overlay, .confirm-box { transition: none; } }
+/* Speed-click guard feedback (see tapGuard() in app.js). A tap in the guard's first
+   moments used to disappear with NO sign it had happened, which is how a "Close anyway"
+   tap got lost and a table stayed open. Now the tap is always VISIBLE:
+     .confirm-armed — the tap landed and is waiting for the guard to expire (button dims
+                      slightly and shows a busy cursor; it fires by itself a moment later).
+     .confirm-nudge — a tap too early to trust (the tail of a double-tap) was refused; the
+                      box gives one short shake so the person knows to tap again. */
+.confirm-overlay.confirm-armed .confirm-actions .btn { opacity: 0.65; cursor: progress; }
+.confirm-overlay.confirm-nudge .confirm-box { animation: confirm-shake 0.24s ease-in-out; }
+@keyframes confirm-shake {
+  0%, 100% { transform: scale(1) translateX(0); }
+  25% { transform: scale(1) translateX(-5px); }
+  75% { transform: scale(1) translateX(5px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .confirm-overlay, .confirm-box { transition: none; }
+  .confirm-overlay.confirm-nudge .confirm-box { animation: none; }
+}
 
 /* Floor-wide confirms (Close all) look DELIBERATELY different from the routine
    one-table popups: red ring, red-tinted glass, bigger message. Muscle memory

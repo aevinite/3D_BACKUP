@@ -216,6 +216,44 @@ function toast(msg, type = "ok", action, ms) {
   toastTimer = setTimeout(() => (t.hidden = true), ms || 1800);
 }
 
+// tapGuard(wrap): the speed-click guard shared by confirmDialog + promptDialog.
+//
+// A dialog pops up right under the pointer, so the tail of a fast double-click lands
+// ~100ms later on it — which used to silently cancel it (the app appeared to ask "are you
+// sure?" again and again) or confirm something unread. So a click in the first SETTLE_MS
+// isn't taken at face value.
+//
+// REMEMBER THE EARLY TAP (owner, 2026-07-30). Dropping those clicks outright cost a real
+// close: a CHAINED dialog ("This table still OWES money. Close anyway?") only appears once
+// the server's refusal lands, so it materialises under a finger already tapping the previous
+// dialog's button — in the SAME screen position. A normal tap 200-300ms later was thrown
+// away with zero feedback: the box just sat there looking fine and the table never closed
+// (AV live, 2026-07-29 — the 3rd table in a row). So a tap inside the window is now HELD and
+// fires the moment the guard expires. Two limits keep the original protection:
+//   • TAIL_MS — a tap in the first 120ms is still a double-click tail, so it is refused, not
+//     queued. The button flashes (.confirm-nudge) so even that tap is visible, never silent.
+//   • the caller never queues a BACKDROP tap (see below) — a stray tap beside the box must
+//     not answer it; that was the original "it keeps cancelling itself" bug.
+function tapGuard(wrap) {
+  const SETTLE_MS = 350, TAIL_MS = 120;
+  const openedAt = Date.now();
+  let held = null;
+  const nudge = () => { wrap.classList.remove("confirm-nudge"); void wrap.offsetWidth; wrap.classList.add("confirm-nudge"); };
+  return {
+    settled: () => Date.now() - openedAt > SETTLE_MS,
+    clearHeld: () => { if (held) { clearTimeout(held); held = null; wrap.classList.remove("confirm-armed"); } },
+    // act(fn): run now if settled; hold until settled if it was a real (post-tail) tap;
+    // otherwise refuse it visibly. Only one tap is ever held — the first one wins.
+    act(fn) {
+      const age = Date.now() - openedAt;
+      if (age > SETTLE_MS) return fn();
+      if (age < TAIL_MS || held) return nudge();
+      wrap.classList.add("confirm-armed"); // shows the tap landed and is waiting
+      held = setTimeout(() => { held = null; wrap.classList.remove("confirm-armed"); fn(); }, SETTLE_MS - age + 10);
+    },
+  };
+}
+
 // Pretty in-app confirm (replaces the ugly native window.confirm).
 // It builds a little "Are you sure?" pop-up and returns a Promise that resolves
 // to true (user clicked the confirm button) or false (cancel / Escape / click
@@ -264,18 +302,13 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
     // Let the hardware-BACK adapter cancel THIS dialog via its own close (resolves the
     // promise false + cleans up), instead of a bare remove() that would leave it hanging.
     wrap.__lfhClose = () => close(false);
-    // Speed-click guard: the dialog pops up right under the pointer, so the
-    // tail of a fast double-click lands ~100ms later on the backdrop (or even
-    // on the Cancel/Confirm buttons). That used to silently cancel the dialog
-    // — making it feel like the app asked "are you sure?" again and again —
-    // or could instantly confirm something the owner never read. So every
-    // click is ignored until the dialog has been on screen for 350ms (humans
-    // need longer than that to read it anyway). Escape stays instant.
-    const openedAt = Date.now();
-    const settled = () => Date.now() - openedAt > 350;
-    wrap.querySelector(".confirm-cancel").onclick = () => { if (settled()) close(false); };
-    wrap.querySelector(".confirm-ok").onclick = () => { if (settled()) close(true); };
-    wrap.onclick = (e) => { if (e.target === wrap && settled()) close(false); };
+    // Speed-click guard — see tapGuard() above. An early BUTTON tap is remembered and
+    // fires when the guard expires; an early BACKDROP tap is still ignored outright (that
+    // stray tap beside the box is what used to cancel the dialog over and over).
+    const guard = tapGuard(wrap);
+    wrap.querySelector(".confirm-cancel").onclick = () => { guard.clearHeld(); guard.act(() => close(false)); };
+    wrap.querySelector(".confirm-ok").onclick = () => guard.act(() => close(true));
+    wrap.onclick = (e) => { if (e.target === wrap && guard.settled()) close(false); };
     document.addEventListener("keydown", esc2);
   });
 }
@@ -321,10 +354,10 @@ function promptDialog(message, opts = {}) {
     };
     const submit = () => { const v = input.value.trim(); if (required && !v) { input.focus(); return; } close(v); };
     wrap.__lfhClose = () => close(null); // hardware BACK cancels cleanly
-    const openedAt = Date.now();
-    const settled = () => Date.now() - openedAt > 350; // same speed-click guard as confirmDialog
-    wrap.querySelector(".confirm-cancel").onclick = () => { if (settled()) close(null); };
-    wrap.querySelector(".confirm-ok").onclick = () => { if (settled()) submit(); };
+    const guard = tapGuard(wrap); // same speed-click guard as confirmDialog (early tap held, not dropped)
+    const settled = () => guard.settled();
+    wrap.querySelector(".confirm-cancel").onclick = () => { guard.clearHeld(); guard.act(() => close(null)); };
+    wrap.querySelector(".confirm-ok").onclick = () => guard.act(() => submit());
     wrap.onclick = (e) => { if (e.target === wrap && settled()) close(null); };
     document.addEventListener("keydown", esc2);
   });
@@ -397,7 +430,10 @@ async function api(method, path, body) {
       body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send
     });
     const json = await res.json().catch(() => ({})); // read the reply; if it isn't JSON, fall back to {}
-    if (!res.ok) throw new Error(json.error || res.statusText); // not OK? surface the server's error message
+    // Carry the parsed body + status on the error (same contract as the outbox path in
+    // public/panels/outbox.js) so callers can read server flags like `reason` — a bare
+    // message string would drop them and force brittle text-matching on the message.
+    if (!res.ok) { const e = new Error(json.error || res.statusText); e.status = res.status; e.data = json; throw e; }
     return json;
   })();
   if (method === "GET") {
@@ -5364,6 +5400,25 @@ async function closeAllTables() {
     toast("Could not close all: " + e.message, "err");
   }
 }
+// closeBlockedReason(err): did the server refuse this close because the table is still
+// busy, and why? Reads the REASON CODE the close endpoint sends ('unpaid' | 'cooking' |
+// 'both'), with a text fallback for a stale/queued reply that predates the code. Returns
+// null for any other failure (network, not found) so a genuine error still surfaces.
+function closeBlockedReason(err) {
+  const code = err && err.data && err.data.reason;
+  if (code === "unpaid" || code === "cooking" || code === "both") return code;
+  const m = String((err && err.message) || "");
+  if (/owes money/i.test(m)) return /cooking/i.test(m) ? "both" : "unpaid";
+  if (/orders cooking/i.test(m)) return "cooking";
+  return null;
+}
+// The override question, worded for the actual reason — a walk-out reads differently from
+// food that simply isn't out yet, and both are recorded in the log either way.
+const closeAnywayAsk = (why) =>
+  why === "both" ? "This table still OWES money AND has food still cooking. Close anyway? The unpaid bill and the cancelled food are both recorded in the log."
+  : why === "cooking" ? "This table's food isn't served yet. Close anyway? The unserved food is cancelled and recorded in the log."
+  : "This table still OWES money. Close anyway? The unpaid bill is recorded in the log.";
+
 // closeSession: end a table's session. The SERVER now scopes the order cleanup to
 // this session and archives them (no client-side loop needed), and it BLOCKS the
 // close while money is owed — so we offer an explicit "close anyway" override.
@@ -5380,9 +5435,14 @@ async function closeSession(id, force) {
     await loadSessions();
     toast("Table closed — bill moved to Previous", "ok");
   } catch (e) {
-    // Server refuses to close a table that still owes money — offer the override.
-    if (/owes money/i.test(String(e && e.message))) {
-      if (await confirmDialog("This table still OWES money. Close anyway? The unpaid bill is recorded in the log.", "Close anyway")) return closeSession(id, true);
+    // Server refused — offer the override. Decide on the server's REASON CODE, never on the
+    // wording: the old `/owes money/` text-match missed the cooking-only refusal ("still has
+    // orders cooking — serve them, or close anyway"), so a table whose bill was PAID but whose
+    // food wasn't served yet showed a red toast with NO "close anyway" button and could not be
+    // closed at all. reason is 'unpaid' | 'cooking' | 'both' (lib/sessionClose.ts).
+    const why = closeBlockedReason(e);
+    if (why) {
+      if (await confirmDialog(closeAnywayAsk(why), "Close anyway")) return closeSession(id, true);
       return;
     }
     toast("Could not close: " + e.message, "err");
@@ -8535,9 +8595,11 @@ async function closeTableQuick(t) { await ensureTableSlice(t); freeTableAll(t, o
 // Free a table: archive its settled orders off the floor and, if a session is open, close it.
 // OPTIMISTIC after the confirm: the tile turns Free instantly; the server
 // catches up in the background and a refresh reconciles (or reloads on error).
-async function freeTableAll(t, sess) {
+// force=true is the "close anyway" retry (a walk-out / food never served) — it skips the
+// first confirm because the override dialog has already been answered.
+async function freeTableAll(t, sess, force) {
   const ids = ordersForTable(t).map((o) => o.id);
-  if (!(await confirmDialog(`Free Table ${t}? Settled orders leave the floor${sess ? " and the session closes" : ""} (kept in records).`, "Free table"))) return;
+  if (!force && !(await confirmDialog(`Free Table ${t}? Settled orders leave the floor${sess ? " and the session closes" : ""} (kept in records).`, "Free table"))) return;
   (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) { o.archived = true; opBegin(o.id); } });
   if (sess) sess.status = "closed";
   state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
@@ -8548,12 +8610,30 @@ async function freeTableAll(t, sess) {
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; ids.forEach((id) => opEnd(id)); } };
   try {
+    // CLOSE FIRST, archive after. The archive PATCHes used to run BEFORE the close, so on a
+    // table the server refuses to close (unpaid / food still cooking) the orders were already
+    // archived: the bill vanished off the floor while the table stayed OPEN — an unpaid bill
+    // hidden by a failed action. Now nothing is archived unless the close is agreed. (The
+    // server's own close archives the session's orders anyway; the loop below only mops up
+    // orders on a table with NO open session.)
+    if (sess) await api("POST", "/sessions/" + sess.id + "/close", force ? { force: true } : undefined);
     for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
-    if (sess) await api("POST", "/sessions/" + sess.id + "/close");
     release();
     await pollTables([String(t)]); // refresh just this tile's summary (handles drop-to-Free)
     toast(`Table ${t} freed`, "ok");
-  } catch (e) { release(); toast("Could not free: " + e.message, "err"); await pollTables([String(t)]); }
+  } catch (e) {
+    release();
+    await pollTables([String(t)]); // put the still-busy table back before we ask
+    // The server blocks a busy table (unpaid / not served). This path used to dead-end in a
+    // red toast with no way forward — the same override the detail panel offers now lives
+    // here too, so the tile's CLS button can finish the job. (owner, 2026-07-30)
+    const why = closeBlockedReason(e);
+    if (why && sess && !force) {
+      if (await confirmDialog(closeAnywayAsk(why), "Close anyway")) return freeTableAll(t, sess, true);
+      return;
+    }
+    toast("Could not free: " + e.message, "err");
+  }
   finally { release(); }
 }
 
