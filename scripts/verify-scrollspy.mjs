@@ -33,7 +33,13 @@ try {
     el.scrollTop = 2500;
     await new Promise((r) => setTimeout(r, 700));
     const r1 = document.getElementById("menu-sticky").getBoundingClientRect();
-    return r1.top >= -2 && r1.top < 130 && r1.bottom > 200; // pinned + on screen while deep
+    // Pinned = it sticks near the top of the scroller and is fully on screen. The old check also
+    // demanded bottom > 200px, which silently encoded the bar's HEIGHT from an earlier design; the
+    // bar is 105px tall now (top 64, bottom 169) so a correctly-pinned bar FAILED. Assert the
+    // behaviour (sticky + at the top + visible), not yesterday's pixels. (2026-07-30)
+    const el2 = document.getElementById("menu-sticky");
+    const sticky = getComputedStyle(el2).position === "sticky";
+    return sticky && r1.top >= -2 && r1.top < 130 && r1.height > 40 && r1.bottom > r1.top && !!el2.offsetParent;
   });
   check(pinned, "the existing category+search bar stays pinned while scrolling");
 

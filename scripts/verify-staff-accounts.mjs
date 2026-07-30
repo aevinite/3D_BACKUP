@@ -53,6 +53,18 @@ async function createUser(name, role, { phone, password } = {}) {
 (async () => {
   console.log("→ staff account stress test\n");
 
+  // ── 0. PRE-CLEAN ──────────────────────────────────────────────────────────
+  // Only the END of this run deleted its users, so ANY interrupted run (a crash, a
+  // ctrl-C, a failed assertion) left "zztest …" accounts behind — and then the next run's
+  // very first create answered 409 "duplicate name", never recorded that user, and the
+  // script died with `Cannot read properties of undefined (reading 'password')`. It had been
+  // failing that way with 8 stale accounts sitting in the dev DB. Clearing them first makes
+  // the run repeatable instead of one-shot. (2026-07-30)
+  const stale = await api("/api/admin/users", { cookie: adminCookie });
+  const staleZz = (stale.json?.users || stale.json || []).filter?.((u) => /^zztest/i.test(String(u.username || u.name || ""))) || [];
+  for (const u of staleZz) await api(`/api/admin/users?id=${encodeURIComponent(u.id)}`, { method: "DELETE", cookie: adminCookie });
+  if (staleZz.length) console.log(`   (pre-clean removed ${staleZz.length} leftover zztest account(s) from an earlier run)\n`);
+
   // ── 1. CREATE 10 users across roles, varied names ─────────────────────────
   const roles = ["manager", "kitchen", "tablet"];
   const names = [

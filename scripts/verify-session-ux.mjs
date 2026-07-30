@@ -6,10 +6,22 @@
 //   4. the editor side panel has the everyday cards on top, Features at the bottom,
 //      and the table panel offers a "👑 Head" transfer button.
 // Reads secrets from .env.local itself and prints ONLY pass/fail lines — no keys.
-// Usage: node scripts/verify-session-ux.mjs   (menu on :4000, editor on :4001)
+// Usage: node scripts/verify-session-ux.mjs   (the unified app on :4000)
+//
+// ⚠️ PARTIALLY REPAIRED, STILL RED (2026-07-30). This script predates the 2026-06-13 merge of the
+// four panel servers into ONE app. Repaired here: the :4001 references now point at :4000, the
+// editor calls use the /api/editor/... prefix, auth uses the admin cookie, and the teardown
+// closes + soft-deletes instead of hard-DELETEing (mig 190 forbids erasing an issued bill, and
+// every session gets a bill_no, so the old teardown could never succeed). What REMAINS: its
+// assertions still describe the pre-merge API and need reviewing one by one. No app bug has
+// surfaced from it — the failures are the script's own staleness. Run it before trusting it.
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+// NOTE: the panels stopped being separate servers on 2026-06-13 — the editor's endpoints now
+// live under /api/editor/... inside the ONE app on :4000. These calls were still using the old
+// un-prefixed paths and answered 404, so the checks below had been failing for weeks. (2026-07-30)
+import { createHash } from "node:crypto";
 import { chromium } from "playwright";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -40,8 +52,13 @@ const sb = async (method, path, body) => {
 
 // ── setup: a fresh open session with a head + an UNAPPROVED partner ──────────
 const cleanup = async () => {
-  // deleting the session cascades to its members; requests are keyed by table
-  await sb("DELETE", `sessions?table_number=eq.${TABLE}`);
+  // TEARDOWN FOLLOWS THE PRODUCT'S OWN RULE: a bill is never erased, it is closed/soft-deleted.
+  // mig 190 blocks hard-DELETE of any "issued" session or order, and since every session gets a
+  // daily bill_no stamped by trigger, that means EVERY session — so the old DELETE teardown could
+  // never succeed and these scripts had been failing on a 23514 check violation before their first
+  // assertion. Closing + soft-deleting clears the fixture off the floor exactly as the app would.
+  // (2026-07-30)
+  await sb("PATCH", `sessions?table_number=eq.${TABLE}`, { status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() });
   await sb("DELETE", `requests?table_number=eq.${TABLE}`);
 };
 await cleanup(); // clear any leftovers from an earlier crashed run
@@ -117,17 +134,12 @@ try {
   // ── 3: make-head endpoint (editor) ─────────────────────────────────────────
   // Bring the partner back (un-remove) so they can be promoted.
   await sb("PATCH", `session_members?id=eq.${guest.id}`, { removed: false });
-  // The editor may be password-locked; log in like the form does if needed.
-  let cookie = "";
-  if (env.EDITOR_PASSWORD) {
-    const r = await fetch("http://localhost:4001/login", {
-      method: "POST", redirect: "manual",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: `password=${encodeURIComponent(env.EDITOR_PASSWORD)}`,
-    });
-    cookie = (r.headers.get("set-cookie") || "").split(";")[0];
-  }
-  const mh = await fetch(`http://localhost:4001/api/members/${guest.id}/make-head`, {
+  // The editor's API is behind the admin gate now (it used to be an open Express server on
+  // :4001 with its own /login form and an EDITOR_PASSWORD). The gate reads a cookie holding
+  // sha256(ADMIN_PASSWORD) — compute it directly so the password is never sent or printed, and
+  // so this never burns a login attempt against the rate limit. (2026-07-30)
+  const cookie = "lfh_staff_auth=" + createHash("sha256").update(env.ADMIN_PASSWORD || "").digest("hex");
+  const mh = await fetch(`http://localhost:4000/api/editor/members/${guest.id}/make-head`, {
     method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
   });
   check(mh.ok, `make-head endpoint answers ok (${mh.status})`);
@@ -141,12 +153,12 @@ try {
   const ectx = await browser.newContext();
   if (cookie) {
     const [name, value] = cookie.split("=");
-    await ectx.addCookies([{ name, value, url: "http://localhost:4001" }]);
+    await ectx.addCookies([{ name, value, url: "http://localhost:4000" }]);
   }
   // A fresh UNAPPROVED joiner first, so the Requests card + tile Attend show up.
   await sb("POST", "session_members", { session_id: sess.id, name: "Second Guest", token: tok("vg2_"), role: "guest", approved: false });
   const ep = await ectx.newPage();
-  await ep.goto("http://localhost:4001/", { waitUntil: "domcontentloaded" });
+  await ep.goto("http://localhost:4000/", { waitUntil: "domcontentloaded" });
   // Get to the Tables (floor) view — its tab mentions "Tables".
   const tab = ep.locator("button, .tab, [role=tab]").filter({ hasText: /tables/i }).first();
   if (await tab.count()) await tab.click();

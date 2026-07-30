@@ -13,6 +13,14 @@
 //              invisible, malformed flag payloads are sanitised, discounts are
 //              clamped and totals net out, feedback needs a real order.
 // Reads secrets from .env.local; prints pass/fail only. Servers: 4000-4003.
+//
+// ⚠️ PARTIALLY REPAIRED, STILL RED (2026-07-30). This script predates the 2026-06-13 merge of the
+// four panel servers into ONE app. Repaired here: the :4001 references now point at :4000, the
+// editor calls use the /api/editor/... prefix, auth uses the admin cookie, and the teardown
+// closes + soft-deletes instead of hard-DELETEing (mig 190 forbids erasing an issued bill, and
+// every session gets a bill_no, so the old teardown could never succeed). What REMAINS: its
+// assertions still describe the pre-merge API and need reviewing one by one. No app bug has
+// surfaced from it — the failures are the script's own staleness. Run it before trusting it.
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,9 +72,17 @@ const tablet = async (method, path, body) => {
 
 const TA = "21", TB = "22"; // quiet test tables
 const cleanup = async () => {
-  await sb("DELETE", `sessions?table_number=in.(${TA},${TB})`);
-  await sb("DELETE", `orders?table_number=in.(${TA},${TB})`);
-  await sb("DELETE", `requests?table_number=in.(${TA},${TB})`);
+  // TEARDOWN FOLLOWS THE PRODUCT'S OWN RULE: a bill is never erased, it is closed/soft-deleted.
+  // mig 190 blocks hard-DELETE of any "issued" session or order, and since every session gets a
+  // daily bill_no stamped by trigger, that means EVERY session — so the old DELETE teardown could
+  // never succeed and these scripts had been failing on a 23514 check violation before their first
+  // assertion. Closing + soft-deleting clears the fixture off the floor exactly as the app would.
+  // (2026-07-30)
+  // Scoped by restaurant: an UPDATE filtered on table_number ALONE has to scan every order ever
+  // written (398k rows here) and died with a statement timeout. Same rule the app follows.
+  await sb("PATCH", `sessions?restaurant_id=eq.00000000-0000-0000-0000-000000000001&table_number=in.(${TA},${TB})`, { status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() });
+  await sb("PATCH", `orders?restaurant_id=eq.00000000-0000-0000-0000-000000000001&table_number=in.(${TA},${TB})`, { archived: true, deleted_at: new Date().toISOString() });
+  await sb("DELETE", `requests?restaurant_id=eq.00000000-0000-0000-0000-000000000001&table_number=in.(${TA},${TB})`);
 };
 
 try {

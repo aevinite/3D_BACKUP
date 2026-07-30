@@ -7,10 +7,21 @@
 //   3. two phones join an empty table at the SAME INSTANT -> exactly ONE head
 //   4. staff transfer head on an already-CLOSED table -> refused (400)
 // Reads secrets from .env.local itself; prints only pass/fail. Servers: menu on
-// :4000, editor on :4001. Usage: node scripts/verify-edge-cases.mjs
+// :4000 — the panels are routes in the ONE app now. Usage: node scripts/verify-edge-cases.mjs
+//
+// ⚠️ PARTIALLY REPAIRED, STILL RED (2026-07-30). This script predates the 2026-06-13 merge of the
+// four panel servers into ONE app. Repaired here: the :4001 references now point at :4000, the
+// editor calls use the /api/editor/... prefix, auth uses the admin cookie, and the teardown
+// closes + soft-deletes instead of hard-DELETEing (mig 190 forbids erasing an issued bill, and
+// every session gets a bill_no, so the old teardown could never succeed). What REMAINS: its
+// assertions still describe the pre-merge API and need reviewing one by one. No app bug has
+// surfaced from it — the failures are the script's own staleness. Run it before trusting it.
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+// NOTE: the panels stopped being separate servers on 2026-06-13 — the editor's endpoints now
+// live under /api/editor/... inside the ONE app on :4000. These calls were still using the old
+// un-prefixed paths and answered 404, so the checks below had been failing for weeks. (2026-07-30)
 import { chromium } from "playwright";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -45,7 +56,13 @@ const anonRpc = async (fn, args) => {
 };
 
 const cleanup = async () => {
-  await sb("DELETE", `sessions?table_number=eq.${TABLE}`);
+  // TEARDOWN FOLLOWS THE PRODUCT'S OWN RULE: a bill is never erased, it is closed/soft-deleted.
+  // mig 190 blocks hard-DELETE of any "issued" session or order, and since every session gets a
+  // daily bill_no stamped by trigger, that means EVERY session — so the old DELETE teardown could
+  // never succeed and these scripts had been failing on a 23514 check violation before their first
+  // assertion. Closing + soft-deleting clears the fixture off the floor exactly as the app would.
+  // (2026-07-30)
+  await sb("PATCH", `sessions?table_number=eq.${TABLE}`, { status: "closed", closed_at: new Date().toISOString(), deleted_at: new Date().toISOString() });
   await sb("DELETE", `requests?table_number=eq.${TABLE}`);
 };
 await cleanup();
@@ -146,14 +163,14 @@ try {
   await closeSession(sess.id);
   let cookie = "";
   if (env.EDITOR_PASSWORD) {
-    const r = await fetch("http://localhost:4001/login", {
+    const r = await fetch("http://localhost:4000/login", {
       method: "POST", redirect: "manual",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `password=${encodeURIComponent(env.EDITOR_PASSWORD)}`,
     });
     cookie = (r.headers.get("set-cookie") || "").split(";")[0];
   }
-  const mh = await fetch(`http://localhost:4001/api/members/${pend.id}/make-head`, {
+  const mh = await fetch(`http://localhost:4000/api/editor/members/${pend.id}/make-head`, {
     method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
   });
   check(mh.status === 400, `make-head on a closed table is refused (got ${mh.status})`);
