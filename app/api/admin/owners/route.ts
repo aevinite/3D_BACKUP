@@ -22,9 +22,9 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName } from "@/lib/userAuth";
 import { logAction, redactMoney } from "@/lib/oplog";
+import { resolveOwnerHomeRid, loginNameTaken } from "@/lib/ownerHome";
 
 export const dynamic = "force-dynamic";
-const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
 const RETENTION_DAYS = 90; // a binned owner is restorable for this long, then purgeable (matches restaurants)
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
@@ -38,12 +38,6 @@ function genPassword(): string {
   return s;
 }
 
-// Owner logins live in the #1 "home" namespace (see /api/admin/restaurants
-// create_owner) — so an owner name must not clash with anything already there.
-async function ownerNameTaken(key: string): Promise<boolean> {
-  const dup = await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", DEFAULT_RID).limit(1);
-  return !!dup.data?.[0];
-}
 
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
@@ -213,15 +207,22 @@ export async function POST(req: NextRequest) {
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
   if (key.length < 2) return bad("Username must be at least 2 characters.");
-  if (await ownerNameTaken(key)) return bad("That username is taken — pick another.", 409);
+  if (await loginNameTaken(key)) return bad("That username is taken — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
 
   const rids: string[] = Array.isArray(body?.restaurant_ids) ? body.restaurant_ids.map(String) : [];
+  // The owner's row still needs SOME restaurant in its NOT NULL + FK column; it's only
+  // an anchor (real ownership = the restaurant_owners rows attached just below), so ask
+  // the DB for one that exists instead of assuming #1 is there. See lib/ownerHome.ts.
+  const home = await resolveOwnerHomeRid(rids);
+  if (!home.rid) return bad(home.error || "Couldn't work out where to file this owner.", 500);
   const ins = await sb.from("staff_users")
-    .insert({ username: key, name: display, role: "owner", restaurant_id: DEFAULT_RID, password_hash: await hashSecret(password), active: true })
+    .insert({ username: key, name: display, role: "owner", restaurant_id: home.rid, password_hash: await hashSecret(password), active: true })
     .select("id, name").single();
-  if (ins.error) return bad(ins.error.message, 500);
+  // 23505 = the global unique index on lower(username) — the friendly version of
+  // "that username is taken" for the rare race between the check above and this insert.
+  if (ins.error) return bad(ins.error.code === "23505" ? "That username is taken — pick another." : ins.error.message, ins.error.code === "23505" ? 409 : 500);
   const ownerId = ins.data.id as string;
 
   // Attach every picked restaurant; report per-restaurant failures instead of
@@ -314,7 +315,7 @@ export async function PATCH(req: NextRequest) {
     const display = String(body?.name ?? "").trim().slice(0, 80);
     const key = normalizeLoginName(display);
     if (key.length < 2) return bad("Username must be at least 2 characters.");
-    if (key !== owner.username && (await ownerNameTaken(key))) return bad("That username is taken — pick another.", 409);
+    if (key !== owner.username && (await loginNameTaken(key))) return bad("That username is taken — pick another.", 409);
     const { error } = await sb.from("staff_users").update({ name: display, username: key }).eq("id", ownerId);
     if (error) return bad(error.message, 500);
     await logAction("admin", "owner_rename", { actor: "admin", restaurant_id: null, detail: `renamed owner "${who}" → "${display}" · owner ${ownerId}` });

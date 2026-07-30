@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName } from "@/lib/userAuth";
+import { resolveOwnerHomeRid, loginNameTaken } from "@/lib/ownerHome";
 import { logAction } from "@/lib/oplog";
 import { loadStarterMenu, toCategoryRows, toFilterRows, toItemRows } from "@/lib/starterMenu";
 import { cleanClonedSettings } from "@/lib/settingsClone";
@@ -348,17 +349,18 @@ export async function POST(req: NextRequest) {
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
   if (key.length < 2) return bad("Username must be at least 2 characters.");
-  // An owner's "home" restaurant_id is #1; their OWNED restaurants come from
-  // restaurants.owner_user_id (assigned via PATCH). Names are unique per-restaurant,
-  // so clash-check owners within #1.
-  const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", DEFAULT_RID).limit(1)).data?.[0];
-  if (dup) return bad("That username is taken — pick another.", 409);
+  // An owner's `restaurant_id` is only a "home" anchor for the NOT NULL + FK column;
+  // their OWNED restaurants come from restaurants.owner_user_id / restaurant_owners
+  // (assigned via PATCH). Login names are globally unique, so clash-check globally.
+  if (await loginNameTaken(key)) return bad("That username is taken — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
+  const home = await resolveOwnerHomeRid();
+  if (!home.rid) return bad(home.error || "Couldn't work out where to file this owner.", 500);
   const { data, error } = await sb.from("staff_users")
-    .insert({ username: key, name: display, role: "owner", restaurant_id: DEFAULT_RID, password_hash: await hashSecret(password), active: true })
+    .insert({ username: key, name: display, role: "owner", restaurant_id: home.rid, password_hash: await hashSecret(password), active: true })
     .select("id, name").single();
-  if (error) return bad(error.message, 500);
+  if (error) return bad(error.code === "23505" ? "That username is taken — pick another." : error.message, error.code === "23505" ? 409 : 500);
   await logAction("admin", "owner_create", { actor: "admin", detail: `created owner "${display}" · id ${data!.id}` });
   return ok({ ok: true, id: data!.id, name: display, password });
 }
