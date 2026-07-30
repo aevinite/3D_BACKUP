@@ -40,6 +40,11 @@ export default function LoginForm({
       // A new sign-in starts with a clean slate of device snapshots, so the previous
       // account's instant-paint numbers can never show inside this tab.
       clearOwnerSnaps();
+      // Same reasoning for the OFFLINE layer: a shared tablet handed to the next person
+      // must not keep the last person's saved screens and figures readable with no
+      // internet. (Signing out already wipes them inside public/sw.js; this covers the
+      // case where the previous session simply expired or the tab was closed.)
+      try { navigator.serviceWorker?.controller?.postMessage({ type: "LFH_CLEAR_DATA" }); } catch { /* best effort */ }
       // From the scoped door, land on the scoped panel URL so the address bar
       // keeps saying which restaurant this is.
       const base = ROLE_HOME[data.role];

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>No internet — your work is safe</title>
+  <!--
+    The last-resort page: shown ONLY when this device has never loaded the page it's
+    asking for AND there's no connection. Everything here is inline (no fonts, no
+    images, no scripts from elsewhere) because by definition nothing can be fetched.
+    Tone matters: staff see this mid-service, so it must reassure (nothing was lost)
+    and act on its own the moment the connection returns.
+  -->
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px;
+      background: radial-gradient(120% 120% at 50% 0%, #16233f 0%, #0b1020 55%, #070a15 100%);
+      color: #e7eefc; font: 500 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+      text-align: center;
+    }
+    .card {
+      width: min(420px, 100%); padding: 30px 24px 26px; border-radius: 20px;
+      background: rgba(15, 24, 48, .72); border: 1px solid rgba(148, 163, 184, .22);
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .45); backdrop-filter: blur(20px);
+    }
+    .dot { width: 54px; height: 54px; margin: 0 auto 16px; border-radius: 999px; display: grid; place-items: center;
+           background: rgba(239, 68, 68, .16); border: 1px solid rgba(239, 68, 68, .4); }
+    .dot span { width: 14px; height: 14px; border-radius: 999px; background: #ef4444; animation: p 1.6s ease-in-out infinite; }
+    @keyframes p { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
+    h1 { margin: 0 0 8px; font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
+    p { margin: 0 0 14px; color: #b8c5de; font-size: 14px; }
+    .safe { margin: 18px 0 20px; padding: 12px 14px; border-radius: 12px; text-align: left;
+            background: rgba(34, 197, 94, .1); border: 1px solid rgba(34, 197, 94, .3); color: #d6f5e0; font-size: 13px; }
+    .safe b { color: #86efac; }
+    button {
+      width: 100%; padding: 13px 16px; border: 0; border-radius: 12px; cursor: pointer;
+      font: 800 15px/1 system-ui, sans-serif; color: #06131f; background: #38bdf8;
+    }
+    button:active { transform: translateY(1px); }
+    .hint { margin-top: 14px; font-size: 12.5px; color: #8fa1bf; }
+    @media (prefers-reduced-motion: reduce) { .dot span { animation: none; } }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="dot"><span></span></div>
+    <h1>No internet right now</h1>
+    <p>This screen hasn't been opened on this device yet, so there's nothing saved to show.</p>
+    <div class="safe">
+      <b>Nothing you did is lost.</b> Any orders or changes you made while offline are stored on
+      this device and will be sent automatically the moment the connection comes back.
+    </div>
+    <button type="button" id="again">Try again</button>
+    <div class="hint" id="hint">Waiting for the connection…</div>
+  </main>
+  <script>
+    // Retry by hand, and automatically the instant the device reports it's back.
+    document.getElementById("again").addEventListener("click", function () { location.reload(); });
+    window.addEventListener("online", function () {
+      document.getElementById("hint").textContent = "Back online — reloading…";
+      location.reload();
+    });
+    // navigator.onLine is TRUE on a café Wi-Fi that has no internet, so reloading just
+    // because it says "online" looped this page forever. PROVE there's a real connection
+    // first, and back off so a bad network isn't hammered.
+    var wait = 5000;
+    (function probe() {
+      setTimeout(function () {
+        fetch("/api/health", { method: "GET", cache: "no-store" })
+          .then(function (r) { if (r && r.ok) location.reload(); else again(); })
+          .catch(again);
+      }, wait);
+      function again() { wait = Math.min(wait * 2, 60000); probe(); }
+    })();
+  </script>
+</body>
+</html>

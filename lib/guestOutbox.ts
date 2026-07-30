@@ -159,7 +159,16 @@ export async function enqueueGuestOrder(p: {
 function doPost(item: GuestOrder) {
   return fetch("/api/guest/place-order", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "X-LFH-Action-Id": item.id },
+    headers: {
+      "Content-Type": "application/json",
+      "X-LFH-Action-Id": item.id,
+      // Everything sent from here is by definition a REPLAY — it was saved on this phone
+      // while it had no signal. These two markers let the server refuse an order whose
+      // table has moved on (closed/billed, or a different party now), instead of adding
+      // it to someone else's bill. See lib/clash.ts.
+      "X-LFH-Replay": "1",
+      "X-LFH-Queued-At": new Date(item.at || Date.now()).toISOString(),
+    },
     body: JSON.stringify({ mode: item.mode, token: item.token, table: item.table, restaurantId: item.restaurantId, items: item.items, allergies: item.allergies }),
   });
 }
@@ -173,11 +182,16 @@ export async function flushGuestOutbox() {
       let res: Response;
       try { res = await doPost(item); }
       catch { break; }                                   // still offline → stop, keep queue
-      if (res.status === 409) {                           // idempotency "processing" → try later
-        const j = await res.json().catch(() => null);
-        if (j?.retry) break;
+      // Read the body ONCE: the old code parsed it inside the 409 branch and then again
+      // below, where the already-consumed stream yielded null — so a clash message never
+      // reached the guest.
+      const j = await res.json().catch(() => null) as
+        | { ok?: boolean; order_id?: string; duplicate?: boolean; reason?: string; retry?: boolean; clash?: { plain?: string } }
+        | null;
+      if (res.status === 409 && j?.retry) break;           // idempotency "processing" → try later
+      if (res.status === 409 && j?.clash?.plain) {          // the table moved on while offline
+        await moveToFailed(item, j.clash.plain); notify(); continue;
       }
-      const j = await res.json().catch(() => null);
       if (res.ok && j?.ok && j.order_id) { recordActive(item, j.order_id as string); await removeItem(item.id); notify(); continue; }
       // Already placed on a prior sync whose reply we lost. The server now echoes the
       // original order_id back with the duplicate, so we can still show it to the guest

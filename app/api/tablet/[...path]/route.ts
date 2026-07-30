@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
+import { replayClash, clashJson } from "@/lib/clash";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
@@ -530,6 +531,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const blocked = await blockedReason(sectionLimit, a, b, c, body);
       if (blocked) return err(blocked, 403);
     }
+
+    // ── OFFLINE REPLAY CLASH (offline sync 2026-07-30) — ONE gate, same reasoning ──
+    // A change that was saved on a tablet with no signal and is only arriving now must
+    // not be applied if the ground moved underneath it: the table was closed and billed,
+    // or a DIFFERENT party is sitting there now. Applying it would put one party's dishes
+    // on another party's bill, or re-open a settled bill. Instead we refuse with a plain
+    // reason and the panel asks a person to redo it (see lib/clash.ts).
+    // A LIVE write never reaches this — it carries no replay marker, so replayClash()
+    // returns immediately without a single extra query.
+    const clash = await replayClash(req, rid, a, b, c, body as Record<string, unknown> | null);
+    if (clash) return clashJson(clash);
 
     // ── Raise an issue / complaint (photo + voice note optional) ────────────────
     // A waiter flags a floor problem for THIS restaurant; owner + admin see it. Media

@@ -13,6 +13,38 @@ owner looks, with cache busting, before claiming anything.
 
 ---
 
+## 📴 OFFLINE — "without internet my app should not break" (owner, 2026-07-30)
+
+Owner's words: the live/connection state must show, changes made with no internet must be
+kept on the device and applied when it returns, clashing changes must come back asking the
+person to redo them — and **the app must work exactly as it did, not break.**
+
+- [x] **O1 — The app OPENS with no internet.** Service worker `public/sw.js` + `/offline.html`;
+  registered for every surface (`components/OfflineShell.tsx`, `public/panels/swreg.js`).
+  Verified on a production build: manager / kitchen / owner / guest menu all survive a full
+  reload with the network cut.
+- [x] **O2 — Panels still SHOW their board offline** (last saved copy, never a blank screen).
+  The manager panel used to abort its whole render + live poll on a failed first load.
+- [x] **O3 — It says what's true**, never pretends saved data is live: red "No internet — you
+  can keep working · showing saved data from 7:42 pm" bar (`public/panels/offline.js`) and the
+  React strip (`components/OfflineNotice.tsx`). Checked on the owner's phone size (360×780),
+  light AND dark skins.
+- [x] **O4 — A change made offline is kept and visible.** Order taken with no signal → saved on
+  the device, "⏳ WAITING TO SEND (1) · 2× Pineapple Mint Mojito · not on the bill until the
+  kitchen has it" inside the table, ⏳ mark on the table tile, count in the top bar.
+- [x] **O5 — On reconnect it lands EXACTLY ONCE** (no double bill) — proven by test, not by eye.
+- [x] **O6 — A clashing change comes back to a person.** Another device closed + billed the
+  table while this one was offline → the replay is refused and shown as "Table 17 was closed
+  and billed after you did this — the order never reached the kitchen", with what to do and
+  a "Not needed anymore". Never silently applied, never silently dropped (`lib/clash.ts`).
+- [x] **O7 — Proof is repeatable:** `node scripts/verify-offline.mjs --base <url>` — 32 checks,
+  all passing against `next build && next start`.
+- [ ] **O8 — Real-device test** (an actual phone/tablet losing WiFi mid-service) — still only
+  proven headless. Known gaps, deliberately: guest-side writes other than placing an order
+  aren't queued yet; 3D models aren't cached offline.
+
+---
+
 ## 🔴 BUGS — "claimed fixed but owner STILL sees them broken" (VERIFY FIRST, then fix)
 
 - [x] **B1 — Panel shifter.** VERIFIED on main in Chrome: `/aevinite` shows a clean left

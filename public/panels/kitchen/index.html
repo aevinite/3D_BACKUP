@@ -53,6 +53,12 @@
   <script src="/panels/outbox.js?v=1"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=7"></script>
+  <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
+       internet, then shows an honest "no internet / showing saved data / needs you" bar.
+       offline.js must load AFTER outbox.js (it reads the queue) and after backstack.js
+       is available for the back button. -->
+  <script src="/panels/swreg.js?v=1"></script>
+  <script src="/panels/offline.js?v=1"></script>
   <script src="/panels/backstack.js"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
   <script src="/panels/errlog.js?v=2"></script>
