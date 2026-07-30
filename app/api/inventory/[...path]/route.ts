@@ -34,6 +34,11 @@ const ok = (body: Record<string, unknown> = {}) => NextResponse.json({ ok: true,
 const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 const isDate = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
 const num = (v: unknown): number => { const n = Number(v); return Number.isFinite(n) ? n : NaN; };
+// Every id this route accepts (path segment or ?item=) is a uuid our own UI produced.
+// Anything else is a BAD REQUEST — without this, Postgres raises "invalid input syntax
+// for type uuid" and the handler answered 500 with the raw DB text (QA sweep 2026-07-30).
+const isUuid = (v: unknown): boolean => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+const badId = () => err("That item no longer exists — refresh the page.", 400);
 
 // ── auth + power gates (the editor route's managerCan, scoped to this module) ──
 async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | NextResponse> {
@@ -281,6 +286,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     if (path[0] === "movements") {
       const item = q.get("item") || "";
       if (!item) return err("item required");
+      if (!isUuid(item)) return badId();
       const r = await sb.from("inv_movements").select("id, qty_base, kind, reason, ref_type, ref_id, unit_cost, created_by, created_at")
         .eq("restaurant_id", rid).eq("item_id", item).order("id", { ascending: false }).limit(50);
       if (r.error) return err(r.error.message, 500);
@@ -328,6 +334,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
     }
     if (path[0] === "expenses" && path[1] && path[2] === "void") {
       if (!(await invCan(g, rid, "inv_expenses"))) return denied("record expenses");
+      if (!isUuid(path[1])) return badId();
       const { body } = await readBody(req);
       const reason = String(body.reason || "").trim();
       if (!reason) return err("A reason is required to strike out an entry.");
@@ -456,6 +463,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ id: ins.data.id });
     }
     if (path[0] === "items" && path[1]) {
+      if (!isUuid(path[1])) return badId();
       const { body } = await readBody(req);
       const patch: Record<string, unknown> = {};
       if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 80);
@@ -499,6 +507,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ id: ins.data.id });
     }
     if (path[0] === "vendors" && path[1]) {
+      if (!isUuid(path[1])) return badId();
       const { body } = await readBody(req);
       const patch: Record<string, unknown> = {};
       if (typeof body.name === "string" && body.name.trim()) patch.name = body.name.trim().slice(0, 80);
@@ -571,6 +580,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ id: pid });
     }
     if (path[0] === "purchases" && path[1] && path[2] === "void") {
+      if (!isUuid(path[1])) return badId();
       const { body } = await readBody(req);
       const reason = String(body.reason || "").trim();
       if (!reason) return err("A reason is required to void a purchase.");
@@ -672,6 +682,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       return ok({ id: ins.data.id });
     }
     if (path[0] === "waste" && path[1] && path[2] === "void") {
+      if (!isUuid(path[1])) return badId();
       const { body } = await readBody(req);
       const reason = String(body.reason || "").trim();
       if (!reason) return err("A reason is required.");
