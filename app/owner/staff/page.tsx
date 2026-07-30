@@ -10,7 +10,7 @@
 // reuses this same API (they can't change the power toggles — those stay owner-only).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asSuffix } from "@/lib/ownerPin";
-import { MANAGER_POWER_FLAGS, ABSENT_ON_POWERS, PERM_BY_ID } from "@/lib/accessModel";
+import { MANAGER_POWER_FLAGS, ABSENT_ON_POWERS, PERM_BY_ID, PERM_BY_POWER } from "@/lib/accessModel";
 
 type Perms = Record<string, boolean>;
 type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean>; payAccess?: PayAccess; tableCount?: number };
@@ -60,10 +60,14 @@ const PERM_COPY: Record<string, [string, string]> = {
   take_orders: ["Take orders", "Start a new dine-in order at a table, like the waiter tablet"],
   parcel: ["Parcel / takeaway", "Punch in a quick takeaway (parcel) order from the floor — shows in the Platform board"],
   platform: ["Platform board", "See & manage online delivery orders (Zomato / Swiggy / website) in the 🛵 Platform tab"],
+  see_staff_pay: ["See staff pay", "Everyone's salary and payment history. Off unless you hand it over — a person always sees their own."],
+  record_staff_payment: ["Record a staff payment", "Log money handed to someone on the pay list — a salary, or a cash advance on a Sunday."],
+  edit_staff_profiles: ["Edit staff profiles", "Each person's own details — phone, address, emergency contact. Personal details only, never their salary."],
   table_assign: ["Give waiters their own tables", "Decide which tables each waiter's tablet shows — turn this off to keep sections in your hands only"],
 };
 const PERMS: [string, string, string][] = MANAGER_POWER_FLAGS.map((f) => {
-  const p = PERM_BY_ID[f];
+  // by POWER first (PERM_BY_ID only works when a permission's id equals its flag)
+  const p = PERM_BY_POWER[f] || PERM_BY_ID[f];
   return [f, PERM_COPY[f]?.[0] || p?.name || f, PERM_COPY[f]?.[1] || p?.what || ""];
 });
 const ROLES = ["manager", "kitchen", "tablet"];

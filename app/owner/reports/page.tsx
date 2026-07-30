@@ -925,12 +925,21 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     if (!people.length && !cash.length)
       return <EmptyCard text="No staff payments recorded in this period. Record one from Team & pay → open a person → Payments." />;
     const cashSeries = cash.map((r) => ({ label: bucketLabel(r.bucket, bucket === "month" ? "month" : "day"), value: r.paid_out }));
+    // "July 2026" or "Jul–Sep 2026" — whichever months the cost figures actually cover
+    const mLabel = (bkt: string) => new Date(bkt).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: TZ });
+    const monthSpan = months.length === 0 ? "" : months.length === 1 ? mLabel(months[0].bucket)
+      : `${mLabel(months[0].bucket)} – ${mLabel(months[months.length - 1].bucket)}`;
     return (
       <>
-        <div className="rs-stats">
+        <div className="rs-kpis">
           <Stat label="Paid out" value={inr(tt.paidOut || 0)} sub="money that actually left" tone="bad" icon="fa-arrow-up-from-bracket" big />
-          <Stat label="Team cost" value={inr(tt.expected || 0)} sub="what these months were worth" tone="info" icon="fa-scale-balanced" />
-          <Stat label="Still owed" value={inr(tt.owed || 0)} sub={tt.owed ? "not yet paid for those months" : "nothing pending"} tone={tt.owed ? "warn" : "good"} icon="fa-hourglass-half" />
+          {/* Cost and owed describe whole MONTHS, while "Paid out" describes the chosen range —
+              so on a short range (a day, a week) they must NAME the month or they read as if
+              you owe a month's wages today (found in the 2026-07-30 sweep). */}
+          <Stat label="Team cost" value={inr(tt.expected || 0)} tone="info" icon="fa-scale-balanced"
+            sub={monthSpan ? `${monthSpan} · what the month${months.length > 1 ? "s" : ""} ${months.length > 1 ? "are" : "is"} worth` : "what these months were worth"} />
+          <Stat label="Still owed" value={inr(tt.owed || 0)} tone={tt.owed ? "warn" : "good"} icon="fa-hourglass-half"
+            sub={tt.owed ? (monthSpan ? `still to pay for ${monthSpan}` : "not yet paid for those months") : "nothing pending"} />
           <Stat label="Advances out" value={inr(tt.advanceOutstanding || 0)} sub="to recover from later salary" tone={tt.advanceOutstanding ? "warn" : "good"} icon="fa-hand-holding-dollar" />
           <Stat label="People paid" value={nfmt(tt.people || 0)} sub="in this period" tone="accent" icon="fa-users" />
         </div>
@@ -1001,7 +1010,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     const bars = worked.slice(0, 12).map((r) => ({ id: r.staff_id, name: r.name, revenue: r.value, orders: r.orders, accentColor: accent }));
     return (
       <>
-        <div className="rs-stats">
+        <div className="rs-kpis">
           <Stat label="People working" value={nfmt(tt.active || 0)} sub={`of ${nfmt(tt.people || 0)} on the team`} tone="accent" icon="fa-users" big />
           <Stat label="Orders punched" value={nfmt(tt.orders || 0)} sub="by staff, not guests" tone="info" icon="fa-list-check" />
           <Stat label="Value punched" value={inr(tt.value || 0)} sub="what they put through" tone="good" icon="fa-indian-rupee-sign" />
