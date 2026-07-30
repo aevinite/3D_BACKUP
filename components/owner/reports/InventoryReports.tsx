@@ -50,8 +50,14 @@ export type InvDish = {
   slug: string; title: string; price: number; qtySold: number; revenue: number;
   plateCost: number; costTotal: number; ingredients: number; marginPct: number | null;
 };
+export type InvPerRest = { name: string; stockValue: number; purchases: number; expenses: number; wasted: number; theoreticalCost: number };
 export type InvPayload = {
   summary: InvSummary; coverage: InvCoverage; costDataFrom: string | null;
+  // ALL-RESTAURANTS mode: totals are summed across the owner's inventory-enabled
+  // restaurants and `perRestaurant` breaks them down. `dishes` is deliberately EMPTY
+  // then — a dish slug belongs to one menu, so merging cost-per-dish across kitchens
+  // would invent a dish nobody sells.
+  merged?: boolean; perRestaurant?: InvPerRest[];
   dishes: InvDish[]; items: InvItem[];
   vendors: { vendor: string; bills: number; amount: number; isCash: boolean }[];
   series: { bucket: string; purchased: number; used: number; wasted: number }[];
@@ -94,8 +100,11 @@ const EXP_LABELS: Record<string, string> = { breakage: "Breakage", repair: "Repa
 const WASTE_LABELS: Record<string, string> = { spoiled: "Spoiled", burnt: "Burnt", spilled: "Spilled", expired: "Expired", staff_meal: "Staff meal", complimentary: "On the house", other: "Other" };
 // LeaderBar speaks RevDatum (id/name/revenue/orders/accentColor) — this keeps the four
 // ranking bars in this file on the studio's own component instead of a parallel one.
-const bars = (rows: { label: string; value: number }[], accent = "") =>
-  rows.map((r, i) => ({ id: `${i}-${r.label}`, name: r.label, revenue: r.value, orders: 0, accentColor: accent }));
+// accentColor is used DIRECTLY as the bar fill by LeaderBar — an empty string paints the
+// bars black (caught in the merged-view screenshot), so always pass a real colour.
+const BAR_FILL = "#10b981";
+const bars = (rows: { label: string; value: number }[], fill = BAR_FILL) =>
+  rows.map((r, i) => ({ id: `${i}-${r.label}`, name: r.label, revenue: r.value, orders: 0, accentColor: fill }));
 const pct1 = (n: number | null) => (n == null ? "—" : `${n.toFixed(1)}%`);
 // Base units → the unit people buy in (kg / L / pc), which is how stock is discussed.
 const inBuy = (i: { factor: number; buyUom: string }, base: number) =>
@@ -166,6 +175,30 @@ export function InvHero({ s, kind }: { s: InvSummary; kind: string }) {
   );
 }
 
+// ── ALL-RESTAURANTS breakdown — which kitchen holds what ────────────────────
+export function PerRestaurantPanel({ d }: { d: InvPayload }) {
+  if (!d.merged || !d.perRestaurant?.length) return null;
+  return (
+    <Panel title="By restaurant" hint={`${nfmt(d.perRestaurant.length)} restaurants with stock tracking`} id="inv-per-rest">
+      <SearchTable rows={d.perRestaurant} columns={[
+        { key: "name", label: "Restaurant", render: (r) => r.name, sortBy: (r) => r.name },
+        { key: "shelf", label: "On the shelf", num: true, render: (r) => inr(r.stockValue), sortBy: (r) => r.stockValue },
+        { key: "bought", label: "Bought", num: true, render: (r) => inr(r.purchases), sortBy: (r) => r.purchases },
+        { key: "used", label: "Ingredients used", num: true, render: (r) => inr(r.theoreticalCost), sortBy: (r) => r.theoreticalCost },
+        { key: "waste", label: "Wasted", num: true, render: (r) => inr(r.wasted), sortBy: (r) => r.wasted },
+        { key: "exp", label: "Expenses", num: true, render: (r) => inr(r.expenses), sortBy: (r) => r.expenses },
+      ] as Col<InvPerRest>[]} searchKey={(r) => r.name} initialSort={{ key: "shelf", dir: "desc" }}
+        placeholder="Search restaurants…" emptyText="No restaurant has stock tracking on."
+        footer={<tr><td><b>All</b></td>
+          <td className="num"><b>{inr(d.summary.stockValue)}</b></td>
+          <td className="num"><b>{inr(d.summary.purchases)}</b></td>
+          <td className="num"><b>{inr(d.summary.theoreticalCost)}</b></td>
+          <td className="num"><b>{inr(d.summary.wasted)}</b></td>
+          <td className="num"><b>{inr(d.summary.expenses)}</b></td></tr>} />
+    </Panel>
+  );
+}
+
 // ══ 1. STOCK ON HAND — "you can see remaining inventory also" ════════════════
 export function InvStockReport({ d }: { d: InvPayload }) {
   const [onlyLow, setOnlyLow] = useState(false);
@@ -186,6 +219,7 @@ export function InvStockReport({ d }: { d: InvPayload }) {
   return (
     <>
       <InvHero s={d.summary} kind="invstock" />
+      <PerRestaurantPanel d={d} />
       {d.summary.negativeCount > 0 && (
         <div className="rs-note warn">
           <b>{nfmt(d.summary.negativeCount)} ingredient{d.summary.negativeCount === 1 ? " shows" : "s show"} less than
@@ -195,10 +229,10 @@ export function InvStockReport({ d }: { d: InvPayload }) {
       )}
       {top.length > 1 && (
         <Panel title="Where the money is sitting" hint="the biggest slices of your shelf value" id="inv-top">
-          <LeaderBar data={bars(top)} />
+          <LeaderBar data={bars(top)} valueLabel="On the shelf" />
         </Panel>
       )}
-      <Panel title="Everything on the shelf" hint={`${nfmt(d.items.length)} ingredients · ${inr(d.summary.stockValue)} total`}
+      <Panel title="Everything on the shelf" hint={`${nfmt(d.items.length)} ingredients · ${inr(d.summary.stockValue)} total${d.merged ? " · same ingredient added up across restaurants" : ""}`}
         right={<span className="rs-metric"><button aria-pressed={onlyLow} onClick={() => setOnlyLow((v) => !v)}>{onlyLow ? "Showing low only" : "Show low only"}</button></span>} id="inv-stock-table">
         <SearchTable rows={rows} columns={cols} searchKey={(r) => `${r.name} ${r.category}`}
           initialSort={{ key: "val", dir: "desc" }} placeholder="Search ingredients…"
@@ -262,6 +296,7 @@ export function InvUsageReport({ d }: { d: InvPayload }) {
   return (
     <>
       <InvHero s={d.summary} kind="invusage" />
+      <PerRestaurantPanel d={d} />
       <CoverageNote cov={d.coverage} from={d.costDataFrom} />
       <Panel title="The two cost numbers — and why they differ" id="inv-two-costs">
         <div className="rs-split">
@@ -287,6 +322,9 @@ export function InvUsageReport({ d }: { d: InvPayload }) {
             initialSort={{ key: byCost ? "total" : "margin", dir: byCost ? "desc" : "asc" }}
             placeholder="Search dishes…" emptyText="No mapped dish was sold in this period."
             footer={<tr><td><b>Total</b></td><td className="num"><b>{nfmt(d.dishes.reduce((a, r) => a + r.qtySold, 0))}</b></td><td /><td /><td /><td className="num"><b>{inr(d.summary.theoreticalCost)}</b></td></tr>} />
+        ) : d.merged ? (
+          <div className="rs-empty">Cost per dish is per restaurant — a dish belongs to one menu, so
+            it can&apos;t be added up across kitchens. Pick a single restaurant above to see it.</div>
         ) : (
           <div className="rs-empty">No dish has a recipe yet — map one in the Manager panel under
             Inventory → Recipes and this table fills itself in.</div>
@@ -310,7 +348,7 @@ export function InvUsageReport({ d }: { d: InvPayload }) {
             causes, in order: over-portioning, a delivery entered short, waste nobody logged, or
             something walking out. It sharpens as more dishes get recipes.
           </div>
-          <LeaderBar data={bars(leak.slice(0, 8).map((i) => ({ label: i.name, value: Math.abs(i.adjustVal) })))} />
+          <LeaderBar data={bars(leak.slice(0, 8).map((i) => ({ label: i.name, value: Math.abs(i.adjustVal) })), "#ef4444")} valueLabel="Missing" />
         </Panel>
       )}
     </>
@@ -332,7 +370,7 @@ export function InvWasteReport({ d }: { d: InvPayload }) {
     <>
       <InvHero s={d.summary} kind="invwaste" />
       {byReason.length > 0 && (
-        <Panel title="Why it was thrown away" id="inv-waste-reason"><LeaderBar data={bars(byReason)} /></Panel>
+        <Panel title="Why it was thrown away" id="inv-waste-reason"><LeaderBar data={bars(byReason, "#f59e0b")} valueLabel="Wasted" /></Panel>
       )}
       <Panel title="Every waste entry" hint={`${nfmt(d.waste.filter((w) => !w.voided_at).length)} entries · ${inr(d.summary.wasted)}`} id="inv-waste-list">
         <SearchTable rows={d.waste} columns={[
@@ -363,7 +401,7 @@ export function InvExpensesReport({ d }: { d: InvPayload }) {
     <>
       <InvHero s={d.summary} kind="invexpenses" />
       {byCat.length > 0 && (
-        <Panel title="What the money went on" id="inv-exp-cat"><LeaderBar data={bars(byCat)} /></Panel>
+        <Panel title="What the money went on" id="inv-exp-cat"><LeaderBar data={bars(byCat)} valueLabel="Spent" /></Panel>
       )}
       <Panel title="Every expense" hint={`${nfmt(live.length)} entr${live.length === 1 ? "y" : "ies"} · ${inr(d.summary.expenses)}`} id="inv-exp-list">
         <SearchTable rows={d.expenses} columns={[

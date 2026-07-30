@@ -156,6 +156,7 @@ type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: Pa
   // lines) and `costSeries` (the second line on the sales chart). Both are absent/null
   // when the module is off, which is what keeps inventory invisible then.
   summary?: InvPayload["summary"]; coverage?: InvPayload["coverage"]; costDataFrom?: string | null;
+  merged?: boolean; perRestaurant?: InvPayload["perRestaurant"];
   dishes?: InvPayload["dishes"]; items?: InvPayload["items"]; vendors?: InvPayload["vendors"];
   series?: InvPayload["series"]; expenses?: InvPayload["expenses"]; waste?: InvPayload["waste"];
   inventory?: {
@@ -875,6 +876,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
       summary: data.summary, coverage: data.coverage, costDataFrom: data.costDataFrom ?? null,
       dishes: data.dishes ?? [], items: data.items ?? [], vendors: data.vendors ?? [],
       series: data.series ?? [], expenses: data.expenses ?? [], waste: data.waste ?? [],
+      merged: data.merged, perRestaurant: data.perRestaurant,
     };
     return (
       <>
