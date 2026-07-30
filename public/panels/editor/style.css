@@ -176,7 +176,11 @@ body.nav-compact .tab {
    renderXrayRibbon() in app.js; 0px for real staff. Every fixed-height calc must
    subtract it or the bottom of the page hangs below the viewport in admin view
    (owner 2026-07-05: detail-panel footer was clipped at the screen edge). */
-.layout { display: grid; grid-template-columns: var(--sidebar-w, 320px) 1fr; height: calc(100vh - 60px - var(--ribbon-h, 0px)); }
+/* --offbar-h: the offline bar's height, published by public/panels/offline.js while it is
+   showing. Without it this hard-coded 60px chrome assumption pushed the bottom of the
+   panel off-screen whenever the bar appeared — the same problem --ribbon-h solves for the
+   admin ribbon. */
+.layout { display: grid; grid-template-columns: var(--sidebar-w, 320px) 1fr; height: calc(100vh - 60px - var(--ribbon-h, 0px) - var(--offbar-h, 0px)); }
 /* Tables tab: no left sidebar — collapse the first column so the floor fills the width. */
 .layout.no-sidebar { grid-template-columns: 1fr; }
 .layout.no-sidebar > .sidebar { display: none; }

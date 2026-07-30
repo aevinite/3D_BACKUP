@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
+import { replayClash, clashJson } from "@/lib/clash";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
@@ -1279,6 +1280,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (emptyIdSegment(b) || emptyIdSegment(c)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which device (this editor screen) is acting
+
+    // ── OFFLINE REPLAY CLASH (offline sync 2026-07-30) ────────────────────────────
+    // A change saved on a device with no signal, arriving only now, must not be applied
+    // if the ground moved underneath it (the table was closed and billed, or a different
+    // party is sitting there now). We refuse with a plain reason and the panel asks a
+    // person to redo it — never a silent overwrite, never a silent drop. See lib/clash.ts.
+    // A LIVE write carries no replay marker, so this returns without a single query.
+    const clash = await replayClash(req, rid, a, b, c, body as Record<string, unknown> | null);
+    if (clash) return clashJson(clash);
 
     // customer-capture — save the guest's name+number at bill time, with consent
     // (Customer CRM, mig 212). DPDP: the RPC stores NOTHING without consent. Records

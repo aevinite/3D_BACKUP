@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
+import { replayClash, clashJson } from "@/lib/clash";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
@@ -154,6 +155,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       : { actor_id: ADMIN_VIEW_ACTOR_ID };
     // A staff-blocked device can't do anything from the kitchen screen.
     if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
+
+    // ── OFFLINE REPLAY CLASH (offline sync 2026-07-30) ────────────────────────────
+    // A change saved on a screen with no signal, arriving only now, must not be applied
+    // if the ground moved underneath it (the table was closed and billed, or a different
+    // party is sitting there now). We refuse with a plain reason and the panel asks a
+    // person to redo it — never a silent overwrite, never a silent drop. See lib/clash.ts.
+    // A LIVE write carries no replay marker, so this returns without a single query.
+    const clash = await replayClash(req, rid, a, b, c, body as Record<string, unknown> | null);
+    if (clash) return clashJson(clash);
 
     // ── Raise an issue / complaint (photo + voice note optional) ────────────────
     // The kitchen flags a problem (equipment, stock…) for THIS restaurant; owner +

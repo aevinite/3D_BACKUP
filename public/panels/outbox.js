@@ -101,10 +101,38 @@
     return (method === "DELETE" ? "Delete " : "") + (seg || "Action");
   }
 
-  function doFetch(item) {
+  // Which TABLE does this action belong to? Used to show, on the table itself, that
+  // something taken on this device hasn't reached the kitchen yet — so an offline order
+  // is never invisible. Returns null when an action can't be tied to one table (those
+  // stay visible in the top bar + the "waiting" list instead).
+  function tableOf(item) {
+    try {
+      var b = item.body || {};
+      if (b.table != null && b.table !== "") return String(b.table);
+      if (b.table_number != null && b.table_number !== "") return String(b.table_number);
+      var p = item.path || "";
+      var m = p.match(/\/tables\/([^/?&]+)/) || p.match(/[?&]table=([^&]+)/);
+      if (m) return decodeURIComponent(m[1]);
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  // `replay` = this is a change coming OUT of the queue (it was saved on the device
+  // earlier), not a live write. Only a replay is clash-checked on the server, which is
+  // what keeps the normal online path byte-for-byte unchanged.
+  function doFetch(item, replay) {
+    var headers = {
+      "Content-Type": "application/json",
+      "X-LFH-Action-Id": item.id,
+      // WHEN the person actually did this. The server uses it to spot a clash: if the
+      // table was closed or the bill was settled after this moment, applying it now
+      // would quietly overwrite someone else's work (see lib/clash.ts).
+      "X-LFH-Queued-At": new Date(item.at || Date.now()).toISOString(),
+    };
+    if (replay) headers["X-LFH-Replay"] = "1";
     return fetch(item.base + item.path, {
       method: item.method,
-      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": item.id },
+      headers: headers,
       body: item.body != null ? JSON.stringify(item.body) : undefined,
     });
   }
@@ -122,10 +150,20 @@
     await idbDel(id);
   }
 
-  async function moveToFailed(item, reason) {
+  // A change that came back needing a PERSON. `info` carries the server's plain-language
+  // explanation + what to do next, so the "Needs you" sheet can say something useful
+  // instead of a status code. Nothing is ever thrown away here.
+  async function moveToFailed(item, reason, info) {
     queued = queued.filter((x) => x.id !== item.id);
     item.status = "failed";
     item.error = reason || "Could not sync";
+    if (info) {
+      item.plain = info.plain || null;   // "Table 5 was already billed and closed."
+      item.todo = info.todo || null;     // "Open the table again and re-take this order."
+      // A clash won't fix itself by resending the same thing — the person has to redo it
+      // against how things are NOW. Anything else (a timeout, a server hiccup) can retry.
+      item.retryable = info.retryable === undefined ? true : !!info.retryable;
+    }
     failed.push(item);
     await idbPut(item);
   }
@@ -170,19 +208,38 @@
       while (queued.length && navigator.onLine !== false) {
         const item = queued[0];
         let res;
-        try { res = await doFetch(item); }
+        try { res = await doFetch(item, true); } // true = a saved change being replayed
         catch (netErr) { break; }               // still offline → stop; keep the queue for next time
         if (res.status === 401) { break; }        // not logged in → can't sync now; keep the queue
         if (res.ok) { await removeItem(item.id); notify(); continue; } // sent (incl. server-dedup ok:true,duplicate:true)
         if (res.status === 409) {
           const j = await res.json().catch(() => null);
           if (j && j.retry) break;                // server is processing this id right now → try again shortly
-          await moveToFailed(item, (j && j.error) || "Already changed"); notify(); continue;
+          // A CLASH: while this device was offline, the same thing moved on (the table
+          // was closed/billed, or another device changed exactly what this was changing).
+          // The server refuses rather than overwrite it, and tells us how to say so.
+          await moveToFailed(item, (j && j.clash && j.clash.plain) || (j && j.error) || "Already changed", j && j.clash);
+          notify(); continue;
         }
-        // Any other 4xx/5xx → the server rejected this action (state changed while
-        // offline, or it's no longer valid). Surface it instead of losing it.
+        // A TRANSIENT server problem (5xx) is not a rejection — keep it queued so the
+        // periodic re-flush tries again, exactly like the guest outbox does. Otherwise a
+        // single database hiccup would strand a real order in the "needs you" list.
+        // BUT not forever: if it keeps failing, a person needs to know rather than watch
+        // "sending…" spin all shift. After a few goes it becomes their decision.
+        if (res.status >= 500) {
+          item.tries = (item.tries || 0) + 1;
+          if (item.tries < 5) { await idbPut(item); break; }
+          await moveToFailed(item, "The restaurant's system kept refusing this", {
+            plain: "The system couldn't accept this after several tries.",
+            todo: "Check whether it already happened; if not, do it again.",
+            retryable: true,
+          });
+          notify(); continue;
+        }
+        // Any other 4xx → the server genuinely won't accept this action any more.
+        // Surface it instead of losing it.
         const j = await res.json().catch(() => null);
-        await moveToFailed(item, (j && j.error) || ("Sync failed (" + res.status + ")")); notify(); continue;
+        await moveToFailed(item, (j && j.error) || ("Sync failed (" + res.status + ")"), j && j.clash); notify(); continue;
       }
     } finally {
       flushing = false;
@@ -209,6 +266,20 @@
     flush();
   }
   async function dismiss(id) { await removeItem(id); notify(); }
+  // Retry ONE specific change from the "Needs you" sheet (the old retryFailed() put the
+  // whole list back at once, which is wrong when only one of them is worth another go).
+  async function retryOne(id) {
+    const it = failed.filter((x) => x.id === id)[0];
+    if (!it) return;
+    failed = failed.filter((x) => x.id !== id);
+    // Reset the attempt counter too: a person choosing "Try again" is asking for a fresh
+    // go, not for the one attempt left over from the automatic retries.
+    it.status = "queued"; it.error = undefined; it.plain = undefined; it.todo = undefined; it.tries = 0;
+    queued.push(it);
+    await idbPut(it);
+    notify();
+    flush();
+  }
 
   // ── boot: load any actions left over from a previous (offline) session ──────
   async function boot() {
@@ -227,7 +298,26 @@
     send,
     flush,
     retryFailed,
+    retryOne,
     dismiss,
+    // Everything taken on this device for ONE table that hasn't reached the server yet.
+    // The panels use this to mark the table (⏳) and to list what's waiting inside it, so
+    // an order taken with no internet is visible where the waiter looks for it.
+    pendingForTable: function (t) {
+      if (t == null) return [];
+      const key = String(t);
+      return queued.concat(failed).filter((it) => tableOf(it) === key);
+    },
+    // { "5": 2, "7": 1 } — how many unsent changes each table is carrying.
+    pendingByTable: function () {
+      const out = {};
+      queued.concat(failed).forEach((it) => {
+        const t = tableOf(it);
+        if (t != null) out[t] = (out[t] || 0) + 1;
+      });
+      return out;
+    },
+    tableOf,
     getSnapshot: () => ({ queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length }),
     pendingCount: () => queued.length,
     failedCount: () => failed.length,

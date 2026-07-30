@@ -1,0 +1,340 @@
+/* sw.js — the OFFLINE SHELL for the whole app (guest menu + all staff panels).
+ *
+ * WHY THIS EXISTS
+ *   Before this file, losing the connection didn't just stop new data — it BROKE the
+ *   app: a reload (or a phone waking the tab) had no HTML to load, so staff got the
+ *   browser's dinosaur page mid-service. The write side was already safe (actions are
+ *   saved on-device and replayed — see public/panels/outbox.js + lib/idempotency.ts);
+ *   what was missing was being able to OPEN and READ the app with no internet.
+ *
+ * WHAT IT DOES (three caches, all per-device, nothing leaves the device)
+ *   1. lfh-shell — the HTML of pages you've already visited, so the app still opens.
+ *   2. lfh-asset — the JS/CSS/images it needs to render (hashed Next chunks + /panels).
+ *   3. lfh-data  — the last successful reply of each read (GET /api/...), so a panel
+ *      shows the LAST KNOWN board instead of an empty screen. Served with
+ *      `X-LFH-From-Cache: 1` + `X-LFH-Cached-At` so the UI can honestly say
+ *      "showing saved data from 7:42 pm" rather than pretending it's live.
+ *
+ * SAFETY RULES BAKED IN (do not "optimise" these away)
+ *   - ONLINE FRESHNESS IS NEVER TRADED AWAY. Every dynamic request is NETWORK-FIRST;
+ *     the cache is only a fallback for a dead/stalled network. The one cache-FIRST
+ *     path is /_next/static/, whose filenames contain a content hash, so it cannot go
+ *     stale. This is what stops the classic "I deployed but the panel shows old code".
+ *   - WRITES ARE NEVER TOUCHED. Anything that isn't a GET goes straight to the network
+ *     (the outbox owns offline writes; a service worker replaying a POST would risk a
+ *     double bill).
+ *   - LOGIN/AUTH IS NEVER CACHED, and the data cache is WIPED on logout / on switching
+ *     restaurant, so one device can never show another account's numbers offline.
+ *   - KILL SWITCH: deleting/404-ing this file unregisters it (browser behaviour), and
+ *     posting {type:"LFH_SW_KILL"} from the page drops every cache + unregisters.
+ */
+const VERSION = "v1";
+const SHELL = `lfh-shell-${VERSION}`;
+const ASSET = `lfh-asset-${VERSION}`;
+const DATA = `lfh-data-${VERSION}`;
+const OFFLINE_URL = "/offline.html";
+
+// A stalled network is the WORST case for staff ("less internet" — it hangs forever and
+// the panel looks frozen). Race every fallback-able request against a timer and fall
+// back to the saved copy instead of spinning.
+const NET_TIMEOUT_MS = 6000;   // navigations + operational reads
+// Assets get a MUCH longer leash than reads. It used to be none at all, which meant a
+// crawling connection could hang a script request forever with no fallback; and before
+// that it was 8s, which cut off a slow 3D model download. Big media is now excluded by
+// path (isBigMedia), so a generous guard is safe and still rescues a hung script.
+const ASSET_TIMEOUT_MS = 25000;
+
+// Caps, so no cache can grow without limit (SHELL collects a key per visited URL, ASSET
+// one per chunk of every deploy). Oldest entries go first.
+const CAPS = { data: 150, shell: 60, asset: 400 };
+const MAX_DATA_BYTES = 3_000_000; // don't cache a huge report payload
+
+// A saved copy is only good for so long. After this, being offline shows the "no internet"
+// page instead of yesterday's screens and figures — which also bounds how long a device
+// that was left signed in keeps anything readable on it.
+const MAX_STALE_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+// Never cached, ever: anything to do with signing in, or a one-shot action route.
+const NEVER = [
+  /^\/api\/(staff-)?login/, /^\/api\/auth/, /^\/api\/owner\/login/,
+  /^\/login/, /^\/staff-login/, /^\/api\/verify/, /^\/api\/health/,
+];
+// Signing out is a plain link (a navigation), so the page's JS never gets to run
+// afterwards — the ONLY reliable place to forget this device's saved screens and
+// numbers is right here, as the request passes through.
+const LOGOUT = /^\/api\/(panel|staff)-logout/; // the only two logout routes that exist
+// Read families worth remembering for offline (panel + dashboard + guest-menu reads).
+const DATA_PATHS = [
+  /^\/api\/editor\//, /^\/api\/tablet\//, /^\/api\/kitchen\//, /^\/api\/admin\//,
+  /^\/api\/owner\//, /^\/api\/guest\//, /^\/api\/inventory\//, /^\/api\/menu/,
+  /^\/api\/r\//,            // guest menu data per restaurant
+  /^\/api\/panel-profile/,  // who am I → the ⚙/👤 button still appears offline
+  /^\/api\/maintenance/,    // maintenance flag → panels don't misjudge it offline
+  /^\/api\/rt-config/,      // realtime config → reconnects the instant we're back
+];
+
+// BIG MEDIA IS NONE OF OUR BUSINESS. The 3D dish models are multi-megabyte files with
+// their own in-memory loader (lib/modelLoader.ts) and a 1-year immutable cache header, and
+// buffering them here would be pure waste. Worse, an earlier version raced them against a
+// timeout, which ABORTED a slow model download and broke the 3D viewer — caught by
+// scripts/verify-cache.mjs.
+const isBigMedia = (p) => p.startsWith("/models/") || /\.(glb|gltf|mp4|webm|mov|zip)$/i.test(p);
+
+// Query flags that mean "give me the live value or tell me you can't" — never a saved one.
+const WANTS_LIVE = ["refresh", "force", "nocache"];
+
+const isNever = (p) => NEVER.some((re) => re.test(p));
+const isData = (p) => DATA_PATHS.some((re) => re.test(p));
+
+// On localhost the dev server's chunk filenames are NOT content-hashed, so the
+// cache-first shortcut would happily serve yesterday's code and look like "my change
+// didn't work". Dev gets network-first for everything (offline still works, just no
+// instant-asset shortcut). Also skip dev-only plumbing entirely.
+const IS_DEV = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(self.location.hostname);
+const isDevPlumbing = (p) => p.startsWith("/_next/webpack-hmr") || p.startsWith("/__nextjs") || p.includes("/_next/static/webpack/");
+
+// ── install / activate ──────────────────────────────────────────────────────────
+self.addEventListener("install", (e) => {
+  e.waitUntil(
+    caches.open(SHELL)
+      .then((c) => c.addAll([OFFLINE_URL]).catch(() => {})) // fallback page is best-effort
+      .then(() => self.skipWaiting()),
+  );
+});
+
+self.addEventListener("activate", (e) => {
+  e.waitUntil((async () => {
+    const keep = new Set([SHELL, ASSET, DATA]);
+    for (const k of await caches.keys()) if (k.startsWith("lfh-") && !keep.has(k)) await caches.delete(k);
+    await self.clients.claim();
+  })());
+});
+
+// ── messages from the page ──────────────────────────────────────────────────────
+self.addEventListener("message", (e) => {
+  const type = e.data && e.data.type;
+  if (type === "LFH_CLEAR_DATA") {
+    // Logout / switched restaurant → forget every saved read so the next person on this
+    // device can't see the previous account's numbers while offline.
+    e.waitUntil(caches.delete(DATA).then(() => caches.delete(SHELL)));
+  } else if (type === "LFH_SW_KILL") {
+    e.waitUntil((async () => {
+      for (const k of await caches.keys()) if (k.startsWith("lfh-")) await caches.delete(k);
+      await self.registration.unregister();
+    })());
+  } else if (type === "LFH_SKIP_WAITING") {
+    self.skipWaiting(); // a fresh deploy takes over now, not next time the tab closes
+  } else if (type === "LFH_PING") {
+    if (e.source) e.source.postMessage({ type: "LFH_PONG", version: VERSION });
+  }
+});
+
+// ── helpers ─────────────────────────────────────────────────────────────────────
+// Rebuild a response with our provenance headers attached (fetch headers are immutable,
+// so this is how a cached body gets labelled "this is saved data, from this time").
+async function tagged(res, cachedAt) {
+  const body = await res.blob();
+  const h = new Headers(res.headers);
+  h.set("X-LFH-From-Cache", "1");
+  h.set("X-LFH-Cached-At", String(cachedAt || Date.now()));
+  return new Response(body, { status: res.status, statusText: res.statusText, headers: h });
+}
+
+// Stamp the save time INTO the stored copy, so a later offline read can say how old it is.
+async function putStamped(cacheName, key, res) {
+  try {
+    // Check the declared size BEFORE buffering, so a big file is skipped without ever
+    // being copied into memory.
+    const declared = Number(res.headers.get("content-length") || 0);
+    if (declared > MAX_DATA_BYTES) return;
+    const buf = await res.clone().arrayBuffer();
+    if (buf.byteLength > MAX_DATA_BYTES) return;
+    const h = new Headers(res.headers);
+    h.set("X-LFH-Cached-At", String(Date.now()));
+    const cache = await caches.open(cacheName);
+    await cache.put(key, new Response(buf, { status: res.status, statusText: res.statusText, headers: h }));
+    trim(cache, cacheName === DATA ? CAPS.data : cacheName === SHELL ? CAPS.shell : CAPS.asset);
+  } catch { /* quota/opaque → skip silently, caching is a bonus not a dependency */ }
+}
+
+// Keep the read cache from growing forever: drop the oldest entries past the cap.
+async function trim(cache, cap) {
+  try {
+    const keys = await cache.keys();
+    if (keys.length <= cap) return;
+    const aged = [];
+    for (const k of keys) {
+      const r = await cache.match(k);
+      aged.push({ k, at: Number((r && r.headers.get("X-LFH-Cached-At")) || 0) });
+    }
+    aged.sort((a, b) => a.at - b.at);
+    for (const { k } of aged.slice(0, keys.length - cap)) await cache.delete(k);
+  } catch { /* best effort */ }
+}
+
+// Tell every open page that what it just received was SAVED data, not live data. The
+// panels read the same fact off the response headers, but a React page's fetches are
+// spread over many files — one broadcast from here means the banner is correct
+// everywhere without touching a single call site.
+async function announceStale(at, clientId) {
+  try {
+    const msg = { type: "LFH_SERVED_FROM_CACHE", at: at || Date.now() };
+    // ONLY the page that made this request. Telling every open tab meant a slow staff read
+    // painted a "showing saved figures" strip across unrelated tabs — including a
+    // customer's menu on the same device.
+    if (clientId) {
+      const c = await self.clients.get(clientId);
+      if (c) c.postMessage(msg);
+      return;
+    }
+    const all = await self.clients.matchAll({ type: "window" });
+    all.forEach((c) => c.postMessage(msg));
+  } catch { /* best effort */ }
+}
+
+async function cachedCopy(cacheName, key, opts, clientId) {
+  const cache = await caches.open(cacheName);
+  // `ignoreVary` is ESSENTIAL, not a nicety: Next sends `Vary` on its replies, and a
+  // lookup by bare URL builds a request whose headers don't match the saved one — so
+  // every saved read silently missed and offline screens came up empty. (Found while
+  // testing the guest menu offline: the page opened but listed no dishes.)
+  const hit = await cache.match(key, { ignoreVary: true, ...(opts || {}) });
+  if (!hit) return null;
+  const at = Number(hit.headers.get("X-LFH-Cached-At") || 0);
+  // Too old to be worth showing — better an honest "no internet" than figures from
+  // another day presented as the current state of the restaurant.
+  if (at && Date.now() - at > MAX_STALE_MS) { await cache.delete(key); return null; }
+  if (cacheName === DATA) announceStale(at, clientId);
+  return tagged(hit, at);
+}
+
+// React client-side navigation fetches the SAME url with an RSC header; it must not
+// share a cache key with the HTML document, so give it its own suffix.
+const rscKey = (url) => url + (url.includes("?") ? "&" : "?") + "__lfh_rsc=1";
+
+// ── the router ──────────────────────────────────────────────────────────────────
+self.addEventListener("fetch", (event) => {
+  const req = event.request;
+
+  // Writes, cross-origin (Supabase/CDN), range requests (3D models, media) and
+  // only-if-cached probes are none of our business.
+  if (req.method !== "GET") return;
+  if (req.cache === "only-if-cached" && req.mode !== "same-origin") return;
+  if (req.headers.has("range")) return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+  if (LOGOUT.test(url.pathname)) {
+    // Let the logout itself go to the network untouched, but wipe the device's saved
+    // pages + saved reads as it goes, so the next person to open this device offline
+    // can't page through the previous account's screens.
+    event.waitUntil(caches.delete(DATA).then(() => caches.delete(SHELL)).catch(() => {}));
+    return;
+  }
+  if (isNever(url.pathname)) return;
+  if (isDevPlumbing(url.pathname)) return;
+  if (isBigMedia(url.pathname)) return;
+
+  const isNav = req.mode === "navigate";
+  const isRsc = req.headers.get("RSC") === "1" || url.searchParams.has("_rsc");
+
+  if (isNav) return event.respondWith(handleNav(req, url));
+  if (isRsc) return event.respondWith(networkFirst(req, SHELL, rscKey(req.url), NET_TIMEOUT_MS));
+  if (url.pathname.startsWith("/_next/static/")) {
+    return event.respondWith(IS_DEV ? networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS) : cacheFirst(req, ASSET));
+  }
+  if (url.pathname.startsWith("/api/")) {
+    if (!isData(url.pathname)) return;
+    // A FORCED REFRESH means "I want the real number, I'll wait" (that's the contract of
+    // the owner panel's Refresh button — see the snapshot-cache rule in CLAUDE.md). It must
+    // never be answered from the device, not even if the network is crawling.
+    if (WANTS_LIVE.some((p) => url.searchParams.has(p))) {
+      return event.respondWith(networkFirst(req, DATA, req.url, 0, { noFallback: true, clientId: event.clientId }));
+    }
+    // Dashboards and reports are ALLOWED to be slow — they scan and aggregate. Racing them
+    // against a few seconds would hand an owner saved figures on a perfectly good
+    // connection. They still fall back if the network is genuinely dead, just never on
+    // grounds of slowness. Operational panel reads are small, so a stall there is a real
+    // problem and does get the guard.
+    const slowByNature = /^\/api\/(owner|admin|inventory)\//.test(url.pathname);
+    return event.respondWith(networkFirst(req, DATA, req.url, slowByNature ? 0 : NET_TIMEOUT_MS, { clientId: event.clientId }));
+  }
+  // Everything else same-origin static: /panels/*, /brand/*, fonts, images, /vendor/*.
+  return event.respondWith(networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS));
+});
+
+// Pages: always try the network, fall back to this page's saved HTML, then to a
+// same-path match ignoring the query, then to the branded offline page.
+async function handleNav(req, url) {
+  // Same rule as reads: the request is never thrown away. If it's merely slow we show the
+  // saved page, but the real one still lands and is saved for next time.
+  const live = fetch(req).then((res) => {
+    // Don't memorise redirects or error pages — only a real rendered page.
+    if (res && res.ok && res.status === 200 && res.type !== "opaqueredirect") putStamped(SHELL, req.url, res);
+    return res;
+  });
+  try {
+    let timer;
+    const stalled = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("stall")), NET_TIMEOUT_MS); });
+    try { return await Promise.race([live, stalled]); } finally { clearTimeout(timer); }
+  } catch {
+    live.catch(() => {});
+    return (await cachedCopy(SHELL, req.url))
+      || (await cachedCopy(SHELL, req.url, { ignoreSearch: true }))
+      || (await caches.match(OFFLINE_URL))
+      || new Response("<h1>Offline</h1>", { status: 503, headers: { "Content-Type": "text/html" } });
+  }
+}
+
+// Fresh when there's a network, saved copy when there isn't. Never the other way round.
+//
+// `timeout` (0 = none) is the STALL guard for a connection that hangs rather than dies.
+// Two rules make it safe to use on a working connection:
+//   - The abandoned request is NOT cancelled or thrown away. It keeps going and its reply
+//     is still saved, so the device's copy ages FORWARD and the bandwidth isn't wasted.
+//     (Racing-and-discarding meant a permanently slow link stayed pinned to one ancient
+//     snapshot while paying full egress for every read — the worst of both worlds.)
+//   - Callers that must have the live value (a forced Refresh, the analytics reads that
+//     are legitimately slow) pass timeout 0 and simply wait.
+async function networkFirst(req, cacheName, key, timeout, opts) {
+  const noFallback = opts && opts.noFallback; // must be live or fail honestly
+  // Start the real request ONCE and let it finish on its own terms.
+  const live = fetch(req).then((res) => {
+    if (res && res.ok) putStamped(cacheName, key, res);
+    return res;
+  });
+  try {
+    let res;
+    if (!timeout) {
+      res = await live;
+    } else {
+      let timer;
+      const stalled = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("stall")), timeout); });
+      try { res = await Promise.race([live, stalled]); } finally { clearTimeout(timer); }
+    }
+    // A real server error (500/404) is the truth — pass it through rather than papering
+    // over it with stale data; only a dead or hung network falls back.
+    return res;
+  } catch {
+    live.catch(() => {}); // keep it alive to update the saved copy; just don't wait for it
+    const hit = noFallback ? null : await cachedCopy(cacheName, key, null, opts && opts.clientId);
+    if (hit) return hit;
+    // Nothing saved: answer reads with a shape the panels already understand
+    // (an error object) instead of a network exception that blanks the screen.
+    if (cacheName === DATA) {
+      return new Response(JSON.stringify({ error: "offline", offline: true }), {
+        status: 503, headers: { "Content-Type": "application/json", "X-LFH-Offline": "1" },
+      });
+    }
+    throw new Error("offline");
+  }
+}
+
+// Content-hashed assets can't go stale → serve instantly from cache, fill on first use.
+async function cacheFirst(req, cacheName) {
+  const cache = await caches.open(cacheName);
+  const hit = await cache.match(req.url, { ignoreVary: true });
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res && res.ok) putStamped(cacheName, req.url, res);
+  return res;
+}

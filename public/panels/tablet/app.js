@@ -102,12 +102,20 @@ const api = async (method, path, body) => {
   if (method !== "GET" && window.LFH_OUTBOX) {
     return window.LFH_OUTBOX.send({ base: "/api/tablet", method, path: ridQ(path), body, panel: "tablet" });
   }
-  const r = await fetch("/api/tablet" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  let r;
+  try {
+    r = await fetch("/api/tablet" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  } catch (netErr) {
+    netErr.offline = true; // no reply at all → offline, not a broken server
+    throw netErr;
+  }
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+  // Live reply or the device's saved copy? The offline bar needs to know.
+  if (window.LFH_OFF) window.LFH_OFF.noteResponse(r);
   const j = await r.json().catch(() => null);
   // Attach the parsed body + status to the error so callers can read server flags like
   // duplicateWarning (#15) / needPin, which a bare message string would have dropped.
-  if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.data = j; throw e; }
+  if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.data = j; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; throw e; }
   return j;
 };
 // #2: a write that returned { queued:true } was saved on THIS device (offline) and will
@@ -977,6 +985,37 @@ function renderPanel() {
   if (state.ordering) { renderOrderMode(); return; }
   const t = state.table, s = sessionOf(t), a = tableAgg(t);
 
+  // WAITING TO SEND: anything taken for this table on this device that hasn't reached
+  // the kitchen yet (offline, or still syncing). It is shown as its OWN block, clearly
+  // marked and deliberately NOT mixed into the order cards or the bill total — a bill
+  // must only ever show what the kitchen really has. Without this a waiter who took an
+  // order with no internet saw "No orders yet" and re-took it. (offline sync 2026-07-30)
+  const unsentCount = (window.LFH_OUTBOX && window.LFH_OUTBOX.pendingForTable) ? window.LFH_OUTBOX.pendingForTable(t).length : 0;
+  const unsentMeta = unsentCount ? ` · <span style="color:#d97706;font-weight:800">${unsentCount} waiting to send</span>` : "";
+  const unsentBox = (() => {
+    const pend = (window.LFH_OUTBOX && window.LFH_OUTBOX.pendingForTable) ? window.LFH_OUTBOX.pendingForTable(t) : [];
+    if (!pend.length) return "";
+    const dishTitle = (id) => {
+      const d = (state.data.dishes || []).find((x) => String(x.id) === String(id));
+      return d ? d.title : "Dish";
+    };
+    const rows = pend.map((it) => {
+      const items = (it.body && Array.isArray(it.body.items)) ? it.body.items : null;
+      const what = items && items.length
+        ? items.map((l) => `${l.qty > 1 ? l.qty + "× " : ""}${esc(dishTitle(l.id))}`).join(", ")
+        : esc(it.label || "Change");
+      const why = it.status === "failed"
+        ? `<span style="color:#b91c1c;font-weight:700">needs you — ${esc(it.plain || it.error || "couldn't be sent")}</span>`
+        : (navigator.onLine === false ? "saved here · will send when you're back online" : "sending…");
+      return `<div class="row" style="align-items:flex-start"><span style="flex:1"><b>${what}</b><br><span class="muted small">${why}</span></span></div>`;
+    }).join("");
+    const bad = pend.some((it) => it.status === "failed");
+    return `<div class="sec" style="margin:0 0 10px;padding:10px 12px;border-radius:12px;border:1px dashed ${bad ? "#ef4444" : "#f59e0b"};background:${bad ? "rgba(239,68,68,.09)" : "rgba(245,158,11,.09)"}">
+      <h3 style="margin:0 0 6px;font-size:13px">${bad ? "⚠️ Needs you" : "⏳ Waiting to send"} (${pend.length})</h3>${rows}
+      <div class="muted small" style="margin-top:6px">Not on the bill until the kitchen has it.</div>
+    </div>`;
+  })();
+
   // ── INSTANT RENDER (stale-while-revalidate): before this table's full slice lands, paint an
   // accurate summary-driven detail (open state, guests, dish count, due — all from tableAgg,
   // which already reads the summary for a non-loaded tile) instead of the old "closed / no
@@ -1007,7 +1046,7 @@ function renderPanel() {
         <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"} · <span class="live">● open</span></div></div>
       </div>
       <div class="detail-body">
-        <div class="sec"><h3>Orders</h3>${pills}${load}</div>
+        <div class="sec"><h3>Orders</h3>${unsentBox}${pills}${load}</div>
       </div>
       <div class="dacts">
         ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
@@ -1151,14 +1190,14 @@ function renderPanel() {
    <div class="detail-pop">
     <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
-      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}</div></div>
+      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}${unsentMeta}</div></div>
     </div>
     <div class="detail-body">
       ${reqRows ? `<div class="sec"><h3>Requests</h3>${reqRows}</div>` : ""}
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
       ${callRows ? `<div class="sec"><h3>Calls</h3>${calls.length > 1 ? `<button class="btn small primary" data-attend-all-calls="${esc(t)}">Attend all (${calls.length})</button>` : ""}${callRows}</div>` : ""}
       ${s ? `<div class="sec"><h3>Party</h3>${partyRows || `<div class="muted small">No guests joined yet.</div>`}</div>` : ""}
-      <div class="sec"><h3>Orders</h3>${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}${Number(s && s.discount) > 0 ? `<div class="bill-disc-note" style="margin-top:8px;font-size:13px;font-weight:700;color:#f0b232">🏷️ Whole-bill discount − ${inr(s.discount)}${s.discount_note ? ` · ${esc(s.discount_note)}` : ""}</div>` : ""}</div>
+      <div class="sec"><h3>Orders</h3>${unsentBox}${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}${Number(s && s.discount) > 0 ? `<div class="bill-disc-note" style="margin-top:8px;font-size:13px;font-weight:700;color:#f0b232">🏷️ Whole-bill discount − ${inr(s.discount)}${s.discount_note ? ` · ${esc(s.discount_note)}` : ""}</div>` : ""}</div>
     </div>
     <div class="dacts">
       ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
@@ -3200,11 +3239,11 @@ function mergeSelectedSlice(t, slice) {
 // correct. This replaces the old "re-read the whole floor on every breadcrumb" — mirrors the
 // manager's pollTables. ANY surprise → full load() (safe fallback). (owner 2026-06-27 — two-tier)
 async function loadTables(tables) {
-  // #2/#19: offline → skip the network GET entirely. The optimistic local state is already
-  // on screen and the outbox will replay + a full refetch fires on reconnect, so there's
-  // nothing to fetch now — and NOT throwing here is what stops a queued action from being
-  // reported as "Failed".
-  if (navigator.onLine === false) return;
+  // #2/#19: offline with NO saved copy on this device → skip the GET entirely. There'd be
+  // nothing to fetch, and NOT throwing here is what stops a queued action from being
+  // reported as "Failed". Once the offline layer (public/sw.js) is installed the GET IS
+  // worth making: it comes back from the device's own cache, so the board still paints.
+  if (navigator.onLine === false && !(window.LFH_OFF && window.LFH_OFF.canReadOffline())) return;
   if (!tables || !tables.length) return load();
   const seq = ++loadSeq;
   const sel = state.table != null ? String(state.table) : null;
@@ -3256,7 +3295,9 @@ async function loadTables(tables) {
 // refresh repaints server truth right after (loadSeq still guarantees latest-wins). (audit 2026-07-09)
 let loadInFlight = null, loadQueued = false;
 function load() {
-  if (navigator.onLine === false) return Promise.resolve();
+  // Offline: still worth loading when the device has a saved copy to answer with (the
+  // offline layer serves it) — that's what paints the floor after an offline reload.
+  if (navigator.onLine === false && !(window.LFH_OFF && window.LFH_OFF.canReadOffline())) return Promise.resolve();
   if (loadInFlight) { loadQueued = true; return loadInFlight; }
   const p = loadImpl();
   loadInFlight = p;
@@ -3264,10 +3305,12 @@ function load() {
   return p;
 }
 async function loadImpl() {
-  // #2/#19: offline → don't fire the GET (it would reject and surface as "Failed: Failed to
-  // fetch" from every caller that awaits load() after a queued write). The reconnect flush
-  // (lfh:outbox-flushed) + the 'online' event both trigger a fresh load() once we're back.
-  if (navigator.onLine === false) return;
+  // #2/#19: offline and nothing saved on this device → don't fire the GET (it would reject
+  // and surface as "Failed: Failed to fetch" from every caller that awaits load() after a
+  // queued write). The reconnect flush (lfh:outbox-flushed) + the 'online' event both
+  // trigger a fresh load() once we're back. WITH the offline layer installed we do load:
+  // the reply is this device's last known floor, which is exactly what should be on screen.
+  if (navigator.onLine === false && !(window.LFH_OFF && window.LFH_OFF.canReadOffline())) return;
   const seq = ++loadSeq;
   const sel = state.table != null ? String(state.table) : null;
   // TIER 1: the slim summary drives the GRID + side aggregates + the table-agnostic bundle
@@ -3347,7 +3390,9 @@ try {
 // menu above — the menu may have changed while this tablet was closed. After that first refresh,
 // recurring floor refreshes go slim. (perf 2026-07-20)
 state._menuStale = true;
-load().catch((e) => toast("Can't reach the database: " + e.message, false));
+// "No internet" is explained by the offline bar — don't also alarm the waiter with a
+// database error. Anything else still toasts.
+load().catch((e) => { if (!(window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))) toast("Can't reach the database: " + e.message, false); });
 
 // ── HIERARCHY X-RAY ribbon (Phase 3) ─────────────────────────────────────────
 // Marks the admin act-as view and counts the billing controls that are off for
@@ -3534,6 +3579,10 @@ if (window.LFH_RT) {
 // the optimistic screen reconciles with what actually synced. load() self-guards (seq +
 // offline), so these are safe no-ops when nothing changed / we're still offline.
 window.addEventListener("lfh:outbox-flushed", () => load().catch(() => {}));
+// The moment something is saved on-device (or finally sent, or comes back needing a
+// person), repaint the open table so its "⏳ Waiting to send" block is always current —
+// this is what makes an order taken with no internet visible immediately.
+window.addEventListener("lfh:outbox-changed", () => { if (state.table != null && !state.ordering) { try { renderPanel(); } catch (e) {} } });
 window.addEventListener("online", () => load().catch(() => {}));
 
 /* ════════════════════════════════════════════════════════════════════════════

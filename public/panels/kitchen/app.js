@@ -43,10 +43,18 @@ const api = async (method, path, body) => {
   if (method !== "GET" && window.LFH_OUTBOX) {
     return window.LFH_OUTBOX.send({ base: "/api/kitchen", method, path: ridQ(path), body, panel: "kitchen" });
   }
-  const r = await fetch("/api/kitchen" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  let r;
+  try {
+    r = await fetch("/api/kitchen" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  } catch (netErr) {
+    netErr.offline = true; // no reply at all → offline, not a broken server
+    throw netErr;
+  }
   if (r.status === 401) { location.href = "/login"; throw new Error("login"); }
+  // Live reply or the device's saved copy? The offline bar needs to know.
+  if (window.LFH_OFF) window.LFH_OFF.noteResponse(r);
   const j = await r.json().catch(() => null);
-  if (!r.ok) throw new Error((j && j.error) || r.statusText);
+  if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; throw e; }
   return j;
 };
 // ── table naming (mig 131) ───────────────────────────────────────────────────
@@ -1017,7 +1025,10 @@ setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], {
 bindDelegation(); // ONE delegated click handler for all ticket buttons (survives tile patching)
 updateSoundNudge(); // show the "enable sound" affordance if this is an untouched wall display
 applyView(); // honour the saved layout (sets which <main> shows) before the first paint
-load().catch((e) => toast("Can't reach the database: " + e.message));
+// A failed first load that's simply "no internet" stays quiet — the offline bar already
+// says so, and shouting "can't reach the database" at a cook mid-service is worse than
+// useless. Any OTHER failure still toasts, because that one needs looking at.
+load().catch((e) => { if (!(window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))) toast("Can't reach the database: " + e.message); });
 // Realtime: refetch only when an order/dish actually changes (instant), instead of
 // polling every second. A slow 60s timer is the backup if the WebSocket drops.
 // If realtime didn't load for any reason, fall back to a gentle 2s poll.

@@ -410,6 +410,13 @@ const tableCountKey = () => { const r = panelRid(); return r ? "lfh_editor_table
 // ("GET"/"POST"/"PATCH"/"DELETE"), the path (e.g. "/orders"), and optionally a
 // body object. It sends the request to our local server, reads back the JSON,
 // and throws a clear error if the server reported a problem.
+// errText: what to SHOW a person for a failed request. "No internet" is by far the most
+// common cause and must read like that — never the browser's raw "Failed to fetch",
+// which tells a manager nothing and looks like the app is broken.
+const errText = (e) => (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))
+  ? "no internet right now — this will load when you're back online"
+  : ((e && e.message) || "unknown error");
+
 const _inflightGET = new Map(); // coalesce concurrent identical GETs into ONE network hit
 async function api(method, path, body) {
   // Writes go through the offline outbox (sent now if online, else saved + replayed
@@ -424,16 +431,36 @@ async function api(method, path, body) {
   // settles, so every real poll tick afterwards still fetches fresh. (dedupe 2026-07-06)
   if (method === "GET" && _inflightGET.has(url)) return _inflightGET.get(url);
   const run = (async () => {
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined, // turn the body object into JSON text to send
+      });
+    } catch (netErr) {
+      // No reply at all (dead network, and no saved copy on this device). Mark it as an
+      // OFFLINE failure so callers can say "no internet" instead of the alarming
+      // "connection failed" — and so they keep whatever is already on screen.
+      netErr.offline = true;
+      throw netErr;
+    }
+    // Tell the offline bar whether this reply was live or served from the device's saved
+    // copy, so the panel can honestly say "showing saved data from 7:42 pm".
+    if (window.LFH_OFF) window.LFH_OFF.noteResponse(res);
     const json = await res.json().catch(() => ({})); // read the reply; if it isn't JSON, fall back to {}
     // Carry the parsed body + status on the error (same contract as the outbox path in
     // public/panels/outbox.js) so callers can read server flags like `reason` — a bare
     // message string would drop them and force brittle text-matching on the message.
-    if (!res.ok) { const e = new Error(json.error || res.statusText); e.status = res.status; e.data = json; throw e; }
+    // `offline` additionally marks the "no internet" case, so callers can stay quiet and
+    // keep what's on screen instead of showing a technical error (see errText()).
+    if (!res.ok) {
+      const e = new Error(json.error || res.statusText); // not OK? surface the server's error message
+      e.status = res.status;
+      e.data = json;
+      e.offline = json.offline === true || res.headers.get("X-LFH-Offline") === "1";
+      throw e;
+    }
     return json;
   })();
   if (method === "GET") {
@@ -5201,7 +5228,7 @@ async function loadSessions(fromPoll) {
       if (!floorOpsInFlight) sels.forEach((t, i) => mergeTableSlice(t, slices[i][0], slices[i][1], slices[i][2]));
       state.boardLoaded = true; // the live floor has arrived at least once → real tiles, not the skeleton
     } catch (e) {
-      toast("Could not load tables: " + e.message, "err");
+      toast("Could not load tables: " + errText(e), "err");
       return;
     }
   }
@@ -8644,7 +8671,7 @@ async function freeTableAll(t, sess, force) {
 // order/call activity) and redraw if the Log tab is showing.
 async function loadUsers() {
   try { state.users = await api("GET", "/users"); if (state.tab === "log") renderEditor(); }
-  catch (e) { toast("Could not load log: " + e.message, "err"); }
+  catch (e) { toast("Could not load log: " + errText(e), "err"); }
 }
 
 // logHtml: build the Log tab — a table listing every guest (name, table, role,
@@ -8763,7 +8790,7 @@ function oplogHtml() {
 // Fetch the operation log (lazily, when that view is shown).
 async function loadOplog() {
   try { state.oplog = await api("GET", "/oplog"); if (state.tab === "log") renderEditor(); }
-  catch (e) { toast("Could not load operation log: " + e.message, "err"); }
+  catch (e) { toast("Could not load operation log: " + errText(e), "err"); }
 }
 
 // bindLog: wire up the Log tab's buttons (refresh, exit a guest, block, unblock).
@@ -9175,7 +9202,7 @@ async function loadOrders() {
     } catch {}
     if (state.tab === "orders") { renderList(); renderEditor(); } // sidebar counts + cards
   } catch (e) {
-    toast("Could not load orders: " + e.message, "err");
+    toast("Could not load orders: " + errText(e), "err");
   }
 }
 
@@ -10566,9 +10593,27 @@ api("GET", "/whoami").then((w) => { XRAY_WHO = w;
 // Then load all the data, refresh the current view in place, and start live polling.
 // If the very first load fails, show "connection failed" so it's obvious the local
 // server probably isn't running.
+const bootPaint = () => { renderCatFilter(); renderList(); renderEditor(); startOrderWatch(); loadPlatform(); applyHierarchyView(); /* refresh the admin ribbon with the restaurant name */ };
 loadAll()
-  .then(() => { renderCatFilter(); renderList(); renderEditor(); startOrderWatch(); loadPlatform(); applyHierarchyView(); /* refresh the admin ribbon with the restaurant name */ })
+  .then(bootPaint)
   .catch((e) => {
+    // NO INTERNET is a different situation from a broken server, and it must not leave
+    // the panel as a dead shell (that was the old behaviour: renderEditor + the live
+    // poll never started, so the manager panel was unusable until a successful reload).
+    // The offline layer normally answers this read from the device's own saved copy; if
+    // even that is missing (first ever load on this device), we still paint the panel,
+    // keep the live poll running, and let the offline bar do the explaining.
+    if (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e)) {
+      $("#conn").textContent = "offline";
+      $("#conn").className = "conn err";
+      try { bootPaint(); } catch (paintErr) { /* nothing saved yet → the shell stays empty, the bar explains why */ }
+      // The moment the connection is back, load for real.
+      window.addEventListener("online", function retry() {
+        window.removeEventListener("online", retry);
+        loadAll().then(bootPaint).catch(() => {});
+      });
+      return;
+    }
     $("#conn").textContent = "connection failed";
     $("#conn").className = "conn err";
     toast("Could not load: " + e.message, "err");

@@ -15,6 +15,9 @@ import "./globals.css";
 // on the staff panels. (Previously these were mounted globally here, which made
 // the guest session logic run on /admin and auto-open tables.)
 import GuestChrome from "@/components/GuestChrome";
+// Registers the offline layer for every surface (see components/OfflineShell.tsx).
+import OfflineShell from "@/components/OfflineShell";
+import OfflineNotice from "@/components/OfflineNotice";
 // (The old floating "panel shifter" was removed 2026-06-26 — admins now reach every
 // restaurant's panels from /aevinite/restaurants, not a global pill that only ever
 // pointed at restaurant #1.)
@@ -93,6 +96,12 @@ export default function RootLayout({
           {/* Guest-only always-on widgets (cart, dining session, toasts) — rendered
               only on customer pages, never on the staff panels. */}
           <GuestChrome />
+          {/* Installs the offline layer (public/sw.js) so the app still OPENS and READS
+              with no internet. Renders nothing. */}
+          <OfflineShell />
+          {/* Says so when what's on screen came from this device rather than the server —
+              a dashboard must never show saved figures as if they were live. */}
+          <OfflineNotice />
         </RestaurantProvider>
       </body>
     </html>

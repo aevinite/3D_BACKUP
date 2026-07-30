@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { pingLatestGuestLimit } from "@/lib/rateLimit";
+import { replayClash, clashJson } from "@/lib/clash";
 
 export const dynamic = "force-dynamic";
 
@@ -50,7 +51,15 @@ async function postImpl(req: NextRequest): Promise<Response> {
     return NextResponse.json(data ?? { ok: false, reason: "empty" });
   }
 
-  // Non-session (QR/public) order.
+  // Non-session (QR/public) order. This is the one path that needs the clash check:
+  // it takes a TABLE NUMBER, so a phone that was offline for twenty minutes could put its
+  // order onto whoever is sitting at that table NOW, or onto a bill that has already been
+  // settled. (The session path above doesn't need it — lfh_place_order validates the
+  // guest's own session token and answers `session_closed` itself.)
+  const publicRid = b.restaurantId || DEFAULT_RID;
+  const clash = await replayClash(req, publicRid, "order", undefined, undefined, { table: b.table });
+  if (clash) return clashJson(clash);
+
   const { data, error } = await sb.rpc("lfh_place_order_public", {
     p_table: b.table || "",
     p_items: items,
