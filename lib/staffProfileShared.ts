@@ -235,3 +235,14 @@ export function todayIST(): string {
   return new Date(Date.now() + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
+/** The IST CALENDAR DATE of an ISO instant, as YYYY-MM-DD.
+ *  `paid_on` is a plain date in IST business terms, but a report window arrives as an ISO
+ *  instant — and 00:00 IST is 18:30 UTC the PREVIOUS day, so `iso.slice(0, 10)` hands the
+ *  query the wrong day. That made a "30 days" pay report include a 31st day and show
+ *  ₹1,04,000 where only ₹71,000 was paid in the window (found in the 2026-07-30 sweep). */
+export function istDateOf(iso: string): string {
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return todayIST();
+  return new Date(t + 5.5 * 3600 * 1000).toISOString().slice(0, 10);
+}
+

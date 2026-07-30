@@ -3714,7 +3714,10 @@ window.addEventListener("online", () => load().catch(() => {}));
     '<div class="dw-row"><span>Restaurant</span><span class="dw-prof" id="dwRest"></span></div>' +
     // My profile & pay (mig 220) — hidden until the server confirms this restaurant has the
     // feature and this person has a profile (no dead button for restaurants without it).
-    '<div class="dw-row" id="dwMeRow" hidden><span>My profile &amp; pay</span><button class="btn small" id="dwMe" type="button">Open</button></div>' +
+    // display:none INLINE, not just [hidden]: .dw-row sets display:flex, and an author display
+    // rule beats the hidden attribute — with only [hidden] this row showed on restaurants that
+    // don't have the feature at all (found in the 2026-07-30 sweep).
+    '<div class="dw-row" id="dwMeRow" hidden style="display:none"><span>My profile &amp; pay</span><button class="btn small" id="dwMe" type="button">Open</button></div>' +
     '<div class="dw-row"><span>Theme</span><button class="btn small" id="dwTheme" type="button">Light / Dark</button></div>' +
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
@@ -3787,7 +3790,10 @@ window.addEventListener("online", () => load().catch(() => {}));
         // .hidden alone loses to a display rule, so clear the display too (a bug this
         // codebase has already been bitten by).
         const meRow = drawer.querySelector("#dwMeRow");
-        if (meRow && j.profileModule) { meRow.hidden = false; meRow.style.display = ""; }
+        if (meRow) {
+          if (j.profileModule) { meRow.hidden = false; meRow.style.display = ""; }
+          else { meRow.hidden = true; meRow.style.display = "none"; }
+        }
         profileLoaded = true;
       }
     } catch { /* offline — leave the placeholder */ }

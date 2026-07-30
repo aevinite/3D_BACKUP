@@ -13,6 +13,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollLadder } from "@/lib/tableTags";
+import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
@@ -222,7 +223,7 @@ export async function GET(req: NextRequest) {
     if (!on.length) return null;
     const q = await sb.rpc("lfh_staff_pay_expense", {
       p_restaurant: on.length === 1 ? on[0] : null,
-      p_from: from.slice(0, 10), p_to: to.slice(0, 10),
+      p_from: istDateOf(from), p_to: istDateOf(to),
       p_ids: on.length === 1 ? null : on,
     });
     const r = (q.data || [])[0] as Record<string, unknown> | undefined;

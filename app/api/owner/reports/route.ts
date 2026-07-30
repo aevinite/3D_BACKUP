@@ -17,6 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
+import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct } from "@/lib/tax";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
@@ -411,7 +412,7 @@ export async function GET(req: NextRequest) {
         for (const id of payIds) if ((await payrollLadder(id)).effective) enabled.push(id);
         if (enabled.length) {
           const per = await mapLimit(enabled, 6, (id) =>
-            sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: from.slice(0, 10), p_to: to.slice(0, 10), p_bucket: "day" }));
+            sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: istDateOf(from), p_to: istDateOf(to), p_bucket: "day" }));
           const rowsSp = per.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[]);
           if (rowsSp.length) staffPay = {
             paidOut: rowsSp.reduce((a, r) => a + num(r.paid_out), 0),
@@ -779,7 +780,7 @@ export async function GET(req: NextRequest) {
     //   people  — per-person totals for the table
     if (type === "staffpay") {
       const ids = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
-      const f = from.slice(0, 10), t2 = to.slice(0, 10);
+      const f = istDateOf(from), t2 = istDateOf(to);   // IST calendar dates, not UTC ones
       const per = await mapLimit(ids, 6, async (id) => {
         const [cash, monthly, people, staff] = await Promise.all([
           sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: f, p_to: t2, p_bucket: bucket === "month" ? "month" : "day" }),

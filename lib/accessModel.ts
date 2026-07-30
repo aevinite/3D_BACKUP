@@ -307,6 +307,12 @@ export const PERMISSIONS: Perm[] = [
 ];
 
 export const PERM_BY_ID: Record<string, Perm> = Object.fromEntries(PERMISSIONS.map((p) => [p.id, p]));
+// …and by the manager-power FLAG. Most permissions happen to use the same string for both, so
+// callers holding a flag used to look it up in PERM_BY_ID and get away with it — until a
+// permission whose id differs from its power arrived and rendered as "see_staff_pay" in the
+// owner's Powers list (caught in the 2026-07-30 sweep). Look powers up here.
+export const PERM_BY_POWER: Record<string, Perm> = Object.fromEntries(
+  PERMISSIONS.filter((p) => p.power).map((p) => [p.power as string, p]));
 export const GROUP_BY_ID = Object.fromEntries(GROUPS.map((g) => [g.id, g]));
 export const permsOf = (gid: string) => PERMISSIONS.filter((p) => p.group === gid);
 
