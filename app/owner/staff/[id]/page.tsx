@@ -28,6 +28,7 @@ type Staff = {
   employment_type: string | null; shift_label: string | null; weekly_off: string[] | null;
   pay_type?: string | null; pay_amount?: number | null; pay_day?: string | null;
   pay_mode?: string | null; pay_extras?: Extra[]; can_see_own_pay: boolean;
+  in_payroll?: boolean; payroll_added_at?: string | null; payroll_added_by?: string | null;
   payHidden?: boolean;
   completeness: { filled: number; total: number; missing: string[] };
 };
@@ -444,8 +445,30 @@ export default function StaffProfilePage() {
           </div>
         )}
 
+        {/* ── NOT ON THE PAY LIST YET (mig 221) ───────────────────────────── */}
+        {(tab === "job" || tab === "pay") && seePay && !staff.in_payroll && (
+          <div className="sp-pane">
+            <div className="sp-note amber">
+              <i className="fas fa-user-plus" />
+              <div><b>{who} isn&apos;t on the pay list.</b> Having a profile and being paid through
+                Aevidine are two different things — you add each person deliberately. Until then they
+                have no rate, no payments can be recorded for them, and they count for nothing in your
+                reports or on your dashboard.</div>
+            </div>
+            {canJob && (
+              <button className="sp-btn cta" disabled={busy} onClick={async () => {
+                try { const d = await call({ id, action: "set_payroll", in_payroll: true });
+                  setStaff((x) => (x ? { ...x, in_payroll: d.in_payroll } : x)); await load(); }
+                catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+              }}>
+                <i className="fas fa-plus" /> Add {who} to the pay list
+              </button>
+            )}
+          </div>
+        )}
+
         {/* ── JOB & PAY ──────────────────────────────────────────────────── */}
-        {tab === "job" && seePay && (
+        {tab === "job" && seePay && staff.in_payroll && (
           <div className="sp-pane">
             <div className="sp-note amber">
               <i className="fas fa-lock" />
@@ -566,6 +589,19 @@ export default function StaffProfilePage() {
               )}
             </div>
 
+            {canJob && (
+              <div className="sp-note" style={{ marginTop: 14 }}>
+                <i className="fas fa-user-minus" />
+                <div>
+                  On the pay list{staff.payroll_added_by ? <> — added by {staff.payroll_added_by}</> : null}.{" "}
+                  <button className="sp-mini danger" disabled={busy} onClick={async () => {
+                    if (!confirm(`Remove ${who} from the pay list?\n\nPast payments stay on the record, but they stop counting as an expense and no new payments can be recorded.`)) return;
+                    try { await call({ id, action: "set_payroll", in_payroll: false }); await load(); }
+                    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+                  }}>Remove from pay list</button>
+                </div>
+              </div>
+            )}
             {expected !== null && (
               <div className="sp-complete" style={{ marginTop: 12 }}>
                 <i className="fas fa-calculator" style={{ fontSize: 18, color: "var(--accent)" }} />
@@ -581,7 +617,7 @@ export default function StaffProfilePage() {
         )}
 
         {/* ── PAYMENTS ───────────────────────────────────────────────────── */}
-        {tab === "pay" && seePay && (
+        {tab === "pay" && seePay && staff.in_payroll && (
           <div className="sp-pane">
             <div className="sp-kpis">
               <div className="sp-kpi"><div className="k">Paid this month</div><div className="v ok">{money(summary?.thisMonth)}</div>
