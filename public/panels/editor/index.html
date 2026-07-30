@@ -117,12 +117,14 @@
   <script src="/panels/myprofile.js?v=1"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
   <script src="/panels/undobar.js?v=3"></script>
+  <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
+  <script src="/panels/billcustomer.js?v=1"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
   <script src="/panels/fitnums.js?v=1" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
   <script src="/panels/editor/inventory.js?v=4"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260729tablename2"></script>
+  <script src="/panels/editor/app.js?v=20260730billcust"></script>
 </body>
 </html>

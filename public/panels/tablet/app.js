@@ -2317,11 +2317,25 @@ function openTagSheet(t) {
 // Generate this table's invoice number, respecting tablet_invoice: 'on' → direct;
 // 'pin' → manager-PIN-gated (server enforces it too). Independent of Mark bill paid —
 // the RPC is idempotent, so this is safe even if somehow clicked twice.
-function genInvoice(sid) {
+async function genInvoice(sid) {
+  // Who is this bill for? Mobile first; a number that has been here before brings its
+  // name back by itself. Required by the restaurant → no invoice without both
+  // (owner, 2026-07-30). The server enforces the same rule.
+  const s = state.data.settings || {};
+  let body = null;
+  if (s.bill_customer_required !== false && window.LFH_BILLCUST) {
+    // Re-issuing a reopened bill opens the sheet pre-filled with THIS session's own
+    // customer (owner, 2026-07-30) — scoped to this session id, never another table's.
+    const sess = (state.data.sessions || []).find((x) => x.id === sid);
+    const prefill = sess && sess.cust_phone ? { phone: sess.cust_phone, name: sess.cust_name } : null;
+    const cust = await LFH_BILLCUST.ask({ api, required: true, print: s.bill_customer_print !== false, prefill });
+    if (!cust) return;                                // backed out — nothing is issued
+    body = { cust_phone: cust.phone, cust_name: cust.name };
+  }
   if (tperm("tablet_invoice") === "pin") {
-    actGated("POST", `/sessions/${sid}/invoice`, null, { message: "Enter a manager PIN to generate this invoice.", toast: "Invoice generated" });
+    actGated("POST", `/sessions/${sid}/invoice`, body, { message: "Enter a manager PIN to generate this invoice.", toast: "Invoice generated" });
   } else {
-    act(() => api("POST", `/sessions/${sid}/invoice`));
+    act(() => api("POST", `/sessions/${sid}/invoice`, body || undefined));
   }
 }
 // openDiscountModal: replaces the old "type the ₹ amount to knock off" prompt() with two

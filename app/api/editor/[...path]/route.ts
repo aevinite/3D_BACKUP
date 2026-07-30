@@ -33,6 +33,7 @@ import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
+import { saveBillCustomer } from "@/lib/billCustomer";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -352,6 +353,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       });
     }
 
+    // customer-search?q=98250 — "who is this number?" for the bill's customer box.
+    // Fired while the waiter is still typing, so it must stay tiny and quick: prefix-anchored
+    // on the (restaurant_id, phone) index, at most 6 rows, only phone + name + visit count.
+    // A complete number is normalised first, so +91 / leading-0 spellings find the same row.
+    if (p === "customer-search") {
+      const q = (new URL(req.url).searchParams.get("q") || "").replace(/\D/g, "").slice(0, 15);
+      if (q.length < 3) return ok({ matches: [] });
+      const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: 6 });
+      if (error) throw new Error(error.message);
+      return ok({ matches: Array.isArray(data) ? data : [] });
+    }
+
     // whoami — boot signal for the panel's hierarchy X-ray (2026-07-05). Tells the
     // client WHO is viewing (admin super-user / owner / manager) and this restaurant's
     // manager_permissions, so the nav can HIDE a disabled feature for the real manager
@@ -620,7 +633,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
       if (sids.length) {
         const [sessQ, memQ] = await Promise.all([
-          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no").in("id", sids),
+          sb.from("sessions").select("id,invoice_no,invoice_voided,invoice_at,bill_no,cust_name,cust_phone").in("id", sids),
           sb.from("session_members").select("session_id,name,role").in("session_id", sids).eq("role", "owner"),
         ]);
         const map: Record<string, any> = Object.fromEntries(((must(sessQ) || []) as any[]).map((s) => [s.id, s]));
@@ -628,7 +641,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         for (const m of (must(memQ) || []) as any[]) { if (m.name && !nameMap[m.session_id]) nameMap[m.session_id] = m.name; }
         for (const o of orders as any[]) {
           const s = map[o.session_id];
-          if (s) { o.invoice_no = s.invoice_no; o.invoice_voided = s.invoice_voided; o.invoice_at = s.invoice_at; o.bill_no = s.bill_no; }
+          if (s) {
+            o.invoice_no = s.invoice_no; o.invoice_voided = s.invoice_voided; o.invoice_at = s.invoice_at; o.bill_no = s.bill_no;
+            // who the BILL is made out to (captured at invoice time, mig 227). Kept apart
+            // from customer_name below, which is the guest's own name on their phone.
+            o.bill_cust_name = s.cust_name; o.bill_cust_phone = s.cust_phone;
+          }
           if (nameMap[o.session_id]) o.customer_name = nameMap[o.session_id];
         }
       }
@@ -1891,6 +1909,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // first (service-role bypasses RLS; a foreign session id must not get an invoice).
       const ownsGen = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
+      // The bill is made out to a named customer (mig 227). When the restaurant requires it,
+      // NO invoice is issued without a mobile + name — enforced here, not just in the UI, so
+      // a stale panel or a direct call can't skip it. Saved before the number is assigned, so
+      // an issued invoice always carries its customer.
+      const custSave = await saveBillCustomer(sb, rid, b as string, body);
+      if (!custSave.ok) return err(custSave.message, 400);
       const genReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReason || null, p_actor: actorName });
       if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw new Error(error.message); }
