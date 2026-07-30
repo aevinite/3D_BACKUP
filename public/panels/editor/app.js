@@ -269,7 +269,15 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
     // inside that window (e.g. "Send" answered → the server replies "duplicate?" in <200ms).
     // Matching it made that second dialog resolve false instantly: no prompt, no toast, the
     // action silently dropped. `data-closing` is stamped by close() the moment it resolves.
-    if (document.querySelector(".confirm-overlay:not([data-closing])")) { resolve(false); return; }
+    // ...and when we DO suppress one, say so. Answering "no" in silence is how a tap
+    // disappears with nothing on screen to explain it (the class of bug that lost a table
+    // close on 2026-07-29). The blocking dialog SHAKES instead, so the person sees which
+    // question is actually waiting for them. (2026-07-30)
+    const blocking = document.querySelector(".confirm-overlay:not([data-closing])");
+    if (blocking) {
+      blocking.classList.remove("confirm-nudge"); void blocking.offsetWidth; blocking.classList.add("confirm-nudge");
+      resolve(false); return;
+    }
     const wrap = document.createElement("div");
     // opts.floorwide marks confirms that hit EVERY table at once (Close all).
     // They get a deliberately different, scarier look so muscle-memory built on
@@ -5073,7 +5081,11 @@ function logDetailDialog(title, rows) {
   document.body.appendChild(wrap);
   requestAnimationFrame(() => wrap.classList.add("show"));
   const onKey = (e) => { if (e.key === "Escape") close(); };
-  const close = () => { wrap.classList.remove("show"); document.removeEventListener("keydown", onKey); setTimeout(() => wrap.remove(), 200); };
+  // data-closing matters even though this card asks nothing: it wears the shared
+  // .confirm-overlay class, and confirmDialog refuses to open while an unanswered overlay of
+  // that class is in the DOM. Without the stamp, the 200ms fade-out after closing a log card
+  // silently answered "no" to the next confirm — a tap into thin air. (2026-07-30)
+  const close = () => { wrap.setAttribute("data-closing", "1"); wrap.classList.remove("show"); document.removeEventListener("keydown", onKey); setTimeout(() => wrap.remove(), 200); };
   wrap.__lfhClose = close; // hardware Back closes via our close() (removes the keydown listener) — no leaked listener
   wrap.querySelector(".confirm-ok").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
