@@ -114,7 +114,13 @@
   window.addEventListener("unhandledrejection", function (e) {
     var r = e && e.reason;
     // "promise" alone told us nothing; keep it only as the fallback when there's no stack.
-    reportError(r && r.message ? r.message : String(r || "unhandled rejection"), frames(r) || "promise");
+    // A rejection whose reason isn't a real Error (a rejected string, a DOMException from a
+    // browser API) carries NO stack at all, so those rows read just "… @ promise" and could
+    // not be located in the code — three "Cannot set properties of null (setting 'innerHTML')"
+    // rows on 2026-07-29 were unfindable for exactly this reason. When there's no stack, name
+    // the LAST BUTTON TAPPED instead (we already track taps for breadcrumbs below), which says
+    // what the person was doing when it broke. (2026-07-30)
+    reportError(r && r.message ? r.message : String(r || "unhandled rejection"), frames(r) || lastTapHint());
   });
   // Let panel code report a handled-but-notable failure (e.g. a failed api() call):
   //   window.LFH_ERRLOG.report("save failed", "POST /orders")
@@ -123,6 +129,15 @@
   // ── 2) Tap breadcrumbs (batched) ─────────────────────────────────────────────
   var taps = [];
   var t0 = Date.now();
+  // The most recent tap, kept SEPARATELY from `taps` because that array is emptied on every
+  // flush — a crash a moment after a flush would otherwise have no breadcrumb at all. Used by
+  // lastTapHint() when a rejection carries no stack. (2026-07-30)
+  var lastTap = null;
+  function lastTapHint() {
+    if (!lastTap || !lastTap.l) return "promise";
+    var secs = Math.round((Date.now() - lastTap.at) / 1000);
+    return "promise · after tap: " + lastTap.l + (secs > 0 ? " (" + secs + "s earlier)" : "");
+  }
   function label(el) {
     var t = (el.getAttribute("data-log") || el.getAttribute("aria-label") || el.title || el.textContent || "").trim();
     return t.replace(/\s+/g, " ").slice(0, 40);
@@ -135,7 +150,9 @@
       // an action — staff tap it constantly just to check their signal, which floods the admin
       // activity log with meaningless "Connection: Excellent…" rows. Never record it.
       if (el.closest(".lfh-conn") || el.closest(".lfh-conn-pop")) return;
-      taps.push({ t: Math.round((Date.now() - t0) / 1000), l: label(el) });
+      var lbl = label(el);
+      taps.push({ t: Math.round((Date.now() - t0) / 1000), l: lbl });
+      lastTap = { l: lbl, at: Date.now() }; // survives flush(); names the action if a crash has no stack
       if (taps.length > 60) taps.shift(); // bound memory between flushes
     } catch (err) { /* ignore */ }
   }, true); // capture phase: still see taps that stopPropagation

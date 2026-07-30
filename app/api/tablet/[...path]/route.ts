@@ -19,6 +19,7 @@ import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { rateAllowed } from "@/lib/rateLimit";
+import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
@@ -762,7 +763,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).select())[0];
       if (status === "approved" && reqRow && reqRow.type === "open") {
         const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
-        if (!existing.length) must(await sb.from("sessions").insert({ table_number: reqRow.table_number, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }));
+        if (!existing.length) await openTableSession(rid, String(reqRow.table_number)); // race-tolerant (2026-07-30)
       }
       return ok(reqRow || null);
     }
@@ -1532,11 +1533,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // button left the guest's open-request pending — so after the table later closed, the tile
       // wrongly showed "Wants in / Asked to open" again from that old guest. (2026-07-07)
       await sb.from("requests").update({ status: "approved" }).eq("restaurant_id", rid).eq("table_number", t).eq("status", "pending").eq("type", "open");
-      const existing = must(await sb.from("sessions").select("id").eq("table_number", t).eq("restaurant_id", rid).neq("status", "closed").limit(1));
-      if (existing.length) return ok(existing[0]);
-      const row = must(await sb.from("sessions").insert({ table_number: t, status: "open", opened_by: "waiter", opened_at: nowIso(), restaurant_id: rid }).select());
+      // openTableSession tolerates the concurrent-open race: two devices tapping Open on the
+      // same table used to make the SECOND one crash on the unique index
+      // (idx_one_open_session_per_table). Opening is idempotent — the loser now just gets the
+      // session that won. (2026-07-30)
+      const row = await openTableSession(rid, t);
       await log("table_open", { table_number: t, device_id: dev });
-      return ok(row[0] || null);
+      return ok(row);
     }
 
     return err("unknown POST endpoint", 404);
