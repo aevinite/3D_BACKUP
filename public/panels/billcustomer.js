@@ -111,7 +111,11 @@
       // nameTouched: once the waiter edits the name themselves we stop overwriting it
       // with a looked-up one (their correction wins).
       let nameTouched = false;
-      nameEl.addEventListener("input", () => { nameTouched = true; sync(); });
+      nameEl.addEventListener("input", () => {
+        nameTouched = true;
+        if (statusEl.style.color === "rgb(220, 38, 38)" && nameEl.value.trim()) { statusEl.style.color = ""; statusEl.textContent = ""; }
+        sync();
+      });
 
       function sync() {
         const p = norm(phoneEl.value);
@@ -131,7 +135,7 @@
         statusEl.textContent = "New customer";
         sync();
       }
-      function showTyping() { statusEl.textContent = ""; matchEl.style.display = "none"; sync(); }
+      function showTyping() { statusEl.style.color = ""; statusEl.textContent = ""; matchEl.style.display = "none"; sync(); }
 
       // Suggestions for a PARTIAL number: tap one to fill it in. Keeps the waiter from
       // having to remember the whole number when the guest half-remembers it.
@@ -201,7 +205,15 @@
 
       goBtn.onclick = () => {
         const phone = norm(phoneEl.value), name = nameEl.value.trim();
-        if (required && (phone.length !== 10 || !name)) return;
+        // The button is disabled while either box is short, but a tap must NEVER die in
+        // silence (panel rule): say which box is missing and put the cursor in it.
+        if (required && (phone.length !== 10 || !name)) {
+          const miss = phone.length !== 10 ? phoneEl : nameEl;
+          statusEl.style.color = "#dc2626";
+          statusEl.textContent = phone.length !== 10 ? "Enter the full 10-digit mobile number" : "Enter the customer's name";
+          miss.focus();
+          return;
+        }
         if (phone && name) known.set(phone, { name, visits: (known.get(phone)?.visits || 0) });
         finish({ phone, name });
       };
