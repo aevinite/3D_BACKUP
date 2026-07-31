@@ -112,10 +112,15 @@ await mp.waitForTimeout(8000);
 const fr = mp.frames().find((f) => /panels\/editor/.test(f.url()));
 ok("manager panel loads", !!fr);
 if (fr) {
-  const printed = await fr.evaluate(async () => {
-    const orders = await api("GET", "/orders");
+  // Print THE BILL THIS RUN CAPTURED (section A), not "any order that happens to have a
+  // customer" — the old way passed only while a previously-captured bill still sat in the
+  // recent list, and reported a false failure the moment the data moved on.
+  const printTable = s1 ? String(s1.table_number) : null;
+  const printed = await fr.evaluate(async (tbl) => {
+    const orders = await api("GET", "/orders" + (tbl ? `?table=${encodeURIComponent(tbl)}` : ""));
     state.data.orders = orders;
-    const row = orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
+    const row = (tbl ? orders.find((o) => String(o.table_number) === String(tbl)) : null)
+      || orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
     if (!row) return { html: "", note: "no orders" };
     const os = orders.filter((o) => String(o.table_number) === String(row.table_number));
     let html = ""; const real = window.open;
@@ -123,7 +128,7 @@ if (fr) {
     try { printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os); }
     finally { window.open = real; }
     return { html, cust: { n: row.bill_cust_name, p: row.bill_cust_phone } };
-  });
+  }, printTable);
   const h = printed.html || "";
   const css = h.slice(h.indexOf("<style"), h.indexOf("</style>"));
   ok("prints as ONE continuous slip", h.includes("size:80mm"));
@@ -144,18 +149,19 @@ if (fr) {
     if (all && all.settings) state.data.settings = all.settings;
     return state.data.settings.bill_customer_print;
   })) === false);
-  const off = await fr.evaluate(async () => {
+  const off = await fr.evaluate(async (tbl) => {
     const all = await api("GET", "/all");                    // reload settings from the server
     if (all && all.settings) state.data.settings = all.settings;
     const orders = state.data.orders || [];
-    const row = orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
+    const row = (tbl ? orders.find((o) => String(o.table_number) === String(tbl)) : null)
+      || orders.find((o) => o.bill_cust_name || o.bill_cust_phone) || orders[0];
     const os = orders.filter((o) => String(o.table_number) === String(row.table_number));
     let html = ""; const real = window.open;
     window.open = () => ({ document: { write: (s) => { html += s; }, close() {} }, print() {}, focus() {} });
     try { printBill(row.table_number, { invoice_no: os[0].invoice_no, bill_no: os[0].bill_no }, os); }
     finally { window.open = real; }
     return { html, printFlag: state.data.settings.bill_customer_print };
-  });
+  }, printTable);
   ok("panel picked up print=OFF from the server", off.printFlag === false, String(off.printFlag));
   ok("print switch OFF hides Customer + Mobile", !off.html.includes(">Customer<") && !off.html.includes(">Mobile<"));
   await sb.from("settings").update({ bill_customer_print: true }).eq("restaurant_id", RID1);
