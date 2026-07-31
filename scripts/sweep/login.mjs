@@ -15,7 +15,9 @@
 //   await page.goto("http://localhost:4101" + route);
 
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export const DIAG_LOGINS = {
   manager: { username: "diagm1", password: "diag-mgr-2026", route: "/manager" },
@@ -37,6 +39,37 @@ export const DIAG_LOGINS = {
 // and ADD the cookies to every later context instead of asking the server again.
 const sessionCache = new Map(); // `${base}|${username}` -> { cookies, route }
 
+// ── the SAME cache, shared between PROCESSES ────────────────────────────────────────────────
+//
+// The in-process Map above fixed "N browser contexts = N logins". It does nothing for "N
+// PROCESSES = N logins", which is the shape of a parallel sweep: six lanes of the 500-phase
+// suite running at once, each signing in as diagm1, is six attempts against a limit of five per
+// five minutes — so the fleet would trip the wall and ping the owner's phone about himself.
+//
+// So the session is also parked in ONE small file in the OS temp directory (never the repo, and
+// never printed). A lane that starts later finds a fresh session and makes ZERO login requests.
+// Two lanes starting in the same instant can still both miss and both sign in — that is 2, not 6,
+// and stays comfortably under the limit.
+const SESSION_FILE = join(tmpdir(), "lfh-sweep-sessions.json");
+const SESSION_TTL_MS = 15 * 60 * 1000;
+// How many REAL sign-in requests this process has made. Exported so a test can prove the
+// caching instead of assuming it — "it should be cached" is how the limit got tripped twice.
+let realLogins = 0;
+export const loginRequestCount = () => realLogins;
+function readDiskSessions() {
+  try { return JSON.parse(readFileSync(SESSION_FILE, "utf8")); } catch { return {}; }
+}
+function writeDiskSession(key, entry) {
+  try {
+    const all = readDiskSessions();
+    all[key] = entry;
+    // Write-then-rename so a lane reading this file can never catch it half-written.
+    const tmp = `${SESSION_FILE}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(all));
+    renameSync(tmp, SESSION_FILE);
+  } catch { /* a cache that cannot be written is not a failure; we just sign in again */ }
+}
+
 export async function loginAs(context, role, base = "http://localhost:4000", creds) {
   const l = creds || DIAG_LOGINS[role];
   if (!l) throw new Error(`loginAs: unknown role "${role}" and no creds given`);
@@ -48,7 +81,14 @@ export async function loginAs(context, role, base = "http://localhost:4000", cre
     await context.addCookies(cached.cookies);
     return cached.route;
   }
+  const shared = readDiskSessions()[key];
+  if (shared && Array.isArray(shared.cookies) && shared.cookies.length && Date.now() - (shared.at || 0) < SESSION_TTL_MS) {
+    sessionCache.set(key, { cookies: shared.cookies, route: shared.route });
+    await context.addCookies(shared.cookies);
+    return shared.route;
+  }
 
+  realLogins++;
   const res = await context.request.post(`${base}/api/panel-login`, {
     headers: { "content-type": "application/json" },
     data: { username: l.username, password: l.password },
@@ -58,7 +98,10 @@ export async function loginAs(context, role, base = "http://localhost:4000", cre
   }
   // Cache the resulting cookies, re-pointed at `base` so any context can accept them.
   const cookies = (await context.cookies()).map((c) => ({ name: c.name, value: c.value, url: base }));
-  if (cookies.length) sessionCache.set(key, { cookies, route: l.route });
+  if (cookies.length) {
+    sessionCache.set(key, { cookies, route: l.route });
+    writeDiskSession(key, { cookies, route: l.route, at: Date.now() });
+  }
   return l.route;
 }
 
