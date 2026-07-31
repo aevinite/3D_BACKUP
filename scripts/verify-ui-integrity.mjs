@@ -82,6 +82,20 @@ for (const panel of (wantPanels ? ["editor", "kitchen", "tablet"] : [])) {
     : bad(`${file}: ${raw - live} panel script(s) are INSIDE A COMMENT — they never run, so that feature is silently missing`);
 }
 
+// ── 4. no throwaway scripts committed ───────────────────────────────────────────
+// Same family as the others: `git add -A` swept five `_probe.mjs`-style files I had written for
+// one-off debugging into a commit, and they reached main. Harmless, but litter — the rule is that
+// temp files get deleted, never committed.
+if (!HOOK || !touched || /(^|\/)_[^/]*\.(mjs|js|ts)$/.test(touched)) {
+  try {
+    const tracked = execSync("git ls-files || true", { encoding: "utf8" }).split("\n")
+      .filter((p) => /(^|\/)_[^/]*\.(mjs|js|ts|json|md|png)$/.test(p));
+    tracked.length === 0
+      ? ok("no throwaway _* scripts are committed")
+      : bad(`${tracked.length} throwaway file(s) are COMMITTED — delete them`, tracked.slice(0, 6).join("  "));
+  } catch { /* not a git repo → skip */ }
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");
