@@ -55,7 +55,7 @@ if (mtime(MODEL_OUT) < mtime(MODEL_SRC)) {
     process.exit(1);
   }
 }
-const { ALL_NODES, nodeValue, nodePatch, extraPatch } = await import(pathToFileURL(MODEL_OUT).href);
+const { ALL_NODES, SECTIONS, nodeValue, nodePatch, extraPatch } = await import(pathToFileURL(MODEL_OUT).href);
 
 const ARGS = process.argv.slice(2);
 // Every OTHER suite in this folder takes `--base`, so `--base` is what a person types here too —
@@ -575,10 +575,16 @@ async function restoreSnapshot() {
   });
 }
 
-phase("the access tree loads all five sections", async () => {
+// Counts the sections the MODEL declares rather than a number typed in here. It said "five" and
+// went red the moment Staff apps was removed (owner, 2026-07-31) — a test that has to be edited
+// every time the screen legitimately changes teaches people to edit tests instead of reading them.
+// What actually matters is that the endpoint serves the same sections the app is built from.
+phase("the access tree loads every section the model declares", async () => {
   await ensureSnap();                       // takes the snapshot AND registers the undo
   const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json();
-  ok(Array.isArray(d.sections) && d.sections.length === 5, `${d.sections?.length ?? "no"} sections`);
+  const want = SECTIONS.map((s) => s.id);
+  const got = Array.isArray(d.sections) ? d.sections.map((s) => s.id) : [];
+  ok(want.length > 0 && want.join(",") === got.join(","), `model has ${want.join(", ")} · endpoint sent ${got.join(", ") || "nothing"}`);
 });
 
 // each guest sub-switch: OFF removes its mark from the served page, ON brings it back
@@ -938,34 +944,47 @@ phase("no order belongs to a session that is already closed", async () => {
   // a 300-row diagnostic it is the only shape that completes.)
   const rows = [];
   for (const r of REST || []) {
-    const page = await dbGet(`orders?select=id,session_id,status,archived,created_at&restaurant_id=eq.${r.id}&order=created_at.desc&limit=300`);
-    rows.push(...page.filter((o) => o.archived !== true));
+    const page = await dbGet(`orders?select=id,session_id,status,archived,created_at,deleted_at&restaurant_id=eq.${r.id}&order=created_at.desc&limit=300`);
+    // A SOFT-DELETED order is not on the floor — it is in the recycle bin, and the close trigger
+    // deliberately leaves it alone (`deleted_at IS NULL` is in its WHERE clause, mig 232). Not
+    // excluding it here is why this check reported a "stranded order" that was nothing of the kind:
+    // the row had been recycled ONE SECOND before its session closed, so the trigger was right and
+    // the check was wrong — and it would have gone on failing on that row forever. (2026-07-31)
+    rows.push(...page.filter((o) => o.archived !== true && !o.deleted_at));
   }
   const ids = [...new Set(rows.map((r) => r.session_id).filter(Boolean))];
   if (!ids.length) return ok(true);
   const chunks = [];
   for (let i = 0; i < ids.length; i += 60) chunks.push(ids.slice(i, i + 60));
-  const closed = new Set();
+  const closedAt = new Map();
   for (const c of chunks) {
-    const ss = await dbGet(`sessions?select=id,status&id=in.(${c.join(",")})`);
-    for (const s of ss) if (s.status === "closed") closed.add(s.id);
+    const ss = await dbGet(`sessions?select=id,status,closed_at&id=in.(${c.join(",")})`);
+    for (const s of ss) if (s.status === "closed") closedAt.set(s.id, s.closed_at);
   }
-  // A REAL stranded order sits there for minutes; anything seconds old is still settling. Several
-  // sessions share this database and their fixtures open, order and close a table inside one
-  // second, so without this the scan reports SOMEONE ELSE'S in-flight write as a stranded order —
-  // the same false alarm that cost time in verify-table-ownership. Skip only the very fresh rows;
-  // anything older still fails, so a genuine leak is caught on this run, not the next. (2026-07-31)
-  const SETTLING_MS = 15000;
-  const settled = (r) => !r.created_at || Date.now() - new Date(r.created_at).getTime() > SETTLING_MS;
-  const candidates = rows.filter((r) => r.session_id && closed.has(r.session_id) && !["cancelled", "paid"].includes(r.status) && settled(r));
+  // A REAL stranded order sits there for minutes; anything freshly closed is still settling.
+  // Several sessions share this database and their fixtures open, order and close a table inside a
+  // second, so without a window the scan reports an IN-FLIGHT write as a stranded order.
+  //
+  // The window is keyed on when the SESSION CLOSED, not on the order's age — that was the bug in
+  // this check. Closing is the event that triggers the cleanup, so an order created 40s ago on a
+  // session closed 9s ago is not evidence of anything: it sailed through an order-age window and
+  // was reported as a fault (2026-07-31, and the rows were gone minutes later). Anything closed
+  // longer ago than this still fails, so a genuine leak is caught on THIS run, not the next.
+  const SETTLING_MS = 60000;
+  const settled = (sid) => {
+    const at = closedAt.get(sid);
+    return !at || Date.now() - new Date(at).getTime() > SETTLING_MS;
+  };
+  const candidates = rows.filter((r) => r.session_id && closedAt.has(r.session_id)
+    && !["cancelled", "paid"].includes(r.status) && settled(r.session_id));
   // RE-READ before failing. The close trigger cancels + archives a moment AFTER the session
   // flips to closed, so a row read mid-flight looks stranded when it is about to be handled —
   // this caught THIS SUITE'S own lifecycle order and called the app broken. Ask again.
   const orphans = [];
   if (candidates.length) await wait(2500);   // let the close trigger finish before we accuse it
   for (const c of candidates.slice(0, 20)) {
-    const now = (await dbGet(`orders?select=id,status,archived&id=eq.${c.id}`))[0];
-    if (now && now.archived !== true && !["cancelled", "paid"].includes(now.status)) orphans.push(now.id);
+    const now = (await dbGet(`orders?select=id,status,archived,deleted_at&id=eq.${c.id}`))[0];
+    if (now && now.archived !== true && !now.deleted_at && !["cancelled", "paid"].includes(now.status)) orphans.push(now.id);
   }
   ok(!orphans.length, `${orphans.length} live orders still on closed sessions after a re-read (e.g. ${orphans[0]})`);
 });
