@@ -82,6 +82,25 @@ async function offlinePage(ctx) {
   }
   return pg;
 }
+// Is this read actually saved on the device yet? The offline checks depend on it, so assert the
+// precondition instead of sleeping and hoping.
+async function waitCached(page, urlPart, ms = 30000) {
+  const until = Date.now() + ms;
+  for (;;) {
+    const has = await page.evaluate(async (part) => {
+      for (const n of await caches.keys()) {
+        if (!n.startsWith("lfh-data")) continue;
+        const keys = await (await caches.open(n)).keys();
+        if (keys.some((k) => k.url.includes(part))) return true;
+      }
+      return false;
+    }, urlPart).catch(() => false);
+    if (has) return true;
+    if (Date.now() > until) return false;
+    await sleep(500);
+  }
+}
+
 async function waitFor(fn, ms = 20000, step = 500) {
   const until = Date.now() + ms;
   for (;;) {
@@ -96,6 +115,11 @@ async function run() {
   const browser = await chromium.launch({ headless: !KEEP });
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const consoleErrors = [];
+  const badResponses = [];   // {status, url} for anything >= 400 — so a failure names itself
+  const watch = (pg) => {
+    pg.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
+    pg.on("response", (r) => { if (r.status() >= 400) badResponses.push(`${r.status()} ${r.url().replace(BASE, "").replace(SLOW || "\u0000", "[slow]")}`); });
+  };
   // A separate STAFF context used only for setup/cleanup and for acting as "the other
   // device". Kept apart from `ctx` so signing in as a manager never disturbs the tablet's
   // own session.
@@ -107,9 +131,20 @@ async function run() {
     const list = Array.isArray(j) ? j : (j && (j.sessions || j.rows)) || [];
     return list.filter((r) => r && r.status !== "closed");
   };
-  const closeSession = (id) => staff.request.post(`${BASE}/api/editor/sessions/${id}/close`, {
-    headers: { "content-type": "application/json" }, data: { force: true },
-  }).catch(() => null);
+  // Setup POSTs get a generous timeout and one retry: this database is shared with other
+  // sessions' test suites, and their load must not be reported as our failure.
+  const setupPost = async (path, data, tries = 2) => {
+    for (let i = 0; i < tries; i++) {
+      try { return await staff.request.post(BASE + path, { headers: { "content-type": "application/json" }, data, timeout: 90000 }); }
+      catch (e) {
+        if (i === tries - 1) { console.log(`  · setup ${path} timed out twice (shared database under load)`); return null; }
+        console.log(`  · setup ${path} timed out, retrying once`);
+        await sleep(2000);
+      }
+    }
+    return null;
+  };
+  const closeSession = (id) => setupPost(`/api/editor/sessions/${id}/close`, { force: true });
 
   // A genuinely FREE table to test on. On a real floor (and after a few runs of this
   // script) there may not be one, so if every table is occupied we free the longest-running
@@ -144,7 +179,7 @@ async function run() {
     console.log("\n1) Offline layer installs (manager panel)");
     const mgrRoute = await loginAs(ctx, "manager", BASE);
     const page = await ctx.newPage();
-    page.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
+    watch(page);
     await page.goto(BASE + mgrRoute, { waitUntil: "domcontentloaded" });
     const controlled = await waitControlled(page);
     controlled ? ok("service worker is controlling the page") : bad("service worker never took control");
@@ -157,7 +192,7 @@ async function run() {
       return typeof v === "number" && v > 0 ? v : null;
     }, 40000);
     liveItems ? ok(`panel loaded live with ${liveItems} menu rows`) : bad("panel never loaded while ONLINE (test setup problem)");
-    await sleep(4000); // let /all + /summary be written to the device
+    (await waitCached(page, "/api/editor/all")) ? ok("the board's data is saved on the device") : bad("the board's data never got saved — the offline checks below cannot be trusted");
 
     const saved = await page.evaluate(async () => {
       const out = {};
@@ -238,7 +273,7 @@ async function run() {
     console.log("\n3) Waiter takes a REAL order with no internet");
     const tabRoute = await loginAs(ctx, "tablet", BASE);
     const tab = await ctx.newPage();
-    tab.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
+    watch(tab);
     await tab.goto(BASE + tabRoute, { waitUntil: "domcontentloaded" });
     await waitControlled(tab);
     await tab.reload({ waitUntil: "domcontentloaded" });
@@ -250,7 +285,7 @@ async function run() {
       return v && v.dishes > 0 ? v : null;
     }, 45000);
     ready ? ok(`waiter panel loaded live (${ready.dishes} dishes, ${ready.tiles} tables)`) : bad("waiter panel never loaded live");
-    await sleep(3000);
+    await waitCached(tab, "/api/tablet/summary");
 
     // Pick a FREE table and a normal (non open-price) dish, so this is a clean new order.
     await loginAs(staff, "manager", BASE); // the setup/cleanup + "other device" identity
@@ -306,7 +341,14 @@ async function run() {
     }, 40000);
     if (!drained) bad("the queue never emptied after reconnecting");
     else {
-      drained.failed.length === 0 ? ok("the saved order was sent on reconnect") : bad(`it came back needing attention: ${drained.failed[0].error}`);
+      if (drained.failed.length === 0) ok("the saved order was sent on reconnect");
+      else {
+        const why = String(drained.failed[0].plain || drained.failed[0].error || "");
+        const perms = /isn't enabled for you|ask a manager|permission/i.test(why);
+        bad(`it came back needing attention: ${why}`, perms
+          ? "that is a PERMISSION refusal, not an offline fault — another session's suite toggles\n       waiter permissions while it runs; re-run when nothing else is testing"
+          : undefined);
+      }
     }
     // EXACTLY ONCE is the money question. The table was FREE before this test, so asking
     // the server what's on it now is the whole answer: 1 = right, 2 = a double bill.
@@ -359,11 +401,8 @@ async function run() {
       ok("a second order was taken on the offline device");
 
       // 3. MEANWHILE, on another device that still has signal, the manager closes+bills it.
-      const closeRes = await staff.request.post(`${BASE}/api/editor/sessions/${live.id}/close`, {
-        headers: { "content-type": "application/json" },
-        data: { force: true },
-      });
-      if (!closeRes.ok()) throw new Error("test setup: the other device couldn't close the table (HTTP " + closeRes.status() + ")");
+      const closeRes = await setupPost(`/api/editor/sessions/${live.id}/close`, { force: true });
+      if (!closeRes || !closeRes.ok()) throw new Error("test setup: the other device couldn't close the table (" + (closeRes ? "HTTP " + closeRes.status() : "timed out twice") + ")");
       ok("another device closed and billed that table");
 
       // 4. The replay guard only judges a change that is genuinely OLD (so live writes are
@@ -434,10 +473,8 @@ async function run() {
       // Seat it as STAFF. A public (QR) guest order doesn't necessarily open a dining
       // session, and the clash guard reasons about the SESSION — so seating it the way a
       // waiter does is both what really happens and what makes this check meaningful.
-      const seat = await staff.request.post(`${BASE}/api/editor/sessions/open`, {
-        headers: { "content-type": "application/json" }, data: { table: gt },
-      });
-      seat.ok() ? ok(`staff seated table ${gt}`) : bad(`couldn't seat table ${gt} (HTTP ${seat.status()})`);
+      const seat = await setupPost("/api/editor/sessions/open", { table: gt });
+      seat && seat.ok() ? ok(`staff seated table ${gt}`) : bad(`couldn't seat table ${gt}`, seat ? `HTTP ${seat.status()}` : "request timed out twice");
       await sleep(1500);
       const QUEUED_AT = new Date();                       // t1: our offline guest ordered now
       await sleep(1500);
@@ -445,10 +482,8 @@ async function run() {
       const sRows = Array.isArray(sList) ? sList : (sList && (sList.sessions || sList.rows)) || [];
       const liveS = sRows.find((r) => r && r.status !== "closed");
       if (!liveS) throw new Error("test setup: the guest order didn't open a session on table " + gt);
-      const closed = await staff.request.post(`${BASE}/api/editor/sessions/${liveS.id}/close`, {
-        headers: { "content-type": "application/json" }, data: { force: true },
-      });
-      closed.ok() ? ok("staff closed and billed it while the phone had no signal") : bad(`couldn't close table ${gt} (HTTP ${closed.status()})`);
+      const closed = await setupPost(`/api/editor/sessions/${liveS.id}/close`, { force: true });
+      closed && closed.ok() ? ok("staff closed and billed it while the phone had no signal") : bad(`couldn't close table ${gt}`, closed ? `HTTP ${closed.status()}` : "request timed out twice");
       // The guard deliberately ignores anything younger than 20s, so the replay has to be
       // genuinely old before it means anything.
       await sleep(22000);
@@ -475,7 +510,7 @@ async function run() {
     console.log("\n6) Kitchen screen with no internet");
     const kRoute = await loginAs(ctx, "kitchen", BASE);
     const kit = await ctx.newPage();
-    kit.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
+    watch(kit);
     await kit.goto(BASE + kRoute, { waitUntil: "domcontentloaded" });
     await waitControlled(kit);
     await kit.reload({ waitUntil: "domcontentloaded" });
@@ -484,7 +519,7 @@ async function run() {
       return typeof v === "number" && v > 0 ? v : null;
     }, 40000);
     kLive ? ok(`kitchen loaded live (${kLive} dishes on the board)`) : bad("kitchen never loaded live");
-    await sleep(3000);
+    (await waitCached(kit, "/api/kitchen/board")) ? ok("the kitchen board is saved on the device") : bad("the kitchen board never got saved");
     await ctx.setOffline(true);
     await kit.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     const kOff = await waitFor(async () => {
@@ -528,7 +563,7 @@ async function run() {
     // ══ GUEST MENU ═════════════════════════════════════════════════════════════
     console.log("\n8) Guest menu with no internet");
     const guest = await ctx.newPage();
-    guest.on("console", (m) => { if (m.type() === "error") consoleErrors.push(m.text()); });
+    watch(guest);
     await guest.goto(`${BASE}/r/french-house/menu`, { waitUntil: "domcontentloaded" });
     await waitControlled(guest);
     await guest.reload({ waitUntil: "domcontentloaded" });
@@ -537,7 +572,7 @@ async function run() {
       return n > 0 ? n : null;
     }, 40000);
     liveDishes ? ok(`guest menu live with ${liveDishes} dishes`) : bad("guest menu never loaded live (test setup problem)");
-    await sleep(3000);
+    (await waitCached(guest, "/menu-data")) ? ok("the menu is saved on the device") : bad("the menu never got saved");
     await ctx.setOffline(true);
     await guest.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     const body = (await guest.locator("body").textContent().catch(() => "")) || "";
@@ -797,7 +832,10 @@ async function run() {
     }
 
     const realErrors = consoleErrors.filter((t) => !/Failed to fetch|net::ERR|offline|503|409|Service Worker/i.test(t));
-    realErrors.length === 0 ? ok("no unexpected console errors") : bad(`${realErrors.length} console error(s)`, realErrors.slice(0, 3).join("\n       "));
+    const realBad = [...new Set(badResponses)].filter((b) => !/^40[13] .*(panel-login|staff-login)/.test(b));
+    realErrors.length === 0
+      ? ok("no unexpected console errors")
+      : bad(`${realErrors.length} console error(s)`, [...realErrors.slice(0, 2), ...(realBad.length ? ["failing requests: " + realBad.slice(0, 5).join(", ")] : [])].join("\n       "));
   } catch (e) {
     bad("the run stopped early", e.stack || e.message);
   } finally {
