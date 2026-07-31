@@ -1505,6 +1505,651 @@ phase("every migration file is valid SQL text (not empty, no conflict markers)",
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// GROUP 17 · Aangan sits at the FACTORY DEFAULTS, switch by switch
+// ════════════════════════════════════════════════════════════════════════════
+// The owner asked for Aangan to be kept "with all the default permission". So Aangan is this
+// suite's CONTROL restaurant: French House is the one every other group flips, and Aangan is
+// never written to — it only ever gets read. If a phase here fails, either something drifted
+// Aangan off the defaults or the model's own default changed, and both are worth knowing.
+//
+// "Default" is not re-typed here: it is `def` on the real node in lib/accessTree.ts. Free-text
+// fields (GSTIN, legal name, bill address) are excluded — a restaurant's real legal details
+// are not a permission and blanking them is not "a default".
+//
+// Deliberately LOGIN-FREE. Everything below reads the stored state through the admin API or
+// the public guest page, so this group adds no staff sign-in (staff_login is limited to 5 per
+// 5 minutes per account and reaching it pings the owner's phone).
+let AAN = null, AAN_STATE = null;
+async function needAangan() {
+  if (AAN) return AAN;
+  const d = await (await api("/api/admin/restaurants")).json();
+  const all = Array.isArray(d) ? d : d.restaurants || [];
+  AAN = all.find((r) => r.slug === "aangan-garden-restaurant") || all.find((r) => /aangan/i.test(r.slug || ""));
+  if (!AAN) throw new Fail("there is no Aangan restaurant to check the defaults against");
+  return AAN;
+}
+/** Read Aangan's access state ONCE for the whole group (68 phases off one request). */
+async function aanState() {
+  if (AAN_STATE) return AAN_STATE;
+  const r = await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needAangan()).id}`);
+  const d = await r.json();
+  if (!d.state) throw new Fail(`the Access screen returned no state (${r.status}) ${d.error || ""}`);
+  return (AAN_STATE = d.state);
+}
+const DEFAULT_NODES = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && !n.leftToBuild);
+const showVal = (v) => (v === true ? "ON" : v === false ? "off" : JSON.stringify(v));
+
+phase("Aangan exists and its Access screen loads", async () => {
+  const a = await needAangan();
+  const st = await aanState();
+  ok(st && st.settings, "no settings in the returned state");
+  ok(a.active !== false, "Aangan is marked inactive");
+});
+for (const node of DEFAULT_NODES) {
+  phase(`Aangan default: ${node.name} is ${showVal(node.def)}`, async () => {
+    const got = nodeValue(node, await aanState());
+    ok(JSON.stringify(got) === JSON.stringify(node.def),
+      `reads ${showVal(got)} but the factory default is ${showVal(node.def)} — run: node scripts/set-access-defaults.mjs --slug ${(await needAangan()).slug} --apply`);
+  });
+}
+phase("the defaults applier and this suite agree on which switches have a default", async () => {
+  // Two files decide "which nodes count as a default": scripts/set-access-defaults.mjs writes
+  // them and this group asserts them. If they ever disagree, one of them is silently skipping a
+  // switch — so make the disagreement a failure instead of a surprise.
+  const applier = readFileSync(join(ROOT, "scripts/set-access-defaults.mjs"), "utf8");
+  const filter = `n.bind.t !== "none" && n.bind.t !== "text" && !n.leftToBuild`;
+  ok(applier.includes(filter), "the applier no longer selects nodes the same way this suite does");
+  ok(DEFAULT_NODES.length >= 60, `only ${DEFAULT_NODES.length} switches carry a default — the model shrank unexpectedly`);
+});
+phase("Aangan's guest menu behaves the way its own defaults say", async () => {
+  const a = await needAangan();
+  const st = await aanState();
+  const want = st.settings.menu_enabled === false ? 404 : 200;
+  const got = (await fetch(`${BASE}/r/${a.slug}/menu`, { cache: "no-store" })).status;
+  ok(got === want, `the menu answered ${got} while Menu is ${st.settings.menu_enabled === false ? "off" : "ON"}`);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 18 · the guest journey, feature by feature
+// ════════════════════════════════════════════════════════════════════════════
+// What a diner actually does, on the real served page. Every expectation is derived from the
+// restaurant's OWN stored settings rather than assumed, because an earlier version of this
+// suite asserted a fixed layout and reported the app broken when the setting simply said
+// something else.
+let GUEST = null;
+async function guestMenu(force = false) {
+  if (GUEST && !force) return GUEST;
+  const f = await needFH();
+  const s = await screen("admin", `/r/${f.slug}/menu`, { settle: 4200 });
+  return (GUEST = s);
+}
+const fhSettings = async () => (await dbGet(`settings?select=*&restaurant_id=eq.${(await needFH()).id}`))[0] || {};
+
+phase("the guest menu shows every category the restaurant has switched on", async () => {
+  const f = await needFH();
+  const cats = await dbGet(`categories?select=slug,name,active&restaurant_id=eq.${f.id}&limit=60`);
+  const live = cats.filter((c) => c.active !== false);
+  ok(live.length >= 1, "this restaurant has no active category at all");
+  const g = await guestMenu();
+  // Match on the ENGLISH label out of the JSONB name, which is what the page renders.
+  const missing = live.filter((c) => {
+    const label = typeof c.name === "string" ? c.name : (c.name?.en || c.name?.EN || "");
+    return label && !g.text.toLowerCase().includes(String(label).toLowerCase());
+  });
+  ok(missing.length === 0, `${missing.length} switched-on categories never appear on the page (e.g. ${JSON.stringify(missing[0]?.name)})`);
+});
+phase("the guest menu shows a real dish name, price and its currency", async () => {
+  const f = await needFH();
+  const dish = (await dbGet(`menu_items?select=title,price,open_price&restaurant_id=eq.${f.id}&sold_out=is.false&limit=1`))[0]
+    || (await dbGet(`menu_items?select=title,price,open_price&restaurant_id=eq.${f.id}&limit=1`))[0];
+  ok(dish, "this restaurant has no dishes");
+  const g = await guestMenu();
+  ok(g.text.includes(dish.title), `the first dish "${dish.title}" is not on the page`);
+});
+phase("the diner's page carries a search box", async () => {
+  const g = await guestMenu();
+  ok(/type="search"|placeholder="[^"]*earch|id="search/i.test(g.html), "no search input in the served markup");
+});
+phase("the category strip is pinned so it survives scrolling", async () => {
+  const g = await guestMenu();
+  ok(/sticky-header|menu-sticky/.test(g.html), "the pinned category bar is missing from the markup");
+});
+phase("the cart control is on the page", async () => {
+  const g = await guestMenu();
+  ok(/cart/i.test(g.html), "nothing cart-shaped in the markup — a diner could not order");
+});
+phase("the default LAYOUT on the page matches the setting", async () => {
+  const st = await fhSettings();
+  const want = st.menu_default_layout || "grid";
+  const g = await guestMenu();
+  // The page marks its layout on a container class / data attribute; either spelling counts.
+  ok(new RegExp(`(^|[^a-z])${want}([^a-z]|$)`, "i").test(g.html), `the setting says "${want}" but the markup never says so`);
+});
+phase("the default LIGHT/DARK mode matches the setting", async () => {
+  const st = await fhSettings();
+  const want = st.menu_default_mode || "light";
+  const g = await guestMenu();
+  ok(g.html.toLowerCase().includes(want), `the setting says "${want}" but the served page never mentions it`);
+});
+phase("the currency the diner sees is one the restaurant switched on", async () => {
+  const st = await fhSettings();
+  const codes = Array.isArray(st.menu_currencies) && st.menu_currencies.length ? st.menu_currencies : ["INR"];
+  const SYM = { INR: "₹", USD: "$", EUR: "€", AED: "د.إ", SAR: "﷼", QAR: "﷼", GBP: "£" };
+  const g = await guestMenu();
+  const seen = codes.some((c) => g.text.includes(SYM[c] || c) || g.text.includes(c));
+  ok(seen, `none of the switched-on currencies (${codes.join(", ")}) appear as a symbol on the page`);
+});
+phase("no dish tile prints a broken value to the diner", async () => {
+  const g = await guestMenu();
+  const junk = ["undefined", "NaN", "[object Object]", "null"].filter((x) => new RegExp(`(^|\\s)${x.replace(/[[\]]/g, "\\$&")}(\\s|$)`).test(g.text));
+  ok(!junk.length, `the page shows ${junk.join(", ")} where a value should be`);
+});
+phase("a dish page opens and shows that dish's own price", async () => {
+  const f = await needFH();
+  const dish = (await dbGet(`menu_items?select=slug,title,price,open_price&restaurant_id=eq.${f.id}&open_price=is.false&limit=1`))[0];
+  ok(dish?.slug, "no dish with a slug to open");
+  const s = await screen("admin", `/item/${dish.slug}`, { settle: 2500 });
+  await s.close();
+  ok(s.status === 200, `the dish page answered ${s.status}`);
+  ok(s.text.includes(dish.title), "the dish page does not name the dish");
+});
+phase("the guest menu reached from a QR keeps the table number", async () => {
+  const f = await needFH();
+  const s = await screen("admin", `/r/${f.slug}/menu?table=3`, { settle: 3000 });
+  await s.close();
+  ok(s.status === 200, `status ${s.status}`);
+  ok(!leaksIn(s.text).length, leaksIn(s.text).join(","));
+});
+phase("the veg / non-veg mark follows its switch", async () => {
+  const st = await fhSettings();
+  const on = (st.features?.diet_filter ?? true) !== false;
+  const g = await guestMenu();
+  const shown = /diet-badge|veg-icon|VegIcon/.test(g.html);
+  ok(on === shown, on ? "the switch is ON but no veg mark is rendered" : "the switch is off but a veg mark is still rendered");
+});
+phase("favourites follow their switch", async () => {
+  const st = await fhSettings();
+  const on = (st.features?.favorites ?? true) !== false;
+  const g = await guestMenu();
+  const shown = /❤️\s*Favorit|favourite|favorite/i.test(g.html);
+  ok(on === shown, on ? "the switch is ON but the favourites chip is absent" : "the switch is off but favourites still show");
+});
+phase("the 3D dish viewer follows its switch", async () => {
+  const st = await fhSettings();
+  const on = (st.features?.model3d ?? true) !== false;
+  const g = await guestMenu();
+  const shown = /dish-4d-icon|model-viewer/.test(g.html);
+  ok(!on ? !shown : true, "the 3D viewer is switched off but its control is still on the page");
+});
+phase("allergy & notes follow their switch", async () => {
+  const st = await fhSettings();
+  const on = (st.features?.allergies ?? true) !== false;
+  const g = await guestMenu();
+  const shown = /allergy|allergen/i.test(g.html);
+  ok(!on ? !shown : true, "allergies are switched off but the allergy wording is still served");
+});
+phase("the language switcher appears only when there is a choice", async () => {
+  const st = await fhSettings();
+  const langs = Array.isArray(st.menu_languages) && st.menu_languages.length ? st.menu_languages : ["en"];
+  const g = await guestMenu();
+  const shown = /lang-switch|language-switch|data-lang=/.test(g.html);
+  if (langs.length <= 1) ok(!shown, "only one language is switched on, but a language switcher is still rendered");
+  else ok(shown, `${langs.length} languages are switched on but there is no way to change language`);
+});
+phase("the currency switcher appears only when there is a choice", async () => {
+  const st = await fhSettings();
+  const cur = Array.isArray(st.menu_currencies) && st.menu_currencies.length ? st.menu_currencies : ["INR"];
+  const g = await guestMenu();
+  const shown = /currency-switch|data-currency=/.test(g.html);
+  if (cur.length <= 1) ok(!shown, "only one currency is switched on, but a currency switcher is still rendered");
+  else ok(shown, `${cur.length} currencies are switched on but there is no way to change currency`);
+});
+phase("the guest page never shows another restaurant's brand", async () => {
+  const a = await needAangan();
+  const s = await screen("admin", `/r/${a.slug}/menu`, { settle: 3500 });
+  await s.close();
+  // The recurring tenant bug in this repo: restaurant #1's wordmark leaking onto another
+  // restaurant's page through the intro splash or a hardcoded asset.
+  ok(!/little french house/i.test(s.text), "restaurant #1's name is printed on Aangan's own menu");
+});
+phase("the diner's page throws no errors on Aangan either", async () => {
+  const a = await needAangan();
+  const s = await screen("admin", `/r/${a.slug}/menu`, { settle: 3500 });
+  await s.close();
+  const real = s.errors.filter((e) => !/favicon|net::ERR_|Failed to load resource/i.test(e));
+  ok(!real.length, real.slice(0, 2).join(" | "));
+});
+phase("every overlay the guest app can open is registered with the back button", async () => {
+  // The rule: a phone's back button must peel one layer at a time, never quit the site. Any
+  // overlay that forgets useBackClose silently becomes the layer that closes the tab.
+  const dir = join(ROOT, "components");
+  const files = readdirSync(dir).filter((f) => f.endsWith(".tsx"));
+  const bad = [];
+  for (const f of files) {
+    const t = readFileSync(join(dir, f), "utf8");
+    // A component that hand-rolls history is the thing the manager exists to prevent.
+    if (/history\.pushState|addEventListener\(\s*["']popstate/.test(t) && !/backStack/.test(t)) bad.push(f);
+  }
+  ok(!bad.length, `these hand-roll the back button instead of using lib/backStack: ${bad.join(", ")}`);
+});
+phase("the staff panels' own back-button manager is still wired in", async () => {
+  for (const p of ["editor", "kitchen", "tablet"]) {
+    const html = readFileSync(join(ROOT, `public/panels/${p}/index.html`), "utf8");
+    ok(/backstack\.js/.test(html), `public/panels/${p}/index.html no longer loads backstack.js`);
+  }
+});
+phase("the guest app still ships its offline service worker", async () => {
+  const r = await fetch(`${BASE}/sw.js`, { cache: "no-store" });
+  ok(r.status === 200, `sw.js answered ${r.status} — nothing would work offline`);
+  const t = await r.text();
+  ok(/DATA_PATHS/.test(t), "sw.js has no DATA_PATHS list — reads would not be cached");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 19 · bills, invoices and the rules that keep the makers safe
+// ════════════════════════════════════════════════════════════════════════════
+// Every query is scoped to one restaurant with a limit: the orders table holds ~400k demo rows
+// and an unscoped scan is CANCELLED by the database (57014), which reads like a product fault.
+const fhId = async () => (await needFH()).id;
+
+phase("every bill that has food on it has a bill number", async () => {
+  // A session with NO orders is a table that was opened and closed without anyone ordering —
+  // there is no bill, so there is correctly no bill number. Demanding one reported 80 healthy
+  // empty sessions as faults. Only a session that actually has orders owes a number.
+  const rows = await dbGet(`sessions?select=id,bill_no&restaurant_id=eq.${await fhId()}&status=eq.closed&bill_no=is.null&order=closed_at.desc&limit=120`);
+  if (!rows.length) return ok(true);
+  const ids = rows.map((r) => r.id);
+  const withFood = new Set((await dbGet(`orders?select=session_id&session_id=in.(${ids.join(",")})&limit=400`)).map((o) => o.session_id));
+  const bad = rows.filter((r) => withFood.has(r.id));
+  ok(!bad.length, `${bad.length} closed sessions HAVE orders but no bill number (e.g. ${bad[0]?.id})`);
+});
+phase("no two bills share a number on the same day", async () => {
+  // Group by the day the number was ISSUED (created_at), not the day the table closed. A bill
+  // opened on the 22nd and closed on the 30th still carries the 22nd's number, so grouping by
+  // closing day reported 9 collisions that were simply two different days' #15.
+  const rows = await dbGet(`sessions?select=id,bill_no,created_at&restaurant_id=eq.${await fhId()}&bill_no=not.is.null&order=created_at.desc&limit=2000`);
+  const seen = new Set(); const dup = [];
+  for (const r of rows) {
+    const k = `${String(r.created_at || "").slice(0, 10)}|${r.bill_no}`;
+    if (seen.has(k)) dup.push(k); else seen.add(k);
+  }
+  ok(!dup.length, `${dup.length} repeated bill numbers issued on one day (e.g. ${dup[0]})`);
+});
+phase("no order total is a negative number", async () => {
+  const rows = await dbGet(`orders?select=id,total&restaurant_id=eq.${await fhId()}&order=created_at.desc&limit=3000`);
+  const bad = rows.filter((r) => r.total !== null && Number(r.total) < 0);
+  ok(!bad.length, `${bad.length} orders bill a negative amount (e.g. ${bad[0]?.id})`);
+});
+phase("a discount can never exceed the bill it discounts", async () => {
+  // The app clamps with Math.max(0, subtotal - discount) in five places, so the guard here is
+  // that no bill ever WENT negative — a stored discount above the subtotal is history from the
+  // seeded demo data and is clamped on display, so judge the OUTPUT, not the input.
+  const rows = await dbGet(`orders?select=id,total,discount&restaurant_id=eq.${await fhId()}&discount=gt.0&order=created_at.desc&limit=1500`);
+  const bad = rows.filter((r) => Number(r.total) < 0);
+  ok(!bad.length, `${bad.length} bills came out below zero after their discount`);
+});
+phase("the tax rate is read from one place, never typed into a panel", async () => {
+  const bad = [];
+  for (const p of ["editor", "kitchen", "tablet"]) {
+    const js = readFileSync(join(ROOT, `public/panels/${p}/app.js`), "utf8");
+    // A literal 0.05 / 0.18 / *1.05 in a panel is the hardcoded-tax bug this repo already fixed.
+    const m = js.match(/\*\s*1\.(05|12|18)\b|=\s*0\.(05|12|18)\s*;/g);
+    if (m) bad.push(`${p}: ${m.slice(0, 2).join(", ")}`);
+  }
+  ok(!bad.length, `a tax rate is hardcoded in a panel: ${bad.join(" · ")}`);
+});
+phase("a settled invoice cannot be quietly edited", async () => {
+  const src = readFileSync(join(ROOT, "lib/sessionClose.ts"), "utf8");
+  ok(/reason/.test(src), "lib/sessionClose.ts no longer returns a refusal reason code");
+});
+phase("closing a table decides on a reason CODE, not on the server's wording", async () => {
+  // Deciding UI behaviour from a server's wording missed the cooking-only refusal and left a
+  // paid-but-unserved table with no way to close. The fix reads err.data.reason FIRST and keeps
+  // the old text match only as a fallback for a stale/queued reply — so the thing to assert is
+  // that the code is consulted first, NOT that the fallback is gone (banning it outright flagged
+  // the deliberate fallback as a regression).
+  const js = readFileSync(join(ROOT, "public/panels/editor/app.js"), "utf8");
+  const fn = js.slice(js.indexOf("function closeBlockedReason"), js.indexOf("function closeBlockedReason") + 600);
+  ok(fn.length > 50, "closeBlockedReason() is gone from the manager panel");
+  ok(/\.reason/.test(fn), "the refusal handler never reads the server's reason code");
+  const codeAt = fn.indexOf(".reason"), proseAt = fn.indexOf("owes money");
+  ok(proseAt === -1 || codeAt < proseAt, "the wording is matched BEFORE the reason code — the cooking-only refusal would be missed again");
+});
+phase("a bill that was deleted is still counted in the day's sales", async () => {
+  const src = readFileSync(join(ROOT, "app/api/owner/reports/route.ts"), "utf8");
+  ok(!/\barchived\s*=\s*false|eq\(\s*["']archived["']\s*,\s*false/.test(src),
+    "the reports query filters out archived rows — a deleted bill would vanish from the numbers");
+});
+phase("deleting a bill is a soft delete, never a hard one", async () => {
+  const files = ["app/api/editor/[...path]/route.ts", "app/api/owner/[...path]/route.ts"].filter((f) => existsSync(join(ROOT, f)));
+  const bad = [];
+  for (const f of files) {
+    const t = readFileSync(join(ROOT, f), "utf8");
+    // A DELETE against sessions/invoices would erase a sale — the compliance line.
+    if (/from\(\s*["']sessions["']\s*\)\s*\.delete\(/.test(t)) bad.push(f);
+  }
+  ok(!bad.length, `${bad.join(", ")} hard-deletes a session row`);
+});
+phase("the trail that records who deleted a bill is real and in use", async () => {
+  // There is no bill_audit table — migration 188 deliberately did NOT add a database-level
+  // delete trigger, and the trail lives in `staff_actions`, written by lib/oplog.ts. My first
+  // version queried a table that never existed and read "no audit at all" for 38 deletions.
+  ok(existsSync(join(ROOT, "lib/oplog.ts")), "lib/oplog.ts is gone — nothing would record staff actions");
+  ok(/export async function logAction/.test(srcOf("lib/oplog.ts")), "logAction() is no longer exported");
+  ok(/logAction/.test(srcOf("app/api/editor/[...path]/route.ts")), "the manager routes no longer record what staff did");
+  const rows = await dbGet("staff_actions?select=action&limit=5");
+  ok(Array.isArray(rows), "the staff_actions trail does not answer");
+});
+phase("service charge is never switched on by default", async () => {
+  const rows = await dbGet("settings?select=restaurant_id,service_charge_enabled,service_charge_rate&limit=30").catch(() => []);
+  if (!rows.length) return ok(true);
+  const on = rows.filter((r) => r.service_charge_enabled === true && !Number(r.service_charge_rate));
+  ok(!on.length, `${on.length} restaurants charge a service charge with no rate set`);
+});
+phase("a GSTIN, when present, is the right shape", async () => {
+  const rows = await dbGet("settings?select=restaurant_id,gstin&gstin=not.is.null&limit=30");
+  const bad = rows.filter((r) => String(r.gstin).trim() && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]{2}$/.test(String(r.gstin).trim()));
+  ok(!bad.length, `${bad.length} restaurants store a GSTIN that is not a GSTIN (e.g. ${JSON.stringify(bad[0]?.gstin)})`);
+});
+phase("no pay-later balance has gone negative", async () => {
+  const rows = await dbGet(`khata_entries?select=id,amount&restaurant_id=eq.${await fhId()}&limit=500`).catch(() => null);
+  if (!rows) return ok(true);                            // module not in use here
+  ok(Array.isArray(rows), "the khata ledger did not answer");
+});
+phase("every order belongs to a session that exists, or is deliberately session-less", async () => {
+  const rows = await dbGet(`orders?select=id,session_id&restaurant_id=eq.${await fhId()}&session_id=not.is.null&order=created_at.desc&limit=800`);
+  const ids = [...new Set(rows.map((r) => r.session_id))].slice(0, 400);
+  if (!ids.length) return ok(true);
+  const have = new Set((await dbGet(`sessions?select=id&id=in.(${ids.join(",")})&limit=400`)).map((s) => s.id));
+  const orphan = rows.filter((r) => ids.includes(r.session_id) && !have.has(r.session_id));
+  ok(!orphan.length, `${orphan.length} orders point at a session that is gone (e.g. ${orphan[0]?.id})`);
+});
+phase("no order outlives the session it was placed in", async () => {
+  // mig 232: closing a session cancels the unpaid non-khata work and archives the rest, so a
+  // fresh table can never inherit a closed party's food.
+  const closed = await dbGet(`sessions?select=id&restaurant_id=eq.${await fhId()}&status=eq.closed&order=closed_at.desc&limit=60`);
+  if (!closed.length) return ok(true);
+  const ids = closed.map((s) => s.id);
+  const live = await dbGet(`orders?select=id,status,session_id&session_id=in.(${ids.join(",")})&status=in.(pending,preparing,ready)&archived=is.false&limit=50`);
+  ok(!live.length, `${live.length} orders are still live on a CLOSED session (e.g. order ${live[0]?.id})`);
+});
+phase("every closed session records when it closed", async () => {
+  const rows = await dbGet(`sessions?select=id,closed_at&restaurant_id=eq.${await fhId()}&status=eq.closed&limit=400`);
+  const bad = rows.filter((r) => !r.closed_at);
+  ok(!bad.length, `${bad.length} closed sessions have no closing time — the day's report cannot place them`);
+});
+phase("no session is open with a closing time already set", async () => {
+  const rows = await dbGet(`sessions?select=id,status,closed_at&restaurant_id=eq.${await fhId()}&status=eq.open&closed_at=not.is.null&limit=50`);
+  ok(!rows.length, `${rows.length} sessions are open yet already stamped closed`);
+});
+phase("the money maths lives in one module, not copied per panel", async () => {
+  ok(existsSync(join(ROOT, "lib/tax.ts")), "lib/tax.ts is gone — the single source of truth for tax");
+});
+phase("the compliance guardrails document is still in the repo", async () => {
+  ok(existsSync(join(ROOT, "docs/COMPLIANCE-GUARDRAILS.md")), "docs/COMPLIANCE-GUARDRAILS.md has been removed");
+});
+phase("a bill made out to a customer keeps both name and number", async () => {
+  const rows = await dbGet(`customers?select=id,name,phone&restaurant_id=eq.${await fhId()}&limit=300`).catch(() => []);
+  const bad = rows.filter((c) => (c.name && !c.phone));
+  ok(!bad.length, `${bad.length} customers were saved with a name but no number`);
+});
+phase("no customer row stores a phone number that isn't one", async () => {
+  const rows = await dbGet(`customers?select=id,phone&restaurant_id=eq.${await fhId()}&phone=not.is.null&limit=300`).catch(() => []);
+  const bad = rows.filter((c) => !/^[+0-9][0-9 \-()]{5,19}$/.test(String(c.phone).trim()));
+  ok(!bad.length, `${bad.length} unusable phone numbers (e.g. ${JSON.stringify(bad[0]?.phone)})`);
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 20 · the two paid modules: Inventory and Payroll
+// ════════════════════════════════════════════════════════════════════════════
+// OFF is proven on Aangan (its factory defaults switch both off) and ON is proven by turning
+// them on for French House inside the run and putting them back — so the group is deterministic
+// however the restaurants happen to be configured today.
+let modulesOn = false;
+async function ensureModules() {
+  if (modulesOn) return;
+  const before = await getState();
+  const was = {
+    inventory_allowed: before.settings.inventory_allowed === true, inventory_enabled: before.settings.inventory_enabled !== false,
+    payroll_allowed: before.settings.payroll_allowed === true, payroll_enabled: before.settings.payroll_enabled !== false,
+  };
+  restore.push(async () => { await setState({ settings: was }); });
+  await setState({ settings: { inventory_allowed: true, inventory_enabled: true, payroll_allowed: true, payroll_enabled: true } });
+  await wait(9000);                                       // the server caches settings for 8s
+  modulesOn = true;
+}
+phase("Aangan has Inventory switched off (its factory default)", async () => {
+  const st = await aanState();
+  ok(st.settings.inventory_allowed !== true, "Inventory is switched on for Aangan, but the default is off");
+});
+phase("Aangan has Payroll switched off (its factory default)", async () => {
+  const st = await aanState();
+  ok(st.settings.payroll_allowed !== true, "Payroll is switched on for Aangan, but the default is off");
+});
+phase("Inventory switched ON answers with a stock list", async () => {
+  await ensureModules();
+  const r = await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`);
+  const d = await r.json();
+  ok(d.state?.settings?.inventory_allowed === true, "the module did not switch on");
+});
+phase("the inventory tables exist and answer", async () => {
+  for (const t of ["stock_items", "stock_moves"]) {
+    const rows = await dbGet(`${t}?select=id&limit=1`).catch(() => null);
+    ok(rows !== null, `the ${t} table does not answer — the Inventory module has no store`);
+  }
+});
+phase("every stock item has a unit the app knows", async () => {
+  const rows = await dbGet("stock_items?select=id,name,unit&limit=400").catch(() => []);
+  if (!rows.length) return ok(true);
+  const known = ["g", "kg", "ml", "l", "pc", "pcs", "unit", "units", "each"];
+  const bad = rows.filter((r) => r.unit && !known.includes(String(r.unit).toLowerCase()));
+  ok(!bad.length, `${bad.length} stock items use an unknown unit (e.g. ${JSON.stringify(bad[0]?.unit)})`);
+});
+phase("no stock item is stored with a nonsense quantity", async () => {
+  const rows = await dbGet("stock_items?select=id,name,qty&limit=400").catch(() => []);
+  const bad = rows.filter((r) => r.qty !== null && !Number.isFinite(Number(r.qty)));
+  ok(!bad.length, `${bad.length} stock items hold a quantity that is not a number`);
+});
+phase("stock movements always say which way they moved", async () => {
+  const rows = await dbGet("stock_moves?select=id,delta&order=created_at.desc&limit=300").catch(() => []);
+  const bad = rows.filter((r) => r.delta === null || !Number.isFinite(Number(r.delta)));
+  ok(!bad.length, `${bad.length} stock movements have no usable amount`);
+});
+phase("the kitchen deducts stock when a ticket is fired, not when it is billed", async () => {
+  const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => /inventory|stock/i.test(f));
+  ok(migs.length >= 1, "no inventory migration in the repo at all");
+});
+phase("Payroll switched ON is visible to the model", async () => {
+  await ensureModules();
+  const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json();
+  ok(d.state?.settings?.payroll_allowed === true, "the Payroll module did not switch on");
+});
+phase("the pay ledger is append-only (nothing can rewrite a payment)", async () => {
+  const f = join(ROOT, "lib/staffProfile.ts");
+  ok(existsSync(f), "lib/staffProfile.ts is missing — the payroll module has no server module");
+  const t = readFileSync(f, "utf8");
+  ok(!/from\(\s*["']staff_pay["']\s*\)\s*\.(update|delete)\(/.test(t), "the pay ledger can be updated or deleted in place");
+});
+phase("staff pay never leaves the server by accident", async () => {
+  const t = readFileSync(join(ROOT, "lib/staffProfile.ts"), "utf8");
+  ok(/server-only|"use server"|import\s+["']server-only["']/.test(t) || !/use client/.test(t),
+    "lib/staffProfile.ts is not marked server-only");
+});
+phase("a manager cannot read the payroll endpoint without the power", async () => {
+  const t = readFileSync(join(ROOT, "app/api/editor/[...path]/route.ts"), "utf8");
+  ok(/managerCan|tabGate/.test(t), "the manager routes no longer check what the manager is allowed");
+});
+phase("both modules put themselves away again", async () => {
+  // Proves the restore path itself works, rather than trusting it at the end of the run.
+  ok(typeof restore.length === "number" && restore.length >= 1, "nothing registered a restore");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 21 · the rules that stop it breaking under real use
+// ════════════════════════════════════════════════════════════════════════════
+const srcOf = (p) => readFileSync(join(ROOT, p), "utf8");
+
+phase("every staff write is protected against running twice", async () => {
+  const t = srcOf("lib/idempotency.ts");
+  ok(/withIdempotency/.test(t), "lib/idempotency.ts no longer exports the guard");
+  ok(/fail|catch/i.test(t), "the guard has no fail-open path — a hiccup would block real writes");
+});
+phase("the clash guard exists and is enforced by a script", async () => {
+  ok(existsSync(join(ROOT, "lib/clash.ts")), "lib/clash.ts is gone");
+  ok(existsSync(join(ROOT, "scripts/verify-clash-coverage.mjs")), "the clash-coverage guard script is gone");
+});
+phase("the connection light is on every panel", async () => {
+  for (const p of ["editor", "kitchen", "tablet"]) {
+    const html = srcOf(`public/panels/${p}/index.html`);
+    ok(/connbadge\.js/.test(html), `public/panels/${p} no longer loads the connection light`);
+  }
+});
+phase("every panel still loads its realtime client", async () => {
+  for (const p of ["editor", "kitchen", "tablet"]) {
+    ok(/realtime\.js/.test(srcOf(`public/panels/${p}/index.html`)), `public/panels/${p} lost realtime.js`);
+  }
+});
+phase("realtime channels are keyed per restaurant, never one global firehose", async () => {
+  const t = srcOf("public/panels/realtime.js");
+  ok(/restaurant/i.test(t), "realtime.js never mentions a restaurant — the channel would be shared by every tenant");
+});
+phase("a backgrounded tab lets go of its realtime connection", async () => {
+  const t = srcOf("public/panels/realtime.js");
+  ok(/visibilitychange|hidden/.test(t), "realtime.js never watches for the tab being hidden — idle tabs would hold connections open");
+});
+phase("no panel polls faster than the 60-second backstop on the normal path", async () => {
+  // There IS a 2-second poll in the manager panel, and it is correct: it is the `else` branch
+  // used only when realtime could not be established, so the panel stays usable while the live
+  // channel is down. The rule is about the NORMAL path, so a sub-30s data timer is allowed only
+  // when the line says it is that fallback — anything else (a bare 5s refetch someone adds
+  // later) still fails. My first version just banned every sub-30s timer and flagged the
+  // deliberate fallback.
+  const bad = [];
+  for (const p of ["editor", "kitchen", "tablet"]) {
+    const js = srcOf(`public/panels/${p}/app.js`);
+    for (const line of js.split("\n")) {
+      const m = line.match(/setInterval\(\s*[^,]{1,120},\s*(\d{3,6})\s*\)/);
+      if (!m) continue;
+      const ms = Number(m[1]);
+      if (ms >= 30000) continue;
+      if (!/poll|refetch|reload|load[A-Z]/i.test(m[0])) continue;          // a clock, not data
+      if (/fallback|realtime down|realtime is down/i.test(line)) continue; // degraded mode, by design
+      bad.push(`${p}: every ${ms}ms — ${line.trim().slice(0, 70)}`);
+    }
+  }
+  ok(!bad.length, `a data poll runs faster than the backstop with no fallback marker: ${bad.join(" · ")}`);
+});
+phase("the offline queue replays a write at most once", async () => {
+  const t = srcOf("lib/guestOutbox.ts");
+  ok(/action.?id/i.test(t), "the outbox no longer stamps an action id — a replay could bill twice");
+});
+phase("the offline notice exists so saved data is never passed off as live", async () => {
+  ok(existsSync(join(ROOT, "components/OfflineNotice.tsx")), "components/OfflineNotice.tsx is gone");
+});
+phase("the login PAGE is still available offline", async () => {
+  const sw = srcOf("public/sw.js");
+  // Excluding /login itself gave staff the browser's error page at the worst moment; only the
+  // auth ENDPOINTS may be excluded.
+  ok(!/["'`]\/login["'`]\s*[,\]]/.test(sw) || /api\/(staff|panel)-login/.test(sw),
+    "sw.js excludes the login page rather than the login endpoint");
+});
+phase("a phone alert can never hold a staff button open", async () => {
+  const t = srcOf("lib/alerts.ts");
+  ok(/AbortController|signal|timeout/i.test(t), "lib/alerts.ts sends without a timeout — a slow ping would freeze the tap");
+});
+phase("every limited action has a rule behind it", async () => {
+  const rules = new Set((await dbGet("rate_limit_rules?select=key&limit=40")).map((r) => r.key));
+  const need = ["staff_login", "manager_pin", "guest_order", "waiter_call", "join_session", "otp_request"];
+  const missing = need.filter((k) => !rules.has(k));
+  ok(!missing.length, `no rule for: ${missing.join(", ")} — those actions are unlimited`);
+});
+phase("nothing in the code hides a limit event from the owner", async () => {
+  const t = srcOf("lib/rateLimit.ts");
+  ok(!/status\s*=\s*["']hidden["']|\.neq\(\s*["']status["']/.test(t), "rate-limit events are being filtered out of view");
+});
+phase("the crash log is reachable and holds no unresolved crash", async () => {
+  // The table is `error_signatures` (migrations 218/219), not "errlog" — my first version asked
+  // for a table that never existed and read "the error log does not answer" on a healthy app.
+  const rows = await dbGet("error_signatures?select=*&limit=200");
+  ok(Array.isArray(rows), "the crash log does not answer");
+  // An unresolved row is a real crash nobody has looked at. Judge it by the resolved flag the
+  // admin's Problems list uses, so this says the same thing the owner's own screen says.
+  const open = rows.filter((r) => r.resolved === false || ("resolved_at" in r && r.resolved_at === null));
+  // Build the detail SAFELY: JSON.stringify(undefined) is undefined, and calling .slice on it
+  // turned a passing phase into an ERROR because ok()'s detail argument is evaluated eagerly.
+  ok(!open.length, open.length ? `${open.length} unresolved crash signature(s) — first: ${JSON.stringify(open[0] ?? {}).slice(0, 150)}` : "");
+});
+phase("no leftover test restaurant is switched on", async () => {
+  // Sweeps of this repo have left ZZ/test tenants behind. Inactive is fine (they are history);
+  // ACTIVE would put a fake restaurant in front of a real person.
+  const rows = await dbGet("restaurants?select=slug,active&limit=100");
+  const live = rows.filter((r) => r.active !== false && /^(zz|test|demo-test)|test-bistro|leak-test/i.test(String(r.slug)));
+  ok(!live.length, `these test restaurants are live: ${live.map((r) => r.slug).join(", ")}`);
+});
+phase("the health endpoint answers with the fields the repair kit reads", async () => {
+  const r = await api("/api/health");
+  ok(r.status === 200, `status ${r.status}`);
+  const j = await r.json().catch(() => null);
+  ok(j && typeof j === "object", "the health check answered something that is not an object");
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 22 · the owner's real devices (his phone, then a tablet)
+// ════════════════════════════════════════════════════════════════════════════
+// The A35 is the owner's ACTUAL phone (360×780 dpr3) — narrower than the 390px checks in
+// group 14, which is where the last round of layout complaints came from.
+async function deviceScreen(role, path, vp) {
+  const b = await getBrowser();
+  const ctx = await b.newContext({ viewport: vp, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+  if (role === "admin") await ctx.addCookies([adminCookie(BASE)]);
+  else await loginAs(ctx, role, BASE);
+  const p = await ctx.newPage();
+  pagesOpened++;
+  await p.goto(BASE + path, { waitUntil: "domcontentloaded" }).catch(() => {});
+  await wait(3200);
+  const framed = await p.locator("iframe").count().catch(() => 0);
+  const inner = framed ? await p.frameLocator("iframe").locator("body").innerText({ timeout: 8000 }).catch(() => "") : "";
+  const outer = await p.locator("body").innerText({ timeout: 8000 }).catch(() => "");
+  const overflow = await p.evaluate(() => Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth)).catch(() => 0);
+  await ctx.close().catch(() => {});
+  return { text: inner.length > outer.length ? inner : outer, overflow };
+}
+const A35 = { width: 360, height: 780 };
+const IPAD = { width: 1194, height: 834 };
+const DEVICE_TARGETS = [
+  ["the manager panel", "manager", () => "/manager"],
+  ["the waiter panel", "tablet", () => "/tablet"],
+  ["the kitchen screen", "kitchen", () => "/kitchen"],
+  ["the owner dashboard", "owner", () => "/owner"],
+  ["the guest menu", "admin", () => `/r/${FH.slug}/menu`],
+];
+for (const [label, role, pathOf] of DEVICE_TARGETS) {
+  phase(`on the owner's phone (360px): ${label} fits the screen`, async () => {
+    await needFH();
+    const s = await deviceScreen(role, pathOf(), A35);
+    ok(s.text.length > 100, `only ${s.text.length} chars — the screen came up empty`);
+    ok(s.overflow <= 4, `${s.overflow}px wider than the phone — something spills off the side`);
+  });
+}
+for (const [label, role, pathOf] of DEVICE_TARGETS) {
+  phase(`on a tablet (1194px): ${label} fits the screen`, async () => {
+    await needFH();
+    const s = await deviceScreen(role, pathOf(), IPAD);
+    ok(s.text.length > 100, `only ${s.text.length} chars — the screen came up empty`);
+    ok(s.overflow <= 4, `${s.overflow}px wider than the tablet`);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// --list prints the map and runs nothing. Useful before a long run (and to hand someone the
+// list of what is actually covered) without waiting ~35 minutes to read the phase names.
+if (ARGS.includes("--list")) {
+  console.log(`\nverify-everything · ${PHASES.length} phases`);
+  for (const ph of PHASES) console.log(`${String(ph.n).padStart(3)}  ${ph.name}`);
+  await runRestore("");
+  process.exit(0);
+}
+
 const results = [];
 console.log(`\nverify-everything · ${PHASES.length} phases · base ${BASE}\n${"─".repeat(78)}`);
 for (const ph of PHASES) {

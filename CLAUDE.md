@@ -704,10 +704,20 @@ work. It is all kept above as history — nothing has been removed — but the L
   the only guard, the endpoint must refuse too.
 - Canonical spec: **`docs/ACCESS-MODEL.md`**. `docs/ACCESS-LADDER.md` is HISTORY only.
 - Guards: **`npm run verify:access`** (a switch that reaches no real code fails) and
-  **`npm run verify:everything`** — 347 numbered phases against a chosen site, one by one:
+  **`npm run verify:everything`** — **500 numbered phases** against a chosen site, one by one:
   every route, all four panels as their real role, every switch off→gone→on→back, a real
-  order followed end to end, the 390px phone, and records/integrity. It signs in once per
-  role, restores every setting it flips (even if killed) and deletes every row it creates.
+  order followed end to end, the guest journey feature by feature, bills + the compliance
+  rules, Inventory/Payroll, the resilience rules, the owner's A35 phone AND a tablet, and
+  records/integrity. It signs in once per role, restores every setting it flips (even if
+  killed) and deletes every row it creates. Map: **`docs/QA-500-PHASES.md`**;
+  `--list` prints it without running, `--only 419-440` re-checks one group.
+- **The two demo restaurants have different jobs in the test, keep it that way.** French
+  House is the one written to (switches flipped, a real order pushed through, restored after).
+  **Aangan is the CONTROL: it stays at the factory default permission set and is only ever
+  READ** (owner, 2026-07-31 — "keep aangan with all the default permission"). Phases 348-418
+  prove all 68 of its switches still read exactly the model's `def`. Put any restaurant back
+  to those defaults with **`npm run access:defaults -- --slug <slug> --apply`** (dry run
+  without `--apply`); it refuses to point at anything but the backup database.
 
 ## Known gotchas (read before editing)
 

@@ -24,6 +24,7 @@
     "verify:access": "node scripts/verify-access-model.mjs",
     "verify:access-live": "node scripts/verify-access-live.mjs",
     "verify:everything": "npx esbuild lib/accessTree.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/accessTree.mjs --log-level=warning && node scripts/verify-everything.mjs",
+    "access:defaults": "npx esbuild lib/accessTree.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/accessTree.mjs --log-level=warning && node scripts/set-access-defaults.mjs",
     "verify:live": "node scripts/verify-no-fatal-ui.mjs",
     "verify:clash": "node scripts/verify-clash-coverage.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
