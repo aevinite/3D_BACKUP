@@ -1976,7 +1976,14 @@ phase("no order outlives the session it was placed in", async () => {
   // OWN fixture — verify-table-ownership inserts a ₹999 "leftover" order on a session
   // backdated ten minutes to reproduce pre-mig-232 data, and the app had already archived it,
   // which is the correct cleanup. Judging a cleaned-up row as a live one is a false alarm.
-  const live = await dbGet(`orders?select=id,status,session_id&session_id=in.(${ids.join(",")})&status=in.(pending,preparing,ready)&archived=not.is.true&limit=50`);
+  // A SETTLING WINDOW, the same idea phase 155 already uses. This suite's own table-ownership
+  // guard deliberately inserts a ₹999 "LEFTOVER check dish" on a back-dated closed session to
+  // reproduce pre-mig-232 data, and the app archives it a moment later. Read in that gap — which
+  // happens whenever the guards run in a parallel lane beside this one — a correct cleanup looks
+  // like a live order outliving its session. Only rows that have had time to settle count.
+  const SETTLE_MS = 90000;
+  const rowsLive = await dbGet(`orders?select=id,status,session_id,created_at&session_id=in.(${ids.join(",")})&status=in.(pending,preparing,ready)&archived=not.is.true&limit=50`);
+  const live = rowsLive.filter((r) => !r.created_at || Date.now() - new Date(r.created_at).getTime() > SETTLE_MS);
   ok(!live.length, `${live.length} orders are still live on a CLOSED session (e.g. order ${live[0]?.id})`);
 });
 phase("every closed session records when it closed", async () => {
