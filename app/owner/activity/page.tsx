@@ -9,7 +9,7 @@
 // it's your own data). A 60s backstop refresh (paused while the tab is hidden) keeps new
 // actions appearing without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useState } from "react";
-import { ACT_LABEL, PANEL_COLOR, timeAgo, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { ACT_LABEL, panelChipStyle, timeAgo, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { asValue } from "@/lib/ownerPin";
 
@@ -121,7 +121,7 @@ export default function OwnerActivity() {
                     opacity: isResolved ? 0.62 : 1,
                   }}
                 >
-                  <div><span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span></div>
+                  <div><span className="adm-chip" style={panelChipStyle(a.panel)}>{a.panel}</span></div>
                   <div style={{ minWidth: 0 }}>
                     <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{ACT_LABEL[a.action] || a.action}</span>
                     {isPin

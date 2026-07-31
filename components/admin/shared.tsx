@@ -34,6 +34,22 @@ export const STATE_COLOR: Record<Tile["state"], string> = {
   free: "", seated: "#2563eb", new: "#ea580c", preparing: "#7c3aed", served: "#ca8a04", cleared: "#15803d",
 };
 export const PANEL_COLOR: Record<string, string> = { editor: "#d4a574", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa", admin: "#e8a13c", owner: "#c084fc", db: "#94a3b8", guest: "#38bdf8", menu: "#38bdf8" };
+/** The tinted "which panel did this" pill. One helper because three screens drew it
+ *  identically (owner Activity, admin Logs, the shared log row).
+ *
+ *  The pill's TEXT is the panel colour mixed toward the CURRENT skin's text colour.
+ *  Those colours were all chosen against a dark console, so on the owner panel's LIGHT
+ *  skin the pale ones sat at ~2:1 contrast on white — "kitchen" was barely legible
+ *  (both-skins readability sweep, 2026-07-31). Mixing toward `--text` keeps every hue
+ *  recognisable while making it readable in whichever skin is on; on the dark console
+ *  it mixes toward light grey, so nothing there looks different. */
+export function panelChipStyle(panel: string | null | undefined): React.CSSProperties {
+  const c = PANEL_COLOR[panel || ""] || "#888";
+  return {
+    background: `color-mix(in srgb, ${c} 22%, transparent)`,
+    color: `color-mix(in srgb, ${c} 78%, var(--text))`,
+  };
+}
 export const ACT_LABEL: Record<string, string> = {
   order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
@@ -254,7 +270,7 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
         <div key={a.id} role="button" tabIndex={0} onClick={() => setDetailRow(a)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailRow(a); } }}
           style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)", cursor: "pointer" }}>
-          <span className="adm-chip" style={{ background: "color-mix(in srgb, " + (PANEL_COLOR[a.panel] || "#888") + " 22%, transparent)", color: PANEL_COLOR[a.panel] || "var(--muted)" }}>{a.panel}</span>
+          <span className="adm-chip" style={panelChipStyle(a.panel)}>{a.panel}</span>
           <span style={{ minWidth: 0 }}>
             {ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : det ? ` · ${det}` : ""}
             {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}

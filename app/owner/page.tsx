@@ -1028,7 +1028,13 @@ export default function OwnerDashboard() {
         .ow2-split .txt small { display: block; font-size: 10px; color: var(--muted); font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
         .ow2-split .txt b { display: block; font-size: 17px; font-weight: 800; line-height: 1.25; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .ow2-split .txt i { display: block; font-style: normal; font-size: 12.5px; color: var(--muted); }
-        .ow2-split .txt em { font-style: normal; font-weight: 800; color: ${GREEN}; }
+        /* The top performer's revenue was a FIXED emerald (${GREEN}) picked for the dark
+           card — on the light skin's white card that is 1.92:1 contrast, i.e. the number
+           the whole callout exists to show was practically invisible (found by the
+           both-skins readability sweep, 2026-07-31). Mixing the skin's own accent toward
+           the skin's own text colour keeps it green in both themes and readable in both:
+           ~5.5:1 on white, ~8.8:1 on the dark card. */
+        .ow2-split .txt em { font-style: normal; font-weight: 800; color: color-mix(in srgb, var(--accent) 80%, var(--text)); }
         .ow2-split .txt em.r { color: #ef4444; }
         .ow2-split .mid { flex: none; width: clamp(90px, 26%, 200px); height: 46px; display: flex; align-items: center; opacity: .9; }
         .ow2-split .oh.good .mid { margin-left: auto; }
@@ -1158,7 +1164,6 @@ export default function OwnerDashboard() {
                   <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
                 {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">Loading…</div>
                   : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r, i) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: portfolioColor(i) }))}
-                      trendData={groupTrend.rows} trendLines={groupTrend.lines}
                       onSelect={(id) => setDrawerRid(id)} />}
               </div>
               <div className="adm-card">
