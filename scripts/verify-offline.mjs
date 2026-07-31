@@ -596,7 +596,10 @@ async function run() {
     await ctx.setOffline(true);
     await guest.reload({ waitUntil: "domcontentloaded" }).catch(() => {});
     const body = (await guest.locator("body").textContent().catch(() => "")) || "";
-    !/No internet right now/i.test(body)
+    // Match the last-resort page by the ONE line only it says. Its headline is decided at
+    // runtime now (it names the real reason), so keying this check on a headline would make
+    // it pass for the wrong reason the moment that wording changes.
+    !/This screen hasn't been opened on this device/i.test(body)
       ? ok("the guest menu opens from the device (not the last-resort page)")
       : bad("the guest menu fell through to the last-resort offline page");
     // 45s, not 25s. Against the DEPLOYED site a cold guest menu can take past 30 seconds to
@@ -716,12 +719,31 @@ async function run() {
     await fresh.goto(BASE + "/never-opened-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
     await sleep(1500);
     const lastResort = (await fresh.locator("body").textContent().catch(() => "")) || "";
-    /No internet right now/i.test(lastResort)
+    /This screen hasn't been opened on this device/i.test(lastResort)
       ? ok("it shows our own page, not the browser's error page")
       : bad("the branded offline page was not served", JSON.stringify(lastResort.slice(0, 100)));
     /Nothing you did is lost/i.test(lastResort)
       ? ok("and it reassures them their work is safe")
       : bad("the reassurance text is missing");
+    // IT MUST NAME THE REASON, AND NAME THE RIGHT ONE. The page used to always blame the
+    // internet; the day the app's own database stopped answering it said "No internet right
+    // now" to an owner whose Wi-Fi was fine, and then waited forever. Here the device really
+    // IS offline, so the device verdict is the correct one and the "it's on us" verdict is a
+    // wrong answer, not a harmless one.
+    const verdict = await waitFor(async () => {
+      const t = (await fresh.locator("body").textContent().catch(() => "")) || "";
+      return /This device is offline|can't reach the internet/i.test(t) ? t : null;
+    }, 10000);
+    verdict
+      ? ok("and it says WHY it couldn't open (this device is offline)")
+      : bad("the page never named a reason", JSON.stringify(lastResort.slice(0, 120)));
+    verdict && !/this one is on us/i.test(verdict)
+      ? ok("and it doesn't blame the app when the device is the one offline")
+      : bad("it blamed the wrong side");
+    // A page whose only button reloads a page that can't load is a dead end.
+    (await fresh.locator("#home").count()) > 0 && (await fresh.locator("#home").isVisible())
+      ? ok("and it offers the way out (go to the home screen)")
+      : bad("the last-resort page has no way out");
     await ctx.setOffline(false);
     await fresh.close();
 

@@ -3,13 +3,26 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>No internet — your work is safe</title>
+  <title>Can't open this screen — your work is safe</title>
   <!--
     The last-resort page: shown ONLY when this device has never loaded the page it's
-    asking for AND there's no connection. Everything here is inline (no fonts, no
+    asking for AND the page couldn't be fetched. Everything here is inline (no fonts, no
     images, no scripts from elsewhere) because by definition nothing can be fetched.
     Tone matters: staff see this mid-service, so it must reassure (nothing was lost)
     and act on its own the moment the connection returns.
+
+    IT MUST NOT GUESS THE REASON. The first version always said "No internet right now",
+    which was WRONG the day the app's own database stopped answering: the owner's Wi-Fi was
+    fine, the site was up, and this page still blamed his internet — then sat on
+    "Waiting for the connection..." forever, because the one thing it probed (/api/health)
+    was the very thing that was hanging. That is the same mistake as the "Connection is
+    struggling" false alarm: never state a cause the evidence doesn't support. So it now
+    TESTS, in order:
+      1. is this device on a network at all?        (navigator.onLine)
+      2. can we reach our own server?               (a path that touches no database)
+      3. is the app behind it actually answering?   (/api/health)
+    and says which of the three failed, in plain words. Plus a way OUT of the dead end
+    (the home screen), because a screen with one button that changes nothing is a trap.
   -->
   <style>
     :root { color-scheme: dark; }
@@ -28,10 +41,17 @@
     .dot { width: 54px; height: 54px; margin: 0 auto 16px; border-radius: 999px; display: grid; place-items: center;
            background: rgba(239, 68, 68, .16); border: 1px solid rgba(239, 68, 68, .4); }
     .dot span { width: 14px; height: 14px; border-radius: 999px; background: #ef4444; animation: p 1.6s ease-in-out infinite; }
+    /* "still checking" and "it's us, not your internet" are amber, not alarm red. */
+    .dot.warn { background: rgba(245, 158, 11, .16); border-color: rgba(245, 158, 11, .45); }
+    .dot.warn span { background: #f59e0b; }
     @keyframes p { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .45; transform: scale(.82); } }
     h1 { margin: 0 0 8px; font-size: 20px; font-weight: 800; letter-spacing: -.01em; }
     p { margin: 0 0 14px; color: #b8c5de; font-size: 14px; }
-    .safe { margin: 18px 0 20px; padding: 12px 14px; border-radius: 12px; text-align: left;
+    .why { margin: 14px 0 0; padding: 12px 14px; border-radius: 12px; text-align: left;
+           background: rgba(56, 189, 248, .09); border: 1px solid rgba(56, 189, 248, .28);
+           color: #cfe6f8; font-size: 13px; }
+    .why b { color: #7dd3fc; display: block; margin-bottom: 3px; }
+    .safe { margin: 14px 0 20px; padding: 12px 14px; border-radius: 12px; text-align: left;
             background: rgba(34, 197, 94, .1); border: 1px solid rgba(34, 197, 94, .3); color: #d6f5e0; font-size: 13px; }
     .safe b { color: #86efac; }
     button {
@@ -39,41 +59,134 @@
       font: 800 15px/1 system-ui, sans-serif; color: #06131f; background: #38bdf8;
     }
     button:active { transform: translateY(1px); }
+    button.ghost { margin-top: 10px; background: transparent; color: #cfe0f7;
+                   border: 1px solid rgba(148, 163, 184, .38); font-weight: 700; }
     .hint { margin-top: 14px; font-size: 12.5px; color: #8fa1bf; }
     @media (prefers-reduced-motion: reduce) { .dot span { animation: none; } }
   </style>
 </head>
 <body>
   <main class="card">
-    <div class="dot"><span></span></div>
-    <h1>No internet right now</h1>
-    <p>This screen hasn't been opened on this device yet, so there's nothing saved to show.</p>
+    <div class="dot warn" id="dot"><span></span></div>
+    <h1 id="title">Can't open this screen</h1>
+    <p id="sub">This screen hasn't been opened on this device yet, so there's nothing saved to show.</p>
+    <div class="why" id="why"><b>Checking what's wrong...</b><span>One moment.</span></div>
     <div class="safe">
       <b>Nothing you did is lost.</b> Any orders or changes you made while offline are stored on
       this device and will be sent automatically the moment the connection comes back.
     </div>
     <button type="button" id="again">Try again</button>
-    <div class="hint" id="hint">Waiting for the connection…</div>
+    <button type="button" class="ghost" id="home">Go to the home screen</button>
+    <div class="hint" id="hint">Checking the connection...</div>
   </main>
   <script>
-    // Retry by hand, and automatically the instant the device reports it's back.
-    document.getElementById("again").addEventListener("click", function () { location.reload(); });
-    window.addEventListener("online", function () {
-      document.getElementById("hint").textContent = "Back online — reloading…";
-      location.reload();
-    });
-    // navigator.onLine is TRUE on a café Wi-Fi that has no internet, so reloading just
-    // because it says "online" looped this page forever. PROVE there's a real connection
+    var $ = function (id) { return document.getElementById(id); };
+
+    $("again").addEventListener("click", function () { location.reload(); });
+    // The way OUT of the dead end. Home is the lightest page in the app and is usually
+    // already saved on the device, so it opens even when this screen couldn't.
+    $("home").addEventListener("click", function () { location.href = "/"; });
+
+    // A check that ONLY proves "we reached our own server". It must be a path the service
+    // worker leaves alone and that touches NO database: an unmatched /api/ path answers 404
+    // from the edge, and a 404 is a perfectly good yes — something answered us.
+    // Never use a cached path here: the worker would answer from this device and we would
+    // conclude the internet is fine while it is not.
+    var REACH = "/api/__offline-check";
+    var HEALTH = "/api/health"; // app + database. Never cached (see the NEVER list in sw.js).
+
+    // Every check is time-boxed. Today's fault was a request that never came back at all —
+    // with no timeout this page waits for it forever and explains nothing.
+    function ping(url, ms) {
+      return new Promise(function (resolve) {
+        var done = false, ctl = null;
+        try { ctl = new AbortController(); } catch (e) { ctl = null; }
+        var timer = setTimeout(function () {
+          if (done) return; done = true;
+          try { if (ctl) ctl.abort(); } catch (e) {}
+          resolve({ ok: false, status: 0, timedOut: true });
+        }, ms);
+        fetch(url + (url.indexOf("?") < 0 ? "?" : "&") + "t=" + Date.now(), {
+          method: "GET", cache: "no-store", signal: ctl ? ctl.signal : undefined
+        }).then(function (r) {
+          if (done) return; done = true; clearTimeout(timer);
+          resolve({ ok: !!(r && r.ok), status: (r && r.status) || 0, timedOut: false });
+        })["catch"](function () {
+          if (done) return; done = true; clearTimeout(timer);
+          resolve({ ok: false, status: 0, timedOut: false });
+        });
+      });
+    }
+
+    function say(kind, title, whyTitle, whyText) {
+      $("dot").className = "dot" + (kind === "device" ? "" : " warn");
+      $("title").textContent = title;
+      while ($("why").firstChild) $("why").removeChild($("why").firstChild);
+      var b = document.createElement("b"); b.textContent = whyTitle;
+      var s = document.createElement("span"); s.textContent = whyText;
+      $("why").appendChild(b); $("why").appendChild(s);
+      document.title = title + " — your work is safe";
+    }
+
+    // WHY it failed, established by testing rather than by assumption.
+    function diagnose() {
+      if (navigator.onLine === false) {
+        say("device", "No internet right now",
+          "This device is offline.",
+          "It isn't connected to Wi-Fi or mobile data. Reconnect and this screen will open itself.");
+        return Promise.resolve(false);
+      }
+      return ping(REACH, 6000).then(function (reach) {
+        // Any answer at all means status > 0. Nothing at all means we never got off this
+        // device, or the whole site is unreachable — both are described the same honest way.
+        if (!reach.status) {
+          say("device", "No internet right now",
+            "This device can't reach the internet.",
+            "Wi-Fi can say it's connected and still have no internet (a common hotel or cafe network). " +
+            "Check the connection — this screen will open itself the moment it's back.");
+          return false;
+        }
+        // We DID reach our server, so the internet is not the problem. Say so plainly.
+        return ping(HEALTH, 9000).then(function (health) {
+          if (health.ok) return true; // everything is back
+          say("app", "The app isn't answering yet",
+            "Your internet is fine — this one is on us.",
+            health.timedOut
+              ? "The app's server was reached but its database isn't responding, so screens that need data can't load yet. It usually comes back on its own, and nothing you did is lost."
+              : "The app's server answered with an error (" + (health.status || "no status") +
+                "), so screens that need data can't load yet. It usually comes back on its own, and nothing you did is lost.");
+          return false;
+        });
+      });
+    }
+
+    // Re-check by hand, automatically when the device says it's back, and on a backing-off
+    // timer. navigator.onLine is TRUE on a cafe Wi-Fi with no internet, so reloading just
+    // because it says "online" looped this page forever: PROVE there's a real connection
     // first, and back off so a bad network isn't hammered.
-    var wait = 5000;
-    (function probe() {
-      setTimeout(function () {
-        fetch("/api/health", { method: "GET", cache: "no-store" })
-          .then(function (r) { if (r && r.ok) location.reload(); else again(); })
-          .catch(again);
-      }, wait);
-      function again() { wait = Math.min(wait * 2, 60000); probe(); }
-    })();
+    var wait = 5000, checking = false;
+    function cycle(fast) {
+      if (checking) return;
+      checking = true;
+      $("hint").textContent = "Checking the connection...";
+      var next = function (back) {
+        checking = false;
+        if (back) {
+          $("hint").textContent = "Back online — reloading...";
+          location.reload();
+          return;
+        }
+        if (fast) wait = 5000;
+        $("hint").textContent = "Checking again in " + Math.round(wait / 1000) + "s...";
+        setTimeout(function () { wait = Math.min(wait * 2, 60000); cycle(false); }, wait);
+      };
+      // The catch is not decoration: if a check ever threw, `checking` would stay true and
+      // this page would never look again — a screen that recovers from nothing, which is the
+      // whole class of bug being fixed here.
+      diagnose().then(next)["catch"](function () { next(false); });
+    }
+    window.addEventListener("online", function () { cycle(true); });
+    cycle(true);
   </script>
 </body>
 </html>

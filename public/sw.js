@@ -29,7 +29,9 @@
  *   - KILL SWITCH: deleting/404-ing this file unregisters it (browser behaviour), and
  *     posting {type:"LFH_SW_KILL"} from the page drops every cache + unregisters.
  */
-const VERSION = "v5"; // v4: no false alarm. v5: a saved copy can't mask a change you just made.
+// BUMP THIS whenever /offline.html changes. The page is precached at install, so devices
+// keep serving the OLD copy from the old cache until new cache names force a re-precache.
+const VERSION = "v6"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason.
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -265,15 +267,19 @@ async function offlinePage() {
   } catch { /* fall through */ }
   try { const net = await fetch(OFFLINE_URL); if (net && net.ok) { precacheOffline(); return net; } } catch { /* really offline */ }
   // Nothing saved and no network: say the important part inline rather than letting the
-  // browser's error page tell staff nothing.
+  // browser's error page tell staff nothing. It does NOT name a cause — this bare fallback
+  // can't run the checks /offline.html runs, and the wrong cause is worse than none (the
+  // page used to blame the internet on a day the internet was fine). It always offers the
+  // way home, so this is never a dead end.
   return new Response(
     '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<body style="margin:0;min-height:100dvh;display:grid;place-items:center;background:#0b1020;color:#e7eefc;' +
     'font:600 15px/1.5 system-ui,sans-serif;text-align:center;padding:24px">' +
-    '<div><h1 style="font-size:20px;margin:0 0 10px">No internet right now</h1>' +
-    '<p style="color:#b8c5de;margin:0 0 14px">This screen hasn\'t been opened on this device yet.</p>' +
+    '<div><h1 style="font-size:20px;margin:0 0 10px">Can\'t open this screen</h1>' +
+    '<p style="color:#b8c5de;margin:0 0 14px">This screen hasn\'t been opened on this device yet, and it couldn\'t be loaded — either this device is offline or the app isn\'t answering.</p>' +
     '<p style="color:#86efac;margin:0">Nothing you did is lost — anything saved on this device will send itself when the connection is back.</p>' +
-    '<p style="margin:16px 0 0"><a href="" onclick="location.reload();return false" style="color:#38bdf8">Try again</a></p></div></body>',
+    '<p style="margin:16px 0 0"><a href="" onclick="location.reload();return false" style="color:#38bdf8">Try again</a>' +
+    ' &nbsp;·&nbsp; <a href="/" style="color:#38bdf8">Go to the home screen</a></p></div></body>',
     { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }
