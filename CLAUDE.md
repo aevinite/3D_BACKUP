@@ -247,24 +247,23 @@ staff analysis/performance, staff payments/payroll** — and more (this list wil
 
 **NEW-FEATURE CHECKLIST — apply to EVERY new feature/section from now on, automatically,
 without being reminded.** When you add anything, wire ALL of these that apply:
-1. **DON'T add a toggle unless the owner asked for one** (rebuild 2026-07-31 — this
-   REPLACES the old "ladder every feature" rule, which produced 54 sub-checkboxes of which
-   45 were read by no code). A feature is permanently ON for whoever's panel owns it unless
-   it appears in `lib/accessTree.ts`. If you think one is needed, ASK — don't invent a rung.
-2. **If it IS switchable, it goes in `lib/accessTree.ts` and NOWHERE else.** One entry
-   wires the admin screen, the read/write route and the allow-lists. Bind it to storage the
-   app already enforces (`settings.features` / `<x>_allowed` / `manager_permissions` /
-   `settings.tablet_*` / `owner_entitlements`) so it bites the moment it saves. Then run
-   **`npm run verify:access`** — it fails a switch that reaches no real code.
-3. **ONLY the admin holds permissions.** The owner panel and the manager panel configure
-   none: no feature toggles, no power grants, no per-person screens. `/aevinite` → Access &
-   permissions is the single screen, with Per person for exceptions. Full model:
-   **`docs/ACCESS-MODEL.md`**.
+1. **Admin entitlement.** Gate the feature by a per-restaurant entitlement the ADMIN
+   controls (admin decides whether a restaurant is even ALLOWED the feature). New modules
+   default OFF. Extends the existing `settings.features` / `useFeatures()` pattern, scoped
+   per `restaurant_id`.
+2. **Feature on/off is ADMIN-controlled, NOT the owner.** Per owner 2026-06-25 the OWNER
+   panel has NO feature-toggle screen — owners get staff management, manager-power grants,
+   and analytics, not feature flags. (Re-confirm with owner before Phase 2 if in doubt.)
+3. **Permission-scoped, least-privilege.** Gate by role (admin > owner > manager >
+   kitchen/tablet). NO role — admin included — gets blanket "access to everything"; each
+   capability is granted deliberately. If a manager should use it, add a manager-power
+   switch the OWNER can grant/revoke (same on/off pattern as features).
 4. **Backend-first.** Business rules live in RPCs / route handlers scoped by
    `restaurant_id` (not the UI); queries indexed + scoped; realtime per restaurant.
-5. **No greyed-out ghosts.** If a role can never reach a thing, that thing is ABSENT from
-   their screen — not shown disabled with a tooltip explaining why. Hiding is never the only
-   guard though: the endpoint must refuse too.
+5. **Surface in the right panels.** For each new feature ask: does ADMIN need an
+   entitlement toggle? does the OWNER panel need a control / a new manager-power switch?
+   does the operational panel (manager/kitchen/tablet) that uses it need UI? Wire every
+   one that applies — this is what keeps the panels in sync as we grow.
 6. **Render nothing when its flag/permission is off** (the existing guest `useFeatures()`
    habit) — no dead UI for restaurants that don't have the module.
 7. **Great, easy UI/UX.** Every new section gets a clean, beginner-simple interface.
@@ -338,14 +337,12 @@ Everything is a SINGLE Next app on **port 4000** (`npm run dev` / `START-ALL.bat
 The panels are routes inside it:
 
 - **/menu** — guest menu (`app/`). Scroll-spy category strip in `#sticky-header`.
-- **/aevinite** — the ADMIN console (`app/aevinite/`): every restaurant, the live floor,
-  revenue, bills, health, and **Access & permissions** (the one screen that decides what
-  anyone can do — `docs/ACCESS-MODEL.md`). Sign-in required. (There is no `/admin` route;
-  this text said so until 2026-07-31.)
-- **/manager** (served from `public/panels/editor/`) — the manager panel: Editor / Bills /
-  Tables / Platform / Banquet / Inventory / Dashboard / Ratings / Log / Settings. It
-  configures NO permissions (rebuild 2026-07-31); its Settings → Sections holds the waiter
-  rota only. Which tabs a restaurant has is Access → Manager's menu.
+- **/admin** — owner control room (`app/admin/page.tsx`): live floor (reads the
+  `lfh_floor_state` brain), key numbers, maintenance switch, and the 10 guest
+  FEATURE TOGGLES. **The only password-gated route** (see Security gate).
+- **/editor** — boss panel: Dishes/Categories/Tags/Orders/Tables/Dashboard/
+  Customers/Log/General; KOT chips, per-order discount, ⇄ Shift table. (Features
+  tab REMOVED — toggles live in /admin now.)
 - **/kitchen** — KDS: New→Cooking→Ready, 86 board (sold-out tag), chime.
 - **/tablet** — waiter app: floor tiles + TAKE ORDER via `lfh_staff_place_order`.
 
@@ -357,33 +354,20 @@ hops between panels. The old standalone `editor/ kitchen/ tablet/ admin/` folder
 the separate editor repo were DELETED (preserved in `reference/` + the
 `pre-rewrite-reference` git tag).
 
-## Who has to be signed in (corrected 2026-07-31 — the old text here was wrong)
+## Security gate (2026-06-13)
 
-**There is NO `middleware.ts` in this app.** This section used to say one redirected
-`/admin`; nothing did, because neither the file nor `/admin` exists any more. What actually
-guards each surface today:
-
-- **`/aevinite` (the admin console)** — its OWN server layout, `app/aevinite/layout.tsx`,
-  reads the cookie via `tokenIsValid()` and `redirect()`s a signed-out visitor to
-  `/staff-login`. It also refuses while an address is throttled.
-- **`/api/admin/*`** — every route calls the gate itself (`tokenIsValid(AUTH_COOKIE)`).
-  Guarded by `npm run verify:everything` phase 35, which fails if an admin route appears
-  with no gate.
-- **The staff panels** (`/manager` `/kitchen` `/tablet` `/owner`) — `requireRole()` /
-  `editorScope()` / `panelScope()` resolve the person AND their restaurant from the signed-in
-  cookie, never from the request, so a panel can only ever answer about its own restaurant.
-  A restaurant with that staff app switched off (Access → Staff apps) is refused at the door.
-- **The guest menu** is public by design, and disappears entirely when Access → Main
-  features → Menu is off.
-
-`ADMIN_PASSWORD` lives in `.env.local` and must also be set in the Vercel project env.
+Only **/admin** (+ `/api/admin/*`) is protected: `middleware.ts` redirects to
+`/staff-login` without a valid cookie; `/api/staff-login` stores a hashed
+`ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`). The guest menu AND the other staff
+panels (/editor /kitchen /tablet) are currently OPEN (owner's call) — RE-LOCK them
+in the middleware matcher before any public hosting. `ADMIN_PASSWORD` is in
+`.env.local` (must also be set in the Vercel project env for the gate to work in prod).
 
 ## Feature switches (migration 035)
 
 - `settings.features` JSONB merged over `lib/features.ts` defaults; components
-  call `useFeatures()` and render nothing when a switch is off. **The editor's "Features"
-  tab no longer exists** (this said it did until 2026-07-31): these switches are edited in
-  `/aevinite` → Access & permissions → Main features → Menu, and only there.
+  call `useFeatures()` and render nothing when a switch is off. Editor →
+  Features tab edits the ten guest-facing switches.
 - **Four BACKEND-ONLY switches stay invisible in every UI** (owner's order):
   `verification`, `payments`, `aggregators`, `gst_invoice` — default OFF,
   flippable only by hand in the DB. Their plumbing: migration 037
@@ -437,13 +421,12 @@ guards each surface today:
   `.env.local` (gitignored): anon key, service-role key, and `SUPABASE_ACCESS_TOKEN`
   (the Management-API PAT used for DDL).
 
-## Routes (corrected 2026-07-31 — this list claimed "only these four exist")
+## Routes
 
-Guest: `/` → `/menu` · `/menu` · `/item/[slug]` · `/view/[folder]` · `/q/[code]` and the
-per-restaurant equivalents `/r/<slug>/menu` and `/r/<slug>/item/<slug>` (what a QR opens).
-Staff: `/manager` `/kitchen` `/tablet` `/owner` (+ `/r/<slug>/<panel>`), `/login`,
-`/staff-login`. Admin: `/aevinite/*`. A dish or restaurant that doesn't exist — or a
-restaurant whose Menu feature is off — answers "not found".
+- `/` — `app/page.tsx` is just `redirect("/menu")`.
+- `/menu` — menu with 3D preload (`app/menu/page.tsx`).
+- `/item/[slug]` — dish detail.
+- `/view/[folder]` — 3D viewer. (Only these four routes exist.)
 
 ## Skills and tools to reach for
 
@@ -675,35 +658,6 @@ guests for it. Two rules came out of it; keep BOTH true forever:
   browser pass): panel source, a floor-wide data scan, the close behaviour, and a tile-by-tile
   click sweep proving each tile and its detail describe the SAME table. `/bug-test` §5b runs it.
 
-## 🧬 THE TWO DATABASES MUST MATCH, AND THE MIGRATIONS FOLDER MUST BE THE TRUTH (2026-07-31)
-
-Chasing the "a table shows the previous party's food" family to the root turned up something
-worse than any single bug: **the two live databases had quietly drifted apart, and nothing was
-checking.** AV LIVE — the paying client — was running:
-
-- an **older `lfh_table_view_summary`** (tier 1 of the manager's live Table view) without the guard
-  that stops ONE malformed order row from throwing; a throw there stops the whole floor refreshing;
-- an **older `lfh_staff_open_table`**, so two people tapping Open at the same instant showed the
-  second one a raw database error instead of the table;
-- **neither partial index** the floor query needs, so every tile lookup walked that table's entire
-  order history (41,993 rows there) instead of the ~40 live ones.
-
-And the qty guard that DEV was running existed in **no migration at all** — applied by hand, so AV
-live could never receive it and a rebuild would have silently removed it. Migrations 234/235 wrote
-the unwritten things down; 228/229/230 were applied to AV live.
-
-- **`npm run verify:db-parity`** (READ-ONLY on both databases) fails when any function/index/trigger
-  differs or is missing outside the modules AV live deliberately lacks, AND when a live function
-  isn't created by a file in `supabase/migrations/`. **Run it before and after every AV live
-  release** — a fix that is only on one stack is not a fix.
-- **Never apply SQL straight to a database.** Write the migration, run it from the folder, and let
-  the parity check prove both stacks agree. If you find a hand-applied change, capture it verbatim
-  into a numbered migration (that is what 234/235 are) instead of leaving it undocumented.
-- Two more full-flow guards came out of the same pass: **`npm run verify:two-parties`** (two
-  consecutive parties at one table: floor, money, customer ledger) and **`npm run verify:lifecycle`**
-  (all eight ways a table changes hands — close, walk-out, restart, shift, merge, simultaneous
-  open, guest re-join, takeaway).
-
 ## 🩺 A GREEN TEST SUITE IS NOT EVIDENCE THAT THE SCREEN IS RIGHT (2026-07-30 — after two faults reached the owner)
 
 Two faults reached the owner's screen on the same day, and **every check that was running passed**,
@@ -735,24 +689,25 @@ an exit code). So, permanently:
   `node scripts/verify-avlive-offline-complete.mjs` proves a surgical release landed COMPLETELY —
   a patcher that skips a file writes nothing and says so in one line among many.
 
-## 🧪 ONE COMMAND THAT TESTS THE WHOLE APP — `npm run verify:everything` (2026-07-31)
+## 🔑 ACCESS & PERMISSIONS WAS REBUILT (2026-07-31) — the LADDER above is retired
 
-`scripts/verify-everything.mjs` runs **179 numbered phases, one by one**, against a chosen
-site (`VERIFY_BASE`, default the deployed backup). Each phase is one question with a yes/no
-answer, printed as it runs, so a failure is pinned to a number instead of hiding in a wall of
-output. It bundles every other guard as its own phase, then adds: every guest/admin/owner
-route renders with no leaked code and no console errors · all four staff panels as their
-REAL role · the access tree switch by switch (off → the thing is GONE → on → it is back) ·
-a **real order placed and followed** through kitchen, waiter, manager and close · money and
-data integrity against the database · and each restaurant showing only its own data.
+Everything in this file about the 4-rung ladder (`admin → owner → manager → tablet`), about
+the owner granting manager powers, and about `docs/ACCESS-LADDER.md` describes how it USED to
+work. It is all kept above as history — nothing has been removed — but the LOGIC is retired:
 
-- It signs in **once per role** (never trips the login limit), **restores every setting** it
-  flips and **deletes every row** it creates.
-- **A phase that cannot run counts as a FAILURE, never a pass** — "didn't run" and "passed"
-  looking alike is how faults reach the owner's screen.
-- `--only 41-60` runs a range; `--skip-slow` drops the bundled suites (and says so).
-- When you add a feature, add its phases. When a bug is found, add the phase that would have
-  caught it.
+- **A toggle exists only where the owner listed one** (`lib/accessTree.ts`). Everything else is
+  permanently ON for whoever's panel owns it. The old model had 54 sub-checkboxes of which 45
+  were read by no code.
+- **Only the admin holds permissions.** `/aevinite` → Access & permissions is the one screen
+  (plus its Per-person tab). The owner panel and the manager panel configure none.
+- **No greyed-out ghosts.** Unreachable = absent from that role's screen — but hiding is never
+  the only guard, the endpoint must refuse too.
+- Canonical spec: **`docs/ACCESS-MODEL.md`**. `docs/ACCESS-LADDER.md` is HISTORY only.
+- Guards: **`npm run verify:access`** (a switch that reaches no real code fails) and
+  **`npm run verify:everything`** — 347 numbered phases against a chosen site, one by one:
+  every route, all four panels as their real role, every switch off→gone→on→back, a real
+  order followed end to end, the 390px phone, and records/integrity. It signs in once per
+  role, restores every setting it flips (even if killed) and deletes every row it creates.
 
 ## Known gotchas (read before editing)
 
