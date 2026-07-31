@@ -57,6 +57,39 @@ live client base URL.
 | **476–490** | **the rules that hold under real use** | idempotency, clash guard, connection light, realtime per restaurant, channel dropped when hidden, no poll faster than the 60s backstop on the normal path, outbox replays once, login page still offline-able, alerts time out, every limited action has a rule, nothing hides a limit event, the crash log is clean, no test restaurant switched on |
 | **491–500** | **the owner's real devices** | the A35 phone (360×780) and a tablet (1194×834): each panel renders and nothing spills off the side |
 
+## Running it in parallel (about a third of it cannot be)
+
+A serial run is ~30 minutes. Splitting it into lanes gets that down, but **only two thirds can be
+split**: any phase that flips a switch and then checks it disappeared must own French House ALONE.
+Two such lanes at once is what produced a whole round of false failures. The safe split:
+
+```bash
+# ONE lane owns every write — serial by necessity
+node scripts/verify-everything.mjs --only 107-118      # switches + module tabs
+node scripts/verify-everything.mjs --only 161-276      # a real order, then every switch round-trip
+node scripts/verify-everything.mjs --only 462-475      # Inventory/Payroll on and off
+
+# these read only, so they can all run at the same time as the lane above
+node scripts/verify-everything.mjs --only 277-320 &    # APIs + the phone
+node scripts/verify-everything.mjs --only 321-418 &    # records, every restaurant, Aangan's defaults
+node scripts/verify-everything.mjs --only 441-461 &    # bills + compliance
+node scripts/verify-everything.mjs --only 476-500 &    # resilience + the owner's devices
+
+# WAIT for the writing lane to finish before these two — they read surfaces it changes
+node scripts/verify-everything.mjs --only 122-160 &    # manager screens (module tabs move)
+node scripts/verify-everything.mjs --only 419-440 &    # guest journey (reads guest switches)
+```
+
+Run them as background PROCESSES, not subagents — several Chrome-driving subagents deadlock each
+other. Keep concurrent browser lanes to ~3 so the machine stays responsive.
+
+**What makes this safe on the login limit:** `loginAs()` caches its session to a file in the OS
+temp directory as well as in memory, so the whole fleet costs ONE sign-in per role instead of one
+per lane. Six lanes each signing in would be six attempts against a limit of five per five
+minutes, and hitting it pings the owner's phone. Proven: 9 browser contexts across 3 processes =
+1 real sign-in (`loginRequestCount()` is exported so a test can check rather than assume), and
+phase 159 — "no rate-limit event was raised by THIS test run" — passed on the seven-lane run.
+
 ## Rules the suite itself obeys
 
 - **Signs in once per role.** `loginAs()` caches the session, so recycling a browser costs no

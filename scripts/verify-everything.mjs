@@ -589,17 +589,23 @@ const mgrTabText = async () => {
   await p.close().catch(() => {});
   return t;
 };
+// POLL, don't sleep blind. These three used to wait CACHE_MS (31s) once and then look — but the
+// manager panel's entitlements come through lib/panelAccess's own 30-SECOND cache, so a 31s wait
+// left exactly 1 second of margin and the Banquet phase failed intermittently with the tab still
+// on screen. That is the same mistake the owner-nav phases already fixed: the pass/fail must not
+// depend on a guess about someone else's cache. Polling also makes the phase FASTER whenever the
+// cache happens to have already turned over.
+const TAB_SETTLE_MS = 48000;
 for (const [label, col, re] of MODULE_TABS) {
   phase(`module ON  → the ${label} tab is in the manager panel`, async () => {
     await setState({ settings: { [col]: true, [col.replace("_allowed", "_enabled")]: true } });
-    await wait(CACHE_MS);
-    ok(re.test(await mgrTabText()), "tab missing while the module is on");
+    const t = await settleUntil(mgrTabText, (x) => re.test(x), TAB_SETTLE_MS);
+    ok(re.test(t), `tab missing while the module is on — strip reads: ${t}`);
   });
   phase(`module OFF → the ${label} tab is GONE`, async () => {
     await setState({ settings: { [col]: false } });
-    await wait(CACHE_MS);
-    const t = await mgrTabText();
-    ok(!re.test(t), `still there: ${t}`);
+    const t = await settleUntil(mgrTabText, (x) => !re.test(x), TAB_SETTLE_MS);
+    ok(!re.test(t), `still there after ${TAB_SETTLE_MS / 1000}s: ${t}`);
   });
 }
 const MGR_TABS = [["Editor", "editor", /editor/i], ["Ratings", "ratings", /ratings/i], ["Log", "log", /log/i]];
@@ -1366,17 +1372,30 @@ phase("no DINE-IN order sits on a table that isn't on the floor plan", async () 
   // be said honestly: a NUMERIC table above the floor plan is wrong, while a LABEL (parcel,
   // banquet, OWNCHK…) is off-plan by design. Off-plan numeric rows beyond the plan are the
   // parcel counter's own numbering, so allow a generous margin and flag only the absurd.
-  // LIVE rows only. This read history too, and history cannot be cleaned: the compliance guard
-  // forbids hard-deleting an order (mig 190), so ONE absurd-table row from an old test made this
-  // phase permanently red — and a check that can never go green is a check everyone learns to
-  // ignore, which is the disease this suite exists to cure. What actually matters is whether such
-  // a row can still reach a guest or a bill, and only an unarchived, undeleted one can.
-  // (Archived + soft-deleted residue stays visible in reports, exactly as the ledger requires.)
-  const rows = await dbGet("orders?select=id,restaurant_id,table_number,archived,deleted_at&order=created_at.desc&limit=2000");
-  const off = rows.filter((r) => r.archived !== true && !r.deleted_at
+  // LIVE rows only — and BOTH sessions arrived at that independently, so keep both reasons.
+  //
+  // History cannot be cleaned: the compliance guard forbids hard-deleting an order (mig 190), so
+  // ONE absurd-table row from an old test would make this phase permanently red — and a check
+  // that can never go green is a check everyone learns to ignore, which is the disease this suite
+  // exists to cure. (Archived + soft-deleted residue stays visible in reports, exactly as the
+  // ledger requires.) On top of that, several of this repo's OWN guards deliberately use a table
+  // number far above the floor plan so their fixture can never collide with a real table, then
+  // close the session and let the app archive the work — correctly. That accounted for 17 of them.
+  //
+  // What actually matters is whether such a row can still reach a guest or a bill: only an
+  // unarchived, undeleted, still-cooking one can. lib/tableAssign's allows() keeps an off-plan
+  // table visible to everyone so staff CAN clear it, so an OPEN bill out there is the problem.
+  //
+  // Ask the database ONLY along its index (restaurant_id, created_at) and sift in memory. Adding
+  // archived=is.false / status=in.(…) to the query looked tidier and made Postgres scan ~400k rows
+  // on unindexed columns until it cancelled the statement (57014) — a timeout that reads like a
+  // product fault. 2000 recent rows is a cheap read; the sifting is free.
+  const rows = await dbGet("orders?select=id,restaurant_id,table_number,status,archived,deleted_at&order=created_at.desc&limit=2000");
+  const LIVE = ["pending", "preparing", "ready"];
+  const off = rows.filter((r) => r.archived !== true && !r.deleted_at && LIVE.includes(r.status)
     && r.table_number != null && /^\d+$/.test(String(r.table_number))
     && cap[r.restaurant_id] && Number(r.table_number) > cap[r.restaurant_id] + 500);
-  ok(!off.length, `${off.length} dine-in orders on a table above the floor plan (e.g. table ${off[0]?.table_number})`);
+  ok(!off.length, `${off.length} LIVE orders on a table above the floor plan (e.g. table ${off[0]?.table_number})`);
 });
 phase("no session carries a table label that is pure gibberish", async () => {
   // table_number is TEXT on purpose: banquet and special sessions carry LABELS (e.g. OWNCHK),
@@ -1602,8 +1621,8 @@ phase("the guest menu shows every category the restaurant has switched on", asyn
 });
 phase("the guest menu shows a real dish name, price and its currency", async () => {
   const f = await needFH();
-  const dish = (await dbGet(`menu_items?select=title,price,open_price&restaurant_id=eq.${f.id}&sold_out=is.false&limit=1`))[0]
-    || (await dbGet(`menu_items?select=title,price,open_price&restaurant_id=eq.${f.id}&limit=1`))[0];
+  // No sold_out column exists on menu_items — I invented it, and PostgREST answered 42703.
+  const dish = (await dbGet(`menu_items?select=title,price,open_price&restaurant_id=eq.${f.id}&limit=1`))[0];
   ok(dish, "this restaurant has no dishes");
   const g = await guestMenu();
   ok(g.text.includes(dish.title), `the first dish "${dish.title}" is not on the page`);
@@ -1690,19 +1709,33 @@ phase("allergy & notes follow their switch", async () => {
   const shown = /allergy|allergen/i.test(g.html);
   ok(!on ? !shown : true, "allergies are switched off but the allergy wording is still served");
 });
+// Both switchers are rendered CLIENT-side after Header.tsx fetches the restaurant's language and
+// currency lists (menuLangs starts null and it deliberately shows nothing until that resolves, so
+// a single-language restaurant never flashes a picker it doesn't have). So these two phases must
+// POLL A LIVE PAGE for the real control — reading one cached HTML snapshot said "3 languages are
+// switched on but there is no way to change language" about a switcher that was simply not
+// hydrated yet. The control is NavPicker's button, which carries aria-label="Language"/"Currency".
+async function pickerShown(label) {
+  const s = await screen("admin", `/r/${(await needFH()).slug}/menu`, { settle: 2000 });
+  try {
+    for (let i = 0; i < 12; i++) {
+      if (await s.page.locator(`[aria-label="${label}"]`).count() > 0) return true;
+      await wait(1000);
+    }
+    return false;
+  } finally { await s.close(); }
+}
 phase("the language switcher appears only when there is a choice", async () => {
   const st = await fhSettings();
   const langs = Array.isArray(st.menu_languages) && st.menu_languages.length ? st.menu_languages : ["en"];
-  const g = await guestMenu();
-  const shown = /lang-switch|language-switch|data-lang=/.test(g.html);
+  const shown = await pickerShown("Language");
   if (langs.length <= 1) ok(!shown, "only one language is switched on, but a language switcher is still rendered");
-  else ok(shown, `${langs.length} languages are switched on but there is no way to change language`);
+  else ok(shown, `${langs.length} languages are switched on (${langs.join(", ")}) but there is no way to change language`);
 });
 phase("the currency switcher appears only when there is a choice", async () => {
   const st = await fhSettings();
   const cur = Array.isArray(st.menu_currencies) && st.menu_currencies.length ? st.menu_currencies : ["INR"];
-  const g = await guestMenu();
-  const shown = /currency-switch|data-currency=/.test(g.html);
+  const shown = await pickerShown("Currency");
   if (cur.length <= 1) ok(!shown, "only one currency is switched on, but a currency switcher is still rendered");
   else ok(shown, `${cur.length} currencies are switched on but there is no way to change currency`);
 });
@@ -1935,27 +1968,34 @@ phase("Inventory switched ON answers with a stock list", async () => {
   ok(d.state?.settings?.inventory_allowed === true, "the module did not switch on");
 });
 phase("the inventory tables exist and answer", async () => {
-  for (const t of ["stock_items", "stock_moves"]) {
+  // The tables are inv_items / inv_movements (migrations 221/224). My first version asked for
+  // "stock_items" and "stock_moves" — names I assumed rather than read — and reported that the
+  // Inventory module has no store while ten inv_* tables were sitting there working.
+  for (const t of ["inv_items", "inv_movements"]) {
     const rows = await dbGet(`${t}?select=id&limit=1`).catch(() => null);
     ok(rows !== null, `the ${t} table does not answer — the Inventory module has no store`);
   }
 });
-phase("every stock item has a unit the app knows", async () => {
-  const rows = await dbGet("stock_items?select=id,name,unit&limit=400").catch(() => []);
+phase("every stock item measures itself in a unit the app knows", async () => {
+  // Three units per item by design (research 2026-07-28): what it is STORED in (base_uom), what
+  // it is BOUGHT in (purchase_uom) and what a recipe calls for (recipe_uom).
+  const rows = await dbGet("inv_items?select=id,name,base_uom,purchase_uom,recipe_uom&limit=400").catch(() => []);
   if (!rows.length) return ok(true);
-  const known = ["g", "kg", "ml", "l", "pc", "pcs", "unit", "units", "each"];
-  const bad = rows.filter((r) => r.unit && !known.includes(String(r.unit).toLowerCase()));
-  ok(!bad.length, `${bad.length} stock items use an unknown unit (e.g. ${JSON.stringify(bad[0]?.unit)})`);
+  const known = ["g", "kg", "ml", "l", "pc", "pcs", "unit", "units", "each", "ltr", "litre", "piece"];
+  const bad = rows.filter((r) => [r.base_uom, r.purchase_uom, r.recipe_uom]
+    .some((u) => u && !known.includes(String(u).toLowerCase())));
+  ok(!bad.length, `${bad.length} stock items use an unknown unit (e.g. ${bad[0]?.name}: ${JSON.stringify([bad[0]?.base_uom, bad[0]?.purchase_uom, bad[0]?.recipe_uom])})`);
 });
-phase("no stock item is stored with a nonsense quantity", async () => {
-  const rows = await dbGet("stock_items?select=id,name,qty&limit=400").catch(() => []);
-  const bad = rows.filter((r) => r.qty !== null && !Number.isFinite(Number(r.qty)));
-  ok(!bad.length, `${bad.length} stock items hold a quantity that is not a number`);
+phase("no stock item holds a nonsense quantity or cost", async () => {
+  const rows = await dbGet("inv_items?select=id,name,qty_base,avg_cost&limit=400").catch(() => []);
+  const bad = rows.filter((r) => (r.qty_base !== null && !Number.isFinite(Number(r.qty_base)))
+    || (r.avg_cost !== null && (!Number.isFinite(Number(r.avg_cost)) || Number(r.avg_cost) < 0)));
+  ok(!bad.length, `${bad.length} stock items hold an unusable quantity or a negative cost (e.g. ${bad[0]?.name})`);
 });
-phase("stock movements always say which way they moved", async () => {
-  const rows = await dbGet("stock_moves?select=id,delta&order=created_at.desc&limit=300").catch(() => []);
-  const bad = rows.filter((r) => r.delta === null || !Number.isFinite(Number(r.delta)));
-  ok(!bad.length, `${bad.length} stock movements have no usable amount`);
+phase("every stock movement says how much moved, and why", async () => {
+  const rows = await dbGet("inv_movements?select=id,qty_base,kind&order=created_at.desc&limit=300").catch(() => []);
+  const bad = rows.filter((r) => r.qty_base === null || !Number.isFinite(Number(r.qty_base)) || !r.kind);
+  ok(!bad.length, `${bad.length} stock movements have no usable amount or no kind (e.g. ${JSON.stringify(bad[0])})`);
 });
 phase("the kitchen deducts stock when a ticket is fired, not when it is billed", async () => {
   const migs = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => /inventory|stock/i.test(f));
