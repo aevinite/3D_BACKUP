@@ -564,10 +564,12 @@ async function run() {
     !/This screen hasn't been opened on this device/i.test(oText)
       ? ok("the owner panel still opens offline")
       : bad("the owner panel fell through to the last-resort page");
+    // Same reason as the guest menu below: the owner dashboard's offline bar appears only after
+    // its data settles, and on a cold deployed site that is slower than 20s.
     const notice = await waitFor(async () => {
       const t = (await own.locator("[role=status]").allTextContents().catch(() => [])).join(" ");
       return /No internet|saved figures/i.test(t) ? t : null;
-    }, 20000);
+    }, 40000);
     notice ? ok("it admits the figures are saved ones, not live") : bad("the owner panel shows figures with no offline warning");
     await ctx.setOffline(false);
     await own.close();
@@ -591,10 +593,14 @@ async function run() {
     !/No internet right now/i.test(body)
       ? ok("the guest menu opens from the device (not the last-resort page)")
       : bad("the guest menu fell through to the last-resort offline page");
+    // 45s, not 25s. Against the DEPLOYED site a cold guest menu can take past 30 seconds to
+    // paint its dishes — measured: a 6-second look said 0 dishes, a 30-second look said 59 on the
+    // same URL. At 25s this reported "the guest menu is empty offline" intermittently, which is
+    // the worst kind of red: the feature works, so the next person learns to re-run and move on.
     const offDishes = await waitFor(async () => {
       const n = await guest.locator(".item-card:not(.skeleton-card)").count();
       return n > 0 ? n : null;
-    }, 25000);
+    }, 45000);
     offDishes ? ok(`the menu still lists ${offDishes} dishes offline (live was ${liveDishes})`) : bad("the guest menu is empty offline");
     await ctx.setOffline(false);
 
