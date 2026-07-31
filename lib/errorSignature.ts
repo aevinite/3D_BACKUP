@@ -71,29 +71,29 @@ export function looksLikeHtmlPage(detail: string | null | undefined): boolean {
 }
 
 /**
- * A READABLE one-line version of an error detail, for the collapsed row on the Repair board.
+ * What the CLOSED row on the Repair board shows.
  *
- * When a gateway or proxy fails it answers with an entire HTML page, so the detail we captured
- * starts "GET summary — <!DOCTYPE html> <!--[if lt IE 7]> …". Collapsed to one line that told the
- * owner nothing except that markup was involved — the useful part ("502 Bad Gateway") sits a
- * hundred characters further in.
+ * readableError() above fixes this at the source, so rows recorded from now on are already
+ * readable. This is the DISPLAY side, and it is still needed for two reasons: rows recorded
+ * BEFORE that fix are in the database with the markup in them, and a closed row is one line of
+ * 34px — so it also says the full text is one press away.
  *
- * This HIDES NOTHING: it is only what the CLOSED row shows, the open row still prints the captured
- * text byte for byte, and nothing about which errors are recorded or alarmed changes. Unlike
- * errorSig this keeps the real case and the real numbers, because a person reads it.
+ * It does no parsing of its own: the "what does this page actually say" part is readableError's
+ * job, called here on the markup only. Two copies of that logic would drift, and this file exists
+ * because drift is the bug.
+ *
+ * HIDES NOTHING: the open row still prints the captured text byte for byte, and what gets
+ * recorded, grouped or alarmed is untouched.
  */
 export function errorHeadline(detail: string | null | undefined): string {
   const s = String(detail ?? "");
   if (!looksLikeHtmlPage(s)) return s;
-  // Whatever came before the markup is ours and worth keeping ("GET summary — "). Split there, and
-  // strip tags from the MARKUP ONLY: stripping the whole string printed the prefix twice.
+  // Whatever came before the markup is OURS and names the failing request ("GET summary — "), so
+  // split there and hand only the markup to readableError.
   const at = s.search(/<!DOCTYPE\s+html|<html[\s>]/i);
   const prefix = (at > 0 ? s.slice(0, at) : "").trim();
   const markup = at >= 0 ? s.slice(at) : s;
-  const title = markup.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
-  const stripped = markup.replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-  const body = title || stripped.slice(0, 120) || "an HTML error page";
-  return `${prefix ? `${prefix} ` : ""}${body} (an HTML error page — open it to read the whole thing)`;
+  return `${prefix ? `${prefix} ` : ""}${readableError(markup)} — open it to read the whole page`;
 }
 
 /**
