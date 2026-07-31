@@ -29,7 +29,7 @@
  *   - KILL SWITCH: deleting/404-ing this file unregisters it (browser behaviour), and
  *     posting {type:"LFH_SW_KILL"} from the page drops every cache + unregisters.
  */
-const VERSION = "v4"; // v2: 2h expiry. v3: sign-in page cached. v4: no false "struggling" alarm.
+const VERSION = "v5"; // v4: no false alarm. v5: a saved copy can't mask a change you just made.
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -63,6 +63,23 @@ const MAX_DATA_BYTES = 3_000_000; // don't cache a huge report payload
 // accepted is that an outage longer than this comes back to an empty screen rather than
 // the last known board.
 const MAX_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
+
+// A CHANGE MUST NEVER BE MASKED BY A SAVED COPY.
+// The stall fallback (show saved data when a read hangs) is right for a bad connection, but it
+// has one dangerous moment: just after someone CHANGES something. If a module is switched on and
+// the panel's next read stalls, the saved copy still says "off" — so the change appears not to
+// have worked. (The whole-app suite caught exactly this shape: "tab is GONE" always passed while
+// "tab comes back" intermittently failed.)
+// So for a short window after any write from this device, an ONLINE read must wait for the truth.
+// Offline is unaffected: with no network the saved copy is still the best thing we have.
+const AFTER_WRITE_FRESH_MS = 60_000;
+// PER FAMILY, and telemetry doesn't count. A first attempt recorded ANY write, and the panels
+// post error/breadcrumb logs constantly — which held the window permanently open and quietly
+// disabled the slow-connection fallback altogether. A write to /api/editor/* can only affect
+// /api/editor/* reads, and a log post affects nothing anyone reads.
+const lastWriteAt = Object.create(null);
+const NOT_A_CHANGE = /^\/api\/(log|errlog|log\/client-error|rt-config|health)/;
+const apiFamily = (p) => { const m = p.match(/^\/api\/([^/?]+)/); return m ? m[1] : ""; };
 
 // Never cached, ever: the API routes that sign someone in or out, or hand out a code.
 //
@@ -271,7 +288,17 @@ self.addEventListener("fetch", (event) => {
 
   // Writes, cross-origin (Supabase/CDN), range requests (3D models, media) and
   // only-if-cached probes are none of our business.
-  if (req.method !== "GET") return;
+  if (req.method !== "GET") {
+    // Note the moment of any write to our own API, so the reads that follow can't be answered
+    // with a copy from before it (see AFTER_WRITE_FRESH_MS).
+    try {
+      const u = new URL(req.url);
+      if (u.origin === self.location.origin && u.pathname.startsWith("/api/") && !NOT_A_CHANGE.test(u.pathname)) {
+        lastWriteAt[apiFamily(u.pathname)] = Date.now();
+      }
+    } catch { /* ignore */ }
+    return;
+  }
   if (req.cache === "only-if-cached" && req.mode !== "same-origin") return;
   if (req.headers.has("range")) return;
   const url = new URL(req.url);
@@ -309,7 +336,11 @@ self.addEventListener("fetch", (event) => {
     // grounds of slowness. Operational panel reads are small, so a stall there is a real
     // problem and does get the guard.
     const slowByNature = /^\/api\/(owner|admin|inventory)\//.test(url.pathname);
-    return event.respondWith(networkFirst(req, DATA, req.url, slowByNature ? 0 : READ_TIMEOUT_MS, { clientId: event.clientId }));
+    // Just after a write, wait for the truth rather than risk showing the state before it.
+    const wroteAt = lastWriteAt[apiFamily(url.pathname)] || 0;
+    const justWrote = self.navigator.onLine !== false && (Date.now() - wroteAt) < AFTER_WRITE_FRESH_MS;
+    const timeout = slowByNature || justWrote ? 0 : READ_TIMEOUT_MS;
+    return event.respondWith(networkFirst(req, DATA, req.url, timeout, { clientId: event.clientId }));
   }
   // Everything else same-origin static: /panels/*, /brand/*, fonts, images, /vendor/*.
   return event.respondWith(networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS));
