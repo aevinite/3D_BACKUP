@@ -280,7 +280,9 @@ function SearchStyle() {
     border-radius: 13px; box-shadow: 0 18px 44px rgba(0,0,0,.42); }
   .as-item { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
     background: none; border: 0; color: inherit; cursor: pointer; padding: 8px 10px; border-radius: 9px; }
-  .as-item.on { background: rgba(99,179,255,.14); }
+  /* The highlighted result — hover AND the keyboard cursor land on the same class, so both read
+     as "where you are" in the owner's red rather than the old blue. */
+  .as-item.on { background: color-mix(in srgb, #f87171 15%, transparent); box-shadow: inset 2px 0 0 #f87171; }
   .as-txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
   .as-nm { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .as-pth { font-size: 11.5px; opacity: .58; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
