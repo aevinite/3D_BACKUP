@@ -64,6 +64,38 @@ export function errorSig(detail: string | null | undefined): string {
     .slice(0, 160);                                                         // long tails add nothing
 }
 
+/** Does this error detail carry a whole HTML page rather than a message? */
+export function looksLikeHtmlPage(detail: string | null | undefined): boolean {
+  const s = String(detail ?? "");
+  return /<!DOCTYPE\s+html/i.test(s) || /<html[\s>]/i.test(s);
+}
+
+/**
+ * A READABLE one-line version of an error detail, for the collapsed row on the Repair board.
+ *
+ * When a gateway or proxy fails it answers with an entire HTML page, so the detail we captured
+ * starts "GET summary — <!DOCTYPE html> <!--[if lt IE 7]> …". Collapsed to one line that told the
+ * owner nothing except that markup was involved — the useful part ("502 Bad Gateway") sits a
+ * hundred characters further in.
+ *
+ * This HIDES NOTHING: it is only what the CLOSED row shows, the open row still prints the captured
+ * text byte for byte, and nothing about which errors are recorded or alarmed changes. Unlike
+ * errorSig this keeps the real case and the real numbers, because a person reads it.
+ */
+export function errorHeadline(detail: string | null | undefined): string {
+  const s = String(detail ?? "");
+  if (!looksLikeHtmlPage(s)) return s;
+  // Whatever came before the markup is ours and worth keeping ("GET summary — "). Split there, and
+  // strip tags from the MARKUP ONLY: stripping the whole string printed the prefix twice.
+  const at = s.search(/<!DOCTYPE\s+html|<html[\s>]/i);
+  const prefix = (at > 0 ? s.slice(0, at) : "").trim();
+  const markup = at >= 0 ? s.slice(at) : s;
+  const title = markup.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
+  const stripped = markup.replace(/<!--[\s\S]*?-->/g, " ").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  const body = title || stripped.slice(0, 120) || "an HTML error page";
+  return `${prefix ? `${prefix} ` : ""}${body} (an HTML error page — open it to read the whole thing)`;
+}
+
 /**
  * The visual group key the Repair page shows as one tile (panel + restaurant + action + signature).
  * Kept here next to errorSig so the tile the owner acts on and the memory row we write always
