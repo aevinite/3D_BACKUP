@@ -15,6 +15,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { pingLatestGuestLimit } from "@/lib/rateLimit";
 import { replayClash, clashJson } from "@/lib/clash";
+import { offPlanTable } from "@/lib/planTable";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +58,9 @@ async function postImpl(req: NextRequest): Promise<Response> {
   // settled. (The session path above doesn't need it — lfh_place_order validates the
   // guest's own session token and answers `session_closed` itself.)
   const publicRid = b.restaurantId || DEFAULT_RID;
+  // A QR that encodes a nonsense table must not create an order nobody can reach on the floor.
+  const offPlan = await offPlanTable(publicRid, b.table);
+  if (offPlan) return NextResponse.json({ ok: false, reason: offPlan }, { status: 400 });
   const clash = await replayClash(req, publicRid, "order", undefined, undefined, { table: b.table });
   if (clash) return clashJson(clash);
 

@@ -12,6 +12,7 @@ import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { replayClash, clashJson, expectClash } from "@/lib/clash";
+import { offPlanTable } from "@/lib/planTable";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
@@ -1380,6 +1381,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // A LIVE write carries no replay marker, so this returns without a single query.
     const clash = await replayClash(req, rid, a, b, c, body as Record<string, unknown> | null);
     if (clash) return clashJson(clash);
+
+    // Same floor-plan sanity check as the waiter panel (see lib/planTable.ts).
+    if ((a === "order" || (a === "sessions" && b === "open")) && body && (body as Record<string, unknown>).table != null) {
+      const offPlan = await offPlanTable(rid, (body as Record<string, unknown>).table);
+      if (offPlan) return err(offPlan, 400);
+    }
 
     // ── NO SILENT OVERWRITES (owner, 2026-07-30) ──────────────────────────────────
     // If the screen told us what it was editing FROM, refuse when someone else has since
