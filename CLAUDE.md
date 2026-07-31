@@ -659,6 +659,35 @@ guests for it. Two rules came out of it; keep BOTH true forever:
   browser pass): panel source, a floor-wide data scan, the close behaviour, and a tile-by-tile
   click sweep proving each tile and its detail describe the SAME table. `/bug-test` §5b runs it.
 
+## 🧬 THE TWO DATABASES MUST MATCH, AND THE MIGRATIONS FOLDER MUST BE THE TRUTH (2026-07-31)
+
+Chasing the "a table shows the previous party's food" family to the root turned up something
+worse than any single bug: **the two live databases had quietly drifted apart, and nothing was
+checking.** AV LIVE — the paying client — was running:
+
+- an **older `lfh_table_view_summary`** (tier 1 of the manager's live Table view) without the guard
+  that stops ONE malformed order row from throwing; a throw there stops the whole floor refreshing;
+- an **older `lfh_staff_open_table`**, so two people tapping Open at the same instant showed the
+  second one a raw database error instead of the table;
+- **neither partial index** the floor query needs, so every tile lookup walked that table's entire
+  order history (41,993 rows there) instead of the ~40 live ones.
+
+And the qty guard that DEV was running existed in **no migration at all** — applied by hand, so AV
+live could never receive it and a rebuild would have silently removed it. Migrations 234/235 wrote
+the unwritten things down; 228/229/230 were applied to AV live.
+
+- **`npm run verify:db-parity`** (READ-ONLY on both databases) fails when any function/index/trigger
+  differs or is missing outside the modules AV live deliberately lacks, AND when a live function
+  isn't created by a file in `supabase/migrations/`. **Run it before and after every AV live
+  release** — a fix that is only on one stack is not a fix.
+- **Never apply SQL straight to a database.** Write the migration, run it from the folder, and let
+  the parity check prove both stacks agree. If you find a hand-applied change, capture it verbatim
+  into a numbered migration (that is what 234/235 are) instead of leaving it undocumented.
+- Two more full-flow guards came out of the same pass: **`npm run verify:two-parties`** (two
+  consecutive parties at one table: floor, money, customer ledger) and **`npm run verify:lifecycle`**
+  (all eight ways a table changes hands — close, walk-out, restart, shift, merge, simultaneous
+  open, guest re-join, takeaway).
+
 ## 🩺 A GREEN TEST SUITE IS NOT EVIDENCE THAT THE SCREEN IS RIGHT (2026-07-30 — after two faults reached the owner)
 
 Two faults reached the owner's screen on the same day, and **every check that was running passed**,
