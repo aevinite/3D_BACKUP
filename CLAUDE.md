@@ -247,23 +247,24 @@ staff analysis/performance, staff payments/payroll** — and more (this list wil
 
 **NEW-FEATURE CHECKLIST — apply to EVERY new feature/section from now on, automatically,
 without being reminded.** When you add anything, wire ALL of these that apply:
-1. **Admin entitlement.** Gate the feature by a per-restaurant entitlement the ADMIN
-   controls (admin decides whether a restaurant is even ALLOWED the feature). New modules
-   default OFF. Extends the existing `settings.features` / `useFeatures()` pattern, scoped
-   per `restaurant_id`.
-2. **Feature on/off is ADMIN-controlled, NOT the owner.** Per owner 2026-06-25 the OWNER
-   panel has NO feature-toggle screen — owners get staff management, manager-power grants,
-   and analytics, not feature flags. (Re-confirm with owner before Phase 2 if in doubt.)
-3. **Permission-scoped, least-privilege.** Gate by role (admin > owner > manager >
-   kitchen/tablet). NO role — admin included — gets blanket "access to everything"; each
-   capability is granted deliberately. If a manager should use it, add a manager-power
-   switch the OWNER can grant/revoke (same on/off pattern as features).
+1. **DON'T add a toggle unless the owner asked for one** (rebuild 2026-07-31 — this
+   REPLACES the old "ladder every feature" rule, which produced 54 sub-checkboxes of which
+   45 were read by no code). A feature is permanently ON for whoever's panel owns it unless
+   it appears in `lib/accessTree.ts`. If you think one is needed, ASK — don't invent a rung.
+2. **If it IS switchable, it goes in `lib/accessTree.ts` and NOWHERE else.** One entry
+   wires the admin screen, the read/write route and the allow-lists. Bind it to storage the
+   app already enforces (`settings.features` / `<x>_allowed` / `manager_permissions` /
+   `settings.tablet_*` / `owner_entitlements`) so it bites the moment it saves. Then run
+   **`npm run verify:access`** — it fails a switch that reaches no real code.
+3. **ONLY the admin holds permissions.** The owner panel and the manager panel configure
+   none: no feature toggles, no power grants, no per-person screens. `/aevinite` → Access &
+   permissions is the single screen, with Per person for exceptions. Full model:
+   **`docs/ACCESS-MODEL.md`**.
 4. **Backend-first.** Business rules live in RPCs / route handlers scoped by
    `restaurant_id` (not the UI); queries indexed + scoped; realtime per restaurant.
-5. **Surface in the right panels.** For each new feature ask: does ADMIN need an
-   entitlement toggle? does the OWNER panel need a control / a new manager-power switch?
-   does the operational panel (manager/kitchen/tablet) that uses it need UI? Wire every
-   one that applies — this is what keeps the panels in sync as we grow.
+5. **No greyed-out ghosts.** If a role can never reach a thing, that thing is ABSENT from
+   their screen — not shown disabled with a tooltip explaining why. Hiding is never the only
+   guard though: the endpoint must refuse too.
 6. **Render nothing when its flag/permission is off** (the existing guest `useFeatures()`
    habit) — no dead UI for restaurants that don't have the module.
 7. **Great, easy UI/UX.** Every new section gets a clean, beginner-simple interface.

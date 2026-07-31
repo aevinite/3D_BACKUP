@@ -19,6 +19,7 @@
     "verify:test-safety": "node scripts/verify-test-safety.mjs",
     "verify:ui": "node scripts/verify-ui-integrity.mjs",
     "verify:access": "node scripts/verify-access-model.mjs",
+    "verify:access-live": "node scripts/verify-access-live.mjs",
     "verify:live": "node scripts/verify-no-fatal-ui.mjs",
     "verify:clash": "node scripts/verify-clash-coverage.mjs",
     "verify:offline": "node scripts/verify-offline.mjs"

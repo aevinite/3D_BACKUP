@@ -36,7 +36,7 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 //                      BACKFILLED true so pre-existing behaviour is unchanged).
 //  · table_ops      — the KOT ▾ menu (merge tables, move a KOT/dish, split bill,
 //                     reprint; migs 172-177). CANONICAL module ladder (docs/
-//                     ACCESS-LADDER.md): the module rung lives on settings
+//                     ACCESS-MODEL.md): the module rung lives on settings
 //                     (table_ops_allowed / _owner_control / _enabled →
 //                     tableOpsLadder() in lib/tableTags.ts); this power is the
 //                     plain manager rung on top of it.

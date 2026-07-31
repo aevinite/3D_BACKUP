@@ -3,7 +3,7 @@
 > **This replaces `docs/ACCESS-LADDER.md` completely.** The old 4-rung ladder
 > (`admin → owner → manager → tablet` on *every* feature, ~54 sub-checkboxes of which 45 were
 > read by no code) is being **deleted as a concept**. Do not add anything to the old shape.
-> Status: **SPEC AGREED / BUILD IN PROGRESS** — see "Build phases" at the bottom.
+> Status: **BUILT** — all six phases below are done. `docs/ACCESS-LADDER.md` is deleted.
 
 ## The one sentence
 
@@ -98,7 +98,7 @@ and the chosen ones also appear at the bottom of the dashboard.)*
 3. Panel-menu enforcement (B, C).
 4. Default-set-for-user + per-person (D).
 5. Strip permissions out of the restaurant detail view; clean the manager's Settings rail.
-6. Rewrite CLAUDE.md + memory + delete `docs/ACCESS-LADDER.md`; full verification sweep.
+6. Rewrite CLAUDE.md + memory; full verification sweep; merge.
 
 **Dev/test (`3-d-backup`) only.** AV live keeps the old model until a separate, explicitly
 asked-for release — flipping ~45 switches to always-on would change a paying client's app.

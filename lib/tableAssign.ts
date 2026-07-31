@@ -1,5 +1,5 @@
 // lib/tableAssign.ts — waiter SECTIONS: a tablet login works only the tables it was
-// given. Migration 221; design notes in docs/ACCESS-LADDER.md (module `table_assign`).
+// given. Migration 221; design notes in docs/ACCESS-MODEL.md (module `table_assign`).
 //
 // SERVER-ONLY (imports supabaseAdmin). The panels hide what a waiter may not touch,
 // but hiding a tile is never the guard — every read is narrowed and every write is

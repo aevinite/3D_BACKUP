@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   } else {
     const ent = await getOwnerEntitlementsUnion(scope.ids);
     for (const k of OWNER_SECTION_KEYS) sections[k] = ent[k] !== false;
-    // Ladder rule (docs/ACCESS-LADDER.md): a section that's OFF is REFUSED by the server,
+    // Ladder rule (docs/ACCESS-MODEL.md): a section that's OFF is REFUSED by the server,
     // not just hidden from the nav. The "settings" section had no server gate — a real
     // owner whose Settings section the admin switched off could still open this page
     // directly and change their password. Refuse here (matches customers/reports/issues)

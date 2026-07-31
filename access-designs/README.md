@@ -1,7 +1,7 @@
 # Access panel — 5 design directions (DESIGN ONLY, not wired)
 
 Mock prototype for the ground-up access/permission panel redesign.
-Spec: memory `access-panel-redesign-spec.md` · canonical rules: `docs/ACCESS-LADDER.md`.
+Spec: memory `access-panel-redesign-spec.md` · canonical rules: `docs/ACCESS-MODEL.md` (the ladder these designs were drawn for was retired 2026-07-31).
 
 **Nothing here talks to the backend.** Toggles mutate an in-memory object only.
 Wiring + enforcement (hidden in the UI AND refused by the server) is step 2, after
