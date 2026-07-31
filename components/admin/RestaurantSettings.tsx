@@ -10,7 +10,7 @@
 // single source of truth with Main features + Access.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FLOOR_PER_ROW_MAX, FLOOR_PER_ROW_MIN, clampPerRow } from "@/lib/floorLayout";
-import { BANQUET_FIELDS, BANQUET_LOCKED, BANQUET_PRESETS, banquetBillNo, cleanBanquetFields } from "@/lib/banquetFields";
+import { BANQUET_FIELDS, BANQUET_LOCKED, BANQUET_PRESETS, banquetBillNo, banquetTaxOf, cleanBanquetFields } from "@/lib/banquetFields";
 import FloorLayoutPreview from "./FloorLayoutPreview";
 
 type Rest = { id: string; slug: string; name: string };
@@ -309,6 +309,10 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
   // Banquet bill (mig 237): the field list this restaurant is asked to fill, and a
   // live preview of the next bill number in the chosen style.
   const bqFields = cleanBanquetFields(draft.banquet_fields);
+  const bqTax = banquetTaxOf(draft);
+  const bqTaxTotal = Math.round(bqTax.reduce((a, c) => a + c.rate, 0) * 100) / 100;
+  const setBqTax = (i: number, key: "label" | "rate", v: string) =>
+    set("banquet_tax_components", bqTax.map((c, j) => (j === i ? { ...c, [key]: key === "rate" ? v : v } : c)));
   const bqSample = banquetBillNo(
     String(draft.banquet_bill_prefix || "BQB"),
     String(draft.banquet_bill_style || "fy"),
@@ -510,6 +514,42 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
         <p className="hint" style={{ marginTop: 8 }}>
           Next bill prints as <b>{bqSample}</b>.
         </p>
+
+        <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Tax on a banquet bill</h3>
+        <p className="hint">
+          A banquet is usually taxed differently from a table: restaurant service is <b>5%</b> (CGST 2.5 + SGST 2.5)
+          while a banquet / catering with food is <b>18%</b> (CGST 9 + SGST 9). Set the banquet lines here and dine-in
+          keeps its own rate. <b>Leave this empty</b> and a banquet is taxed exactly like the rest of the menu
+          ({compTotal}%).
+        </p>
+        <div style={{ display: "grid", gap: 8, maxWidth: 480 }}>
+          {bqTax.map((c, i) => (
+            <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 92px 22px 36px", gap: 8, alignItems: "center" }}>
+              <input value={String(c?.label ?? "")} placeholder="e.g. CGST" maxLength={24} disabled={!loadOk || busy}
+                onChange={(e) => setBqTax(i, "label", e.target.value)} style={inputStyle} />
+              <input type="number" step="any" min={0} max={100} value={String(c?.rate ?? "")} placeholder="%" disabled={!loadOk || busy}
+                onChange={(e) => setBqTax(i, "rate", e.target.value)} style={inputStyle} />
+              <span className="adm-muted" style={{ fontWeight: 700 }}>%</span>
+              <button className="adm-btn" title="Remove this tax" disabled={!loadOk || busy}
+                onClick={() => set("banquet_tax_components", bqTax.filter((_, j) => j !== i))} style={{ padding: "6px 9px" }}>
+                <i className="fas fa-trash" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "8px 0" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700 }}>
+            Banquet tax: <b>{bqTax.length ? `${bqTaxTotal}%` : `${compTotal}% (same as the menu)`}</b>
+          </div>
+          <button className="adm-btn" disabled={!loadOk || busy || bqTax.length >= 6}
+            onClick={() => set("banquet_tax_components", [...bqTax, { label: "", rate: "" }])}>+ Add tax</button>
+          {!bqTax.length && (
+            <button className="adm-btn" disabled={!loadOk || busy}
+              onClick={() => set("banquet_tax_components", [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }])}>
+              Use 18% (CGST 9 + SGST 9)
+            </button>
+          )}
+        </div>
 
         <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Paper</h3>
         <p className="hint">
