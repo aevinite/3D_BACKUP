@@ -288,24 +288,11 @@ export const SECTIONS: Section[] = [
   },
 
   // ──────────────────────────── A2 · STAFF APPS ─────────────────────────────
-  // NOT on the owner's list, kept deliberately: these are in real use (Aangan runs on the
-  // waiter tablet only) and switching one off REFUSES that login at the door — a capability
-  // with no substitute anywhere else. They moved here from the restaurant detail page, which
-  // now carries no permissions at all. Flagged to the owner 2026-07-31.
-  {
-    id: "apps", name: "Staff apps", icon: "grid",
-    blurb: "Which of the four staff apps this restaurant has. Switching one off refuses that login — nobody can open it.",
-    children: [
-      { id: "panel_manager", name: "Manager panel", def: true, bind: { t: "panel", key: "manager" },
-        what: "The full control room: floor, bills, editor, reports. Off refuses a manager login." },
-      { id: "panel_kitchen", name: "Kitchen display", def: true, bind: { t: "panel", key: "kitchen" },
-        what: "The New → Cooking → Ready ticket board and the sold-out list. Off refuses a kitchen login." },
-      { id: "panel_tablet", name: "Waiter tablet", def: true, bind: { t: "panel", key: "tablet" },
-        what: "The floor tiles and take-order app the waiters carry. Off refuses a waiter login." },
-      { id: "panel_owner", name: "Owner panel", def: true, bind: { t: "panel", key: "owner" },
-        what: "The owner's own dashboard, reports and staff pages. Off refuses an owner login." },
-    ],
-  },
+  // REMOVED (owner, 2026-07-31: "remove it completely, all panels always on"). Every restaurant
+  // now has all four staff apps; there is no per-restaurant switch and no screen that offers one.
+  // The gate in lib/panelAccess.ts answers ON for all four regardless of what is stored, so no
+  // restaurant can be left with a login refused by a switch nobody can reach any more.
+  // Whether the MENU editor exists is decided by the Menu feature in Main features, not here.
 
   // ────────────────────────── B · MANAGER'S MENU ────────────────────────────
   {

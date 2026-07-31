@@ -16,19 +16,22 @@ export const PANEL_KEYS = ["manager", "kitchen", "tablet", "owner"] as const;
 export type PanelKey = (typeof PANEL_KEYS)[number];
 const ALL_ON: Record<PanelKey, boolean> = { manager: true, kitchen: true, tablet: true, owner: true };
 
-// The merged enabled-panels map for one restaurant (defaults overlaid with its overrides).
-export async function getEnabledPanels(restaurantId: string): Promise<Record<PanelKey, boolean>> {
-  const out: Record<PanelKey, boolean> = { ...ALL_ON };
-  if (!restaurantId) return out;
-  const row = await sb.from("settings").select("enabled_panels").eq("restaurant_id", restaurantId).maybeSingle();
-  const stored = row.data?.enabled_panels;
-  if (stored && typeof stored === "object") {
-    for (const k of PANEL_KEYS) {
-      const v = (stored as Record<string, unknown>)[k];
-      if (typeof v === "boolean") out[k] = v;
-    }
-  }
-  return out;
+// EVERY RESTAURANT HAS ALL FOUR STAFF APPS (owner, 2026-07-31: "remove it completely, all panels
+// always on"). The four switches were deleted from the Access screen in the same change, so this
+// must NOT go on honouring a stored value: one restaurant (demo-bistro) had its owner panel off,
+// and reading that column would have left an owner login refused by a switch nobody can reach any
+// more. Answering ON regardless is what makes the removal safe instead of a trap.
+//
+// Kept as a function rather than ripped out: settings.enabled_panels still holds the old values,
+// several callers read this, and ONE honest place that says "always on" is clearer than deleting it
+// and scattering `true` through every caller. It also stays a cheap no-op — this used to be a
+// settings read on the hot path, which is why the cached variant below exists.
+//
+// Whether the MENU EDITOR exists is a different question and is NOT decided here: that follows the
+// Menu feature in Main features, enforced by the Edit-menu tab gate, so a restaurant without a menu
+// never builds one (no dead screen, no wasted reads).
+export async function getEnabledPanels(_restaurantId: string): Promise<Record<PanelKey, boolean>> {
+  return { ...ALL_ON };
 }
 
 // Is this role's panel enabled for the restaurant? owner/manager/kitchen/tablet map 1:1 to a

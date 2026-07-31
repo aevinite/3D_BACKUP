@@ -22,6 +22,22 @@ const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 // refresh. A worker thread is throttled far less, so the connection survives a
 // trip to the camera/another app. (Recovery on return is handled by the forced
 // reconnect in RealtimeProvider; this just keeps it alive in the first place.)
+// A DEADLINE on every REST read, for the reason spelled out in lib/supabaseAdmin.ts: with no
+// timeout a hanging connection never rejects, so a caller waits forever instead of failing
+// honestly. This only wraps the REST fetch — the realtime websocket above is untouched, so the
+// heartbeat and reconnect behaviour are unchanged.
+//
+// 15s here, not the server's 8s, and the difference is deliberate: this client also runs IN THE
+// BROWSER, where a phone on a bad restaurant wifi legitimately takes many seconds for a read that
+// is not in trouble. 8s would start failing work that would have succeeded. 15s is longer than any
+// healthy read and still short enough that the guest sees the offline notice instead of a spinner
+// that never resolves. The service worker keeps its own, shorter timeout for deciding when to serve
+// the saved copy — that decision stays where it already lives.
+const REST_TIMEOUT_MS = 15000;
 export const supabase = createClient(url, anon, {
   realtime: { worker: true, params: { eventsPerSecond: 10 } },
+  global: {
+    fetch: (input, init) =>
+      fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(REST_TIMEOUT_MS) }),
+  },
 });

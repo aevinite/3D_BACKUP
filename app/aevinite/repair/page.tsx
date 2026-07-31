@@ -775,7 +775,11 @@ export default function AdminRepair() {
                     style={{ display: "flex", gap: 10, alignItems: "flex-start", width: "100%", background: "none", border: "none", padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: s.report ? "pointer" : "default", minHeight: 40 }}>
                     <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: 0.5, padding: "2px 6px", borderRadius: 5, marginTop: 1, background: "color-mix(in srgb, var(--adm-accent, #e8a13c) 18%, transparent)", color: "var(--adm-accent, #e8a13c)" }}>{kindLabel}</span>
                     <span style={{ flex: 1, minWidth: 0 }}>
-                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.title}</span>
+                      {/* A run started before readableError() landed carries the whole gateway page
+                          as its TITLE, so this one line read "<!DOCTYPE html> <!--[if lt IE 7]>…".
+                          Same treatment as the problem rows: a title is a label, never the
+                          evidence — the full report is still printed verbatim below. */}
+                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{errorHeadline(s.title)}</span>
                       <span className="adm-muted" style={{ fontSize: 11.5 }}>
                         {new Date(s.started_at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
                         {mins !== null ? <> · {mins} min</> : null} · <span style={{ color: st.color }}>{st.label}</span>

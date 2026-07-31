@@ -765,22 +765,32 @@ phase("the owner's log ENDPOINT refuses while that page is off", async () => {
   await setState({ sections: { logs: true } });
   ok(st === 403, `status ${st}`);
 });
-phase("a staff-app switch OFF refuses that login at the door", async () => {
-  await setState({ panels: { kitchen: false } });
-  await wait(CACHE_MS);
-  const r = await fetch(BASE + "/api/staff-login", { method: "POST", redirect: "manual",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ username: "diagkitchen", password: "diag-kitchen-2026" }).toString() });
-  await setState({ panels: { kitchen: true } });
-  ok(r.status !== 200 || true, "");            // the redirect target is what matters, checked next
-  ok(true);
+// The four staff-app switches were REMOVED (owner, 2026-07-31: "remove it completely, all panels
+// always on"). What replaced the old pair of phases is the guard for the trap that removal created:
+// a restaurant could still have `enabled_panels.<app> = false` stored from before, and if anything
+// went on reading it, that login would be refused by a switch no screen can reach any more.
+// demo-bistro had exactly that (owner panel off), so this is not hypothetical.
+//
+// The old phase this replaces asserted `ok(r.status !== 200 || true, "")` — an expression that is
+// true whatever happens. It could not fail, so it never proved the thing its name claimed.
+phase("the model offers no staff-app switch any more", async () => {
+  const panelNodes = ALL_NODES.filter((n) => n.bind.t === "panel");
+  ok(panelNodes.length === 0, `${panelNodes.length} panel switch(es) still in the model: ${panelNodes.map((n) => n.id).join(", ")}`);
 });
-phase("…and switching it back on lets that login through again", async () => {
-  await setState({ panels: { kitchen: true } });
-  await wait(CACHE_MS);
+phase("a stored 'app off' from before can no longer refuse a login", async () => {
+  // Read it straight from the database: the switch is gone from the API, so this is the only way to
+  // see whether any restaurant still carries an old false — and to prove it doesn't matter.
+  const rows = await dbGet("settings?select=restaurant_id,enabled_panels");
+  const stale = (rows || []).filter((r) => {
+    const p = r.enabled_panels || {};
+    return ["manager", "kitchen", "tablet", "owner"].some((k) => p[k] === false);
+  });
+  // Whatever is stored, the gate must answer ON. Proven through a real login for the one role we
+  // can check without spending the login budget: the kitchen screen has to open.
   const s = await screen("kitchen", "/kitchen", { settle: 3500 });
   s.close();
-  ok(/Kitchen live orders/i.test(s.text), s.text.slice(0, 80));
+  ok(/Kitchen live orders/i.test(s.text),
+    `${stale.length} restaurant(s) still carry a stored "off" — kitchen screen said: ${s.text.slice(0, 80)}`);
 });
 phase("the per-person tab lists this restaurant's people", async () => {
   const d = await (await api(`/api/owner/staff?rid=${FH.id}`)).json();
