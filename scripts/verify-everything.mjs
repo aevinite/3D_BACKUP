@@ -705,7 +705,9 @@ phase("a per-person override lands on the key the server reads", async () => {
   const before = w.permissions?.tablet_discount;
   await fetch(BASE + "/api/owner/staff", { method: "PATCH", headers: HJ, body: JSON.stringify({ id: w.id, action: "set_permissions", permissions: { tablet_discount: "off" } }) });
   const row = (await dbGet(`staff_users?select=permissions&id=eq.${w.id}`))[0];
-  await fetch(BASE + "/api/owner/staff", { method: "PATCH", headers: HJ, body: JSON.stringify({ id: w.id, action: "set_permissions", permissions: { tablet_discount: before || "" } }) });
+  // Restore with null, not "" — null DELETES the key and puts the person back to "Default"
+  // (the endpoint's own contract), whereas "" left a junk value sitting in the JSONB.
+  await fetch(BASE + "/api/owner/staff", { method: "PATCH", headers: HJ, body: JSON.stringify({ id: w.id, action: "set_permissions", permissions: { tablet_discount: before ?? null } }) });
   ok(row?.permissions?.tablet_discount === "off", JSON.stringify(row?.permissions));
 });
 
@@ -1979,9 +1981,28 @@ phase("a manager cannot read the payroll endpoint without the power", async () =
   const t = readFileSync(join(ROOT, "app/api/editor/[...path]/route.ts"), "utf8");
   ok(/managerCan|tabGate/.test(t), "the manager routes no longer check what the manager is allowed");
 });
-phase("both modules put themselves away again", async () => {
-  // Proves the restore path itself works, rather than trusting it at the end of the run.
-  ok(typeof restore.length === "number" && restore.length >= 1, "nothing registered a restore");
+phase("no test login carries leftover per-person debris", async () => {
+  // THIS ONE COST TWO FALSE FINDINGS, back to back. A per-person setting BEATS the
+  // restaurant-wide one, so debris on the diag accounts silently changes what every later test
+  // sees — and it gets reported as a product fault:
+  //   1. all six waiter capabilities forced "off" in staff_users.permissions. The restaurant
+  //      said take-orders was ON; the waiter still got "This isn't enabled for you".
+  //   2. assigned_tables emptied, so the waiter held 0 of the floor's 30 tables and every
+  //      order came back "Table 30 isn't in your section".
+  // Both times the app was behaving exactly as configured, and the offline guard read it as
+  // "17 passed, 3 failed". So debris is a failure in its own right, named as debris.
+  const rows = await dbGet("staff_users?select=username,role,restaurant_id,permissions,assigned_tables&username=like.diag*&limit=30");
+  ok(rows.length >= 1, "no diag test logins found at all");
+  const dirty = rows.filter((r) => r.permissions && Object.keys(r.permissions).length > 0)
+    .map((r) => `${r.username} has overrides ${JSON.stringify(r.permissions)}`);
+  // An empty section is a legitimate choice for a REAL waiter, but never for a diag login —
+  // it makes the account unable to do the very thing the tests use it for.
+  const floors = Object.fromEntries((await dbGet("settings?select=restaurant_id,table_count&limit=40")).map((s) => [s.restaurant_id, Number(s.table_count) || 0]));
+  const sectionless = rows.filter((r) => r.role === "tablet" && floors[r.restaurant_id] > 0
+    && (!Array.isArray(r.assigned_tables) || r.assigned_tables.length === 0))
+    .map((r) => `${r.username} holds 0 of its ${floors[r.restaurant_id]} tables`);
+  const all = [...dirty, ...sectionless];
+  ok(!all.length, `${all.join(" · ")} — a diag login must inherit the restaurant's settings and hold its whole floor`);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
