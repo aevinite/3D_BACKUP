@@ -178,10 +178,14 @@ if (!BASE) {
     // check, click again — up to three times — then say plainly what the screen showed.
     await fr.locator('.tab[data-tab="tables"]').waitFor({ timeout: 60000 });
     let floorUp = false;
-    for (let attempt = 1; attempt <= 3 && !floorUp; attempt++) {
+    for (let attempt = 1; attempt <= 4 && !floorUp; attempt++) {
       await fr.locator('.tab[data-tab="tables"]').click().catch(() => {});
+      // Wait for the floor to EXIST at all before demanding one particular tile. On the
+      // deployed site the grid can take a while to arrive, and asking for tile N first meant
+      // a slow-but-healthy floor read as "never painted" (flaky, 2026-07-31).
+      try { await fr.locator(".ftile").first().waitFor({ timeout: 25000 }); } catch { await page.waitForTimeout(2500); continue; }
       try { await fr.locator(`.ftile[data-floor-table="${T}"]`).waitFor({ timeout: 20000 }); floorUp = true; }
-      catch { await page.waitForTimeout(3000); }
+      catch { await page.waitForTimeout(2500); }
     }
     if (!floorUp) {
       const seen = (await fr.locator("body").innerText().catch(() => "")).slice(0, 160).replace(/\n/g, " · ");
