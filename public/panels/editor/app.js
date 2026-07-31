@@ -1790,7 +1790,9 @@ const SETTINGS_SECTIONS = [
   { id: "general", label: "General", sub: "site basics", icon: "fa-gear", title: "General settings" },
   { id: "tables", label: "Tables", sub: "floor & seats", icon: "fa-chair", title: "Table settings" },
   { id: "users", label: "Users", sub: "staff logins", icon: "fa-users", title: "User settings" },
-  { id: "access", label: "Access", sub: "permissions & sections", icon: "fa-key", title: "Access settings" },
+  // Renamed with the access rebuild: this section holds no permissions any more, only the
+  // waiter rota. Calling it "Access" would promise controls that live in the admin panel.
+  { id: "access", label: "Sections", sub: "who serves which table", icon: "fa-users-rectangle", title: "Waiter sections" },
   { id: "billing", label: "Billing", sub: "invoice & tax", icon: "fa-file-invoice", title: "Billing settings" },
   { id: "kitchen", label: "Kitchen", sub: "KOT printing", icon: "fa-fire-burner", title: "Kitchen settings" },
   { id: "sessions", label: "Dining sessions", sub: "QR & location", icon: "fa-qrcode", title: "Dining sessions" },
@@ -1943,11 +1945,12 @@ function formGeneral(s) {
     return userSettingCardHtml();
   }
   if (sec === "access") {
-    // Who-serves-which-table lives here (owner, 2026-07-30 — "it should be in the
-    // user / access thing of the settings, a sub setting of access"). It moved out of
-    // Settings → Tables AND off the Tables floor header, so this is now its ONLY home.
-    // It sits FIRST because it's the one card a table_assign-only manager can see.
-    return tableSectionsCardHtml() + accessDefaultsCardHtml(s) + accessUsersCardHtml(s);
+    // ACCESS REBUILD (owner, 2026-07-31): the manager panel configures NO permissions at
+    // all. "Defaults for everyone" is now Access & permissions → Default set for user, and
+    // the per-person rows are on the admin's Per-person tab — one screen owns permissions,
+    // and it isn't this one. What remains is who-serves-which-table, which is a rota, not a
+    // permission, and is a manager's own job (owner, 2026-07-30 — it has no other home).
+    return tableSectionsCardHtml();
   }
   if (sec === "billing") {
     // TWO stacked sections (owner, 2026-07-05 — "manager bill and printable bill, up/down,
@@ -10309,9 +10312,10 @@ const XRAY_CONTROLS = [
   // this section (owner, 2026-07-30). The two cards that are genuinely about staff powers
   // carry their own manage_staff gate below, so a table_assign-only manager opening this
   // row sees the waiter-sections card alone.
-  { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff|table_assign", label: "Access settings" },
-  { selector: '[data-mgr-hide="access_defaults"]', flag: "manage_staff", label: "Who can do what (defaults)" },
-  { selector: '[data-mgr-hide="access_users"]', flag: "manage_staff", label: "Per-person access" },
+  // The Sections row is now the waiter rota only, so table_assign alone decides it — the
+  // two permission cards that needed manage_staff moved to the admin panel (rebuild
+  // 2026-07-31), and their XRAY rows went with them rather than matching nothing.
+  { selector: '.list-item[data-settings-section="access"]', flag: "table_assign", label: "Waiter sections" },
   // ADMIN/OWNER-only settings (owner 2026-07-28, extended 2026-07-29): a real manager only
   // handles per-table name + seats. Billing, KOT printing, dining sessions, the table COUNT
   // and the guest QR links are set from the admin panel
@@ -10652,6 +10656,13 @@ function applyHierarchyView() {
     els.forEach((el) => {
       if (granted) { xraySetHidden(el, false); xraySetTint(el, false); return; }
       if (!higher) { xraySetHidden(el, true); xraySetTint(el, false); return; }
+      // ADMIN-OWNED settings are GONE for everyone in this panel, not greyed (owner,
+      // 2026-07-31, pointing at the tinted Billing / Kitchen / Dining-sessions rows: "there
+      // shouldn't be grayed out option also"). Nobody can ever grant them to a manager, so a
+      // tinted row is a dead-end that only adds noise — the admin edits them in the admin
+      // panel, which is where the tooltip was sending them anyway. The X-ray tint still
+      // applies to REAL powers below, where the greying genuinely means "off for the staff".
+      if (entry.flag === "admin_only_setting") { xraySetHidden(el, true); xraySetTint(el, false); return; }
       xraySetHidden(el, false);
       xraySetTint(el, true, xrayTintTitle(entry.label, entry.flag));
       if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
@@ -10660,7 +10671,9 @@ function applyHierarchyView() {
   // A real manager who raced the whoami hide and parked on an admin-only settings section
   // (billing/kitchen/dining sessions) is bounced back to General so they never sit on cards
   // whose sidebar row is now hidden. One-shot: after the hop the condition self-clears.
-  if (!higher && state.tab === "general" && (state.settingsSection === "billing" || state.settingsSection === "kitchen" || state.settingsSection === "sessions")) {
+  // (No longer "!higher": those rows are hidden for EVERYONE in this panel now, so an admin
+  // parked on one would be looking at a section with no way back to it.)
+  if (state.tab === "general" && (state.settingsSection === "billing" || state.settingsSection === "kitchen" || state.settingsSection === "sessions")) {
     state.settingsSection = "general";
     renderList();
     renderEditor();

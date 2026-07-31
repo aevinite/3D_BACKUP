@@ -12,8 +12,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import AccessTree from "@/components/admin/AccessTree";
 import {
-  GROUPS, PERMISSIONS, PERM_BY_ID, permsOf, maxReach, reachLevel, allowed,
-  tabletValue, moduleKey, type Perm, type SubOpt, type AccessState,
+  GROUPS, PERMISSIONS, PERM_BY_ID, reachLevel, allowed, type Perm, type AccessState,
 } from "@/lib/accessModel";
 
 type Rest = { id: string; name: string; slug: string; active: boolean };
@@ -44,37 +43,6 @@ const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
   </svg>
 );
 
-// Count badge — an oval that fills like a progress ring (owner design, 2026-07-24).
-// Shows "on/total" (one consistent bold colour, no faded denominator); the oval outline
-// draws round proportionally from the TOP-CENTRE; when everything's on it goes green and
-// the label becomes just "All". Geometry is fixed (48×28) so the perimeter is analytic —
-// no DOM measuring, works on the server render too.
-const OW = 48, OH = 28, OINSET = 2, OR = OH / 2 - OINSET;
-const OX0 = OINSET, OY0 = OINSET, OX1 = OW - OINSET, OY1 = OH - OINSET, OCX = OW / 2;
-const OVAL_D = `M ${OCX} ${OY0} L ${OX1 - OR} ${OY0} A ${OR} ${OR} 0 0 1 ${OX1 - OR} ${OY1} L ${OX0 + OR} ${OY1} A ${OR} ${OR} 0 0 1 ${OX0 + OR} ${OY0} L ${OCX} ${OY0} Z`;
-const OVAL_PERIM = 2 * ((OX1 - OR) - (OX0 + OR)) + Math.PI * (2 * OR);
-const CountOval = ({ on, total }: { on: number; total: number }) => {
-  const full = total > 0 && on >= total;
-  const ratio = total > 0 ? Math.min(on / total, 1) : 0;
-  return (
-    <span className={`acc2-count ${full ? "full" : ""}`}>
-      <svg viewBox={`0 0 ${OW} ${OH}`} aria-hidden="true">
-        <path className="bgf" d={OVAL_D} />
-        <path className="tk" d={OVAL_D} />
-        <path className="pg" d={OVAL_D} style={{ strokeDasharray: OVAL_PERIM, strokeDashoffset: OVAL_PERIM * (1 - ratio) }} />
-      </svg>
-      <span className="lb">{full ? "All" : `${on}/${total}`}</span>
-    </span>
-  );
-};
-
-const REACH_LABEL = ["Off", "Owner only", "Owner + Manager", "Owner + Mgr + Tablet"];
-// The three sub-option tiers mirror the reach ladder (owner ⊇ manager ⊇ waiter).
-type Side = "owner" | "manager" | "waiter";
-const OPTS = { owner: "owner_opts", manager: "manager_opts", waiter: "waiter_opts" } as const;
-const SIDE_META: Record<Side, { label: string; icon: string }> = {
-  owner: { label: "Owner can…", icon: "crown" }, manager: { label: "Manager can…", icon: "users" }, waiter: { label: "Waiter can…", icon: "user" },
-};
 // The staff_users.permissions KEY under which a per-person override is actually ENFORCED —
 // ROLE-DEPENDENT, because each role's server gate reads a different key (mig 115). Getting
 // this wrong = a switch that saves but is never read (owner 2026-07-26: "nothing working-but-
@@ -133,10 +101,6 @@ const ROLE_RELEVANCE: Record<string, string[]> = {
 // Every alias a ?focus deep-link may use for one capability card: its id, the manager
 // power flag, the tablet_* cap key, the owner section key, the guest feature slug, and
 // its sub-option ids (e.g. khata_book). Rendered as data-focus-key + used for the flash.
-function focusKeysOf(p: Perm): string[] {
-  return [p.id, p.power, p.tablet, p.section, p.feature, ...(p.sub || []).map((s) => s.id)].filter(Boolean) as string[];
-}
-
 export default function Access2Page() {
   const [rests, setRests] = useState<Rest[]>([]);
   const [rid, setRid] = useState<string>("");
@@ -150,11 +114,7 @@ export default function Access2Page() {
   // because the render sub-components remount each pass (they hold no local state).
   const [pQuery, setPQuery] = useState<string>("");
   const [pRole, setPRole] = useState<string>("all");
-  const [open, setOpen] = useState<Record<string, boolean>>({ guest: true });
   const [activeArea, setActiveArea] = useState<string>("guest"); // the ONE rail item highlighted (nav target)
-  const [side, setSide] = useState<Record<string, Side>>({});
-  const [openCards, setOpenCards] = useState<Record<string, boolean>>({});
-  const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
   const [info, setInfo] = useState<{ perm: Perm; sub?: string } | null>(null);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [fromRest, setFromRest] = useState(false);
@@ -164,7 +124,6 @@ export default function Access2Page() {
   // The key currently being flash-highlighted. STATE, not a manual classList.add: the
   // section/card components are nested in this component, so any re-render remounts them
   // and would wipe a manually-added class mid-flash (bit us on the first build).
-  const [flashKey, setFlashKey] = useState("");
 
   useEffect(() => {
     // Read ?rid / ?from off the URL directly (no useSearchParams → no Suspense
@@ -233,8 +192,6 @@ export default function Access2Page() {
     const hit = PERMISSIONS.find((p) =>
       [p.id, p.power, p.tablet, p.section, p.feature].includes(key) || (p.sub || []).some((s) => s.id === key));
     if (hit) {
-      setOpen((s) => ({ ...s, [hit.group]: true }));
-      setOpenCards((s) => ({ ...s, [hit.id]: true }));
       setActiveArea(hit.group);
     }
     // Let the just-opened group render before locating the card — retry briefly (the
@@ -248,9 +205,7 @@ export default function Access2Page() {
       if (!el) return;
       spyClick.current = Date.now() + 1500; // don't let the scroll-spy fight the jump
       el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setFlashKey(key); // the matching card renders .acc2-flash itself (survives re-renders)
-      setTimeout(() => setFlashKey(""), 2000);
-    };
+      };
     setTimeout(locate, 120);
   }, [st, tab]);
 
@@ -265,26 +220,9 @@ export default function Access2Page() {
     else if (bt + bh > rt + rh - 6) rail.scrollTo({ top: bt + bh - rh + 10, behavior: "smooth" });
   }, [activeArea]);
 
-  // apply a patch locally (mirror the server) + POST it
-  const save = useCallback((patch: any) => {
-    setSt((prev) => {
-      if (!prev) return prev;
-      const n: AccessState = JSON.parse(JSON.stringify(prev));
-      if (patch.features) Object.assign(n.features, patch.features);
-      if (patch.panels) Object.assign(n.panels, patch.panels);
-      if (patch.owner) Object.assign(n.owner, patch.owner);
-      if (patch.manager) Object.assign(n.manager, patch.manager);
-      if (patch.tablet) Object.assign(n.tablet, patch.tablet);
-      if (patch.adminSwitches) Object.assign(n.adminSwitches, patch.adminSwitches);
-      if (patch.modules) for (const k of Object.keys(patch.modules)) n.modules[k] = { ...n.modules[k], ...patch.modules[k] };
-      if (patch.config) for (const k of Object.keys(patch.config)) n.config[k] = { ...(n.config[k] || {}), ...patch.config[k] };
-      return n;
-    });
-    setSaving("saving");
-    fetch("/api/admin/restaurants/access2", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: rid, patch }) })
-      .then((r) => { setSaving(r.ok ? "saved" : "err"); if (!r.ok) load(rid); setTimeout(() => setSaving(""), 1400); })
-      .catch(() => { setSaving("err"); load(rid); });
-  }, [rid, load]);
+  // (The whole-tree save() that lived here belonged to the retired General pane. The
+  // Access tree owns its own saving now; this page's remaining pane writes per-person
+  // overrides straight to /api/owner/staff.)
 
   // Closing a fixed overlay by TAPPING its close button focuses that button; when the
   // button then unmounts, the browser restores focus to <body> and NATIVELY scrolls the
@@ -306,82 +244,7 @@ export default function Access2Page() {
   const rest = rests.find((r) => r.id === rid);
 
   // ── save helpers that translate the model → canonical columns ───────────────
-  const powerKey = (f: string) => `power_${f}`;
-  const setReach = (p: Perm, lvl: number) => {
-    lvl = Math.max(0, Math.min(lvl, maxReach(p)));
-    const patch: any = {};
-    if (p.module) { patch.modules = { [moduleKey(p)]: { allowed: lvl >= 1 } }; }
-    // A section-linked capability's OWNER rung IS the owner-panel section: one control writes
-    // BOTH the section (page exists) AND power_<flag> (admin allows the manager grant). This is
-    // what links the old "Owner panel sections" to the powers so ratings etc. never diverge.
-    if (p.section) { patch.owner = { ...(patch.owner || {}), [p.section]: lvl >= 1 }; }
-    if (p.power && !p.fixedTop) { patch.owner = { ...(patch.owner || {}), [powerKey(p.power)]: lvl >= 1 }; }
-    if (p.power) patch.manager = { ...(patch.manager || {}), [p.power]: lvl >= 2 };
-    if (p.waiter) {
-      const on = lvl >= 3;
-      if (p.tabletNew) patch.config = { [p.id]: { tablet: on ? (tabletValue(p, st) === "pin" ? "pin" : "on") : "off" } };
-      else if (p.tablet) patch.tablet = { ...(patch.tablet || {}), [p.tablet]: on ? (st.tablet[p.tablet] !== "off" ? st.tablet[p.tablet] : "on") : "off" };
-    }
-    save(patch);
-  };
-  const setMaster = (p: Perm, on: boolean) => { setReach(p, on ? Math.max(1, reachLevel(p, st)) : 0); if (on) setOpenCards((s) => ({ ...s, [p.id]: true })); else setOpenCards((s) => ({ ...s, [p.id]: false })); };
-  const setWaiter = (p: Perm, v: string) => { if (p.tabletNew) save({ config: { [p.id]: { tablet: v } } }); else if (p.tablet) save({ tablet: { [p.tablet]: v } }); };
-  const setSub = (p: Perm, sideK: Side, subId: string, on: boolean) => {
-    const cur = { ...((st.config[p.id]?.[OPTS[sideK]]) || {}) };
-    cur[subId] = on;
-    const patch: any = { config: { [p.id]: { [OPTS[sideK]]: cur } } };
-    // Cascade DOWN — a lower tier can never hold a sub-option a higher one lacks.
-    // owner OFF → drop it for manager AND waiter; manager OFF → drop it for waiter.
-    if (!on) {
-      if (sideK === "owner") {
-        const mgr = { ...((st.config[p.id]?.manager_opts) || {}) };
-        const wtr = { ...((st.config[p.id]?.waiter_opts) || {}) };
-        if (mgr[subId]) { delete mgr[subId]; patch.config[p.id].manager_opts = mgr; }
-        if (wtr[subId]) { delete wtr[subId]; patch.config[p.id].waiter_opts = wtr; }
-      } else if (sideK === "manager") {
-        const wtr = { ...((st.config[p.id]?.waiter_opts) || {}) };
-        if (wtr[subId]) { delete wtr[subId]; patch.config[p.id].waiter_opts = wtr; }
-      }
-    }
-    save(patch);
-  };
-  const setLimit = (p: Perm, sideK: string, v: number) => save({ config: { [p.id]: { limit: { ...((st.config[p.id]?.limit) || {}), [sideK]: v } } } });
-
   // ── switches (guest / panels / owner sections / admin auto-print) ───────────
-  const switchVal = (p: Perm): boolean => {
-    if (p.feature) return !!st.features[p.feature];
-    if (p.panel) return st.panels[p.panel] !== false;
-    if (p.section) return st.owner[p.section] !== false;
-    if (p.adminSwitch) return !!st.adminSwitches[p.adminSwitch];
-    return false;
-  };
-  const setSwitch = (p: Perm, on: boolean) => {
-    if (p.feature) {
-      // Ratings OFF must also force reviews OFF in the same save — reviews is the
-      // written-comment layer on top of star ratings, so a stored ratings-off-but-
-      // reviews-on state would leave the guest star/comment input alive. Turning
-      // ratings ON must NOT auto-enable reviews (owner flips that separately).
-      const feats: Record<string, boolean> = { [p.feature]: on };
-      if (p.feature === "ratings" && !on) feats.reviews = false;
-      save({ features: feats });
-    }
-    else if (p.panel) save({ panels: { [p.panel]: on } });
-    else if (p.section) save({ owner: { [p.section]: on } });
-    else if (p.adminSwitch) save({ adminSwitches: { [p.adminSwitch]: on } });
-  };
-
-  const subOn = (p: Perm, sideK: Side, subId: string) =>
-    !!(st.config[p.id]?.[OPTS[sideK]]?.[subId]);
-  const conflicts = (p: Perm): string[] => {
-    if (!p.sub) return [];
-    const lvl = reachLevel(p, st);
-    const bad = new Set<string>();
-    // a lower tier holding a sub-option a higher tier lacks = an impossible state to flag
-    if (lvl >= 2) p.sub.forEach((s) => { if (subOn(p, "manager", s.id) && !subOn(p, "owner", s.id)) bad.add(s.name); });
-    if (lvl >= 3 && p.waiter) p.sub.forEach((s) => { if (subOn(p, "waiter", s.id) && !subOn(p, "manager", s.id)) bad.add(s.name); });
-    return [...bad];
-  };
-
   const sortedStaff = [...staff].sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9) || (a.name || a.username).localeCompare(b.name || b.username));
 
   return (
@@ -408,7 +271,6 @@ export default function Access2Page() {
           <p className="adm-page-sub" style={{ margin: "4px 0 0" }}>{rest?.name} · {staff.length} people</p>
         </div>
         <div className="acc2-head-r">
-          <span className={`acc2-save ${saving}`}>{saving === "saving" ? "Saving…" : saving === "saved" ? "Saved ✓" : saving === "err" ? "Save failed" : ""}</span>
           <select className="acc2-rsel" value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Restaurant">
             {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
@@ -436,228 +298,9 @@ export default function Access2Page() {
     </div>
   );
 
-  // ─────────────────── GENERAL (RETIRED — replaced by <AccessTree/>) ──────────
-  // Kept inert for one phase only: the Per-person pane below still shares this
-  // component's helpers, so it is deleted together with that pane's rewrite (Phase 4/5
-  // of the access rebuild) rather than ripped out mid-way. Nothing renders it.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  function General() {
-    const conf = PERMISSIONS.filter((p) => conflicts(p).length);
-    return (
-      <>
-        {conf.length > 0 && (
-          <div className="acc2-warn">
-            <Icon n="alert" s={18} />
-            <span><b>{conf.length} power{conf.length > 1 ? "s have" : " has"} a manager set above the owner.</b> A manager can never hold something the owner doesn&rsquo;t — {conf.map((c) => c.name).join(", ")}.</span>
-          </div>
-        )}
-        <div className="acc2-rail-wrap">
-          <nav className="acc2-rail" ref={railRef}>
-            <div className="rh">Areas</div>
-            {GROUPS.map((g) => {
-              const ps = permsOf(g.id);
-              const on = ps.filter((p) => (p.kind === "switch" ? switchVal(p) : reachLevel(p, st!) > 0)).length;
-              return (
-                <button key={g.id} data-area={g.id} className={activeArea === g.id ? "on" : ""} onClick={() => { spyClick.current = Date.now() + 750; setActiveArea(g.id); setOpen((s) => ({ ...s, [g.id]: true })); document.getElementById("sec-" + g.id)?.scrollIntoView({ behavior: "smooth", block: "start" }); }}>
-                  <span className="acc2-gi"><Icon n={g.icon} s={15} /></span>
-                  <span className="nm">{g.name}</span><CountOval on={on} total={ps.length} />
-                </button>
-              );
-            })}
-          </nav>
-          <div className="acc2-main">
-            {GROUPS.map((g) => {
-              const ps = permsOf(g.id);
-              const on = ps.filter((p) => (p.kind === "switch" ? switchVal(p) : reachLevel(p, st!) > 0)).length;
-              const isOpen = open[g.id];
-              return (
-                <section className="adm-card acc2-sect" id={"sec-" + g.id} key={g.id}>
-                  <button className="acc2-sh" onClick={() => setOpen((s) => ({ ...s, [g.id]: !s[g.id] }))}>
-                    <span className="acc2-gi lg"><Icon n={g.icon} s={19} /></span>
-                    <div className="acc2-sh-t"><h2>{g.name}</h2><p>{g.blurb}</p></div>
-                    <CountOval on={on} total={ps.length} />
-                    <span className={`acc2-chev ${isOpen ? "o" : ""}`}><Icon n="chevron" /></span>
-                  </button>
-                  {isOpen && <div className="acc2-body">{ps.map((p) => p.kind === "switch" ? <SwitchRow key={p.id} p={p} /> : <LadderCard key={p.id} p={p} />)}</div>}
-                </section>
-              );
-            })}
-          </div>
-        </div>
-      </>
-    );
-  }
+  // (The old GENERAL pane lived here. It was the 54-checkbox screen the 2026-07-31
+  // rebuild replaced with <AccessTree/>; deleted once nothing rendered it.)
 
-  function SwitchRow({ p }: { p: Perm }) {
-    const on = switchVal(p);
-    const blocked = p.requires && !st!.features[p.requires];
-    return (
-      <div className={`acc2-sw${flashKey && focusKeysOf(p).includes(flashKey) ? " acc2-flash" : ""}`} data-focus-key={focusKeysOf(p).join(" ")}>
-        <div className="acc2-sw-b">
-          <div className="nm">{p.name}{p.adminOnly && <span className="tag">ADMIN ONLY</span>}<InfoBtn p={p} /></div>
-          <div className="ds">{blocked ? `Needs “${PERM_BY_ID[p.requires!].name}” on first.` : p.what}</div>
-        </div>
-        <Toggle checked={on} disabled={!!blocked} onChange={() => setSwitch(p, !on)} />
-      </div>
-    );
-  }
-
-  function LadderCard({ p }: { p: Perm }) {
-    const lvl = reachLevel(p, st!);
-    const gated = !allowed(p, st!) && !!p.module; // module not allowed by admin
-    const isOpen = !!openCards[p.id];
-    const sd = side[p.id] || "owner";
-    const canMgr = lvl >= 2;
-    const canWtr = !!p.waiter && lvl >= 3;
-    // which tiers this capability actually reaches → which "…can" tabs to show
-    const tiers: Side[] = ["owner", ...(canMgr ? ["manager"] as Side[] : []), ...(canWtr ? ["waiter"] as Side[] : [])];
-    const shown: Side = tiers.includes(sd) ? sd : "owner";
-    const parentHas = (spt: SubOpt, s: Side) => s === "owner" ? true : s === "manager" ? subOn(p, "owner", spt.id) : subOn(p, "manager", spt.id);
-    const conf = conflicts(p);
-    const master = p.fixedTop ? true : lvl >= 1;
-    const reachTxt = p.fixedTop ? "Owner + Manager" + (lvl >= 3 ? " + Tablet" : "") : REACH_LABEL[lvl];
-
-    return (
-      <article className={`acc2-card ${isOpen ? "o" : ""} ${master ? "act" : ""}${flashKey && focusKeysOf(p).includes(flashKey) ? " acc2-flash" : ""}`} data-focus-key={focusKeysOf(p).join(" ")}>
-        <div className="acc2-ph">
-          <button className="acc2-ph-b" onClick={() => setOpenCards((s) => ({ ...s, [p.id]: !s[p.id] }))}>
-            <div className="nm">{p.name}{p.adminOnly && <span className="tag">ADMIN ONLY</span>}</div>
-            <div className="ds">{p.what}</div>
-          </button>
-          <div className="acc2-ph-c">
-            <span className={`acc2-reachtag ${master ? "on" : ""}`}>{reachTxt}</span>
-            {!p.fixedTop && <Toggle checked={master} onChange={() => setMaster(p, !master)} />}
-            <button className={`acc2-chev ${isOpen ? "o" : ""}`} onClick={() => setOpenCards((s) => ({ ...s, [p.id]: !s[p.id] }))}><Icon n="chevron" /></button>
-          </div>
-        </div>
-
-        {isOpen && (
-          <div className="acc2-cb">
-            {p.module && (
-              <div className="acc2-gate">
-                <div className="lbl">Admin allows “{p.name}” for this restaurant
-                  <small>{allowed(p, st!) ? "Allowed — the owner decides who uses it below." : "Not allowed — nothing below applies and the server refuses it."}</small></div>
-                <Toggle checked={allowed(p, st!)} onChange={() => save({ modules: { [moduleKey(p)]: { allowed: !allowed(p, st!) } } })} />
-              </div>
-            )}
-            {gated ? (
-              <p className="acc2-hint"><Icon n="shield" /> Switched off for this restaurant. Turn “Admin allows” on to open the settings.</p>
-            ) : master ? (
-              <>
-                {/* CUMULATIVE reach ladder (capped at the capability's max): the model is
-                    additive — manager always includes owner, tablet always includes manager —
-                    so every step UP TO the chosen reach fills in (soft) and the chosen ceiling
-                    is solid + checked. Reads like signal bars: you can SEE that "+ Manager"
-                    still keeps the owner. Clicking a step sets the ceiling. Owner-only caps
-                    (Issues/Customers) show just "Owner"; money/floor caps go up to "+ Tablet". */}
-                {!p.fixedTop && !p.ownerOnly && (
-                  <div className="acc2-reach">
-                    {Array.from({ length: maxReach(p) }, (_, i) => i + 1).map((v) => (
-                      <button key={v} className={`rs r${v} ${lvl >= v ? "on" : ""} ${lvl === v ? "cur" : ""}`} onClick={() => setReach(p, v)} title={v === 1 ? "Owner only" : v === 2 ? "Owner and managers" : "Owner, managers and waiters"}>
-                        <Icon n={v === 1 ? "crown" : v === 2 ? "users" : "user"} s={14} />{v === 1 ? "Owner" : v === 2 ? "+ Manager" : "+ Tablet"}
-                        {lvl === v && <span className="rc"><Icon n="check" s={11} /></span>}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {p.ownerOnly && <p className="acc2-hint"><Icon n="crown" /> Owner-only — this is an owner-panel page; the toggle above turns it on or off.</p>}
-                {p.fixedTop && <p className="acc2-hint"><Icon n="info" /> Owner &amp; manager always have this — choose whether waiters get it below.</p>}
-
-                {/* The owner rung means TWO different things — where the owner USES this, and
-                    that they can HAND IT DOWN. Stated as plain facts, never as controls, so
-                    "has it" and "can give it" stop reading as one idea (owner ask 2026-07-26).
-                    ownerUse comes from lib/accessModel — enforcement is untouched. */}
-                <div className="acc2-ownerfact" role="note">
-                  <div className="of-row"><Icon n="crown" s={13} />
-                    <span><b>Owner has it</b> — {p.ownerUse === "panel"
-                      ? "a page in their own owner panel."
-                      : "no owner-panel page for this; the owner uses it by opening the manager panel."}</span></div>
-                  <div className="of-row"><Icon n="key" s={13} />
-                    <span><b>Owner can give it</b> — {p.ownerOnly
-                      ? "never handed down; this one stays owner-only."
-                      : p.fixedTop
-                        ? "managers always have this one — the only choice is waiters, below."
-                        : lvl >= 2
-                          ? "currently given to managers (owner's Staff & powers page)."
-                          : "not given to managers yet — the owner flips it on their Staff & powers page."}</span></div>
-                </div>
-
-                {p.sub && (
-                  <>
-                    {/* ONE "…can" tab per tier this capability reaches: Owner, +Manager, +Tablet(Waiter).
-                        Each tier picks WHICH sub-actions it gets; cascade is waiter ⊆ manager ⊆ owner. */}
-                    <div className="acc2-sides">
-                      {tiers.map((tk) => (
-                        <button key={tk} className={`sd ${tk} ${shown === tk ? "on" : ""}`} onClick={() => setSide((s) => ({ ...s, [p.id]: tk }))}>
-                          <Icon n={SIDE_META[tk].icon} s={14} /> {SIDE_META[tk].label} <b>{p.sub!.filter((spt) => subOn(p, tk, spt.id)).length}/{p.sub!.length}</b>
-                        </button>
-                      ))}
-                    </div>
-                    <div className={`acc2-chips ${shown}`}>
-                      {p.sub.map((spt) => {
-                        const on = subOn(p, shown, spt.id);
-                        const dis = spt.adminOnly && shown !== "owner";           // admin-only sub can't be delegated below owner
-                        const bad = shown !== "owner" && on && !parentHas(spt, shown); // holding what the tier above lacks
-                        // Corner badges = the OTHER tiers that also hold this sub-option.
-                        // Owner→O, Manager→M, waiter tier→T (the tablet — the rest of the UI
-                        // says "+ Tablet"/"T", so t[0] "W" was the odd one out; owner 2026-07-24).
-                        const others = tiers.filter((t) => t !== shown && subOn(p, t, spt.id)).map((t) => t === "waiter" ? "T" : t[0].toUpperCase());
-                        return (
-                          <div key={spt.id} className={`chip ${on ? "on" : ""} ${bad ? "bad" : ""} ${dis ? "dis" : ""}`}>
-                            <button disabled={dis} onClick={() => setSub(p, shown, spt.id, !on)}>
-                              <span className="box"><Icon n="check" s={12} /></span>{spt.name}
-                              {spt.adminOnly && <span className="tag">ADMIN</span>}
-                            </button>
-                            {others.length > 0 && <span className="xb" title={"Also on for: " + others.map((o) => o === "O" ? "owner" : o === "M" ? "manager" : "tablet").join(", ")}>{others.join("")}</span>}
-                            <button className="ib" onClick={() => setInfo({ perm: p, sub: spt.id })}><Icon n="info" s={12} /></button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-
-                {p.limit && (
-                  <div className="acc2-limit">
-                    <div className="lbl">{p.limit.label} — {shown}<small>Anything above this is refused, not just hidden.</small></div>
-                    <div className="segs">{p.limit.options.map((o) => {
-                      const cur = (st!.config[p.id]?.limit?.[shown]) ?? p.limit!.options[0];
-                      return <button key={o} className={cur === o ? "on" : ""} onClick={() => setLimit(p, shown, o)}>{o}{p.limit!.unit}</button>;
-                    })}</div>
-                  </div>
-                )}
-
-                {p.waiter && lvl >= 3 && (
-                  <div className="acc2-waiter">
-                    <div className="lbl"><Icon n="user" s={15} /> Every waiter, by default<small>Override one person on the Per person tab.</small></div>
-                    <div className="tri">
-                      {[["on", "Straight on", "check"], ["pin", "On, ask for a PIN", "key"]].map(([v, l, ic]) => (
-                        <button key={v} className={tabletValue(p, st!) === v || (v === "on" && tabletValue(p, st!) !== "pin") ? "on" : ""} onClick={() => setWaiter(p, v as string)}><Icon n={ic as string} s={13} />{l}</button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {conf.length > 0 && (
-                  <div className="acc2-conflict"><Icon n="alert" s={16} /><span><b>Manager is set above the owner:</b> {conf.join(", ")}. Give the owner the same option, or untick it for the manager.</span></div>
-                )}
-
-                <button className="acc2-who" onClick={() => { setTab("person"); setPersonFilter(p.id); }}>
-                  <Icon n="users" s={14} /> Who has this right now? <b>{holders(p).length}</b> <Icon n="arrowR" s={14} />
-                </button>
-              </>
-            ) : (
-              <p className="acc2-hint"><Icon n="info" /> Off — nobody has this. Flip the switch above to give it to the owner.</p>
-            )}
-          </div>
-        )}
-      </article>
-    );
-  }
-
-  function holders(p: Perm): Staff[] {
-    return sortedStaff.filter((u) => (ROLE_RELEVANCE[u.role] || []).includes(p.id) && resolved(u, p).eff);
-  }
   function resolved(u: Staff, p: Perm): { base: boolean; eff: boolean; ov: string } {
     const lvl = reachLevel(p, st!);
     let base = false;
@@ -828,9 +471,6 @@ export default function Access2Page() {
   }
 }
 
-function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled?: boolean; onChange: () => void }) {
-  return <button className={`acc2-toggle ${checked ? "on" : ""}`} role="switch" aria-checked={checked} disabled={disabled} onClick={onChange}><span /></button>;
-}
 
 function Style() {
   return <style jsx global>{`

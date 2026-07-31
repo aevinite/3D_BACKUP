@@ -64,7 +64,7 @@ for (const m of tree.matchAll(/t:\s*"module",\s*key:\s*"([^"]+)"/g)) {
 for (const m of tree.matchAll(/t:\s*"tablet",\s*key:\s*"([^"]+)"/g)) settingCols.add(m[1]);
 // Columns that predate this rebuild live in older migrations; only the NEW ones must be in 235.
 const preExisting = new Set([
-  "sessions_enabled", "google_review_mode", "auto_print_kot_allowed", "gstin", "restaurant_name",
+  "sessions_enabled", "google_review_mode", "google_review_url", "auto_print_kot_allowed", "gstin", "restaurant_name",
   "restaurant_address", "banquet_allowed", "banquet_enabled", "payroll_allowed", "payroll_enabled",
   "inventory_allowed", "inventory_enabled",
   "tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_take_orders",

@@ -169,6 +169,14 @@ export const SECTIONS: Section[] = [
               { value: "off", label: "Menu rating only", what: "Guests leave a 1–5 star rating inside your own menu. Nothing goes to Google." },
               { value: "google", label: "Google review only", what: "No in-menu stars — the guest is sent straight to your Google review page." },
               { value: "google_after_normal", label: "Both — Google after the menu one", what: "The guest rates in the menu first, then is invited to post it on Google." },
+            ],
+            children: [
+              // The link the Google choices send guests to. It used to live in its own card on
+              // the restaurant detail page; it belongs with the choice that uses it, and only
+              // one screen may own it.
+              { id: "google_review_url", name: "Google review link", def: "", bind: { t: "text", key: "google_review_url" },
+                placeholder: "https://g.page/r/…/review",
+                what: "Where the Google choices send a guest. Find it in your Google Business profile → Ask for reviews. Leave it empty and the Google invite stays hidden even when picked above." },
             ] },
           { id: "show_reviews", name: "Show reviews", def: true, bind: { t: "feature", key: "reviews" },
             what: "Written reviews, everywhere they appear: on the menu list, on a dish's own page, and in the “what other guests wrote” panel beside the rating box. OFF keeps the stars but shows no written words." },
@@ -259,6 +267,26 @@ export const SECTIONS: Section[] = [
             what: "Design the whole bill like a document — move the logo, change the wording, resize the totals. Not built yet; this is where it will live." },
         ],
       },
+    ],
+  },
+
+  // ──────────────────────────── A2 · STAFF APPS ─────────────────────────────
+  // NOT on the owner's list, kept deliberately: these are in real use (Aangan runs on the
+  // waiter tablet only) and switching one off REFUSES that login at the door — a capability
+  // with no substitute anywhere else. They moved here from the restaurant detail page, which
+  // now carries no permissions at all. Flagged to the owner 2026-07-31.
+  {
+    id: "apps", name: "Staff apps", icon: "grid",
+    blurb: "Which of the four staff apps this restaurant has. Switching one off refuses that login — nobody can open it.",
+    children: [
+      { id: "panel_manager", name: "Manager panel", def: true, bind: { t: "panel", key: "manager" },
+        what: "The full control room: floor, bills, editor, reports. Off refuses a manager login." },
+      { id: "panel_kitchen", name: "Kitchen display", def: true, bind: { t: "panel", key: "kitchen" },
+        what: "The New → Cooking → Ready ticket board and the sold-out list. Off refuses a kitchen login." },
+      { id: "panel_tablet", name: "Waiter tablet", def: true, bind: { t: "panel", key: "tablet" },
+        what: "The floor tiles and take-order app the waiters carry. Off refuses a waiter login." },
+      { id: "panel_owner", name: "Owner panel", def: true, bind: { t: "panel", key: "owner" },
+        what: "The owner's own dashboard, reports and staff pages. Off refuses an owner login." },
     ],
   },
 

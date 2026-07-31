@@ -10,7 +10,6 @@
 // reuses this same API (they can't change the power toggles — those stay owner-only).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asSuffix } from "@/lib/ownerPin";
-import { MANAGER_POWER_FLAGS, ABSENT_ON_POWERS, PERM_BY_ID, PERM_BY_POWER } from "@/lib/accessModel";
 
 type Perms = Record<string, boolean>;
 type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean>; payAccess?: PayAccess; tableCount?: number };
@@ -40,40 +39,9 @@ const WAITER_CAPS: [string, string, string | null][] = [
 ];
 const OVR_MODES: [string, string][] = [["default", "Default"], ["on", "On"], ["pin", "PIN"], ["off", "Off"]];
 
-// Owner-page copy per power flag (shorter, owner-voiced). The FLAG LIST itself is
-// DERIVED from lib/accessModel.ts (2026-07-26) so this page can never miss a power the
-// admin panel + server know about (the old hand-typed list was missing view_logs); a
-// flag without copy here still renders, using the access model's own name/description.
-const PERM_COPY: Record<string, [string, string]> = {
-  manage_staff: ["Manage staff", "Add / remove team members"],
-  edit_menu: ["Edit menu", "Change dishes, prices, categories"],
-  give_discounts: ["Give discounts", "Apply a discount to a bill"],
-  view_dashboard: ["View dashboard", "See sales numbers & charts"],
-  void_bills: ["Void bills", "Cancel / void an invoiced bill"],
-  edit_settings: ["Change settings", "Edit restaurant settings & preferences"],
-  view_ratings: ["Guest ratings", "See & handle guest star-ratings"],
-  view_logs: ["Activity log", "See the restaurant's activity record — who did what"],
-  table_tags: ["Mark table types", "Mark tables VIP / Family / Owner's guest + settle on the house"],
-  khata: ["Pay later (khata)", "Park bills on a person & collect later"],
-  banquet: ["Banquet billing", "Create fixed-plate banquet bills"],
-  table_ops: ["Table & KOT operations", "Merge tables, move KOTs/items, split bills"],
-  take_orders: ["Take orders", "Start a new dine-in order at a table, like the waiter tablet"],
-  parcel: ["Parcel / takeaway", "Punch in a quick takeaway (parcel) order from the floor — shows in the Platform board"],
-  platform: ["Platform board", "See & manage online delivery orders (Zomato / Swiggy / website) in the 🛵 Platform tab"],
-  see_staff_pay: ["See staff pay", "Everyone's salary and payment history. Off unless you hand it over — a person always sees their own."],
-  record_staff_payment: ["Record a staff payment", "Log money handed to someone on the pay list — a salary, or a cash advance on a Sunday."],
-  edit_staff_profiles: ["Edit staff profiles", "Each person's own details — phone, address, emergency contact. Personal details only, never their salary."],
-  table_assign: ["Give waiters their own tables", "Decide which tables each waiter's tablet shows — turn this off to keep sections in your hands only"],
-};
-const PERMS: [string, string, string][] = MANAGER_POWER_FLAGS.map((f) => {
-  // by POWER first (PERM_BY_ID only works when a permission's id equals its flag)
-  const p = PERM_BY_POWER[f] || PERM_BY_ID[f];
-  return [f, PERM_COPY[f]?.[0] || p?.name || f, PERM_COPY[f]?.[1] || p?.what || ""];
-});
 const ROLES = ["manager", "kitchen", "tablet"];
 // Powers that only exist while the "Staff profiles & pay" module is on for that restaurant
 // (mig 220). With the module off these would be dead switches, so they're not rendered at all.
-const PAYROLL_POWERS = new Set(["see_staff_pay", "record_staff_payment", "edit_staff_profiles"]);
 const money = (n: number | null | undefined) => "\u20b9" + Math.round(Number(n || 0)).toLocaleString("en-IN");
 
 export default function OwnerStaffPage() {
@@ -101,8 +69,8 @@ export default function OwnerStaffPage() {
   // Two views of the same page: the PEOPLE (a roster you open a profile from) and the POWERS
   // (what managers here may do). Splitting them stopped the page being one long scroll where
   // the person list was buried under toggles. ?tab=powers deep-links the second one.
-  const [tab, setTab] = useState<"team" | "powers">(() =>
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("tab") === "powers" ? "powers" : "team");
+  const [tab] = useState<"team" | "powers">(() =>
+    "team"); // powers moved to the admin panel; this page is the roster only
   // Synchronous re-entry guard so a fast double-click on "Add" can't fire twice before
   // React flushes the disabled state (the exact race that showed a raw duplicate-key error).
   const addingRef = useRef(false);
@@ -170,13 +138,6 @@ export default function OwnerStaffPage() {
       if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
       return d;
     } finally { setBusy(false); }
-  }
-
-  async function togglePerm(rid: string, key: string, value: boolean) {
-    try {
-      const d = await call(withScope("/api/owner/manager-permissions"), { method: "PATCH", body: JSON.stringify({ restaurant_id: rid, permissions: { [key]: value } }) });
-      setRestaurants((rs) => rs.map((r) => (r.id === rid ? { ...r, managerPermissions: d.manager_permissions } : r)));
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }
 
   // Per-user override for a waiter's tablet cap (Default/On/PIN/Off). Server (GAP-B) refuses a
@@ -297,13 +258,13 @@ export default function OwnerStaffPage() {
       <div className="own-bar"><div className="own-crumb"><span className="cur">{restaurants.some((r) => r.modules?.payroll) ? "Team & pay" : "Staff & powers"}</span></div></div>
 
       {/* People first, toggles second — the roster is what an owner opens this page for. */}
+      {/* The POWERS tab was removed in the access rebuild (owner, 2026-07-31: "only admin
+          will have all this permission"). What a manager may do is set once, by the admin, in
+          Access & permissions → Default set for user → Manager. This page is the roster. */}
       <div className="ost-tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "team"} className="ost-tab" onClick={() => setTab("team")}>
+        <button role="tab" aria-selected className="ost-tab">
           <i className="fas fa-users" /> Team
           <span className="ost-tcount">{staff.filter((s) => s.active).length}</span>
-        </button>
-        <button role="tab" aria-selected={tab === "powers"} className="ost-tab" onClick={() => setTab("powers")}>
-          <i className="fas fa-shield-halved" /> Powers
         </button>
       </div>
 
@@ -331,44 +292,6 @@ export default function OwnerStaffPage() {
               <div><div className="ost-name">{r.name}</div><div className="adm-muted" style={{ fontSize: 12 }}>{r.slug} · {team.length} staff</div></div>
             </div>
 
-            {/* ── POWERS tab: what a manager here may do ─────────────────────────── */}
-            {tab === "powers" && <>
-            <div className="ost-section-t">Manager powers <span className="adm-muted" style={{ fontWeight: 500 }}>· what a manager here may do</span>
-              <span className="reach-legend" title="Each power shows how far it reaches. M = passed down to your managers."><span className="reach-chip on" aria-hidden="true">M</span> reaches managers</span>
-            </div>
-            <div className="ost-perms">
-              {PERMS.map(([key, label, hint]) => {
-                // The ladder (mig 133): a power the ADMIN removed doesn't exist here.
-                // Hidden from the real owner; the admin act-as sees it amber-tinted,
-                // and clicking it jumps to the admin Access hub instead of toggling.
-                const exists = r.ownerEntitlements?.[`power_${key}`] !== false;
-                if (!exists && actor !== "admin") return null;
-                // A power belonging to a module the restaurant doesn't have isn't hidden
-                // information — it doesn't exist. Rendering it would be a switch that does
-                // nothing (and the server refuses it anyway).
-                if (PAYROLL_POWERS.has(key) && !r.modules?.payroll) return null;
-                // absentOn flags (view_logs): an ABSENT grant means ON — the toggle must show
-                // what the server enforces, never "off" while managers genuinely have it.
-                const on = ABSENT_ON_POWERS.has(key) ? r.managerPermissions?.[key] !== false : !!r.managerPermissions?.[key];
-                if (!exists) {
-                  return (
-                    <button key={key} type="button" className="ost-perm xray-off" data-perm-key={key}
-                      onClick={() => { window.location.href = `/aevinite/access?rid=${r.id}&focus=manager-powers`; }}
-                      title="Removed by admin — the owner can't see this. Tap to change it in Access control.">
-                      <i className="fas fa-lock" /> <span>{label}</span>
-                    </button>
-                  );
-                }
-                return (
-                  <button key={key} type="button" className={`ost-perm ${on ? "on" : ""}`} data-perm-key={key} disabled={!canEditPowers || busy}
-                    onClick={() => togglePerm(r.id, key, !on)} title={canEditPowers ? hint : "Only the owner can change this"}>
-                    <i className={`fas ${on ? "fa-toggle-on" : "fa-toggle-off"}`} /> <span>{label}</span>
-                  </button>
-                );
-              })}
-            </div>
-            {!canEditPowers && <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 4 }}>Only the owner can change these.</div>}
-            </>}
 
             {/* ── TEAM tab: the roster ───────────────────────────────────────────── */}
             {tab === "team" && <>

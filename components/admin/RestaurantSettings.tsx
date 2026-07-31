@@ -344,12 +344,18 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           <b> right now</b>. <b>Invoice prefix</b> + financial year build the number (e.g. <code>INV/2025-26/000042</code>) —
           the running number itself is made by the server; nobody can edit the sequence.
         </p>
+        {/* The legal name, address and GSTIN moved to Access & permissions → Main features →
+            Bill (owner, 2026-07-31), so each of those values has exactly ONE editor. Two
+            screens writing the same field is how the pair silently drift apart. What stays
+            here is the rest of the printed bill, which is not a permission. */}
+        <p className="hint" style={{ marginTop: 0 }}>
+          <b>Legal name, address and GSTIN</b> are set in{" "}
+          <a href={`/aevinite/access?rid=${restaurant.id}&from=rest`}>Access &amp; permissions → Bill</a>{" "}
+          so there is only one place that owns them.
+        </p>
         <div style={{ display: "grid", gap: 10 }}>
-          {field("Restaurant name", "restaurant_name")}
-          {field("Address", "restaurant_address", { ph: "e.g. 12 Lake Road, Ahmedabad", hint: !draft.restaurant_address ? "Nothing set — the bill prints a shared placeholder address until you type the real one." : "" })}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
             {field("Phone", "restaurant_phone", { ph: "+91 …" })}
-            {field("GSTIN", "gstin", { ph: "e.g. 24ABCDE1234F1Z5", hint: !draft.gstin ? "No GSTIN set — bills print WITHOUT a GSTIN until you enter the real one (a fake number on a real bill is illegal)." : "" })}
             {field("Invoice prefix", "invoice_prefix")}
           </div>
           {field("Bill footer message", "bill_footer", { hint: "Printed at the very bottom of the customer's bill, e.g. “Thank you — visit again!”." })}
@@ -443,13 +449,20 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
       {/* ═══ DINING SESSIONS — same-to-same with the manager's section ═══ */}
       <div id="det-sessions" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>⏱ Dining sessions</h2>
+        {/* The dining-session MASTER switch moved to Access & permissions → Menu → Dining
+            sessions (owner, 2026-07-31) — it decides whether the floor has an "Open table"
+            step at all, which is a feature decision, not a setting. What stays here are the
+            details that only matter once it is on. */}
         <p className="hint">
-          The QR/session system. <b>When OFF, the menu works exactly like today.</b> Turn it ON only when the
-          restaurant is ready: guests must be at the café (location) to order or call a waiter, and the first
-          order asks for a one-time phone code.
+          The QR/session system is switched on in{" "}
+          <a href={`/aevinite/access?rid=${restaurant.id}&from=rest`}>Access &amp; permissions → Menu → Dining sessions</a>.
+          It is currently <b>{draft.sessions_enabled === true ? "ON" : "OFF"}</b>
+          {draft.sessions_enabled === true
+            ? " — guests join a table and staff open it before ordering."
+            : " — the floor takes orders directly, with no “Open table” step."}
+          {" "}The rules below apply only while it is on.
         </p>
         <div className="adm-togglegrid" style={{ marginBottom: 12 }}>
-          {boolToggle("Turn the dining-session system ON", "sessions_enabled", draft.sessions_enabled === true)}
           {boolToggle("Require location (guest must be near the café)", "require_location", draft.require_location !== false)}
           {boolToggle("Require a phone code (OTP) to place an order", "require_otp", draft.require_otp !== false)}
         </div>
