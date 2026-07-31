@@ -1,4 +1,7 @@
--- 235_write_down_the_unwritten_function.sql
+-- 236_write_down_the_unwritten_function.sql
+-- (renumbered from 235 the same day: another session's 235_access_model_v2.sql landed in parallel.
+--  Two files with the same number make "which ran first?" unanswerable — verify-db-parity now
+--  fails on a duplicate number so the next collision is caught before it is merged.)
 --
 -- HOUSEKEEPING WITH TEETH, from the owner's "check everything again, go to the root" pass.
 --
