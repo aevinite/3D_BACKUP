@@ -951,6 +951,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
               ["det-kitchen", "fa-print", "KOT printing"],
               ["det-sessions", "fa-qrcode", "Sessions"],
               ["det-tables", "fa-chair", "Tables & QR"],
+              ["det-banquet", "fa-champagne-glasses", "Banquet bill"],
             ] as const).map(([id, icon, label]) => (
               <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" })}>
                 <i className={`fas ${icon}`} aria-hidden="true" />{label}

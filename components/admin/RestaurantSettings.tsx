@@ -23,7 +23,14 @@ const KEYS = [
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
   "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
-  "table_count", "table_seats", "table_names", "auto_table_action", "floor_per_row",
+  "table_count", "table_seats", "table_names", "auto_table_action",
+  // Banquet bill (migs 237/239). These MUST be listed here: the Save button builds its
+  // patch from the keys in this array, so a field missing from it looks editable and then
+  // silently saves nothing (which is exactly what happened when the card was first added).
+  "banquet_fields", "banquet_bill_prefix", "banquet_bill_style", "banquet_bill_next",
+  "banquet_tax_components", "banquet_paper", "banquet_paper_size", "banquet_paper_top",
+  "banquet_paper_bot", "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign",
+  "banquet_paper_fill", "floor_per_row",
 ] as const;
 
 const inputStyle: React.CSSProperties = {
