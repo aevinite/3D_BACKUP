@@ -500,12 +500,15 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
 
 function TreeStyle() {
   return <style jsx global>{`
-  /* HOVER IS RED (owner, 2026-07-31: "when you hover it's blue — make it red, a mid-light red").
-     Deliberately a DIFFERENT colour from the level blues and greens: those say what a setting IS,
-     hover says where your pointer is. Keeping them apart means a hovered-but-off box can never be
-     mistaken for an on one. The checkbox and radio keep their level colour while hovered, so the
-     state stays readable underneath the highlight. */
-  .acc2-main, .at-head { --hov:#f87171; }
+  /* HOVER FOLLOWS THE BOX'S OWN COLOUR. The owner's "make it red" (2026-07-31) was about the
+     PRIMARY FEATURE BOX's border — the outline round "Main features" — not about hover, and he
+     corrected this the same day: "there was not a hover colour, the colour was for the primary
+     feature box". A red hover on top of the level colours also put three colours in play on one
+     row. Hover now just brightens the colour the box already wears, so it says "your pointer is
+     here" without inventing a second meaning. --lvl is set per level below; the fallback covers
+     the section header, which has no level of its own. */
+  .at-box, .at-chip, .at-opt, .at-tw { --hov: var(--lvl, var(--accent)); }
+  .acc2-main, .at-head { --hov: var(--accent); }
   .at-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; min-height:38px; margin:0 0 10px; }
   .at-head .acc2-save { margin-left:auto; }
   .at-hint-x { margin-left:auto; background:none; border:0; color:inherit; opacity:.6; cursor:pointer; font-size:19px; line-height:1; }
@@ -528,11 +531,17 @@ function TreeStyle() {
   /* ── LEVEL COLOURS (owner, 2026-07-31: "blue, green, blue, green … according to theme") ────
      Nesting is shown by COLOUR as well as containment, so at a glance you can tell a feature
      from its sub-option from ITS sub-option. One variable per level and everything inherits it:
-       depth 0  master feature (Menu, Takeaway, Payroll…)      BLUE
+       depth 0  master feature (Menu, Takeaway, Payroll…)      ROSE
        depth 1  a feature inside it (Dining sessions, Ratings) GREEN
        depth 2  its options (Add a dish, Guest's own note)     BLUE
-       depth 3  deeper still                                   GREEN                          */
-  .at-box.d0, .at-chip.d0 { --lvl: var(--accent); }
+       depth 3  deeper still                                   GREEN
+
+     The PRIMARY box is rose, not blue (owner, 2026-07-31: change the primary feature box's colour
+     to "not the actual red — like pink type, it should match the theme"). Rose-400 and not a true
+     red because true red means DANGER everywhere else in this panel (--adm-danger), and a master
+     feature being switched on is not a warning. It also stops the primary box sharing the blue of
+     its own depth-2 grandchildren, which was the thing that made the nesting hard to read. */
+  .at-box.d0, .at-chip.d0 { --lvl: #fb7185; }
   .at-box.d1, .at-chip.d1 { --lvl: #34d399; }
   .at-box.d2, .at-chip.d2 { --lvl: var(--accent); }
   .at-box.d3, .at-chip.d3 { --lvl: #34d399; }
