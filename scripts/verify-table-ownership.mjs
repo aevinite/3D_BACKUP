@@ -77,9 +77,22 @@ head("B. Live data — no order left behind by a closed session");
   const sids = [...new Set(live.map((o) => o.session_id).filter(Boolean))];
   const sess = sids.length ? must(await sb.from("sessions").select("id,status").in("id", sids)) : [];
   const status = new Map(sess.map((s) => [s.id, s.status]));
-  const ghosts = live.filter((o) => o.session_id && status.get(o.session_id) !== "open");
+  // A real leak is an order that STAYS on the floor after its party left — it persists for
+  // minutes or hours. This scan reads the WHOLE shared dev database, so it also used to catch
+  // another session's fixture MID-FLIGHT (a test that opens a table, orders, and closes it inside
+  // one second) and reported it as a leak. That is a false alarm about someone else's in-flight
+  // write, not a product fault, and it cost real time twice. So: still fail for anything that has
+  // had time to settle, and skip only rows written in the last few seconds. Nothing real is hidden
+  // — a genuine leak is still failing on the very next run. (2026-07-31)
+  const SETTLING_MS = 15000;
+  const freshIds = new Set(
+    must(await sb.from("orders").select("id")
+      .eq("archived", false).is("deleted_at", null).neq("status", "cancelled")
+      .gte("created_at", new Date(Date.now() - SETTLING_MS).toISOString()).limit(500)).map((o) => o.id),
+  );
+  const ghosts = live.filter((o) => o.session_id && status.get(o.session_id) !== "open" && !freshIds.has(o.id));
   ghosts.length === 0
-    ? pass(`${live.length} live orders checked — every one belongs to an OPEN session`)
+    ? pass(`${live.length} live orders checked — every settled one belongs to an OPEN session`)
     : fail(`${ghosts.length} order(s) still on the floor after their party left: ` +
         JSON.stringify(ghosts.slice(0, 8).map((o) => `T${o.table_number} ${o.status}/${o.payment_status}`)) +
         " — the next guests at those tables would inherit them (mig 232 should have archived these)");

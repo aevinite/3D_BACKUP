@@ -53,7 +53,13 @@ const busy = new Set([
   ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", RID).neq("status", "closed")).map((s) => String(s.table_number)),
   ...must(await sb.from("orders").select("table_number").eq("restaurant_id", RID).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
 ]);
-const free = [...Array(count).keys()].map((n) => String(n + 1)).filter((n) => !busy.has(n)).reverse();
+// SHUFFLE, don't take the same two every time. `.reverse()` meant every run reserved the two
+// highest free tables — so two sessions running this at once (normal here, several sessions share
+// one dev DB) both "reserved" the SAME pair and stomped on each other's fixture. That is what
+// produced "the surviving table has 0 order(s) across 0 session(s)": the other run had already
+// cleaned it. Random picks make concurrent runs diverge instead of collide. (2026-07-31)
+const free = [...Array(count).keys()].map((n) => String(n + 1)).filter((n) => !busy.has(n))
+  .map((t) => [Math.random(), t]).sort((a, b) => a[0] - b[0]).map(([, t]) => t);
 if (free.length < 2) { console.error("need two completely free tables; the floor is busy right now"); process.exit(1); }
 const [TA, TB] = free;
 
