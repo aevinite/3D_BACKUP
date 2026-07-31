@@ -7,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { replayClash, clashJson, expectClash } from "@/lib/clash";
+import { offPlanTable } from "@/lib/planTable";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
@@ -575,6 +576,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // returns immediately without a single extra query.
     const clash = await replayClash(req, rid, a, b, c, body as Record<string, unknown> | null);
     if (clash) return clashJson(clash);
+
+    // A dine-in table must be one this restaurant could actually have. The suite found 20
+    // orders on tables like 9,754,262 — unreachable from the floor, so their money sits in the
+    // books with no tile to serve or settle it from. Generous by design (parcel counters number
+    // above the plan); only the absurd is refused. See lib/planTable.ts.
+    if ((a === "order" || (a === "sessions" && b === "open")) && body && (body as Record<string, unknown>).table != null) {
+      const offPlan = await offPlanTable(rid, (body as Record<string, unknown>).table);
+      if (offPlan) return err(offPlan, 400);
+    }
 
     // ── NO SILENT OVERWRITES (owner, 2026-07-30) ──────────────────────────────────
     // If the screen told us what it was editing FROM, refuse when someone else has since
