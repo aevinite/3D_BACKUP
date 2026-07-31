@@ -957,7 +957,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <Panel title="Cost view — what each month was worth" hint="Salary due for that month vs what you have paid for it. People on a daily or hourly rate are left out of “worth” until attendance exists." id="team-cost">
           <div className="rs-tablewrap">
             <table className="rs-table">
-              <thead><tr><th>Month</th><th className="num">People</th><th className="num">Team cost</th><th className="num">Paid for it</th><th className="num">Still owed</th></tr></thead>
+              <thead><tr><th>Month</th><th className="num">On pay list</th><th className="num">Team cost</th><th className="num">Paid for it</th><th className="num">Still owed</th></tr></thead>
               <tbody>
                 {months.map((m) => (
                   <tr key={m.bucket}>
