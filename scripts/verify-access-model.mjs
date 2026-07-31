@@ -213,6 +213,41 @@ if (!deadRows) ok("no row is a switch with nothing behind it");
   else ok(`every switch's key is read by real code (or is honestly labelled "left to build")`);
 }
 
+// ── 9c · NOTHING may still read a column the tree stopped writing ───────────
+// The access rebuild moved parcel_*/platform_* onto ONE takeaway_* module. Seven places kept
+// reading the retired columns, so the panels and the server disagreed: a 403 console error on
+// every manager load, and — worse — switching Takeaway ON did not show the Platform tab,
+// because the panel's own check read a column the Access screen no longer writes. A switch
+// that appears to work and does nothing is exactly what this rebuild removed, so it fails here.
+{
+  const RETIRED = ["parcel_allowed", "parcel_owner_control", "parcel_enabled",
+                   "platform_allowed", "platform_owner_control", "platform_enabled"];
+  const dirs = ["app", "lib", "components", "public/panels"];
+  const files = [];
+  const walk = (d) => {
+    let ents = []; try { ents = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== "node_modules" && e.name !== ".next") walk(full); }
+      else if (/\.(ts|tsx|js)$/.test(e.name)) files.push(full);
+    }
+  };
+  for (const d of dirs) walk(join(root, d));
+  const offenders = [];
+  for (const f of files) {
+    // settingsClone deliberately still WRITES the old columns for rollback safety.
+    if (/lib\/settingsClone\.ts$/.test(f)) continue;
+    let t = ""; try { t = readFileSync(f, "utf8"); } catch { continue; }
+    for (const col of RETIRED) {
+      // Only flag a READ (a comparison or a select), not a mention in a comment.
+      const re = new RegExp(`${col}\\s*(===|!==|==|:)|select\\([^)]*${col}`);
+      if (re.test(t)) { offenders.push(`${f.replace(root + "/", "")} → ${col}`); break; }
+    }
+  }
+  if (offenders.length) fail(`still reading a RETIRED column (the Access screen no longer writes it): ${offenders.join(", ")}`);
+  else ok("nothing reads a column the access tree stopped writing");
+}
+
 // ── 10 · the read/write route must allow-list from the model, not by hand ──
 if (!treeRoute.includes('from "@/lib/accessTree"')) fail("the access-tree route does not derive its allow-lists from lib/accessTree.ts");
 else ok("the read/write route derives every allow-list from the model");

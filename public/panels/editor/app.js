@@ -1833,7 +1833,7 @@ function accessCapsFor() {
     if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
     if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
     if (c.key === "tablet_take_orders") return s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
-    if (c.key === "tablet_parcel") return s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
+    if (c.key === "tablet_parcel") return s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
     return true;
   });
 }
@@ -9291,8 +9291,11 @@ async function loadPlatform() {
   // aren't loaded yet (first call) so the initial fetch still runs.
   const s = state.data.settings;
   if (s && !(XRAY_WHO && XRAY_WHO.higherView)) {
-    const platEff = s.platform_allowed === true && (s.platform_owner_control !== true || s.platform_enabled !== false);
-    const parcelEff = s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
+    // ONE module (takeaway_*) since mig 235. Reading the retired platform_*/parcel_* columns
+    // meant the panel fetched a board the server refuses (a 403 console error on every load)
+    // and, worse, HID the tab when the admin switched Takeaway ON — the switch did nothing.
+    const takeawayEff = s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
+    const platEff = takeawayEff, parcelEff = takeawayEff;
     if (!platEff && !parcelEff) { state.data.platform = []; updatePlatformBadge(); return; }
   }
   const seq = ++platSeq;
@@ -10250,8 +10253,9 @@ function syncPlatformTab() {
   const btn = document.querySelector('.tabs .tab[data-tab="platform"]');
   if (!btn) return;
   const s = state.data.settings || {};
-  const platEff = s.platform_allowed === true && (s.platform_owner_control !== true || s.platform_enabled !== false);
-  const parcelEff = s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
+  // Same single module (takeaway_*) — see the note above.
+  const takeawayEff2 = s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
+  const platEff = takeawayEff2, parcelEff = takeawayEff2;
   const higher = !XRAY_WHO || XRAY_WHO.higherView;
   // Granted if a higher role, OR the manager has EITHER power for whichever module is on.
   const granted = higher || (platEff && xrayGrantedForManager("platform")) || (parcelEff && xrayGrantedForManager("parcel"));

@@ -118,7 +118,9 @@ const takeOrdersEffectiveFromRow = (s: Record<string, unknown> | null) =>
 // Parcel / takeaway module rung (mig 197), from an already-fetched settings row. Brand-new
 // module → _allowed defaults FALSE, so the 🥡 Parcel button stays hidden until the admin grants it.
 const parcelEffectiveFromRow = (s: Record<string, unknown> | null) =>
-  !!s && s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
+  // takeaway_* since mig 235 — parcel and the platform board are ONE module now, and the
+  // retired parcel_* columns are no longer written by the Access screen.
+  !!s && s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
