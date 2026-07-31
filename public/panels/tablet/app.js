@@ -3760,7 +3760,9 @@ window.addEventListener("online", () => load().catch(() => {}));
     const pcBtn = drawer.querySelector("#dwParcel");
     if (pcBtn) {
       const sset = state.data.settings || {};
-      const pAllowed = sset.parcel_allowed === true && (sset.parcel_owner_control !== true || sset.parcel_enabled !== false);
+      // Takeaway & delivery is ONE module on takeaway_* since mig 235; parcel_* is no longer
+      // written, so reading it made the panel disagree with the server (403s + a hidden tab).
+      const pAllowed = sset.takeaway_allowed === true && (sset.takeaway_owner_control !== true || sset.takeaway_enabled !== false);
       const pOff = !pAllowed || tperm("tablet_parcel") === "off";
       pcBtn.hidden = tHigher() ? false : pOff;
       pcBtn.classList.toggle("xray-off", tHigher() && pOff);

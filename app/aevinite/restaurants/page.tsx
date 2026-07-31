@@ -306,7 +306,7 @@ function systemAccess(): Access {
   for (const [k] of NR_MGR_POWERS) owner["power_" + k] = true;
   const features: Record<string, boolean> = {};
   for (const [m] of NR_MODULES) { features[m + "_allowed"] = false; features[m + "_owner_control"] = false; }
-  features.parcel_allowed = true; // parcel is ON for the manager by default (owner 2026-07-26)
+  features.takeaway_allowed = true; // Takeaway & delivery ON by default (owner 2026-07-26; one module since mig 235)
   return { owner, manager: { ...NR_MP_DEFAULT }, tablet: { ...NR_TABLET_DEFAULT }, features };
 }
 // Merge a (possibly partial) saved access blob over the system defaults, so a missing key

@@ -21,7 +21,8 @@ export const FEATURE_SWITCHES = [
   "banquet_allowed", "banquet_owner_control",
   "table_ops_allowed", "table_ops_owner_control",
   "take_orders_allowed", "take_orders_owner_control",
-  "parcel_allowed", "parcel_owner_control",
+  // Takeaway & delivery is ONE module since mig 235 (it replaced parcel_* + platform_*).
+  "takeaway_allowed", "takeaway_owner_control",
 ] as const;
 
 // The owner's grant baseline for the manager powers (restaurants.manager_permissions).
