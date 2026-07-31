@@ -1,10 +1,39 @@
 # Floor timeouts — the follow-up check (open until confirmed)
 
-**Status: WAITING FOR EVIDENCE.** Opened 2026-07-31. Close it or act on it with one command:
+**Status: ANSWERED for the 2026-07-31 bursts — the query is exonerated, the load was OURS.**
+Keep the check; it is still the way to judge any future burst.
 
 ```bash
 npm run check:floor-timeouts
 ```
+
+## The 2026-07-31 15:20 answer (worked through the list below — start here before re-deriving it)
+
+The owner pressed "Fix NOW" on a burst of `GET summary` timeouts from Aangan's waiter tablet
+(14:04–14:43 UTC, 32 rows, all after mig 238 went live). Verdict, with the evidence:
+
+| step | finding |
+|---|---|
+| is the read slow? | **No.** Aangan's whole floor measures **1.3–1.7 ms** (10 tables, 41,883 orders). It was being killed at the **8-second** `statement_timeout` — so it spent ~8s *waiting*, not working. |
+| was it only us? | `pg_stat_statements` showed `max_exec_time` piled up at **7.7–8.0 s across many unrelated query shapes** — the whole instance was saturated, not one query. |
+| who saturated it? | **Our own testing.** `scripts/verify-everything.mjs` (the 501-phase suite) running in a loop against `localhost:4310`, alongside two other dev servers and ~20 worktrees, on a shared 60-connection dev instance holding **399,426 orders** of seeded stress data. Phases 348–418 drive Aangan's tablet — which is exactly the panel and restaurant that timed out. |
+| did the panel make it worse? | No. `load()` coalesces concurrent calls onto one in-flight fetch, and the 2s poll only exists when realtime failed to load. No retry storm. |
+
+**So: not a product fault, and per the project rule our own load generating alarming rows counts as
+a bug in the test, not a finding.** Do NOT "optimise" the floor query again on the strength of these
+rows — at 1.5 ms there is nothing left to win. The database was calm again by 15:25 with 2 active
+connections.
+
+**What WAS a real fault, and got fixed:** the gateway's reply. When Supabase's edge gave up at
+14:38 it answered with a Cloudflare **522 HTML page**, and the app stored that entire page as the
+problem text — so the Problems list, the Logs, the phone alert and the "Fix NOW" ticket title all
+read `<!DOCTYPE html> <!--[if lt IE 7]>…`. `logError` now runs the message through
+`readableError()` (`lib/errorSignature.ts`), which keeps the page's `<title>` — the only part that
+says anything — and drops the markup. Guarded by `npm run test:errors`.
+
+**If you are looking at a NEW burst:** re-run the check, and before anything else confirm whether a
+test suite or a load script was running at that hour (`ps -Ao pid,etime,command | grep verify-`).
+That single question decided this one.
 
 ---
 
