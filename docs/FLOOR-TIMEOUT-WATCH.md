@@ -27,7 +27,8 @@ statements to answer one refresh of a 300-table floor.
 
 1. **Share the computation** (PR #603/#607, `lib/floorSummary.ts`). Every manager and waiter device
    polls the whole floor as its 60-second backstop; a dozen landing together queued and crossed the
-   2-minute limit. Now whole-floor reads for the same restaurant inside a 1.5s window share ONE
+   limit (see below — it is **8 seconds**, not the 2 minutes the database default suggests). Now
+   whole-floor reads for the same restaurant inside a 1.5s window share ONE
    database call. **This one is also on AV live.**
 2. **Make the read itself cheap** (PR #616, migration **238**). One set-based pass instead of the
    per-table loop, plus two costs that were hiding in it: a floor-wide `count(*) FILTER` that walked
@@ -56,6 +57,43 @@ So the honest position is: the numbers say it should be fixed, and there is no e
 is. That gets checked, not assumed.
 
 ---
+
+## The number everyone gets wrong: the limit is 8 SECONDS
+
+The database's default `statement_timeout` is 120s, so it is natural to assume a query has two
+minutes. **It does not.** PostgREST logs in as `authenticator`, whose role settings carry
+`statement_timeout=8s`, and that is what the session gets — `SET ROLE service_role` afterwards does
+not re-apply role settings. Measured on the real app path: a 5s query returns `200`, a 20s query is
+cancelled at **8.8s** with `57014 canceling statement due to statement timeout` — the exact error in
+these rows.
+
+This matters for reading every number here. A floor read at ~26ms has **~300x headroom** against 8s.
+It cannot cross that limit on its own; it would have to become 300 times slower.
+
+## What the first re-check found (2026-07-31, ~4h after the fix)
+
+**The floor query is fixed. Timeouts still happened, and they were not its fault.**
+
+- 32 more rows, ALL on **Aangan — a 10-table restaurant** — in a single 40-minute window
+  (14:04–14:43 UTC), all from the waiter tablet.
+- App traffic in that window was **low** (2–19 logged actions per 5 min). By contrast 13:45 had
+  **148 actions and zero timeouts**, and the 45 minutes afterwards had a full 501-phase suite
+  running against the app with **zero timeouts**.
+- Every query that route issues, timed for Aangan with the database calm: floor RPC 5–16ms,
+  settings/categories/restaurant/dishes all ~10ms of database time. Nothing close to 8s.
+- `pg_stat_statements` shows **several different** app statements with maxima pressed against the
+  ceiling (7.7–7.9s). That is the signature of a saturated database cancelling whatever happened to
+  be running — not one slow query.
+
+So the remaining cause is **contention**, and the biggest single consumer of this database is
+**owner analytics / reports** (`p_from`, `p_to`, `p_bucket`): mean ~0.5s, max ~8s, thousands of
+calls. If timeouts recur, that is the first place to look — and note CLAUDE.md already requires
+those to be served from the snapshot cache, so a high call count there may mean something is
+bypassing it.
+
+**A caveat worth keeping honest:** this is the shared dev database, and several sessions test against
+it at once. Timeout rows here can be a neighbour's load rather than a product fault — check what else
+was running before treating them as a bug (step 4 below).
 
 ## Tomorrow: run the check
 
@@ -104,7 +142,7 @@ SELECT created_at, panel, detail FROM staff_actions
 together. If the mix has changed, the cause has changed.
 
 **2. Check whether the read is actually slow, or just waiting.** The script prints the current cost.
-If a whole-floor read is ~10–30ms and screens are still timing out at 2 minutes, then the query is
+If a whole-floor read is ~10–30ms and screens are still timing out, then the query is
 **not** the bottleneck and making it faster again will achieve nothing. That means contention —
 go to step 3. This is the exact mistake that already cost a lot of time here: single-call timings
 pointed at the wrong culprit, and the "obvious one-line fix" was worth only ~1.1× under real load.
