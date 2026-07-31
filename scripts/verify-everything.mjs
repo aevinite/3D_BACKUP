@@ -2202,6 +2202,18 @@ for (const [label, role, pathOf] of DEVICE_TARGETS) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 23 · the Access screen's "find a setting" bar
+// ════════════════════════════════════════════════════════════════════════════
+// Deliberately added at the END, as one bundled guard, so every phase number above keeps the
+// meaning it already had (renumbering a 500-phase suite silently invalidates every `--only`
+// range anyone has written down, and every note that says "phase 434 failed").
+phase("guard: the Access search finds any setting and lands on it", async () => {
+  if (skipSlow) return ok(true);
+  const r = await run("node", ["scripts/verify-access-search.mjs", "--base", BASE]);
+  ok(r.code === 0, r.out.split("\n").filter((l) => /✗|FAILED|checks passed/.test(l)).slice(-4).join(" / "));
+});
+
 // --list prints the map and runs nothing. Useful before a long run (and to hand someone the
 // list of what is actually covered) without waiting ~35 minutes to read the phase names.
 if (ARGS.includes("--list")) {

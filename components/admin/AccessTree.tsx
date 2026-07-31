@@ -19,6 +19,7 @@ import {
   SECTIONS, ALL_NODES, nodeValue, nodePatch, extraPatch, applyPatch,
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
+import AccessSearch from "./AccessSearch";
 
 const ICON: Record<string, string> = {
   sparkles: "M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z",
@@ -99,6 +100,30 @@ export default function AccessTree({ rid }: { rid: string }) {
   // (found by the whole-app sweep). Matched against each node's storage key, opened, scrolled
   // to and ringed for ~2s. Consumed once per load.
   const [flashId, setFlashId] = useState("");
+  const [hint, setHint] = useState("");
+
+  // ONE way to land on a row, shared by the ?focus= deep link and the search bar. Opens the
+  // section (and any collapsed group above the row), waits for it to exist, scrolls it to the
+  // middle and rings it. Written once so the two entry points can't drift apart.
+  const jumpTo = useCallback((nodeId: string, sectionId?: string, ancestorIds: string[] = []) => {
+    setOpenSec((s) => (sectionId
+      ? { ...s, [sectionId]: true }
+      : (Object.fromEntries(SECTIONS.map((x) => [x.id, true])) as Record<string, boolean>)));
+    if (ancestorIds.length) {
+      setOpenNode((s) => { const n = { ...s }; for (const id of ancestorIds) n[id] = true; return n; });
+    }
+    let tries = 0;
+    const locate = () => {
+      const el = document.querySelector<HTMLElement>(`[data-node="${CSS.escape(nodeId)}"]`);
+      if (!el && tries++ < 14) return void setTimeout(locate, 120);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setFlashId(nodeId);
+      setTimeout(() => setFlashId(""), 2200);
+    };
+    setTimeout(locate, 150);
+  }, []);
+
   const focusDone = useRef(false);
   useEffect(() => {
     if (!st || focusDone.current) return;
@@ -109,20 +134,8 @@ export default function AccessTree({ rid }: { rid: string }) {
       const b: any = n.bind;
       return n.id === key || b.key === key || b.flag === key || (b.t === "module" && `${b.key}_allowed` === key);
     });
-    if (!hit) return;
-    // Open every section (the row may be inside a collapsed one) then jump to it.
-    setOpenSec((s) => Object.fromEntries(SECTIONS.map((x) => [x.id, true])) as Record<string, boolean>);
-    let tries = 0;
-    const locate = () => {
-      const el = document.querySelector<HTMLElement>(`[data-node="${CSS.escape(hit.id)}"]`);
-      if (!el && tries++ < 14) return void setTimeout(locate, 120);
-      if (!el) return;
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      setFlashId(hit.id);
-      setTimeout(() => setFlashId(""), 2200);
-    };
-    setTimeout(locate, 150);
-  }, [st]);
+    if (hit) jumpTo(hit.id);          // no section given → open them all, the row may be anywhere
+  }, [st, jumpTo]);
 
   if (err && !st) return <div className="acc2-warn"><Icon n="info" s={17} /><div>{err}</div></div>;
   if (!st) return <div className="adm-muted" style={{ padding: 28, textAlign: "center" }}>Loading…</div>;
@@ -131,11 +144,32 @@ export default function AccessTree({ rid }: { rid: string }) {
     <>
       <TreeStyle />
       <div className="at-head">
+        <AccessSearch
+          isOn={(n) => isOn(n, st)}
+          onPick={(nodeId, sectionId, ancestorIds, blockedBy) => {
+            // A row whose parent is off is REMOVED from the page (rule 1), so there is nothing
+            // to scroll to. Say what has to come on first and land on THAT switch instead of
+            // pretending to navigate somewhere.
+            if (blockedBy) {
+              setHint(`“${blockedBy.name}” is switched off, so that setting isn’t on the page yet — turn it on here first.`);
+              const upto = ancestorIds.indexOf(blockedBy.id);
+              jumpTo(blockedBy.id, sectionId, upto > 0 ? ancestorIds.slice(0, upto) : []);
+              return;
+            }
+            setHint("");
+            jumpTo(nodeId, sectionId, ancestorIds);
+          }}
+        />
         <span className={`acc2-save ${saving}`}>
           {saving === "saving" ? "Saving…" : saving === "saved" ? "Saved" : saving === "err" ? "Not saved" : ""}
         </span>
       </div>
       {err ? <div className="acc2-warn"><Icon n="info" s={17} /><div>{err}</div></div> : null}
+      {hint ? (
+        <div className="acc2-warn"><Icon n="info" s={17} /><div>{hint}</div>
+          <button className="at-hint-x" onClick={() => setHint("")} aria-label="Dismiss">×</button>
+        </div>
+      ) : null}
 
       <div className="acc2-main">
         {SECTIONS.map((sec) => (
@@ -367,7 +401,10 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
 
 function TreeStyle() {
   return <style jsx global>{`
-  .at-head { display:flex; justify-content:flex-end; min-height:18px; margin:0 0 8px; }
+  .at-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; min-height:38px; margin:0 0 10px; }
+  .at-head .acc2-save { margin-left:auto; }
+  .at-hint-x { margin-left:auto; background:none; border:0; color:inherit; opacity:.6; cursor:pointer; font-size:19px; line-height:1; }
+  .at-hint-x:hover { opacity:1; }
   /* ?focus= landing ring — the same amber flash the old screen used, so a "⚙ change" link
      from a panel visibly ARRIVES somewhere instead of dumping you at the top of the page. */
   .at-flash > .acc2-sw { animation: atFlashRing 2.1s ease-out 1; border-radius: 11px; }

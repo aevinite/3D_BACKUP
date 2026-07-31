@@ -1,6 +1,6 @@
 # The 500-phase whole-app test
 
-`npm run verify:everything` — 500 numbered phases, run one at a time against a chosen site.
+`npm run verify:everything` — 501 numbered phases, run one at a time against a chosen site.
 Each phase is ONE question with a yes/no answer, printed as it runs, so a failure is pinned to
 a number instead of hiding in a wall of output.
 
@@ -56,6 +56,7 @@ live client base URL.
 | **462–475** | **Inventory + Payroll** | off on Aangan by default; switched on for French House inside the run and put back; units, quantities, movements; the pay ledger is append-only and server-only |
 | **476–490** | **the rules that hold under real use** | idempotency, clash guard, connection light, realtime per restaurant, channel dropped when hidden, no poll faster than the 60s backstop on the normal path, outbox replays once, login page still offline-able, alerts time out, every limited action has a rule, nothing hides a limit event, the crash log is clean, no test restaurant switched on |
 | **491–500** | **the owner's real devices** | the A35 phone (360×780) and a tablet (1194×834): each panel renders and nothing spills off the side |
+| **501** | **the Access screen's "find a setting" bar** | 22 checks on desktop AND the A35 phone: a synonym like "zomato" finds a row nothing is called, every result shows its path, 15 keystrokes filter+render in ~20ms, picking a result lands on that exact row and rings it, arrows/Escape work, and a row under a switched-off parent is labelled rather than a dead click (`npm run verify:access-search`) |
 
 ## Running it in parallel (about a third of it cannot be)
 
