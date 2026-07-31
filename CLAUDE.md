@@ -735,13 +735,13 @@ WHOLE floor as its 60s backstop, and a dozen landing together queued and crossed
 timeout (134 error rows in 12h, and pings on the owner's phone).
 
 **BOTH LEVERS ARE NOW PULLED, and they are complementary — sharing cuts the NUMBER of calls,
-mig 237 cuts the COST of each.** Read the history here so neither gets undone:
+mig 238 cuts the COST of each.** Read the history here so neither gets undone:
 
 - A first set-based rewrite was tried and **rejected by measurement**: byte-identical output,
   5× faster at 4 concurrent reads, **2× slower at 12**, because it computed one big aggregate
   per call where many small queries interleave better. That rejection was correct *for that
   implementation*.
-- **Migration 237 is a different rewrite and was measured the same way, harder.** It keeps the
+- **Migration 238 is a different rewrite and was measured the same way, harder.** It keeps the
   per-table wording ladder and the small aggregates, adds one set-based data pass, deletes a
   floor-wide `count(*) FILTER` that walked EVERY order the restaurant ever took (~42k rows a
   call), and stops accumulating tiles with `v_tiles := v_tiles || one_tile` (quadratic copying,
@@ -750,7 +750,7 @@ mig 237 cuts the COST of each.** Read the history here so neither gets undone:
   once 7.1×, 36 at once 7.6×, 48 at once 8.0×** (it improves with load, it does not degrade).
   Single call went 169/386/**1675**ms → 11/16/**29**ms (min/avg/worst of 7).
 - **The one-line count fix alone is NOT the win** — measured at only ~1.1× under load. Do not
-  "simplify" mig 237 back to a loop on the theory that the count was the whole problem.
+  "simplify" mig 238 back to a loop on the theory that the count was the whole problem.
 - Touching this function again? Use **`node scripts/verify-summary-parity.mjs`** — it compares
   a candidate against the live one tile by tile, for every restaurant and every occupied table,
   and it is itself proven to catch a trailing space in a label, money rounded to 1 decimal, and

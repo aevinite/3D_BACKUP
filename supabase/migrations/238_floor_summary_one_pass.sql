@@ -1,4 +1,8 @@
--- 237_floor_summary_one_pass.sql
+-- 238_floor_summary_one_pass.sql
+-- (renumbered from 237 the same day: another session's 237_banquet_bill.sql landed in parallel,
+--  eight minutes before this one. Two files with the same number make "which ran first?"
+--  unanswerable. Same collision mig 236 hit; verify:ui now fails on a duplicate number so it is
+--  caught on the EDIT rather than after the merge.)
 --
 -- WHY THIS EXISTS. lfh_table_view_summary is TIER 1 of the Table view: it decides what every
 -- tile on the manager floor and every waiter tablet SAYS, and what money it shows. It was also
