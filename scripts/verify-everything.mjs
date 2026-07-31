@@ -266,8 +266,16 @@ for (const [label, script, slow] of GUARDS) {
     const needsBase = ["verify:live", "verify:offline", "verify:table-ownership", "verify:two-parties", "verify:lifecycle"];
     const extra = needsBase.includes(script) ? ["--", "--base", BASE] : [];
     const r = await run("npm", ["run", "--silent", script, ...extra]);
-    const tail = r.out.trim().split("\n").slice(-3).join(" / ").slice(0, 220);
-    ok(r.code === 0, tail);
+    // SAY WHAT FAILED. The last three lines of a child suite are its summary ("50 passed, 2
+    // failed"), which tells you a guard broke but never WHICH check — so every failure meant
+    // re-running the child by hand to find out. Prefer the child's own failing lines; fall back
+    // to the tail only when it didn't print any.
+    const lines = r.out.trim().split("\n").map((l) => l.trimEnd());
+    const failed = lines.filter((l) => /^\s*(❌|✗)/.test(l)).map((l) => l.trim());
+    const summary = lines.filter((l) => /passed|failed/.test(l)).slice(-1);
+    const detail = (failed.length ? [...failed.slice(0, 6), ...summary] : lines.slice(-3))
+      .join(" / ").slice(0, 400);
+    ok(r.code === 0, detail);
   });
 }
 
