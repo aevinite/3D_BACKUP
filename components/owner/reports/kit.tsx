@@ -313,6 +313,10 @@ export function ReportsStyles() {
       .rs-rtitle h2 { font-size: 18px; font-weight: 800; margin: 0; letter-spacing: -0.02em; }
       .rs-rtitle .scope { font-size: 12px; color: var(--muted); margin-top: 2px; }
 
+      /* rs-mut: the "quieter second half" of a table cell / label. Used by several report
+         bodies since the Studio landed but never actually styled, so it rendered at full
+         strength (found in the 2026-07-30 staff-pay sweep). */
+      .rs-mut { color: var(--muted); font-weight: 500; }
       .rs-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px; }
       .rs-stat { border: 1px solid var(--border-c); border-radius: var(--r); background: var(--card); padding: 14px 15px; position: relative; overflow: hidden; }
       .rs-stat::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--tone-c); opacity: .85; }
