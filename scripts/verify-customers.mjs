@@ -46,11 +46,31 @@ const actx = await b.newContext();
 // is what pushed the owner's own panel over the admin login limit and pinged his phone.
 await actx.addCookies([adminCookie(BASE)]);
 
+// The guard MAKES its own bill instead of hunting for an existing one. Hunting meant each run
+// consumed a fixture (it issues an invoice on it), so a second run had nothing to test and
+// reported nine failures that were entirely the test's fault. Every row created here is torn
+// down at the end, on a table number far above any real floor.
+// A table number unique to THIS run, far above any real floor: two runs must never collide
+// (the app rightly refuses a second open session on the same table).
+const RUN_TAG = String(Date.now()).slice(-5);
+const FIXTURE_TABLES = [`9${RUN_TAG}1`, `9${RUN_TAG}2`, `9${RUN_TAG}3`];
+let fixtureIdx = 0;
+const madeSessions = [];
 const freshBill = async () => {
-  const { data } = await sb.from("sessions").select("id, table_number")
-    .eq("restaurant_id", RID1).eq("status", "open").is("cust_phone", null).is("invoice_no", null)
-    .order("created_at", { ascending: false }).limit(1);
-  return data?.[0] || null;
+  const table = FIXTURE_TABLES[fixtureIdx++];
+  if (!table) return null;
+  const { data: ses, error: e1 } = await sb.from("sessions")
+    .insert({ restaurant_id: RID1, table_number: table, status: "open", auto_approve: true })
+    .select("id, table_number").single();
+  if (e1) { console.log("    (could not create a test bill: " + e1.message + ")"); return null; }
+  const { error: e2 } = await sb.from("orders").insert({
+    restaurant_id: RID1, session_id: ses.id, table_number: table,
+    items: [{ title: "QA Test Dish", qty: 1, price: "100.00", status: "received" }],
+    subtotal: 100, tax: 5, total: 105, status: "received", payment_status: "unpaid",
+  });
+  if (e2) console.log("    (test order not created: " + e2.message + ")");
+  madeSessions.push(ses.id);
+  return ses;
 };
 let s1 = await freshBill();
 if (s1) {
@@ -209,13 +229,18 @@ ok("NO money anywhere on the admin page", !/₹/.test(bodyA), (bodyA.match(/₹[
 // segments
 for (const [label, expect] of [["Regulars", "visits >= 2"], ["First-timers", "visits < 2"], ["Blocked", "blocked"]]) {
   await ap.evaluate((l) => { const b2 = [...document.querySelectorAll("button")].find((x) => x.innerText.trim() === l); if (b2) b2.click(); }, label);
-  await ap.waitForTimeout(1400);
-  const n = await ap.evaluate(() => document.querySelectorAll("table tbody tr").length);
-  const chips = await ap.evaluate(() => [...document.querySelectorAll("table tbody tr")].map((r) => r.innerText).join(" "));
-  const good = label === "Regulars" ? !/first visit/i.test(chips)
-    : label === "First-timers" ? !/regular/i.test(chips)
-    : n === 0 || /blocked/i.test(chips);
-  ok(`segment "${label}" filters correctly (${expect})`, good, n + " rows");
+  // POLL for the filtered list. A fixed wait read the PREVIOUS segment's rows on a second run
+  // and reported a perfectly good filter as broken.
+  const settled = await until(async () => {
+    const rows = await ap.evaluate(() => [...document.querySelectorAll("table tbody tr")].map((r) => r.innerText));
+    const chips = rows.join(" ");
+    const good = label === "Regulars" ? rows.length > 0 && !/first visit/i.test(chips)
+      : label === "First-timers" ? rows.length > 0 && !/regular/i.test(chips)
+      : rows.length === 0 || /blocked/i.test(chips);
+    return good ? rows.length : null;
+  });
+  ok(`segment "${label}" filters correctly (${expect})`, settled !== null,
+    settled !== null ? settled + " rows" : (await ap.evaluate(() => document.querySelectorAll("table tbody tr").length)) + " rows, still mixed after 9s");
 }
 await ap.evaluate(() => { const b2 = [...document.querySelectorAll("button")].find((x) => x.innerText.trim() === "Everyone"); if (b2) b2.click(); });
 await ap.waitForTimeout(1200);
@@ -316,6 +341,19 @@ section("I. Console");
 ok("no page errors anywhere", pageErrs.length === 0, pageErrs.slice(0, 3).join(" | "));
 
 /* ─────────────── cleanup ─────────────── */
+// Put the bills this run created beyond the floor's view. NOT a hard delete: the database
+// rightly refuses to erase an issued bill ("an issued bill cannot be hard-deleted — soft-delete
+// it instead"), which is the compliance guard that stops a sale being made to disappear. So the
+// test respects it and soft-deletes, exactly like the app's own recycle bin does.
+const gone = new Date().toISOString();
+for (const sid of madeSessions) {
+  await sb.from("customer_visits").delete().eq("session_id", sid);
+  await sb.from("orders").update({ deleted_at: gone, delete_reason: "verify:customers fixture" }).eq("session_id", sid);
+  const hard = await sb.from("sessions").delete().eq("id", sid);
+  if (hard.error) {
+    await sb.from("sessions").update({ status: "closed", deleted_at: gone, delete_reason: "verify:customers fixture" }).eq("id", sid);
+  }
+}
 for (const ph of cleanupPhones) {
   const { data: ses } = await sb.from("sessions").select("id").eq("restaurant_id", RID1).eq("cust_phone", ph);
   for (const s of ses || []) await sb.from("customer_visits").delete().eq("session_id", s.id);

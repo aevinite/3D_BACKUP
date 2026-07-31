@@ -28,6 +28,7 @@ import { effectiveTaxRate } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { waiterTables, allows, normTable, blockedReason, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
+import { sharedFloorSummary } from "@/lib/floorSummary";
 
 export const dynamic = "force-dynamic";
 
@@ -314,7 +315,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // safety-net). The recurring floor refresh (60s poll / ops reloads) is the common case, and
       // the dish list was ~50KB of the ~77KB payload — so this cuts that recurring egress ~2.5x. (perf 2026-07-20)
       const nomenu = new URL(req.url).searchParams.get("nomenu") === "1";
-      const { data, error } = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl || null });
+      // Whole-floor reads for the SAME restaurant inside a 1.5s window share ONE database
+      // call (lib/floorSummary.ts) — several devices polling together used to queue 1,800
+      // statements each and cross the statement timeout. A targeted ?table= refetch is never
+      // shared, so a tile still updates the instant its order lands.
+      const { data, error } = tbl
+        ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
+        : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
       if (error) throw new Error(error.message);
       const summary = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
       // WAITER SECTIONS (mig 222): keep only the tables this waiter was given. `limit` is

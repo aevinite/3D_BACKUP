@@ -117,6 +117,14 @@ function headerSafe(s: string): string {
 // Loud unless the caller explicitly asks for quiet with `silent: true` (see AlertOpts above).
 const isQuiet = (o?: AlertOpts) => o?.silent === true;
 
+// A "quiet" ping means LOW, never MIN. ntfy's `min` can be dropped from the notification
+// list entirely, so the one alert we deliberately deliver quietly (the staff/owner login
+// limit) could vanish instead of waiting to be read — the opposite of the intent, and it
+// contradicted the rule already written down in CLAUDE.md. `low` arrives, sits in the list,
+// and makes no sound or vibration.
+const QUIET_PRIORITY = "low";
+const LOUD_PRIORITY = "high";
+
 // An alert must NEVER hold up the request that triggered it. Both pushes are outbound HTTP
 // to someone else's server, and they used to be awaited with no upper bound — so on a
 // restaurant's flaky wifi (or if ntfy is slow) a staff action could sit there waiting for a
@@ -135,7 +143,7 @@ async function pushNtfy(text: string, o?: AlertOpts): Promise<void> {
     method: "POST",
     headers: {
       Title: headerSafe(o?.title || "Restaurant alert"),
-      Priority: isQuiet(o) ? "min" : "high",
+      Priority: isQuiet(o) ? QUIET_PRIORITY : LOUD_PRIORITY,
       Tags: o?.tags || (isQuiet(o) ? "traffic_light" : "warning"),
       Markdown: "no", // the body is plain text on purpose — see alertText()
     },
