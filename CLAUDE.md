@@ -338,12 +338,14 @@ Everything is a SINGLE Next app on **port 4000** (`npm run dev` / `START-ALL.bat
 The panels are routes inside it:
 
 - **/menu** — guest menu (`app/`). Scroll-spy category strip in `#sticky-header`.
-- **/admin** — owner control room (`app/admin/page.tsx`): live floor (reads the
-  `lfh_floor_state` brain), key numbers, maintenance switch, and the 10 guest
-  FEATURE TOGGLES. **The only password-gated route** (see Security gate).
-- **/editor** — boss panel: Dishes/Categories/Tags/Orders/Tables/Dashboard/
-  Customers/Log/General; KOT chips, per-order discount, ⇄ Shift table. (Features
-  tab REMOVED — toggles live in /admin now.)
+- **/aevinite** — the ADMIN console (`app/aevinite/`): every restaurant, the live floor,
+  revenue, bills, health, and **Access & permissions** (the one screen that decides what
+  anyone can do — `docs/ACCESS-MODEL.md`). Sign-in required. (There is no `/admin` route;
+  this text said so until 2026-07-31.)
+- **/manager** (served from `public/panels/editor/`) — the manager panel: Editor / Bills /
+  Tables / Platform / Banquet / Inventory / Dashboard / Ratings / Log / Settings. It
+  configures NO permissions (rebuild 2026-07-31); its Settings → Sections holds the waiter
+  rota only. Which tabs a restaurant has is Access → Manager's menu.
 - **/kitchen** — KDS: New→Cooking→Ready, 86 board (sold-out tag), chime.
 - **/tablet** — waiter app: floor tiles + TAKE ORDER via `lfh_staff_place_order`.
 
@@ -355,20 +357,33 @@ hops between panels. The old standalone `editor/ kitchen/ tablet/ admin/` folder
 the separate editor repo were DELETED (preserved in `reference/` + the
 `pre-rewrite-reference` git tag).
 
-## Security gate (2026-06-13)
+## Who has to be signed in (corrected 2026-07-31 — the old text here was wrong)
 
-Only **/admin** (+ `/api/admin/*`) is protected: `middleware.ts` redirects to
-`/staff-login` without a valid cookie; `/api/staff-login` stores a hashed
-`ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`). The guest menu AND the other staff
-panels (/editor /kitchen /tablet) are currently OPEN (owner's call) — RE-LOCK them
-in the middleware matcher before any public hosting. `ADMIN_PASSWORD` is in
-`.env.local` (must also be set in the Vercel project env for the gate to work in prod).
+**There is NO `middleware.ts` in this app.** This section used to say one redirected
+`/admin`; nothing did, because neither the file nor `/admin` exists any more. What actually
+guards each surface today:
+
+- **`/aevinite` (the admin console)** — its OWN server layout, `app/aevinite/layout.tsx`,
+  reads the cookie via `tokenIsValid()` and `redirect()`s a signed-out visitor to
+  `/staff-login`. It also refuses while an address is throttled.
+- **`/api/admin/*`** — every route calls the gate itself (`tokenIsValid(AUTH_COOKIE)`).
+  Guarded by `npm run verify:everything` phase 35, which fails if an admin route appears
+  with no gate.
+- **The staff panels** (`/manager` `/kitchen` `/tablet` `/owner`) — `requireRole()` /
+  `editorScope()` / `panelScope()` resolve the person AND their restaurant from the signed-in
+  cookie, never from the request, so a panel can only ever answer about its own restaurant.
+  A restaurant with that staff app switched off (Access → Staff apps) is refused at the door.
+- **The guest menu** is public by design, and disappears entirely when Access → Main
+  features → Menu is off.
+
+`ADMIN_PASSWORD` lives in `.env.local` and must also be set in the Vercel project env.
 
 ## Feature switches (migration 035)
 
 - `settings.features` JSONB merged over `lib/features.ts` defaults; components
-  call `useFeatures()` and render nothing when a switch is off. Editor →
-  Features tab edits the ten guest-facing switches.
+  call `useFeatures()` and render nothing when a switch is off. **The editor's "Features"
+  tab no longer exists** (this said it did until 2026-07-31): these switches are edited in
+  `/aevinite` → Access & permissions → Main features → Menu, and only there.
 - **Four BACKEND-ONLY switches stay invisible in every UI** (owner's order):
   `verification`, `payments`, `aggregators`, `gst_invoice` — default OFF,
   flippable only by hand in the DB. Their plumbing: migration 037
@@ -422,12 +437,13 @@ in the middleware matcher before any public hosting. `ADMIN_PASSWORD` is in
   `.env.local` (gitignored): anon key, service-role key, and `SUPABASE_ACCESS_TOKEN`
   (the Management-API PAT used for DDL).
 
-## Routes
+## Routes (corrected 2026-07-31 — this list claimed "only these four exist")
 
-- `/` — `app/page.tsx` is just `redirect("/menu")`.
-- `/menu` — menu with 3D preload (`app/menu/page.tsx`).
-- `/item/[slug]` — dish detail.
-- `/view/[folder]` — 3D viewer. (Only these four routes exist.)
+Guest: `/` → `/menu` · `/menu` · `/item/[slug]` · `/view/[folder]` · `/q/[code]` and the
+per-restaurant equivalents `/r/<slug>/menu` and `/r/<slug>/item/<slug>` (what a QR opens).
+Staff: `/manager` `/kitchen` `/tablet` `/owner` (+ `/r/<slug>/<panel>`), `/login`,
+`/staff-login`. Admin: `/aevinite/*`. A dish or restaurant that doesn't exist — or a
+restaurant whose Menu feature is off — answers "not found".
 
 ## Skills and tools to reach for
 
@@ -718,6 +734,25 @@ an exit code). So, permanently:
   the served files, check the panel HTML comments balance, and diff them against the backup site.
   `node scripts/verify-avlive-offline-complete.mjs` proves a surgical release landed COMPLETELY —
   a patcher that skips a file writes nothing and says so in one line among many.
+
+## 🧪 ONE COMMAND THAT TESTS THE WHOLE APP — `npm run verify:everything` (2026-07-31)
+
+`scripts/verify-everything.mjs` runs **179 numbered phases, one by one**, against a chosen
+site (`VERIFY_BASE`, default the deployed backup). Each phase is one question with a yes/no
+answer, printed as it runs, so a failure is pinned to a number instead of hiding in a wall of
+output. It bundles every other guard as its own phase, then adds: every guest/admin/owner
+route renders with no leaked code and no console errors · all four staff panels as their
+REAL role · the access tree switch by switch (off → the thing is GONE → on → it is back) ·
+a **real order placed and followed** through kitchen, waiter, manager and close · money and
+data integrity against the database · and each restaurant showing only its own data.
+
+- It signs in **once per role** (never trips the login limit), **restores every setting** it
+  flips and **deletes every row** it creates.
+- **A phase that cannot run counts as a FAILURE, never a pass** — "didn't run" and "passed"
+  looking alike is how faults reach the owner's screen.
+- `--only 41-60` runs a range; `--skip-slow` drops the bundled suites (and says so).
+- When you add a feature, add its phases. When a bug is found, add the phase that would have
+  caught it.
 
 ## Known gotchas (read before editing)
 

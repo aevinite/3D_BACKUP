@@ -35,6 +35,12 @@ export default async function RestaurantItemPage({
   // Menu master switch (access rebuild): no guest menu means no dish pages either —
   // gating only the list would leave every dish reachable by its own URL.
   if (!(await getSettings(r.id)).menuEnabled) notFound();
+  // A dish that doesn't exist must ANSWER "not found", not 200 with a friendly message
+  // inside (found by the whole-app sweep, phase 28). The guest saw the right words either
+  // way, but a 200 tells search engines the page is real and tells our own monitoring the
+  // request succeeded. generateMetadata above already fetched this dish, so asking again
+  // here costs one small cached read on a page nobody polls.
+  if (!(await getMenuItem(slug, r.id).catch(() => null))) notFound();
   // WHITE-LABEL (audit fix 2026-07-08): this page renders ItemClient WITHOUT the
   // AppShell that themes the menu, so its price + "Add to Cart" button fell back to
   // restaurant #1's GOLD accent for every OTHER restaurant. Emit this restaurant's

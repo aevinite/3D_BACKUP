@@ -171,9 +171,23 @@ if (!BASE) {
     page.on("console", (m) => { if (m.type() === "error") errs.push(m.text()); });
     await page.goto(`${BASE}/manager`, { waitUntil: "domcontentloaded" });
     const fr = page.frameLocator("iframe").first();
+    // The panel opens on the EDITOR tab, so the floor tiles do not exist until Tables is
+    // clicked — and clicking the instant the tab element appears is too early: the panel is
+    // still booting and the click is lost, after which this waited 60s for a tile that was
+    // never going to be drawn (a flaky guard that "failed" with no useful message). Click,
+    // check, click again — up to three times — then say plainly what the screen showed.
     await fr.locator('.tab[data-tab="tables"]').waitFor({ timeout: 60000 });
-    await fr.locator('.tab[data-tab="tables"]').click();
-    await fr.locator(`.ftile[data-floor-table="${T}"]`).waitFor({ timeout: 60000 });
+    let floorUp = false;
+    for (let attempt = 1; attempt <= 3 && !floorUp; attempt++) {
+      await fr.locator('.tab[data-tab="tables"]').click().catch(() => {});
+      try { await fr.locator(`.ftile[data-floor-table="${T}"]`).waitFor({ timeout: 20000 }); floorUp = true; }
+      catch { await page.waitForTimeout(3000); }
+    }
+    if (!floorUp) {
+      const seen = (await fr.locator("body").innerText().catch(() => "")).slice(0, 160).replace(/\n/g, " · ");
+      fail(`the manager floor never drew table ${T} after three tries (screen: "${seen}")`);
+      throw new Error("manager floor did not paint — the checks below cannot run");
+    }
 
     const tile = (await fr.locator(`.ftile[data-floor-table="${T}"]`).innerText()).replace(/\n/g, " · ");
     /Open · waiting for guests/.test(tile) ? pass(`manager tile: "${tile}"`) : fail(`manager tile reads "${tile}" — expected the fresh "Open · waiting for guests"`);
@@ -226,12 +240,29 @@ if (!BASE) {
     const tp = await tctx.newPage();
     await tp.goto(`${BASE}/tablet`, { waitUntil: "domcontentloaded" });
     const tfr = tp.frameLocator("iframe").first();
-    await tfr.locator(`.tile[data-t="${T}"]`).waitFor({ timeout: 60000 });
-    await tfr.locator(`.tile[data-t="${T}"]`).click();
-    await tp.waitForTimeout(4000);
-    const wp = await tfr.locator("body").innerText();
-    !/LEFTOVER check dish/.test(wp) ? pass("waiter panel lists none of the old party's dishes") : fail("waiter panel adopted the old order");
-    !/₹4,995|₹999/.test(wp) ? pass("waiter panel shows none of the old party's money") : fail("waiter panel shows the old party's money");
+    // A waiter with NO section correctly sees an empty floor ("No tables assigned to you
+    // yet"), so this tile would never appear and the whole script died on an unhandled
+    // 60s timeout — taking the earlier passing checks down with it. Say what's wrong
+    // instead of crashing: a guard that dies is indistinguishable from a guard that found
+    // nothing (this actually happened, 2026-07-31).
+    const wtile = tfr.locator(`.tile[data-t="${T}"]`);
+    let waiterReady = true;
+    try {
+      await wtile.waitFor({ timeout: 45000 });
+    } catch {
+      waiterReady = false;
+      const seen = await tfr.locator("body").innerText().catch(() => "");
+      if (/No tables assigned to you yet/i.test(seen))
+        fail("the waiter account has NO section, so its floor is correctly empty and this half cannot run — give it tables (staff_users.assigned_tables) and re-run");
+      else fail(`the waiter floor never showed table ${T} (screen said: "${seen.slice(0, 120).replace(/\n/g, " · ")}")`);
+    }
+    if (waiterReady) {
+      await wtile.click();
+      await tp.waitForTimeout(4000);
+      const wp = await tfr.locator("body").innerText();
+      !/LEFTOVER check dish/.test(wp) ? pass("waiter panel lists none of the old party's dishes") : fail("waiter panel adopted the old order");
+      !/₹4,995|₹999/.test(wp) ? pass("waiter panel shows none of the old party's money") : fail("waiter panel shows the old party's money");
+    }
   } finally {
     await browser.close();
     await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true }).eq("id", ghost.id);

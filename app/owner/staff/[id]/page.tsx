@@ -772,10 +772,13 @@ export default function StaffProfilePage() {
               </>
             )}
 
+            {/* This used to link to Team → Powers. That tab was removed in the access rebuild
+                (2026-07-31) — permissions are set once, by Aevidine, so the link went nowhere.
+                Say who to ask instead of offering a door that isn't there. */}
             <div className="sp-note" style={{ marginTop: 12 }}>
               <i className="fas fa-users-gear" />
-              <div>What <b>all</b> your managers may do — including whether they can see staff pay — lives in
-                <a href={scopePin ? `/owner/staff?rid=${scopePin}&tab=powers` : "/owner/staff?tab=powers"}> Team → Powers</a>.</div>
+              <div>What <b>all</b> your managers may do — including whether they can see staff pay — is set by
+                Aevidine. Ask us to change it and it applies to every manager here straight away.</div>
             </div>
           </div>
         )}

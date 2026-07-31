@@ -10368,7 +10368,11 @@ function xraySettingUrl(flag) {
       return `/aevinite/restaurants?focus=${encodeURIComponent(PANEL_RID)}&tab=settings`;
     return `/aevinite/access${PANEL_RID ? `?rid=${encodeURIComponent(PANEL_RID)}&` : "?"}focus=${encodeURIComponent(flag)}`;
   }
-  return `/owner/staff?focus=${encodeURIComponent(flag)}`;
+  // An OWNER has no permission screen any more (access rebuild 2026-07-31 — only the admin
+  // holds permissions), so there is nowhere to send them. Returning null makes the popover
+  // show "Aevidine sets this" instead of a link to a page that no longer has the control —
+  // offering a door that isn't there is worse than saying who to ask.
+  return null;
 }
 
 (function injectXrayStyles() {
@@ -10805,8 +10809,12 @@ function toggleXrayZones(zones) {
     ? zones.map((z, i) => {
         const nv = XRAY_NEVER[z.flag];
         const by = nv ? esc(nv.by) : `by ${xrayOffBy(z.flag)}`;
-        const go = !nv || nv.settable
-          ? `<small class="zgo" data-zgo="${i}" title="Open the setting that controls this">⚙ change</small>` : "";
+        // Only offer "⚙ change" when there is somewhere to GO. Since the access rebuild an
+        // owner has no permission screen, so xraySettingUrl() returns null for them and the
+        // affordance is replaced by who to ask — never a link that lands nowhere.
+        const go = (!nv || nv.settable) && xraySettingUrl(z.flag)
+          ? `<small class="zgo" data-zgo="${i}" title="Open the setting that controls this">⚙ change</small>`
+          : `<small class="zask">Aevidine sets this</small>`;
         return `<button class="zrow" data-zi="${i}"><span class="dot"></span>${z.label} <small>${by}</small>${go}</button>`;
       }).join("")
     : `<div class="zrow" style="cursor:default">Nothing is off here.</div>`) + simRow;
@@ -10824,7 +10832,11 @@ function toggleXrayZones(zones) {
       if (!z) return;
       // "⚙ change" → jump straight to the setting that controls this (Phase 5).
       if (e.target.closest("[data-zgo]")) {
-        try { window.top.location.href = xraySettingUrl(z.flag); } catch { window.location.href = xraySettingUrl(z.flag); }
+        const url = xraySettingUrl(z.flag);
+        // No destination → SAY so. Assigning a null href would have navigated to the literal
+        // string "null" and shown a not-found page (found by the whole-app sweep).
+        if (!url) { toast("Aevidine sets this one — ask us and it changes for everyone here.", "ok"); return; }
+        try { window.top.location.href = url; } catch { window.location.href = url; }
         return;
       }
       // Locate: re-resolve NOW — live repaints replace nodes, so a captured el may be stale.

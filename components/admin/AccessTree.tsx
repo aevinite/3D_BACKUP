@@ -16,7 +16,7 @@
  * .at-* set for the tree indentation. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  SECTIONS, nodeValue, nodePatch, extraPatch, applyPatch,
+  SECTIONS, ALL_NODES, nodeValue, nodePatch, extraPatch, applyPatch,
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
 
@@ -92,6 +92,38 @@ export default function AccessTree({ rid }: { rid: string }) {
     save(applyTwo(nodePatch(n, v), extraPatch(n, v)));
   }, [save]);
 
+  // DEEP LINK — ?focus=<key>. The staff panels' "zones off for staff" popovers send a
+  // "⚙ change" link carrying a manager-power flag, a tablet_* column, an owner section or a
+  // guest feature slug; it must land on the EXACT row, not just the page. Rebuilding this
+  // screen dropped it, so every one of those links became "here's the page, find it yourself"
+  // (found by the whole-app sweep). Matched against each node's storage key, opened, scrolled
+  // to and ringed for ~2s. Consumed once per load.
+  const [flashId, setFlashId] = useState("");
+  const focusDone = useRef(false);
+  useEffect(() => {
+    if (!st || focusDone.current) return;
+    const key = new URLSearchParams(window.location.search).get("focus");
+    if (!key) { focusDone.current = true; return; }
+    focusDone.current = true;
+    const hit = ALL_NODES.find((n) => {
+      const b: any = n.bind;
+      return n.id === key || b.key === key || b.flag === key || (b.t === "module" && `${b.key}_allowed` === key);
+    });
+    if (!hit) return;
+    // Open every section (the row may be inside a collapsed one) then jump to it.
+    setOpenSec((s) => Object.fromEntries(SECTIONS.map((x) => [x.id, true])) as Record<string, boolean>);
+    let tries = 0;
+    const locate = () => {
+      const el = document.querySelector<HTMLElement>(`[data-node="${CSS.escape(hit.id)}"]`);
+      if (!el && tries++ < 14) return void setTimeout(locate, 120);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      setFlashId(hit.id);
+      setTimeout(() => setFlashId(""), 2200);
+    };
+    setTimeout(locate, 150);
+  }, [st]);
+
   if (err && !st) return <div className="acc2-warn"><Icon n="info" s={17} /><div>{err}</div></div>;
   if (!st) return <div className="adm-muted" style={{ padding: 28, textAlign: "center" }}>Loading…</div>;
 
@@ -110,7 +142,7 @@ export default function AccessTree({ rid }: { rid: string }) {
           <SectionCard
             key={sec.id} sec={sec} st={st} open={!!openSec[sec.id]}
             onToggle={() => setOpenSec((s) => ({ ...s, [sec.id]: !s[sec.id] }))}
-            openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={setInfo}
+            openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={setInfo} flashId={flashId}
           />
         ))}
       </div>
@@ -128,10 +160,10 @@ function applyTwo(a: TreePatch, b: TreePatch): TreePatch {
   return out;
 }
 
-function SectionCard({ sec, st, open, onToggle, openNode, setOpenNode, set, onInfo }: {
+function SectionCard({ sec, st, open, onToggle, openNode, setOpenNode, set, onInfo, flashId }: {
   sec: Section; st: TreeState; open: boolean; onToggle: () => void;
   openNode: Record<string, boolean>; setOpenNode: (f: (s: Record<string, boolean>) => Record<string, boolean>) => void;
-  set: (n: Node, v: any) => void; onInfo: (n: Node) => void;
+  set: (n: Node, v: any) => void; onInfo: (n: Node) => void; flashId?: string;
 }) {
   // The counter counts only rows that HAVE a switch at this level — a group header
   // (Format, Bill, the three role folders) isn't a thing you can turn on.
@@ -148,7 +180,7 @@ function SectionCard({ sec, st, open, onToggle, openNode, setOpenNode, set, onIn
       {open ? (
         <div className="acc2-body">
           {sec.children.map((n) => (
-            <Row key={n.id} node={n} st={st} depth={0} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} />
+            <Row key={n.id} node={n} st={st} depth={0} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />
           ))}
         </div>
       ) : null}
@@ -156,10 +188,10 @@ function SectionCard({ sec, st, open, onToggle, openNode, setOpenNode, set, onIn
   );
 }
 
-function Row({ node, st, depth, openNode, setOpenNode, set, onInfo }: {
+function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
   node: Node; st: TreeState; depth: number;
   openNode: Record<string, boolean>; setOpenNode: (f: (s: Record<string, boolean>) => Record<string, boolean>) => void;
-  set: (n: Node, v: any) => void; onInfo: (n: Node) => void;
+  set: (n: Node, v: any) => void; onInfo: (n: Node) => void; flashId?: string;
 }) {
   const v = nodeValue(node, st);
   const kids = node.children || [];
@@ -171,7 +203,7 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo }: {
   const expanded = collapsible ? openNode[node.id] !== false : true;
 
   return (
-    <div className={`at-row d${Math.min(depth, 3)}`}>
+    <div className={`at-row d${Math.min(depth, 3)} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
       <div className="acc2-sw">
         <div className="acc2-sw-b">
           <div className="nm">
@@ -195,7 +227,7 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo }: {
       {showKids && expanded ? (
         <div className="at-kids">
           {kids.map((k) => (
-            <Row key={k.id} node={k} st={st} depth={depth + 1} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} />
+            <Row key={k.id} node={k} st={st} depth={depth + 1} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />
           ))}
         </div>
       ) : null}
@@ -336,6 +368,10 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
 function TreeStyle() {
   return <style jsx global>{`
   .at-head { display:flex; justify-content:flex-end; min-height:18px; margin:0 0 8px; }
+  /* ?focus= landing ring — the same amber flash the old screen used, so a "⚙ change" link
+     from a panel visibly ARRIVES somewhere instead of dumping you at the top of the page. */
+  .at-flash > .acc2-sw { animation: atFlashRing 2.1s ease-out 1; border-radius: 11px; }
+  @keyframes atFlashRing { 0%, 55% { box-shadow: 0 0 0 3px rgba(217,119,6,.6); } 100% { box-shadow: 0 0 0 3px transparent; } }
   .at-count { font-size:11.5px; font-weight:800; color:var(--muted); background:var(--bg); border:var(--border); padding:5px 9px; border-radius:8px; white-space:nowrap; flex:none; font-variant-numeric:tabular-nums; }
   /* Tree indentation: a hairline guide per level, so a deep sub-option still reads as
      belonging to its parent instead of floating in a flat list. */
