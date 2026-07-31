@@ -1597,11 +1597,30 @@ phase("Aangan's guest menu behaves the way its own defaults say", async () => {
 // restaurant's OWN stored settings rather than assumed, because an earlier version of this
 // suite asserted a fixed layout and reported the app broken when the setting simply said
 // something else.
+// POLL for the dishes, and only CACHE a snapshot that actually has them.
+//
+// This cost ~20 false failures in one run. The guest menu renders its dishes CLIENT side, and on a
+// cold load that can take well over 10 seconds — but this helper read the page once after 4.2s and
+// cached whatever it saw. One early read therefore poisoned every phase in the group: the page was
+// reported as having no categories, no dish, no currency and no switcher, while the very same URL
+// showed 59 dishes a few seconds later. Same family as the cached-read lesson in group 7: never
+// let ONE snapshot decide many phases, and never treat "not painted yet" as "not there".
 let GUEST = null;
 async function guestMenu(force = false) {
   if (GUEST && !force) return GUEST;
   const f = await needFH();
-  const s = await screen("admin", `/r/${f.slug}/menu`, { settle: 4200 });
+  let s = null;
+  for (let i = 0; i < 6; i++) {
+    s = await screen("admin", `/r/${f.slug}/menu`, { settle: i === 0 ? 4200 : 6000 });
+    if (/item-card/.test(s.html)) break;      // dishes have painted — this snapshot is usable
+    await s.close();
+    s = null;
+  }
+  if (!s) {
+    // Still nothing after ~40s: take one last look and let the phases report what they see, so a
+    // genuinely empty menu is still a failure rather than an infinite wait.
+    s = await screen("admin", `/r/${f.slug}/menu`, { settle: 8000 });
+  }
   return (GUEST = s);
 }
 const fhSettings = async () => (await dbGet(`settings?select=*&restaurant_id=eq.${(await needFH()).id}`))[0] || {};
