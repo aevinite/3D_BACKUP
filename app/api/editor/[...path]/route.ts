@@ -36,6 +36,7 @@ import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 import { managerTabsOff, managerTabOn, type ManagerTabKey } from "@/lib/accessTree";
 import { saveBillCustomer } from "@/lib/billCustomer";
+import { sharedFloorSummary } from "@/lib/floorSummary";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -919,7 +920,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // simply mean "no targeted table" (a full, correct refresh), never an error.
       const tblRaw = new URL(req.url).searchParams.get("table");
       const tbl = tblRaw !== null && /^\d{1,6}$/.test(tblRaw.trim()) ? tblRaw.trim() : null;
-      const { data, error } = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl || null });
+      // Whole-floor reads for the SAME restaurant inside a 1.5s window share ONE database call
+      // (lib/floorSummary.ts). Several devices polling the 300-table floor together used to
+      // queue ~1,800 statements each and cross the statement timeout — that is what filled the
+      // error log and pinged the owner. A targeted ?table= refetch is never shared, so a tile
+      // still updates the instant its order lands.
+      const { data, error } = tbl
+        ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
+        : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
       if (error) throw new Error(error.message);
       return ok(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] });
     }
