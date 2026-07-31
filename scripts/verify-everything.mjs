@@ -37,8 +37,14 @@ const applyTwo = (a, b) => {
 };
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const BASE = (process.env.VERIFY_BASE || "https://3-d-backup.vercel.app").replace(/\/$/, "");
 const ARGS = process.argv.slice(2);
+// Every OTHER suite in this folder takes `--base`, so `--base` is what a person types here too —
+// and it used to be accepted in silence and ignored, leaving the run pointed at the deployed site
+// while the header quietly said so and nobody re-read it. A check that tests something other than
+// what you asked for is worse than no check, so both spellings work and the source is printed.
+const baseArg = (() => { const i = ARGS.indexOf("--base"); return i >= 0 ? ARGS[i + 1] : null; })();
+const BASE = (baseArg || process.env.VERIFY_BASE || "https://3-d-backup.vercel.app").replace(/\/$/, "");
+const BASE_FROM = baseArg ? "--base" : process.env.VERIFY_BASE ? "VERIFY_BASE" : "default";
 const only = (() => {
   const i = ARGS.indexOf("--only");
   if (i === -1) return null;
@@ -2243,7 +2249,7 @@ if (ARGS.includes("--list")) {
 }
 
 const results = [];
-console.log(`\nverify-everything · ${PHASES.length} phases · base ${BASE}\n${"─".repeat(78)}`);
+console.log(`\nverify-everything · ${PHASES.length} phases · base ${BASE} (from ${BASE_FROM})\n${"─".repeat(78)}`);
 for (const ph of PHASES) {
   if (only && (ph.n < only.from || ph.n > only.to)) continue;
   const t0 = Date.now();
