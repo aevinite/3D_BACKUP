@@ -1908,7 +1908,12 @@ phase("service charge is never switched on by default", async () => {
 });
 phase("a GSTIN, when present, is the right shape", async () => {
   const rows = await dbGet("settings?select=restaurant_id,gstin&gstin=not.is.null&limit=30");
-  const bad = rows.filter((r) => String(r.gstin).trim() && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]{2}$/.test(String(r.gstin).trim()));
+  // A GSTIN is FIFTEEN characters: 2 state digits, the 10-character PAN, 1 entity code, a
+  // literal Z, then 1 checksum. My first pattern allowed only 14 and called the perfectly
+  // valid "24ABOFA9863A1ZD" malformed — the kind of false alarm that teaches people to
+  // ignore a check. (state 24 · PAN ABOFA9863A · entity 1 · Z · checksum D)
+  const GSTIN = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/;
+  const bad = rows.filter((r) => String(r.gstin).trim() && !GSTIN.test(String(r.gstin).trim()));
   ok(!bad.length, `${bad.length} restaurants store a GSTIN that is not a GSTIN (e.g. ${JSON.stringify(bad[0]?.gstin)})`);
 });
 phase("no pay-later balance has gone negative", async () => {
@@ -1930,7 +1935,12 @@ phase("no order outlives the session it was placed in", async () => {
   const closed = await dbGet(`sessions?select=id&restaurant_id=eq.${await fhId()}&status=eq.closed&order=closed_at.desc&limit=60`);
   if (!closed.length) return ok(true);
   const ids = closed.map((s) => s.id);
-  const live = await dbGet(`orders?select=id,status,session_id&session_id=in.(${ids.join(",")})&status=in.(pending,preparing,ready)&archived=is.false&limit=50`);
+  // archived=not.is.true, NOT archived=is.false: a row whose flag is still NULL is not
+  // archived-false, so `is.false` quietly let one through. The row it caught was this repo's
+  // OWN fixture — verify-table-ownership inserts a ₹999 "leftover" order on a session
+  // backdated ten minutes to reproduce pre-mig-232 data, and the app had already archived it,
+  // which is the correct cleanup. Judging a cleaned-up row as a live one is a false alarm.
+  const live = await dbGet(`orders?select=id,status,session_id&session_id=in.(${ids.join(",")})&status=in.(pending,preparing,ready)&archived=not.is.true&limit=50`);
   ok(!live.length, `${live.length} orders are still live on a CLOSED session (e.g. order ${live[0]?.id})`);
 });
 phase("every closed session records when it closed", async () => {
