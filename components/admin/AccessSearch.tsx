@@ -186,16 +186,19 @@ export default function AccessSearch({ isOn, onPick }: {
     return null;
   };
 
+  // Picking a result KEEPS what you typed (owner: "after search that written thing should stay
+  // there until you click the cross at the very end, just like phone"). Only the × clears it.
+  // That also makes the common case cheap: land on one match, glance at it, reopen the same
+  // list and take the next one — instead of retyping "discount" four times.
   const choose = (e: Entry) => {
     const blocked = blockerOf(e);
     setOpen(false);
-    setQ("");
-    inputRef.current?.blur();
     onPick(e.node.id, e.section.id, e.ancestors.map((a) => a.id), blocked);
   };
 
   const onKeyDown = (ev: React.KeyboardEvent<HTMLInputElement>) => {
-    if (ev.key === "Escape") { setOpen(false); setQ(""); return; }
+    // Escape closes the list but LEAVES the text, for the same reason. The × empties it.
+    if (ev.key === "Escape") { setOpen(false); return; }
     if (!results.length) return;
     if (ev.key === "ArrowDown") { ev.preventDefault(); setOpen(true); setCursor((c) => (c + 1) % results.length); }
     else if (ev.key === "ArrowUp") { ev.preventDefault(); setOpen(true); setCursor((c) => (c - 1 + results.length) % results.length); }

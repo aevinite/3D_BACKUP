@@ -52,7 +52,9 @@ export default function AccessTree({ rid }: { rid: string }) {
   const [st, setSt] = useState<TreeState | null>(null);
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
   const [err, setErr] = useState("");
-  const [openSec, setOpenSec] = useState<Record<string, boolean>>({ main: true });
+  // CLOSED by default (owner, 2026-07-31: "by default dropdown should be close"). Each header
+  // carries a counter, so you can see what a section holds without opening it.
+  const [openSec, setOpenSec] = useState<Record<string, boolean>>({});
   const [openNode, setOpenNode] = useState<Record<string, boolean>>({});
   const [info, setInfo] = useState<Node | null>(null);
   const flash = useRef<number>(0);
@@ -208,7 +210,11 @@ function SectionCard({ sec, st, open, onToggle, openNode, setOpenNode, set, onIn
       <button className="acc2-sh" onClick={onToggle} aria-expanded={open}>
         <span className="acc2-gi lg"><Icon n={sec.icon} s={18} /></span>
         <span className="acc2-sh-t"><h2>{sec.name}</h2><p>{sec.blurb}</p></span>
-        {switchable.length ? <span className="at-count">{on}/{switchable.length}</span> : null}
+        {switchable.length ? (
+          <span className={`at-count ${on === switchable.length ? "all" : ""}`}>
+            {on === switchable.length ? "All" : `${on}/${switchable.length}`}
+          </span>
+        ) : null}
         <span className={`acc2-chev ${open ? "o" : ""}`}><Icon n="chevron" s={18} /></span>
       </button>
       {open ? (
@@ -237,9 +243,9 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
   const expanded = collapsible ? openNode[node.id] !== false : true;
 
   return (
-    <div className={`at-row d${Math.min(depth, 3)} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
-      <div className="acc2-sw">
-        <div className="acc2-sw-b">
+    <div className={`at-box d${Math.min(depth, 3)} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
+      <div className="at-box-h">
+        <div className="at-box-t">
           <div className="nm">
             {collapsible ? (
               <button className={`at-tw ${expanded ? "o" : ""}`} aria-label={expanded ? "Collapse" : "Expand"}
@@ -259,12 +265,66 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
       </div>
 
       {showKids && expanded ? (
-        <div className="at-kids">
-          {kids.map((k) => (
-            <Row key={k.id} node={k} st={st} depth={depth + 1} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />
-          ))}
+        <div className="at-box-k">
+          <Kids nodes={kids} st={st} depth={depth + 1} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** Is this child small enough to be one of the compact boxes in a grid? Only a plain on/off
+ *  leaf is: anything with its own children, a segmented choice, a list or a text field needs
+ *  the full width to stay readable. */
+const chipable = (n: Node) =>
+  !(n.children || []).length && !n.leftToBuild
+  && (isBoolBind(n) || (n.bind.t === "opt" && !n.choices));
+
+/** Lay a row's children out the way the owner asked for: the simple on/off ones as a GRID OF
+ *  BOXES ("see the blue box inside the box for sub edit — make sure all have box like that"),
+ *  everything else full width underneath. Consecutive chipable children are grouped into one
+ *  grid so the ORDER the owner specified is preserved — a chip never jumps above a row that
+ *  was listed before it. */
+function Kids({ nodes, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
+  nodes: Node[]; st: TreeState; depth: number;
+  openNode: Record<string, boolean>; setOpenNode: (f: (s: Record<string, boolean>) => Record<string, boolean>) => void;
+  set: (n: Node, v: any) => void; onInfo: (n: Node) => void; flashId?: string;
+}) {
+  const out: React.ReactNode[] = [];
+  let run: Node[] = [];
+  const flush = () => {
+    if (!run.length) return;
+    out.push(
+      <div className="at-grid" key={`grid-${out.length}`}>
+        {run.map((n) => <Chip key={n.id} node={n} st={st} set={set} onInfo={onInfo} flashId={flashId} />)}
+      </div>,
+    );
+    run = [];
+  };
+  for (const n of nodes) {
+    if (chipable(n)) { run.push(n); continue; }
+    flush();
+    out.push(<Row key={n.id} node={n} st={st} depth={depth} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />);
+  }
+  flush();
+  return <>{out}</>;
+}
+
+/** One compact setting box. The WHOLE box is the switch — a much bigger target than a 34px
+ *  toggle, which matters on the phone the owner tests on. The (i) sits outside that target so
+ *  reading about a setting can never flip it by accident. */
+function Chip({ node, st, set, onInfo, flashId }: {
+  node: Node; st: TreeState; set: (n: Node, v: any) => void; onInfo: (n: Node) => void; flashId?: string;
+}) {
+  const on = nodeValue(node, st) === true;
+  return (
+    <div className={`at-chip ${on ? "on" : ""} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
+      <button className="at-chip-hit" role="switch" aria-checked={on} aria-label={node.name}
+        onClick={() => set(node, !on)}>
+        <span className="at-cbox">{on ? <Icon n="check" s={12} /> : null}</span>
+        <span className="at-cnm">{node.name}</span>
+      </button>
+      <button className="at-i" onClick={() => onInfo(node)} aria-label={`What is ${node.name}?`}><Icon n="info" s={13} /></button>
     </div>
   );
 }
@@ -405,19 +465,50 @@ function TreeStyle() {
   .at-head .acc2-save { margin-left:auto; }
   .at-hint-x { margin-left:auto; background:none; border:0; color:inherit; opacity:.6; cursor:pointer; font-size:19px; line-height:1; }
   .at-hint-x:hover { opacity:1; }
-  /* ?focus= landing ring — the same amber flash the old screen used, so a "⚙ change" link
-     from a panel visibly ARRIVES somewhere instead of dumping you at the top of the page. */
-  .at-flash > .acc2-sw { animation: atFlashRing 2.1s ease-out 1; border-radius: 11px; }
-  @keyframes atFlashRing { 0%, 55% { box-shadow: 0 0 0 3px rgba(217,119,6,.6); } 100% { box-shadow: 0 0 0 3px transparent; } }
+  /* LANDING BLINK — the owner asked for the phone-Settings behaviour: arriving at a setting
+     should "light that setting once, kinda blink thing". Two quick pulses of the accent, then
+     it settles, so your eye is pulled to the row without a colour that stays and confuses. */
+  .at-flash { animation: atBlink 1.6s ease-out 1; }
+  @keyframes atBlink {
+    0%, 100% { background:transparent; box-shadow:0 0 0 0 transparent; }
+    10%, 40%  { background:color-mix(in srgb, var(--accent) 20%, transparent); box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 62%, transparent); }
+    25%, 55%  { background:transparent; box-shadow:0 0 0 3px transparent; }
+  }
   .at-count { font-size:11.5px; font-weight:800; color:var(--muted); background:var(--bg); border:var(--border); padding:5px 9px; border-radius:8px; white-space:nowrap; flex:none; font-variant-numeric:tabular-nums; }
-  /* Tree indentation: a hairline guide per level, so a deep sub-option still reads as
-     belonging to its parent instead of floating in a flat list. */
-  .at-row { display:flex; flex-direction:column; gap:6px; }
-  .at-row > .acc2-sw { align-items:flex-start; gap:14px; }
-  .at-kids { display:flex; flex-direction:column; gap:6px; margin-left:14px; padding-left:12px; border-left:2px solid color-mix(in srgb, var(--accent) 22%, transparent); }
-  .at-row.d1 > .acc2-sw { background:color-mix(in srgb, var(--card) 65%, var(--bg)); }
-  .at-row.d2 > .acc2-sw, .at-row.d3 > .acc2-sw { background:transparent; border:var(--border); }
-  .at-row .acc2-sw-b .nm { flex-wrap:wrap; }
+  .at-count.all { color:#34d399; border-color:color-mix(in srgb,#34d399 42%,transparent); background:color-mix(in srgb,#34d399 12%,transparent); }
+
+  /* ── BOXES (owner, 2026-07-31: "make sure all have box like that, well structured") ────────
+     Every setting is a box, and a setting's sub-settings are boxes INSIDE its box, so the
+     nesting is visible as containment instead of an indent guide you have to trace. */
+  .at-box { border:var(--border); border-radius:13px; background:color-mix(in srgb, var(--card) 74%, var(--bg)); padding:12px 13px; }
+  .at-box + .at-box { margin-top:8px; }
+  .at-box-h { display:flex; align-items:flex-start; gap:14px; }
+  .at-box-t { flex:1; min-width:0; }
+  .at-box-t .nm { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:14px; font-weight:750; }
+  .at-box-t .ds { margin-top:3px; font-size:12.5px; line-height:1.55; color:var(--muted); }
+  .at-box-k { margin-top:11px; padding-top:11px; border-top:var(--border); }
+  .at-box.d1 { background:color-mix(in srgb, var(--card) 88%, var(--bg)); }
+  .at-box.d2, .at-box.d3 { background:transparent; }
+
+  /* The grid of compact on/off boxes — 1 per row on a phone, filling out on wider screens. */
+  .at-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(212px, 1fr)); gap:8px; }
+  .at-grid + .at-box, .at-box + .at-grid { margin-top:8px; }
+  .at-chip { display:flex; align-items:center; gap:2px; border:1.5px solid var(--adm-line, rgba(255,255,255,.14));
+    border-radius:11px; background:color-mix(in srgb, var(--card) 60%, var(--bg)); padding-right:4px; transition:border-color .15s, background .15s; }
+  .at-chip.on { border-color:color-mix(in srgb, var(--accent) 60%, transparent); background:color-mix(in srgb, var(--accent) 13%, transparent); }
+  /* The whole box is the switch: a far bigger target than a 34px toggle, which is what makes
+     this reliable with a thumb on the 360px phone the owner actually uses. */
+  .at-chip-hit { flex:1; min-width:0; display:flex; align-items:center; gap:9px; background:none; border:0;
+    color:inherit; font:inherit; cursor:pointer; padding:11px 4px 11px 11px; text-align:left; border-radius:10px; }
+  .at-cbox { flex:none; width:17px; height:17px; border-radius:5px; border:1.7px solid var(--muted);
+    display:grid; place-items:center; color:transparent; transition:background .15s, border-color .15s; }
+  .at-chip.on .at-cbox { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .at-cnm { font-size:13px; font-weight:650; line-height:1.35; }
+  /* Keyboard users must be able to SEE which box they are on before they press space — without
+     this the whole grid is invisible to a tab-through, which is a silent tap in a different form. */
+  .at-chip-hit:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .at-chip:has(.at-chip-hit:focus-visible) { border-color:var(--accent); }
+  .at-chip.on .at-cnm { color:var(--text); }
   .at-tw { display:grid; place-items:center; width:20px; height:20px; margin-right:-2px; border:none; background:none; color:var(--muted); cursor:pointer; transition:transform .18s; flex:none; }
   .at-tw.o { transform:rotate(180deg); color:var(--accent); }
   .at-i { display:grid; place-items:center; width:20px; height:20px; border:none; background:none; color:var(--muted); cursor:pointer; flex:none; }
@@ -449,11 +540,14 @@ function TreeStyle() {
   .at-sheet-b ul b { color:var(--text); }
   .at-sheet-note { color:var(--adm-warn) !important; font-weight:600; }
   @media (max-width:640px) {
-    .at-row > .acc2-sw { flex-direction:column; }
+    .at-box { padding:11px; border-radius:12px; }
+    .at-box-h { flex-direction:column; gap:10px; }
     .at-segs.wide, .at-chips { max-width:100%; justify-content:flex-start; }
     .at-chips-note { text-align:left; }
     .at-text { min-width:0; width:100%; }
-    .at-kids { margin-left:6px; padding-left:9px; }
+    /* One box per row on a phone — two 160px boxes side by side truncate every label. */
+    .at-grid { grid-template-columns:1fr; }
+    .at-box-k { margin-top:10px; padding-top:10px; }
   }
   `}</style>;
 }

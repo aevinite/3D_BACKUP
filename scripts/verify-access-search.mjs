@@ -51,6 +51,11 @@ try {
     const overflow = await p.evaluate(() => Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth));
     ok("nothing spills off the side", overflow <= 4, `${overflow}px`);
 
+    // Every section starts CLOSED (owner: "by default dropdown should be close"), so the screen
+    // opens as a short list of areas rather than a wall of switches.
+    ok("every section starts closed", (await p.locator(".acc2-body").count()) === 0,
+      `${await p.locator(".acc2-body").count()} sections were already open`);
+
     // A word that is NOT any row's label — proves the search reaches help text + synonyms,
     // which is the difference between "search" and "type the exact name you already knew".
     await box.click();
@@ -78,7 +83,23 @@ try {
     await p.locator(".as-item").first().click();
     await sleep(1700);
     ok("picking a result lands on that exact row", await p.locator('[data-node="menu_languages"]').isVisible().catch(() => false));
-    ok("the row is ringed, so you can see you arrived", (await p.locator('[data-node="menu_languages"].at-flash').count()) > 0);
+    ok("the row blinks once, so you can see you arrived", (await p.locator('[data-node="menu_languages"].at-flash').count()) > 0);
+    // What you typed STAYS after picking (owner: "should stay there until click cross at very
+    // end just like phone"). Clearing it meant retyping the same word to take a second match.
+    ok("what you typed is still in the box after picking", (await box.inputValue()) === "languages", JSON.stringify(await box.inputValue()));
+    // …and the × is what empties it.
+    await p.locator(".as-clear").click();
+    await sleep(200);
+    ok("the × is what clears it", (await box.inputValue()) === "");
+
+    // The sub-settings are BOXES in a grid, which is the structure the owner asked for.
+    await box.fill("allergy");
+    await sleep(450);
+    await p.locator(".as-item").first().click();
+    await sleep(1500);
+    ok("sub-settings render as boxes in a grid", (await p.locator(".at-grid .at-chip").count()) > 0,
+      `${await p.locator(".at-grid .at-chip").count()} setting boxes`);
+    await p.locator(".as-clear").click().catch(() => {});
 
     // Keyboard, the way anyone who searches a lot expects it to behave.
     await box.fill("");
