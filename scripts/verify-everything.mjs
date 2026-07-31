@@ -249,6 +249,18 @@ const GUARDS = [
   ["test safety — no script can raise a false alert", "verify:test-safety", false],
   ["money maths unit tests", "test:money", false],
   ["order totals end-to-end", "test:totals", true],
+  // GUARD ORDER: LEAVE IT ALONE UNLESS YOU MEASURE.
+  //
+  // Each of these fourteen guards launches its own browser and most of them seat, close or
+  // back-date tables. Chained on a busy machine they interfere, and the failure always LOOKS like
+  // a product fault ("couldn't seat table 30", "the clashing order was NOT flagged", "the check
+  // stopped early") when it is really the previous guard's floor or a browser that could not
+  // start. Every one of them passes standalone.
+  //
+  // I tried moving `offline` ahead of the table guards to give it a clean floor: it fixed offline
+  // and broke table-ownership, verify:live and access-live instead — one cascade traded for three.
+  // Reverted. If this needs solving properly, the fix is for each guard to tolerate the floor it
+  // finds (or claim its own table), not to shuffle this list.
   ["table ownership — a table shows only its own party", "verify:table-ownership", true],
   ["two parties never mix", "verify:two-parties", true],
   ["table lifecycle", "verify:lifecycle", true],
@@ -266,8 +278,16 @@ for (const [label, script, slow] of GUARDS) {
     const needsBase = ["verify:live", "verify:offline", "verify:table-ownership", "verify:two-parties", "verify:lifecycle"];
     const extra = needsBase.includes(script) ? ["--", "--base", BASE] : [];
     const r = await run("npm", ["run", "--silent", script, ...extra]);
-    const tail = r.out.trim().split("\n").slice(-3).join(" / ").slice(0, 220);
-    ok(r.code === 0, tail);
+    // SAY WHAT FAILED. The last three lines of a child suite are its summary ("50 passed, 2
+    // failed"), which tells you a guard broke but never WHICH check — so every failure meant
+    // re-running the child by hand to find out. Prefer the child's own failing lines; fall back
+    // to the tail only when it didn't print any.
+    const lines = r.out.trim().split("\n").map((l) => l.trimEnd());
+    const failed = lines.filter((l) => /^\s*(❌|✗)/.test(l)).map((l) => l.trim());
+    const summary = lines.filter((l) => /passed|failed/.test(l)).slice(-1);
+    const detail = (failed.length ? [...failed.slice(0, 6), ...summary] : lines.slice(-3))
+      .join(" / ").slice(0, 400);
+    ok(r.code === 0, detail);
   });
 }
 
@@ -466,8 +486,26 @@ const getState = async () => (await (await api(`/api/admin/restaurants/access-tr
 // undo its own writes must not make them, so the gate lives in the ONE place every write passes
 // through rather than in each phase's good intentions.
 let snapOk = false;
+/** Take the restore snapshot, retrying, and register the undo. Called by the snapshot PHASE and
+ *  lazily by the first write — because `--only 161-276` is a legitimate way to run this suite and
+ *  that range contains writes but not the snapshot phase. Without the lazy path the safety gate
+ *  would turn every range run into a wall of failures, and someone would "fix" it by deleting the
+ *  gate. Idempotent: the snapshot is taken once per process. */
+async function ensureSnap() {
+  if (snapOk) return;
+  let d = null, why = "";
+  for (let i = 0; i < 4; i++) {
+    try { d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json(); if (d?.state) break; why = d?.error || "no state"; }
+    catch (e) { why = String(e.message).slice(0, 80); d = null; }
+    await wait(2000);
+  }
+  if (!d?.state) throw new Fail(`refusing to change a setting: could not read the restore snapshot (${why})`);
+  SNAP = d.state;
+  restore.push(async () => { await restoreSnapshot(); });
+  snapOk = true;
+}
 const setState = async (patch) => {
-  if (!snapOk) throw new Fail("refusing to change a setting: no restore snapshot was taken, so this could not be undone");
+  await ensureSnap();                 // never write without a way back
   return fetch(BASE + "/api/admin/restaurants/access-tree", { method: "POST", headers: HJ, body: JSON.stringify({ restaurant_id: (await needFH()).id, patch }) });
 };
 // How long to wait for a switch to become visible. This MUST clear the server's own caches,
@@ -487,19 +525,13 @@ const settleUntil = async (read, want, ms = CACHE_MS + 6000) => {
 };
 let SNAP = null;
 
-phase("the access tree loads all five sections", async () => {
-  // RETRY: this single request decides whether the whole run may write anything, so one dropped
-  // connection must not disarm the restore for the next 200 phases.
-  let d = null, why = "";
-  for (let i = 0; i < 4; i++) {
-    try { d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json(); if (d?.sections) break; why = d?.error || "no sections"; }
-    catch (e) { why = String(e.message).slice(0, 80); d = null; }
-    await wait(2000);
-  }
-  ok(d && Array.isArray(d.sections) && d.sections.length === 5, `${d?.sections?.length ?? "no"} sections${why ? ` · ${why}` : ""}`);
-  SNAP = d.state;
-  restore.push(async () => {
-    await setState({
+/** Put every switch this suite touches back to the snapshot. Named (not inline) so the lazy
+ *  ensureSnap() and the snapshot phase register the exact same undo. */
+async function restoreSnapshot() {
+  if (!SNAP) return;
+  await fetch(BASE + "/api/admin/restaurants/access-tree", {
+    method: "POST", headers: HJ,
+    body: JSON.stringify({ restaurant_id: (await needFH()).id, patch: {
       features: Object.fromEntries(["reviews", "model3d", "allergies", "allergy_other", "guest_note", "favorites", "diet_filter", "ratings"].map((k) => [k, SNAP.features[k] !== false])),
       settings: {
         menu_enabled: SNAP.settings.menu_enabled !== false,
@@ -519,9 +551,14 @@ phase("the access tree loads all five sections", async () => {
       sections: Object.fromEntries(["menu", "ratings", "logs"].map((k) => [k, SNAP.sections[k] !== false])),
       tabs: { manager: { editor: SNAP.tabs?.manager?.editor !== false, ratings: SNAP.tabs?.manager?.ratings !== false, log: SNAP.tabs?.manager?.log !== false } },
       panels: Object.fromEntries(["manager", "kitchen", "tablet", "owner"].map((k) => [k, SNAP.panels[k] !== false])),
-    });
+    } }),
   });
-  snapOk = true;                    // only NOW may anything be written
+}
+
+phase("the access tree loads all five sections", async () => {
+  await ensureSnap();                       // takes the snapshot AND registers the undo
+  const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json();
+  ok(Array.isArray(d.sections) && d.sections.length === 5, `${d.sections?.length ?? "no"} sections`);
 });
 
 // each guest sub-switch: OFF removes its mark from the served page, ON brings it back
@@ -1959,7 +1996,14 @@ phase("no order outlives the session it was placed in", async () => {
   // OWN fixture — verify-table-ownership inserts a ₹999 "leftover" order on a session
   // backdated ten minutes to reproduce pre-mig-232 data, and the app had already archived it,
   // which is the correct cleanup. Judging a cleaned-up row as a live one is a false alarm.
-  const live = await dbGet(`orders?select=id,status,session_id&session_id=in.(${ids.join(",")})&status=in.(pending,preparing,ready)&archived=not.is.true&limit=50`);
+  // A SETTLING WINDOW, the same idea phase 155 already uses. This suite's own table-ownership
+  // guard deliberately inserts a ₹999 "LEFTOVER check dish" on a back-dated closed session to
+  // reproduce pre-mig-232 data, and the app archives it a moment later. Read in that gap — which
+  // happens whenever the guards run in a parallel lane beside this one — a correct cleanup looks
+  // like a live order outliving its session. Only rows that have had time to settle count.
+  const SETTLE_MS = 90000;
+  const rowsLive = await dbGet(`orders?select=id,status,session_id,created_at&session_id=in.(${ids.join(",")})&status=in.(pending,preparing,ready)&archived=not.is.true&limit=50`);
+  const live = rowsLive.filter((r) => !r.created_at || Date.now() - new Date(r.created_at).getTime() > SETTLE_MS);
   ok(!live.length, `${live.length} orders are still live on a CLOSED session (e.g. order ${live[0]?.id})`);
 });
 phase("every closed session records when it closed", async () => {

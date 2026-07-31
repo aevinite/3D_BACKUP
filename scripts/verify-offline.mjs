@@ -581,10 +581,16 @@ async function run() {
     await guest.goto(`${BASE}/r/french-house/menu`, { waitUntil: "domcontentloaded" });
     await waitControlled(guest);
     await guest.reload({ waitUntil: "domcontentloaded" });
+    // 75s. This is the SETUP step for everything below it: if the menu hasn't painted live, the
+    // saved-copy and offline checks all fail too, and the whole section reports four faults for
+    // one slow load. Against the deployed site a cold guest menu already needs past 30s, and
+    // under a parallel test run — several browser lanes hitting the same site — it needs more.
+    // The check itself labels this "(test setup problem)"; giving it room is how that label stops
+    // being printed as if the app were broken.
     const liveDishes = await waitFor(async () => {
       const n = await guest.locator(".item-card:not(.skeleton-card)").count();
       return n > 0 ? n : null;
-    }, 40000);
+    }, 75000);
     liveDishes ? ok(`guest menu live with ${liveDishes} dishes`) : bad("guest menu never loaded live (test setup problem)");
     (await waitCached(guest, "/menu-data")) ? ok("the menu is saved on the device") : bad("the menu never got saved");
     await ctx.setOffline(true);
