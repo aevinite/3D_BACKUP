@@ -62,9 +62,18 @@ for (const r of ROUTES) {
   if (!src) { check(`${r.panel} route found`, false, r.file); continue; }
 
   check(`${r.panel}: whole-floor read is shared`, src.includes("sharedFloorSummary(`floor:${rid}`"));
-  // the ternary is what keeps a targeted refetch OUT of the shared path
+
+  // A targeted ?table= refetch must NOT go through the shared path — that is what makes a tile
+  // update the instant its order lands. This used to be asserted by matching the exact source line,
+  // which broke the moment the read was legitimately refactored (adding the transient-read retry did
+  // it) — a guard that fails on a correct change teaches people to edit the guard, which is how a
+  // guard dies. So test the PROPERTY instead: isolate the `tbl ?` branch and require that it asks
+  // for this one table and does not share.
+  const tern = src.match(/const \{ data, error \} = tbl\s*([\s\S]{0,600}?);\n/);
+  const targetedBranch = tern ? tern[1].split(/\n\s*:/)[0] : "";
   check(`${r.panel}: a targeted ?table= refetch is NOT shared`,
-    /const \{ data, error \} = tbl\s*\n\s*\? await sb\.rpc\("lfh_table_view_summary", \{ p_restaurant_id: rid, p_table: tbl \}\)/.test(src));
+    !!targetedBranch && /p_table:\s*tbl/.test(targetedBranch) && !/sharedFloorSummary/.test(targetedBranch),
+    targetedBranch ? undefined : "could not find the `const { data, error } = tbl ? … : …` read");
 
   // EVERY write handler must drop the snapshot. Find each impl's body and look inside it.
   for (const impl of r.impls) {
