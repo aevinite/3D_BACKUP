@@ -75,7 +75,9 @@ const state = {
   board: { sessions: [], members: [], items: [], requests: [], blocklist: [] }, // v2 sessions live board (TIER 2: only the SELECTED table's full slice now)
   // Banquet module (mig 130): its items load on first tab open only. qty maps
   // item id → plate count in the "generate bill" builder; table = the target table.
-  banquet: { loaded: false, items: [], qty: {}, table: "" },
+  // Banquet (migs 130/237): packages load on first tab open; `sub` is which
+  // sub-screen is showing, `f` the bill being typed, `bills` the ledger page.
+  banquet: { loaded: false, items: [], sub: "new", f: null, bills: [], billsLoaded: false, q: "" },
   // TIER 1 of the two-tier Table view: the slim, server-computed per-tile summary the GRID
   // renders from (mig 101, lfh_table_view_summary). tiles is keyed by table number → the
   // computed { state,label,meta,counts,due,pay,members,pending,hasNew/Call/Req/Join,reqs,calls }.
@@ -10059,102 +10061,384 @@ setTab(state.tab);
 //     at the setting that controls it. The server still enforces every capability —
 //     this is purely presentation.
 // ══════════════════════════════════════════════════════════════════════════════
-// BANQUET MODULE (mig 130) — a SEPARATE bill-only menu for fixed-plate events.
+// BANQUET MODULE (migs 130/132 + 237) — event billing with its OWN numbered bill.
 // The tab exists only when the admin entitlement (settings.banquet_allowed) is on
-// (syncBanquetTab). Left card: the banquet menu (CRUD, priced per plate). Right
-// card: the bill builder — pick a table, set plate counts, one tap lands a normal
-// order on that table at 'served' (no kitchen ticket), and the existing Tables
-// billing flow (invoice / discount / mark paid) takes over.
+// (syncBanquetTab). Three sub-screens:
+//   • New bill  — built from settings.banquet_fields, so a restaurant only ever sees
+//                 the boxes the ADMIN ticked for it (owner 2026-07-31: "only ask for
+//                 what's necessary"). Everything money/number/date is filled by the
+//                 server and is NOT typeable here.
+//   • Bills     — this restaurant's banquet ledger with its own numbers + re-print.
+//   • Packages  — the per-plate list (the original mig-130 screen).
+// The sale itself still rides the normal order pipeline, so Bills, the day-book, the
+// GST report and the audit log need no changes.
 // ══════════════════════════════════════════════════════════════════════════════
+
+// Mirrors lib/banquetFields.ts — keep the two in step. The SERVER decides what is
+// actually stored (mig 237 filters every value by this same list), so a stale copy
+// here can only ever show a box, never smuggle a value into the DB.
+const BQ_FIELDS = [
+  ["cust_name", "Customer name"], ["cust_phone", "Mobile number"], ["dish", "Package / dish name"],
+  ["pax", "No. of plates (pax)"], ["rate", "Price per plate"], ["advance", "Advance received"],
+  ["extras", "Extra lines"], ["disc", "Discount"], ["func", "Function name"], ["hall", "Hall / banquet name"],
+  ["fndate", "Function date & time"], ["gstin", "Customer GSTIN"], ["address", "Customer address"],
+  ["person", "Contact person"], ["paysplit", "How they paid"], ["remark", "Remark on the bill"],
+  ["by", "Print “prepared by”"],
+];
+const BQ_DEFAULT_FIELDS = ["cust_name", "cust_phone", "dish", "pax", "rate", "advance"];
+// Is this restaurant asked for field <k>? Missing/blank config falls back to the
+// simple set, so a restaurant that was never configured still gets a usable bill.
+function bqOn(k) {
+  const f = (state.data.settings || {}).banquet_fields;
+  const list = Array.isArray(f) && f.length ? f : BQ_DEFAULT_FIELDS;
+  return list.indexOf(k) >= 0;
+}
+// The paper this restaurant prints on (mig 237). Plain = the app prints the header.
+function bqPaper() {
+  const s = state.data.settings || {};
+  const num = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+  return {
+    pad: s.banquet_paper === "pad",
+    size: s.banquet_paper_size === "a4" ? "a4" : "a5",
+    top: num(s.banquet_paper_top, 0, 80, 33),
+    bot: num(s.banquet_paper_bot, 0, 50, 14),
+    side: num(s.banquet_paper_side, 2, 25, 6),
+    foot: s.banquet_paper_foot === true,
+    sign: s.banquet_paper_sign !== false,
+    fill: s.banquet_paper_fill !== false,
+  };
+}
+// Indian amount-in-words for the "Bill total (in words)" line.
+const BQ_ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve",
+  "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+const BQ_TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+function bqWords(amount) {
+  const two = (n) => (n < 20 ? BQ_ONES[n] : BQ_TENS[Math.floor(n / 10)] + (n % 10 ? "-" + BQ_ONES[n % 10] : ""));
+  const three = (n) => (n >= 100 ? BQ_ONES[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " : "") : "") + (n % 100 ? two(n % 100) : "");
+  let n = Math.floor(Math.abs(Number(amount) || 0));
+  if (!n) return "Zero Only";
+  const p = [];
+  const cr = Math.floor(n / 1e7); n %= 1e7;
+  const la = Math.floor(n / 1e5); n %= 1e5;
+  const th = Math.floor(n / 1e3); n %= 1e3;
+  if (cr) p.push(three(cr) + " Crore");
+  if (la) p.push(three(la) + " Lakh");
+  if (th) p.push(three(th) + " Thousand");
+  if (n) p.push(three(n));
+  return p.join(" ").trim() + " Only";
+}
+const bq2 = (n) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const bq0 = (n) => Math.round(Number(n) || 0).toLocaleString("en-IN");
+
 async function loadBanquet() {
   try {
     const r = await api("GET", "/banquet/items");
     state.banquet.items = r.items || [];
   } catch (e) {
     state.banquet.items = [];
-    toast("Couldn't load the banquet menu: " + e.message, "err");
+    toast("Couldn't load the banquet packages: " + e.message, "err");
   }
   state.banquet.loaded = true;
   if (state.tab === "banquet") renderEditor();
 }
+async function loadBanquetBills() {
+  const bq = state.banquet;
+  try {
+    const r = await api("GET", "/banquet/bills?limit=40" + (bq.q ? "&q=" + encodeURIComponent(bq.q) : ""));
+    bq.bills = r.bills || [];
+  } catch (e) {
+    bq.bills = [];
+    toast("Couldn't load the banquet bills: " + e.message, "err");
+  }
+  bq.billsLoaded = true;
+  if (state.tab === "banquet") renderEditor();
+}
+
+// The bill being typed. Only the enabled fields are ever read out of it.
+function bqForm() {
+  const bq = state.banquet;
+  if (!bq.f) {
+    bq.f = {
+      cust_name: "", cust_phone: "", pkg: 0, pax: 1, rate: 0, disc: 0,
+      advance: 0, advMode: "Cash", pays: [], extras: [],
+      hall: "", func: "", fn_date: "", fn_from: "", fn_to: "",
+      cust_gstin: "", cust_addr: "", cust_person: "", remark: "", table: "",
+    };
+  }
+  return bq.f;
+}
+// The lines this bill will bill for: the package (× plates) plus any extras.
+// `id` is a banquet_items row — the server re-prices every one of them.
+function bqLines() {
+  const bq = state.banquet, f = bqForm();
+  const active = bq.items.filter((i) => i.active);
+  const out = [];
+  const pkg = active[Math.min(f.pkg, Math.max(0, active.length - 1))];
+  if (pkg) {
+    const open = Number(pkg.price) === 0;   // open-price package: the rate is typed
+    out.push({
+      id: pkg.id, title: pkg.title, unit: pkg.unit,
+      qty: bqOn("pax") ? Math.max(1, Math.round(Number(f.pax) || 1)) : 1,
+      price: open ? Math.max(0, Number(f.rate) || 0) : Number(pkg.price) || 0,
+      open, disc: bqOn("disc") ? Math.max(0, Math.min(100, Number(f.disc) || 0)) : 0,
+    });
+  }
+  if (bqOn("extras")) {
+    for (const ex of f.extras) {
+      const it = bq.items.find((i) => i.id === ex.id);
+      if (!it) continue;
+      const open = Number(it.price) === 0;
+      out.push({
+        id: it.id, title: it.title, unit: it.unit,
+        qty: Math.max(1, Math.round(Number(ex.qty) || 1)),
+        price: open ? Math.max(0, Number(ex.price) || 0) : Number(it.price) || 0,
+        open, disc: bqOn("disc") ? Math.max(0, Math.min(100, Number(ex.disc) || 0)) : 0,
+      });
+    }
+  }
+  return out;
+}
+// The same money the server will compute (mig 237): discount BEFORE tax, whole-rupee total.
+function bqMath(lines) {
+  const tm = taxModel(state.data.settings);
+  let sub = 0, disc = 0;
+  for (const l of lines) {
+    const gross = l.qty * l.price;
+    sub += gross;
+    disc += Math.round(gross * (l.disc / 100) * 100) / 100;
+  }
+  disc = Math.min(disc, sub);
+  const tax = Math.round((sub - disc) * tm.rate * 100) / 100;
+  const total = Math.round(sub - disc + tax);
+  const f = bqForm();
+  const paid = bqOn("paysplit")
+    ? f.pays.reduce((a, p) => a + (Number(p.amt) || 0), 0)
+    : bqOn("advance") ? Number(f.advance) || 0 : 0;
+  return { sub, disc, tax, total, paid, bal: Math.round((total - paid) * 100) / 100, rate: tm.rate, comps: tm.components };
+}
 
 function banquetHtml() {
   const bq = state.banquet;
-  if (!bq.loaded) return `<div class="ed-head"><h2>🎪 Banquet</h2></div><div class="empty">Loading the banquet menu…</div>`;
-  const tm = taxModel(state.data.settings);
+  if (!bq.loaded) return `<div class="ed-head"><h2>🎪 Banquet</h2></div><div class="empty">Loading…</div>`;
+  const sub = bq.sub || "new";
+  const chip = (id, label) => `<button class="btn small${sub === id ? " primary" : ""}" data-bqsub="${id}">${label}</button>`;
+  const head = `<div class="ed-head"><h2>🎪 Banquet</h2>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      ${chip("new", "＋ New bill")}${chip("bills", "📕 Bills")}${chip("pkg", "🍽 Packages")}
+      <button class="btn small" id="bqRefresh" title="Reload">↻</button>
+    </div></div>`;
+  if (sub === "pkg") return head + bqPackagesHtml();
+  if (sub === "bills") return head + bqBillsHtml();
+  return head + bqNewHtml();
+}
+
+// ── the packages screen (the original mig-130 editor) ───────────────────────
+function bqPackagesHtml() {
+  const bq = state.banquet;
   const rows = bq.items.map((it) => `
     <div class="bq-row${it.active ? "" : " bq-off"}" data-bq-id="${esc(it.id)}" style="display:grid;grid-template-columns:1fr 110px 130px auto auto;gap:8px;align-items:center;padding:8px 10px;border-radius:9px;background:var(--panel-2);margin-bottom:8px${it.active ? "" : ";opacity:.55"}">
-      <input class="sx-input" data-bq-f="title" value="${esc(it.title)}" placeholder="Item name" />
-      <input class="sx-input" data-bq-f="price" type="number" min="0" step="1" value="${esc(String(it.price))}" title="Price per unit (₹)" />
+      <input class="sx-input" data-bq-f="title" value="${esc(it.title)}" placeholder="Package name" />
+      <input class="sx-input" data-bq-f="price" type="number" min="0" step="1" value="${esc(String(it.price))}" title="Price per unit (₹) — 0 means the price is typed on the bill" />
       <input class="sx-input" data-bq-f="unit" value="${esc(it.unit || "per plate")}" placeholder="per plate" title='Shown on the bill after the name, e.g. "per plate"' />
-      <button class="btn small" data-bq-toggle title="${it.active ? "Hide from the bill builder" : "Show in the bill builder"}">${it.active ? "On" : "Off"}</button>
+      <button class="btn small" data-bq-toggle title="${it.active ? "Hide from the bill screen" : "Show on the bill screen"}">${it.active ? "On" : "Off"}</button>
       <button class="btn small danger" data-bq-del title="Delete">🗑</button>
     </div>`).join("");
-  const activeItems = bq.items.filter((it) => it.active);
-  let sub = 0;
-  const lines = activeItems.map((it) => {
-    const q = Math.max(0, Math.round(Number(bq.qty[it.id]) || 0));
-    sub += q * (Number(it.price) || 0);
-    return `<div style="display:grid;grid-template-columns:1fr 130px 110px;gap:8px;align-items:center;margin-bottom:8px">
-      <div><b style="font-size:13.5px">${esc(it.title)}</b><small style="color:var(--muted);display:block">${inr(it.price)} ${esc(it.unit || "per plate")}</small></div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn small" data-bq-minus="${esc(it.id)}">−</button>
-        <input class="sx-input" data-bq-qty="${esc(it.id)}" type="number" min="0" max="5000" value="${q}" style="width:64px;text-align:center" title="Plates / count" />
-        <button class="btn small" data-bq-plus="${esc(it.id)}">+</button>
-      </div>
-      <div style="text-align:right;font-weight:700">${q ? inr(q * (Number(it.price) || 0)) : "—"}</div>
-    </div>`;
-  }).join("");
-  const tax = Math.round(sub * tm.rate * 100) / 100;
-  const tableCount = Number((state.data.settings || {}).table_count) || 0;
-  return `<div class="ed-head"><h2>🎪 Banquet</h2><button class="btn" id="bqRefresh">↻ Refresh</button></div>
-  <div class="grid cols-2" style="align-items:start;gap:14px">
-    <div class="card">
-      <h3>Banquet menu</h3>
+  return `<div class="card">
+      <h3>Banquet packages</h3>
       <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5">
-        Separate from the dining menu — these lines exist ONLY to build banquet bills
-        (price per plate × guests). Guests never see them.</p>
-      ${rows || `<div class="sx-empty">No banquet items yet — add the first one below.</div>`}
+        Separate from the dining menu — these lines exist ONLY to build banquet bills, and guests never see them.
+        A price of <b>0</b> means “ask for the price on the bill” (décor, DJ, a one-off quote).</p>
+      ${rows || `<div class="sx-empty">No packages yet — add the first one below.</div>`}
       <div style="display:grid;grid-template-columns:1fr 110px auto;gap:8px;margin-top:10px">
-        <input class="sx-input" id="bqNewTitle" placeholder="New item — e.g. Gujarati Thali" />
+        <input class="sx-input" id="bqNewTitle" placeholder="New package — e.g. Unlimited package" />
         <input class="sx-input" id="bqNewPrice" type="number" min="0" step="1" placeholder="₹ / plate" />
         <button class="btn primary" id="bqAdd">+ Add</button>
       </div>
+    </div>`;
+}
+
+// ── the ledger ─────────────────────────────────────────────────────────────
+function bqBillsHtml() {
+  const bq = state.banquet;
+  if (!bq.billsLoaded) return `<div class="card"><div class="empty">Loading the banquet bills…</div></div>`;
+  const rows = bq.bills.map((b) => {
+    const bal = Math.max(0, Math.round((Number(b.total) || 0) - (Number(b.received) || 0)));
+    const when = new Date(b.issued_at);
+    return `<tr${b.voided_at ? ' style="opacity:.55"' : ""}>
+      <td><b>${esc(b.bill_no)}</b>${b.voided_at ? ' <span style="color:var(--red)">VOID</span>' : ""}
+        <div style="color:var(--muted);font-size:11.5px">${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div></td>
+      <td>${esc(b.cust_name || "—")}${b.cust_phone ? `<div style="color:var(--muted);font-size:11.5px">${esc(b.cust_phone)}</div>` : ""}</td>
+      <td>${esc([b.func, b.hall].filter(Boolean).join(" · ") || "—")}${b.pax ? `<div style="color:var(--muted);font-size:11.5px">${b.pax} plates</div>` : ""}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${inr(b.total)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums">${inr(b.received)}</td>
+      <td style="text-align:right;font-variant-numeric:tabular-nums${bal > 0 ? ";color:var(--red);font-weight:700" : ";color:var(--muted)"}">${inr(bal)}</td>
+      <td style="text-align:right"><button class="btn small" data-bqprint="${esc(b.id)}">🖨 Print</button></td>
+    </tr>`;
+  }).join("");
+  return `<div class="card">
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+      <input class="sx-input" id="bqSearch" value="${esc(bq.q || "")}" placeholder="Search a name, a number or a bill no…" style="max-width:300px" />
+      <span style="color:var(--muted);font-size:12.5px">Banquet bills have their own numbers — they also appear under <b>Bills</b> and in the reports.</span>
     </div>
-    <div class="card">
-      <h3>Generate a banquet bill</h3>
-      <p style="color:var(--muted);font-size:13px;margin:0 0 12px;line-height:1.5">
-        Set the plate counts and create — the bill appears under <b>Bills</b> (no kitchen
-        ticket) for invoice / discount / mark paid. A table is optional: set one only if
-        the party actually occupies a floor table.</p>
-      ${activeItems.length ? lines : `<div class="sx-empty">Turn on at least one banquet item first.</div>`}
-      <div style="display:flex;gap:10px;align-items:center;justify-content:space-between;border-top:1px solid var(--line);padding-top:12px;margin-top:6px">
-        <div class="field" style="margin:0"><label style="font-size:11px">Table (optional)</label>
-          <input class="sx-input" id="bqTable" type="number" min="1" ${tableCount ? `max="${tableCount}"` : ""} value="${esc(bq.table)}" placeholder="none" style="width:90px" /></div>
-        <div style="text-align:right;font-size:13px">
-          <div>Subtotal <b>${inr(sub)}</b></div>
-          <div style="color:var(--muted)">${esc(taxLabel())} ${tm.pct}% · ${inr(tax)}</div>
-          <div style="font-size:15px;margin-top:2px">Total <b>${inr(sub + tax)}</b></div>
-        </div>
-      </div>
-      <button class="btn primary" id="bqPlace" style="width:100%;margin-top:12px" ${sub > 0 ? "" : "disabled"}>🧾 Create the bill</button>
-    </div>
+    ${bq.bills.length ? `<div style="overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:13.5px">
+      <thead><tr style="text-align:left;color:var(--muted);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase">
+        <th style="padding:0 8px 8px">Bill</th><th style="padding:0 8px 8px">Customer</th><th style="padding:0 8px 8px">Function</th>
+        <th style="padding:0 8px 8px;text-align:right">Total</th><th style="padding:0 8px 8px;text-align:right">Received</th>
+        <th style="padding:0 8px 8px;text-align:right">Balance</th><th></th></tr></thead>
+      <tbody>${rows}</tbody></table></div>`
+      : `<div class="sx-empty">No banquet bills yet.</div>`}
   </div>`;
+}
+
+// ── the bill screen ────────────────────────────────────────────────────────
+function bqNewHtml() {
+  const bq = state.banquet, f = bqForm();
+  const active = bq.items.filter((i) => i.active);
+  if (!active.length) {
+    return `<div class="card"><div class="sx-empty">Add a banquet package first — open <b>🍽 Packages</b>.</div></div>`;
+  }
+  const lines = bqLines(), m = bqMath(lines);
+  const paper = bqPaper();
+  const card = (title, body, hint) => `<div class="card"><h3>${title}</h3>${hint ? `<p style="color:var(--muted);font-size:12.5px;margin:0 0 12px;line-height:1.5">${hint}</p>` : ""}${body}</div>`;
+  const fld = (label, id, extra) => `<div class="field" style="margin:0"><label style="font-size:11px">${label}</label>${extra}</div>`;
+
+  // who
+  const who = [];
+  if (bqOn("cust_phone")) who.push(fld("Mobile", "bqPhone", `<input class="sx-input" id="bqPhone" maxlength="13" value="${esc(f.cust_phone)}" placeholder="98250 12345" />`));
+  if (bqOn("cust_name")) who.push(fld("Customer name", "bqName", `<input class="sx-input" id="bqName" value="${esc(f.cust_name)}" placeholder="Name or company" />`));
+  if (bqOn("gstin")) who.push(fld("Customer GSTIN (optional)", "bqGstin", `<input class="sx-input" id="bqGstin" value="${esc(f.cust_gstin)}" placeholder="24ABZFM7035R1Z7" />`));
+  if (bqOn("person")) who.push(fld("Contact person", "bqPerson", `<input class="sx-input" id="bqPerson" value="${esc(f.cust_person)}" placeholder="Mr. Rakesh Shah" />`));
+  if (bqOn("address")) who.push(`<div class="field" style="margin:0;grid-column:1/-1"><label style="font-size:11px">Address</label>
+      <textarea class="sx-input" id="bqAddr" rows="2" placeholder="Street, area, city">${esc(f.cust_addr)}</textarea></div>`);
+  const whoCard = who.length ? card("Who is this bill for",
+    `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px">${who.join("")}</div>
+     ${bqOn("cust_phone") ? `<div id="bqFound" style="font-size:12.5px;color:var(--green);margin-top:7px;min-height:16px"></div>` : ""}`) : "";
+
+  // the plates
+  const pkgSel = bqOn("dish")
+    ? fld("Package / dish", "bqPkg", `<select class="sx-input" id="bqPkg">${active.map((p, i) => `<option value="${i}"${i === Math.min(f.pkg, active.length - 1) ? " selected" : ""}>${esc(p.title)} — ${Number(p.price) ? inr(p.price) + " " + esc(p.unit || "") : "price typed on the bill"}</option>`).join("")}</select>`)
+    : "";
+  const pkg = active[Math.min(f.pkg, active.length - 1)];
+  const openPkg = pkg && Number(pkg.price) === 0;
+  const plates = [pkgSel];
+  if (bqOn("pax")) plates.push(fld("No. of plates", "bqPax", `<input class="sx-input" id="bqPax" type="number" min="1" max="5000" value="${esc(String(f.pax))}" style="font-size:18px;font-weight:700" />`));
+  if (bqOn("rate")) plates.push(fld(openPkg ? "Price per plate ₹" : "Price per plate ₹ (set by the package)", "bqRate",
+    `<input class="sx-input" id="bqRate" type="number" min="0" value="${esc(String(openPkg ? f.rate : (pkg ? pkg.price : 0)))}" ${openPkg ? "" : "readonly"} style="font-size:18px;font-weight:700" />`));
+  if (bqOn("disc")) plates.push(fld("Discount %", "bqDisc", `<input class="sx-input" id="bqDisc" type="number" min="0" max="100" value="${esc(String(f.disc))}" />`));
+  let extrasHtml = "";
+  if (bqOn("extras")) {
+    const rows = f.extras.map((ex, i) => {
+      const it = state.banquet.items.find((x) => x.id === ex.id);
+      const open = it && Number(it.price) === 0;
+      const amt = (Number(ex.qty) || 0) * (open ? Number(ex.price) || 0 : (it ? Number(it.price) : 0));
+      return `<div style="display:grid;grid-template-columns:1fr 80px 100px ${bqOn("disc") ? "74px " : ""}96px 30px;gap:8px;align-items:center;margin-bottom:8px" data-bqex="${i}">
+        <select class="sx-input" data-exf="id">${active.map((p) => `<option value="${esc(p.id)}"${p.id === ex.id ? " selected" : ""}>${esc(p.title)}</option>`).join("")}</select>
+        <input class="sx-input" data-exf="qty" type="number" min="1" value="${esc(String(ex.qty))}" />
+        <input class="sx-input" data-exf="price" type="number" min="0" value="${esc(String(open ? ex.price : (it ? it.price : 0)))}" ${open ? "" : "readonly"} />
+        ${bqOn("disc") ? `<input class="sx-input" data-exf="disc" type="number" min="0" max="100" value="${esc(String(ex.disc || 0))}" />` : ""}
+        <div style="text-align:right;font-weight:700">${bq0(amt)}</div>
+        <button class="btn small" data-exdel="${i}" title="Remove">✕</button></div>`;
+    }).join("");
+    extrasHtml = `<div style="margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px">Extra lines</div>
+      ${rows}<button class="btn small" id="bqAddEx">＋ Add a line (décor, DJ, extra plates)</button></div>`;
+  }
+  const platesCard = card("What they are being billed for",
+    `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px">${plates.join("")}</div>${extrasHtml}`);
+
+  // the function
+  const fn = [];
+  if (bqOn("hall")) fn.push(fld("Hall / banquet", "bqHall", `<input class="sx-input" id="bqHall" value="${esc(f.hall)}" placeholder="A/C Banquet" />`));
+  if (bqOn("func")) fn.push(fld("Function", "bqFunc", `<input class="sx-input" id="bqFunc" value="${esc(f.func)}" placeholder="Reception" />`));
+  if (bqOn("fndate")) {
+    fn.push(fld("Function date", "bqFnDate", `<input class="sx-input" id="bqFnDate" type="date" value="${esc(f.fn_date)}" />`));
+    fn.push(fld("From", "bqFrom", `<input class="sx-input" id="bqFrom" type="time" value="${esc(f.fn_from)}" />`));
+    fn.push(fld("To", "bqTo", `<input class="sx-input" id="bqTo" type="time" value="${esc(f.fn_to)}" />`));
+  }
+  const fnCard = fn.length ? card("The function", `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">${fn.join("")}</div>`) : "";
+
+  // money in
+  let payCard = "";
+  if (bqOn("paysplit")) {
+    const rows = f.pays.map((p, i) => `<div style="display:grid;grid-template-columns:150px 120px 1fr 110px 30px;gap:8px;align-items:center;margin-bottom:8px" data-bqpay="${i}">
+      <input class="sx-input" data-pf="date" type="date" value="${esc(p.date || "")}" />
+      <select class="sx-input" data-pf="mode">${["Cash", "Online", "Card", "Cheque", "Other"].map((x) => `<option${x === p.mode ? " selected" : ""}>${x}</option>`).join("")}</select>
+      <input class="sx-input" data-pf="ref" value="${esc(p.ref || "")}" placeholder="reference" />
+      <input class="sx-input" data-pf="amt" type="number" min="0" value="${esc(String(p.amt || 0))}" />
+      <button class="btn small" data-paydel="${i}">✕</button></div>`).join("");
+    payCard = card("What they have paid", `${rows}<button class="btn small" id="bqAddPay">＋ Add a payment</button>`,
+      "Each payment prints on the bill and the balance is worked out for you.");
+  } else if (bqOn("advance")) {
+    payCard = card("What they have paid",
+      `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px">
+        ${fld("Amount received ₹", "bqAdv", `<input class="sx-input" id="bqAdv" type="number" min="0" value="${esc(String(f.advance))}" style="font-size:18px;font-weight:700" />`)}
+        ${fld("How", "bqAdvMode", `<select class="sx-input" id="bqAdvMode">${["Cash", "Online", "Card", "Cheque"].map((x) => `<option${x === f.advMode ? " selected" : ""}>${x}</option>`).join("")}</select>`)}
+      </div>`);
+  }
+
+  // notes
+  const notes = [];
+  if (bqOn("remark")) notes.push(`<div class="field" style="margin:0;grid-column:1/-1"><label style="font-size:11px">Remark on the bill</label>
+    <textarea class="sx-input" id="bqRemark" rows="2" placeholder="Unlimited menu · DJ till 23:00">${esc(f.remark)}</textarea></div>`);
+  const notesCard = notes.length ? card("Notes", `<div style="display:grid;gap:10px">${notes.join("")}</div>`) : "";
+
+  const tableCount = Number((state.data.settings || {}).table_count) || 0;
+  return `${whoCard}${platesCard}${fnCard}${payCard}${notesCard}
+  <div class="card" style="border-style:dashed">
+    <h3 style="color:var(--muted)">🔒 Filled by the app</h3>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)">
+      <span>Bill no. — its own banquet series</span><span>Date &amp; time</span>
+      <span>${esc(bqTaxLabel())}</span><span>Totals, round off, amount in words</span>
+      <span>Prints on ${paper.pad ? "the pre-printed pad" : "plain paper"} (${paper.size.toUpperCase()})</span>
+    </div>
+  </div>
+  <div class="card" style="position:sticky;bottom:0;z-index:4">
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end">
+      <div><div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em">Subtotal</div>
+        <div style="font-size:17px;font-weight:700">${inr(m.sub)}</div></div>
+      ${m.disc > 0 ? `<div><div style="font-size:10.5px;color:var(--muted);text-transform:uppercase">Discount</div>
+        <div style="font-size:17px;font-weight:700">− ${inr(m.disc)}</div></div>` : ""}
+      <div><div style="font-size:10.5px;color:var(--muted);text-transform:uppercase">${esc(bqTaxLabel())}</div>
+        <div style="font-size:17px;font-weight:700">${inr(m.tax)}</div></div>
+      <div><div style="font-size:10.5px;color:var(--muted);text-transform:uppercase">Bill total</div>
+        <div style="font-size:25px;font-weight:800;color:var(--gold-strong)">${inr(m.total)}</div></div>
+      ${m.paid ? `<div><div style="font-size:10.5px;color:var(--muted);text-transform:uppercase">Received</div>
+        <div style="font-size:17px;font-weight:700">${inr(m.paid)}</div></div>
+      <div><div style="font-size:10.5px;color:var(--muted);text-transform:uppercase">Balance</div>
+        <div style="font-size:17px;font-weight:700;color:${m.bal > 0 ? "var(--red)" : "var(--green)"}">${inr(Math.max(0, m.bal))}</div></div>` : ""}
+      <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+        <div class="field" style="margin:0;width:104px"><label style="font-size:11px">Table (optional)</label>
+          <input class="sx-input" id="bqTable" type="number" min="1" ${tableCount ? `max="${tableCount}"` : ""} value="${esc(f.table)}" placeholder="none" /></div>
+        <button class="btn primary" id="bqIssue" ${m.total > 0 ? "" : "disabled"}>🖨 Save &amp; print</button>
+      </div>
+    </div>
+    <div style="font-size:11.5px;color:var(--muted);margin-top:8px;border-top:1px dashed var(--line);padding-top:7px">
+      In words: ${esc(bqWords(m.total))}${m.paid ? (m.bal > 0 ? ` · ${inr(m.bal)} still to collect` : " · settled in full") : ""}</div>
+  </div>`;
+}
+function bqTaxLabel() {
+  const tm = taxModel(state.data.settings);
+  return tm.components && tm.components.length
+    ? tm.components.map((c) => c.label + " " + c.rate + "%").join(" + ")
+    : taxLabel() + " " + tm.pct + "%";
 }
 
 function bindBanquet() {
   const ed = $("#editor");
-  const bq = state.banquet;
+  const bq = state.banquet, f = bqForm();
+  ed.querySelectorAll("[data-bqsub]").forEach((b) => (b.onclick = () => {
+    bq.sub = b.dataset.bqsub;
+    if (bq.sub === "bills" && !bq.billsLoaded) { renderEditor(); loadBanquetBills(); return; }
+    renderEditor();
+  }));
   const rf = document.getElementById("bqRefresh");
-  if (rf) rf.onclick = () => { bq.loaded = false; renderEditor(); };
-  // Menu card — save a row's edits on change (title/price/unit), toggle, delete.
+  if (rf) rf.onclick = () => { bq.loaded = false; bq.billsLoaded = false; renderEditor(); loadBanquet(); if (bq.sub === "bills") loadBanquetBills(); };
+
+  // ── packages screen ──
   ed.querySelectorAll("[data-bq-id]").forEach((row) => {
     const id = row.dataset.bqId;
     const item = bq.items.find((i) => i.id === id);
     if (!item) return;
-    // Track in-flight row saves so "Create the bill" can WAIT for them — otherwise editing a
-    // price then immediately creating a bill placed it at the OLD price (the place RPC re-prices
-    // from the DB, and the row save was still travelling).
     bq._pending = bq._pending || new Set();
     const save = (patch) => {
       const p = (async () => {
@@ -10168,17 +10452,15 @@ function bindBanquet() {
       return p;
     };
     row.querySelectorAll("[data-bq-f]").forEach((inp) => {
-      // Keep the local item live as you type so the bill total reflects the edit immediately.
-      inp.oninput = () => { const f = inp.dataset.bqF; item[f] = f === "price" ? Number(inp.value) || 0 : inp.value; };
+      inp.oninput = () => { const k = inp.dataset.bqF; item[k] = k === "price" ? Number(inp.value) || 0 : inp.value; };
       inp.onchange = () => save({ [inp.dataset.bqF]: inp.dataset.bqF === "price" ? Number(inp.value) || 0 : inp.value });
     });
     row.querySelector("[data-bq-toggle]").onclick = () => save({ active: !item.active });
     row.querySelector("[data-bq-del]").onclick = async () => {
-      if (!(await confirmDialog(`Delete "${item.title}" from the banquet menu?`, "Delete"))) return;
+      if (!(await confirmDialog(`Delete "${item.title}" from the banquet packages?`, "Delete"))) return;
       try {
         await api("POST", "/banquet/item-delete", { id });
         bq.items = bq.items.filter((i) => i.id !== id);
-        delete bq.qty[id];
         renderEditor();
         toast("Deleted", "ok");
       } catch (e) { toast("Couldn't delete: " + e.message, "err"); }
@@ -10188,7 +10470,7 @@ function bindBanquet() {
   if (add) add.onclick = async () => {
     const title = (document.getElementById("bqNewTitle").value || "").trim();
     const price = Number(document.getElementById("bqNewPrice").value) || 0;
-    if (!title) { toast("Give the item a name.", "err"); return; }
+    if (!title) { toast("Give the package a name.", "err"); return; }
     try {
       const row = await api("POST", "/banquet/item-save", { title, price, unit: "per plate", active: true, sort_order: bq.items.length + 1 });
       bq.items.push(row);
@@ -10196,36 +10478,345 @@ function bindBanquet() {
       toast("Added", "ok");
     } catch (e) { toast("Couldn't add: " + e.message, "err"); }
   };
-  // Bill-builder card — qty steppers re-render for the live total.
-  const setQty = (id, v) => { bq.qty[id] = Math.max(0, Math.min(5000, Math.round(Number(v) || 0))); renderEditor(); };
-  ed.querySelectorAll("[data-bq-qty]").forEach((inp) => { inp.onchange = () => setQty(inp.dataset.bqQty, inp.value); });
-  ed.querySelectorAll("[data-bq-minus]").forEach((b) => { b.onclick = () => setQty(b.dataset.bqMinus, (Number(bq.qty[b.dataset.bqMinus]) || 0) - 1); });
-  ed.querySelectorAll("[data-bq-plus]").forEach((b) => { b.onclick = () => setQty(b.dataset.bqPlus, (Number(bq.qty[b.dataset.bqPlus]) || 0) + 1); });
-  const tableInp = document.getElementById("bqTable");
-  if (tableInp) tableInp.onchange = () => { bq.table = tableInp.value; };
-  const place = document.getElementById("bqPlace");
-  if (place) place.onclick = async () => {
-    const linesOut = state.banquet.items.filter((i) => i.active && (Number(bq.qty[i.id]) || 0) > 0)
-      .map((i) => ({ id: i.id, qty: Math.round(Number(bq.qty[i.id])) }));
-    const t = String((tableInp && tableInp.value) || "").trim();
-    if (!linesOut.length) { toast("Set a plate count on at least one item.", "err"); return; }
-    if (t && !/^\d+$/.test(t)) { toast("That table number doesn't look right — or leave it blank.", "err"); return; }
-    place.disabled = true;
+
+  // ── ledger screen ──
+  const search = document.getElementById("bqSearch");
+  if (search) {
+    let t = null;
+    search.oninput = () => { bq.q = search.value; clearTimeout(t); t = setTimeout(() => loadBanquetBills(), 350); };
+  }
+  ed.querySelectorAll("[data-bqprint]").forEach((b) => (b.onclick = async () => {
+    b.disabled = true;
     try {
-      // Wait for any in-flight menu-row edit (price/title) so the bill is priced from the
-      // latest saved values, not a half-committed one.
+      const r = await api("GET", "/banquet/bill?id=" + encodeURIComponent(b.dataset.bqprint));
+      const lines = ((r.order && r.order.items) || []).map((i) => ({ title: i.title, qty: Number(i.qty) || 1, price: parseFloat(i.price) || 0 }));
+      printBanquetBill(r.bill, lines);
+    } catch (e) { toast("Couldn't open that bill: " + e.message, "err"); }
+    b.disabled = false;
+  }));
+
+  // ── bill screen ──
+  const bind = (id, fn, ev) => { const el = document.getElementById(id); if (el) el[ev || "oninput"] = () => { fn(el.value); renderEditor(); }; };
+  const bindQuiet = (id, fn, ev) => { const el = document.getElementById(id); if (el) el[ev || "oninput"] = () => fn(el.value); };
+  bindQuiet("bqName", (v) => (f.cust_name = v));
+  bindQuiet("bqGstin", (v) => (f.cust_gstin = v.toUpperCase()));
+  bindQuiet("bqPerson", (v) => (f.cust_person = v));
+  bindQuiet("bqAddr", (v) => (f.cust_addr = v));
+  bindQuiet("bqHall", (v) => (f.hall = v));
+  bindQuiet("bqFunc", (v) => (f.func = v));
+  bindQuiet("bqFnDate", (v) => (f.fn_date = v));
+  bindQuiet("bqFrom", (v) => (f.fn_from = v));
+  bindQuiet("bqTo", (v) => (f.fn_to = v));
+  bindQuiet("bqRemark", (v) => (f.remark = v));
+  bindQuiet("bqTable", (v) => (f.table = v));
+  bind("bqPkg", (v) => { f.pkg = Number(v) || 0; f.rate = 0; }, "onchange");
+  bind("bqPax", (v) => (f.pax = Math.max(1, Math.round(Number(v) || 1))));
+  bind("bqRate", (v) => (f.rate = Math.max(0, Number(v) || 0)));
+  bind("bqDisc", (v) => (f.disc = Math.max(0, Math.min(100, Number(v) || 0))));
+  bind("bqAdv", (v) => (f.advance = Math.max(0, Number(v) || 0)));
+  bindQuiet("bqAdvMode", (v) => (f.advMode = v), "onchange");
+  // phone → look the customer up in this restaurant's own directory (same search the
+  // dine-in bill uses), so a repeat booking doesn't retype the name.
+  const ph = document.getElementById("bqPhone");
+  if (ph) {
+    let t = null;
+    ph.oninput = () => {
+      f.cust_phone = ph.value;
+      clearTimeout(t);
+      const digits = ph.value.replace(/\D/g, "");
+      const found = document.getElementById("bqFound");
+      if (digits.length < 4) { if (found) { found.textContent = ""; } return; }
+      t = setTimeout(async () => {
+        try {
+          const r = await api("GET", "/customer-search?q=" + encodeURIComponent(digits));
+          const hit = (r.matches || [])[0];
+          if (!found) return;
+          if (hit && hit.name) {
+            found.style.color = "var(--green)";
+            found.textContent = `✓ ${hit.name}${hit.visits ? ` — ${hit.visits} past visit${hit.visits > 1 ? "s" : ""}` : ""}`;
+            const nameEl = document.getElementById("bqName");
+            if (nameEl && !nameEl.value.trim()) { nameEl.value = hit.name; f.cust_name = hit.name; }
+          } else {
+            found.style.color = "var(--gold)";
+            found.textContent = "New customer — the name is remembered for next time.";
+          }
+        } catch (e) { /* a lookup is a nicety: never block the bill */ }
+      }, 320);
+    };
+  }
+  // extras
+  const addEx = document.getElementById("bqAddEx");
+  if (addEx) addEx.onclick = () => {
+    const first = bq.items.filter((i) => i.active)[0];
+    if (!first) return;
+    f.extras.push({ id: first.id, qty: 1, price: 0, disc: 0 });
+    renderEditor();
+  };
+  ed.querySelectorAll("[data-bqex]").forEach((row) => {
+    const i = Number(row.dataset.bqex);
+    row.querySelectorAll("[data-exf]").forEach((inp) => {
+      const k = inp.dataset.exf;
+      const apply = () => {
+        f.extras[i][k] = k === "id" ? inp.value : Number(inp.value) || 0;
+        renderEditor();
+      };
+      if (k === "id") inp.onchange = apply; else inp.onchange = apply;
+    });
+    const del = row.querySelector("[data-exdel]");
+    if (del) del.onclick = () => { f.extras.splice(i, 1); renderEditor(); };
+  });
+  // payments
+  const addPay = document.getElementById("bqAddPay");
+  if (addPay) addPay.onclick = () => {
+    f.pays.push({ date: new Date().toISOString().slice(0, 10), mode: "Cash", ref: "", amt: 0 });
+    renderEditor();
+  };
+  ed.querySelectorAll("[data-bqpay]").forEach((row) => {
+    const i = Number(row.dataset.bqpay);
+    row.querySelectorAll("[data-pf]").forEach((inp) => (inp.onchange = () => {
+      const k = inp.dataset.pf;
+      f.pays[i][k] = k === "amt" ? Number(inp.value) || 0 : inp.value;
+      renderEditor();
+    }));
+    const del = row.querySelector("[data-paydel]");
+    if (del) del.onclick = () => { f.pays.splice(i, 1); renderEditor(); };
+  });
+
+  // ── issue the bill ──
+  const issue = document.getElementById("bqIssue");
+  if (issue) issue.onclick = async () => {
+    const lines = bqLines();
+    if (!lines.length) { toast("Pick a package first.", "err"); return; }
+    const t = String(f.table || "").trim();
+    if (t && !/^\d+$/.test(t)) { toast("That table number doesn't look right — or leave it blank.", "err"); return; }
+    if (bqOn("cust_name") && !String(f.cust_name || "").trim()) { toast("Type who the bill is for.", "err"); return; }
+    issue.disabled = true;
+    try {
+      // wait for any in-flight package edit so the server prices from the saved value
       if (bq._pending && bq._pending.size) await Promise.allSettled([...bq._pending]);
-      const r = await api("POST", "/banquet/place", { table: t, lines: linesOut });
-      bq.qty = {}; bq.table = t;
-      toast(`Banquet bill created${t ? ` on table ${t}` : ""} — total ${inr(r.total)}.`, "ok");
-      // With a table it's a normal open table (settle from Tables); without, it's a
-      // standalone bill — send the manager straight to where it now lives.
-      setTab(t ? "tables" : "orders");
+      const advances = bqOn("paysplit")
+        ? f.pays.filter((p) => Number(p.amt) > 0)
+        : (bqOn("advance") && Number(f.advance) > 0
+            ? [{ date: new Date().toISOString().slice(0, 10), mode: f.advMode, ref: "", amt: Number(f.advance) }]
+            : []);
+      const meta = {
+        hall: f.hall, func: f.func, fn_date: f.fn_date || null, fn_from: f.fn_from, fn_to: f.fn_to,
+        pax: bqOn("pax") ? Math.max(1, Math.round(Number(f.pax) || 1)) : null,
+        rate: lines[0] ? lines[0].price : null,
+        cust_name: f.cust_name, cust_phone: f.cust_phone, cust_gstin: f.cust_gstin,
+        cust_addr: f.cust_addr, cust_person: f.cust_person, remark: f.remark, advances,
+      };
+      const payload = lines.map((l) => ({ id: l.id, qty: l.qty, disc: l.disc, price: l.open ? l.price : undefined }));
+      const r = await api("POST", "/banquet/bill", { table: t, lines: payload, meta });
+      toast(`Bill ${r.bill_no} created — ${inr(r.total)}.`, "ok");
+      // print from the SERVER's frozen figures, never from the screen's copy
+      printBanquetBill({
+        bill_no: r.bill_no, issued_at: new Date().toISOString(),
+        subtotal: r.subtotal, tax: r.tax, total: r.total, discount: r.discount, received: r.received,
+        advances, hall: f.hall, func: f.func, fn_date: f.fn_date, fn_from: f.fn_from, fn_to: f.fn_to,
+        pax: meta.pax, rate: meta.rate, cust_name: f.cust_name, cust_phone: f.cust_phone,
+        cust_gstin: f.cust_gstin, cust_addr: f.cust_addr, cust_person: f.cust_person,
+        remark: f.remark, prepared_by: r.prepared_by || "",
+        table_number: t || null,
+      }, lines.map((l) => ({ title: l.title + (l.unit ? ` (${l.unit})` : ""), qty: l.qty, price: l.price })));
+      // fresh form, and the ledger will re-read on its next open
+      state.banquet.f = null;
+      state.banquet.billsLoaded = false;
+      renderEditor();
     } catch (e) {
       toast("Couldn't create the bill: " + e.message, "err");
-      place.disabled = false;
+      issue.disabled = false;
     }
   };
+}
+
+// ── THE PRINTED BANQUET BILL (mig 237) ─────────────────────────────────────
+// A5/A4 sheet. On a PRE-PRINTED pad the top <top>mm is left blank for the
+// letterhead and the header is not printed; on PLAIN paper (the default) the app
+// prints the name/address/GSTIN itself. A bill for a customer with a GSTIN prints
+// the full per-line CGST/SGST columns their accountant expects; a family booking
+// gets the shorter form with the tax in the summary. Every figure comes from the
+// bill row (frozen at issue), so a re-print years later is identical.
+function printBanquetBill(b, lines) {
+  const s = state.data.settings || {};
+  const bi = billIdentity(s);
+  const P = bqPaper();
+  const isA4 = P.size === "a4";
+  const W = isA4 ? 210 : 148, H = isA4 ? 297 : 210;
+  const when = new Date(b.issued_at || Date.now());
+  const dstr = when.toLocaleDateString("en-GB").replace(/\//g, "-");
+  const tstr = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toUpperCase().replace(" ", "");
+  const sub = Number(b.subtotal) || 0, disc = Number(b.discount) || 0;
+  const taxAmt = Number(b.tax) || 0, total = Number(b.total) || 0;
+  const recv = Number(b.received) || 0;
+  const bal = Math.round((total - recv) * 100) / 100;
+  const taxable = Math.round((sub - disc) * 100) / 100;
+  const b2b = !!String(b.cust_gstin || "").trim();
+  // named tax components, or the historical CGST+SGST halves; the last one takes the
+  // remainder so the printed lines always foot to the tax on the total.
+  const tm = taxModel(s);
+  const comps = (tm.components && tm.components.length) ? tm.components
+    : [{ label: "CGST", rate: tm.pct / 2 }, { label: "SGST", rate: tm.pct / 2 }];
+  const rateSum = comps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
+  let run = 0;
+  const taxRows = comps.map((c, i) => {
+    const amt = i === comps.length - 1 ? Math.round((taxAmt - run) * 100) / 100
+      : Math.round(taxAmt * ((Number(c.rate) || 0) / rateSum) * 100) / 100;
+    run = Math.round((run + amt) * 100) / 100;
+    return { label: c.label, rate: Number(c.rate) || 0, amt };
+  });
+  const L = (lines || []).map((l) => {
+    const gross = (Number(l.qty) || 0) * (Number(l.price) || 0);
+    return { title: l.title, qty: Number(l.qty) || 0, price: Number(l.price) || 0, gross };
+  });
+  // per-line taxable value: the bill's discount spread pro-rata so the column foots
+  const grossAll = L.reduce((a, l) => a + l.gross, 0) || 1;
+  L.forEach((l) => { l.taxable = Math.round((l.gross - disc * (l.gross / grossAll)) * 100) / 100; });
+
+  const cols = b2b ? 5 + comps.length * 2 : 5;
+  // One <col> per column. Built by concatenation, NOT by joining half-open tags — the
+  // clever join printed a stray "<" on the paper (caught in the print check).
+  const colg = b2b
+    ? `<col style="width:7mm"><col><col style="width:11mm"><col style="width:14mm"><col style="width:19mm">`
+      + comps.map(() => `<col style="width:10mm"><col style="width:15mm">`).join("")
+    : `<col style="width:7mm"><col><col style="width:14mm"><col style="width:18mm"><col style="width:22mm">`;
+  const head = b2b
+    ? `<tr><th rowspan="2">Sr</th><th rowspan="2">Item Name</th><th rowspan="2">Qty.</th><th rowspan="2">Rate</th><th rowspan="2">Taxable<br/>Value</th>${comps.map((c) => `<th colspan="2">${esc(c.label)}</th>`).join("")}</tr>
+       <tr>${comps.map(() => "<th>Rate</th><th>Amount</th>").join("")}</tr>`
+    : `<tr><th>Sr</th><th>Item Name</th><th>Qty.</th><th>Rate</th><th>Amount</th></tr>`;
+  const rows = L.map((l, i) => {
+    const nameCell = `<td class="n">${esc(l.title)}</td>`;
+    if (!b2b) return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.gross)}</td></tr>`;
+    const tds = taxRows.map((c) => `<td class="c">${bq2(c.rate)}%</td><td class="r">${bq2(Math.round(l.taxable * (c.rate / 100) * 100) / 100)}</td>`).join("");
+    return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.taxable)}</td>${tds}</tr>`;
+  }).join("");
+  const fillN = P.fill ? Math.max(0, (isA4 ? 12 : 6) - L.length) : 0;
+  let fill = "";
+  for (let i = 0; i < fillN; i++) fill += `<tr class="fill">${"<td></td>".repeat(cols)}</tr>`;
+
+  // Terms box: the advances, the remark, and the function line — each only if present.
+  const terms = [];
+  for (const a of (b.advances || [])) {
+    if (Number(a.amt) > 0) {
+      const d = a.date ? new Date(a.date).toLocaleDateString("en-GB") : "";
+      terms.push(`${esc(String(a.mode || "").toUpperCase())} PAY${d ? " DT." + d : ""} — ${bq0(a.amt)}/-`);
+    }
+  }
+  if (b.remark) terms.push(esc(b.remark));
+  const fnBits = [];
+  if (b.func) fnBits.push(esc(b.func));
+  if (b.fn_date) fnBits.push(new Date(b.fn_date).toLocaleDateString("en-GB") + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
+  if (b.pax) fnBits.push(b.pax + (b.func || b.fn_date ? " pax" : " plates"));
+  const fnLead = fnBits.length && (b.func || b.fn_date) ? "Function: " : "";
+  const toBits = [];
+  if (b.cust_name) toBits.push(`<div class="who">${esc(b.cust_name)}</div>`);
+  if (b.cust_addr) toBits.push(`<div class="adr">${esc(b.cust_addr).split("\n").join("<br/>")}</div>`);
+  const line2 = [b.cust_person, b.cust_phone].filter(Boolean).map(esc).join(" · ");
+  if (line2) toBits.push(`<div class="adr">${line2}</div>`);
+  if (b2b) toBits.push(`<div style="font-size:7.6pt;margin-top:1.2mm">GSTIN / UID&nbsp;: <b>${esc(b.cust_gstin)}</b></div>`);
+
+  const money = [];
+  money.push(`<div class="ms"><span>Subtotal</span><i>${bq2(sub)}</i></div>`);
+  if (disc > 0) money.push(`<div class="ms"><span>Discount</span><i>− ${bq2(disc)}</i></div><div class="ms"><span>Taxable value</span><i>${bq2(taxable)}</i></div>`);
+  taxRows.forEach((c) => money.push(`<div class="ms"><span>${esc(c.label)} ${c.rate}%</span><i>${bq2(c.amt)}</i></div>`));
+  const roundOff = Math.round((total - (taxable + taxAmt)) * 100) / 100;
+  if (roundOff) money.push(`<div class="ms"><span>Round off</span><i>${(roundOff > 0 ? "+" : "") + bq2(roundOff)}</i></div>`);
+  money.push(`<div class="ms tot"><span>BILL TOTAL</span><i>${bq2(total)}</i></div>`);
+  if (recv > 0) {
+    money.push(`<div class="ms bal"><span>Received</span><i>${bq2(recv)}</i></div>`);
+    money.push(`<div class="ms" style="font-weight:700"><span>${bal > 0 ? "Balance due" : "Balance"}</span><i>${bq2(Math.max(0, bal))}</i></div>`);
+  }
+
+  const w = window.open("", "_blank", "width=780,height=980");
+  if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Banquet bill ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
+<style>
+  /* A5/A4 sheet print recipe: an EXPLICIT @page size is correct here (unlike the 80mm
+     thermal bill, where forcing a size makes CUPS rotate the job) because the tray
+     really holds this sheet. margin:0 kills the browser's own header/footer. */
+  @page{size:${W}mm ${H}mm;margin:0}
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html,body{margin:0;padding:0;background:#fff}
+  .pg{width:${W}mm;min-height:${H}mm;background:#fff;color:#000;position:relative;
+      font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:${isA4 ? 9.4 : 8.2}pt;line-height:1.34}
+  .body{padding:0 ${P.side}mm ${P.bot}mm}
+  .selfhead{text-align:center;padding:${P.pad ? 0 : 4}mm 0 2.2mm;border-bottom:1.1px solid #000;margin-bottom:1.4mm}
+  .selfhead .nm{font-size:${isA4 ? 16 : 14}pt;font-weight:800;letter-spacing:.2px}
+  .selfhead .ad{font-size:7.5pt;line-height:1.34;margin-top:.7mm}
+  .doct{text-align:center;margin:2.4mm 0 2mm}
+  .doct b{font-size:10pt;font-weight:700;letter-spacing:.22em;text-transform:uppercase}
+  table{width:100%;border-collapse:collapse}
+  .bx{border:1px solid #000}
+  .bx td{border:1px solid #000;padding:1.5mm 1.9mm;vertical-align:top}
+  .lbl{font-size:6.7pt;letter-spacing:.09em;text-transform:uppercase;opacity:.7}
+  .who{font-weight:700;font-size:8.7pt;text-transform:uppercase;letter-spacing:.2px;margin-top:.5mm}
+  .adr{font-size:7.5pt;line-height:1.36;margin-top:.5mm}
+  .v{font-weight:700;font-size:8.2pt;white-space:nowrap}
+  .metag{display:grid;grid-template-columns:1fr 1fr;gap:1.4mm 2mm}
+  .terms{font-size:7.4pt;line-height:1.44}
+  table.it{border:1px solid #000;table-layout:fixed;margin-top:0}
+  table.it th,table.it td{border:1px solid #000;padding:1.2mm 1.5mm;font-size:7.7pt}
+  table.it th{font-weight:700;text-align:center;font-size:6.9pt;line-height:1.2}
+  table.it td.n{text-align:left}table.it td.c{text-align:center}
+  table.it td.r{text-align:right;font-variant-numeric:tabular-nums}
+  table.it tr.fill td{height:5.4mm;border-top:0;border-bottom:0}
+  .footg{display:flex;border:1px solid #000;border-top:0}
+  .footg .fl{flex:1;padding:1.6mm 1.9mm;border-right:1px solid #000;min-width:0}
+  .footg .fr{width:${isA4 ? 74 : 56}mm;padding:1.2mm 1.9mm}
+  .wrd{font-size:7.6pt;line-height:1.38;margin-top:.4mm}
+  .ms{display:flex;justify-content:space-between;gap:2mm;font-size:7.8pt;padding:.5mm 0}
+  .ms.tot{border-top:1px solid #000;margin-top:.9mm;padding-top:1.1mm;font-weight:700;font-size:9.4pt}
+  .ms.bal{border-top:1px dashed #000;margin-top:.9mm;padding-top:1.1mm;font-weight:700}
+  .ms i{font-style:normal;font-variant-numeric:tabular-nums}
+  .stamp{display:inline-block;border:1.1px solid #000;border-radius:1mm;padding:.5mm 2mm;font-size:7.4pt;
+         font-weight:700;letter-spacing:.12em;margin-top:1.4mm}
+  .sign{text-align:right;font-size:7.7pt;margin-top:2.6mm;line-height:1.5}
+  .sign .sp{height:9mm}
+  .pfoot{text-align:center;font-size:7.2pt;margin-top:3mm;line-height:1.45}
+  @media print{tr,.ms,.footg,.bx{break-inside:avoid}thead{display:table-row-group}}
+</style></head><body><div class="pg">
+  <div style="height:${P.pad ? P.top : 0}mm"></div>
+  <div class="body">
+    ${P.pad ? "" : `<div class="selfhead"><div class="nm">${esc(bi.name)}</div>
+      <div class="ad">${esc(bi.address)}${bi.phone ? "<br/>Ph " + esc(bi.phone) : ""}${bi.gstin ? "<br/>GSTIN " + esc(bi.gstin) : ""}</div></div>`}
+    <div class="doct"><b>${b2b ? "Tax Invoice" : "Bill"}</b></div>
+    <table class="bx">
+      <tr>
+        <td style="width:53%"><div class="lbl">Supplier</div><div class="who">${esc(bi.name)}</div>
+          <div class="adr">${esc(bi.address)}</div>
+          ${bi.gstin ? `<div style="font-size:7.5pt;margin-top:1mm">GSTIN&nbsp;: <b>${esc(bi.gstin)}</b></div>` : ""}</td>
+        <td><div class="metag">
+          <div><div class="lbl">Bill No.</div><div class="v">${esc(b.bill_no || "—")}</div></div>
+          <div><div class="lbl">Dated</div><div class="v">${esc(dstr)}</div></div>
+          ${b.hall ? `<div><div class="lbl">Banq. Name</div><div class="v">${esc(b.hall)}</div></div>` : ""}
+          <div><div class="lbl">Time</div><div class="v">${esc(tstr)}</div></div>
+          ${b.table_number ? `<div><div class="lbl">Table</div><div class="v">${esc(String(b.table_number))}</div></div>` : ""}
+        </div></td>
+      </tr>
+      ${toBits.length || terms.length || fnBits.length ? `<tr>
+        <td>${toBits.length ? `<div class="lbl">Details of receiver (Bill to)</div>${toBits.join("")}`
+             : `<div class="lbl">Bill to</div><div class="adr">Counter booking</div>`}</td>
+        <td><div class="lbl">Terms &amp; conditions</div>
+          ${terms.length ? `<div class="terms" style="margin-top:.6mm">${terms.join("<br/>")}</div>` : ""}
+          ${fnBits.length ? `<div class="terms" style="margin-top:${terms.length ? "1mm" : ".6mm"}">${fnLead}${fnBits.join(" · ")}</div>` : ""}
+          ${!terms.length && !fnBits.length ? `<div class="terms" style="margin-top:.6mm">—</div>` : ""}</td>
+      </tr>` : ""}
+    </table>
+    <table class="it" style="border-top:0"><colgroup>${colg}</colgroup><thead>${head}</thead><tbody>${rows}${fill}</tbody></table>
+    <div class="footg">
+      <div class="fl"><div class="lbl">Bill total (in words)</div>
+        <div class="wrd">${esc(bqWords(total))}</div>
+        ${recv > 0 ? `<div class="stamp">${bal > 0 ? "BALANCE DUE " + bq0(bal) : "PAID IN FULL"}</div>` : ""}</div>
+      <div class="fr">${money.join("")}</div>
+    </div>
+    ${P.sign ? `<div class="sign">For <b>${esc(bi.name)}</b><div class="sp"></div>Authorised Signatory</div>` : ""}
+    ${b.prepared_by ? `<div style="font-size:7pt;margin-top:1.4mm">Prepared by ${esc(b.prepared_by)}</div>` : ""}
+    ${P.foot ? `<div class="pfoot">${esc(bi.footer)}${bi.gstin ? "<br/>GST No: " + esc(bi.gstin) : ""}</div>` : ""}
+  </div>
+</div>
+<script>setTimeout(function(){print()},350)<\/script>
+</body></html>`);
+  w.document.close();
 }
 
 // Show/hide the Banquet tab from the entitlement — called after every loadAll so
