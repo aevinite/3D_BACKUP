@@ -11,6 +11,34 @@
 // Used by logError (should this occurrence alarm?), the Send-to-Claude guard (is this already
 // fixed?) and the Repair page (group + label tiles). ONE definition so the three can't drift —
 // that drift is what let the same problem look "new" to one surface and "known" to another.
+//
+// readableError() (below) is the sibling that fixes what is STORED and SHOWN, not just what is
+// compared — see its own note.
+
+/**
+ * Turn a raw error message into something a person can read, without losing the signal.
+ *
+ * A gateway in front of the database (Cloudflare, in Supabase's case) answers a failed request
+ * with a whole HTML PAGE rather than JSON, and supabase-js passes that page straight through as
+ * `error.message`. So a database wobble was recorded — and pushed to the owner's phone, and used
+ * as the title of the "Fix NOW" ticket — as hundreds of characters of markup beginning
+ * `<!DOCTYPE html> <!--[if lt IE 7]>…`, which says nothing to anybody (2026-07-31: that is exactly
+ * what the owner was shown for a Supabase 522).
+ *
+ * Everything such a page actually TELLS us is its <title> — "supabase.co | 522: Connection timed
+ * out". The rest is Cloudflare boilerplate, so keeping the title keeps the whole signal; nothing
+ * is hidden. Any message that is NOT an error page comes back untouched.
+ */
+export function readableError(msg: string | null | undefined): string {
+  const s = String(msg ?? "");
+  if (!/<html[\s>]/i.test(s) && !/<!doctype\s+html/i.test(s) && !/<title>/i.test(s)) return s;
+  const title = s.match(/<title>([^<]*)<\/title>/i)?.[1]?.replace(/\s+/g, " ").trim();
+  // No <title> (a bare proxy page) → strip the tags so we still say something, never raw markup.
+  const stripped = s.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+  const what = title || stripped;
+  const lead = "the server replied with an error page instead of data";
+  return what ? `${lead}: "${what}"` : lead;
+}
 
 /** Normalise an error message into a comparable signature. Empty message → "" (never matches). */
 export function errorSig(detail: string | null | undefined): string {

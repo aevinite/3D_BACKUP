@@ -2,6 +2,7 @@
 // so the "Operation log" shows who-did-what. Fire-and-forget: a logging failure
 // must never break the actual action, so it's wrapped in try/catch.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { readableError } from "@/lib/errorSignature";
 
 // Redact currency from a free-text `detail` string for ADMIN-facing feeds only. The admin
 // must never see food money (hard rule: "admin sees NO earnings"), but some staff actions
@@ -81,7 +82,12 @@ export async function logError(
   err: unknown,
   fields: Omit<Fields, "level"> = {},
 ): Promise<void> {
-  const msg = err instanceof Error ? err.message : String(err ?? "unknown error");
+  // A gateway failure (Supabase behind Cloudflare) arrives as an entire HTML page, and it used to
+  // be stored verbatim — so the admin's Problems list, the Logs row, the "Fix NOW" ticket title
+  // and the owner's phone alert all read `<!DOCTYPE html> <!--[if lt IE 7]>…`. readableError keeps
+  // the page's <title> (which is the whole message) and drops the markup; anything that isn't an
+  // error page is returned untouched, so no ordinary error changes. (owner ticket, 2026-07-31)
+  const msg = readableError(err instanceof Error ? err.message : String(err ?? "unknown error"));
   const detail = `${fields.detail ? fields.detail + " — " : ""}${msg}`.slice(0, 500);
   try {
     await sb.from("staff_actions").insert({
