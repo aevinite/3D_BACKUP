@@ -26,13 +26,21 @@ const ICON: Record<string, string> = {
   users: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 010 7.8",
   crown: "M3 18h18M4 15L2 7l5.5 4L12 4l4.5 7L22 7l-2 8z",
   user: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8",
+  // "Staff apps" asked for this and it did not exist, so that section wore an EMPTY chip while
+  // every other section had its glyph (owner spotted it, 2026-07-31). Four panes, which is also
+  // literally what the section counts — the four staff apps.
+  grid: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
   info: "M12 22a10 10 0 100-20 10 10 0 000 20M12 16v-5M12 8h.01",
   chevron: "M6 9l6 6 6-6", check: "M20 6L9 17l-5-5", link: "M10 13a5 5 0 007 0l3-3a5 5 0 00-7-7l-1 1M14 11a5 5 0 00-7 0l-3 3a5 5 0 007 7l1-1",
+  // Drawn when a name has no glyph. An unknown name used to render NOTHING, so a typo or a new
+  // section shipped a blank square that looked deliberate — the failure was invisible, which is
+  // the only reason it survived. A visible placeholder makes the gap obvious the first time.
+  unknown: "M5 5h14v14H5z",
 };
 const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
   <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.85}
     strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }} aria-hidden="true">
-    {ICON[n]?.split("M").filter(Boolean).map((d, i) => <path key={i} d={"M" + d} />)}
+    {(ICON[n] || ICON.unknown).split("M").filter(Boolean).map((d, i) => <path key={i} d={"M" + d} />)}
   </svg>
 );
 
