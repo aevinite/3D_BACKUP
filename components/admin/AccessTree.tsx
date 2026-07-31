@@ -500,6 +500,12 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
 
 function TreeStyle() {
   return <style jsx global>{`
+  /* HOVER IS RED (owner, 2026-07-31: "when you hover it's blue — make it red, a mid-light red").
+     Deliberately a DIFFERENT colour from the level blues and greens: those say what a setting IS,
+     hover says where your pointer is. Keeping them apart means a hovered-but-off box can never be
+     mistaken for an on one. The checkbox and radio keep their level colour while hovered, so the
+     state stays readable underneath the highlight. */
+  .acc2-main, .at-head { --hov:#f87171; }
   .at-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; min-height:38px; margin:0 0 10px; }
   .at-head .acc2-save { margin-left:auto; }
   .at-hint-x { margin-left:auto; background:none; border:0; color:inherit; opacity:.6; cursor:pointer; font-size:19px; line-height:1; }
@@ -534,6 +540,7 @@ function TreeStyle() {
   .at-box { border:1.5px solid color-mix(in srgb, var(--lvl) 30%, transparent); border-radius:14px;
     background:color-mix(in srgb, var(--lvl) 5%, color-mix(in srgb, var(--card) 78%, var(--bg))); padding:13px 14px; }
   .at-box + .at-box, .at-box + .at-grid, .at-grid + .at-box { margin-top:9px; }
+  .at-box:hover { border-color:color-mix(in srgb, var(--hov) 42%, transparent); }
   .at-box-h { display:flex; align-items:flex-start; gap:14px; }
   .at-box-t { flex:1; min-width:0; }
   .at-box-t .nm { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:14.5px; font-weight:750; }
@@ -548,6 +555,7 @@ function TreeStyle() {
     background:color-mix(in srgb, var(--card) 55%, var(--bg)); color:inherit; font:inherit;
     transition:border-color .15s, background .15s; }
   .at-opt.on { border-color:color-mix(in srgb, var(--lvl) 66%, transparent); background:color-mix(in srgb, var(--lvl) 12%, transparent); }
+  .at-opt:hover { border-color:color-mix(in srgb, var(--hov) 66%, transparent); background:color-mix(in srgb, var(--hov) 12%, transparent); }
   .at-opt:focus-visible { outline:2px solid var(--lvl); outline-offset:2px; }
   .at-radio { flex:none; width:16px; height:16px; margin-top:2px; border-radius:50%;
     border:1.7px solid var(--muted); display:grid; place-items:center; transition:border-color .15s; }
@@ -562,6 +570,8 @@ function TreeStyle() {
     border-radius:12px; background:color-mix(in srgb, var(--card) 60%, var(--bg)); padding-right:4px; transition:border-color .15s, background .15s; }
   .at-chip.on { border-color:color-mix(in srgb, var(--lvl) 62%, transparent); background:color-mix(in srgb, var(--lvl) 14%, transparent); }
   .at-chip.on .at-cbox { background:var(--lvl); border-color:var(--lvl); }
+  .at-chip:hover { border-color:color-mix(in srgb, var(--hov) 70%, transparent); background:color-mix(in srgb, var(--hov) 13%, transparent); }
+  .at-chip:hover .at-cnm { color:var(--text); }
   /* The whole box is the switch: a far bigger target than a 34px toggle, which is what makes
      this reliable with a thumb on the 360px phone the owner actually uses. */
   .at-chip-hit { flex:1; min-width:0; display:flex; align-items:center; gap:9px; background:none; border:0;
@@ -577,8 +587,9 @@ function TreeStyle() {
   .at-chip.on .at-cnm { color:var(--text); }
   .at-tw { display:grid; place-items:center; width:20px; height:20px; margin-right:-2px; border:none; background:none; color:var(--muted); cursor:pointer; transition:transform .18s; flex:none; }
   .at-tw.o { transform:rotate(180deg); color:var(--accent); }
+  .at-tw:hover { color:var(--hov); }
   .at-i { display:grid; place-items:center; width:20px; height:20px; border:none; background:none; color:var(--muted); cursor:pointer; flex:none; }
-  .at-i:hover { color:var(--accent); }
+  .at-i:hover { color:var(--hov); }
   .at-tag { font-size:9px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:2px 6px; border-radius:5px; }
   .at-tag.build { background:color-mix(in srgb,var(--adm-warn) 18%,transparent); color:var(--adm-warn); border:1px solid color-mix(in srgb,var(--adm-warn) 34%,transparent); }
   .at-tag.new { background:color-mix(in srgb,var(--accent) 16%,transparent); color:var(--accent); border:1px solid color-mix(in srgb,var(--accent) 32%,transparent); }

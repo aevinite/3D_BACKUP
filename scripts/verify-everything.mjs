@@ -458,7 +458,18 @@ async function needFH() {
   return FH;
 }
 const getState = async () => (await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json()).state;
-const setState = async (patch) => fetch(BASE + "/api/admin/restaurants/access-tree", { method: "POST", headers: HJ, body: JSON.stringify({ restaurant_id: (await needFH()).id, patch }) });
+// NOTHING may be changed until we can put it back.
+//
+// A transient "fetch failed" on the snapshot phase once left this run with no restore registered,
+// and the module phases — which switch a tab OFF and rely on that snapshot to switch it back —
+// then stripped Takeaway, Banquet and Inventory off French House for real. A test that cannot
+// undo its own writes must not make them, so the gate lives in the ONE place every write passes
+// through rather than in each phase's good intentions.
+let snapOk = false;
+const setState = async (patch) => {
+  if (!snapOk) throw new Fail("refusing to change a setting: no restore snapshot was taken, so this could not be undone");
+  return fetch(BASE + "/api/admin/restaurants/access-tree", { method: "POST", headers: HJ, body: JSON.stringify({ restaurant_id: (await needFH()).id, patch }) });
+};
 // How long to wait for a switch to become visible. This MUST clear the server's own caches,
 // and it did not: lib/panelAccess.ts caches an owner's restaurant list for PANEL_TTL_MS =
 // 30_000, so a 9.5s wait read the nav while the OLD entitlements were still cached and reported
@@ -477,8 +488,15 @@ const settleUntil = async (read, want, ms = CACHE_MS + 6000) => {
 let SNAP = null;
 
 phase("the access tree loads all five sections", async () => {
-  const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${FH.id}`)).json();
-  ok(Array.isArray(d.sections) && d.sections.length === 5, `${d.sections?.length} sections`);
+  // RETRY: this single request decides whether the whole run may write anything, so one dropped
+  // connection must not disarm the restore for the next 200 phases.
+  let d = null, why = "";
+  for (let i = 0; i < 4; i++) {
+    try { d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json(); if (d?.sections) break; why = d?.error || "no sections"; }
+    catch (e) { why = String(e.message).slice(0, 80); d = null; }
+    await wait(2000);
+  }
+  ok(d && Array.isArray(d.sections) && d.sections.length === 5, `${d?.sections?.length ?? "no"} sections${why ? ` · ${why}` : ""}`);
   SNAP = d.state;
   restore.push(async () => {
     await setState({
@@ -503,6 +521,7 @@ phase("the access tree loads all five sections", async () => {
       panels: Object.fromEntries(["manager", "kitchen", "tablet", "owner"].map((k) => [k, SNAP.panels[k] !== false])),
     });
   });
+  snapOk = true;                    // only NOW may anything be written
 });
 
 // each guest sub-switch: OFF removes its mark from the served page, ON brings it back
