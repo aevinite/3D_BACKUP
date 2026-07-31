@@ -29,7 +29,9 @@ const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, 
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
 type Totals = Omit<MoneyRow, "bucket">;
 type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean } | null;
-type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; bucket?: string };
+type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; bucket?: string;
+  // Team & pay carries its own shapes (mig 220/221) alongside the shared `rows`.
+  people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[] };
 
 export type SectionMeta = { label: string; kind: string };
 export type SectionCtx = {
@@ -63,6 +65,42 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
   if (meta.kind === "categories") return [{ title, head: ["Category", "Qty sold", "Item sales (list price)"], rows: ((data.rows ?? []) as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, Math.round(r.revenue)]) }];
   if (meta.kind === "payments") return [{ title, head: ["Method", "Bills", "Revenue"], rows: ((data.rows ?? []) as { method: string; revenue: number; orders: number }[]).map((r) => [canonPayMethod(r.method), r.orders, Math.round(r.revenue)]) }];
   if (meta.kind === "hourly") return [{ title, head: ["Hour", "Orders", "Revenue"], rows: ((data.rows ?? []) as { hour: number; orders: number; revenue: number }[]).map((r) => [`${r.hour}:00`, r.orders, Math.round(r.revenue)]) }];
+  // Team & pay (mig 220/221). Without these two branches the export fell through to the
+  // empty "—" table below, so Export and Print produced a blank document (2026-07-31 sweep).
+  if (meta.kind === "staffpay") {
+    const people = (data.people ?? []) as { name: string; designation: string | null; role: string; pay_type: string | null; pay_amount: number; salary: number; advance: number; bonus: number; overtime: number; other: number; paid: number; advanceOutstanding: number; lastPaidOn: string | null }[];
+    const months = (data.monthRows ?? []) as { bucket: string; people: number; expected: number; paid: number; owed: number }[];
+    const cash = (data.cashRows ?? []) as { bucket: string; paid_out: number; people: number; entries: number }[];
+    const out: ExportTable[] = [{
+      title: `${title} — who you paid`,
+      head: ["Person", "Role", "Rate", "Salary", "Advance", "Bonus / OT / other", "Total paid", "Advance left", "Last paid"],
+      rows: people.map((r) => [r.name, r.designation || (r.role === "tablet" ? "waiter" : r.role),
+        r.pay_amount ? Math.round(r.pay_amount) : "", Math.round(r.salary), Math.round(r.advance),
+        Math.round(r.bonus + r.overtime + r.other), Math.round(r.paid), Math.round(r.advanceOutstanding),
+        r.lastPaidOn || ""]),
+    }];
+    if (months.length) out.push({
+      title: `${title} — what each month was worth`,
+      head: ["Month", "On pay list", "Team cost", "Paid for it", "Still owed"],
+      rows: months.map((m) => [new Date(m.bucket).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }),
+        m.people, Math.round(m.expected), Math.round(m.paid), Math.round(m.owed)]),
+    });
+    if (cash.length) out.push({
+      title: `${title} — money out, by day`,
+      head: ["Day", "Paid out", "People", "Entries"],
+      rows: cash.map((r) => [c.bucketLabel(r.bucket, grain), Math.round(r.paid_out), r.people, r.entries]),
+    });
+    return out;
+  }
+  if (meta.kind === "staffperf") {
+    const rows = (data.rows ?? []) as { name: string; role: string; designation: string | null; active: boolean; daysActive: number; hours: number; orders: number; value: number; tables: number; sittings: number; discount: number; ratings: number; avgRating: number | null; paid: number }[];
+    return [{
+      title, head: ["Person", "Role", "Days worked", "Hours on shift", "Orders punched", "Value punched", "Tables", "Sittings", "Discount given", "Ratings", "Avg rating", "Paid"],
+      rows: rows.map((r) => [r.name + (r.active ? "" : " (disabled)"), r.designation || (r.role === "tablet" ? "waiter" : r.role),
+        r.daysActive, r.hours, r.orders, Math.round(r.value), r.tables, r.sittings, Math.round(r.discount),
+        r.ratings, r.avgRating ?? "", Math.round(r.paid)]),
+    }];
+  }
   return [{ title, head: ["—"], rows: [] }];
 }
 
