@@ -702,16 +702,31 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // guests' screen and nearly on their bill (owner report, 2026-07-30; PR #578 fixed the
         // panel, this closes the door on the server side so no future panel can repeat it).
         //
-        // Rule, identical to lfh_table_view_summary and to the panels: the table's CURRENT
-        // open session, plus session-less rows at that table (banquet/legacy — never hidden).
-        // Sessions OFF ⇒ the table's live rows, exactly as before.
-        const setRow = (await sb.from("settings").select("sessions_enabled").eq("restaurant_id", rid).maybeSingle()).data as { sessions_enabled?: boolean } | null;
+        // Rule, identical to lfh_table_view_summary and to the panels: the table's CURRENT open
+        // party, plus a party-LESS row at that table — but only one that appeared AFTER the party
+        // sat down (owner report, 2026-07-31).
+        //
+        // "plus every session-less row" was too generous and it showed: table 2 carried two live
+        // orders from 7 JULY with no session at all. The tile counted the party's 1 dish (correct);
+        // this slice handed the browser all three, so the detail said 7 dishes / ₹6,048 and
+        // "Mark all paid" would have charged tonight's guests for food ordered 24 days earlier.
+        // An order older than the party cannot be the party's — while a genuinely party-less row
+        // taken DURING this sitting (banquet, a legacy path) still counts, so nothing is hidden.
+        // The 60s of slack covers an order that landed a moment before its session row existed.
         oq = oq.eq("table_number", tbl).eq("archived", false).is("deleted_at", null);
-        if (setRow?.sessions_enabled) {
-          const liveSess = (await sb.from("sessions").select("id").eq("restaurant_id", rid)
+        {
+          const liveSess = (await sb.from("sessions").select("id,opened_at").eq("restaurant_id", rid)
             .eq("table_number", tbl).eq("status", "open")
-            .order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
-          oq = liveSess ? oq.or(`session_id.eq.${liveSess.id},session_id.is.null`) : oq.is("session_id", null);
+            .order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string; opened_at?: string } | undefined;
+          if (liveSess) {
+            const since = new Date(new Date(liveSess.opened_at || 0).getTime() - 60_000).toISOString();
+            oq = oq.or(`session_id.eq.${liveSess.id},and(session_id.is.null,created_at.gte.${since})`);
+          } else {
+            const setRow = (await sb.from("settings").select("sessions_enabled").eq("restaurant_id", rid).maybeSingle()).data as { sessions_enabled?: boolean } | null;
+            // No open party: with sessions ON there is nobody to own anything (the tile reads
+            // free). With sessions OFF a table can still legitimately hold party-less legacy rows.
+            if (setRow?.sessions_enabled) oq = oq.is("session_id", null);
+          }
         }
       }
       const orders = must(await oq.order("created_at", { ascending: false }).limit(200));
@@ -2718,7 +2733,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             // How many tables exist and how many tiles sit on a row of the floor are both
             // ADMIN-owned (mig 226): the per-row number replaced a per-device S/M/L toggle
             // precisely so one restaurant has one answer, not one per manager's phone.
-            "table_count", "floor_per_row",
+            "table_count", "floor_per_row", "floor_layout_mode",
             "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone",
             "gstin", "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
             "auto_print_kot",
@@ -2774,6 +2789,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // Same clamp as the admin route (mig 226 also has a CHECK constraint) — an
         // owner/admin saving through this path can't write an out-of-range number either.
         if ("floor_per_row" in body) body.floor_per_row = clampPerRow(body.floor_per_row);
+        if ("floor_layout_mode" in body) body.floor_layout_mode = body.floor_layout_mode === "custom" ? "custom" : "classic";
         for (const k of ["sessions_enabled", "require_location", "require_otp", "auto_print_kot"]) {
           if (k in body) body[k] = body[k] === true || body[k] === "true";
         }
@@ -3040,6 +3056,14 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,table_number,session_id").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
+      // Voiding a ticket needs the void_bills power (2026-07-31). The manager panel grew a
+      // "✕ Cancel" button on each ticket when "close table" was removed — it is how a walk-out
+      // is cleared now — so the endpoint has to refuse it for a role that isn't allowed to void
+      // a bill, not just hide the button. void_bills is the right power: its own description is
+      // "reopening a settled bill, voiding a generated one, or closing a table unpaid after a
+      // walk-out". Admin and owner pass automatically (managerCan).
+      if (patch.status === "cancelled" && cur.status !== "cancelled" && !(await managerCan(g, rid, "void_bills")))
+        return permDenied("cancel an order");
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
       // RULE (owner 2026-06-29): a bill can only be paid once the order is ACCEPTED (gone to

@@ -63,7 +63,10 @@ async function postHandler(req: NextRequest) {
     if (!row) return err("That log entry no longer exists.", 404);
     rid = rid || row.restaurant_id;
     source = "error_row";
-    summary = (redactMoney(row.detail) as string) || row.action;
+    // Cap what gets STORED as well as what gets shown. A detail can be a whole HTML error page
+    // (a proxy answering with a document instead of JSON), and a 50KB blob is no use to anyone
+    // reading a queue — the full text stays on the error row itself. (2026-07-31)
+    summary = String((redactMoney(row.detail) as string) || row.action).slice(0, 600);
 
     // ── Already fixed? (error_signatures, migs 218/219) ──────────────────────────────────────
     // This is the guard that stops the same problem being handed to Claude twice. On 2026-07-28

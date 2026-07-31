@@ -1136,12 +1136,16 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    tiles their normal size instead of stretching a lone tile across the whole row. */
 .ftile-grid {
   --per-row: 6;         /* overwritten inline per restaurant; this is the fallback */
-  --ftile-gap: clamp(8px, 1.1vw, 14px); /* tighter once tiles get small, or gaps eat the tiles */
-  /* Narrowest a tile may ever get — mirrors TILE_MIN_PX in lib/floorLayout.ts. Measured,
-     not guessed: at 104px the busiest tile (occupied + tagged) still needed 3px more than
-     it had; from 112px up every tile state fits with room to spare. 116px keeps headroom
-     for a longer amount or a longer state word. */
-  --ftile-floor: 116px;
+  /* The gap scales with the DENSITY, not the viewport: at 30 per row a fixed 14px gutter is
+     ~400px of pure gap and it was the thing stopping the asked-for columns from fitting (asking
+     for 30 quietly gave 25). Wide floors keep exactly the gutter they had. */
+  --ftile-gap: clamp(3px, calc(84px / var(--per-row, 6)), 14px);
+  /* Narrowest a tile may ever get — mirrors TILE_MIN_PX in lib/floorLayout.ts. This is a
+     TAPPABILITY floor (44px = a finger), not a readability one: the owner's tables-per-row is
+     an instruction, so the tile shrinks to honour it and sheds detail on the way down rather
+     than the grid handing back fewer columns than he asked for. Only when a tile would stop
+     being touchable does a column come back — which in practice means only on a phone. */
+  --ftile-floor: 44px;
   display: grid;
   gap: var(--ftile-gap);
   grid-template-columns: repeat(auto-fill, minmax(
@@ -1155,9 +1159,37 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
 /* The faint chair watermark on a free/off table — top-right, subtle, premium. Carries
    the table's seat count (migration 111) alongside the icon, so "free" also answers
    "how many can sit here" without opening the tile. */
-.ft-officon { position: absolute; top: clamp(7px, 9cqw, 13px); right: clamp(7px, 9.7cqw, 14px); display: flex; align-items: center; gap: 3px; color: var(--c); opacity: 0.45; pointer-events: none; }
-.ft-officon i { font-size: clamp(12px, 12.5cqw, 18px); }
-.ft-officon span { font-size: clamp(9.5px, 8.3cqw, 12px); font-weight: 800; }
+/* ── CUSTOM FLOOR PLAN (mig 242) ────────────────────────────────────────────────────────
+   The owner's hand-written room shape. Same tiles as the classic grid — only their POSITIONS
+   come from his plan, so a table looks and behaves identically in either mode. Empty cells are
+   left empty on purpose: that is how an aisle, a counter or the kitchen gets drawn. */
+/* The wrapper is the query container, so --fplan-sq below can be "one column's width" — a
+   container-query unit can't be used inside its own container's declarations. */
+.fplan-wrap { container-type: inline-size; }
+.fplan { --fplan-sq: calc((100cqw - (var(--fplan-cols, 12) - 1) * var(--ftile-gap, 10px)) / var(--fplan-cols, 12));
+  display: grid; grid-template-columns: repeat(var(--fplan-cols, 12), minmax(0, 1fr));
+  gap: var(--ftile-gap, 10px); }
+.fplan-cell { min-width: 0; min-height: 0; }
+/* Inside a plan the CELL decides the shape (the grid rows are already one column tall), so the
+   tile fills it instead of forcing its own square. */
+.fplan-cell > .ftile { height: 100%; aspect-ratio: auto; min-height: 0; }
+/* A zone caption ("A/C", "Terrace") spanning the plan's full width. */
+.fplan-zone { font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); padding: 6px 2px 0; }
+/* Said out loud on screen, never in the console: a restaurant set to Custom with no plan yet, and
+   the tables a half-finished plan hasn't placed. Neither is an error — both are just the truth. */
+.floor-plan-note { margin: 8px 0 10px; padding: 8px 11px; border-radius: 9px; font-size: 12.5px;
+  color: var(--muted); background: var(--panel-2); border: 1px dashed var(--line); }
+.floor-plan-note b { color: var(--text); font-weight: 700; }
+
+/* Seats — top-right on EVERY tile (owner drawing, 2026-07-31: "no. of person can sit on
+   table"). It used to be a watermark that appeared only on a FREE tile, which is the one
+   time nobody needs it; when you're deciding where to put a party of six, the tiles you're
+   comparing are the busy ones. */
+.ft-seats { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto;
+  font-size: clamp(9.5px, 8.3cqw, 12px); font-weight: 800; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--c) 55%, var(--muted)); }
+.ft-seats i { font-size: clamp(9px, 8.6cqw, 12px); opacity: .8; }
 /* ── A TILE IS A SQUARE (owner, 2026-07-30) ─────────────────────────────────────────
    It used to keep a fixed min-height while the grid narrowed it, so a small tile went
    PORTRAIT — a tall thin rectangle (owner screenshots). Now the height follows the
@@ -1241,22 +1273,43 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    admin made small stays readable and in proportion instead of clipping its own text.
    Each clamp keeps the old fixed size as the MAXIMUM, so a normal/large tile looks
    exactly as it always did — only small tiles change. */
-.ft-num { font-size: clamp(19px, 21cqw, 30px); font-weight: 800; line-height: 1; color: color-mix(in srgb, var(--c) 78%, var(--text)); }
-.ft-badges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-.ftb { font-size: 12px; background: rgba(0,0,0,0.42); border: 1px solid var(--line); border-radius: 999px; padding: 2px 7px; line-height: 1.4; }
+.ft-num { font-size: clamp(9px, 21cqw, 30px); font-weight: 800; line-height: 1; color: color-mix(in srgb, var(--c) 78%, var(--text));
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The notification row (owner drawing: the boxes down the sides of the tile) — waiter calls,
+   join requests, anyone waiting. Its own row under the table number so a busy table's badges
+   can never push the seat count or the table's name out of the tile. */
+.ft-badges { display: flex; gap: clamp(2px, 2.6cqw, 4px); flex-wrap: wrap; margin-top: clamp(3px, 3.4cqw, 5px); }
+.ftb { font-size: clamp(8.5px, 7.6cqw, 12px); background: rgba(0,0,0,0.42); border: 1px solid var(--line);
+  border-radius: 999px; padding: clamp(1px, 1.4cqw, 2px) clamp(4px, 5cqw, 7px); line-height: 1.4; }
 .ftb.call { animation: tblPulse 1.2s ease-in-out infinite; }
 .ftb.ftb-more { animation: none; background: rgba(0,0,0,0.42); color: var(--muted); } /* the "+N" overflow pill — quiet, doesn't pulse */
 .ftb.req { background: color-mix(in srgb, #e7b75a 24%, rgba(0,0,0,0.42)); border-color: rgba(231,183,90,0.55); color: #f1d49b; animation: tblPulse 1.3s ease-in-out infinite; }
 .ftb.cart { background: rgba(96,165,250,0.18); border-color: rgba(96,165,250,0.45); color: #9cc4fb; } /* table is building a cart */
-.ft-label { margin-top: auto; padding-top: clamp(4px, 7cqw, 10px); font-weight: 700; font-size: clamp(11px, 9.6cqw, 13.5px); color: color-mix(in srgb, var(--c) 72%, var(--text)); }
+/* THE LIVE STATUS BLOCK (owner drawing, 2026-07-31) — what the table is doing right now,
+   in one tinted panel that sits above the action row. It carries the state's own colour
+   (var(--c)), so the floor still reads at a glance from across the room, and it always
+   holds the same two things: the state word, then the detail under it. */
+.ft-status { margin-top: auto; display: flex; flex-direction: column; min-width: 0;
+  gap: clamp(1px, 0.8cqw, 3px);
+  padding: clamp(3px, 3.4cqw, 6px) clamp(6px, 6.5cqw, 10px);
+  border-radius: clamp(7px, 7.5cqw, 11px);
+  background: color-mix(in srgb, var(--c) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 26%, transparent); }
+.ft-label { font-weight: 700; font-size: clamp(10px, 9.2cqw, 13px); line-height: 1.15;
+  color: color-mix(in srgb, var(--c) 72%, var(--text));
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Two lines maximum. Without the clamp, a long amount ("0/12 served · ₹1,24,500 due")
    wraps to a third line and — because the tile's height is fixed by aspect-ratio — that
    third line would be cut off. Two lines is what a square tile has room for at every
    size the grid allows. */
-.ft-meta { font-size: clamp(9.5px, 7.9cqw, 11px); color: var(--muted); margin-top: 3px;
+.ft-meta { font-size: clamp(9px, 7.6cqw, 11px); color: var(--muted); line-height: 1.25;
+  font-variant-numeric: tabular-nums;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 /* Status progress bar on each tile (new→cooking→ready→served), like the tablet's .tstrip. */
-.ft-strip { height: 6px; border-radius: 6px; margin-top: 8px; background: var(--line); overflow: hidden; display: flex; }
+/* Height AND top margin scale with the tile: at 46px the fixed 8px margin alone overflowed the
+   square (the content needed 35px inside a 34px box), which is what "clipped" looked like. */
+.ft-strip { height: clamp(3px, 5cqw, 6px); border-radius: 6px; margin-top: clamp(2px, 5cqw, 8px);
+  background: var(--line); overflow: hidden; display: flex; }
 .ft-strip i { display: block; height: 100%; }
 
 /* Floor skeleton — shown for the brief moment between opening the Tables tab and
@@ -1304,10 +1357,7 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
 /* OUTLINE = payment (overrides the state-tinted border): red unpaid, green paid */
 .ftile.pay-red { border-color: #ef4444; }
 .ftile.pay-green { border-color: #22c55e; }
-/* RST / CLS pair on a finished tile (small, side by side). 10px gap keeps the two
-   opposite actions from being mis-tapped for each other (owner: "too close"). */
-.ft-quick2 { display: flex; gap: 10px; margin-top: 10px; }
-.ftq2 { flex: 1; padding: 7px 0; font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+/* (The RST / CLS pair went with the open/close step — see .ft-act for what replaced it.) */
 /* legend: outline-meaning rings + section captions */
 .lring { width: 13px; height: 13px; border-radius: 4px; border: 2px solid; display: inline-block; box-sizing: border-box; }
 .lring-red { border-color: #ef4444; } .lring-green { border-color: #22c55e; }
@@ -1338,13 +1388,65 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
 .logdid { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 999px; white-space: nowrap; }
 .logdid.order { background: rgba(96,165,250,0.16); color: #60a5fa; }       /* ordered */
 .logdid.call { background: rgba(232,161,60,0.18); color: #e8a13c; }        /* called a waiter */
-/* quick action button on a tile ("Open", "Bill", …). Shrinks with the tile (cqw) so a
-   small square keeps a real, tappable button instead of one that overflows the edge. */
-.ft-quick { margin-top: clamp(5px, 7cqw, 10px); }
-.ftq { width: 100%; }
-.ft-quick .ftq, .ft-quick2 .ftq {
-  font-size: clamp(11px, 9cqw, 13px);
-  padding: clamp(5px, 5.4cqw, 9px) clamp(6px, 6cqw, 12px);
+/* ── ROW 4: THE ACTION ROW (owner drawing, 2026-07-31) ───────────────────────────────
+   "＋ Take order" fills the row on EVERY tile — same action, same place, every table —
+   with the small square icons (accept / bill) tucked on the right. Everything is sized in
+   cqw (% of the TILE's own width) so shrinking a tile shrinks the CONTROLS, and the tile
+   stays the same square shape instead of the button spilling over its edge. */
+.ft-act { display: flex; align-items: stretch; gap: clamp(3px, 3.4cqw, 6px); margin-top: clamp(5px, 6cqw, 9px); }
+.ft-take { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center;
+  gap: clamp(2px, 2.6cqw, 5px); cursor: pointer; font: inherit; font-weight: 700;
+  font-size: clamp(9.5px, 8.6cqw, 12.5px); line-height: 1.1;
+  padding: clamp(4px, 5cqw, 9px) clamp(5px, 5.5cqw, 11px);
+  border-radius: clamp(6px, 6.5cqw, 10px);
+  color: color-mix(in srgb, var(--gold) 82%, var(--text));
+  background: color-mix(in srgb, var(--gold) 15%, var(--panel-2));
+  border: 1px solid color-mix(in srgb, var(--gold) 40%, var(--line));
+  transition: background .14s ease, border-color .14s ease, color .14s ease; }
+.ft-take:hover { background: color-mix(in srgb, var(--gold) 28%, var(--panel-2)); border-color: var(--gold); color: var(--text); }
+.ft-take-x { font-weight: 800; }
+.ft-take-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Square icon buttons: the ✓ accept and the 🖨 bill. Same height as the take button so the
+   row reads as one control strip. */
+.ft-ico { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  cursor: pointer; font: inherit; font-size: clamp(9.5px, 8.6cqw, 12.5px);
+  width: clamp(20px, 19cqw, 30px); padding: 0;
+  border-radius: clamp(6px, 6.5cqw, 10px);
+  color: color-mix(in srgb, var(--c) 60%, var(--text));
+  background: var(--panel-2); border: 1px solid var(--line);
+  transition: background .14s ease, border-color .14s ease, color .14s ease; }
+.ft-ico:hover { background: color-mix(in srgb, var(--c) 20%, var(--panel-2)); border-color: color-mix(in srgb, var(--c) 55%, var(--line)); color: var(--text); }
+/* A new order waiting to be accepted is the one thing that should pull the eye. */
+.ft-ico-go { color: #86efac; background: color-mix(in srgb, #22c55e 16%, var(--panel-2)); border-color: color-mix(in srgb, #22c55e 42%, var(--line)); }
+.ft-ico-go:hover { background: color-mix(in srgb, #22c55e 30%, var(--panel-2)); border-color: #22c55e; color: #fff; }
+/* ── SMALL TILES: DROP DETAIL, NEVER RESHAPE (owner: "small will not affect the shape of
+   table, it will make text and stuff small") ────────────────────────────────────────────
+   These widths are the tile's INNER width (a container query measures the content box), so
+   they read about 16px LESS than the tile you see: the compact default of ~111px per tile is
+   ~95px here. Getting that wrong once hid the button's label at the default size.
+   As the tile shrinks it sheds detail in priority order — it never grows taller and never
+   clips: first the sub-line goes to one line and the decorative ＋ goes (the WORD is the
+   information), and only when even that won't fit does the label give way to the ＋. */
+@container (max-width: 120px) {
+  .ft-meta { -webkit-line-clamp: 1; }
+  .ft-take-x { display: none; }
+}
+@container (max-width: 88px) {
+  .ft-take-t { display: none; }
+  .ft-take-x { display: inline; } /* out of room for the word — the ＋ is the fallback */
+  .ft-seats { display: none; }
+}
+/* Genuinely tiny (a deliberately dense floor): the sub-line goes, then the state WORD. What
+   never goes is the table number, the state COLOUR and the progress strip — which is how a
+   dense floor is read anyway: you scan for the colour, then tap. */
+@container (max-width: 64px) {
+  .ft-meta { display: none; }
+  .ft-status { padding: 2px 4px; border-radius: 5px; }
+}
+@container (max-width: 48px) {
+  .ft-label { display: none; }
+  .ft-badges { display: none; }
+  .ft-status { padding: 0; background: transparent; border: 0; }
 }
 /* drag-to-resize divider for the side panel: styled in ONE place further down
    ("the middle divider" block) — an earlier duplicate rule here used to fight it
@@ -1672,7 +1774,15 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 /* NOTE: no min-height here on purpose. A fixed min-height is exactly what made a
    narrowed tile go portrait; the square comes from aspect-ratio on .ftile above.
    Padding + radius scale with the tile (cqw) so a small square isn't all padding. */
-.ftile { border-radius: clamp(11px, 11cqw, 16px); padding: clamp(7px, 8.4cqw, 12px) clamp(8px, 9cqw, 13px); transition: transform .12s ease, box-shadow .12s ease, border-color .12s; }
+/* PADDING SCALES WITH THE DENSITY, not with cqw. A container-query unit inside .ftile's OWN
+   padding resolves against an ANCESTOR container (an element is never its own query container),
+   so `9cqw` here quietly resolved against the whole panel and always clamped to the 13px max —
+   which on a 111px tile ate 28px of the 111 and left the action button too narrow for its own
+   label. Deriving it from --per-row (set inline on the grid) is honest and automatic: a dense
+   floor gets tight padding, a 6-per-row floor keeps exactly the padding it always had. */
+.ftile { border-radius: clamp(11px, 11cqw, 16px);
+  padding: clamp(6px, calc(72px / var(--per-row, 6)), 12px) clamp(7px, calc(80px / var(--per-row, 6)), 13px);
+  transition: transform .12s ease, box-shadow .12s ease, border-color .12s; }
 .ftile:hover { transform: translateY(-3px); box-shadow: 0 12px 26px -12px rgba(0,0,0,.7); }
 /* Selection ring colour: gold normally, but a tile that carries a payment outline
    keeps THAT meaning — the red/green goes BRIGHTER + glows instead of being
@@ -2402,12 +2512,8 @@ html[data-theme="light"] .khata-due{ color:#0369a1; }
 @container (max-width: 152px) {
   .ftile.ft-tag .ft-tagbadge { display: none; }
 }
-/* Below this the "tap to open" hint goes too — it's a hint, not information, and the
-   whole tile is the tap target anyway. Keep .ft-meta on OCCUPIED tiles (it carries the
-   served count + amount due), which is why this targets the free-tile hint only. */
-@container (max-width: 124px) {
-  .ftile.ft-free .ft-meta { display: none; }
-}
+/* (A free tile carries no sub-line at all now — the "tap to open" hint went with the
+   open/close step, so there is nothing left here to hide at small sizes.) */
 /* Guest tile pill — silver metallic (dark default). */
 .ftile.tag-guest .ft-tagbadge { background: linear-gradient(135deg, #eef1f6, #c9ced6); color: #1c2230; border-color: #e5eaf2; }
 /* ── LIGHT MODE: guest → BLACK metallic; VIP → deeper violet (approved 2026-07-24). ── */
@@ -2418,7 +2524,7 @@ html[data-theme="light"] .ftile.tag-guest .ft-tagbadge { background: linear-grad
 html[data-theme="light"] .ftile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb, #6d28d9 40%, transparent); }
 html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in srgb, #6d28d9 18%, #fff); color: #5b21b6; border-color: #6d28d9; }
 /* keep the tile's inner content above the tint overlay */
-.ftile.ft-tag .ft-top, .ftile.ft-tag .ft-label, .ftile.ft-tag .ft-meta, .ftile.ft-tag .ft-quick, .ftile.ft-tag .ft-strip { position: relative; z-index: 1; }
+.ftile.ft-tag .ft-top, .ftile.ft-tag .ft-badges, .ftile.ft-tag .ft-status, .ftile.ft-tag .ft-act, .ftile.ft-tag .ft-strip { position: relative; z-index: 1; }
 
 /* the "Mark table" popup options */
 .tag-opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; margin-bottom: 8px;

@@ -36,6 +36,7 @@ const SETTINGS_COLS = [
   "banquet_tax_components",
   "banquet_paper", "banquet_paper_size", "banquet_paper_top", "banquet_paper_bot",
   "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign", "banquet_paper_fill",
+  "floor_layout_mode",
 ] as const;
 const SELECT = SETTINGS_COLS.join(", ");
 
@@ -88,6 +89,9 @@ function sanitize(body: Patch): Patch {
     out.table_count = Number.isFinite(n) ? Math.min(Math.max(n, 1), 500) : 12;
   }
   if ("floor_per_row" in body) out.floor_per_row = clampPerRow(body.floor_per_row);
+  // Only the two modes the panel can draw (mig 242 has the same CHECK) — a typo must not be able
+  // to take a restaurant's floor away.
+  if ("floor_layout_mode" in body) out.floor_layout_mode = body.floor_layout_mode === "custom" ? "custom" : "classic";
   if ("table_seats" in body) {
     const raw = body.table_seats;
     const clean: Record<string, number> = {};

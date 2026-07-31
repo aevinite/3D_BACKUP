@@ -81,12 +81,11 @@ const state = {
   // TIER 1 of the two-tier Table view: the slim, server-computed per-tile summary the GRID
   // renders from (mig 101, lfh_table_view_summary). tiles is keyed by table number → the
   // computed { state,label,meta,counts,due,pay,members,pending,hasNew/Call/Req/Join,reqs,calls }.
-  // The aggregates (calls/requests/joiners/blocklist + order_count) feed the side panel + chimes.
+  // The aggregates (calls/requests/joiners/blocklist + order_count) feed the tile badges + chimes.
   summary: { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] },
   boardLoaded: false, // false until the live board arrives once → drives the floor skeleton (no "all Free" flash on load)
   openSess: null, // table number whose session modal is open
-  selectedTable: null, // table number whose DETAIL is shown IN the right side panel (Tables tab master-detail). null = show the floor controls instead.
-  floorSideCollapsed: lsGet("lfh_floor_side_collapsed", "0") === "1", // F1: right floor panel collapsed → clicking a table opens a FULL-SCREEN popup instead of the in-side detail.
+  selectedTable: null, // the table whose popup is open — marks its tile and makes it read the full slice. null = nothing open.
   // Floating popups (owner request, 2026-07-02 — "I want many popups at the same time"):
   // an ORDERED array (oldest→newest) of { table, pinned, x, y, w } — one entry per table
   // whose detail is floating right now. Non-pinned ones auto-arrange in a single row
@@ -1928,19 +1927,30 @@ function formGeneral(s) {
   ${tableSeatingCardHtml(s)}
   ${tableQrLinksCardHtml(s)}
   <div class="card"><h3>Auto close / restart tables</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      When a table's bill is fully <b>paid</b> and every dish is <b>served</b>, free it
-      automatically. <b>Off</b> = today's behaviour (you close/restart by hand).
-      <b>Auto-close</b> ends the dining session; <b>Auto-restart</b> clears the round but
-      keeps the table open for the next guests.
+    ${!s.sessions_enabled ? `
+    <p style="color:var(--muted);font-size:13px;margin:0 0 4px;line-height:1.5">
+      <b>Always on for this restaurant.</b> Guest sessions are off, so nobody opens or closes a
+      table by hand — which means a table has to clear ITSELF, or finished tables would pile up
+      on the floor with no way to free them.
     </p>
-    <div style="max-width:280px"><div class="field"><label>When a table is paid &amp; fully served</label>
+    <p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">
+      As soon as a bill is fully <b>paid</b> and every dish is <b>served</b>, that table goes
+      back to <b>Free</b>, ready for the next guests. Turn guest sessions on (above) if you want
+      to choose this behaviour yourself.
+    </p>` : `
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      A table always clears itself once its bill is fully <b>paid</b> and every dish is
+      <b>served</b> — nobody closes a table by hand any more, so there's no "do nothing"
+      option. Choose WHICH way it clears: <b>free the table</b> for the next guests, or
+      <b>keep this party seated</b> (the round is filed away and they can order again on the
+      same bill number — useful for long sittings that settle as they go).
+    </p>
+    <div style="max-width:320px"><div class="field"><label>When a table is paid &amp; fully served</label>
       <select data-path="auto_table_action">
-        <option value="off" ${(s.auto_table_action || "off") === "off" ? "selected" : ""}>Off — do nothing</option>
-        <option value="close" ${s.auto_table_action === "close" ? "selected" : ""}>Auto-close the table</option>
-        <option value="restart" ${s.auto_table_action === "restart" ? "selected" : ""}>Auto-restart the table</option>
+        <option value="close" ${s.auto_table_action !== "restart" ? "selected" : ""}>Free the table</option>
+        <option value="restart" ${s.auto_table_action === "restart" ? "selected" : ""}>Keep the party seated</option>
       </select>
-    </div></div>
+    </div></div>`}
   </div>`;
   }
   if (sec === "users") {
@@ -2282,10 +2292,11 @@ function mergedOrderCardHtml(g) {
       ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>`
       : `<button class="ord-btn ghost" data-print-group="${esc("solo:" + o0.id)}">🖨 Print</button>`;
   }
-  const tableDue = billMath(live.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid")).total;
-  const freeBtn = (tnum && paid)
-    ? (tableDue === 0 ? `<button class="ord-btn free-table" data-free-table="${esc(tnum)}">🪑 Free table ${esc(tnum)}</button>` : "")
-    : "";
+  // No "🪑 Free table" button (owner, 2026-07-31): a settled table leaves the floor by
+  // itself the moment its bill is paid and served, so a button for it is one more thing
+  // to remember — and it used to be the only way to clear a table, which is why a walk-out
+  // ended up being "closed" instead of properly voided.
+  const freeBtn = "";
   return `<div class="card ord-card ord-${cls} ${paid ? "is-paid" : ""}">
     <div class="ord-top">
       ${kots.length ? `<span class="kot-chip" title="Kitchen tickets">#${esc(kots[0])}${kots.length > 1 ? ` +${kots.length - 1}` : ""}</span>` : ""}
@@ -2628,10 +2639,8 @@ function openBillModal(key) {
   const restoreLeftMs = Math.min(...g.map((o) => restoreDeadline(o) - Date.now()));
   const canRestore = restoreLeftMs > 0;
   const restoreMins = Math.max(1, Math.ceil(restoreLeftMs / 60000));
-  // A bill that landed here purely because it's fully paid (never actually freed)
-  // still has an occupied table sitting on the floor — offer "Free table" right
-  // here so staff don't have to hunt for it elsewhere (code review before merge).
-  const stillOnFloor = g.some((o) => !o.archived) && !!(o0.table_number || "").trim();
+  // (There used to be a "Free table" button here for a paid bill still sitting on the
+  // floor. A paid + served table now leaves the floor on its own, so it's gone.)
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
@@ -2646,7 +2655,6 @@ function openBillModal(key) {
       </div>
       <div class="bm-actions">
         <button class="btn primary" data-bm-print>🖨 Print</button>
-        ${stillOnFloor ? `<button class="btn free-table" data-bm-free="${esc(o0.table_number)}">🪑 Free table ${esc(o0.table_number)}</button>` : ""}
         ${canRestore
           ? `<button class="btn" data-bm-restore title="Undo within the next ${restoreMins} min">↩ Restore to floor (${restoreMins}m left)</button>`
           : `<button class="btn" disabled title="More than 30 minutes have passed since this bill was settled">↩ Restore window expired</button>`}
@@ -2663,8 +2671,6 @@ function openBillModal(key) {
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.querySelector("[data-bm-close]").onclick = close;
   wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
-  const freeBtn = wrap.querySelector("[data-bm-free]");
-  if (freeBtn) freeBtn.onclick = async () => { close(); await freeTable(freeBtn.dataset.bmFree); };
   const restoreBtn = wrap.querySelector("[data-bm-restore]");
   if (restoreBtn) restoreBtn.onclick = async () => { close(); await restoreBill(g); };
   // Delete a CANCELLED bill permanently (owner 2026-07-24). deleteOrders() itself REQUIRES a
@@ -2771,15 +2777,32 @@ function ordersKhataHtml() {
 
 // freeTable: clear a settled table off the floor by archiving all its orders
 // (they stay in the records, just hidden from the live view). Asks first.
-async function freeTable(t) {
+// freeTable(t, opts): take a finished table off the floor — archive its orders (the records
+// keep them) and END the party, so the next guests start clean.
+//
+// It has NO button any more (owner, 2026-07-31). It is the mechanism the app calls FOR the
+// user: after the last live order at a table is cancelled (a walk-out), and nowhere else.
+// `opts.silent` skips the confirm — the cancel itself was already confirmed, and asking a
+// second question about the same decision is exactly the double-ask we're removing.
+//
+// Ending the party matters as much as archiving the orders: leave the session open and the
+// NEXT party's food joins the walk-out's session — inheriting its bill number and whoever
+// the bill was made out to. (A party with no orders renders as a free tile either way, so
+// the mistake would have been invisible until someone printed the bill.)
+async function freeTable(t, opts = {}) {
   const ids = (state.data.orders || []).filter((o) => !o.archived && (o.table_number || "").trim() === String(t)).map((o) => o.id);
-  if (!ids.length) return;
-  if (!(await confirmDialog(`Free Table ${t}? Its ${ids.length} settled order(s) leave the floor (kept in records).`, "Free table"))) return;
+  const sess = openSessionForTable(t);
+  if (!ids.length && !sess) return;
+  if (!opts.silent && !(await confirmDialog(`Free Table ${t}? Its ${ids.length} settled order(s) leave the floor (kept in records).`, "Free table"))) return;
   try {
     for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
     (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) o.archived = true; });
-    renderEditor();
-    toast(`Table ${t} freed`, "ok");
+    // force: the orders left here are cancelled/settled, so the server's "still owes money /
+    // still cooking" guard has nothing to protect — without force it would refuse a table
+    // whose food was cancelled unmade, and the table would sit on the floor forever.
+    if (sess) { try { await api("POST", "/sessions/" + sess.id + "/close", { force: true }); } catch (e) { /* orders are already off the floor; the tile reads free */ } }
+    await loadSessions();
+    toast(`Table ${t} is free`, "ok");
   } catch (e) { toast("Could not free: " + e.message, "err"); }
 }
 
@@ -2899,9 +2922,13 @@ async function setOrderStatus(id, status) {
   }
 }
 
-// cancelOrder: void one order (after confirming). If cancelling it leaves the
-// table with NO active orders, offer to free the table in the same flow — so a
-// cancelled, empty table doesn't sit open by mistake.
+// cancelOrder: void one order (after confirming). If that was the table's LAST live order,
+// the table frees itself right after — no second question.
+//
+// This is now the ONE way a table gets cleared by hand (owner, 2026-07-31): there is no
+// "close table" any more, so a walk-out is dealt with by voiding what they didn't pay for.
+// That is also the honest record — the void stays on the books with its reason, instead of
+// an unpaid bill quietly disappearing behind a closed table.
 async function cancelOrder(id) {
   if (!(await confirmDialog("Cancel this order? It will be voided — no charge to the guest.", "Cancel order"))) return;
   await setOrderStatus(id, "cancelled");
@@ -2910,7 +2937,7 @@ async function cancelOrder(id) {
   if (!t) return;
   // Any non-cancelled, non-archived order still live at this table?
   const stillActive = (state.data.orders || []).some((x) => !x.archived && (x.table_number || "").trim() === t && x.status !== "cancelled");
-  if (!stillActive && (await confirmDialog(`Table ${t} has no active orders left. Free the table?`, "Free table"))) freeTable(t);
+  if (!stillActive) await freeTable(t, { silent: true });
 }
 
 // deleteOrders: permanently delete orders — a single one, a selected batch, or
@@ -3222,7 +3249,7 @@ async function editorUndoPay(paidIds) {
 // cancelled) order paid via payOrdersWithMethod. Used by the on-tile quick button
 // AND the "Mark all paid" button in the table popup, so staff don't have to settle
 // three orders separately.
-async function markTablePaid(t) {
+async function markTablePaid(t, mtpOpts = {}) {
   await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
   const os = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
   // The two special settles (mig 166) ride the SAME payment popup as extra buttons:
@@ -3238,9 +3265,18 @@ async function markTablePaid(t) {
   if (!r) return;
   // Every settled bill gets an invoice (owner 2026-07-24): auto-generate on settle if the
   // session isn't invoiced yet, so a paid bill always shows Print (never "Generate invoice").
-  // Best-effort — a failed invoice must not undo the payment the staff just took.
+  //
+  // Goes through generateInvoice() rather than POSTing the invoice directly (2026-07-31): a
+  // restaurant with "customer required on the bill" turned on has a server that REFUSES an
+  // invoice with no mobile + name, so the direct POST returned 400 every time and the settled
+  // bill silently ended up with no invoice number at all. generateInvoice asks for the customer
+  // exactly when the restaurant requires one (phone-first, auto-filling a returning number) and
+  // asks nothing at all when it doesn't. Still best-effort — a cancelled or failed invoice must
+  // never undo the payment staff just took; it stays generable from the bill.
+  // opts.skipAutoInvoice: the caller already offered the invoice BEFORE taking payment (the bill
+  // popup does), so don't chain a second customer sheet on top of a finished payment.
   const sid = os[0] && os[0].session_id;
-  if (sid) { try { const ss = (state.board.sessions || []).find((s) => s.id === sid); if (!ss || ss.invoice_no == null) await api("POST", `/sessions/${sid}/invoice`); } catch (e) { /* invoice stays generable from the bill */ } }
+  if (sid && !mtpOpts.skipAutoInvoice) { try { const ss = (state.board.sessions || []).find((s) => s.id === sid); if (!ss || ss.invoice_no == null) await generateInvoice(sid); } catch (e) { /* invoice stays generable from the bill */ } }
   await pollTables([String(t)]); // refresh this tile's summary → green pay ring / "Cleared"
 }
 
@@ -5368,8 +5404,15 @@ async function loadTableSlice(t) {
 // slice is kept fresh by the pollers). Called at the top of every tile quick-action so the
 // handler has table t's real order/call rows to act on, even when t isn't selected. Best-effort:
 // a fetch failure leaves the caches as-is (the handler then no-ops rather than throwing).
-async function ensureTableSlice(t) {
-  if (detailTables().includes(String(t))) return; // the open-detail table's slice is already kept fresh
+// ensureTableSlice(t, force): make sure table t's FULL slice (sessions + orders + items) is in
+// the client's board. Normally it trusts an already-open detail, whose slice the polls keep
+// fresh. `force` refetches regardless — needed the moment something we just wrote lives on the
+// SESSION row (an invoice number), because the summary refresh (pollTables) carries tiles only,
+// so re-reading the board would hand back the pre-write copy. That cost a real bug: after
+// generating an invoice, the bill popup read invoice_no as still null and treated its own
+// successful invoice as a failure, so nothing printed.
+async function ensureTableSlice(t, force = false) {
+  if (!force && detailTables().includes(String(t))) return; // the open-detail table's slice is already kept fresh
   try { await loadTableSlice(t); } catch {}
 }
 
@@ -5434,19 +5477,15 @@ async function loadSessions(fromPoll) {
   // summary, the open-detail table's order rows, AND its SESSION row). If a poll arrives
   // and the fingerprint hasn't changed, there's literally nothing new — so skip the redraw.
   //
-  // The session row matters: the detail panel's "is this table open" state comes from
-  // openSessionForTable() reading state.board.sessions, NOT from summary/orders. Opening a
-  // table optimistically pre-sets its summary tile to "Open/waiting" BEFORE the real POST
-  // lands (openTableSession) — so once the real session actually arrives, the tile's label
-  // is already the same and there's still no order, meaning summary+orders alone produce the
-  // IDENTICAL sig as the pre-open optimistic render. The dedup guard then thinks nothing
-  // changed and skips the redraw that would show the table as open — the detail panel is
-  // left stuck showing "this table isn't open yet" until some UNRELATED event happens to
-  // change the sig (owner report, 2026-07-02: stuck 5+ seconds after tapping the tile's
-  // quick Open button while that table's detail was already showing).
+  // The session row still matters even though staff never open or close one: the detail
+  // panel reads the party from openSessionForTable() (state.board.sessions), NOT from the
+  // summary or the orders. A party can therefore arrive or end while summary+orders look
+  // unchanged — and if the session row weren't part of this fingerprint, the dedup guard
+  // would decide nothing happened and skip the redraw, leaving the detail stuck on the
+  // previous party for seconds (owner report, 2026-07-02, back when opening was manual).
   // Folds in EVERY open detail (docked + every floating popup), not just one — a change to
-  // ANY of them (including a floating popup you're not currently looking at the side panel
-  // for) must still invalidate the dedup guard and redraw.
+  // ANY of them (including a popup you're not currently looking at) must still invalidate the
+  // dedup guard and redraw.
   const _dts = detailTables();
   const selOrdersSig = _dts.length
     ? (state.data.orders || []).filter((o) => _dts.includes(String(o.table_number)))
@@ -5501,48 +5540,16 @@ function flipOrderItems(o, from, to) {
   (o.items || []).forEach((it) => { if (!from || (it.status || "received") === from) it.status = to; });
 }
 
-// openTableSession: open (seat) a table so its guests can order.
-// OPTIMISTIC: the tile flips to "Open" instantly via a temporary local
-// session; the follow-up refresh swaps in the server's real one.
-async function openTableSession(table) {
-  const t = String(table);
-  // TWO-TIER: the grid tile reads the SUMMARY, so flip THIS tile to "Open / waiting" in the
-  // summary optimistically (and drop its pending requests — opening also approves them
-  // server-side). The targeted refetch on success swaps in the server's real tile.
-  const beforeTiles = Object.assign({}, (state.summary.tiles || {}));
-  const beforeReqs = state.summary.requests || [];
-  const tiles = Object.assign({}, beforeTiles);
-  tiles[t] = Object.assign({}, tiles[t] || {}, { state: "waiting", label: "Open", meta: "waiting for guests", hasReq: false, reqs: 0 });
-  state.summary = Object.assign({}, state.summary, {
-    tiles,
-    requests: beforeReqs.filter((r) => String(r.table_number) !== t),
-  });
-  floorOpsInFlight++;
-  loadSessions(true); // render-only, no network
-  try {
-    const opened = await api("POST", "/sessions/open", { table: t });
-    floorOpsInFlight--;
-    // The POST response IS the real session row — merge it in and redraw right away instead
-    // of waiting for pollTables' extra round-trip to fetch the exact same thing a moment
-    // later. This is what made the detail panel feel laggy when it was already open for this
-    // table (owner report, 2026-07-02): it sat on "not open yet" until that second fetch
-    // landed. pollTables still runs after, as the usual reconcile/safety net.
-    if (opened && opened.id) {
-      state.board = Object.assign({}, state.board, {
-        sessions: (state.board.sessions || []).filter((s) => s.id !== opened.id).concat(opened),
-      });
-      loadSessions(true);
-    }
-    await pollTables([t]);
-    toast("Table opened", "ok");
-  }
-  catch (e) {
-    floorOpsInFlight--;
-    state.summary = Object.assign({}, state.summary, { tiles: beforeTiles, requests: beforeReqs }); // undo
-    loadSessions(true);
-    toast("Could not open: " + e.message, "err");
-  }
-}
+// ── "OPEN THIS TABLE" IS GONE (owner, 2026-07-31) ────────────────────────────────────
+// openTableSession() / openAllTables() / closeAllTables() used to live here. Seating a
+// table was a step staff had to remember before guests could order, and closing it was a
+// step they had to remember after. Both are now automatic: the first order starts the
+// party, a settled bill ends it (see maybeAutoSettle). Nothing in the panel opens or
+// closes a table by hand any more, so those three functions — and the floor's
+// "⬆ Open all / ⬇ Close all" card — were removed rather than left as dead buttons.
+// The server endpoints (/sessions/open, /sessions/close-all) still exist and still work;
+// they simply have no caller in this panel. summaryTableOpen() below stays: it answers
+// "is anyone sitting here?", which the KOT/shift-table pickers still need.
 // summaryTableOpen(t): is table t currently OPEN, per the slim summary? A tile is open
 // when it has a summary entry whose state is anything but 'free' or 'req' (those two mean
 // no open session). The board is no longer fetched whole, so the bulk actions read this.
@@ -5550,128 +5557,11 @@ function summaryTableOpen(t) {
   const tile = (state.summary.tiles || {})[String(t)];
   return !!tile && tile.state !== "free" && tile.state !== "req";
 }
-// openAllTables: seat every table that isn't open yet, in one go (asks first).
-async function openAllTables() {
-  const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
-  const targets = [];
-  for (let i = 1; i <= n; i++) if (!summaryTableOpen(String(i))) targets.push(String(i));
-  if (!targets.length) return toast("Every table is already open", "ok");
-  if (!(await confirmDialog(`Open all ${targets.length} remaining table${targets.length > 1 ? "s" : ""}?`, "Open all"))) return;
-  // INSTANT: flip every target tile to "Open" (waiting, no guests yet) in the local summary NOW,
-  // so the whole floor looks open immediately — then ONE bulk call (mig 102) opens them all in a
-  // single round-trip server-side, then reconcile to the truth. floorOpsInFlight shields the
-  // optimistic tiles from a background poll clobbering them mid-flight.
-  floorOpsInFlight++;
-  const tiles = Object.assign({}, state.summary.tiles || {});
-  for (const t of targets) tiles[t] = Object.assign({}, tiles[t], {
-    state: "waiting", label: "Open", meta: "waiting for guests",
-    counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, due: 0, pay: "",
-    members: 0, pending: 0, hasNew: false, hasCall: false, hasReq: false, hasJoin: false, reqs: 0, calls: 0,
-  });
-  state.summary = Object.assign({}, state.summary, { tiles });
-  loadSessions(true); // re-render the optimistic tiles immediately (no fetch)
-  try {
-    const res = await api("POST", "/sessions/open-all", {});
-    floorOpsInFlight--;
-    await loadSessions(); // one full summary refresh → reconcile to server truth
-    toast(`Opened ${(res && res.opened) || targets.length} table${(((res && res.opened) || targets.length) > 1) ? "s" : ""}`, "ok");
-  } catch (e) {
-    floorOpsInFlight--;
-    await loadSessions(); // reconcile back to truth on failure
-    toast("Could not open all: " + e.message, "err");
-  }
-}
-// closeAllTables: end EVERY open session at once (asks first — guests at those
-// tables can no longer order until reopened).
-async function closeAllTables() {
-  // Open tables come from the SLIM summary (state.summary.tiles) — no whole-board fetch needed.
-  // A tile is "open" when it has a session: any state except free/req.
-  const tiles = state.summary.tiles || {};
-  const openTables = Object.keys(tiles).filter((t) => { const st = tiles[t].state; return st && st !== "free" && st !== "req"; });
-  if (!openTables.length) return toast("No open tables", "ok");
-  // Floor-wide = the scary red confirm so it can't be mistaken for the one-table popup.
-  if (!(await confirmDialog(`Close ALL ${openTables.length} open table${openTables.length > 1 ? "s" : ""}? Guests at them can't order until reopened.`, `Close all ${openTables.length}`, { floorwide: true }))) return;
-  // INSTANT: free every CLOSEABLE tile now (same guard the server uses — a table that owes money
-  // [pay red] or is still cooking [received/preparing counts] is NOT closeable, so leave it). One
-  // bulk call (mig 103) closes them server-side, then reconcile. floorOpsInFlight shields optimism.
-  const isBlocked = (t) => { const x = tiles[t] || {}; const c = x.counts || {}; return x.pay === "red" || (c.nw || 0) > 0 || (c.ck || 0) > 0; };
-  floorOpsInFlight++;
-  const nt = Object.assign({}, tiles);
-  for (const t of openTables) if (!isBlocked(t)) delete nt[t]; // dropped tile → renders as Free
-  state.summary = Object.assign({}, state.summary, { tiles: nt });
-  loadSessions(true); // render the optimistic frees immediately (no fetch)
-  try {
-    const res = await api("POST", "/sessions/close-all", {});
-    floorOpsInFlight--;
-    await loadSessions(); // reconcile to server truth
-    const closed = (res && res.closed) || 0, skipped = (res && res.skipped) || 0;
-    const closedTables = (res && res.closed_tables) || [];
-    if (!closed && skipped) return toast(`Couldn't close ${skipped} table${skipped > 1 ? "s" : ""} — they owe money or still have food cooking.`, "err");
-    // Gmail-style 8s action: REOPEN the tables we just closed (as fresh, empty tables). Close-all only
-    // ever closes fully-SETTLED tables, so there's no party or unpaid bill left to restore — hence
-    // "Reopen", not "Undo" (which wrongly implied the old party/orders would come back). (B26)
-    const reopenClosed = async () => {
-      await Promise.allSettled(closedTables.map((tb) => api("POST", "/sessions/open", { table: tb })));
-      await loadSessions();
-      toast(`Reopened ${closedTables.length} table${closedTables.length > 1 ? "s" : ""}`, "ok");
-    };
-    const closedMsg = skipped ? `Closed ${closed}, left ${skipped} (unpaid/cooking)` : `Closed ${closed} table${closed > 1 ? "s" : ""}`;
-    if (closedTables.length && window.LFH_UNDO) LFH_UNDO.show({ message: closedMsg, sub: `Tap undo to reopen ${closedTables.length} table${closedTables.length > 1 ? "s" : ""}`, icon: "🔓", undoLabel: "Reopen", seconds: 6, onUndo: reopenClosed });
-    else toast(closedMsg, skipped ? "err" : "ok", closedTables.length ? { label: "Reopen", fn: reopenClosed } : undefined, 8000);
-  } catch (e) {
-    floorOpsInFlight--;
-    await loadSessions(); // reconcile back to truth on failure
-    toast("Could not close all: " + e.message, "err");
-  }
-}
-// closeBlockedReason(err): did the server refuse this close because the table is still
-// busy, and why? Reads the REASON CODE the close endpoint sends ('unpaid' | 'cooking' |
-// 'both'), with a text fallback for a stale/queued reply that predates the code. Returns
-// null for any other failure (network, not found) so a genuine error still surfaces.
-function closeBlockedReason(err) {
-  const code = err && err.data && err.data.reason;
-  if (code === "unpaid" || code === "cooking" || code === "both") return code;
-  const m = String((err && err.message) || "");
-  if (/owes money/i.test(m)) return /cooking/i.test(m) ? "both" : "unpaid";
-  if (/orders cooking/i.test(m)) return "cooking";
-  return null;
-}
-// The override question, worded for the actual reason — a walk-out reads differently from
-// food that simply isn't out yet, and both are recorded in the log either way.
-const closeAnywayAsk = (why) =>
-  why === "both" ? "This table still OWES money AND has food still cooking. Close anyway? The unpaid bill and the cancelled food are both recorded in the log."
-  : why === "cooking" ? "This table's food isn't served yet. Close anyway? The unserved food is cancelled and recorded in the log."
-  : "This table still OWES money. Close anyway? The unpaid bill is recorded in the log.";
-
-// closeSession: end a table's session. The SERVER now scopes the order cleanup to
-// this session and archives them (no client-side loop needed), and it BLOCKS the
-// close while money is owed — so we offer an explicit "close anyway" override.
-async function closeSession(id, force) {
-  if (!force && !(await confirmDialog("Close this session? Guests at this table can no longer order or call until it's reopened.", "Close session"))) return;
-  // Grab the table number BEFORE we close (the session row disappears after loadSessions),
-  // so we can also drop any FLOATING popup showing it — otherwise a popup lingered on the
-  // now-freed table (close from popup mode left the wrong table on screen).
-  const closedTnum = (state.board.sessions || []).find((s) => s.id === id)?.table_number;
-  try {
-    await api("POST", "/sessions/" + id + "/close", force ? { force: true } : undefined);
-    state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
-    if (closedTnum != null) state.floatingTables = state.floatingTables.filter((f) => String(f.table) !== String(closedTnum));
-    await loadSessions();
-    toast("Table closed — bill moved to Previous", "ok");
-  } catch (e) {
-    // Server refused — offer the override. Decide on the server's REASON CODE, never on the
-    // wording: the old `/owes money/` text-match missed the cooking-only refusal ("still has
-    // orders cooking — serve them, or close anyway"), so a table whose bill was PAID but whose
-    // food wasn't served yet showed a red toast with NO "close anyway" button and could not be
-    // closed at all. reason is 'unpaid' | 'cooking' | 'both' (lib/sessionClose.ts).
-    const why = closeBlockedReason(e);
-    if (why) {
-      if (await confirmDialog(closeAnywayAsk(why), "Close anyway")) return closeSession(id, true);
-      return;
-    }
-    toast("Could not close: " + e.message, "err");
-  }
-}
+// The manual close/free path (closeBlockedReason + closeAnywayAsk + closeSession +
+// freeTableAll) was DELETED with the open/close step (owner, 2026-07-31). A settled table
+// frees itself; a walk-out is handled by cancelling the order, which keeps the void on the
+// record instead of hiding an unpaid bill behind a closed table. lib/sessionClose.ts still
+// owns closing on the SERVER (mig 232 cleanup) — that is what auto-settle calls.
 // setSessAutoApprove: turn on/off "let new joiners in automatically" for a table.
 async function setSessAutoApprove(id, value) {
   try { await api("POST", "/sessions/" + id + "/auto-approve", { value: !!value }); await loadSessions(); toast(value ? "Auto-approve on" : "Auto-approve off", "ok"); }
@@ -5747,7 +5637,7 @@ async function itemStatus(id, status) {
 // OPTIMISTIC: the request row leaves the queue instantly; the real refresh
 // afterwards brings in whatever the approval created (e.g. the new session).
 async function resolveRequest(id, status) {
-  // The side panel + tile badges read the SUMMARY's requests now, so the optimistic removal
+  // The tile badges read the SUMMARY's requests now, so the optimistic removal
   // mutates state.summary.requests (the row leaves the queue instantly); the refresh afterwards
   // brings in whatever the approval created (e.g. the new session) via a fresh summary.
   const before = (state.summary.requests || []);
@@ -5809,18 +5699,32 @@ const ordersForTable = (t) => {
   // closed table can never keep showing "Preparing"/"Served" from an old order.)
   const sess = openSessionForTable(t);
   if (sessionsOn && !sess) return [];
-  // WHOSE ORDERS ARE THESE? (owner report, 2026-07-30 — the bug this guard exists for.)
-  // An order belongs to the party sitting here NOW only when it carries THIS session's id
-  // (or no session id at all — banquet/legacy rows, which the staff-order path adopts into
-  // the session anyway, mig 049). The guard above only asked "is the table open?", so the
-  // moment a NEW party was seated, a PREVIOUS party's leftover live orders came flooding
-  // back: opening a FREE Aangan table showed it instantly as "Preparing · 5 dishes ·
-  // ₹1,150 due" from three 9-day-old orders whose session had long been closed — and
-  // Mark-all-paid / Generate-invoice would have put them on the new guests' bill.
-  // The SERVER summary (lfh_table_view_summary) has always scoped by session id, which is
-  // why the tile then flip-flopped back to "Open · waiting for guests" on the next poll.
-  // This is the client catching up to that one truth — never widen it back to table_number.
-  return sessionsOn ? list.filter((o) => !o.session_id || o.session_id === sess.id) : list;
+  // WHOSE ORDERS ARE THESE? (owner reports, 2026-07-30 and 2026-07-31 — two doors to one bug.)
+  //
+  // An order belongs to the party sitting here NOW when it carries THIS session's id — or when it
+  // has NO session but was taken DURING this sitting (banquet / legacy paths, which is why
+  // party-less rows must never be hidden).
+  //
+  // The 2026-07-30 door: this used to gate only on "is the table open?", so a new party inherited
+  // the previous party's leftover live orders — a free Aangan table opened as "Preparing · 5
+  // dishes · ₹1,150 due" from 9-day-old orders.
+  // The 2026-07-31 door: the fix for that still admitted EVERY party-less row, with no date test
+  // at all. Table 2 held two live orders from 7 JULY with session_id NULL, so its tile said
+  // "0/1 served" (the server counts the party's one dish — correct) while its detail said 7 dishes
+  // / ₹6,048, and "Mark all paid" would have billed tonight's guests for July. An order older than
+  // the party cannot be the party's.
+  //
+  // The SERVER (the ?table= slice and lfh_table_view_summary) enforces the same rule, so the
+  // browser isn't even sent the strays — this is the client agreeing, not the client deciding.
+  // Never widen it back to "any session-less row" or to table_number.
+  // No party row at all (a sessions-OFF restaurant on legacy data): there is nothing to compare
+  // against, so the table's own live rows are the best truth available. Since migration 237 every
+  // new order carries a party, so this is history only — and it must not dereference a null.
+  if (!sess) return list;
+  const since = sess.opened_at ? new Date(sess.opened_at).getTime() - 60000 : 0; // 60s: an order can land a moment before its session row exists
+  const mine = (o) => o.session_id === sess.id
+    || (!o.session_id && (!since || new Date(o.created_at || 0).getTime() >= since));
+  return list.filter(mine);
 };
 const openSessionForTable = (t) => (state.board.sessions || []).find((s) => String(s.table_number) === String(t) && s.status === "open"); // t's open session
 // sliceLoaded(t): has table t's FULL slice (its session row OR any live order) landed in
@@ -5906,6 +5810,15 @@ function tagActionAllowed(flag) {
   if (XRAY_WHO && XRAY_WHO.higherView) return true;
   return xrayGrantedForManager(flag);
 }
+// May the CURRENT viewer take an order? Admin + owner always; a real manager needs the
+// owner-granted take_orders power. Used by the floor's "tap an empty table to start ordering"
+// shortcut, which has no button for XRAY_CONTROLS to hide — so the check has to be made here.
+// (The order-builder's own Send is server-checked too; this only decides what a tap opens.)
+function takeOrdersAllowed() {
+  if (XRAY_WHO && XRAY_WHO.actor === "admin") return true;
+  if (XRAY_WHO && XRAY_WHO.higherView) return true;
+  return xrayGrantedForManager("take_orders");
+}
 // This table's mark ('' when none) — the slim summary carries it for every tile.
 // ADMIN X-RAY rule (owner 2026-07-23): the admin console sees/uses EVERY feature, so a
 // mark ALWAYS renders in the admin view regardless of the restaurant's feature toggle.
@@ -5917,6 +5830,23 @@ function tagForTable(t) {
   return (tile && tile.tag) || "";
 }
 
+// ── NO MORE "OPEN" / "CLOSED" TABLES (owner, 2026-07-31) ─────────────────────────────
+// Opening and closing a table was removed from every screen. A party now starts BY ITSELF
+// at the first order and ends BY ITSELF when the bill is paid. The party row (the session)
+// still exists underneath — it is what keeps a table showing only its OWN orders, and what
+// carries the bill/invoice number — but staff never see it or manage it.
+//
+// So a table that has a party but NO orders is simply AVAILABLE: the old
+// "Open · waiting for guests" tile is not a state a person needs to know about. The server
+// summary still computes it (that SQL is shared with other panels), so this is the ONE
+// place it gets re-presented — and BOTH tile paths (summary + board) run through here, so
+// the grid can never disagree with itself.
+function normalizeTileState(s) {
+  if (s.st === "waiting") { s.st = "free"; s.label = "Free"; s.meta = ""; }
+  else if (s.st === "free") s.meta = ""; // "tap to open" was open/close-era wording
+  return s;
+}
+
 function tableTileState(t) {
   // SELECTED table → live-from-board (we have its full slice; keeps detail + optimism exact).
   if (state.selectedTable != null && String(state.selectedTable) === String(t) && state.board && (state.board.sessions || []).length >= 0) {
@@ -5924,9 +5854,9 @@ function tableTileState(t) {
     // fall through to the summary so we never render a selected table as blank "Free".
     const hasSlice = (state.board.sessions || []).some((s) => String(s.table_number) === String(t))
       || (state.data.orders || []).some((o) => String(o.table_number) === String(t));
-    if (hasSlice) return tableTileStateFromBoard(t);
+    if (hasSlice) return normalizeTileState(tableTileStateFromBoard(t));
   }
-  return tableTileStateFromSummary(t);
+  return normalizeTileState(tableTileStateFromSummary(t));
 }
 
 // Build a tile from the slim server summary (state.summary.tiles[t]). The summary already
@@ -6046,33 +5976,46 @@ function tableTileStateFromBoard(t) {
 // (floorHtml's loop) AND the incremental patch (patchFloorTiles) call this, so a tile
 // drawn either way is byte-identical (no path-divergent rendering). The state/label/
 // meta/badges/quick all come from tableTileState(i) exactly as before.
+// ── THE TILE'S SHAPE IS FIXED (owner drawing, 2026-07-31) ────────────────────────────
+// Every tile carries the SAME four rows in the SAME places, whatever the table is doing,
+// so a floor of 40 tables reads as one grid instead of 40 different little cards:
+//
+//   row 1   T1  ································  🪑 4     (name left, seats right)
+//   row 2   the notification badges, when there are any
+//   row 3   the LIVE STATUS pill (+ the dish progress bar)
+//   row 4   ＋ Take order ····························  🖨
+//
+// "Take order" is on EVERY tile (sessions off means there is no seat-them-first step), and
+// the small printer opens the bill preview — where Print / Generate invoice / Mark paid
+// live, so paying a table is one popup instead of a chain of confirms.
 function floorTileHtml(i) {
   const s = state.data.settings || {};
-  const sessionsOn = !!s.sessions_enabled;
-  const { st, label, meta, badges, counts, pay, done, hasNew, hasCall, hasReq, hasJoin } = tableTileState(i); // everything this tile needs
+  const { st, label, meta, badges, counts, pay, hasNew } = tableTileState(i); // everything this tile needs
   // Status progress bar (new→cooking→ready→served), same colours as the tablet's .tstrip.
   const cTot = counts.nw + counts.ck + counts.rd + counts.sv;
   const strip = cTot > 0 ? `<div class="ft-strip">${counts.nw ? `<i style="width:${(counts.nw / cTot) * 100}%;background:#f59e0b"></i>` : ""}${counts.ck ? `<i style="width:${(counts.ck / cTot) * 100}%;background:#4f9dff"></i>` : ""}${counts.rd ? `<i style="width:${(counts.rd / cTot) * 100}%;background:#ec4899"></i>` : ""}${counts.sv ? `<i style="width:${(counts.sv / cTot) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
-  // quick action(s) on the tile itself — no need to open the detail view.
-  // Show the ONE button that matches the table's situation right now.
-  let quick = "";
-  if ((st === "free" || st === "req") && sessionsOn) quick = `<button class="btn small primary ftq" data-quick-open="${i}">Open</button>`;
-  else if (hasNew) quick = `<button class="btn small primary ftq" data-quick-accept="${i}">Accept</button>`;
-  // Someone is ASKING at this table (a partner waiting to join, or a request on
-  // an occupied table) → an Attend button right on the tile (owner, 2026-06-12).
-  // It opens the table's panel, where the decision lives (OK/Transfer/✕/Ban) —
-  // a request needs a choice, so unlike a water call it can't be blind-resolved.
-  else if (hasJoin || hasReq) quick = `<button class="btn small primary ftq" data-quick-requests="${i}">Attend</button>`;
-  else if (done) quick = `<div class="ft-quick2"><button class="btn small ftq2" data-quick-restart="${i}" title="Restart — clear orders, keep table open">RST</button><button class="btn small primary ftq2" data-quick-close="${i}" title="Close & free the table">CLS</button></div>`;
-  // Served but unpaid → a one-tap "Mark paid" right on the tile (it confirms first).
-  else if (st === "bill") quick = `<button class="btn small primary ftq" data-quick-pay="${i}">💳 Mark paid</button>`;
-  else if (hasCall) quick = `<button class="btn small ftq" data-quick-attend="${i}">Attend</button>`;
-  // A faint chair watermark marks an OFF/free table (an empty seat) — a quiet,
-  // premium cue that the table is available.
-  // Seat count rides along the SAME watermark (owner request, 2026-07-01 — "how much
-  // person can sit"), from the table_seats setting (migration 111); no entry → 4.
+  // Does this table have a bill to look at? Only once the FOOD IS ALL OUT (owner, 2026-07-31:
+  // "till everything is not [served] I don't want the option for the print thing"). Nothing new,
+  // nothing cooking, nothing sitting on the pass — then the meal is finished and a bill makes
+  // sense. Before that a printer button is an invitation to bill a table mid-meal.
+  const allServed = cTot > 0 && counts.nw === 0 && counts.ck === 0 && counts.rd === 0;
+  // ROW 4 — the actions, and there are none on an EMPTY table (owner, 2026-07-31: "when the
+  // table is free and you click the table directly the ordering thing should pop, no option for
+  // take order — and whenever an order is going on, then we want the take order option").
+  // So: a free tile IS the button (tapping it opens the order builder — see the tile-click
+  // handler), and "＋ Take order" only appears once there is something to add to.
+  // It keeps the data-take-order hook, so the existing take_orders permission check
+  // (XRAY_CONTROLS) and the server's own re-check apply to it unchanged.
+  // A brand-new order still gets its one-tap ✓ accept: it's the fastest thing a manager does,
+  // and burying it in the detail would cost a tap on every single order.
+  const isEmpty = st === "free";
+  const acts = (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
+    + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
+    + (allServed ? `<button class="ft-ico" data-bill-preview="${i}" title="Bill — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-print"></i></button>` : "");
+  // Seats — ALWAYS visible, top-right (owner drawing: "no. of person can sit on table").
+  // From the table_seats setting (migration 111); no entry → 4. It used to be a watermark
+  // that only showed on a FREE table, which is exactly when you least need it.
   const seats = (s.table_seats || {})[String(i)] || 4;
-  const offIcon = st === "free" ? `<div class="ft-officon" aria-hidden="true"><i class="fas fa-chair"></i><span>${seats}</span></div>` : "";
   // Display name (mig 131): the tile badge shows the name when one is set — the
   // number stays in the tooltip (and everywhere data lives).
   const tnm = ((s.table_names || {})[String(i)] || "").trim();
@@ -6080,58 +6023,20 @@ function floorTileHtml(i) {
   // look — the strip/label/pay ring keep working, the tag is unmistakable on top.
   const tag = tagForTable(i);
   const tinfo = TABLE_TAG_INFO[tag];
-  return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0">
-        ${offIcon}${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
-        <div class="ft-top"><span class="ft-num" ${tnm ? `title="T${i}"` : ""}>${esc(tnm || i)}</span>${badges ? `<span class="ft-badges">${badges}</span>` : ""}</div>
+  return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
+        ${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
+        <div class="ft-top"><span class="ft-num" ${tnm ? `title="T${i}"` : ""}>${esc(tnm || i)}</span><span class="ft-seats" title="${esc(seats)} seats"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seats)}</span></div>
+        ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
         ${tinfo ? `<span class="ft-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
-        <div class="ft-label">${esc(label)}</div><div class="ft-meta">${esc(meta)}</div>${strip}
-        ${quick ? `<div class="ft-quick">${quick}</div>` : ""}</div>`;
+        <div class="ft-status"><span class="ft-label">${esc(label)}</span>${meta ? `<span class="ft-meta">${esc(meta)}</span>` : ""}</div>${strip}
+        ${acts ? `<div class="ft-act">${acts}</div>` : ""}</div>`;
 }
 
-// floorReqCardHtml(): the "Requests" side-panel card (pending joiners + open/join/access
-// requests). Extracted so BOTH the full render (floorHtml) AND the incremental patch
-// (patchFloorTiles) build it from the SAME markup. It carries a stable id (#fcReq) so the
-// patch can swap just this node in place. Its buttons are handled by the ONE delegated
-// click handler (see bindFloorDelegation), so replacing the node never breaks them.
-function floorReqCardHtml() {
-  const s = state.data.settings || {};
-  if (!s.sessions_enabled) return "";
-  const reqs = state.summary.requests || [];
-  const joiners = state.summary.joiners || [];
-  const joinerRows = joiners.map((m) =>
-    `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-join">join</span> ${esc(m.name || "Guest")} · join T${esc(m.table_number)}<small>${esc(timeAgo(m.joined_at))}</small></div><div class="sx-req-actions"><button class="btn small" data-mem-deny="${esc(m.id)}" title="Decline this join request">✕</button><button class="btn small danger" data-mem-ban="${esc(m.id)}" data-ban-phone="${esc(m.phone || "")}" title="Decline AND add to the blocklist">Ban</button><button class="btn small" data-mem-head="${esc(m.id)}" title="Make them the table's head — the current head is kicked">Transfer</button><button class="btn small primary" data-mem-approve="${esc(m.id)}">OK</button></div></div>`
-  ).join("");
-  const reqCount = reqs.length + joiners.length;
-  return `<div class="fc-card" id="fcReq"><h3>Requests <span class="sub">· ${reqCount}</span></h3>${reqCount ? joinerRows + reqs.map((r) => {
-    const who = esc(r.name || r.phone || "Someone");
-    const what = r.type === "open" ? `open T${esc(r.table_number)}` : r.type === "join" ? `join T${esc(r.table_number)}` : `access T${esc(r.table_number)}`;
-    // "access" = a guest asked for a WAITER to come over (e.g. their join was
-    // declined, or location failed) — so the quick action reads "✓ Attend",
-    // exactly like a water call, instead of an ambiguous "OK".
-    const okLabel = r.type === "open" ? "Open" : r.type === "access" ? "✓ Attend" : "OK";
-    return `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-${esc(r.type)}">${esc(r.type)}</span> ${who} · ${what}<small>${esc(timeAgo(r.created_at))}</small></div><div class="sx-req-actions"><button class="btn small" data-req-deny="${esc(r.id)}">✕</button><button class="btn small primary" data-req-approve="${esc(r.id)}">${okLabel}</button></div></div>`;
-  }).join("") : `<div class="sx-empty">No pending requests.</div>`}</div>`;
-}
+// (The floor's three right-hand cards — "Requests", "Needs" and "To accept" — were deleted
+// with the side panel itself (owner, 2026-07-31). Nothing they told you was lost: each tile
+// carries its own badges for calls / joiners / people waiting, the stats strip still counts
+// "NEEDS YOU", and a new order keeps its one-tap ✓ right on the tile.
 
-// floorNeedsCardHtml(): the "Needs" side-panel card (active waiter calls). Same shared-builder
-// pattern as floorReqCardHtml — id #fcNeeds, buttons via the delegated handler.
-function floorNeedsCardHtml() {
-  const s = state.data.settings || {};
-  if (!s.sessions_enabled) return "";
-  const liveCalls = (state.summary.calls || []).filter((c) => !c.resolved);
-  return `<div class="fc-card" id="fcNeeds"><h3>Needs <span class="sub">· ${liveCalls.length}</span></h3>${liveCalls.length ? liveCalls.map((c) =>
-    `<div class="sx-req"><div class="sx-req-info">${callEmoji(c.note)} T${esc(c.table_number)} · ${esc(c.note || "Waiter")}<small>${esc(timeAgo(c.created_at))}</small></div><div class="sx-req-actions"><button class="btn small primary" data-call-attend="${esc(c.id)}">Done</button></div></div>`
-  ).join("") : `<div class="sx-empty">No active calls.</div>`}</div>`;
-}
-
-// floorAcceptCardHtml(): the "To accept" side-panel card — every table with a NEW order
-// still waiting for staff to accept it, each with a one-tap Accept. Before this, new orders
-// showed ONLY on the floor tiles, so the side panel looked empty while "Needs you" counted
-// them (owner asked for them to show + sync here, 2026-07-05). Uses the SAME tableTileState
-// .hasNew that drives the tiles and the "Needs you" count, so all three always agree. Same
-// shared-builder + delegated-button pattern as floorReqCardHtml (id #fcAccept); the Accept
-// button reuses data-quick-accept → acceptTableOrders, wired by the ONE floor delegated
-// handler, so the incremental patch can swap this node without orphaning a listener.
 // The floor normally draws tables 1..table_count, but a table numbered ABOVE the current
 // count can still be OCCUPIED (e.g. the count was lowered while it had a live order). Extend
 // the drawn range to cover any such table so it never vanishes from the grid / "to accept" /
@@ -6152,29 +6057,16 @@ function floorTableList(baseN) {
     .sort((a, b) => a - b);
   return out.concat(extras);
 }
-function floorAcceptCardHtml() {
-  const s = state.data.settings || {};
-  if (!s.sessions_enabled) return "";
-  const _tcKey = tableCountKey();
-  let cachedN = _tcKey ? parseInt(localStorage.getItem(_tcKey), 10) : NaN;
-  if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
-  const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
-  const rows = [];
-  for (const i of floorTableList(n)) {
-    const ts = tableTileState(i);
-    if (ts.hasNew) rows.push({ t: i, meta: ts.meta || "" });
-  }
-  return `<div class="fc-card" id="fcAccept"><h3>To accept <span class="sub">· ${rows.length}</span></h3>${rows.length ? rows.map((r) =>
-    `<div class="sx-req"><div class="sx-req-info"><span class="sx-tag sx-tag-new">new</span> T${esc(r.t)}${r.meta ? `<small>${esc(r.meta)}</small>` : ""}</div><div class="sx-req-actions"><button class="btn small primary" data-quick-accept="${esc(r.t)}">✓ Accept</button></div></div>`
-  ).join("") : `<div class="sx-empty">No orders waiting.</div>`}</div>`;
-}
 
 // floorStatsHtml(): the floor-wide stats strip (Occupied / To pay / Needs you). Computed by
 // looping tableTileState over EVERY table (cheap — no DOM) so the patch can refresh it without
 // rebuilding the grid. Shared by floorHtml and patchFloorTiles.
 function floorStatsHtml() {
   const s = state.data.settings || {};
-  if (!s.sessions_enabled) return "";
+  // Shown WHATEVER the session setting says (fixed 2026-07-31). It used to return nothing at
+  // all when dining sessions were off — which is now the normal setup — so the floor lost its
+  // "how full am I / who owes me" line for exactly the restaurants that live on this screen.
+  // None of the three numbers needs sessions: they count tables, money and things waiting.
   const _tcKey = tableCountKey();
   let cachedN = _tcKey ? parseInt(localStorage.getItem(_tcKey), 10) : NaN;
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
@@ -6187,9 +6079,82 @@ function floorStatsHtml() {
     if (hasNew) cNew++;
     if (hasCall) cCall++;
   }
-  const pendingJoinersN = (state.summary.joiners || []).length;
-  const needsYou = cNew + cCall + (state.summary.requests || []).length + pendingJoinersN;
+  // Count only what a person can actually SEE and act on from this floor: something waiting at
+  // a table that is drawn here. A request for a table the restaurant doesn't have (a stale row,
+  // a table that was removed) used to be counted anyway — and now that the queue card is gone
+  // it would sit in "Needs you" forever with nothing on screen to answer it. A number nobody
+  // can act on teaches staff to ignore the number.
+  const drawn = new Set(floorTableList(n).map(String));
+  const atTable = (x) => drawn.has(String(x && x.table_number));
+  const reqN = (state.summary.requests || []).filter(atTable).length;
+  const joinN = (state.summary.joiners || []).filter(atTable).length;
+  const needsYou = cNew + cCall + reqN + joinN;
   return `<div class="floor-stats"><div class="fstat"><div class="fstat-n">${cOcc}/${n}</div><div class="fstat-l">Occupied</div></div><div class="fstat warn"><div class="fstat-n">${cPay}</div><div class="fstat-l">To pay</div></div><div class="fstat alert"><div class="fstat-n">${needsYou}</div><div class="fstat-l">Needs you</div></div></div>`;
+}
+
+// floorPlan(): this restaurant's hand-written floor plan, or null for the classic grid.
+// Returns null unless BOTH are true: the restaurant is set to Custom, and a plan exists for its
+// slug in floor-layouts.js. Anything malformed (no tables array) counts as no plan — a typo in a
+// hand-written file must fall back to a working floor, not break the screen.
+function floorPlan() {
+  const s = state.data.settings || {};
+  if (s.floor_layout_mode !== "custom") return null;
+  const slug = (state.data.restaurant || {}).slug || "";
+  const plan = (window.LFH_FLOOR_LAYOUTS || {})[slug];
+  if (!plan || !Array.isArray(plan.tables) || !plan.tables.length) return null;
+  return plan;
+}
+
+// customFloorHtml(plan, n): draw the owner's plan. Each table sits where he put it (1-based
+// x/y, optional w/h) on a CSS grid of plan.cols columns; the tiles themselves are the SAME
+// floorTileHtml every other view uses, so a table behaves identically wherever it is drawn.
+//
+// A table that exists on the floor but ISN'T in the plan still appears, in its own row
+// underneath: a half-finished plan may look unfinished, but it may never hide a table (and with
+// it, that table's money).
+function customFloorHtml(plan, n) {
+  const cols = Math.max(1, Math.min(40, parseInt(plan.cols, 10) || 12));
+  const placed = new Set();
+  const cells = plan.tables.map((row) => {
+    const t = String(row.t);
+    placed.add(t);
+    const x = Math.max(1, parseInt(row.x, 10) || 1);
+    const y = Math.max(1, parseInt(row.y, 10) || 1);
+    const w = Math.max(1, parseInt(row.w, 10) || 1);
+    const h = Math.max(1, parseInt(row.h, 10) || 1);
+    // Row offset: zone captions occupy a row of their own, so a table's y is shifted down by
+    // however many captions sit above it. Keeps the owner's numbers meaning what he wrote.
+    const above = (plan.zones || []).filter((z) => (parseInt(z.y, 10) || 1) <= y).length;
+    return `<div class="fplan-cell" style="grid-column:${x} / span ${w};grid-row:${y + above} / span ${h}">${floorTileHtml(row.t)}</div>`;
+  }).join("");
+  const zones = (plan.zones || []).map((z) => {
+    const y = Math.max(1, parseInt(z.y, 10) || 1);
+    const above = (plan.zones || []).filter((o) => (parseInt(o.y, 10) || 1) < y).length;
+    return `<div class="fplan-zone" style="grid-column:1 / -1;grid-row:${y + above}">${esc(z.label || "")}</div>`;
+  }).join("");
+  const missing = floorTableList(n).filter((i) => !placed.has(String(i)));
+  const extra = missing.length
+    ? `<div class="floor-plan-note">Not placed on the plan yet — ${missing.length} table${missing.length > 1 ? "s" : ""}:</div>
+       <div class="ftile-grid" style="--per-row:${floorPerRow()}">${missing.map((i) => floorTileHtml(i)).join("")}</div>`
+    : "";
+  // ROW HEIGHTS, spelled out. A table row is exactly as tall as a column is wide, so a 1×1 table
+  // is a SQUARE and the owner's w/h mean what they look like: 3 wide × 1 tall draws as a long
+  // table, not as a giant square (which is what happened when every tile forced its own 1:1).
+  // A zone caption gets min-content — a line of text, not a table-sized band.
+  const zoneRows = new Set((plan.zones || []).map((z, i) => {
+    const y = Math.max(1, parseInt(z.y, 10) || 1);
+    return y + (plan.zones || []).filter((o, j) => j < i && (parseInt(o.y, 10) || 1) < y).length;
+  }));
+  let maxRow = 0;
+  plan.tables.forEach((row) => {
+    const y = Math.max(1, parseInt(row.y, 10) || 1);
+    const h = Math.max(1, parseInt(row.h, 10) || 1);
+    const above = (plan.zones || []).filter((z) => (parseInt(z.y, 10) || 1) <= y).length;
+    maxRow = Math.max(maxRow, y + above + h - 1);
+  });
+  const rowSizes = [];
+  for (let r = 1; r <= maxRow; r++) rowSizes.push(zoneRows.has(r) ? "min-content" : "var(--fplan-sq)");
+  return `<div class="fplan-wrap"><div class="fplan" style="--fplan-cols:${cols};grid-template-rows:${rowSizes.join(" ")}">${zones}${cells}</div></div>${extra}`;
 }
 
 // floorHtml: build the whole unified floor — the grid of table tiles on the left
@@ -6205,7 +6170,7 @@ function floorStatsHtml() {
 // auto-fill drop columns when the width isn't there (see .ftile-grid), so a phone or a
 // narrow window shows fewer per row rather than a row of unreadable slivers. That is what
 // keeps a 300-table restaurant usable on any screen.
-const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 6;
+const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 30, FLOOR_PER_ROW_DEFAULT = 12; // mirrors lib/floorLayout.ts
 function floorPerRow() {
   // The admin preview slider wins while it's driving (never persisted — see state).
   const raw = state.floorPerRowPreview != null
@@ -6250,7 +6215,6 @@ function floorHtml() {
   if (s.table_count && _tcKey) { try { localStorage.setItem(_tcKey, String(parseInt(s.table_count, 10))); } catch {} }
   // Side-panel queues now come from the slim SUMMARY aggregates (tiny — only pending rows),
   // not the full board (which is no longer fetched whole). Same shapes the cards expect.
-  // (Requests/joiners/calls live in the shared floorReqCardHtml/floorNeedsCardHtml builders.)
   const blocks = state.summary.blocklist || [];
 
   // legend — every state + its colour. ("Bill due" was removed: payment is
@@ -6270,14 +6234,9 @@ function floorHtml() {
       skel += `<div class="ftile ftile-skel" aria-hidden="true"><div class="sk-num"></div><div class="sk-lbl"></div><div class="sk-meta"></div></div>`;
     }
     const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2></div>${legend}<div class="ftile-grid" style="--per-row:${floorPerRow()}">${skel}</div></div>`;
-    // right: skeleton versions of the side-panel cards so the whole layout is
-    // present from the first frame (no empty gutter that fills in late). A card
-    // = a title bar + a few placeholder rows of shimmer.
-    const skRow = `<div class="sk-row"></div>`;
-    const skCard = (titleW, rows) => `<div class="fc-card fc-card-skel"><div class="sk-cardtitle" style="width:${titleW}"></div>${skRow.repeat(rows)}</div>`;
-    const sideW = state.floorSideW || 300;
-    const skelSide = `<aside class="floor-side" style="width:${sideW}px;flex:0 0 ${sideW}px">${skCard("46%", 4)}${skCard("38%", 2)}${skCard("34%", 2)}</aside>`;
-    return `<div class="floor-wrap">${skelMain}<div class="floor-resizer"></div>${skelSide}</div>`;
+    // The floor is the WHOLE width now — there is no right-hand panel to leave room for
+    // (owner, 2026-07-31), so the skeleton is just the grid.
+    return `<div class="floor-wrap floor-collapsed">${skelMain}</div>`;
   }
 
   let tiles = "";
@@ -6310,72 +6269,41 @@ function floorHtml() {
   // SEPARATE `edit_settings` power, so a manager granted only `table_assign` could never
   // reach it. Sections belong to the floor anyway, so the live Table view is the natural
   // home. Same builder → one source of truth, no chance of the two drifting.
-  const sectionsBtn = `<button class="btn" id="floorSections" data-mgr-hide="table_sections" title="Give each waiter their own tables">👥 Who serves what</button>`;
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${sectionsBtn}${parcelBtn}</div>${statsStrip}${legend}<div class="ftile-grid" style="--per-row:${floorPerRow()}">${tiles}</div></div>`;
+  // 👥 "Who serves what" is NOT on the floor (owner, 2026-07-31: "I do not want this option
+  // completely on top"). Its home is Settings → Access, where the waiter rota belongs.
+  // In its place: 🧾 KOT ▾ for the WHOLE floor (owner, same day — "I want the KOT option on the
+  // top where who does what was, and it will have to choose a table and it will work after like
+  // it was before"). It asks which table first, then opens the same table-and-KOT menu the table
+  // popup opens — including "Table type", which is how a table gets marked VIP BEFORE anyone has
+  // ordered (there is no popup to reach on an empty table any more: tapping one starts an order).
+  const kotBtn = tableOpsOn() ? `<button class="btn" id="floorKot" title="Table &amp; KOT operations — mark a table VIP, change table, merge, move a KOT or dish, split, reprint">🧾 KOT ▾</button>` : "";
+  // ── CLASSIC or CUSTOM (mig 242) ────────────────────────────────────────────────────────
+  // Classic = tables in order, N per row. Custom = the room's real shape, hand-written by the
+  // owner in public/panels/floor-layouts.js and keyed by restaurant slug. A restaurant set to
+  // Custom with no plan written yet falls back to Classic and SAYS so — choosing the mode must
+  // never be able to empty someone's floor.
+  const plan = floorPlan();
+  const gridHtml = plan
+    ? customFloorHtml(plan, n)
+    : `<div class="ftile-grid" style="--per-row:${floorPerRow()}">${tiles}</div>`;
+  const planNote = (s.floor_layout_mode === "custom" && !plan)
+    ? `<div class="floor-plan-note">Custom layout is on for this restaurant, but no floor plan has been written for it yet — showing the classic grid. The plan lives in <b>public/panels/floor-layouts.js</b>.</div>`
+    : "";
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${kotBtn}${parcelBtn}</div>${statsStrip}${legend}${planNote}${gridHtml}</div>`;
 
-  // side panel — everyday floor work only (whole-floor open/close, requests, needs,
-  // blocked). The old "Features · rarely changed" card that used to sit at the bottom
-  // (system ON / require location / require code + café latitude-longitude-radius) was
-  // REMOVED 2026-07-29 (owner): those are restaurant-wide SETUP settings, not floor
-  // controls, and a mis-tap here could switch the whole dining-session system off
-  // mid-service. They live in exactly ONE place now — Settings → "Dining sessions"
-  // (admin-only) and the admin panel's restaurant settings. Do not re-add them here.
-  // Whole-floor bulk actions — used every open/close of the day, so they live on
-  // top. (Deliberately STILL not next to the header's Refresh button: a misfired
-  // speed-click there once closed the whole floor. Both confirm before acting.)
-  const bulkCard = sessionsOn ? `<div class="fc-card"><h3>Whole floor</h3><div class="fc-bulk"><button class="btn small" id="floorOpenAll">⬆ Open all</button><button class="btn small danger" id="floorCloseAll">⬇ Close all</button></div></div>` : "";
+  // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
+  // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",
+  // Requests, Needs, Blocked) or the selected table's detail docked in place. Both are gone:
+  //   · the cards, because with sessions off they are empty most of the day and the badges on
+  //     the tiles already say who needs something ("we don't even need the right side panel");
+  //   · the docked detail, because a table must open as a POPUP and nothing else ("only popup
+  //     option, no right side popup option at all") — one way in, so a tile tap always does the
+  //     same thing whatever else is on screen.
+  // The floor therefore gets the full width, which is also what makes the compact tiles read
+  // properly. The cards' builders were deleted rather than left unreferenced.
 
-  // Pending JOINERS + open/join/access requests → the "Requests" card; active waiter
-  // calls → the "Needs" card. Both are now built by SHARED module-level functions
-  // (floorReqCardHtml / floorNeedsCardHtml) so the incremental patch path can refresh
-  // just these two cards in place with byte-identical markup. They carry stable ids
-  // (#fcReq / #fcNeeds) and their buttons are wired by the ONE delegated click handler.
-  const acceptCard = floorAcceptCardHtml();
-  const reqCard = floorReqCardHtml();
-  const needsCard = floorNeedsCardHtml();
-
-  // Blocked list: device/phone/table bans, each with its reason; rows where the
-  // banned guest left a number asking to be unblocked float to the TOP and are
-  // highlighted so staff can act on them. (owner, 2026-06-22 — ban system)
-  const blkRow = (b) => {
-    const who = b.phone ? "📵 " + esc(b.phone) : b.device_id ? "🚫 Device" : b.table_number ? "🚫 T" + esc(b.table_number) : "🚫 Blocked";
-    const reason = b.reason ? ` <small>${esc(b.reason)}</small>` : "";
-    const unban = b.unban_phone ? `<div class="sx-blk-unban">🙋 Wants unblock · <b>${esc(b.unban_phone)}</b></div>` : "";
-    return `<div class="sx-blk${b.unban_phone ? " has-req" : ""}"><div class="sx-blk-top"><span>${who}${reason}</span><button class="btn small" data-unblock="${esc(b.id)}">Unblock</button></div>${unban}</div>`;
-  };
-  const blkSorted = [...blocks].sort((a, c) => (c.unban_phone ? 1 : 0) - (a.unban_phone ? 1 : 0));
-  const blkCard = sessionsOn ? `<div class="fc-card"><h3>Blocked <span class="sub">· ${blocks.length}</span></h3>${blocks.length ? blkSorted.map(blkRow).join("") : `<div class="sx-empty">Nobody blocked.</div>`}<div class="sx-blk-add"><input class="sx-input" id="blkPhone" placeholder="Phone/email"/><input class="sx-input sx-input-sm" id="blkTable" placeholder="T#"/><button class="btn small" id="blkAdd">Block</button></div></div>` : "";
-
-  // The detail pane wants more room than the compact controls — so when a table is
-  // selected we use a wider default (and its own remembered width, floorDetailW).
-  const sideW = state.selectedTable != null ? (state.floorDetailW || 460) : (state.floorSideW || 300);
-  // RIGHT SIDE PANEL — master-detail. By default it's the whole-floor CONTROLS
-  // (bulk open/close, requests, needs, blocked, features/location). When a table is
-  // SELECTED, the SAME panel instead shows that table's full detail IN PLACE (not a
-  // pop-up), with a ✕ at the top-right that deselects and returns to these controls.
-  let sideInner;
-  if (state.selectedTable != null) {
-    const t = state.selectedTable;
-    const parts = tablePanelParts(t, "dock"); // rail: every action EXCEPT ＋ Take order
-    const { headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
-    // Pop this table out into the FLOATING layer (owner request, 2026-07-02 — "movable",
-    // "many popups at the same time"). Docking back happens from the floating card's own
-    // "⇱ Dock" button (bindFloor), not here — this button only ever pops OUT.
-    const alreadyFloating = state.floatingTables.some((f) => String(f.table) === String(t));
-    const floatBtn = alreadyFloating ? "" : `<button class="tp-detail-float" data-float-open="${esc(t)}" title="Pop out as a movable floating window">⤢ Float</button>`;
-    sideInner = `<div class="tp-detail" data-table-detail="${esc(t)}">
-        <div class="tp-detail-head">
-          <div class="tp-detail-top"><h3>${esc(tableLabel(t))}</h3>${headPill}${parts.kotHeadBtn || ""}${floatBtn}<button class="tp-detail-close" id="tpDetailClose" aria-label="Back to floor controls" title="Back to floor controls">✕</button></div>
-          ${headMeta}
-        </div>
-        <div class="tp-detail-body">${requestsSec}${sessionSec}${ordersSec}${callsSec}${billSec}</div>
-        <div class="tp-detail-foot">${foot}</div>
-      </div>`;
-  } else {
-    sideInner = `${acceptCard}${bulkCard}${reqCard}${needsCard}${blkCard}`;
-  }
   // FLOATING LAYER: every table in state.floatingTables gets its own draggable card,
-  // rendered ALONGSIDE whatever the side panel is doing above — fully independent (owner,
+  // rendered above the grid — fully independent of each other (owner,
   // 2026-07-02: "this only happens in popup mode, not the side thing — when the side thing
   // is closed [docked] that still happens [normally]"). Non-pinned cards get their
   // left/top/width from layoutFloatingRow() right after this markup lands (bindFloor);
@@ -6383,7 +6311,7 @@ function floorHtml() {
   const floatingLayerHtml = state.floatingTables.map((f) => {
     const parts = tablePanelParts(f.table, "float");
     const { headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot } = parts;
-    const dockBtn = isPhoneLayout() ? "" : `<button class="tp-detail-float" data-float-dock="${esc(f.table)}" title="Dock back to the side panel">⇱ Dock</button>`; // no side panel on a phone → nothing to dock into
+    const dockBtn = ""; // nothing to dock INTO any more — the side panel is gone (2026-07-31)
     // A PINNED card keeps its dragged/resized geometry (x/y/w/h); a free one gets only its
     // auto-arrange width here and its left/top/width from layoutFloatingRow after render.
     const styleParts = [`width:${f.w || 400}px`];
@@ -6400,24 +6328,9 @@ function floorHtml() {
       <div class="tp-resize-handle" data-float-resize="${esc(f.table)}" title="Drag to resize"></div>
     </div>`;
   }).join("");
-  // POPUP MODE — hide the side panel entirely (owner, 2026-07-02: float and the side panel
-  // must NEVER be on screen together). We're in popup mode when EITHER the owner manually
-  // collapsed the panel, OR any floating popup is open (floating one auto-hides the panel).
-  // The floor goes full-width with a chevron that EXITS popup mode (closes popups + shows the
-  // panel — see the floorSideToggle handler). Tapping a tile here opens a floating popup.
-  // On a PHONE the floor is ALWAYS popup-mode (there's no room for the side panel — owner,
-  // 2026-07-03: "on phone, click table = only popup"); the desktop rule is unchanged.
-  if (isPhoneLayout() || state.floatingTables.length > 0 || (state.floorSideCollapsed && state.selectedTable == null)) {
-    // NO floating Open-all/Close-all bar here any more (owner, 2026-07-28): it hovered
-    // over the header and overlapped the New Parcel button. These rarely-used bulk
-    // actions live ONLY in the side panel's "Whole floor" card now — expanding the
-    // panel (the ‹ chevron) is one click away, and a whole-floor action is deliberate
-    // enough to deserve that click.
-    return `<div class="floor-wrap floor-collapsed">${main}<button class="floor-side-toggle is-collapsed" id="floorSideToggle" title="Show floor controls" aria-label="Show floor controls">‹</button></div>${floatingLayerHtml}`;
-  }
-  const collapseBtn = state.selectedTable == null
-    ? `<button class="floor-side-toggle" id="floorSideToggle" title="Hide this panel" aria-label="Hide this panel">›</button>` : "";
-  return `<div class="floor-wrap">${main}<div class="floor-resizer" id="floorResizer" title="Drag to resize"></div><aside class="floor-side" style="width:${sideW}px;flex:0 0 ${sideW}px">${collapseBtn}${sideInner}</aside></div>${floatingLayerHtml}`;
+  // ONE layout, one way in: the grid at full width, with any open table floating above it.
+  // (`floor-collapsed` is what that full-width mode has always been called in the CSS.)
+  return `<div class="floor-wrap floor-collapsed">${main}</div>${floatingLayerHtml}`;
 }
 
 // patchFloorTiles(tables): the INCREMENTAL update path. Instead of rebuilding all ~300 tiles
@@ -6462,12 +6375,7 @@ function patchFloorTiles(tables) {
   // the nodes can't orphan a listener.
   const statsEl = ed.querySelector(".floor-stats");
   if (statsEl) statsEl.outerHTML = floorStatsHtml();
-  const reqEl = ed.querySelector("#fcReq");
-  if (reqEl) reqEl.outerHTML = floorReqCardHtml();
-  const needsEl = ed.querySelector("#fcNeeds");
-  if (needsEl) needsEl.outerHTML = floorNeedsCardHtml();
-  const acceptEl = ed.querySelector("#fcAccept");
-  if (acceptEl) acceptEl.outerHTML = floorAcceptCardHtml();
+  // (No queue cards to refresh any more — the stats strip above is the only floor-wide node.)
   // A patch draws the new summary WITHOUT updating loadSessions' lastBoardSig fingerprint.
   // If a later FULL poll lands carrying the PREVIOUS summary (a wake/reconnect/platform event
   // whose summary happens to match the pre-patch one), loadSessions(true) would see an unchanged
@@ -6513,12 +6421,14 @@ function bindFloorDelegation() {
     // matching one and returning replicates the old stopPropagation so a quick button
     // never ALSO triggers the tile-select below. Check most-specific targets, then the tile.
     let b;
-    if ((b = e.target.closest("[data-quick-open]")))     { openTableSession(b.dataset.quickOpen); return; }
+    // The tile's two own buttons (owner, 2026-07-31): ＋ Take order on every tile, and the
+    // printer that opens the bill preview. Scoped to a .ftile so a detail panel rendered
+    // inside #editor can never be double-handled by this floor-wide listener.
+    if ((b = e.target.closest("[data-take-order]")) && b.closest(".ftile")) { openTakeOrder(b.dataset.takeOrder, null); return; }
+    if ((b = e.target.closest("[data-bill-preview]"))) { openBillPreview(b.dataset.billPreview); return; }
     if ((b = e.target.closest("[data-quick-accept]")))   { acceptTableOrders(b.dataset.quickAccept); return; }
     if ((b = e.target.closest("[data-quick-attend]")))   { attendTableCalls(b.dataset.quickAttend); return; }
-    if ((b = e.target.closest("[data-quick-requests]"))) { selectTable(b.dataset.quickRequests); return; }
-    if ((b = e.target.closest("[data-quick-restart]")))  { restartTable(b.dataset.quickRestart); return; }
-    if ((b = e.target.closest("[data-quick-close]")))    { closeTableQuick(b.dataset.quickClose); return; }
+    if ((b = e.target.closest("[data-quick-requests]"))) { openFloatingTable(b.dataset.quickRequests); return; }
     if ((b = e.target.closest("[data-quick-pay]")))      { markTablePaid(b.dataset.quickPay); return; }
     // Requests card — joiner rows (member actions) + open/join/access requests.
     if ((b = e.target.closest("[data-mem-approve]")))    { memberAction(b.dataset.memApprove, "approve"); return; }
@@ -6532,13 +6442,15 @@ function bindFloorDelegation() {
     // TILE SELECT last — only reached when no button above matched.
     const tile = e.target.closest("[data-floor-table]");
     if (tile) {
-      // POPUP MODE (side panel collapsed OR a popup already open) → open another FLOATING
-      // popup. DOCKED MODE (side panel visible, no popups) → dock the detail in the panel.
-      // The two modes are mutually exclusive (owner, 2026-07-02), so a tile tap can only ever
-      // ADD to whichever mode is active — never mix a docked detail with floating popups.
-      const popupMode = isPhoneLayout() || state.floatingTables.length > 0 || state.floorSideCollapsed;
-      if (popupMode) openFloatingTable(tile.dataset.floorTable);
-      else selectTable(tile.dataset.floorTable);
+      // An EMPTY table goes STRAIGHT into taking an order (owner, 2026-07-31) — that is the only
+      // thing anyone wants from a free table, so making them open a popup first and press a
+      // button in it was one tap of pure ceremony. A table with something on it opens its popup,
+      // where the order, the bill and the KOT tools live.
+      // The permission still decides: a manager without take_orders gets the popup instead of a
+      // builder they aren't allowed to use (and the server refuses it regardless).
+      const ft = tile.dataset.floorTable;
+      if (tableTileState(ft).st === "free" && takeOrdersAllowed()) openTakeOrder(ft, null);
+      else openFloatingTable(ft);
     }
   });
 }
@@ -6629,85 +6541,12 @@ function bindFloor() {
   ed.querySelectorAll("[data-new-parcel]").forEach((b) => (b.onclick = () => openTakeOrder(null, null, { parcel: true })));
   // Waiter sections (migs 222-225) — same editor as Settings → Tables, reachable from the floor.
   { const sb = ed.querySelector("#floorSections"); if (sb) sb.onclick = () => openSectionsModal(); }
-  // Waiter sections (mig 222) — same editor as Settings → Tables, reachable from the floor.
-  const oa = document.getElementById("floorOpenAll");
-  if (oa) oa.onclick = () => openAllTables();
-  const ca = document.getElementById("floorCloseAll");
-  if (ca) ca.onclick = () => closeAllTables();
-  // Collapse / expand the right floor panel. The '‹' chevron shows in POPUP MODE and EXITS it
-  // — closing every floating popup AND showing the side panel (float and panel are mutually
-  // exclusive, so leaving popup mode must clear the popups). The '›' chevron (docked mode)
-  // just collapses into the empty popup-ready floor. (state persisted across reloads.)
-  const sideToggle = ed.querySelector("#floorSideToggle");
-  if (sideToggle) sideToggle.onclick = () => {
-    const inPopupMode = state.floatingTables.length > 0 || state.floorSideCollapsed;
-    if (inPopupMode) { state.floatingTables = []; state.floorSideCollapsed = false; }
-    else { state.floorSideCollapsed = true; }
-    lsSet("lfh_floor_side_collapsed", state.floorSideCollapsed ? "1" : "0");
-    renderEditor();
-  };
-  // The Blocked card's Unblock buttons — that card is NEVER touched by the patch path
-  // (unblock() routes through a full loadSessions()), so id-based binding is safe here.
-  ed.querySelectorAll("[data-unblock]").forEach((b) => (b.onclick = () => unblock(b.dataset.unblock)));
-  const add = document.getElementById("blkAdd");
-  if (add) add.onclick = () => {
-    const phone = (document.getElementById("blkPhone").value || "").trim();
-    const table = (document.getElementById("blkTable").value || "").trim();
-    if (!phone && !table) { toast("Enter a phone/email or table to block", "err"); return; }
-    block({ phone: phone || undefined, table: table || undefined });
-  };
-  // Master-detail: if a table is SELECTED, its detail is showing in the right panel
-  // — wire its ✕ (back to controls) and all its action buttons. We reuse the SAME
-  // bindTablePanel as the modal, pointed at the side-panel container, with a rerender
-  // that redraws the floor (the detail lives inside it) while keeping the body's scroll.
-  if (state.selectedTable != null) {
-    const detail = ed.querySelector("[data-table-detail]");
-    if (detail) {
-      const closeBtn = detail.querySelector("#tpDetailClose");
-      if (closeBtn) closeBtn.onclick = () => deselectTable();
-      const parts = tablePanelParts(state.selectedTable, "dock"); // must match the render above
-      // rerender keeps the detail body's scroll position so serving/deleting a dish
-      // doesn't fling the panel back to the top.
-      const rerender = () => {
-        const body = ed.querySelector(".tp-detail-body");
-        const top = body ? body.scrollTop : 0;
-        renderEditor();
-        const b2 = $("#editor").querySelector(".tp-detail-body");
-        if (b2) b2.scrollTop = top;
-      };
-      bindTablePanel(detail, state.selectedTable, parts, { rerender, close: deselectTable });
-    }
-  }
-  // drag the divider to resize the side panel (like a real app); width persists across re-renders
-  const rz = document.getElementById("floorResizer");
-  if (rz) rz.onpointerdown = (e) => {
-    e.preventDefault();
-    const aside = ed.querySelector(".floor-side");
-    const startX = e.clientX, startW = aside.offsetWidth; // remember where the drag began and the starting width
-    try { rz.setPointerCapture(e.pointerId); } catch {}
-    // While the mouse moves: new width = start width minus how far we've dragged
-    // left/right, clamped between 240 and 560px. Store it so re-renders keep it.
-    // The detail needs more room than the compact controls, so each remembers its
-    // OWN width (floorDetailW vs floorSideW) and the detail allows a wider max.
-    const showingDetail = state.selectedTable != null;
-    const maxW = showingDetail ? 820 : 560;
-    const move = (ev) => { const w = Math.min(maxW, Math.max(280, startW - (ev.clientX - startX))); if (showingDetail) state.floorDetailW = w; else state.floorSideW = w; aside.style.width = w + "px"; aside.style.flexBasis = w + "px"; };
-    const up = () => { rz.removeEventListener("pointermove", move); rz.removeEventListener("pointerup", up); }; // let go → stop tracking
-    rz.addEventListener("pointermove", move);
-    rz.addEventListener("pointerup", up);
-  };
-  // Pop the DOCKED detail out into the floating layer (adds it to floatingTables, clears
-  // the docked selection — the side panel goes back to controls). Multiple tables can be
-  // floating at once; this just adds one more.
-  const openBtn = ed.querySelector("[data-float-open]");
-  if (openBtn) openBtn.onclick = () => {
-    const t = String(openBtn.dataset.floatOpen);
-    if (!addFloating(t)) return; // at the cap → keep it docked
-    state.selectedTable = null;
-    renderEditor();
-  };
-  // Every floating card: wire its own detail actions (via the SAME bindTablePanel the
-  // docked/collapsed views use), its Dock/Close buttons, and drag-to-pin on its header.
+  // (No Open all / Close all bindings — the buttons no longer exist; see bulkCard.)
+  { const kb = ed.querySelector("#floorKot"); if (kb) kb.onclick = () => openKotTablePicker(); }
+  // (No Blocked-card / docked-detail / resizer / float-out bindings — the right-hand panel
+  // and everything that lived in it are gone. A table opens as a popup, full stop.)
+  // Every floating card: wire its own detail actions (through the SAME bindTablePanel every
+  // other host uses), its Close button, and drag-to-pin on its header.
   ed.querySelectorAll("[data-floating-table]").forEach((card) => {
     const t = String(card.dataset.floatingTable);
     const detail = card.querySelector("[data-table-detail]");
@@ -6720,22 +6559,11 @@ function bindFloor() {
         const c2 = $("#editor").querySelector(`[data-floating-table="${CSS.escape(t)}"] .tp-detail-body`);
         if (c2) c2.scrollTop = top;
       };
-      const closeThis = () => { state.floatingTables = state.floatingTables.filter((f) => f.table !== t); renderEditor(); };
+      const closeThis = () => { closeFloatingTable(t); };
       bindTablePanel(detail, t, parts, { rerender, close: closeThis });
     }
-    const dockBtn = card.querySelector("[data-float-dock]");
-    if (dockBtn) dockBtn.onclick = () => {
-      // "Dock" = leave popup mode and show THIS table in the side panel. Float and the side
-      // panel are mutually exclusive (owner, 2026-07-02: "if we shift to side panel then float
-      // should not be there"), so docking CLOSES every floating popup — not just this one —
-      // and re-shows the (expanded) side panel with this table docked.
-      state.floatingTables = [];
-      state.selectedTable = t;
-      if (state.floorSideCollapsed) { state.floorSideCollapsed = false; lsSet("lfh_floor_side_collapsed", "0"); }
-      renderEditor();
-    };
     const closeBtn = card.querySelector("[data-float-close]");
-    if (closeBtn) closeBtn.onclick = () => { state.floatingTables = state.floatingTables.filter((f) => f.table !== t); renderEditor(); };
+    if (closeBtn) closeBtn.onclick = () => closeFloatingTable(t);
     // Drag-to-pin: once dragged, this card is EXCLUDED from auto-arrange (owner, 2026-07-02
     // — "if you once move it, it will not be a part of auto") and the rest re-share the
     // space among themselves. Clamped so it can't be dragged fully off-screen.
@@ -6838,21 +6666,10 @@ function bindFloor() {
 function openTablePanel(table) { state.openSess = String(table); renderTablePanel(); loadSessions(); }
 function closeTablePanel() { state.openSess = null; document.querySelector(".tbl-modal-overlay")?.remove(); }
 
-// selectTable / deselectTable — the NEW master-detail (Tables tab). Selecting a
-// table shows its full detail IN the right side panel (not a pop-up); deselecting
-// returns the panel to the whole-floor controls.
-// Renders INSTANTLY (renderEditor) using the summary-driven streaming view, THEN
-// loadSessions() re-renders with the full dish list once the slice lands. This is the
-// stale-while-revalidate fix: the first paint is ACCURATE (summary guests/dishes/due),
-// not stale/empty, so bringing back the instant render (removed in an earlier over-
-// correction) no longer flickers — the detail appears immediately and the dishes stream in.
-function selectTable(table) {
-  const t = String(table);
-  state.selectedTable = t;
-  renderEditor();  // instant, summary-accurate
-  loadSessions();  // fetch slice → re-render with full dish rows
-}
-function deselectTable() { state.selectedTable = null; renderEditor(); }
+// (selectTable / deselectTable are gone with the docked detail — openFloatingTable below is
+// the ONE way a table opens now. state.selectedTable stays as "which table is open", because
+// that is what makes its tile show the selected ring and read from the full board slice rather
+// than the slim summary.)
 
 // Sync hardware-BACK layers to the open table details. On a phone the table detail is a
 // floating popup (or the docked detail on desktop); neither registered with LFH_BACK, so
@@ -6903,15 +6720,25 @@ function followShiftedTable(from, to) {
   loadSessions();  // fetch the destination's full slice
 }
 
-// openFloatingTable(t): open (or re-focus) table t as a FLOATING popup — the tile-tap
-// entry point when the side panel is collapsed (owner, 2026-07-02: collapsed → popup mode).
-// Renders instantly (summary-accurate streaming), then loadSessions fills in the dishes —
-// same stale-while-revalidate flow as selectTable, just into a floating card instead of the
-// dock. Guards against duplicating a table that's already floating (a second tap is a no-op).
+// openFloatingTable(t): open (or re-focus) table t as a popup. This is THE way a table opens
+// (owner, 2026-07-31) — there is no docked alternative any more. It paints instantly from the
+// slim summary (accurate: guests/dishes/due), then loadSessions fills in the dish rows. A second
+// tap on an already-open table is a no-op rather than a duplicate card.
 function openFloatingTable(table) {
   if (!addFloating(table)) return; // at the cap
+  state.selectedTable = String(table); // marks the tile + makes it read from the full slice
   renderEditor();  // instant, summary-accurate
   loadSessions();  // fetch slice → re-render with full dish rows
+}
+// closeFloatingTable(t): the ONE way a table popup closes (its ✕, the back button, a table that
+// got freed). It also clears the "open table" marker when nothing is left open — otherwise the
+// tile kept its selected ring and kept pulling that table's full slice on every poll.
+function closeFloatingTable(t) {
+  state.floatingTables = state.floatingTables.filter((f) => String(f.table) !== String(t));
+  if (String(state.selectedTable) === String(t)) {
+    state.selectedTable = state.floatingTables.length ? String(state.floatingTables[0].table) : null;
+  }
+  renderEditor();
 }
 
 // refreshTableDetail: redraw whichever table-detail view is currently open after a
@@ -7107,13 +6934,12 @@ function openDishEditModal(itemId, rerender) {
 //   • renderTablePanel() — the old pop-up modal (kept for any caller that still uses it)
 //   • the Tables-tab right side panel — the new master-detail (renders this IN PLACE)
 // Pulling it out means the two views can never drift apart again.
-// Returns the pieces + the computed { sess, os, canFree } so the caller can wire up.
+// Returns the pieces + the computed { sess, os } so the caller can wire up.
 //
-// `host` says WHERE the result is about to be rendered — "dock" (the Tables-tab right
-// side rail), "float" (a popup card) or "modal" (the legacy pop-up). Everything is
-// identical between hosts except ＋ Take order, which is popup-only (see takeOrderBtn).
-// Default "float" so any caller that forgets keeps the fuller footer rather than
-// silently losing a button.
+// `host` says WHERE the result is about to be rendered — "float" (a table popup) or "modal"
+// (the legacy pop-up). Both get the identical footer; the old third host, the docked side
+// rail, went with the side panel (2026-07-31). Default "float" so a caller that forgets still
+// gets the full footer rather than silently losing a button.
 function tablePanelParts(t, host = "float") {
   const sessionsOn = !!(state.data.settings || {}).sessions_enabled;
   const os = ordersForTable(t);
@@ -7165,7 +6991,6 @@ function tablePanelParts(t, host = "float") {
   const mDue = billMath(unpaidOs);
   const due = streaming ? (Number(sumTile.due) || 0) : mDue.total;
   const billTotal = streaming ? (Number(sumTile.due) || 0) : mBill.total;
-  const canFree = os.length > 0 && os.every((o) => o.payment_status === "paid" || o.status === "cancelled");
 
   // ── HEAD: a status pill, a one-line summary (bill #, guests, dishes, due) and a
   // dish-status PROGRESS BAR (how much of this table is served vs cooking vs new).
@@ -7202,7 +7027,7 @@ function tablePanelParts(t, host = "float") {
     const loadRow = `<div class="sx-loading"><span class="sx-load-dot"></span> Loading details…</div>`;
     const sessionSec = sessionsOn ? `<div class="sx-sec"><div class="sx-sec-h">Guests <span class="sub">· ${guestsN}</span></div>${loadRow}</div>` : "";
     const ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${dishN}</span></div>${loadRow}</div>`;
-    return { sess: null, os: [], canFree: false, headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec: "", billSec: "", foot: "" };
+    return { sess: null, os: [], headPill, headMeta, requestsSec, sessionSec, ordersSec, callsSec: "", billSec: "", foot: "" };
   }
 
   let sessionSec = "";
@@ -7225,7 +7050,9 @@ function tablePanelParts(t, host = "float") {
       }).join("") : `<div class="sx-empty">No one has joined yet.</div>`;
       sessionSec = `<div class="sx-sec"><div class="sx-sec-h">Guests <span class="sub">· ${mem.length}</span><label class="sx-auto"><input type="checkbox" id="sxAuto" ${sess.auto_approve ? "checked" : ""}> auto-approve</label></div>${memRows}</div>`;
     } else {
-      sessionSec = `<div class="sx-sec"><div class="sx-sec-h">Session</div><div class="sx-empty">This table isn't open yet.</div><button class="btn primary" id="sxOpen">Open this table</button></div>`;
+      // No party here yet. There is nothing to DO about that any more (no "Open this
+      // table" step) — taking an order starts the party — so this just states the fact.
+      sessionSec = `<div class="sx-sec"><div class="sx-sec-h">Guests</div><div class="sx-empty">Nobody here yet — taking an order seats them.</div></div>`;
     }
   }
 
@@ -7256,16 +7083,26 @@ function tablePanelParts(t, host = "float") {
     };
     // Each un-accepted (NEW) order is its own highlighted card with its own Accept —
     // dishes share the same row layout as the rest (via itemRowHtml).
+    // ✕ Cancel — void this whole ticket. THE walk-out escape hatch (owner, 2026-07-31): with
+    // "close table" gone, this is how a table whose guests left without paying gets cleared,
+    // and it's the honest way round — the void stays on the record with who did it, instead of
+    // an unpaid bill vanishing behind a closed table. Cancelling the table's LAST live order
+    // frees the table by itself (see cancelOrder). Gated by void_bills, whose own description
+    // is "…or closing a table unpaid after a walk-out"; the server re-checks it.
+    const cancelBtn = (o) => `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕ Cancel</button>`;
     const newBlocks = newOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
-      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot"><button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
+      return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot">${cancelBtn(o)}<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
     }).join("");
     // ACCEPTED orders are GROUPED into per-KOT cards (so you can see which ticket each
     // dish came from) but they still settle as ONE bill — no per-order total/pay/discount
     // (owner, 2026-06-14: one merged bill). Per-dish serve/delete live on each row.
     const mergedBlock = liveOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
-      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}${orderEditExtras(o)}</div>`;
+      // An already-PAID ticket is not cancellable (the server refuses it too — a refund goes
+      // through mark-unpaid or a credit note), so it shows no Cancel.
+      const foot = o.payment_status === "paid" ? "" : `<div class="tp-order-foot">${cancelBtn(o)}</div>`;
+      return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}${orderEditExtras(o)}${foot}</div>`;
     }).join("");
     const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} merged · one bill</span>` : "";
     // Edit/Done toggle: the gated entry to staff editing. The confirm fires on Edit.
@@ -7321,15 +7158,12 @@ function tablePanelParts(t, host = "float") {
   let primaryBtn = "";
   if (newOrdersN) primaryBtn = `<button class="btn primary tp-accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare${newOrdersN > 1 ? ` (${newOrdersN})` : ""}</button>`;
   else if (anyUnservedAccepted) primaryBtn = `<button class="btn green tp-serve-all-orders" data-serve-all-orders="${esc(t)}">🍽️ Serve all</button>`;
-  // ONE end-the-table button (was a redundant "Turn table off" + "Free table",
-  // which do the same thing once the bill is paid). It adapts to the state:
-  //  • bill fully settled → "✓ Free table" (archive the paid orders + close)
-  //  • open but unpaid    → "⏻ Close table" (force-close, cancels unmade food)
-  //  • legacy no-session + unpaid → a disabled "Settle bill to free" hint.
-  const endBtn = canFree
-    ? `<button class="btn primary tp-free">✓ Free table</button>`
-    : (sess ? `<button class="btn danger" id="sxClose">⏻ Close table</button>`
-            : `<button class="btn tp-free" disabled>Settle bill to free</button>`);
+  // "✓ Free table" / "⏻ Close table" / "Settle bill to free" are GONE (owner, 2026-07-31).
+  // A paid table frees ITSELF (maybeAutoSettle), so the button only ever existed for the
+  // case it handled badly: guests who left without paying. That case is now handled where
+  // it belongs — cancel the order in the Orders list above, which voids it on the record
+  // instead of quietly closing a table that still owes money.
+  const endBtn = "";
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
   const tagBtn = tagActionAllowed("table_tags") ? `<button class="btn" id="sxTag" title="Mark this table VIP / Family / Owner's guest">${TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷"} Type</button>` : "";
@@ -7347,18 +7181,13 @@ function tablePanelParts(t, host = "float") {
   // Gated by the take_orders manager power: XRAY_CONTROLS hides it for a manager without
   // the power (and tints it for an admin/owner looking in); the server re-checks too.
   //
-  // ONE HOST ONLY (owner, 2026-07-30): taking an order is a full-attention job, so it
-  // starts from the table POPUP and nowhere else. The docked side rail used to carry the
-  // same button — in a narrow rail the order builder was cramped and it was easy to start
-  // an order on the table you'd merely glanced at. The rail keeps every other action
-  // (pay, discount, print, KOT, end) and "＋ Add dish" on an order that already exists;
-  // only STARTING a new order moved out. Tap a tile → the popup → ＋ Take order.
-  const takeOrderBtn = host === "dock"
-    ? ""
-    : `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
+  // It used to be hidden in one of the two hosts (the narrow docked rail, where the order
+  // builder was cramped). There is only the popup now, and the floor tile itself, so the
+  // host test is gone.
+  const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
   const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${shiftFallbackBtn}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
 
-  return { sess, os, canFree, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
+  return { sess, os, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
 }
 
 // Ask the manager for a price at order time — used for "open price" dishes (as-per-MRP /
@@ -7439,6 +7268,110 @@ function openAddDishModal(orderId, rerender) {
   wrap.querySelector(".tbl-modal-close").onclick = () => wrap.remove();
   wrap.onclick = (e) => { if (e.target === wrap) wrap.remove(); };
   search.focus();
+}
+
+// ── THE BILL POPUP — finish a table in ONE place (owner, 2026-07-31) ─────────────
+// The little printer on a floor tile opens this. It shows the bill the way it will PRINT
+// (every dish, its add-ons, discount, tax, total), and carries the three things a finished
+// table needs, in the order they actually happen: Print → (invoice) → Mark paid.
+//
+// Why one popup instead of the old route (tile → detail panel → hunt the footer → confirm →
+// confirm): closing out a table is the most repeated job of a service, and it was the most
+// scattered. Paying from here also frees the table by itself, so a table is done in two taps.
+//
+// TWO BUTTONS UNTIL IT IS PRINTED (owner, 2026-07-31: "there should only be option of generate
+// invoice and print … when printed then mark as paid"). A running tab offers exactly
+// 🧾 Generate invoice and 🖨 Print. **Mark paid appears only once the bill is issued** — which
+// Print does by itself, so the real sequence on the floor is: Print → Mark paid → the table
+// frees itself. Asking for money before the guest has a bill in their hand was the wrong order,
+// and three buttons on a fresh tab made the common one harder to find.
+//
+// Print never dead-ends on the invoice-first rule: a bill with no invoice yet gets one generated
+// (that IS the document that prints) and THEN prints, in the same tap.
+async function openBillPreview(t) {
+  await ensureTableSlice(t, true); // ALWAYS current: this popup shows money and issues documents
+  const live = () => ordersForTable(t).filter((o) => o.status !== "cancelled");
+  let os = live();
+  if (!os.length) { toast(`${tableLabel(t)} has nothing to bill yet`, "ok"); return; }
+  const sess = openSessionForTable(t);
+  const m = billMath(os); // discount-before-tax — the SAME math the printed bill uses
+  const pct = Math.round(m.rate * 10000) / 100;
+  const invoiced = !!sess && sess.invoice_no != null && !sess.invoice_voided;
+  const anyUnpaid = os.some((o) => o.payment_status !== "paid");
+  // A brand-new order can't be paid before staff accept it — the same rule the orders list
+  // enforces. Say so on the button instead of letting the tap fail.
+  const anyReceived = os.some((o) => o.status === "received");
+  const lines = os.map((o) => orderItemRows(o).map((i) => {
+    const det = itemDetailLine(i);
+    return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-line-right"><span class="bm-pr">${inr((parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1))}</span></span></div>`;
+  }).join("")).join("");
+  const wrap = document.createElement("div");
+  wrap.className = "bill-overlay";
+  wrap.innerHTML = `<div class="bill-modal">
+      <div class="bm-head"><b>${esc(tableLabel(t))}${sess && sess.bill_no != null ? ` · Bill #${esc(sess.bill_no)}` : ""}</b>${invoiced ? `<span class="inv-chip">invoice #${esc(sess.invoice_no)}</span>` : `<span class="inv-chip pending">not invoiced</span>`}</div>
+      <div class="bm-sub">${esc(sess && sess.customer_name ? sess.customer_name : "")}${anyUnpaid ? "" : " · paid"}</div>
+      <div class="bm-items">${lines}</div>
+      <div class="bm-totals">
+        <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
+        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
+        ${m.tax > 0 ? `<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
+        <div class="bm-trow grand"><span>${anyUnpaid ? "Total due" : "Total"}</span><span>${inr(m.total)}</span></div>
+      </div>
+      <div class="bm-actions">
+        ${!invoiced && sess ? `<button class="btn" data-bp-inv>🧾 Generate invoice</button>` : ""}
+        <button class="btn primary" data-bp-print>🖨 Print</button>
+        ${invoiced && anyUnpaid ? `<button class="btn green" data-bp-pay${anyReceived ? ` disabled title="Accept the order first — a bill can only be paid once the order is accepted."` : ""}>💳 Mark paid</button>` : ""}
+        <button class="btn confirm-cancel" data-bp-close>Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  requestAnimationFrame(() => wrap.classList.add("show"));
+  const onEsc = (e) => { if (e.key === "Escape") close(); };
+  const close = () => { wrap.classList.remove("show"); document.removeEventListener("keydown", onEsc); setTimeout(() => wrap.remove(), 180); };
+  wrap.__lfhClose = close; // hardware BACK closes THIS layer (and drops the Esc listener)
+  document.addEventListener("keydown", onEsc);
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+  wrap.querySelector("[data-bp-close]").onclick = close;
+  // Print: invoice first if there isn't one (that's the document that prints), then paper.
+  // Re-read the session AFTER generating — generateInvoice refreshes it, and printing a
+  // stale copy would put a bill on paper with no invoice number on it.
+  // Re-open the popup after issuing/printing, so it comes back showing 💳 Mark paid — the next
+  // thing that happens at that table — instead of leaving stale buttons on screen.
+  //
+  // openBillPreview force-refreshes this table's slice, so re-opening always reads the invoice
+  // number that was just issued rather than the copy the screen was built from.
+  const reopen = async () => { close(); await openBillPreview(t); };
+  wrap.querySelector("[data-bp-print]").onclick = async () => {
+    let ss = openSessionForTable(t);
+    const needsInvoice = ss && (ss.invoice_no == null || ss.invoice_voided);
+    if (needsInvoice) {
+      await generateInvoice(ss.id);
+      await ensureTableSlice(t, true); // the invoice lives on the SESSION row — re-read it
+      ss = openSessionForTable(t);
+      if (!ss || ss.invoice_no == null || ss.invoice_voided) return; // cancelled or failed — generateInvoice already said which
+    }
+    printBill(t, ss || { invoice_no: null, bill_no: null }, live());
+    if (needsInvoice) await reopen();
+  };
+  const invBtn = wrap.querySelector("[data-bp-inv]");
+  if (invBtn) invBtn.onclick = async () => { await generateInvoice(sess.id); await reopen(); };
+  // Mark paid runs the normal payment popup (method + khata/on-the-house where allowed),
+  // and the server frees the table once the bill is settled and everything is served.
+  //
+  // The invoice is made FIRST, deliberately. A restaurant that requires a customer on the bill
+  // can't be invoiced without a mobile + name, and that used to be asked AFTER the payment sheet
+  // closed — a dialog appearing under a finger that had just tapped Cash, which is the one thing
+  // this app never does. Asking before any money moves keeps it one straight sequence:
+  // Mark paid → (who is this bill for?) → how did they pay? → done.
+  // Cancelling the customer sheet does NOT block the payment: staff must always be able to take
+  // money that's in their hand. The bill stays invoice-able from this same popup afterwards.
+  const payBtn = wrap.querySelector("[data-bp-pay]");
+  if (payBtn && !payBtn.disabled) payBtn.onclick = async () => {
+    close();
+    let ss = openSessionForTable(t);
+    if (ss && (ss.invoice_no == null || ss.invoice_voided)) { await generateInvoice(ss.id); await loadSessions(); }
+    await markTablePaid(t, { skipAutoInvoice: true });
+  };
 }
 
 // ── TAKE ORDER — start a BRAND-NEW dine-in order from the manager panel ─────────
@@ -7707,7 +7640,12 @@ function openTakeOrder(table, rerender, opts = {}) {
       return;
     }
 
-    if (!confirmDuplicate && !(await confirmDialog(`Send this order for Table ${table} to the kitchen?`, "Yes, send it"))) return;
+    // NO "are you sure" (owner, 2026-07-31 — "less clicks, no unnecessary two-time ask"). The
+    // button you just pressed says "Send to kitchen" on a cart you built dish by dish; asking
+    // again adds a tap to the single most repeated action of a service and teaches staff to
+    // dismiss dialogs without reading them. A mis-send is still covered: the server refuses an
+    // identical order within 3 seconds (which DOES ask, because then the question is real), and
+    // the order can be cancelled from the table.
     sendBtns.forEach((b) => (b.disabled = true));
     try {
       const r = await api("POST", "/order", { table: String(table), items, allergies, note: orderNote || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
@@ -7912,6 +7850,8 @@ function openKotColumns(t, sess) {
   for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
   const bill = billMath(movable.filter((o) => o.status !== "received"));
   const OPS = [
+    // Works on an EMPTY table too — see the note in openKotMenu.
+    { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
     { id: "shift", icon: "⇄", label: "Change table", sub: "To a free table", on: !!sess, why: "table closed" },
     { id: "merge", icon: "🪢", label: "Merge tables", sub: "One table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
     { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "One order moves", on: movable.length > 0, why: "no movable KOT" },
@@ -7985,6 +7925,9 @@ function openKotColumns(t, sess) {
     colsEl.querySelectorAll("[data-op]").forEach((b) => (b.onclick = () => {
       const op = b.dataset.op;
       if (op === "split") { closeM(); openSplitSettle(t); return; }
+      // Table type is its own little picker (VIP / Family / Owner's guest), not a drill-down —
+      // same hand-over as split.
+      if (op === "type") { closeM(); openTagModal(t); return; }
       sel1 = op; sel2 = null; render();
     }));
     // panel 2 executors / selectors
@@ -8010,6 +7953,38 @@ function openKotColumns(t, sess) {
   render();
 }
 
+// openKotTablePicker(): step one of the floor-wide 🧾 KOT ▾ — WHICH table? (owner, 2026-07-31).
+// Then it hands straight over to the per-table menu, so everything downstream behaves exactly as
+// it did when the button lived inside a table's own popup. Free tables are pickable on purpose:
+// marking a table VIP before the guests order is one of the reasons this button exists.
+function openKotTablePicker() {
+  document.querySelector(".kotpick-overlay")?.remove();
+  const s = state.data.settings || {}; // (the sheet's styles are injected once at load)
+  const n = Math.max(1, parseInt(s.table_count, 10) || 12);
+  const grid = floorTableList(n).map((i) => {
+    const ts = tableTileState(i);
+    const busy = ts.st !== "free";
+    const info = TABLE_TAG_INFO[tagForTable(i)];
+    const sub = [info ? info.emoji : "", busy ? ts.label : "free"].filter(Boolean).join(" ");
+    return `<button class="kotm-tile${busy ? " occ" : ""}" data-kotpick="${esc(i)}"><b>T${esc(i)}</b><small>${esc(sub)}</small></button>`;
+  }).join("");
+  const wrap = el(`<div class="sx-modal-overlay kotpick-overlay"><div class="sx-modal kotm-sheet">
+    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 Table &amp; KOT operations</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
+    <div class="kotm-bill">Which table?</div></div>
+    <div class="kotm-list"><div class="kotm-grid">${grid}</div></div></div>`);
+  document.body.appendChild(wrap);
+  const closeM = () => wrap.remove();
+  wrap.__lfhClose = closeM;
+  wrap.querySelector(".tbl-modal-close").onclick = closeM;
+  wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
+  wrap.querySelectorAll("[data-kotpick]").forEach((b) => (b.onclick = async () => {
+    const t = String(b.dataset.kotpick);
+    closeM();
+    await ensureTableSlice(t); // the menu reads this table's orders (movable KOTs, dishes, bill)
+    openKotMenu(t, openSessionForTable(t));
+  }));
+}
+
 function openKotMenu(t, sess) {
   // Desktop → the Finder-style Miller columns above; phone keeps the step sheets.
   if (!isPhoneLayout()) return openKotColumns(t, sess);
@@ -8023,6 +7998,10 @@ function openKotMenu(t, sess) {
   for (let i = 1; i <= nAll; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
   const bill = billMath(movable.filter((o) => o.status !== "received"));
   const rows = [
+    // Marking a table works with NO order on it — that is the point of reaching this menu from
+    // the floor's own KOT button (owner, 2026-07-31: "before a table or order is taken you can
+    // mark table as VIP from that option").
+    { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
     { id: "shift", icon: "⇄", label: "Change table", sub: "Party, orders & bill move to a free table", on: !!sess, why: "table closed" },
     { id: "merge", icon: "🪢", label: "Merge tables", sub: "Join another party — one table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
     { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "Send one order to another table's bill", on: movable.length > 0, why: "no movable KOT" },
@@ -8045,6 +8024,7 @@ function openKotMenu(t, sess) {
   wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
   wrap.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
     const op = b.dataset.kotop; closeM();
+    if (op === "type") openTagModal(t);
     if (op === "shift" && sess) openShiftPicker(t, sess);
     if (op === "merge" && sess) openMergePicker(t, sess);
     if (op === "movekot") openMoveKotPicker(t);
@@ -8489,9 +8469,8 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
 // have different redraw paths), and `close` deselects/closes that view. Sharing
 // this keeps the two views' behaviour identical.
 function bindTablePanel(root, t, parts, { rerender, close }) {
-  const { sess, os, canFree } = parts;
-  const ob = root.querySelector("#sxOpen"); if (ob) ob.onclick = () => openTableSession(t);
-  const cb = root.querySelector("#sxClose"); if (cb && sess) cb.onclick = () => closeSession(sess.id);
+  const { sess, os } = parts;
+  // (No #sxOpen / #sxClose wiring — a table is never opened or closed by hand.)
   // Shift the whole party (orders + calls move along) to an EMPTY table.
   const sh = root.querySelector("#sxShift");
   if (sh && sess) sh.onclick = () => openShiftPicker(t, sess);
@@ -8603,7 +8582,9 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   root.querySelectorAll("[data-pay]").forEach((b) => (b.onclick = () => setOrderPayment(b.dataset.pay, b.dataset.paid !== "1")));
   root.querySelectorAll("[data-call-attend]").forEach((b) => (b.onclick = () => attendCall(b.dataset.callAttend)));
   root.querySelectorAll("[data-attend-all]").forEach((b) => (b.onclick = () => attendTableCalls(b.dataset.attendAll)));
-  const free = root.querySelector(".tp-free"); if (free && canFree) free.onclick = () => freeTableAll(t, sess);
+  // ✕ Cancel a whole ticket — the walk-out path. cancelOrder() confirms once, then frees the
+  // table by itself if that was its last live order.
+  root.querySelectorAll("[data-cancel-order]").forEach((b) => (b.onclick = () => cancelOrder(b.dataset.cancelOrder)));
 }
 
 // renderTablePanel: the legacy POP-UP modal version of the table detail. Kept so any
@@ -8864,53 +8845,6 @@ async function restartTable(t) {
   finally { release(); }
 }
 // CLS: free the table (archive orders + close any open session).
-async function closeTableQuick(t) { await ensureTableSlice(t); freeTableAll(t, openSessionForTable(t)); }
-
-// Free a table: archive its settled orders off the floor and, if a session is open, close it.
-// OPTIMISTIC after the confirm: the tile turns Free instantly; the server
-// catches up in the background and a refresh reconciles (or reloads on error).
-// force=true is the "close anyway" retry (a walk-out / food never served) — it skips the
-// first confirm because the override dialog has already been answered.
-async function freeTableAll(t, sess, force) {
-  const ids = ordersForTable(t).map((o) => o.id);
-  if (!force && !(await confirmDialog(`Free Table ${t}? Settled orders leave the floor${sess ? " and the session closes" : ""} (kept in records).`, "Free table"))) return;
-  (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) { o.archived = true; opBegin(o.id); } });
-  if (sess) sess.status = "closed";
-  state.openSess = null; state.selectedTable = null; document.querySelector(".tbl-modal-overlay")?.remove(); // close modal AND the in-panel detail
-  state.floatingTables = state.floatingTables.filter((f) => String(f.table) !== String(t)); // drop the freed table's popup too
-  floorOpsInFlight++;
-  loadSessions(true); // instant redraw from local state
-  // release first, then refresh — see restartTable for why this order matters.
-  let released = false;
-  const release = () => { if (!released) { released = true; floorOpsInFlight--; ids.forEach((id) => opEnd(id)); } };
-  try {
-    // CLOSE FIRST, archive after. The archive PATCHes used to run BEFORE the close, so on a
-    // table the server refuses to close (unpaid / food still cooking) the orders were already
-    // archived: the bill vanished off the floor while the table stayed OPEN — an unpaid bill
-    // hidden by a failed action. Now nothing is archived unless the close is agreed. (The
-    // server's own close archives the session's orders anyway; the loop below only mops up
-    // orders on a table with NO open session.)
-    if (sess) await api("POST", "/sessions/" + sess.id + "/close", force ? { force: true } : undefined);
-    for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
-    release();
-    await pollTables([String(t)]); // refresh just this tile's summary (handles drop-to-Free)
-    toast(`Table ${t} freed`, "ok");
-  } catch (e) {
-    release();
-    await pollTables([String(t)]); // put the still-busy table back before we ask
-    // The server blocks a busy table (unpaid / not served). This path used to dead-end in a
-    // red toast with no way forward — the same override the detail panel offers now lives
-    // here too, so the tile's CLS button can finish the job. (owner, 2026-07-30)
-    const why = closeBlockedReason(e);
-    if (why && sess && !force) {
-      if (await confirmDialog(closeAnywayAsk(why), "Close anyway")) return freeTableAll(t, sess, true);
-      return;
-    }
-    toast("Could not free: " + e.message, "err");
-  }
-  finally { release(); }
-}
-
 // ===================== USERS / LOG =====================
 // Every guest who joined a table (auto ID = their member id) + the blocklist. From here
 // the owner can EXIT (kick) a guest or BLOCK them (they then see a blocked screen).
@@ -10933,7 +10867,9 @@ const XRAY_CONTROLS = [
   { selector: "[data-new-parcel]", flag: "parcel", label: "New parcel" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
+  { selector: "[data-cancel-order]", flag: "void_bills", label: "Void / reopen bills" },
   { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
+  { selector: "#floorKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
   // Access row: manage_staff OR table_assign, because Who-serves-which-table now lives in
   // this section (owner, 2026-07-30). The two cards that are genuinely about staff powers
