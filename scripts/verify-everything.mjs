@@ -466,8 +466,26 @@ const getState = async () => (await (await api(`/api/admin/restaurants/access-tr
 // undo its own writes must not make them, so the gate lives in the ONE place every write passes
 // through rather than in each phase's good intentions.
 let snapOk = false;
+/** Take the restore snapshot, retrying, and register the undo. Called by the snapshot PHASE and
+ *  lazily by the first write — because `--only 161-276` is a legitimate way to run this suite and
+ *  that range contains writes but not the snapshot phase. Without the lazy path the safety gate
+ *  would turn every range run into a wall of failures, and someone would "fix" it by deleting the
+ *  gate. Idempotent: the snapshot is taken once per process. */
+async function ensureSnap() {
+  if (snapOk) return;
+  let d = null, why = "";
+  for (let i = 0; i < 4; i++) {
+    try { d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json(); if (d?.state) break; why = d?.error || "no state"; }
+    catch (e) { why = String(e.message).slice(0, 80); d = null; }
+    await wait(2000);
+  }
+  if (!d?.state) throw new Fail(`refusing to change a setting: could not read the restore snapshot (${why})`);
+  SNAP = d.state;
+  restore.push(async () => { await restoreSnapshot(); });
+  snapOk = true;
+}
 const setState = async (patch) => {
-  if (!snapOk) throw new Fail("refusing to change a setting: no restore snapshot was taken, so this could not be undone");
+  await ensureSnap();                 // never write without a way back
   return fetch(BASE + "/api/admin/restaurants/access-tree", { method: "POST", headers: HJ, body: JSON.stringify({ restaurant_id: (await needFH()).id, patch }) });
 };
 // How long to wait for a switch to become visible. This MUST clear the server's own caches,
@@ -487,19 +505,13 @@ const settleUntil = async (read, want, ms = CACHE_MS + 6000) => {
 };
 let SNAP = null;
 
-phase("the access tree loads all five sections", async () => {
-  // RETRY: this single request decides whether the whole run may write anything, so one dropped
-  // connection must not disarm the restore for the next 200 phases.
-  let d = null, why = "";
-  for (let i = 0; i < 4; i++) {
-    try { d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json(); if (d?.sections) break; why = d?.error || "no sections"; }
-    catch (e) { why = String(e.message).slice(0, 80); d = null; }
-    await wait(2000);
-  }
-  ok(d && Array.isArray(d.sections) && d.sections.length === 5, `${d?.sections?.length ?? "no"} sections${why ? ` · ${why}` : ""}`);
-  SNAP = d.state;
-  restore.push(async () => {
-    await setState({
+/** Put every switch this suite touches back to the snapshot. Named (not inline) so the lazy
+ *  ensureSnap() and the snapshot phase register the exact same undo. */
+async function restoreSnapshot() {
+  if (!SNAP) return;
+  await fetch(BASE + "/api/admin/restaurants/access-tree", {
+    method: "POST", headers: HJ,
+    body: JSON.stringify({ restaurant_id: (await needFH()).id, patch: {
       features: Object.fromEntries(["reviews", "model3d", "allergies", "allergy_other", "guest_note", "favorites", "diet_filter", "ratings"].map((k) => [k, SNAP.features[k] !== false])),
       settings: {
         menu_enabled: SNAP.settings.menu_enabled !== false,
@@ -519,9 +531,14 @@ phase("the access tree loads all five sections", async () => {
       sections: Object.fromEntries(["menu", "ratings", "logs"].map((k) => [k, SNAP.sections[k] !== false])),
       tabs: { manager: { editor: SNAP.tabs?.manager?.editor !== false, ratings: SNAP.tabs?.manager?.ratings !== false, log: SNAP.tabs?.manager?.log !== false } },
       panels: Object.fromEntries(["manager", "kitchen", "tablet", "owner"].map((k) => [k, SNAP.panels[k] !== false])),
-    });
+    } }),
   });
-  snapOk = true;                    // only NOW may anything be written
+}
+
+phase("the access tree loads all five sections", async () => {
+  await ensureSnap();                       // takes the snapshot AND registers the undo
+  const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json();
+  ok(Array.isArray(d.sections) && d.sections.length === 5, `${d.sections?.length ?? "no"} sections`);
 });
 
 // each guest sub-switch: OFF removes its mark from the served page, ON brings it back
