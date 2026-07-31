@@ -85,7 +85,7 @@ const before = (await (await api(`/api/admin/restaurants/access-tree?restaurant_
 if (!before) { console.error("The Access screen did not return a state for that restaurant."); process.exit(1); }
 
 /** Every node whose default we can honestly write and read back. */
-const defaultNodes = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && !n.leftToBuild);
+const defaultNodes = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild);
 
 let patch = {};
 const diffs = [];

@@ -1639,7 +1639,7 @@ async function aanState() {
   if (!d.state) throw new Fail(`the Access screen returned no state (${r.status}) ${d.error || ""}`);
   return (AAN_STATE = d.state);
 }
-const DEFAULT_NODES = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && !n.leftToBuild);
+const DEFAULT_NODES = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild);
 const showVal = (v) => (v === true ? "ON" : v === false ? "off" : JSON.stringify(v));
 
 phase("Aangan exists and its Access screen loads", async () => {
@@ -1660,7 +1660,7 @@ phase("the defaults applier and this suite agree on which switches have a defaul
   // them and this group asserts them. If they ever disagree, one of them is silently skipping a
   // switch — so make the disagreement a failure instead of a surprise.
   const applier = readFileSync(join(ROOT, "scripts/set-access-defaults.mjs"), "utf8");
-  const filter = `n.bind.t !== "none" && n.bind.t !== "text" && !n.leftToBuild`;
+  const filter = `n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild`;
   ok(applier.includes(filter), "the applier no longer selects nodes the same way this suite does");
   ok(DEFAULT_NODES.length >= 60, `only ${DEFAULT_NODES.length} switches carry a default — the model shrank unexpectedly`);
 });

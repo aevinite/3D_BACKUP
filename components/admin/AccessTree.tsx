@@ -16,7 +16,7 @@
  * .at-* set for the tree indentation. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  SECTIONS, ALL_NODES, nodeValue, nodePatch, extraPatch, applyPatch,
+  SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch,
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
 import AccessSearch from "./AccessSearch";
@@ -43,6 +43,64 @@ const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
     {(ICON[n] || ICON.unknown).split("M").filter(Boolean).map((d, i) => <path key={i} d={"M" + d} />)}
   </svg>
 );
+
+/**
+ * Where does this row live? Returns its section and the chain of groups above it, so landing on a
+ * row can open exactly that one path. Built by walking the model, which is the only thing that
+ * actually knows — the alternative was opening every section and hoping, which is what the owner
+ * saw as "every dropdown is open".
+ */
+const NODE_PATH: Record<string, { sectionId: string; ancestorIds: string[] }> = (() => {
+  const out: Record<string, { sectionId: string; ancestorIds: string[] }> = {};
+  const walk = (nodes: Node[], sectionId: string, trail: string[]) => {
+    for (const n of nodes) {
+      out[n.id] = { sectionId, ancestorIds: trail };
+      if (n.children?.length) walk(n.children, sectionId, [...trail, n.id]);
+    }
+  };
+  for (const s of SECTIONS) walk(s.children, s.id, []);
+  return out;
+})();
+const locateNode = (id: string) => NODE_PATH[id] || null;
+
+/** "Main features › Menu › Format" — so the sheet says WHERE the setting you're reading lives. */
+function readablePath(nodeId: string): string {
+  const p = NODE_PATH[nodeId];
+  if (!p) return "";
+  const names = [SECTION_BY_ID[p.sectionId]?.name, ...p.ancestorIds.map((a) => NODE_BY_ID[a]?.name)];
+  return names.filter(Boolean).join(" › ");
+}
+
+/**
+ * Which picture shows this setting? The help images are real screenshots of the panel with the
+ * control ringed (scripts/shot-access-help.mjs, public/admin-help/<id>.png). Names were written by
+ * hand over time, so try the row's id, its stored key, and the dash spellings, then fall back to
+ * the picture of the AREA the setting lives in — a shot of the right screen beats no shot at all.
+ * A name that has no file is simply skipped by the <img> onError, so a missing picture costs
+ * nothing and never shows a broken image.
+ */
+function helpImages(node: Node, sectionId?: string): string[] {
+  const b = node.bind as { key?: string; flag?: string };
+  const raw = [node.id, b?.key, b?.flag].filter(Boolean) as string[];
+  const spellings = raw.flatMap((r) => [r, r.replace(/_/g, "-"), r.replace(/-/g, "_")]);
+  const area: Record<string, string> = {
+    main: "guest-menu", apps: "manager-menu", mgrMenu: "manager-menu",
+    ownMenu: "owner-home", defaults: "manager-menu",
+  };
+  const fallback = sectionId ? area[sectionId] : undefined;
+  return [...new Set([...spellings, ...(fallback ? [fallback] : [])])].map((n) => `/admin-help/${n}.png`);
+}
+
+/** "On by default" / "Off by default" / the default value, in words. */
+function defaultLine(node: Node): string {
+  const d = node.def;
+  if (d === undefined) return "";
+  if (d === true) return "On by default.";
+  if (d === false) return "Off by default.";
+  if (Array.isArray(d)) return d.length ? `By default: ${d.join(", ")}.` : "Nothing chosen by default.";
+  if (d === "off") return "Off by default.";
+  return `By default: ${String(d)}.`;
+}
 
 const isBoolBind = (n: Node) =>
   ["feature", "setting", "module", "panel", "channel", "grant", "section", "tab"].includes(n.bind.t);
@@ -99,9 +157,36 @@ export default function AccessTree({ rid }: { rid: string }) {
       .catch(() => { setSaving("err"); setErr("That change didn't save — the connection dropped."); load(rid); });
   }, [rid, load]);
 
+  /**
+   * Save an API key. Deliberately NOT `save()`: that merges the patch into local state for an
+   * instant repaint, which for a credential would put the real key into the page and show it back.
+   * This posts it and then RELOADS, so the only thing on screen is the masked hint the server
+   * computed — the key goes one way.
+   */
+  const setCreds = useCallback((key: string, value: string | null) => {
+    setSaving("saving");
+    fetch("/api/admin/restaurants/access-tree", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ restaurant_id: rid, patch: { creds: { [key]: value } } }),
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}));
+          setErr(j.error || "That key didn't save."); setSaving("err"); return;
+        }
+        setErr(""); setSaving("saved");
+        load(rid);
+        setTimeout(() => setSaving(""), 1400);
+      })
+      .catch(() => { setSaving("err"); setErr("That key didn't save — the connection dropped."); });
+  }, [rid, load]);
+
+  // Every control calls this. A credential is routed to the write-only path above, so the control
+  // itself stays an ordinary input and there is exactly ONE place that knows keys are different.
   const set = useCallback((n: Node, v: any) => {
+    if (n.bind.t === "creds") return setCreds(n.bind.key, v as string | null);
     save(applyTwo(nodePatch(n, v), extraPatch(n, v)));
-  }, [save]);
+  }, [save, setCreds]);
 
   // DEEP LINK — ?focus=<key>. The staff panels' "zones off for staff" popovers send a
   // "⚙ change" link carrying a manager-power flag, a tablet_* column, an owner section or a
@@ -116,9 +201,16 @@ export default function AccessTree({ rid }: { rid: string }) {
   // section (and any collapsed group above the row), waits for it to exist, scrolls it to the
   // middle and rings it. Written once so the two entry points can't drift apart.
   const jumpTo = useCallback((nodeId: string, sectionId?: string, ancestorIds: string[] = []) => {
-    setOpenSec((s) => (sectionId
-      ? { ...s, [sectionId]: true }
-      : (Object.fromEntries(SECTIONS.map((x) => [x.id, true])) as Record<string, boolean>)));
+    // Open ONLY the section holding the row. This used to fall back to opening EVERY section when
+    // no section was named ("the row may be anywhere"), so following a "change this" link from
+    // anywhere else in the admin flung all six open at once and you had to close them by hand
+    // (owner, 2026-07-31: "every dropdown is open — make sure every dropdown is closed"). The
+    // section never had to be guessed: the model knows where every row lives, so look it up.
+    const found = sectionId && ancestorIds.length ? { sectionId, ancestorIds } : locateNode(nodeId);
+    const sec = found?.sectionId ?? sectionId;
+    const anc = found?.ancestorIds ?? ancestorIds;
+    if (sec) setOpenSec((s) => ({ ...s, [sec]: true }));
+    ancestorIds = anc;
     if (ancestorIds.length) {
       setOpenNode((s) => { const n = { ...s }; for (const id of ancestorIds) n[id] = true; return n; });
     }
@@ -144,7 +236,7 @@ export default function AccessTree({ rid }: { rid: string }) {
       const b: any = n.bind;
       return n.id === key || b.key === key || b.flag === key || (b.t === "module" && `${b.key}_allowed` === key);
     });
-    if (hit) jumpTo(hit.id);          // no section given → open them all, the row may be anywhere
+    if (hit) jumpTo(hit.id);          // jumpTo looks the section up itself — see locateNode
   }, [st, jumpTo]);
 
   if (err && !st) return <div className="acc2-warn"><Icon n="info" s={17} /><div>{err}</div></div>;
@@ -427,6 +519,7 @@ function Control({ node, value, set }: { node: Node; value: any; set: (n: Node, 
 
   if (b.t === "list") return <ListControl node={node} value={Array.isArray(value) ? value : []} set={set} />;
   if (b.t === "text") return <TextControl node={node} value={String(value ?? "")} set={set} />;
+  if (b.t === "creds") return <CredsControl node={node} hint={String(value ?? "")} set={set} />;
   if (b.t === "opt") {
     if (node.choices) {
       return (
@@ -483,6 +576,48 @@ function TextControl({ node, value, set }: { node: Node; value: string; set: (n:
   );
 }
 
+/**
+ * One delivery channel's API key (Zomato, Swiggy, the restaurant's own website).
+ *
+ * `hint` is all the server will ever say about a stored key — "" or "••••1234". The box starts
+ * EMPTY even when a key is stored, because the stored one is not available to prefill and pretending
+ * otherwise (showing dots in the input) would make "save" look like it re-saved something. Leaving
+ * it empty and pressing nothing changes nothing; that is why a key can't be lost by editing a
+ * neighbouring setting.
+ */
+function CredsControl({ node, hint, set }: { node: Node; hint: string; set: (n: Node, v: any) => void }) {
+  const [draft, setDraft] = useState("");
+  const [show, setShow] = useState(false);
+  const stored = !!hint;
+  return (
+    <div className="at-creds">
+      <div className="at-creds-row">
+        <input className="at-text" type={show ? "text" : "password"} value={draft} autoComplete="off"
+          placeholder={node.placeholder || (stored ? "Enter a new key to replace it" : "Paste the key")}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && draft.trim()) { set(node, draft.trim()); setDraft(""); } }} />
+        {draft ? (
+          <button className="at-creds-eye" type="button" onClick={() => setShow((v) => !v)}
+            title={show ? "Hide what you typed" : "Show what you typed"}>{show ? "Hide" : "Show"}</button>
+        ) : null}
+        <button className="adm-btn primary at-creds-save" type="button" disabled={!draft.trim()}
+          onClick={() => { set(node, draft.trim()); setDraft(""); }}>Save</button>
+      </div>
+      <div className="at-creds-state">
+        {stored ? (
+          <>
+            <span className="at-creds-ok">Connected · key ending {hint.replace(/[^0-9a-z]/gi, "").slice(-4)}</span>
+            <button className="at-creds-rm" type="button"
+              onClick={() => { if (confirm(`Remove the ${node.name}? Orders from that channel stop arriving until a new key is saved.`)) set(node, null); }}>
+              Remove
+            </button>
+          </>
+        ) : <span className="at-creds-no">Not connected — no key saved yet</span>}
+      </div>
+    </div>
+  );
+}
+
 function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
   // Registered with nothing to peel: this is a plain admin-desktop popover, and the admin
   // console is not one of the panels the back-button manager governs.
@@ -491,17 +626,65 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [onClose]);
+  // The picture. Candidates are tried in order and a name with no file is skipped by onError, so a
+  // setting with no screenshot yet shows the sheet without one instead of a broken image.
+  const [shot, setShot] = useState(0);
+  const [more, setMore] = useState(false);
+  const path = readablePath(node.id);
+  const imgs = helpImages(node, NODE_PATH[node.id]?.sectionId);
+  const src = imgs[shot];
+  const kids = node.children || [];
+  const def = defaultLine(node);
   return (
     <div className="at-sheet" role="dialog" aria-label={node.name} onClick={onClose}>
       <div className="at-sheet-b" onClick={(e) => e.stopPropagation()}>
         <h3>{node.name}</h3>
+        {path ? <div className="at-sheet-path">{path}</div> : null}
+        {/* A real screenshot of the screen this setting controls, with the control ringed. The
+            owner asked for it back: "an (i) button should work like it used to — full screenshot,
+            highlight the feature". lazy + a static /public file, so an unopened sheet costs
+            nothing. See scripts/shot-access-help.mjs to re-capture. */}
+        {src ? (
+          <img className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} loading="lazy"
+            onError={() => setShot((i) => i + 1)} />
+        ) : null}
         <p>{node.what}</p>
+        {def ? <p className="at-sheet-def">{def}</p> : null}
         {node.choices?.length ? (
           <ul>{node.choices.map((c) => <li key={c.value}><b>{c.label}</b>{c.what ? ` — ${c.what}` : ""}</li>)}</ul>
+        ) : null}
+        {/* SHOW MORE — the owner wanted the short version first and "in detail for all option sub
+            option" behind one press. Everything below is read from the model itself (each
+            sub-option's own explanation, its default, its own sub-options), so this can never
+            describe a setting the app doesn't have. */}
+        {kids.length ? (
+          <>
+            <button className="at-sheet-more" onClick={() => setMore((v) => !v)} aria-expanded={more}>
+              {more ? "Show less" : `Show more — what each of the ${kids.length} option${kids.length > 1 ? "s" : ""} does`}
+            </button>
+            {more ? <div className="at-sheet-deep">{kids.map((k) => <DeepHelp key={k.id} node={k} depth={0} />)}</div> : null}
+          </>
         ) : null}
         {node.leftToBuild ? <p className="at-sheet-note">This one isn&apos;t built yet. The switch appears here the moment it is.</p> : null}
         <button className="adm-btn" onClick={onClose}>Close</button>
       </div>
+    </div>
+  );
+}
+
+/** One sub-option inside "Show more", and its own sub-options under it, as deep as the model goes. */
+function DeepHelp({ node, depth }: { node: Node; depth: number }) {
+  const def = defaultLine(node);
+  const kids = node.children || [];
+  return (
+    <div className="at-dh" style={{ marginLeft: depth * 14 }}>
+      <div className="at-dh-n">{node.name}{node.leftToBuild ? <span className="at-dh-tbd">not built yet</span> : null}</div>
+      {node.what ? <div className="at-dh-w">{node.what}</div> : null}
+      {def ? <div className="at-dh-d">{def}</div> : null}
+      {node.choices?.length ? (
+        <ul className="at-dh-c">{node.choices.map((c) => <li key={c.value}><b>{c.label}</b>{c.what ? ` — ${c.what}` : ""}</li>)}</ul>
+      ) : null}
+      {kids.map((k) => <DeepHelp key={k.id} node={k} depth={depth + 1} />)}
     </div>
   );
 }
@@ -633,6 +816,38 @@ function TreeStyle() {
   .at-sheet-b ul { margin:0 0 14px; padding-left:18px; font-size:13px; line-height:1.7; color:var(--muted); }
   .at-sheet-b ul b { color:var(--text); }
   .at-sheet-note { color:var(--adm-warn) !important; font-weight:600; }
+  /* (i) SHEET: path line, screenshot, and the "show more" detail (owner, 2026-07-31 — he wanted the
+     screenshot back, a short plain line first, and every sub-option explained behind one press). */
+  .at-sheet-path { font-size:11.5px; font-weight:700; letter-spacing:.02em; color:var(--muted); opacity:.85; margin:-2px 0 11px; }
+  .at-sheet-shot { display:block; width:100%; height:auto; border-radius:11px; border:1px solid color-mix(in srgb, var(--accent) 26%, transparent);
+    margin:0 0 13px; background:var(--bg); }
+  .at-sheet-def { font-size:12.5px !important; font-weight:600; color:var(--text) !important; opacity:.72; margin:-6px 0 12px !important; }
+  .at-sheet-more { display:block; width:100%; text-align:left; background:color-mix(in srgb, var(--accent) 9%, transparent);
+    border:1px solid color-mix(in srgb, var(--accent) 30%, transparent); color:var(--text); font-size:12.5px; font-weight:700;
+    padding:9px 12px; border-radius:10px; cursor:pointer; margin:0 0 12px; }
+  .at-sheet-more:hover { background:color-mix(in srgb, var(--accent) 16%, transparent); }
+  .at-sheet-deep { margin:0 0 14px; }
+  .at-dh { padding:9px 0 2px; border-top:1px solid color-mix(in srgb, var(--muted) 16%, transparent); }
+  .at-dh-n { font-size:13px; font-weight:800; margin-bottom:3px; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .at-dh-tbd { font-size:10.5px; font-weight:700; color:var(--adm-warn); border:1px solid color-mix(in srgb, var(--adm-warn) 45%, transparent);
+    padding:1px 6px; border-radius:6px; }
+  .at-dh-w { font-size:12.5px; line-height:1.6; color:var(--muted); }
+  .at-dh-d { font-size:11.5px; font-weight:600; color:var(--muted); opacity:.8; margin-top:3px; }
+  .at-dh-c { margin:5px 0 0 !important; padding-left:16px !important; font-size:12px !important; }
+  /* API KEY per channel (owner, 2026-07-31: Zomato / Swiggy / takeaway need "a link option to add
+     an API key"). The key goes one way — the box is empty even when a key is stored, because the
+     stored one is never sent back; only "connected · ending 1234" is. */
+  .at-creds { display:flex; flex-direction:column; gap:6px; min-width:0; width:100%; }
+  .at-creds-row { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .at-creds-row .at-text { flex:1; min-width:150px; }
+  .at-creds-save { font-size:12px; padding:7px 13px; }
+  .at-creds-save:disabled { opacity:.45; cursor:not-allowed; }
+  .at-creds-eye { background:none; border:0; color:var(--muted); font-size:11.5px; font-weight:700; cursor:pointer; padding:2px 4px; }
+  .at-creds-eye:hover { color:var(--text); }
+  .at-creds-state { display:flex; align-items:center; gap:10px; font-size:11.5px; font-weight:600; flex-wrap:wrap; }
+  .at-creds-ok { color:var(--adm-ok, #34d399); }
+  .at-creds-no { color:var(--muted); opacity:.85; }
+  .at-creds-rm { background:none; border:0; color:var(--adm-danger, #f87171); font-size:11.5px; font-weight:700; cursor:pointer; padding:0; text-decoration:underline; }
   @media (max-width:640px) {
     .at-box { padding:11px; border-radius:12px; }
     .at-box-h { flex-direction:column; gap:10px; }
