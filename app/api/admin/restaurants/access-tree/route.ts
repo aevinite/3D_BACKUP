@@ -8,10 +8,12 @@
 //
 // Admin-gated. Replaces /access2 (deleted with the old panel in the same rebuild).
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+import { menuTag } from "@/lib/menuDataServer";
 import {
   SECTIONS, ALL_NODES, NODE_BY_ID, SETTINGS_COLUMNS, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
   LIST_KEYS, TEXT_KEYS, MODULE_KEYS, PANEL_KEYS, CHANNEL_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
@@ -230,6 +232,22 @@ export async function POST(req: NextRequest) {
       const up = await sb.from("settings").upsert(row, { onConflict: "restaurant_id" });
       if (up.error) return bad(up.error.message, 500);
     }
+  }
+
+  // A GUEST-FACING switch has to reach guests NOW, not whenever a cache feels like it.
+  //
+  // The guest menu bundle is cached per restaurant with `revalidate: 86400` and the tag
+  // menuTag(rid) (lib/menuDataServer.ts), and the ONLY thing that purged that tag was the
+  // manager panel's own save (bustMenuCache in app/api/editor/[...path]/route.ts). This admin
+  // endpoint replaced the old access screen and never purged it — so switching a guest feature
+  // (favourites, the 3D dish viewer, the veg mark…) off here left guests seeing it for up to a
+  // DAY, and the admin had no way to tell. That is the same "the switch did nothing" family as
+  // the retired-column bug in #592. Found by the whole-app suite, phases 92/94. (2026-07-31)
+  //
+  // Best-effort and last: a purge failure must never fail a save that already succeeded — the
+  // 24h revalidate is still the backstop underneath.
+  if (Object.keys(setPatch).length) {
+    try { revalidateTag(menuTag(rid), "max"); } catch { /* the revalidate window is the backstop */ }
   }
 
   return NextResponse.json({ ok: true });
