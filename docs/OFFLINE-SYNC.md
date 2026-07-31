@@ -51,8 +51,21 @@ browser's dinosaur page, mid-service. Now a service worker keeps three per-devic
 - **Big media is untouched:** `/models/`, `.glb`, video. They have their own in-memory loader
   and a 1-year immutable header; an earlier version raced them against a timeout and broke
   the 3D viewer.
-- **Bump `VERSION` in `public/sw.js` whenever you change the caching RULES.** The `activate`
-  sweep renames the caches, and that is the only way to force every device off the old rules.
+- **Bump `VERSION` in `public/sw.js` whenever you change the caching RULES — or `offline.html`.**
+  The `activate` sweep renames the caches, and that is the only way to force every device off
+  the old rules. The offline page is *precached at install*, so without a bump a device keeps
+  serving the old copy of it forever.
+- **The last-resort page must not GUESS the cause** (`public/offline.html`). It used to always
+  say *"No internet right now"*. On 2026-07-31 the backup site's database stopped answering:
+  the owner's internet was fine, the site was up, and the page still blamed his internet — then
+  sat on *"Waiting for the connection…"* forever, because the only thing it probed
+  (`/api/health`) was the very request that was hanging. It now runs three time-boxed checks in
+  order — `navigator.onLine` → an unmatched `/api/` path that reaches our server but touches no
+  database → `/api/health` — and reports which one failed: *"This device is offline"*, *"can't
+  reach the internet"* (Wi-Fi with no internet), or *"Your internet is fine — this one is on
+  us"* when the server is reachable but its database isn't. It also offers **Go to the home
+  screen**, because a page whose only button reloads a page that can't load is a dead end.
+  Guarded in `scripts/verify-offline.mjs` §10 (right reason, not the wrong one, plus the way out).
 - **Kill switch:** any URL with `?nosw=1` unregisters the worker and clears the caches;
   404-ing `/sw.js` does the same by browser behaviour. `vercel.json` sends
   `Cache-Control: max-age=0, must-revalidate` for `/sw.js` so an update always lands.
