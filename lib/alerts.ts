@@ -84,6 +84,27 @@ export function alertText(fields: AlertField[], note?: string | null): string {
   return lines.join("\n");
 }
 
+// WHICH STACK IS TALKING — the first thing on every alert (owner, 2026-07-31: "it is error
+// from AV live or it is error from backup, it should note on the top"). A ping that doesn't say
+// where it came from is a ping you can't act on: our own test load and a real restaurant in
+// trouble looked identical on his phone.
+// Derived from the database the app is pointed at, so neither deployment needs a new setting.
+// Kept ASCII — it goes in an HTTP header (see headerSafe below).
+const STACK_BY_REF: Record<string, string> = {
+  kclqkmdxnwlhtyrducku: "AV live",       // the paying clients
+  wnsfcizclkbobwzcxqsf: "Backup (test)", // our dev/demo stack
+};
+export function alertStack(): string {
+  const override = (process.env.ALERT_STACK || "").trim();
+  if (override) return override;
+  try {
+    const ref = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL || "").hostname.split(".")[0];
+    return STACK_BY_REF[ref] || `Stack ${ref.slice(0, 6)}`;
+  } catch {
+    return "Unknown stack";
+  }
+}
+
 // ntfy headers are HTTP headers = ASCII only. A "·", a curly quote or a Hindi restaurant name in
 // the TITLE arrives as mojibake (seen 2026-07-29), so anything non-ASCII is sent RFC-2047 encoded,
 // which ntfy understands and decodes back to the real characters.
@@ -146,6 +167,11 @@ export async function sendOwnerAlert(text: string, key: string, opts?: AlertOpts
       return; // no channel configured → no-op
     }
     if (await recentlyAlerted(key)) return; // grouped: same alert within 15 min → skip
+    // Stamp the stack on the title and the first line, so a glance at the phone answers
+    // "is this my restaurant, or our test site?" before anything else is read.
+    const stack = alertStack();
+    const body = `[${stack}]\n${text}`;
+    const withStack: AlertOpts = { ...(opts || {}), title: `${stack}: ${opts?.title || "Restaurant alert"}` };
     // Record the send FIRST so a burst of concurrent errors doesn't all slip past the window check.
     try {
       await sb.from("staff_actions").insert({ panel: "admin", action: "alert_sent", detail: key, level: "info", restaurant_id: null });
@@ -153,7 +179,7 @@ export async function sendOwnerAlert(text: string, key: string, opts?: AlertOpts
       /* logging the send is best-effort */
     }
     // Each channel independently; one failing must not stop the other.
-    await Promise.allSettled([pushNtfy(text, opts), pushTelegram(text, opts)]);
+    await Promise.allSettled([pushNtfy(body, withStack), pushTelegram(body, withStack)]);
   } catch {
     /* alerts are best-effort; never break the caller */
   }
