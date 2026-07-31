@@ -31,7 +31,7 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { clampPerRow } from "@/lib/floorLayout";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "@/lib/ownerEntitlements";
-import { isTableTag, tableTagsLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
+import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 import { saveBillCustomer } from "@/lib/billCustomer";
@@ -462,7 +462,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // (admin/owner pass managerCan automatically). Outstanding bills only; a bill = the
     // orders parked together (grouped by session, solo orders by their own id).
     if (p === "khata") {
-      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("see the khata book");
       // ONE source of truth for the net-due math (mig 184): the RPC returns per-BILL open
       // rows; we group them into person → bills for the Pay Later view. The owner panel
@@ -485,7 +485,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     // khata/customers?q= — the person picker's search (scoped, limited, debounced client-side).
     if (p === "khata/customers") {
-      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("use the khata book");
       const q = (new URL(req.url).searchParams.get("q") || "").trim().slice(0, 60);
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
@@ -2397,7 +2397,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "khata") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("park bills to collect later");
       const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
       let kq = sb.from("orders").select("id,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
@@ -2442,7 +2442,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // khata/customers — add a person to the book directly (the picker's "add new").
     if (a === "khata" && b === "customers" && !c) {
-      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("use the khata book");
       const name = String(body?.name || "").trim().slice(0, 80);
       if (!name) return err("name required");
@@ -2460,7 +2460,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // khata/pay — collect a parked bill. body { session_id } (a bill) or { order_id }
     // (a solo parked order), + { method, note? }. Normal payment methods only.
     if (a === "khata" && b === "pay") {
-      if (g.user && !(await tableTagsLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
+      if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("collect khata payments");
       const method = String(body?.method || "");
       if (!PAYMENT_METHODS.includes(method as (typeof PAYMENT_METHODS)[number])) return err("invalid payment_method");

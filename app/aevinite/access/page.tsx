@@ -10,6 +10,7 @@
  * granular sub-options (menu split, dashboard/log picks, discount caps, new tablet
  * rungs) persist to access_config; their enforcement is a later, reviewed step. */
 import { useEffect, useState, useCallback, useRef } from "react";
+import AccessTree from "@/components/admin/AccessTree";
 import {
   GROUPS, PERMISSIONS, PERM_BY_ID, permsOf, maxReach, reachLevel, allowed,
   tabletValue, moduleKey, type Perm, type SubOpt, type AccessState,
@@ -404,7 +405,7 @@ export default function Access2Page() {
       <header className="acc2-head">
         <div>
           <h1 className="adm-page-title" style={{ margin: 0 }}>Access &amp; permissions</h1>
-          <p className="adm-page-sub" style={{ margin: "4px 0 0" }}>{rest?.name} · {staff.length} people · new panel (preview)</p>
+          <p className="adm-page-sub" style={{ margin: "4px 0 0" }}>{rest?.name} · {staff.length} people</p>
         </div>
         <div className="acc2-head-r">
           <span className={`acc2-save ${saving}`}>{saving === "saving" ? "Saving…" : saving === "saved" ? "Saved ✓" : saving === "err" ? "Save failed" : ""}</span>
@@ -418,7 +419,12 @@ export default function Access2Page() {
         </div>
       </header>
 
-      {tab === "general" ? <General /> : <PerPerson />}
+      {/* GENERAL is the rebuilt tree (owner 2026-07-31 — docs/ACCESS-MODEL.md): four sections,
+          only the switches he listed, no greyed-out ghosts. It owns its own state and talks to
+          /api/admin/restaurants/access-tree. PER PERSON still runs on the older model below,
+          which is safe because both write the SAME enforced keys (manager_permissions flags and
+          the tablet_* tri-states) — it is tidied to the new capability list in the next phase. */}
+      {tab === "general" ? <AccessTree rid={rid} /> : <PerPerson />}
 
       {info && <InfoPop />}
       {lightbox && (
@@ -430,7 +436,11 @@ export default function Access2Page() {
     </div>
   );
 
-  // ───────────────────────────── GENERAL ─────────────────────────────────────
+  // ─────────────────── GENERAL (RETIRED — replaced by <AccessTree/>) ──────────
+  // Kept inert for one phase only: the Per-person pane below still shares this
+  // component's helpers, so it is deleted together with that pane's rewrite (Phase 4/5
+  // of the access rebuild) rather than ripped out mid-way. Nothing renders it.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   function General() {
     const conf = PERMISSIONS.filter((p) => conflicts(p).length);
     return (

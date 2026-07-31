@@ -23,6 +23,10 @@ export const FEATURE_DEFAULTS = {
   reviews: true,      // written guest reviews on dish detail pages
   model3d: true,      // the 3D dish viewer (buttons + background preloading)
   allergies: true,    // allergen warnings, the allergy filter, allergies on orders
+  // The two FREE-TEXT halves of the allergy/notes step (access rebuild, 2026-07-31). Off
+  // removes only the typing — a guest may still pick from the restaurant's presets.
+  allergy_other: true, // the "Other…" box for an allergy that isn't on the list
+  guest_note: true,    // the free-text note a guest sends to the kitchen
   favorites: true,    // the heart button + the Favorites tab
   waiter_calls: true, // the call-waiter bell + popup
   search: true,       // the dish search box

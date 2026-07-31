@@ -20,7 +20,9 @@ import { MANAGER_POWER_FLAGS } from "@/lib/accessModel";
 // the admin can switch it off to remove the section for a restaurant. Note this is the
 // SECTION-visibility rung — whether the owner can EDIT vs only VIEW the menu is the separate
 // power_edit_menu rung (see MANAGER_POWER_FLAGS below).
-export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu"] as const;
+// "logs" (2026-07-31, access rebuild) gates the owner panel's activity-log page — the
+// owner's equivalent of the manager's Log tab, which was the one panel tab never wired.
+export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu", "logs"] as const;
 export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 
 // The manager powers (mig 091). The admin's availability switch for each lives under
