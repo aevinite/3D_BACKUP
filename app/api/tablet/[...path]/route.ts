@@ -28,7 +28,7 @@ import { effectiveTaxRate } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { waiterTables, allows, normTable, blockedReason, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
-import { sharedFloorSummary } from "@/lib/floorSummary";
+import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 
 export const dynamic = "force-dynamic";
 
@@ -505,6 +505,9 @@ export const POST = withIdempotency(postImpl, "tablet");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  // A write to this restaurant drops its shared floor snapshot, so the very next read
+  // recomputes — a device can never be handed a floor computed before its own action.
+  if (rid) invalidateFloor(rid);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   // The logged-in waiter, for per-user permission checks. Bound here because the
   // tabletPerm call sites below shadow `g` with their own gate result.

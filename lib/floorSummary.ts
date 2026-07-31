@@ -59,6 +59,18 @@ export async function sharedFloorSummary<T>(key: string, compute: () => Promise<
   return promise;
 }
 
+/**
+ * Drop this restaurant's shared snapshot. Called at the START of every staff WRITE, so a
+ * device that changes something and immediately reloads the floor can never be handed a
+ * snapshot computed before its own action ("read your own write"). Without this a waiter who
+ * marked a table paid could see the tile flick back to unpaid for a moment — the exact
+ * "old value for a second" behaviour the owner refuses.
+ * Over-invalidating is harmless: the next read simply computes.
+ */
+export function invalidateFloor(restaurantId: string): void {
+  inflight.delete(`floor:${restaurantId}`);
+}
+
 /** Test hook: forget everything (so a test can measure a cold call). */
 export function _resetSharedFloorSummary(): void {
   inflight.clear();
