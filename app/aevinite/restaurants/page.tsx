@@ -889,7 +889,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {/* Access & permissions is its OWN screen (owner 2026-07-23) reached by a button
-              from here, not shown inline. Carries ?rid so access2 preselects this restaurant;
+              from here, not shown inline. Carries ?rid so Access preselects this restaurant;
               &from=rest lets its breadcrumb come back to this detail view. */}
           <a className="adm-btn" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}
             title={`Manage who can do what at ${restaurant.name}`}>

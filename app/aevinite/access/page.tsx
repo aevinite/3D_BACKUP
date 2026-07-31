@@ -1,251 +1,59 @@
 "use client";
-/* /aevinite/access — the access-control panel (redesign #1, rail + accordion).
- * This IS the access page (the old inline-styled version was replaced by this on the
- * owner's 2026-07-24 merge). Reads/writes the whole ladder through
- * /api/admin/restaurants/access2 using lib/accessModel bindings, styled with the admin
- * theme tokens (var(--card)/(--border)/(--accent)).
+/* /aevinite/access — Access & permissions (owner rebuild, 2026-07-31).
  *
- * SAFE-BY-DESIGN: every save maps onto the EXISTING enforced columns, so turning a
- * rung off here hides AND server-refuses it via the app's current guards. Genuinely-new
- * granular sub-options (menu split, dashboard/log picks, discount caps, new tablet
- * rungs) persist to access_config; their enforcement is a later, reviewed step. */
-import { useEffect, useState, useCallback, useRef } from "react";
+ * A thin shell: pick a restaurant, pick a tab. Both tabs are their own components and both
+ * read lib/accessTree.ts, so "what a role gets by default" and "what this one person gets"
+ * can never offer different capabilities.
+ *
+ *   General     → <AccessTree/>       Main features · Staff apps · Manager's menu ·
+ *                                     Owner's menu · Default set for user
+ *   Per person  → <AccessPerPerson/>  the exception list for one member of staff
+ *
+ * This replaced a 1000-line screen of 54 sub-checkboxes, 45 of which no server code read.
+ * The rule now: a toggle exists only where lib/accessTree.ts says so. Spec:
+ * docs/ACCESS-MODEL.md. */
+import { useEffect, useState } from "react";
 import AccessTree from "@/components/admin/AccessTree";
-import {
-  GROUPS, PERMISSIONS, PERM_BY_ID, reachLevel, allowed, type Perm, type AccessState,
-} from "@/lib/accessModel";
+import AccessPerPerson from "@/components/admin/AccessPerPerson";
 
 type Rest = { id: string; name: string; slug: string; active: boolean };
-type Staff = { id: string; name: string | null; username: string; role: string; permissions?: Record<string, string> };
 
-// ── tiny inline icon set (no FA dependency) ──────────────────────────────────
 const P: Record<string, string> = {
-  crown: "M3 18h18M4 15L2 7l5.5 4L12 4l4.5 7L22 7l-2 8z", users: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 010 7.8",
-  user: "M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8", check: "M20 6L9 17l-5-5", minus: "M5 12h14",
-  chevron: "M6 9l6 6 6-6", chevronR: "M9 18l6-6-6-6", info: "M12 22a10 10 0 100-20 10 10 0 000 20M12 16v-5M12 8h.01",
-  alert: "M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0zM12 9v4M12 17h.01", key: "M7.5 15.5a4.5 4.5 0 100-9 4.5 4.5 0 000 9M10.7 12.3L21 2M17 6l3 3",
-  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z", arrowR: "M5 12h14M12 5l7 7-7 7", arrowL: "M19 12H5M12 19l-7-7 7-7", lock: "M5 11h14v10H5zM8 11V7a4 4 0 018 0v4", x: "M18 6L6 18M6 6l12 12", reset: "M3 12a9 9 0 103-6.7L3 8M3 3v5h5",
-  // area icons (GROUPS[].icon)
-  cutlery: "M3 2v7a2 2 0 002 2h1a2 2 0 002-2V2M6 11v11M17 2v20M17 12c2 0 4-2 4-5V2c-2 0-4 2-4 5",
-  book: "M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z",
-  receipt: "M4 2v20l2.5-1.5L9 22l2.5-1.5L14 22l2.5-1.5L19 22V2l-2.5 1.5L14 2l-2.5 1.5L9 2 6.5 3.5zM8 8h8M8 12h6",
-  grip: "M5 5h4v4H5zM15 5h4v4h-4zM5 15h4v4H5zM15 15h4v4h-4z",
-  grid: "M5 5h4v4H5zM15 5h4v4h-4zM5 15h4v4H5zM15 15h4v4h-4z",
-  fire: "M12 2c1 4 4 5 4 9a4 4 0 01-8 0c0-1.5.5-2.5 1-3M12 22a6 6 0 006-6c0-2-1-4-2-5",
-  sparkles: "M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z",
-  chart: "M3 3v16.5A1.5 1.5 0 004.5 21H21M7 15l3.5-4 3 2.5L20 7",
-  box: "M21 8l-9-5-9 5v8l9 5 9-5zM3 8l9 5 9-5M12 22V13",
-  sidebar: "M3 3h18v18H3zM9 3v18",
+  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z",
+  users: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 010 7.8",
+  arrowL: "M19 12H5M12 19l-7-7 7-7",
 };
-const Icon = ({ n, s = 16 }: { n: string; s?: number }) => (
-  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.85} strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }}>
+const Icon = ({ n, s = 15 }: { n: string; s?: number }) => (
+  <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.85}
+    strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }} aria-hidden="true">
     {P[n]?.split("M").filter(Boolean).map((d, i) => <path key={i} d={"M" + d} />)}
   </svg>
 );
 
-// The staff_users.permissions KEY under which a per-person override is actually ENFORCED —
-// ROLE-DEPENDENT, because each role's server gate reads a different key (mig 115). Getting
-// this wrong = a switch that saves but is never read (owner 2026-07-26: "nothing working-but-
-// not-existing"). The old `p.tablet || p.id` used the tablet_* key for EVERY role, so a
-// manager override for a tablet-column power (give_discounts, khata, take_orders, parcel,
-// table_ops, table_tags, banquet) was written to tablet_* while managerCan reads the bare
-// flag — silently dead. Correct mapping:
-//   • tablet (waiter): the tablet_* tri-state column, read by tabletPerm. tabletNew caps
-//     (void_bills) are enforced via access_config elsewhere, so there is NO per-person key.
-//   • manager: the BARE power flag, read by managerCan. fixedTop caps (mark_paid/print_invoice
-//     — managers always have them) have no manager gate, so no per-person key.
-//   • kitchen / owner: no per-person enforcement path at all.
-// Returns null when no real control exists → the UI shows a plain explanatory line, never a
-// fake toggle. MODULE-SCOPE so resolved()/holders() (hoisted) never hit it in the TDZ.
-function overrideKey(p: Perm, role: string): string | null {
-  if (role === "tablet") return p.waiter && p.tablet ? p.tablet : null;
-  if (role === "manager") return p.power || null;
-  return null;
-}
-// Why a row has no per-person toggle (shown in place of the tri-state) — honest, role-specific.
-function noOverrideReason(p: Perm, role: string): string {
-  if (role === "manager" && p.fixedTop) return "Managers always have this — only waiters can be limited per person.";
-  if (role === "tablet" && p.tabletNew) return "Set for all waiters on the card above — there’s no per-person override for this one.";
-  if (role === "kitchen") return "The kitchen app doesn’t use this.";
-  return "No per-person setting applies to this role.";
-}
-// A real-panel screenshot PER FEATURE, shown in the (i) popover so the admin can see WHERE
-// the thing lives in the app (the exact control ringed + a path banner across the top).
-// Files in public/admin-help/<perm.id>.png, captured by the re-runnable script
-// scripts/shot-access-help.mjs — RE-RUN IT whenever a panel's UI changes so these never go
-// stale (owner rule 2026-07-24). SHOT_IDS lists the ids that have their own image; anything
-// not yet captured falls back to the per-AREA image in SHOT_BY_GROUP. Lazy-loaded.
-const SHOT_IDS = new Set([
-  "ratings", "reviews", "model3d", "allergies", "favorites", "waiter_calls", "diet_filter", "languages", "currency",
-  "edit_menu", "give_discounts", "void_bills", "mark_paid", "print_invoice", "khata",
-  "take_orders", "table_ops", "table_tags", "auto_print_kot", "banquet",
-  "view_dashboard", "view_ratings", "view_logs", "handle_issues", "view_customers",
-  "manage_staff", "edit_settings", "panel_manager", "panel_kitchen", "panel_tablet", "panel_owner",
-]);
-const SHOT_BY_GROUP: Record<string, string> = {
-  guest: "guest-menu", menu: "manager-menu", money: "manager-menu", floor: "tablet",
-  kitchen: "kitchen", banquet: "manager-menu", reports: "owner-home", staff: "owner-staff", panels: "owner-home",
-};
-const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, tablet: 2, kitchen: 3 };
-const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager", tablet: "Waiter", kitchen: "Kitchen" };
-// Per-role colours (owner 2026-07-25 — match the Users page: colour people by role, not one gold accent).
-const ROLE_COLOR: Record<string, string> = { owner: "#b491f0", manager: "#d4a574", tablet: "#60a5fa", kitchen: "#7ec88a" };
-const roleTint = (c: string) => `color-mix(in srgb, ${c} 16%, transparent)`;
-const ROLE_RELEVANCE: Record<string, string[]> = {
-  manager: ["edit_menu", "give_discounts", "void_bills", "mark_paid", "print_invoice", "khata", "take_orders", "parcel", "table_ops", "table_tags", "banquet", "view_dashboard", "view_ratings", "view_logs", "manage_staff", "edit_settings"],
-  tablet: ["give_discounts", "mark_paid", "print_invoice", "khata", "take_orders", "parcel", "table_ops", "table_tags", "banquet", "void_bills"],
-  kitchen: ["edit_menu", "view_logs"],
-  owner: PERMISSIONS.filter((p) => p.kind === "ladder").map((p) => p.id),
-};
-
-// Every alias a ?focus deep-link may use for one capability card: its id, the manager
-// power flag, the tablet_* cap key, the owner section key, the guest feature slug, and
-// its sub-option ids (e.g. khata_book). Rendered as data-focus-key + used for the flash.
-export default function Access2Page() {
+export default function AccessPage() {
   const [rests, setRests] = useState<Rest[]>([]);
-  const [rid, setRid] = useState<string>("");
-  const [st, setSt] = useState<AccessState | null>(null);
-  const [staff, setStaff] = useState<Staff[]>([]);
+  const [rid, setRid] = useState("");
   const [tab, setTab] = useState<"general" | "person">("general");
-  const [personId, setPersonId] = useState<string>("");
-  const [personFilter, setPersonFilter] = useState<string>("");
-  // People-rail fast navigation (owner 2026-07-24 two-pane redesign): a search box + role
-  // filter chips so you jump to a person / a type of person without scanning. Parent-scoped
-  // because the render sub-components remount each pass (they hold no local state).
-  const [pQuery, setPQuery] = useState<string>("");
-  const [pRole, setPRole] = useState<string>("all");
-  const [activeArea, setActiveArea] = useState<string>("guest"); // the ONE rail item highlighted (nav target)
-  const [info, setInfo] = useState<{ perm: Perm; sub?: string } | null>(null);
-  const [lightbox, setLightbox] = useState<string | null>(null);
   const [fromRest, setFromRest] = useState(false);
-  const railRef = useRef<HTMLElement | null>(null);
-  const spyClick = useRef(0); // suppress the spy briefly after a rail click so it doesn't fight the smooth-scroll
-  const focusRef = useRef(""); // ?focus=<key> deep-link, consumed once when the state has loaded
-  // The key currently being flash-highlighted. STATE, not a manual classList.add: the
-  // section/card components are nested in this component, so any re-render remounts them
-  // and would wipe a manually-added class mid-flash (bit us on the first build).
 
   useEffect(() => {
-    // Read ?rid / ?from off the URL directly (no useSearchParams → no Suspense
-    // boundary needed), matching how the restaurants page reads ?focus.
+    // ?rid / ?from read straight off the URL (no useSearchParams → no Suspense boundary),
+    // matching how the restaurants page reads ?focus.
     const q = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
     const urlRid = q.get("rid") || "";
-    focusRef.current = q.get("focus") || "";
     setFromRest(q.get("from") === "rest");
-    fetch("/api/admin/restaurants").then((r) => r.json()).then((d) => {
-      const list: Rest[] = (Array.isArray(d) ? d : d.restaurants || []).filter((x: Rest) => x.active !== false);
-      setRests(list);
-      const pick = list.find((x) => x.id === urlRid) || list[0];
-      if (pick) setRid(pick.id);
-    }).catch(() => {});
+    fetch("/api/admin/restaurants")
+      .then((r) => r.json())
+      .then((d) => {
+        const list: Rest[] = (Array.isArray(d) ? d : d.restaurants || []).filter((x: Rest) => x.active !== false);
+        setRests(list);
+        const pick = list.find((x) => x.id === urlRid) || list[0];
+        if (pick) setRid(pick.id);
+      })
+      .catch(() => {});
   }, []);
-
-  const load = useCallback((id: string) => {
-    if (!id) return;
-    fetch(`/api/admin/restaurants/access2?restaurant_id=${id}`).then((r) => r.json()).then((d) => { if (!d.error) setSt(d); }).catch(() => {});
-    fetch(`/api/owner/staff?rid=${id}`).then((r) => r.json()).then((d) => {
-      const s: Staff[] = (d.staff || d.users || d || []) as Staff[];
-      setStaff(Array.isArray(s) ? s : []);
-    }).catch(() => setStaff([]));
-  }, []);
-  useEffect(() => { load(rid); setPersonId(""); setPersonFilter(""); setPQuery(""); setPRole("all"); }, [rid, load]);
-
-  // Scroll-spy: as the sections scroll past, highlight the matching AREA in the left rail —
-  // exactly like the guest menu's category strip. The scroll container is .adm-main.
-  useEffect(() => {
-    if (tab !== "general" || !st) return;
-    const scroller = document.querySelector(".adm-main");
-    if (!scroller) return;
-    let raf = 0;
-    const onScroll = () => {
-      if (raf) return;
-      raf = requestAnimationFrame(() => {
-        raf = 0;
-        if (Date.now() < spyClick.current) return; // let a rail-click's smooth scroll settle first
-        const band = scroller.getBoundingClientRect().top + 96;
-        let best = GROUPS[0].id, bestTop = -Infinity;
-        for (const g of GROUPS) {
-          const el = document.getElementById("sec-" + g.id);
-          if (!el) continue;
-          const top = el.getBoundingClientRect().top;
-          if (top <= band && top > bestTop) { bestTop = top; best = g.id; }
-        }
-        setActiveArea(best);
-      });
-    };
-    scroller.addEventListener("scroll", onScroll, { passive: true });
-    onScroll();
-    return () => { scroller.removeEventListener("scroll", onScroll); if (raf) cancelAnimationFrame(raf); };
-  }, [tab, st, rid]);
-
-  // DEEP-LINK (owner, 2026-07-28): ?focus=<key> — sent by the panels' "zones off for
-  // staff" dropdowns ("⚙ change") — lands on the EXACT control, not just the page. A key
-  // may be a permission id, a manager power flag, a tablet_* cap key, an owner section
-  // key, or a guest feature slug; every control card exposes all its aliases via
-  // data-focus-key (space-separated, matched with ~=). Opens the card's group first
-  // (sections start collapsed), then scrolls to it and flashes a ring for ~1.6s — the
-  // same pattern as /owner/staff's ?focus. Consumed once per page load.
-  useEffect(() => {
-    const key = focusRef.current;
-    if (!key || !st || tab !== "general") return;
-    focusRef.current = "";
-    const hit = PERMISSIONS.find((p) =>
-      [p.id, p.power, p.tablet, p.section, p.feature].includes(key) || (p.sub || []).some((s) => s.id === key));
-    if (hit) {
-      setActiveArea(hit.group);
-    }
-    // Let the just-opened group render before locating the card — retry briefly (the
-    // React commit can land after a fixed delay; a one-shot 150ms lookup flashed the
-    // whole section instead of the card when it lost that race).
-    let tries = 0;
-    const locate = () => {
-      const exact = document.querySelector<HTMLElement>(`[data-focus-key~="${CSS.escape(key)}"]`);
-      if (!exact && tries++ < 12) { setTimeout(locate, 120); return; }
-      const el = exact || document.getElementById("sec-" + (hit?.group || key));
-      if (!el) return;
-      spyClick.current = Date.now() + 1500; // don't let the scroll-spy fight the jump
-      el.scrollIntoView({ behavior: "smooth", block: "center" });
-      };
-    setTimeout(locate, 120);
-  }, [st, tab]);
-
-  // Keep the highlighted rail item in view WITHIN the rail (scrolls the rail only, never the page).
-  useEffect(() => {
-    const rail = railRef.current;
-    if (!rail) return;
-    const btn = rail.querySelector<HTMLElement>(`[data-area="${activeArea}"]`);
-    if (!btn) return;
-    const bt = btn.offsetTop, bh = btn.offsetHeight, rt = rail.scrollTop, rh = rail.clientHeight;
-    if (bt < rt + 6) rail.scrollTo({ top: Math.max(0, bt - 10), behavior: "smooth" });
-    else if (bt + bh > rt + rh - 6) rail.scrollTo({ top: bt + bh - rh + 10, behavior: "smooth" });
-  }, [activeArea]);
-
-  // (The whole-tree save() that lived here belonged to the retired General pane. The
-  // Access tree owns its own saving now; this page's remaining pane writes per-person
-  // overrides straight to /api/owner/staff.)
-
-  // Closing a fixed overlay by TAPPING its close button focuses that button; when the
-  // button then unmounts, the browser restores focus to <body> and NATIVELY scrolls the
-  // admin content container back to the top (verified on touch: 500 → 0, with no JS
-  // scroll call to intercept). So we snapshot the scroll position of whichever container
-  // is actually scrolled (.adm.adx on mobile, .adm-main on desktop) and put it back on
-  // the next frame — before paint, so it's imperceptible. Cheap, no egress.
-  const closeStay = (fn: () => void) => {
-    const els = ([document.querySelector<HTMLElement>(".adm.adx"), document.querySelector<HTMLElement>(".adm-main")].filter(Boolean) as HTMLElement[]);
-    const snap = els.map((e) => e.scrollTop);
-    const wy = window.scrollY;
-    fn();
-    const restore = () => { els.forEach((e, i) => { if (e.scrollTop !== snap[i]) e.scrollTop = snap[i]; }); if (window.scrollY !== wy) window.scrollTo(0, wy); };
-    requestAnimationFrame(() => { restore(); requestAnimationFrame(restore); });
-  };
-
-  if (!st) return <div style={{ padding: 40, color: "var(--muted)" }}>Loading access…</div>;
 
   const rest = rests.find((r) => r.id === rid);
-
-  // ── save helpers that translate the model → canonical columns ───────────────
-  // ── switches (guest / panels / owner sections / admin auto-print) ───────────
-  const sortedStaff = [...staff].sort((a, b) => (ROLE_ORDER[a.role] ?? 9) - (ROLE_ORDER[b.role] ?? 9) || (a.name || a.username).localeCompare(b.name || b.username));
 
   return (
     <div className="acc2">
@@ -253,8 +61,6 @@ export default function Access2Page() {
       <nav className="adm-crumbs" style={{ marginBottom: 4 }}>
         <a href="/aevinite">Dashboard</a><span className="sep">›</span>
         <a href="/aevinite/restaurants">Restaurants</a><span className="sep">›</span>
-        {/* Back to origin: if we arrived from a restaurant detail, this crumb reopens THAT
-            detail (?focus=<slug>); otherwise it just returns to the list. */}
         <a href={rest ? `/aevinite/restaurants?focus=${rest.slug}` : "/aevinite/restaurants"}>{rest?.name || "Restaurant"}</a>
         <span className="sep">›</span>
         <span className="cur">Access</span>
@@ -268,406 +74,55 @@ export default function Access2Page() {
       <header className="acc2-head">
         <div>
           <h1 className="adm-page-title" style={{ margin: 0 }}>Access &amp; permissions</h1>
-          <p className="adm-page-sub" style={{ margin: "4px 0 0" }}>{rest?.name} · {staff.length} people</p>
+          <p className="adm-page-sub" style={{ margin: "4px 0 0" }}>
+            {rest?.name ? `${rest.name} · ` : ""}the only screen that decides what anyone can do.
+          </p>
         </div>
         <div className="acc2-head-r">
           <select className="acc2-rsel" value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Restaurant">
             {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
           <div className="acc2-tabs">
-            <button className={tab === "general" ? "on" : ""} onClick={() => { setTab("general"); setPersonFilter(""); }}><Icon n="shield" s={15} /> General</button>
-            <button className={tab === "person" ? "on" : ""} onClick={() => setTab("person")}><Icon n="users" s={15} /> Per person</button>
+            <button className={tab === "general" ? "on" : ""} onClick={() => setTab("general")}><Icon n="shield" /> General</button>
+            <button className={tab === "person" ? "on" : ""} onClick={() => setTab("person")}><Icon n="users" /> Per person</button>
           </div>
         </div>
       </header>
 
-      {/* GENERAL is the rebuilt tree (owner 2026-07-31 — docs/ACCESS-MODEL.md): four sections,
-          only the switches he listed, no greyed-out ghosts. It owns its own state and talks to
-          /api/admin/restaurants/access-tree. PER PERSON still runs on the older model below,
-          which is safe because both write the SAME enforced keys (manager_permissions flags and
-          the tablet_* tri-states) — it is tidied to the new capability list in the next phase. */}
-      {tab === "general" ? <AccessTree rid={rid} /> : <PerPerson />}
-
-      {info && <InfoPop />}
-      {lightbox && (
-        <div className="acc2-lightbox" onClick={() => closeStay(() => setLightbox(null))}>
-          {/* eslint-disable-next-line @next/next/no-img-element -- local help screenshot lightbox */}
-          <img src={lightbox} alt="Where this appears in the app, enlarged" />
-        </div>
-      )}
+      {rid ? (tab === "general" ? <AccessTree rid={rid} /> : <AccessPerPerson rid={rid} />) : null}
     </div>
   );
-
-  // (The old GENERAL pane lived here. It was the 54-checkbox screen the 2026-07-31
-  // rebuild replaced with <AccessTree/>; deleted once nothing rendered it.)
-
-  function resolved(u: Staff, p: Perm): { base: boolean; eff: boolean; ov: string } {
-    const lvl = reachLevel(p, st!);
-    let base = false;
-    if (u.role === "owner") base = lvl >= 1;
-    else if (u.role === "manager") base = lvl >= 2;
-    else if (u.role === "tablet") base = lvl >= 3 && !!p.waiter;
-    const key = overrideKey(p, u.role);
-    const ov = (key && u.permissions?.[key]) || "default";
-    const eff = ov === "on" || ov === "pin" ? true : ov === "off" ? false : base;
-    return { base, eff, ov };
-  }
-  function setOverride(u: Staff, p: Perm, v: string) {
-    const key = overrideKey(p, u.role);
-    if (!key) return; // no enforceable per-person control for this role (UI shows a line, not buttons)
-    setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: { ...(x.permissions || {}), [key]: v } } : x));
-    fetch("/api/owner/staff", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: u.id, action: "set_permissions", permissions: { [key]: v } }) }).catch(() => {});
-  }
-
-  // ───────────────────────────── PER PERSON ──────────────────────────────────
-  function PerPerson() {
-    const allPeople = sortedStaff;
-    const inits = (u: Staff) => (u.name || u.username).split(/\s+/).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
-    // role counts (only roles present) drive the filter chips
-    const roleCounts: Record<string, number> = {};
-    allPeople.forEach((u) => { roleCounts[u.role] = (roleCounts[u.role] || 0) + 1; });
-    const roleChips = ["all", ...Object.keys(ROLE_ORDER).filter((r) => roleCounts[r])];
-    const rolePlural = (r: string) => r === "all" ? "All" : r === "kitchen" ? "Kitchen" : ROLE_LABEL[r] + "s";
-    const q = pQuery.trim().toLowerCase();
-    const shown = allPeople.filter((u) => (pRole === "all" || u.role === pRole) && (!q || (u.name || u.username).toLowerCase().includes(q)));
-    // selected person stays valid even when filtered out of the list; fall back to the first shown
-    const person = allPeople.find((p) => p.id === personId) || shown[0] || allPeople[0];
-    if (!person) return <div className="adm-card" style={{ padding: 24, color: "var(--muted)" }}>No staff for this restaurant.</div>;
-
-    const railHead = (
-      <div className="acc2-railhead">
-        <div className="acc2-search">
-          <Icon n="users" s={15} />
-          <input value={pQuery} onChange={(e) => setPQuery(e.target.value)} placeholder="Search staff by name…" aria-label="Search staff" />
-          {pQuery && <button className="clr" onClick={() => setPQuery("")} aria-label="Clear search"><Icon n="x" s={13} /></button>}
-        </div>
-        <div className="acc2-rolechips">
-          {roleChips.map((r) => {
-            const c = r === "all" ? null : ROLE_COLOR[r];
-            const on = pRole === r;
-            return (
-              <button key={r} className={on ? "on" : ""} onClick={() => setPRole(r)}
-                style={on && c ? { borderColor: c, background: roleTint(c), color: "var(--text)" } : undefined}>
-                {c && <span className="cdot" style={{ background: c }} />}{rolePlural(r)} <b style={on && c ? { color: c } : undefined}>{r === "all" ? allPeople.length : roleCounts[r]}</b>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-    );
-
-    let lastRole = "";
-    const list = shown.length === 0
-      ? <div className="acc2-noone">No one matches.</div>
-      : shown.map((u) => {
-        const c = ROLE_COLOR[u.role] || "#94a3b8";
-        const sel = u.id === person.id;
-        const hd = u.role !== lastRole ? <div className="prole" key={"h" + u.id}><span className="pdot" style={{ background: c }} />{rolePlural(u.role)} · {roleCounts[u.role]}</div> : null;
-        lastRole = u.role;
-        const nOv = Object.keys(u.permissions || {}).length;
-        return (<div key={u.id}>{hd}
-          <button className={`prow ${sel ? "on" : ""}`} onClick={() => setPersonId(u.id)}
-            style={sel ? { borderLeftColor: c, background: roleTint(c) } : undefined}>
-            <span className="av" style={{ background: c, color: "#10131a" }}>{inits(u)}</span>
-            <span className="pi"><span className="nm">{u.name || u.username}</span><span className="ppill" style={{ color: c, background: roleTint(c) }}>{ROLE_LABEL[u.role]}</span></span>
-            {nOv > 0 && <span className="ovr" title={`${nOv} custom rule${nOv > 1 ? "s" : ""}`}>{nOv}</span>}
-          </button></div>);
-      });
-
-    if (personFilter) {
-      const p = PERM_BY_ID[personFilter];
-      const relevant = allPeople.filter((u) => (ROLE_RELEVANCE[u.role] || []).includes(p.id));
-      const hs = relevant.filter((u) => resolved(u, p).eff);
-      return (
-        <div className="acc2-pp">
-          <nav className="acc2-plist adm-card">{railHead}{list}</nav>
-          <div className="adm-card">
-            <div className="acc2-filter"><Icon n="users" s={15} /> Who has <b>{p.name}</b> — <b>{hs.length}</b> of {relevant.length}
-              <button onClick={() => setPersonFilter("")}>Back to one person</button></div>
-            {relevant.map((u) => <CapRow key={u.id} u={u} p={p} whoMode />)}
-          </div>
-        </div>
-      );
-    }
-
-    const caps = (ROLE_RELEVANCE[person.role] || []).map((id) => PERM_BY_ID[id]).filter((p) => p && !(p.module && !allowed(p, st!)));
-    const allowedN = caps.filter((p) => resolved(person, p).eff).length;
-    const customN = Object.keys(person.permissions || {}).length;
-    let lastG = "";
-    return (
-      <div className="acc2-pp">
-        <nav className="acc2-plist adm-card">{railHead}{list}</nav>
-        <div className="adm-card">
-          <div className="acc2-pdh">
-            <span className="av" style={{ background: ROLE_COLOR[person.role] || "#94a3b8", color: "#10131a" }}>{inits(person)}</span>
-            <div className="pdh-i"><h3>{person.name || person.username}</h3><span>{ROLE_LABEL[person.role]}{rest ? " · " + rest.name : ""}</span></div>
-            <div className="pdh-stats">
-              <div><b>{allowedN}<span className="dn">/{caps.length}</span></b><small>Allowed</small></div>
-              <div><b className={customN ? "cust" : ""}>{customN}</b><small>Custom</small></div>
-            </div>
-          </div>
-          {caps.length === 0 ? <p className="acc2-hint" style={{ padding: 20 }}>Nothing here applies to a {ROLE_LABEL[person.role].toLowerCase()}.</p> :
-            caps.map((p) => { const hd = p.group !== lastG ? <div className="capg" key={"g" + p.id}>{PERM_BY_ID[p.id] && GROUPS.find((g) => g.id === p.group)?.name}</div> : null; lastG = p.group; return <div key={p.id}>{hd}<CapRow u={person} p={p} /></div>; })}
-        </div>
-      </div>
-    );
-  }
-
-  function CapRow({ u, p, whoMode }: { u: Staff; p: Perm; whoMode?: boolean }) {
-    const { base, eff, ov } = resolved(u, p);
-    const key = overrideKey(p, u.role);
-    const pinnable = u.role === "tablet" && p.waiter;
-    const opts: [string, string][] = pinnable
-      ? [["default", "Follows restaurant"], ["on", "On"], ["pin", "On, PIN"], ["off", "Off"]]
-      : [["default", "Follows restaurant"], ["on", "On"], ["off", "Off"]];
-    return (
-      <div className={`caprow ${whoMode && eff ? "hi" : ""}`}>
-        {whoMode && <span className="av sm">{(u.name || u.username).split(" ").map((w) => w[0]).join("").slice(0, 2).toUpperCase()}</span>}
-        <div className="body">
-          <div className="nm">{whoMode ? (u.name || u.username) : p.name}{whoMode && <span className={`hasit ${eff ? "y" : "n"}`}>{eff ? "Has it" : "Does not"}</span>}<InfoBtn p={p} /></div>
-          {/* No enforceable per-person key for this role → state the fact, don't render a toggle
-              that would save but never be read (the dead-switch class this fix removes). */}
-          <div className="ds">{!key
-            ? noOverrideReason(p, u.role) + (base ? " Currently on for them." : "")
-            : whoMode ? `${ROLE_LABEL[u.role]} · ${ov === "default" ? "follows restaurant" : "overridden to " + ov.toUpperCase()}`
-            : (ov === "default" ? `Follows the restaurant — currently ${base ? "on" : "off"}.` : `Overridden — restaurant says ${base ? "on" : "off"}.`)}</div>
-        </div>
-        {key ? (
-          <div className="tri3">
-            {opts.map(([v, l]) => (
-              <button key={v} className={`${ov === v || (v === "on" && ov === "pin" && !pinnable) ? "on" : ""} v-${v}`} onClick={() => setOverride(u, p, v)}>
-                {v === "on" && <Icon n="check" s={12} />}{v === "off" && <Icon n="minus" s={12} />}{v === "pin" && <Icon n="key" s={12} />}{l}{v === "default" && <b>{base ? "ON" : "OFF"}</b>}
-              </button>
-            ))}
-          </div>
-        ) : (
-          <span className="caprow-fixed">{base ? "Always on" : "—"}</span>
-        )}
-      </div>
-    );
-  }
-
-  function InfoBtn({ p }: { p: Perm }) { return <button className="acc2-ib" onClick={() => setInfo({ perm: p })}><Icon n="info" s={12} /></button>; }
-  function InfoPop() {
-    if (!info) return null;
-    const sub = info.sub ? info.perm.sub?.find((s) => s.id === info.sub) : undefined;
-    // Prefer the feature's OWN screenshot (control ringed); fall back to the area image.
-    const shot = SHOT_IDS.has(info.perm.id) ? info.perm.id : SHOT_BY_GROUP[info.perm.group];
-    const src = shot ? `/admin-help/${shot}.png` : null;
-    return (
-      <div className="acc2-infowrap" onClick={() => closeStay(() => setInfo(null))}>
-        <div className="acc2-info" onClick={(e) => e.stopPropagation()}>
-          <button type="button" className="cl" onClick={() => closeStay(() => setInfo(null))}><Icon n="x" s={16} /></button>
-          <h4>{sub ? sub.name : info.perm.name}{(sub?.adminOnly || info.perm.adminOnly) && <span className="tag">ADMIN ONLY</span>}</h4>
-          <p>{sub ? sub.what : info.perm.what}</p>
-          {src && <>
-            <p className="note">Where it shows in the app (tap to enlarge):</p>
-            {/* eslint-disable-next-line @next/next/no-img-element -- local help screenshot, lazy-loaded */}
-            <img className="acc2-shot" src={src} alt="Where this appears in the app" loading="lazy" onClick={() => setLightbox(src)} />
-          </>}
-        </div>
-      </div>
-    );
-  }
 }
-
 
 function Style() {
   return <style jsx global>{`
   .acc2 { max-width: 1180px; }
-  /* ?focus deep-link landing flash (owner 2026-07-28) — same amber ring as /owner/staff. */
-  .acc2-flash { animation: acc2FlashRing 1.6s ease-out 1; border-radius: 12px; }
-  @keyframes acc2FlashRing { 0%, 55% { box-shadow: 0 0 0 4px rgba(217,119,6,.55); } 100% { box-shadow: 0 0 0 4px transparent; } }
-  /* People coloured by ROLE (owner 2026-07-25) — matches the Users page; no single gold accent. */
-  .acc2 .prole { display:flex; align-items:center; gap:8px; }
-  .acc2 .prole .pdot { width:8px; height:8px; border-radius:50%; flex:none; }
-  .acc2 .ppill { display:inline-block; margin-top:3px; font-size:10.5px; font-weight:800; letter-spacing:.02em; padding:2px 9px; border-radius:20px; line-height:1.5; }
-  .acc2 .acc2-rolechips .cdot { width:8px; height:8px; border-radius:50%; flex:none; }
-  .acc2 .prow.on .av { color:#10131a; }  /* avatar stays role-coloured (inline bg) even when selected */
   .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 18px; }
   .acc2-head-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-  .acc2-save { font-size:12px; font-weight:700; color:var(--muted); min-width:60px; }
+  .acc2-save { font-size:12px; font-weight:700; color:var(--muted); min-width:60px; text-align:right; }
   .acc2-save.saved { color:var(--adm-ok); } .acc2-save.err { color:var(--adm-danger); }
   .acc2-rsel { height:40px; border-radius:10px; border:var(--border); background:var(--card); color:var(--text); font-weight:700; font-size:13.5px; padding:0 10px; }
   .acc2-tabs { display:flex; gap:3px; background:var(--card); border:var(--border); border-radius:12px; padding:4px; }
   .acc2-tabs button { display:flex; align-items:center; gap:7px; min-height:40px; padding:0 16px; border-radius:9px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:13.5px; cursor:pointer; }
   .acc2-tabs button.on { background:var(--accent); color:#fff; }
   .acc2-warn { display:flex; gap:10px; align-items:flex-start; padding:12px 16px; margin:0 0 16px; border-radius:12px; background:color-mix(in srgb, var(--adm-danger) 12%, transparent); border:1px solid color-mix(in srgb, var(--adm-danger) 40%, transparent); color:var(--text); font-size:13.5px; }
-  .acc2-warn svg { color:var(--adm-danger); margin-top:1px; }
-  .acc2-rail-wrap { display:grid; grid-template-columns:250px 1fr; gap:20px; align-items:start; }
-  .acc2-rail { position:sticky; top:12px; max-height:calc(100dvh - 96px); overflow-y:auto; background:var(--card); border:var(--border); border-radius:14px; padding:7px; scrollbar-width:thin; }
-  .acc2-rail .rh { padding:9px 11px 6px; font-size:10.5px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
-  .acc2-rail button { position:relative; display:flex; align-items:center; gap:11px; width:100%; min-height:46px; padding:8px 12px; border:none; background:transparent; border-radius:10px; cursor:pointer; color:var(--text); text-align:left; transition:background .14s; }
-  .acc2-rail button:hover { background:color-mix(in srgb, var(--accent) 7%, transparent); }
-  /* Single, consistent active treatment: a soft tint + a slim accent bar on the left
-     (only ONE rail item is active = the nav target). Icon chip stays uniform — no jarring
-     big solid block, so items read as one clean list. */
-  .acc2-rail button.on { background:color-mix(in srgb, var(--accent) 11%, transparent); }
-  .acc2-rail button.on::before { content:""; position:absolute; left:0; top:9px; bottom:9px; width:3px; border-radius:0 3px 3px 0; background:var(--accent); }
-  .acc2-rail button.on .nm { color:var(--accent); }
-  .acc2-rail button.on .acc2-gi { background:color-mix(in srgb, var(--accent) 20%, transparent); border-color:color-mix(in srgb, var(--accent) 40%, transparent); }
-  .acc2-rail .nm { flex:1; font-size:13.5px; font-weight:650; }
-  /* the small area-icon chip (rail + section header) — uniform for all rows */
-  .acc2-gi { width:30px; height:30px; border-radius:9px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--accent) 11%, transparent); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
-  .acc2-gi.lg { width:38px; height:38px; border-radius:11px; }
-  .acc2-rail .nm { flex:1; font-size:13.5px; font-weight:700; }
   .acc2-main { display:flex; flex-direction:column; gap:14px; min-width:0; }
-  .acc2-sect { padding:0; overflow:hidden; scroll-margin-top:12px; transition:box-shadow .15s, border-color .15s; }
-  .acc2-sect:hover { border-color:color-mix(in srgb, var(--accent) 30%, var(--border)); }
+  .acc2-sect { padding:0; overflow:hidden; }
   .acc2-sh { display:flex; align-items:center; gap:13px; width:100%; padding:13px 16px; border:none; background:transparent; cursor:pointer; text-align:left; color:var(--text); }
   .acc2-sh-t { flex:1; min-width:0; }
   .acc2-sh h2 { margin:0; font-size:15.5px; font-weight:800; letter-spacing:-.02em; }
   .acc2-sh p { margin:2px 0 0; font-size:12px; color:var(--muted); line-height:1.35; }
-  .acc2-count { position:relative; display:inline-flex; align-items:center; justify-content:center; width:48px; height:28px; flex:none; }
-  .acc2-count svg { position:absolute; inset:0; width:100%; height:100%; overflow:visible; }
-  .acc2-count .bgf { fill:transparent; transition:fill .3s; }
-  .acc2-count .tk { fill:none; stroke:color-mix(in srgb, var(--muted) 34%, transparent); stroke-width:2; }
-  .acc2-count .pg { fill:none; stroke:var(--accent); stroke-width:2; stroke-linecap:round; transition:stroke-dashoffset .5s ease; }
-  .acc2-count .lb { position:relative; font-size:12px; font-weight:800; line-height:1; font-variant-numeric:tabular-nums; letter-spacing:.02em; color:var(--text); }
-  .acc2-count.full .pg { stroke:var(--adm-ok); }
-  .acc2-count.full .bgf { fill:color-mix(in srgb, var(--adm-ok) 13%, transparent); }
-  .acc2-count.full .lb { color:var(--adm-ok); letter-spacing:.04em; }
+  .acc2-gi { width:30px; height:30px; border-radius:9px; display:grid; place-items:center; flex:none; background:color-mix(in srgb, var(--accent) 11%, transparent); color:var(--accent); border:1px solid color-mix(in srgb, var(--accent) 20%, transparent); }
+  .acc2-gi.lg { width:38px; height:38px; border-radius:11px; }
   .acc2-chev { color:var(--muted); transition:transform .2s; display:grid; place-items:center; background:none; border:none; cursor:pointer; }
   .acc2-chev.o { transform:rotate(180deg); color:var(--accent); }
   .acc2-body { border-top:var(--border); padding:8px; display:flex; flex-direction:column; gap:8px; }
   .acc2-sw { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:11px; background:var(--bg); }
   .acc2-sw-b { flex:1; min-width:0; } .acc2-sw .nm { font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
-  .acc2-sw .ds { font-size:12px; color:var(--muted); margin-top:2px; }
+  .acc2-sw .ds { font-size:12px; color:var(--muted); margin-top:2px; line-height:1.5; }
   .acc2-toggle { width:44px; height:26px; border-radius:99px; background:var(--muted2); border:var(--border); position:relative; cursor:pointer; flex:none; transition:background .2s; }
   .acc2-toggle span { position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:99px; background:var(--muted); transition:transform .2s, background .2s; }
   .acc2-toggle.on { background:var(--accent); border-color:var(--accent); } .acc2-toggle.on span { transform:translateX(18px); background:#fff; }
-  .acc2-toggle:disabled { opacity:.4; cursor:not-allowed; }
-  .tag { font-size:9px; font-weight:800; letter-spacing:.06em; padding:2px 6px; border-radius:5px; background:color-mix(in srgb,var(--adm-warn) 18%,transparent); color:var(--adm-warn); border:1px solid color-mix(in srgb,var(--adm-warn) 34%,transparent); }
-  .acc2-card { background:var(--bg); border:var(--border); border-radius:13px; overflow:hidden; }
-  .acc2-card.act { border-color:color-mix(in srgb,var(--accent) 40%,transparent); }
-  .acc2-ph { display:flex; align-items:flex-start; gap:10px; padding:12px 14px; }
-  .acc2-ph-b { flex:1; min-width:0; text-align:left; border:none; background:none; cursor:pointer; color:var(--text); }
-  .acc2-ph-b .nm { font-size:14.5px; font-weight:800; display:flex; align-items:center; gap:8px; }
-  .acc2-ph-b .ds { font-size:12px; color:var(--muted); margin-top:3px; }
-  .acc2-ph-c { display:flex; align-items:center; gap:9px; flex:none; }
-  .acc2-reachtag { font-size:11px; font-weight:800; color:var(--muted); background:var(--card); border:var(--border); padding:5px 8px; border-radius:7px; white-space:nowrap; }
-  .acc2-reachtag.on { color:var(--accent); background:color-mix(in srgb,var(--accent) 12%,transparent); border-color:color-mix(in srgb,var(--accent) 30%,transparent); }
-  .acc2-cb { border-top:var(--border); padding:14px; }
-  .acc2-gate { display:flex; gap:12px; align-items:center; padding:11px 13px; margin-bottom:14px; border-radius:11px; background:color-mix(in srgb,var(--adm-warn) 10%,transparent); border:1px solid color-mix(in srgb,var(--adm-warn) 26%,transparent); }
-  .acc2-gate .lbl { flex:1; font-size:12.8px; font-weight:700; } .acc2-gate small { display:block; font-weight:400; color:var(--muted); margin-top:2px; }
-  .acc2-hint { display:flex; gap:8px; align-items:flex-start; font-size:12.5px; color:var(--muted); margin:2px 0; }
-  .acc2-reach { display:grid; grid-template-columns:repeat(auto-fit,minmax(90px,1fr)); gap:4px; padding:4px; background:var(--card); border:var(--border); border-radius:11px; }
-  .acc2-reach .rs { display:flex; align-items:center; justify-content:center; gap:6px; min-height:42px; border-radius:8px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:12.5px; cursor:pointer; }
-  .acc2-reach .rs { position:relative; transition:background .14s, color .14s; }
-  .acc2-reach .rs.on { color:var(--accent); background:color-mix(in srgb,var(--accent) 20%,transparent); }
-  .acc2-reach .rs.cur { color:#fff; background:var(--accent); }
-  .acc2-reach .rs .rc { display:grid; place-items:center; width:15px; height:15px; border-radius:999px; background:rgba(255,255,255,.28); }
-  .acc2-reach .rs.cur .rc { color:#fff; }
-  /* Owner two-fact strip — information, never a control: no hover, no pointer, quiet
-     card tone; wraps naturally at phone width. Icons take the accent, the bold lead
-     stays on --text for contrast, body copy on --muted. */
-  .acc2-ownerfact { display:flex; flex-direction:column; gap:7px; margin-top:14px; padding:11px 13px; border-radius:11px; background:var(--card); border:var(--border); }
-  .acc2-ownerfact .of-row { display:flex; gap:9px; align-items:flex-start; font-size:12.5px; color:var(--muted); line-height:1.5; }
-  .acc2-ownerfact .of-row svg { color:var(--accent); flex:none; margin-top:2.5px; }
-  .acc2-ownerfact .of-row b { color:var(--text); font-weight:700; }
-  .acc2-sides { display:flex; gap:4px; background:var(--card); border:var(--border); border-radius:11px; padding:4px; margin:14px 0 12px; }
-  .acc2-sides .sd { flex:1; display:flex; align-items:center; justify-content:center; gap:7px; min-height:40px; border-radius:8px; border:none; background:transparent; color:var(--muted); font-weight:700; font-size:13px; cursor:pointer; }
-  .acc2-sides .sd.on { background:var(--muted2); color:var(--text); }
-  .acc2-sides .sd:disabled { opacity:.4; cursor:not-allowed; }
-  .acc2-chips { display:flex; flex-wrap:wrap; gap:8px; }
-  .acc2-chips .chip { position:relative; display:flex; align-items:center; background:var(--card); border:var(--border); border-radius:10px; }
-  .acc2-chips .chip button:first-child { display:flex; align-items:center; gap:9px; min-height:42px; padding:0 6px 0 11px; border:none; background:none; color:var(--muted); font-weight:600; font-size:12.8px; cursor:pointer; }
-  .acc2-chips .chip .box { width:18px; height:18px; border-radius:5px; border:1.5px solid var(--muted); display:grid; place-items:center; color:transparent; }
-  .acc2-chips .chip.on { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 12%,transparent); }
-  .acc2-chips .chip.on button:first-child { color:var(--text); } .acc2-chips .chip.on .box { background:var(--accent); border-color:var(--accent); color:#fff; }
-  .acc2-chips .chip.bad { border-color:var(--adm-danger); background:color-mix(in srgb,var(--adm-danger) 12%,transparent); }
-  .acc2-chips .chip.dis { opacity:.5; }
-  .acc2-chips .chip .ib { padding:0 9px 0 2px; background:none; border:none; color:var(--muted); cursor:pointer; align-self:center; }
-  .acc2-chips .chip .xb { position:absolute; top:-7px; right:-6px; min-width:18px; height:18px; padding:0 4px; border-radius:99px; display:grid; place-items:center; font-size:9.5px; font-weight:800; letter-spacing:.06em; font-family:ui-monospace,monospace; border:2px solid var(--bg); background:var(--accent); color:#fff; }
-  .acc2-limit { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:14px; padding:11px 13px; border-radius:11px; background:var(--card); border:var(--border); }
-  .acc2-limit .lbl { flex:1; min-width:150px; font-size:13px; font-weight:700; } .acc2-limit small { display:block; font-weight:400; color:var(--muted); }
-  .acc2-limit .segs { display:flex; gap:3px; background:var(--bg); border:var(--border); border-radius:9px; padding:3px; }
-  .acc2-limit .segs button { min-height:36px; min-width:46px; border-radius:7px; border:none; background:none; color:var(--muted); font-weight:700; font-family:ui-monospace,monospace; font-size:12px; cursor:pointer; }
-  .acc2-limit .segs button.on { background:var(--accent); color:#fff; }
-  .acc2-waiter { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:14px; padding:12px 13px; border-radius:11px; background:color-mix(in srgb,var(--adm-ok) 8%,transparent); border:1px solid color-mix(in srgb,var(--adm-ok) 24%,transparent); }
-  .acc2-waiter .lbl { flex:1; min-width:170px; font-size:13px; font-weight:700; display:flex; align-items:center; gap:8px; } .acc2-waiter small { display:block; font-weight:400; color:var(--muted); }
-  .acc2-waiter .tri { display:flex; gap:3px; background:var(--bg); border:var(--border); border-radius:9px; padding:3px; }
-  .acc2-waiter .tri button { display:flex; align-items:center; gap:6px; min-height:36px; padding:0 12px; border-radius:7px; border:none; background:none; color:var(--muted); font-weight:700; font-size:12.5px; cursor:pointer; }
-  .acc2-waiter .tri button.on { background:var(--adm-ok); color:#04210f; }
-  .acc2-conflict { display:flex; gap:9px; align-items:flex-start; margin-top:14px; padding:11px 13px; border-radius:10px; background:color-mix(in srgb,var(--adm-danger) 12%,transparent); border:1px solid color-mix(in srgb,var(--adm-danger) 40%,transparent); font-size:12.5px; }
-  .acc2-conflict svg { color:var(--adm-danger); flex:none; margin-top:1px; }
-  .acc2-who { display:inline-flex; align-items:center; gap:8px; margin-top:14px; min-height:40px; padding:0 14px; border-radius:10px; border:1px dashed var(--muted); background:none; color:var(--muted); font-weight:700; font-size:12.5px; cursor:pointer; }
-  .acc2-who:hover { border-style:solid; border-color:var(--accent); color:var(--accent); }
-  .acc2-who b { color:var(--accent); font-family:ui-monospace,monospace; }
-  .acc2-ib { width:20px; height:20px; padding:0; appearance:none; -webkit-appearance:none; border-radius:99px; border:var(--border); background:none; color:var(--muted); display:inline-grid; place-items:center; cursor:pointer; flex:none; line-height:0; }
-  .acc2-ib svg { display:block; }
-  .acc2-pp { display:grid; grid-template-columns:270px 1fr; gap:20px; align-items:start; }
-  .acc2-plist { padding:8px; position:sticky; top:12px; }
-  .prole { padding:10px 12px 4px; font-size:10px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
-  .prow { display:flex; align-items:center; gap:11px; width:100%; min-height:56px; padding:7px 12px; border:none; background:none; border-radius:10px; border-left:3px solid transparent; cursor:pointer; text-align:left; color:var(--text); }
-  .prow:hover { background:color-mix(in srgb,var(--accent) 7%,transparent); }
-  .prow.on { background:color-mix(in srgb,var(--accent) 13%,transparent); border-left-color:var(--accent); }
-  .prow .av { width:34px; height:34px; border-radius:10px; display:grid; place-items:center; font-size:12px; font-weight:800; background:var(--muted2); flex:none; }
-  .prow.on .av { background:var(--accent); color:#fff; }
-  .prow .pi { flex:1; min-width:0; } .prow .nm { display:block; font-size:13.5px; font-weight:700; } .prow .mt { display:block; font-size:11px; color:var(--muted); }
-  .prow .ovr { font-size:10px; font-weight:800; font-family:ui-monospace,monospace; color:var(--accent); background:color-mix(in srgb,var(--accent) 14%,transparent); padding:3px 6px; border-radius:5px; }
-  .acc2-pdh { display:flex; align-items:center; gap:14px; padding:6px 6px 16px; border-bottom:var(--border); margin-bottom:8px; }
-  .acc2-pdh .av { width:48px; height:48px; border-radius:13px; display:grid; place-items:center; font-size:16px; font-weight:800; background:var(--accent); color:#fff; }
-  .acc2-pdh h3 { margin:0; font-size:18px; font-weight:800; } .acc2-pdh span { font-size:12.5px; color:var(--muted); }
-  .acc2-filter { display:flex; align-items:center; gap:9px; padding:11px 13px; margin:-6px -6px 8px; border-radius:10px; background:color-mix(in srgb,var(--accent) 10%,transparent); font-size:13px; }
-  .acc2-filter button { margin-left:auto; background:none; border:none; color:var(--muted); font-weight:700; font-size:12px; text-decoration:underline; cursor:pointer; }
-  .capg { padding:12px 6px 4px; font-size:10px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
-  .caprow { display:flex; align-items:center; gap:12px; padding:11px 8px; border-top:var(--border); flex-wrap:wrap; }
-  .caprow.hi { background:color-mix(in srgb,var(--accent) 8%,transparent); border-radius:9px; }
-  .caprow .av.sm { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; font-size:11px; font-weight:800; background:var(--muted2); flex:none; }
-  .caprow .body { flex:1; min-width:170px; } .caprow .nm { font-size:13.5px; font-weight:700; display:flex; align-items:center; gap:8px; } .caprow .ds { font-size:11.5px; color:var(--muted); margin-top:2px; }
-  .caprow .hasit { font-size:10px; font-weight:800; padding:2px 7px; border-radius:99px; } .caprow .hasit.y { background:color-mix(in srgb,var(--adm-ok) 16%,transparent); color:var(--adm-ok); } .caprow .hasit.n { background:var(--muted2); color:var(--muted); }
-  /* Shown instead of the tri-state when a role has no enforceable per-person control
-     (manager fixedTop / waiter tabletNew / kitchen) — a quiet fact, not a fake button. */
-  .caprow-fixed { flex:none; font-size:11px; font-weight:700; color:var(--muted); background:var(--bg); border:var(--border); border-radius:8px; padding:8px 12px; white-space:nowrap; }
-  .tri3 { display:flex; gap:3px; background:var(--bg); border:var(--border); border-radius:10px; padding:3px; flex:none; }
-  .tri3 button { display:flex; align-items:center; gap:5px; min-height:38px; padding:0 11px; border-radius:7px; border:none; background:none; color:var(--muted); font-weight:700; font-size:12px; cursor:pointer; }
-  .tri3 button b { font-family:ui-monospace,monospace; font-size:10px; opacity:.8; }
-  .tri3 button.on.v-default { background:var(--muted2); color:var(--text); }
-  .tri3 button.on.v-on { background:var(--adm-ok); color:#04210f; }
-  .tri3 button.on.v-pin { background:var(--accent); color:#fff; }
-  .tri3 button.on.v-off { background:var(--adm-danger); color:#fff; }
-  .acc2-infowrap { position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,.4); display:grid; place-items:center; padding:24px; }
-  .acc2-info { max-width:420px; width:100%; background:var(--card); border:var(--border); border-radius:16px; padding:18px; position:relative; box-shadow:var(--elev-hi); }
-  .acc2-info h4 { margin:0 0 8px; font-size:16px; font-weight:800; display:flex; align-items:center; gap:8px; padding-right:24px; }
-  .acc2-info p { margin:0; font-size:13.5px; color:var(--text); line-height:1.5; } .acc2-info .note { margin-top:10px; font-size:12px; color:var(--muted); }
-  .acc2-info .cl { position:absolute; top:12px; right:12px; width:28px; height:28px; border-radius:8px; border:none; background:var(--bg); color:var(--muted); cursor:pointer; display:grid; place-items:center; }
-  .acc2-shot { width:100%; margin-top:8px; border-radius:10px; border:var(--border); cursor:zoom-in; display:block; background:var(--bg); }
-  .acc2-lightbox { position:fixed; inset:0; z-index:1100; background:rgba(0,0,0,.75); display:grid; place-items:center; padding:32px; cursor:zoom-out; }
-  .acc2-lightbox img { max-width:96vw; max-height:92vh; border-radius:12px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
-  /* People rail: search + role-filter chips + a scrollable list with the search pinned
-     (the two-pane "find a person fast" bar, owner 2026-07-24). */
-  .acc2-plist { max-height:calc(100dvh - 96px); overflow-y:auto; scrollbar-width:thin; }
-  .acc2-railhead { position:sticky; top:0; z-index:2; background:var(--card); padding:2px 2px 9px; margin-bottom:2px; }
-  .acc2-search { display:flex; align-items:center; gap:8px; padding:9px 11px; border-radius:10px; background:var(--bg); border:var(--border); }
-  .acc2-search:focus-within { border-color:var(--accent); }
-  .acc2-search svg { color:var(--muted); flex:none; }
-  .acc2-search input { flex:1; min-width:0; border:none; background:none; outline:none; color:var(--text); font-size:13.5px; }
-  .acc2-search .clr { border:none; background:none; color:var(--muted); cursor:pointer; display:grid; place-items:center; padding:2px; flex:none; }
-  .acc2-rolechips { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
-  .acc2-rolechips button { display:flex; align-items:center; gap:6px; padding:6px 10px; border-radius:8px; border:var(--border); background:var(--bg); color:var(--muted); font-weight:700; font-size:12px; cursor:pointer; }
-  .acc2-rolechips button b { font-family:ui-monospace,monospace; font-size:10.5px; opacity:.7; }
-  .acc2-rolechips button.on { border-color:var(--accent); background:color-mix(in srgb,var(--accent) 14%,transparent); color:var(--text); }
-  .acc2-rolechips button.on b { opacity:1; color:var(--accent); }
-  .acc2-noone { padding:22px 12px; text-align:center; color:var(--muted); font-size:13px; }
-  .acc2-pdh .pdh-i { flex:1; min-width:0; }
-  .acc2-pdh .pdh-stats { display:flex; gap:16px; text-align:right; flex:none; }
-  .acc2-pdh .pdh-stats > div { display:flex; flex-direction:column; gap:1px; }
-  .acc2-pdh .pdh-stats b { font-size:19px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; }
-  .acc2-pdh .pdh-stats b.cust { color:var(--accent); }
-  .acc2-pdh .pdh-stats b .dn { font-size:13px; color:var(--muted); font-weight:700; }
-  .acc2-pdh .pdh-stats small { font-size:9.5px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); font-weight:700; }
-  @media (max-width:900px){ .acc2-rail-wrap,.acc2-pp{ grid-template-columns:1fr; } .acc2-rail,.acc2-plist{ position:static; max-height:none; } .acc2-pdh .pdh-stats{ gap:12px; } }
-  /* Phone (owner 2026-07-26): the ladder-card header used to cram the title into a thin
-     column beside the reach tag + toggle + chevron (one word per line). Stack it — title
-     takes the full width, the tag/toggle/chevron drop to a spread-out row below. Same for
-     the per-person cap rows (name over the tri-state) and guest switch rows. */
-  @media (max-width:560px){
-    .acc2-ph { flex-direction:column; gap:9px; }
-    .acc2-ph-c { width:100%; justify-content:space-between; }
-    .caprow { align-items:stretch; }
-    .caprow .tri3, .caprow .caprow-fixed { align-self:flex-start; }
-    .acc2-sw { flex-wrap:wrap; }
-  }
+  @media (max-width:640px) { .acc2-head-r { width:100%; } .acc2-rsel { flex:1; } }
   `}</style>;
 }
