@@ -15,6 +15,13 @@
 // So this checks the one thing those had in common: what a person actually SEES, on the site
 // that is actually deployed. It is read-only — it signs in, looks, and leaves.
 //
+// COSTS TWO LOGINS, on purpose. The first version signed in as four roles; when the whole-app
+// suite runs this as one of its phases, those four pushed past the app's own "5 logins per 5
+// minutes" wall and the guard failed on its own sign-in. Our tests must never trip the owner's
+// limits (CLAUDE.md). One manager + one owner is enough: the fault this exists for appeared in the
+// MANAGER header, and the other panels are covered by verify-ui-integrity.mjs (no browser) and
+// rendered live by verify-offline.mjs.
+//
 // What it refuses to accept:
 //   · leaked code in visible text  ("-->", "${", "[object Object]", "undefined", "NaN")
 //   · two bits of UI contradicting each other about the connection
@@ -72,7 +79,12 @@ async function run() {
   const browser = await chromium.launch();
   try {
     // ── the three staff panels: rendered text + no self-contradiction ─────────
-    for (const [role, label] of [["manager", "Manager panel"], ["tablet", "Waiter panel"], ["kitchen", "Kitchen screen"]]) {
+    // ONE panel, ONE login. The rendered-text fault this exists for happened in the MANAGER
+    // header, and the other two panels' markup is covered without a browser by
+    // verify-ui-integrity.mjs (comment balance + no stranded script) and rendered live by
+    // verify-offline.mjs. Signing into three panels here pushed the whole-app suite past the
+    // app's own "5 logins per 5 minutes" wall — our tests must never trip the owner's limits.
+    for (const [role, label] of [["manager", "Manager panel"]]) {
       console.log(`${label}`);
       const ctx = await browser.newContext({ viewport: { width: 1440, height: 950 } });
       const errs = [];
