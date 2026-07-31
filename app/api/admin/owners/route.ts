@@ -5,7 +5,7 @@
 //           live restaurant list (for attach pickers + the "no owner" warning).
 //   POST  → { action:"create_owner", name, password?, restaurant_ids?[] } — mint the
 //           login ONCE (password shown once) and attach any number of restaurants.
-//   PATCH → { owner_id, action: "attach"|"detach" (+restaurant_id) |
+//   PATCH → { owner_id, action: "attach"|"detach"|"set_primary" (+restaurant_id) |
 //             "reset_password" (+password?) | "set_active" (+active) | "rename" (+name) }
 //   POST  → also { action:"restore_owner"|"purge_owner", owner_id } for the recycle bin.
 //   GET ?id=<owner_id>  → one owner's ACTIVITY feed (staff_actions rows that name
@@ -122,12 +122,31 @@ export async function GET(req: NextRequest) {
   if (restQ.error) return bad(restQ.error.message, 500);
 
   const restById = new Map((restQ.data || []).map((r) => [r.id, r]));
-  const byOwner = new Map<string, { id: string; slug: string; name: string; active: boolean; primary: boolean }[]>();
+
+  // Who holds each restaurant's PRIMARY slot right now — including accounts the list
+  // above hides (a binned owner keeps its links so Restore works). Without this the
+  // screen could only say "Co-owner" with no way to see WHO the primary is, which is
+  // exactly the confusion Aangan caused (its binned starter "owner" still held it).
+  const primaryIds = Array.from(new Set((restQ.data || []).map((r) => r.owner_user_id).filter(Boolean) as string[]));
+  const primaryUser = new Map<string, { name: string; binned: boolean }>();
+  if (primaryIds.length) {
+    const pq = await sb.from("staff_users").select("id, username, name, deleted_at").in("id", primaryIds);
+    for (const u of pq.data || []) primaryUser.set(u.id as string, { name: (u.name as string) || (u.username as string), binned: !!u.deleted_at });
+  }
+
+  type OwnedRow = { id: string; slug: string; name: string; active: boolean; primary: boolean; primaryHolder: string | null; primaryBinned: boolean };
+  const byOwner = new Map<string, OwnedRow[]>();
   for (const l of linksQ.data || []) {
     const r = restById.get(l.restaurant_id);
     if (!r) continue; // deleted/binned restaurants don't show as owned
+    const holder = r.owner_user_id ? primaryUser.get(r.owner_user_id as string) : undefined;
     const list = byOwner.get(l.user_id) || [];
-    list.push({ id: r.id, slug: r.slug, name: r.name, active: r.active === true, primary: r.owner_user_id === l.user_id });
+    list.push({
+      id: r.id, slug: r.slug, name: r.name, active: r.active === true,
+      primary: r.owner_user_id === l.user_id,
+      primaryHolder: r.owner_user_id === l.user_id ? null : (holder?.name ?? null),
+      primaryBinned: r.owner_user_id === l.user_id ? false : holder?.binned === true,
+    });
     byOwner.set(l.user_id, list);
   }
   const owners = (ownersQ.data || []).map((o) => ({
@@ -143,14 +162,26 @@ export async function GET(req: NextRequest) {
   return ok({ owners, restaurants });
 }
 
-// Attach ONE restaurant to an owner: join-table membership + become the primary
-// if the restaurant doesn't have one yet (so act-as/display always resolve).
+// Is this user still a LIVE holder of the primary slot? A binned (recycle-bin) or
+// missing staff_users row must not keep it: binning deliberately preserves an owner's
+// links so Restore works, so without this check the primary pointer stays on a ghost
+// and the newly-assigned real owner reads as "Co-owner" everywhere (seen on Aangan
+// 2026-07-31: the starter "owner" login was binned 29 Jul but still held primary).
+async function isLivePrimaryHolder(userId: string | null | undefined): Promise<boolean> {
+  if (!userId) return false;
+  const u = (await sb.from("staff_users").select("id, deleted_at").eq("id", userId).limit(1)).data?.[0];
+  return !!u && !u.deleted_at;
+}
+
+// Attach ONE restaurant to an owner: join-table membership + become the primary if
+// the slot is free OR only held by a binned/deleted account (so act-as, the admin's
+// Restaurants tab and every "who owns this?" display always resolve to a real owner).
 async function attach(ownerId: string, rid: string): Promise<string | null> {
   const up = await sb.from("restaurant_owners")
     .upsert({ restaurant_id: rid, user_id: ownerId }, { onConflict: "restaurant_id,user_id", ignoreDuplicates: true });
   if (up.error) return up.error.message;
   const r = (await sb.from("restaurants").select("owner_user_id").eq("id", rid).limit(1)).data?.[0];
-  if (r && !r.owner_user_id) {
+  if (r && !(await isLivePrimaryHolder(r.owner_user_id as string | null))) {
     const set = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
     if (set.error) return set.error.message;
   }
@@ -257,6 +288,29 @@ export async function PATCH(req: NextRequest) {
     const e = await attach(ownerId, rid);
     if (e) return bad(e, 500);
     await logAction("admin", "owner_attach_restaurant", { restaurant_id: rid, actor: "admin", detail: `${r.name} attached to owner "${who}" · owner ${ownerId}` });
+    return ok({ ok: true });
+  }
+
+  // ── set_primary — make THIS owner the restaurant's primary owner. Every real
+  // permission is membership-based (restaurant_owners, mig 097), so this changes no
+  // access; it fixes the SINGLE-owner displays that read restaurants.owner_user_id
+  // (admin Restaurants tab, dashboard, restaurant report, "Visit panel" home pick)
+  // and the act-as tie-break that prefers the primary member. Membership is required
+  // — owner_user_id must never point at someone with no link. ──────────────────
+  if (action === "set_primary") {
+    const rid = String(body?.restaurant_id || "");
+    if (!rid) return bad("Missing restaurant_id.");
+    const r = (await sb.from("restaurants").select("id, name, owner_user_id").eq("id", rid).is("deleted_at", null).limit(1)).data?.[0];
+    if (!r) return bad("Restaurant not found.", 404);
+    if (r.owner_user_id === ownerId) return ok({ ok: true, already: true });
+    const member = (await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid).eq("user_id", ownerId).limit(1)).data?.[0];
+    if (!member) return bad("Assign this restaurant to the owner first — only a linked owner can be made primary.", 409);
+    const { error } = await sb.from("restaurants").update({ owner_user_id: ownerId }).eq("id", rid);
+    if (error) return bad(error.message, 500);
+    const prevId = (r.owner_user_id as string | null) || null;
+    const prev = prevId ? (await sb.from("staff_users").select("name, username, deleted_at").eq("id", prevId).limit(1)).data?.[0] : null;
+    const prevWho = prev ? `${prev.name || prev.username}${prev.deleted_at ? " (in recycle bin)" : ""}` : "nobody";
+    await logAction("admin", "owner_set_primary", { restaurant_id: rid, actor: "admin", detail: `${r.name}: primary owner ${prevWho} → "${who}" · owner ${ownerId}` });
     return ok({ ok: true });
   }
 

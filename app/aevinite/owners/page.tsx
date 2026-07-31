@@ -14,7 +14,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { CopyButton } from "@/components/admin/CopyButton";
 
-type OwnedRest = { id: string; slug: string; name: string; active: boolean; primary: boolean };
+// primaryHolder / primaryBinned describe WHO holds the primary slot when it isn't this
+// owner — so a "Co-owner" badge can name the reason instead of looking like a bug (a
+// binned starter login keeps the slot: Aangan, 2026-07-31).
+type OwnedRest = { id: string; slug: string; name: string; active: boolean; primary: boolean; primaryHolder?: string | null; primaryBinned?: boolean };
 type Owner = {
   id: string; username: string; name: string; active: boolean;
   lastSeenAt: string | null; createdAt: string; restaurants: OwnedRest[];
@@ -582,6 +585,22 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
     if (!ids.length) return;
     run(async () => { for (const rid of ids) await patch({ owner_id: owner.id, action: "attach", restaurant_id: rid }); });
   };
+  // Make-primary → hand this restaurant's PRIMARY badge to this owner. Deliberately
+  // spells out that it changes no access (every permission is membership-based) so the
+  // admin knows it's a display/tie-break fix, not a power grant.
+  const makePrimary = (r: OwnedRest) => setConfirm({
+    tone: "blue", icon: "fa-star", ctaLabel: "Make primary owner", ctaTone: "blue",
+    title: `Make ${owner.name} the primary owner of ${r.name}?`,
+    sub: r.primaryHolder ? `Takes the badge from ${r.primaryHolder}${r.primaryBinned ? " (an account in the recycle bin)" : ""}.` : "This restaurant has no primary owner yet.",
+    chip: <RestChip r={r} />,
+    facts: [
+      { i: "fa-star", c: "#fbbf24", t: <>{r.name} lists <b>{owner.name}</b> as its owner everywhere in the admin</> },
+      { i: "fa-shield-halved", c: "#34d399", t: <><b>No access changes</b> — every owner already linked keeps exactly what they see now</> },
+      { i: "fa-user-group", t: r.primaryHolder ? <>{r.primaryHolder} stays a <b>co-owner</b> (their link isn’t touched)</> : "Other owners (if any) stay co-owners" },
+    ],
+    onYes: () => run(async () => { await patch({ owner_id: owner.id, action: "set_primary", restaurant_id: r.id }); }),
+  });
+
   // Remove-restaurant → the shared confirm dialog (was a native confirm()).
   const detachRestaurant = (r: OwnedRest) => setConfirm({
     tone: "danger", icon: "fa-link-slash", ctaLabel: "Remove restaurant", ctaTone: "danger",
@@ -707,9 +726,21 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
                   <div style={{ fontSize: 11.5, marginTop: 1 }}>
                     {r.primary
                       ? <span style={{ color: "#fbbf24", fontWeight: 700 }}><i className="fas fa-star" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Primary owner</span>
-                      : <span style={{ color: "#60a5fa", fontWeight: 700 }}><i className="fas fa-user-group" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Co-owner</span>}
+                      : <>
+                          <span style={{ color: "#60a5fa", fontWeight: 700 }}><i className="fas fa-user-group" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Co-owner</span>
+                          {/* Name the holder — "Co-owner" alone reads like a bug when the
+                              primary is a binned starter login nobody can see. */}
+                          {r.primaryHolder
+                            ? <span style={{ color: "var(--muted)" }}> · primary is <b>{r.primaryHolder}</b>{r.primaryBinned ? <span style={{ color: "#fbbf24" }}> (in recycle bin)</span> : null}</span>
+                            : <span style={{ color: "var(--muted)" }}> · no primary set</span>}
+                        </>}
                   </div>
                 </div>
+                {!r.primary && (
+                  <button style={{ ...actBtn, color: "#fbbf24", padding: "7px 10px" }} disabled={busy}
+                    title={`Make ${owner.name} the primary owner of ${r.name}`}
+                    onClick={() => makePrimary(r)}><i className="fas fa-star" style={ic} aria-hidden="true" />Make primary</button>
+                )}
                 <a style={{ ...actBtn, textDecoration: "none", color: "#60a5fa", padding: "7px 10px" }}
                   title={`Open ${owner.name}'s owner panel for ${r.name} (no password, invisible to them)`}
                   href={panelHref(r.id, owner.id)} target="_blank" rel="noreferrer">
