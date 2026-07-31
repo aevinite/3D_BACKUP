@@ -36,7 +36,7 @@ import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 import { managerTabsOff, managerTabOn, type ManagerTabKey } from "@/lib/accessTree";
 import { saveBillCustomer } from "@/lib/billCustomer";
-import { sharedFloorSummary } from "@/lib/floorSummary";
+import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -1357,6 +1357,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? { actor_id: g.user.id } : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
+  // A write to this restaurant drops its shared floor snapshot, so the very next read
+  // recomputes — a device can never be handed a floor computed before its own action.
+  invalidateFloor(rid);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
@@ -2894,6 +2897,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? { actor_id: g.user.id } : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
+  // A write to this restaurant drops its shared floor snapshot, so the very next read
+  // recomputes — a device can never be handed a floor computed before its own action.
+  invalidateFloor(rid);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
@@ -3025,6 +3031,9 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const log = (...a: Parameters<typeof logAction>) => logAction(a[0], a[1], { actor: actorName, ...(g.user ? { actor_id: g.user.id } : { actor_id: ADMIN_VIEW_ACTOR_ID }), ...(a[2] || {}) });
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
+  // A write to this restaurant drops its shared floor snapshot, so the very next read
+  // recomputes — a device can never be handed a floor computed before its own action.
+  invalidateFloor(rid);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
