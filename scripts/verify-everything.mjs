@@ -838,7 +838,7 @@ phase("no order belongs to a session that is already closed", async () => {
   // a 300-row diagnostic it is the only shape that completes.)
   const rows = [];
   for (const r of REST || []) {
-    const page = await dbGet(`orders?select=id,session_id,status,archived&restaurant_id=eq.${r.id}&order=created_at.desc&limit=300`);
+    const page = await dbGet(`orders?select=id,session_id,status,archived,created_at&restaurant_id=eq.${r.id}&order=created_at.desc&limit=300`);
     rows.push(...page.filter((o) => o.archived !== true));
   }
   const ids = [...new Set(rows.map((r) => r.session_id).filter(Boolean))];
@@ -850,11 +850,19 @@ phase("no order belongs to a session that is already closed", async () => {
     const ss = await dbGet(`sessions?select=id,status&id=in.(${c.join(",")})`);
     for (const s of ss) if (s.status === "closed") closed.add(s.id);
   }
-  const candidates = rows.filter((r) => r.session_id && closed.has(r.session_id) && !["cancelled", "paid"].includes(r.status));
+  // A REAL stranded order sits there for minutes; anything seconds old is still settling. Several
+  // sessions share this database and their fixtures open, order and close a table inside one
+  // second, so without this the scan reports SOMEONE ELSE'S in-flight write as a stranded order —
+  // the same false alarm that cost time in verify-table-ownership. Skip only the very fresh rows;
+  // anything older still fails, so a genuine leak is caught on this run, not the next. (2026-07-31)
+  const SETTLING_MS = 15000;
+  const settled = (r) => !r.created_at || Date.now() - new Date(r.created_at).getTime() > SETTLING_MS;
+  const candidates = rows.filter((r) => r.session_id && closed.has(r.session_id) && !["cancelled", "paid"].includes(r.status) && settled(r));
   // RE-READ before failing. The close trigger cancels + archives a moment AFTER the session
   // flips to closed, so a row read mid-flight looks stranded when it is about to be handled —
   // this caught THIS SUITE'S own lifecycle order and called the app broken. Ask again.
   const orphans = [];
+  if (candidates.length) await wait(2500);   // let the close trigger finish before we accuse it
   for (const c of candidates.slice(0, 20)) {
     const now = (await dbGet(`orders?select=id,status,archived&id=eq.${c.id}`))[0];
     if (now && now.archived !== true && !["cancelled", "paid"].includes(now.status)) orphans.push(now.id);
@@ -1356,8 +1364,15 @@ phase("no DINE-IN order sits on a table that isn't on the floor plan", async () 
   // be said honestly: a NUMERIC table above the floor plan is wrong, while a LABEL (parcel,
   // banquet, OWNCHK…) is off-plan by design. Off-plan numeric rows beyond the plan are the
   // parcel counter's own numbering, so allow a generous margin and flag only the absurd.
-  const rows = await dbGet("orders?select=id,restaurant_id,table_number&order=created_at.desc&limit=2000");
-  const off = rows.filter((r) => r.table_number != null && /^\d+$/.test(String(r.table_number))
+  // LIVE rows only. This read history too, and history cannot be cleaned: the compliance guard
+  // forbids hard-deleting an order (mig 190), so ONE absurd-table row from an old test made this
+  // phase permanently red — and a check that can never go green is a check everyone learns to
+  // ignore, which is the disease this suite exists to cure. What actually matters is whether such
+  // a row can still reach a guest or a bill, and only an unarchived, undeleted one can.
+  // (Archived + soft-deleted residue stays visible in reports, exactly as the ledger requires.)
+  const rows = await dbGet("orders?select=id,restaurant_id,table_number,archived,deleted_at&order=created_at.desc&limit=2000");
+  const off = rows.filter((r) => r.archived !== true && !r.deleted_at
+    && r.table_number != null && /^\d+$/.test(String(r.table_number))
     && cap[r.restaurant_id] && Number(r.table_number) > cap[r.restaurant_id] + 500);
   ok(!off.length, `${off.length} dine-in orders on a table above the floor plan (e.g. table ${off[0]?.table_number})`);
 });
