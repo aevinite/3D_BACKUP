@@ -129,6 +129,35 @@ for (const b of biggest) {
 }
 await sql(`DROP FUNCTION IF EXISTS zz_floor_probe(uuid, int)`);
 
+// ── 4b. how much room is there before the limit bites? ─────────────────────────────────────────
+// The budget is 8 SECONDS, not the 2 minutes the database default suggests: PostgREST logs in as
+// `authenticator`, whose role settings carry statement_timeout=8s, and that is what the session
+// gets (SET ROLE service_role afterwards does not re-apply role settings). Measured on the app
+// path: a 5s query returns 200, a 20s query is cancelled at 8.8s with 57014 — the exact error in
+// these rows. Knowing the real number is the difference between "this query is the problem" and
+// "something else made the whole database slow".
+const BUDGET_MS = 8000;
+const headroom = Math.round(BUDGET_MS / Math.max(slowest, 0.01));
+console.log(`\n  the limit is 8s (PostgREST logs in as \`authenticator\`, statement_timeout=8s — NOT the`);
+console.log(`  database's 120s default). Worst floor read above is ${slowest}ms, so it has ~${headroom}x headroom.`);
+
+// The heaviest statements the APP itself runs. If a floor read has huge headroom and screens still
+// time out, the floor query is a bystander — something else is saturating the database, and this is
+// where to look. Owner analytics/report RPCs are the usual answer.
+const heavy = await sql(`
+  SELECT round(mean_exec_time)::text AS mean, round(max_exec_time)::text AS max, calls,
+         CASE WHEN query LIKE '%p_bucket%' OR query LIKE '%p_from%' THEN 'owner analytics / reports (p_from, p_to, p_bucket)'
+              WHEN query LIKE '%lfh_table_view_summary%' THEN 'the floor summary'
+              ELSE left(regexp_replace(regexp_replace(query, '--.*$', ''), '\\s+', ' ', 'g'), 60) END AS what
+    FROM pg_stat_statements
+   WHERE query LIKE '%pgrst_source%' AND calls > 20
+   ORDER BY mean_exec_time * calls DESC LIMIT 4`);
+if (heavy.length) {
+  console.log(`\n  the app's most expensive statements overall (mean x calls — pg_stat_statements is`);
+  console.log(`  cumulative, so treat these as "what this database spends its time on", not as today):`);
+  for (const h of heavy) console.log(`    mean ${String(h.mean).padStart(6)}ms  max ${String(h.max).padStart(7)}ms  x${String(h.calls).padStart(6)}  ${h.what}`);
+}
+
 // ── 5. the verdict, and it is allowed to say "too early to tell" ───────────────────────────────
 console.log("\n" + "─".repeat(94));
 const since = Number(counts.since), sinceFloor = Number(counts.since_floor), live = Number(counts.hours_live);
@@ -145,10 +174,18 @@ if (!isOnePass) {
   console.log(`VERDICT: TOO EARLY — clean so far, but only ${live}h of evidence, and the timeouts came`);
   console.log(`         in bursts during service hours. Run this again after a busy period.`);
   process.exit(0);
+} else if (headroom > 50) {
+  console.log(`VERDICT: the FLOOR QUERY is fixed, but ${sinceFloor} read(s) still timed out since.`);
+  console.log(`         Those are NOT this query's fault: it runs in ${slowest}ms against an 8s limit`);
+  console.log(`         (~${headroom}x headroom), so it would need to get ${headroom}x slower to fail on its own.`);
+  console.log(`         Something else made the whole database slow while a panel was asking.`);
+  console.log(`         → docs/FLOOR-TIMEOUT-WATCH.md → "If it is still timing out" (start at step 2:`);
+  console.log(`           check what ELSE was running, not this query).`);
+  process.exit(1);
 } else {
-  console.log(`VERDICT: NOT FIXED — ${sinceFloor} floor read(s) still timed out AFTER the change.`);
-  console.log(`         A whole-floor read costs ${slowest}ms at worst, so if that is small, the`);
-  console.log(`         remaining cause is CONTENTION, not this query. Work the ordered list in`);
+  console.log(`VERDICT: NOT FIXED — ${sinceFloor} floor read(s) still timed out AFTER the change, and`);
+  console.log(`         a whole-floor read costs ${slowest}ms against an 8s limit (only ~${headroom}x headroom),`);
+  console.log(`         so this query really can still cross it. Work the ordered list in`);
   console.log(`         docs/FLOOR-TIMEOUT-WATCH.md → "If it is still timing out".`);
   process.exit(1);
 }
