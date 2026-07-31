@@ -238,12 +238,10 @@ export const SECTIONS: Section[] = [
       { id: "banquet", name: "Banquet billing", def: false, bind: { t: "module", key: "banquet" },
         what: "Per-plate event billing that runs without a table — a wedding, a party booking. OFF removes the Banquet tab." },
       {
-        id: "payroll", name: "Payroll", def: false, bind: { t: "module", key: "payroll" },
-        what: "Staff profiles, salaries and payment records. OFF removes the staff-pay pages from the owner and manager panels.",
-        children: [
-          { id: "payroll_in_reports", name: "Show pay in the main reports", leftToBuild: true, bind: { t: "none" },
-            what: "Adds wages as an expense line inside the normal sales reports, so profit is shown after pay. OFF keeps pay on its own pages only." },
-        ],
+        // Named to match the Main-features card exactly — the two admin screens write the same
+        // settings columns, so they must not call the module two different things.
+        id: "payroll", name: "Staff profiles & pay", def: false, bind: { t: "module", key: "payroll" },
+        what: "Each person's profile (details, job, documents), a record of salary and advances paid, and the team performance report. Pay counts as an expense wherever money is shown: a “Staff pay out” line in the day book and “Staff pay out” + “After staff pay” on the owner dashboard. OFF removes all of it — pages, report and expense lines — from the owner, manager and waiter panels.",
       },
       {
         id: "inventory", name: "Inventory", def: false, bind: { t: "module", key: "inventory" },
