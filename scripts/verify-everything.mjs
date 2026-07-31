@@ -857,10 +857,30 @@ phase("no negative order total exists", async () => {
   const rows = await dbGet("orders?select=id,total&total=lt.0&limit=5");
   ok(!rows.length, `${rows.length} orders with a negative total`);
 });
-phase("no discount exceeds its own order total", async () => {
-  const rows = await dbGet("orders?select=id,total,discount&discount=gt.0&limit=1000");
-  const bad = rows.filter((r) => Number(r.discount) > Number(r.total) + 0.001);
-  ok(!bad.length, `${bad.length} orders discounted below zero (e.g. ${bad[0]?.id})`);
+phase("no discount takes a whole BILL below zero", async () => {
+  // Asked per ORDER this reports healthy data as broken: a whole-bill discount is stored on
+  // ONE order but is capped against the WHOLE BILL, so on a multi-order table that single row
+  // legitimately shows a discount bigger than its own total (the editor API says so in as many
+  // words, and clamping it per order once OVERSTATED revenue). The real question is whether a
+  // BILL — every order sharing a session — ever goes negative.
+  const rows = await dbGet("orders?select=id,session_id,total,discount&discount=gt.0&limit=1000");
+  const bills = new Map();
+  for (const r of rows) {
+    const k = r.session_id || `solo:${r.id}`;
+    const b = bills.get(k) || { total: 0, disc: 0 };
+    b.disc += Number(r.discount) || 0;
+    bills.set(k, b);
+  }
+  // Add every SIBLING order's total onto its bill (a discounted row's siblings carry the money).
+  const ids = [...bills.keys()].filter((k) => !k.startsWith("solo:"));
+  for (let i = 0; i < ids.length; i += 40) {
+    const chunk = ids.slice(i, i + 40);
+    const sib = await dbGet(`orders?select=session_id,total&session_id=in.(${chunk.join(",")})&limit=2000`);
+    for (const o of sib) { const b = bills.get(o.session_id); if (b) b.total += Number(o.total) || 0; }
+  }
+  for (const r of rows) if (!r.session_id) { const b = bills.get(`solo:${r.id}`); if (b) b.total += Number(r.total) || 0; }
+  const negative = [...bills.entries()].filter(([, b]) => b.disc > b.total + 0.01);
+  ok(!negative.length, `${negative.length} bills discounted below zero (e.g. bill ${negative[0]?.[0]} — total ${negative[0]?.[1].total}, discount ${negative[0]?.[1].disc})`);
 });
 phase("every invoice number is unique per restaurant", async () => {
   const rows = await dbGet("invoices?select=id,restaurant_id,invoice_no&limit=3000").catch(() => []);
