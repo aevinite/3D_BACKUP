@@ -128,7 +128,16 @@ head("C. Closing a session — its food leaves the floor with it");
         : fail("an order row disappeared — that would be hiding a sale");
       // A new party at the same table starts clean.
       const s2 = must(await sb.from("sessions").insert({ restaurant_id: rid, table_number: T, status: "open", opened_by: "waiter", opened_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).select("id"))[0];
-      const tile = (await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: T })).data?.tiles?.[T];
+      // Read the tile with a short retry. The INSERT above and this summary read are two
+      // round-trips, so a first read can land before the new session is visible to the RPC and
+      // report the tile as "undefined · undefined" — which reads like a broken floor but is just
+      // this script racing its own fixture (seen intermittently 2026-07-31). Poll briefly; a
+      // genuinely wrong tile still fails, because the CONTENT is what's asserted below.
+      let tile = null;
+      for (let i = 0; i < 12 && !tile; i++) {
+        tile = (await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: T })).data?.tiles?.[T] || null;
+        if (!tile) await new Promise((r) => setTimeout(r, 250));
+      }
       tile && tile.state === "waiting" && Number(tile.due) === 0 && tile.counts.ck === 0
         ? pass(`reopened → "${tile.label} · ${tile.meta}", 0 dishes, ₹0 due`)
         : fail(`reopened tile is "${tile?.label} · ${tile?.meta}" due=${tile?.due} counts=${JSON.stringify(tile?.counts)} — a new party must start empty`);
