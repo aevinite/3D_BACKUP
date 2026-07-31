@@ -104,6 +104,52 @@ if (!av) {
   }
 }
 
+// ── A2. Are the migration files unambiguously ordered? ───────────────────────
+head("A2. Migration numbers");
+{
+  const files = readdirSync(join(root, "supabase/migrations")).filter((f) => /^\d+_.*\.sql$/.test(f));
+  const byNum = new Map();
+  for (const f of files) {
+    const n = f.match(/^(\d+)_/)[1];
+    if (!byNum.has(n)) byNum.set(n, []);
+    byNum.get(n).push(f);
+  }
+  const clashes = [...byNum].filter(([, list]) => list.length > 1);
+
+  // Parallel sessions have numbered migrations at the same time for months: 18 numbers were
+  // already doubled when this check was written (057 through 229). They are harmless — VERIFIED,
+  // not assumed: no colliding pair creates or alters the same function/index/trigger/table, so
+  // whichever ran first, the result is identical. Renaming 18 applied migrations would be churn
+  // with its own risk, so they are grandfathered BY NUMBER and the check guards two real things:
+  //   • a NEW duplicated number (the next collision, caught before it merges);
+  //   • ANY duplicated pair that touches the same object — grandfathered or not, that one's
+  //     outcome depends on filename sort order, which is not a decision anybody made.
+  const GRANDFATHERED = new Set(["057", "068", "116", "121", "122", "130", "145", "155", "181",
+    "190", "196", "202", "203", "208", "221", "227", "228", "229"]);
+  const objectsIn = (f) => {
+    const t = readFileSync(join(root, "supabase/migrations", f), "utf8");
+    const out = new Set();
+    for (const [re, tag] of [
+      [/(?:CREATE OR REPLACE FUNCTION|CREATE FUNCTION)\s+(?:public\.)?(\w+)/gi, "function"],
+      [/CREATE (?:UNIQUE )?INDEX(?: IF NOT EXISTS)?\s+(\w+)/gi, "index"],
+      [/CREATE TRIGGER\s+(\w+)/gi, "trigger"],
+      [/ALTER TABLE\s+(?:public\.)?(\w+)/gi, "table"],
+    ]) for (const m of t.matchAll(re)) out.add(`${tag} ${m[1].toLowerCase()}`);
+    return out;
+  };
+  const fresh = clashes.filter(([n]) => !GRANDFATHERED.has(n));
+  const fighting = clashes.filter(([, list]) => {
+    const sets = list.map(objectsIn);
+    return [...sets[0]].some((o) => sets.slice(1).every((s) => s.has(o)));
+  });
+  fresh.length === 0
+    ? pass(`${files.length} migrations; no NEW duplicated number (${clashes.length} historical ones grandfathered)`)
+    : fail(`new duplicated migration number(s): ${fresh.map(([n, l]) => n + " → " + l.join(" + ")).join("; ")} — renumber the newer file`);
+  fighting.length === 0
+    ? pass("no two same-numbered migrations create or alter the same object, so their order can't matter")
+    : fail(`${fighting.length} same-numbered pair(s) touch the SAME object — their order decides the result: ${fighting.map(([n, l]) => n + " → " + l.join(" + ")).join("; ")}`);
+}
+
 // ── B. Is the migrations folder really the source of truth? ──────────────────
 head("B. Is every live function written down in supabase/migrations?");
 {
