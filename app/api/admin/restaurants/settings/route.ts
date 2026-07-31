@@ -14,6 +14,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { clampPerRow } from "@/lib/floorLayout";
+import { cleanBanquetFields } from "@/lib/banquetFields";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -28,6 +29,12 @@ const SETTINGS_COLS = [
   "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
   "table_count", "table_seats", "table_names", "auto_table_action", "floor_per_row",
+  // Banquet bill (mig 237): WHAT this restaurant is asked to fill in, its own bill-number
+  // series, and WHICH paper it prints on. Admin-owned — the manager/owner save path strips
+  // these (owner 2026-07-31: the info-format option lives in the admin panel).
+  "banquet_fields", "banquet_bill_prefix", "banquet_bill_style", "banquet_bill_next",
+  "banquet_paper", "banquet_paper_size", "banquet_paper_top", "banquet_paper_bot",
+  "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign", "banquet_paper_fill",
 ] as const;
 const SELECT = SETTINGS_COLS.join(", ");
 
@@ -107,6 +114,32 @@ function sanitize(body: Patch): Patch {
   if ("auto_table_action" in body) {
     const v = String(body.auto_table_action || "off");
     out.auto_table_action = ["off", "close", "restart"].includes(v) ? v : "off";
+  }
+  // ── banquet bill (mig 237) ────────────────────────────────────────────────
+  // The field list is cleaned against lib/banquetFields.ts, so an unknown key can
+  // never reach the DB and the SQL side (which filters every stored value by this
+  // same list) can always be trusted.
+  if ("banquet_fields" in body) out.banquet_fields = cleanBanquetFields(body.banquet_fields);
+  if ("banquet_bill_prefix" in body) {
+    out.banquet_bill_prefix = String(body.banquet_bill_prefix || "BQB").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) || "BQB";
+  }
+  if ("banquet_bill_style" in body) {
+    const v = String(body.banquet_bill_style || "fy");
+    out.banquet_bill_style = ["fy", "date", "plain"].includes(v) ? v : "fy";
+  }
+  // banquet_bill_next is handled in POST (it is refused once bills exist), not here.
+  if ("banquet_paper" in body) out.banquet_paper = body.banquet_paper === "pad" ? "pad" : "plain";
+  if ("banquet_paper_size" in body) out.banquet_paper_size = body.banquet_paper_size === "a4" ? "a4" : "a5";
+  const mm = (k: string, lo: number, hi: number, dflt: number) => {
+    if (!(k in body)) return;
+    const n = Math.round(Number(body[k]));
+    out[k] = Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : dflt;
+  };
+  mm("banquet_paper_top", 0, 80, 33);
+  mm("banquet_paper_bot", 0, 50, 14);
+  mm("banquet_paper_side", 2, 25, 6);
+  for (const k of ["banquet_paper_foot", "banquet_paper_sign", "banquet_paper_fill"]) {
+    if (k in body) out[k] = body[k] === true || body[k] === "true";
   }
   return out;
 }
@@ -188,6 +221,26 @@ export async function POST(req: NextRequest) {
 
   // Settings save — whitelist-sanitized patch of changed fields only.
   const patch = sanitize(body);
+  // The banquet counter (mig 237): settable while the restaurant has issued NO banquet
+  // bill — that is the whole point of letting them line the series up with what their
+  // accountant already files. After the first bill it is refused OUT LOUD (never
+  // silently dropped), because a counter that can move backwards is the part an audit
+  // actually checks.
+  if ("banquet_bill_next" in body) {
+    const n = Math.round(Number(body.banquet_bill_next));
+    const [issued, cur] = await Promise.all([
+      sb.from("banquet_bills").select("id", { count: "exact", head: true }).eq("restaurant_id", rid),
+      sb.from("settings").select("banquet_bill_next").eq("restaurant_id", rid).maybeSingle(),
+    ]);
+    const already = Number(issued.count) || 0;
+    const current = Number(cur.data?.banquet_bill_next) || 1;
+    if (already > 0 && Number.isFinite(n) && n !== current) {
+      return NextResponse.json({
+        error: `${already} banquet ${already === 1 ? "bill has" : "bills have"} already been issued, so the starting number can't be changed. The prefix and the style can.`,
+      }, { status: 409 });
+    }
+    if (Number.isFinite(n)) patch.banquet_bill_next = Math.min(Math.max(n, 1), 99_999_999);
+  }
   if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to save" }, { status: 400 });
   const rest = await sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle();
   if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });

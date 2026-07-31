@@ -494,6 +494,38 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return ok({ items });
     }
 
+    // banquet/bills — the restaurant's own banquet bill ledger (mig 237), newest
+    // first. Its own section, separate from table bills, with the numbers this
+    // restaurant printed. Scoped + explicit columns + hard limit (egress rule);
+    // `?q=` filters on the server so a search never pulls the whole ledger.
+    if (p === "banquet/bills") {
+      if (g.user && !(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
+      const q = String(new URL(req.url).searchParams.get("q") || "").trim().slice(0, 40);
+      const limit = Math.min(100, Math.max(1, Number(new URL(req.url).searchParams.get("limit")) || 40));
+      let sel = sb.from("banquet_bills")
+        .select("id,bill_no,issued_at,total,received,cust_name,cust_phone,hall,func,fn_date,pax,order_id,voided_at,void_reason")
+        .eq("restaurant_id", rid);
+      if (q) sel = sel.or(`cust_name.ilike.%${q}%,cust_phone.ilike.%${q}%,bill_no.ilike.%${q}%`);
+      const bills = must(await sel.order("issued_at", { ascending: false }).limit(limit));
+      return ok({ bills });
+    }
+
+    // banquet/bill?id= — ONE bill, everything needed to re-print exactly what was
+    // printed the first time (frozen totals + the lines from its order).
+    if (p === "banquet/bill") {
+      if (g.user && !(await banquetLadder(rid)).effective) return err("Banquet isn't enabled for this restaurant.", 403);
+      if (!(await managerCan(g, rid, "banquet"))) return permDenied("use banquet billing");
+      const id = String(new URL(req.url).searchParams.get("id") || "");
+      if (!id) return err("id required");
+      const bill = must(await sb.from("banquet_bills").select("*").eq("id", id).eq("restaurant_id", rid).limit(1))[0];
+      if (!bill) return err("bill not found", 404);
+      const order = bill.order_id
+        ? must(await sb.from("orders").select("id,items,subtotal,tax,total,discount,status").eq("id", bill.order_id).eq("restaurant_id", rid).limit(1))[0]
+        : null;
+      return ok({ bill, order });
+    }
+
     // khata — the pay-later book, grouped by person (mig 166). Feature + khata power gated
     // (admin/owner pass managerCan automatically). Outstanding bills only; a bill = the
     // orders parked together (grouped by session, solo orders by their own id).
@@ -1788,6 +1820,40 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         await log("manager", "banquet_place", { restaurant_id: rid, table_number: t || null, detail: `total ${(data as any)?.total}`, device_id: dev });
         return ok(data);
       }
+      // banquet/bill — issue a numbered banquet bill (mig 237).
+      // { table?, lines:[{id,qty,price?}], meta:{…} }. The RPC prices every line from
+      // banquet_items, keeps ONLY the meta keys this restaurant is allowed to fill
+      // (settings.banquet_fields), takes the next number from the restaurant's own
+      // counter under a row lock, and lands the sale as a normal 'served' order so
+      // Bills, the day-book and the GST report see it with no changes. POST is already
+      // wrapped in withIdempotency, so an offline replay bills exactly once.
+      if (b === "bill") {
+        const t = String(body?.table || "").trim();
+        if (t) {
+          if (!/^\d+$/.test(t)) return err("valid table required");
+          const tcRow = await sb.from("settings").select("table_count").eq("restaurant_id", rid).maybeSingle();
+          const tableCount = Number((tcRow.data as { table_count?: number } | null)?.table_count) || 0;
+          if (tableCount > 0 && (Number(t) < 1 || Number(t) > tableCount)) return err(`Table ${t} doesn't exist (this place has ${tableCount} tables).`, 400);
+        }
+        const lines = Array.isArray(body?.lines) ? body.lines : [];
+        if (!lines.length) return err("Add at least one banquet line.");
+        // prepared_by is recorded from the LOGIN, never from the browser (the field
+        // switch only decides whether it prints).
+        const meta = { ...(body?.meta && typeof body.meta === "object" ? body.meta : {}), prepared_by: g.user?.name || g.user?.username || "Manager" };
+        const { data, error } = await sb.rpc("lfh_banquet_bill_create", {
+          p_lines: lines, p_meta: meta, p_table: t || null, p_restaurant_id: rid,
+          p_by: g.user?.name || g.user?.username || "Manager",
+        });
+        if (error) throw new Error(error.message);
+        if (!(data as any)?.ok) return err(banquetErrMsg((data as any)?.reason), 400);
+        await log("manager", "banquet_bill", {
+          restaurant_id: rid, table_number: t || null,
+          detail: `${(data as any)?.bill_no} · total ${(data as any)?.total}`, device_id: dev,
+        });
+        // prepared_by comes back so the FIRST print carries the same name a re-print
+        // will show (the panel has no reliable copy of who is logged in).
+        return ok({ ...(data as object), prepared_by: meta.prepared_by });
+      }
       return err("unknown banquet action", 404);
     }
 
@@ -2666,6 +2732,37 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             "oplog_retention_days", "custlog_retention_days",
           ];
           for (const k of MANAGER_BLOCKED_SETTINGS) delete (body as Record<string, unknown>)[k];
+          // A manager must not renumber invoices — the series is the thing an audit
+          // checks, and the audited party doesn't get to set it (same reasoning as the
+          // log-retention block above). Owner + admin may. (mig 237)
+          for (const k of ["banquet_bill_prefix", "banquet_bill_style", "banquet_bill_next"]) delete (body as Record<string, unknown>)[k];
+        }
+        // WHAT a restaurant is asked for, and WHICH paper it prints on, are the ADMIN's
+        // (owner 2026-07-31: "one info-format option in banquet in Access & permissions
+        // in the admin panel"). Strip them from ANY staff-cookie save — manager or owner
+        // — so the only way in is the admin route. (mig 237)
+        if (g.user) {
+          for (const k of Object.keys(body)) if (k === "banquet_fields" || /^banquet_paper/.test(k)) delete (body as Record<string, unknown>)[k];
+        }
+        // The banquet series: shape it here so a bad value can never reach the CHECK
+        // constraint, and REFUSE (never silently drop) a start-number change once bills
+        // exist — the counter is the part that must stay gapless.
+        if ("banquet_bill_prefix" in body) {
+          body.banquet_bill_prefix = String(body.banquet_bill_prefix || "BQB").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) || "BQB";
+        }
+        if ("banquet_bill_style" in body) {
+          const st = String(body.banquet_bill_style || "fy");
+          body.banquet_bill_style = ["fy", "date", "plain"].includes(st) ? st : "fy";
+        }
+        if ("banquet_bill_next" in body) {
+          const n = Math.round(Number(body.banquet_bill_next));
+          const issued = await sb.from("banquet_bills").select("id", { count: "exact", head: true }).eq("restaurant_id", rid);
+          const already = Number(issued.count) || 0;
+          const current = Number((await sb.from("settings").select("banquet_bill_next").eq("restaurant_id", rid).maybeSingle()).data?.banquet_bill_next) || 1;
+          if (already > 0 && Number.isFinite(n) && n !== current) {
+            return err(`${already} banquet ${already === 1 ? "bill has" : "bills have"} already been issued, so the starting number can't be changed. The prefix and the style can.`, 409);
+          }
+          body.banquet_bill_next = Number.isFinite(n) ? Math.min(Math.max(n, 1), 99_999_999) : 1;
         }
         // settings is one row per restaurant (UNIQUE restaurant_id); matched by
         // restaurant_id at the upsert below — don't force the legacy id='site'

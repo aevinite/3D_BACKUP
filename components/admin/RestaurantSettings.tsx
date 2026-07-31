@@ -10,6 +10,7 @@
 // single source of truth with Main features + Access.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FLOOR_PER_ROW_MAX, FLOOR_PER_ROW_MIN, clampPerRow } from "@/lib/floorLayout";
+import { BANQUET_FIELDS, BANQUET_LOCKED, BANQUET_PRESETS, banquetBillNo, cleanBanquetFields } from "@/lib/banquetFields";
 import FloorLayoutPreview from "./FloorLayoutPreview";
 
 type Rest = { id: string; slug: string; name: string };
@@ -305,6 +306,15 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
   const setComp = (i: number, key: "label" | "rate", v: string) =>
     set("tax_components", comps.map((c, j) => (j === i ? { ...c, [key]: v } : c)));
 
+  // Banquet bill (mig 237): the field list this restaurant is asked to fill, and a
+  // live preview of the next bill number in the chosen style.
+  const bqFields = cleanBanquetFields(draft.banquet_fields);
+  const bqSample = banquetBillNo(
+    String(draft.banquet_bill_prefix || "BQB"),
+    String(draft.banquet_bill_style || "fy"),
+    Math.max(1, Math.round(Number(draft.banquet_bill_next)) || 1),
+  );
+
   const perRow = clampPerRow(draft.floor_per_row);
   const draftCount = Math.min(Math.max(Math.round(Number(draft.table_count)) || 12, 1), 500);
   const savedCount = Math.min(Math.max(Math.round(Number(base.table_count)) || 12, 1), 500);
@@ -423,6 +433,113 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           onClick={() => set("tax_components", [...comps, { label: "", rate: "" }])}>+ Add tax</button>
         <div style={{ maxWidth: 240, marginTop: 14 }}>
           {field("Fallback tax rate (0.05 = 5%)", "tax_rate", { type: "number", step: "any", min: 0, hint: "Used only if you remove every named tax above." })}
+        </div>
+      </div>
+
+      {/* ═══ BANQUET BILL (mig 237) — what this restaurant is ASKED for ═══════
+          Owner, 2026-07-31: "only ask for what's necessary … the restaurant will only
+          get to choose what they fill." Unticking a box removes it from the manager's
+          bill screen AND from the printed paper. The tax-sensitive parts are not on
+          this list at all — they are filled by the server (BANQUET_LOCKED). */}
+      <div id="det-banquet" className="adm-card" style={{ marginBottom: 14 }}>
+        <h2>🎪 Banquet bill — what this restaurant fills in</h2>
+        <p className="hint">
+          Only shows up for a restaurant that has <b>Banquet &amp; events</b> switched on (Access &amp; permissions).
+          Tick a box and the manager is asked for it; untick it and it disappears from their screen and from the
+          bill — no empty boxes to guess at.
+        </p>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "0 0 12px" }}>
+          {(["simple", "company", "full"] as const).map((k) => {
+            const same = [...bqFields].sort().join(",") === [...BANQUET_PRESETS[k]].sort().join(",");
+            return (
+              <button key={k} type="button" className={`adm-toggle ${same ? "on" : "off"}`} disabled={!loadOk || busy}
+                style={{ width: "auto", padding: "7px 12px" }}
+                onClick={() => set("banquet_fields", [...BANQUET_PRESETS[k]])}>
+                <span>{k === "simple" ? "Simple (default)" : k === "company" ? "Company / GST bills" : "Everything"}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: "grid", gap: 7 }}>
+          {BANQUET_FIELDS.map((f) => {
+            const on = bqFields.includes(f.key);
+            return (
+              <label key={f.key} style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer",
+                border: "var(--border)", borderRadius: 9, padding: "9px 11px", opacity: loadOk ? 1 : 0.6 }}>
+                <input type="checkbox" checked={on} disabled={!loadOk || busy} style={{ marginTop: 3 }}
+                  onChange={(e) => set("banquet_fields", e.target.checked
+                    ? [...bqFields, f.key]
+                    : bqFields.filter((k) => k !== f.key))} />
+                <span>
+                  <b style={{ fontSize: 13 }}>{f.label}</b>
+                  <span className="adm-muted" style={{ display: "block", fontSize: 11.5, lineHeight: 1.45 }}>{f.what}</span>
+                </span>
+              </label>
+            );
+          })}
+        </div>
+        <details style={{ marginTop: 12 }}>
+          <summary style={{ cursor: "pointer", fontSize: 12.5, fontWeight: 700 }}>🔒 Filled by the app — nobody can type over these</summary>
+          <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
+            {BANQUET_LOCKED.map(([t, d]) => (
+              <div key={t} style={{ fontSize: 12 }}>
+                <b>{t}</b> <span className="adm-muted">— {d}</span>
+              </div>
+            ))}
+          </div>
+        </details>
+
+        <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Its own bill numbers</h3>
+        <p className="hint">
+          A banquet bill never shares a number with a table bill. Set the series to continue from whatever this
+          restaurant&apos;s accountant already files — <b>the starting number locks itself</b> once the first banquet bill
+          is issued, and from then on the app fills every number (nobody can type, skip or reuse one).
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "120px 1fr 130px", gap: 10, maxWidth: 560, alignItems: "end" }}>
+          {field("Prefix", "banquet_bill_prefix", { ph: "BQB" })}
+          <label style={labelStyle}>Style
+            <select value={String(draft.banquet_bill_style || "fy")} disabled={!loadOk || busy}
+              onChange={(e) => set("banquet_bill_style", e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
+              <option value="fy">BQB/2026-27/000006 — running year series</option>
+              <option value="date">BQB-140826-6 — date + counter</option>
+              <option value="plain">BQB-000006 — plain running number</option>
+            </select>
+          </label>
+          {field("Start from", "banquet_bill_next", { type: "number", min: 1, step: 1 })}
+        </div>
+        <p className="hint" style={{ marginTop: 8 }}>
+          Next bill prints as <b>{bqSample}</b>.
+        </p>
+
+        <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Paper</h3>
+        <p className="hint">
+          <b>Plain paper</b> (the default) prints the restaurant&apos;s name, address and GSTIN at the top itself.
+          <b> Pre-printed pad</b> leaves the top blank for stationery that already carries the letterhead —
+          set how much room to leave.
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, maxWidth: 560 }}>
+          <label style={labelStyle}>Prints on
+            <select value={String(draft.banquet_paper || "plain")} disabled={!loadOk || busy}
+              onChange={(e) => set("banquet_paper", e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
+              <option value="plain">Plain paper — the app prints the header</option>
+              <option value="pad">Pre-printed pad — leave the letterhead blank</option>
+            </select>
+          </label>
+          <label style={labelStyle}>Page size
+            <select value={String(draft.banquet_paper_size || "a5")} disabled={!loadOk || busy}
+              onChange={(e) => set("banquet_paper_size", e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
+              <option value="a5">A5 — 148 × 210 mm</option>
+              <option value="a4">A4 — 210 × 297 mm</option>
+            </select>
+          </label>
+          {field("Top space for the letterhead (mm)", "banquet_paper_top", { type: "number", min: 0, max: 80, step: 1, hint: "Only used on a pre-printed pad." })}
+          {field("Bottom space kept (mm)", "banquet_paper_bot", { type: "number", min: 0, max: 50, step: 1 })}
+          {field("Side margins (mm)", "banquet_paper_side", { type: "number", min: 2, max: 25, step: 1 })}
+        </div>
+        <div style={{ display: "grid", gap: 8, maxWidth: 560, marginTop: 12 }}>
+          {boolToggle("Print the footer line + our GST no.", "banquet_paper_foot", draft.banquet_paper_foot === true)}
+          {boolToggle("Print “For <restaurant> / Authorised Signatory”", "banquet_paper_sign", draft.banquet_paper_sign !== false)}
+          {boolToggle("Keep the item box ruled to the bottom", "banquet_paper_fill", draft.banquet_paper_fill !== false)}
         </div>
       </div>
 
