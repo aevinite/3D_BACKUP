@@ -7,7 +7,7 @@
 // actually consumed. Every check below maps to a mistake that really happened.
 //
 // Run: node scripts/verify-access-model.mjs   (or npm run verify:access)
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -149,6 +149,69 @@ for (let i = 0; i < idPositions.length; i++) {
   deadRows++;
 }
 if (!deadRows) ok("no row is a switch with nothing behind it");
+
+// ── 9b · THE BIG ONE: every switch's key must be READ by code somewhere ──────
+// The original version of this guard only proved a switch's STORAGE existed. That is not
+// the same question as "does anything read it", and the gap let four switches ship that
+// saved happily and did nothing — payroll_in_reports, inventory_in_reports and the two
+// dashboard picks (found by the whole-app sweep, 2026-07-31). A switch nothing reads is the
+// exact fault this whole rebuild removed, so it now fails here.
+// A row honestly marked `leftToBuild` is exempt: it says so on screen.
+{
+  const SEARCH_DIRS = ["app", "lib", "components", "public/panels"];
+  const files = [];
+  const walk = (d) => {
+    let ents = []; try { ents = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents) {
+      const full = join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== "node_modules" && e.name !== ".next") walk(full); }
+      else if (/\.(ts|tsx|js|mjs)$/.test(e.name)) files.push(full);
+    }
+  };
+  for (const d of SEARCH_DIRS) walk(join(root, d));
+  // Kept PER FILE, not concatenated: an opt row needs one reader that mentions BOTH its
+  // record and its sub-key. Searching a single blob let "range" match an unrelated file and
+  // hid the two dashboard picks on the first attempt.
+  const sources = files
+    .filter((f) => !/lib\/accessTree\.ts$/.test(f) && !/scripts\//.test(f))
+    .map((f) => { try { return readFileSync(f, "utf8"); } catch { return ""; } });
+  const corpus = sources.join("\n");
+  const someFileHasBoth = (a, b) => sources.some((t) => t.includes(a) && t.includes(b));
+
+  // Pull every node together with the keys it writes and whether it is labelled unbuilt.
+  // A NODE start is `id: "x", name:` — a bind's `id:` is followed by side/key instead. Using
+  // the bare /id:/ truncated every node's text at its own bind, so the sub-key was never
+  // found and each opt row passed by accident.
+  const nodeBlocks = [...tree.matchAll(/\bid:\s*"([a-z0-9_]+)",\s*name:/g)];
+  const dead = [];
+  for (let i = 0; i < nodeBlocks.length; i++) {
+    const id = nodeBlocks[i][1];
+    const own = tree.slice(nodeBlocks[i].index, i + 1 < nodeBlocks.length ? nodeBlocks[i + 1].index : tree.length);
+    if (/leftToBuild:\s*true/.test(own)) continue;
+    const bind = own.match(/bind:\s*\{\s*t:\s*"([a-z]+)"(?:,\s*(?:key|flag|id):\s*"([^"]+)")?/);
+    if (!bind) continue;
+    const [, kind, key] = bind;
+    if (!key) continue;
+    // What a reader would have to mention to consult this switch.
+    let seen;
+    if (kind === "module") seen = corpus.includes(`${key}_allowed`);
+    else if (kind === "opt") {
+      // These live at access_config[<perm>].<side>_opts[<subKey>]. A real reader therefore
+      // indexes an "_opts" object BY THIS SUB-KEY — so require the two within a few hundred
+      // characters of each other in one file. Merely mentioning the words somewhere in a
+      // big file is not evidence (that is how the two dashboard picks first slipped past).
+      const sub = (own.match(/key:\s*"([^"]+)"\s*\}/) || [])[1];
+      seen = !sub ? corpus.includes(key)
+        : sources.some((t) => new RegExp(`_opts[\\s\\S]{0,300}\\b${sub}\\b|\\b${sub}\\b[\\s\\S]{0,300}_opts`).test(t));
+    } else if (kind === "limit") {
+      // access_config[<perm>].limit[<side>] — lib/discountCap.ts reads exactly this.
+      seen = sources.some((t) => new RegExp(`\\b${key}\\b[\\s\\S]{0,300}\\blimit\\b`).test(t));
+    } else seen = corpus.includes(key);
+    if (!seen) dead.push(`${id} (${kind}:${key})`);
+  }
+  if (dead.length) fail(`switches that NOTHING reads — they would save and do nothing: ${dead.join(", ")}`);
+  else ok(`every switch's key is read by real code (or is honestly labelled "left to build")`);
+}
 
 // ── 10 · the read/write route must allow-list from the model, not by hand ──
 if (!treeRoute.includes('from "@/lib/accessTree"')) fail("the access-tree route does not derive its allow-lists from lib/accessTree.ts");

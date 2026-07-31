@@ -2609,3 +2609,8 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
 .nw-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 9px; font-size: 13px; }
 .nw-pick { min-height: 38px; }
 .nw-warn { margin-top: 9px; font-size: 12.5px; font-weight: 700; color: var(--red, #ef4444); }
+
+/* "Aevidine sets this" — shown where a "⚙ change" link used to be for anyone who has no
+   permission screen to open (access rebuild 2026-07-31). Quiet, not a button: there is
+   nothing to tap, and a tappable-looking thing that does nothing is worse than plain words. */
+.zask { margin-left: auto; font-size: 10.5px; font-weight: 700; opacity: .62; white-space: nowrap; }

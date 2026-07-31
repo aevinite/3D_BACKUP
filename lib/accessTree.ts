@@ -241,7 +241,7 @@ export const SECTIONS: Section[] = [
         id: "payroll", name: "Payroll", def: false, bind: { t: "module", key: "payroll" },
         what: "Staff profiles, salaries and payment records. OFF removes the staff-pay pages from the owner and manager panels.",
         children: [
-          { id: "payroll_in_reports", name: "Show pay in the main reports", def: false, fresh: true, bind: { t: "setting", key: "payroll_in_reports" },
+          { id: "payroll_in_reports", name: "Show pay in the main reports", leftToBuild: true, bind: { t: "none" },
             what: "Adds wages as an expense line inside the normal sales reports, so profit is shown after pay. OFF keeps pay on its own pages only." },
         ],
       },
@@ -249,7 +249,7 @@ export const SECTIONS: Section[] = [
         id: "inventory", name: "Inventory", def: false, bind: { t: "module", key: "inventory" },
         what: "Ingredients, purchases, stock counting, waste and the expense book.",
         children: [
-          { id: "inventory_in_reports", name: "Show cost in the main reports", def: false, fresh: true, bind: { t: "setting", key: "inventory_in_reports" },
+          { id: "inventory_in_reports", name: "Show cost in the main reports", leftToBuild: true, bind: { t: "none" },
             what: "Adds stock and expense cost as a line inside the normal sales reports, so profit is shown after cost. OFF keeps it on the inventory pages only." },
         ],
       },
@@ -343,12 +343,12 @@ export const SECTIONS: Section[] = [
             what: "May read the activity log." },
           {
             id: "d_mgr_dashboard", name: "Dashboard", def: true, bind: { t: "grant", flag: "view_dashboard" },
-            what: "The numbers screen and the day's report.",
+            what: "The numbers screen and the day's report. A real manager's dashboard is clamped to TODAY by the server today; the two picks below are the settings that will change that once they are built.",
             children: [
-              { id: "d_mgr_dash_range", name: "What the dashboard shows", def: "today", bind: { t: "opt", id: "view_dashboard", side: "manager", key: "range" },
+              { id: "d_mgr_dash_range", name: "What the dashboard shows", leftToBuild: true, bind: { t: "none" },
                 what: "How far back a manager's dashboard reaches.",
                 choices: [{ value: "today", label: "Today only" }, { value: "today_yesterday", label: "Today + yesterday" }] },
-              { id: "d_mgr_daily_report", name: "Generate the daily report", def: true, bind: { t: "opt", id: "view_dashboard", side: "manager", key: "daily_report" },
+              { id: "d_mgr_daily_report", name: "Generate the daily report", leftToBuild: true, bind: { t: "none" },
                 what: "The button that produces the day's report. It is the SAME report, with the same design, as the owner's daily analysis — one report, two places." },
             ],
           },

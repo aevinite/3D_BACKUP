@@ -63,7 +63,7 @@ export async function PATCH(req: NextRequest) {
 
   // Mig 133 (the ladder): an OWNER can only grant a power the ADMIN still entitles —
   // the toggle is hidden from their panel, so a request naming it is hand-crafted.
-  // The admin console writes through /api/admin/restaurants/access, so isAdmin here
+  // The admin console writes through /api/admin/restaurants/access-tree, so isAdmin here
   // means the act-as owner view — keep it able to flip only what the owner could.
   const ents = mergeOwnerEntitlements(cur.owner_entitlements);
   for (const k of Object.keys(patch)) {

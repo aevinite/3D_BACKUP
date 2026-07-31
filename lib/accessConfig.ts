@@ -1,5 +1,5 @@
 // lib/accessConfig.ts — the CANONICAL admin-editable access lists, shared by the
-// per-restaurant Access editor (app/api/admin/restaurants/access) AND the create-
+// per-restaurant Access editor (retired 2026-07-31 — Access is lib/accessTree.ts now) AND the create-
 // restaurant flow (app/api/admin/restaurants) so the two can never drift.
 //
 // These mirror docs/ACCESS-MODEL.md. Keep the DEFAULTS matching the migrations —
