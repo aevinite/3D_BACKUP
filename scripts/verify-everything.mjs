@@ -17,16 +17,11 @@
  * restores every setting it flips, and deletes every row it creates.
  */
 import { chromium } from "playwright";
-import { execFile } from "node:child_process";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { execFile, execFileSync } from "node:child_process";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { loginAs, adminCookie, adminHeaders } from "./sweep/login.mjs";
-// The access MODEL itself, bundled from lib/accessTree.ts by the npm script (the same esbuild
-// step verify:owner-home uses). Importing the real model instead of re-describing it in JS is
-// the whole point: a second copy of "where does this switch live" would drift, and drift is
-// what this suite exists to catch.
-import { ALL_NODES, nodeValue, nodePatch, extraPatch } from "../node_modules/.cache/accessTree.mjs";
 
 /** Merge a node's own patch with the Ratings mirror, without losing either branch. */
 const applyTwo = (a, b) => {
@@ -37,6 +32,31 @@ const applyTwo = (a, b) => {
 };
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The access MODEL itself, bundled from lib/accessTree.ts. Importing the real model instead of
+// re-describing it in JS is the whole point: a second copy of "where does this switch live" would
+// drift, and drift is what this suite exists to catch.
+//
+// The bundle is built HERE, not only by the npm script, because `node scripts/verify-everything.mjs`
+// is how every range run and every parallel lane actually starts this file — and without the bundle
+// that crashed on line 1 with a bare ERR_MODULE_NOT_FOUND naming a path inside node_modules. A
+// suite that can't start looks nothing like a suite that passed, but it also tells you nothing
+// about what to do. It rebuilds when lib/accessTree.ts is newer, so a stale bundle can't pass a
+// check the current model would fail.
+const MODEL_SRC = join(ROOT, "lib/accessTree.ts");
+const MODEL_OUT = join(ROOT, "node_modules/.cache/accessTree.mjs");
+const mtime = (p) => { try { return statSync(p).mtimeMs; } catch { return 0; } };
+if (mtime(MODEL_OUT) < mtime(MODEL_SRC)) {
+  try {
+    execFileSync("npx", ["esbuild", "lib/accessTree.ts", "--bundle", "--platform=node", "--format=esm",
+      "--alias:@=.", `--outfile=${MODEL_OUT}`, "--log-level=warning"], { cwd: ROOT, stdio: "inherit" });
+  } catch {
+    console.error("\n✗ could not bundle lib/accessTree.ts (needs esbuild). Run: npm run verify:everything\n");
+    process.exit(1);
+  }
+}
+const { ALL_NODES, nodeValue, nodePatch, extraPatch } = await import(pathToFileURL(MODEL_OUT).href);
+
 const ARGS = process.argv.slice(2);
 // Every OTHER suite in this folder takes `--base`, so `--base` is what a person types here too —
 // and it used to be accepted in silence and ignored, leaving the run pointed at the deployed site

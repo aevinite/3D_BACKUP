@@ -41,6 +41,27 @@ const ok = (m) => { pass++; console.log(`  ✅ ${m}`); };
 const bad = (m, extra) => { fail++; console.log(`  ❌ ${m}${extra ? `\n       ${extra}` : ""}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// Is BASE a DEV server? It matters, and it is not the same question as "is it localhost":
+// `next start` on localhost is a production build and offline works there.
+//
+// A dev server compiles and serves JavaScript ON DEMAND, so an offline reload asks for chunks the
+// online visit never fetched — nothing cached them, the page never hydrates, and the checks that
+// need the app's own code report "the menu is empty offline" as though the feature were broken. It
+// isn't; it simply cannot be judged here. sw.js says the same thing in its own comment ("Dev gets
+// network-first for everything").
+//
+// The tell is the chunk NAMES: dev names them after source paths (node_modules_…, components_…),
+// production uses opaque hashes. Measured on both, 2026-07-31.
+let IS_DEV_SERVER = false;
+try {
+  const html = await (await fetch(BASE + "/menu", { cache: "no-store" })).text();
+  IS_DEV_SERVER = /chunks\/(components|node_modules|app)_|next-devtools/.test(html);
+} catch { /* the reachability checks below report this properly */ }
+/** Name the real reason a needs-cached-code check failed, instead of blaming the feature. */
+const hydrationBlame = (msg) => (IS_DEV_SERVER
+  ? `${msg} — but this is a DEV server, which serves code on demand, so offline it asks for chunks that were never cached. Offline can only be judged on a production build: npm run build && npm start (test setup problem, not the app)`
+  : msg);
+
 // Registration is async: the very first load of a new install isn't controlled yet, and
 // every offline expectation below depends on control having been taken.
 async function waitControlled(page, tries = 40) {
@@ -187,6 +208,12 @@ async function run() {
   }
 
   try {
+    if (IS_DEV_SERVER) {
+      console.log(`\n⚠ ${BASE} is a DEV server. The checks that need the app's own code back from`);
+      console.log("  the cache cannot pass here (dev compiles chunks on demand, so an offline reload");
+      console.log("  asks for code the online visit never fetched). For a verdict on offline, run");
+      console.log("  against a production build: npm run build && npm start\n");
+    }
     // ══ MANAGER: can it be opened and read with no internet? ═══════════════════
     console.log("\n1) Offline layer installs (manager panel)");
     const mgrRoute = await loginAs(ctx, "manager", BASE);
@@ -570,7 +597,7 @@ async function run() {
       const t = (await own.locator("[role=status]").allTextContents().catch(() => [])).join(" ");
       return /No internet|saved figures/i.test(t) ? t : null;
     }, 40000);
-    notice ? ok("it admits the figures are saved ones, not live") : bad("the owner panel shows figures with no offline warning");
+    notice ? ok("it admits the figures are saved ones, not live") : bad(hydrationBlame("the owner panel shows figures with no offline warning"));
     await ctx.setOffline(false);
     await own.close();
 
@@ -610,7 +637,7 @@ async function run() {
       const n = await guest.locator(".item-card:not(.skeleton-card)").count();
       return n > 0 ? n : null;
     }, 45000);
-    offDishes ? ok(`the menu still lists ${offDishes} dishes offline (live was ${liveDishes})`) : bad("the guest menu is empty offline");
+    offDishes ? ok(`the menu still lists ${offDishes} dishes offline (live was ${liveDishes})`) : bad(hydrationBlame("the guest menu is empty offline"));
     await ctx.setOffline(false);
 
     // 409 is EXPECTED here: it's the clash refusal this suite deliberately provokes.
