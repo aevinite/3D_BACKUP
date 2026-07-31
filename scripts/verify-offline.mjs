@@ -157,6 +157,18 @@ async function run() {
     // and abort a whole section for no real reason.)
     let keys = Object.keys(tiles || {}).sort((x, y) => Number(x) - Number(y));
     if (!keys.length) keys = Array.from({ length: 30 }, (_, i) => String(i + 1));
+    // ONLY tables that really exist. The tile map deliberately includes tables ABOVE the floor
+    // count when they still hold live orders (a real table with an unpaid bill must never be
+    // hidden — see the table-ownership rule), so leftover test rows on e.g. table 9397561 put
+    // that number in here. Picking one made the app refuse the order it was asked to place —
+    // "Table 992 doesn't exist (this place has 30 tables)" — and the whole offline section then
+    // failed for a reason that was the fixture's, not the product's. (2026-07-31)
+    const floorCount = await (async () => {
+      const r = await staff.request.get(`${BASE}/api/editor/all`).then((x) => x.json()).catch(() => null);
+      const n = Number(r && (r.table_count ?? (r.settings && r.settings.table_count)));
+      return Number.isFinite(n) && n > 0 ? n : 30;
+    })();
+    keys = keys.filter((k) => { const n = Number(k); return Number.isFinite(n) && n >= 1 && n <= floorCount; });
     for (const k of keys) {
       const t = tiles[k];
       if (!t || t.state === "free") {
