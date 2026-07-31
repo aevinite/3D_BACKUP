@@ -453,7 +453,21 @@ async function needFH() {
 }
 const getState = async () => (await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json()).state;
 const setState = async (patch) => fetch(BASE + "/api/admin/restaurants/access-tree", { method: "POST", headers: HJ, body: JSON.stringify({ restaurant_id: (await needFH()).id, patch }) });
-const CACHE_MS = 9500;
+// How long to wait for a switch to become visible. This MUST clear the server's own caches,
+// and it did not: lib/panelAccess.ts caches an owner's restaurant list for PANEL_TTL_MS =
+// 30_000, so a 9.5s wait read the nav while the OLD entitlements were still cached and reported
+// "the owner's Menu page still shows when switched off" — twice, as a product bug it wasn't.
+// (Verified by hand: switch it off, wait 30s, and both the Menu and Activity links do disappear.)
+// Kept just over the server TTL, and the owner-nav phases poll instead of sleeping blind.
+const CACHE_MS = 31000;
+// Poll a reader until it agrees (or we give up), so a phase costs the real settle time instead of
+// a worst-case sleep — and can never pass or fail on a guess about someone else's cache.
+const settleUntil = async (read, want, ms = CACHE_MS + 6000) => {
+  const until = Date.now() + ms;
+  let last = await read();
+  while (!want(last) && Date.now() < until) { await wait(1500); last = await read(); }
+  return last;
+};
 let SNAP = null;
 
 phase("the access tree loads all five sections", async () => {
@@ -631,28 +645,24 @@ async function ownerNavLabels() {
 }
 phase("the owner's Menu page disappears when switched off", async () => {
   await setState({ sections: { menu: false } });
-  await wait(CACHE_MS);
-  const nav = await ownerNavLabels();
+  const nav = await settleUntil(ownerNavLabels, (t) => !/\bmenu\b/.test(t));
   await setState({ sections: { menu: true } });
   ok(!/\bmenu\b/.test(nav), `still a link: ${nav.slice(0, 140)}`);
 });
 phase("the owner's Menu page comes back when switched on", async () => {
   await setState({ sections: { menu: true } });
-  await wait(CACHE_MS);
-  const nav = await ownerNavLabels();
+  const nav = await settleUntil(ownerNavLabels, (t) => /\bmenu\b/.test(t));
   ok(/\bmenu\b/.test(nav), `did not return: ${nav.slice(0, 140)}`);
 });
 phase("the owner's Activity page disappears when switched off", async () => {
   await setState({ sections: { logs: false } });
-  await wait(CACHE_MS);
-  const nav = await ownerNavLabels();
+  const nav = await settleUntil(ownerNavLabels, (t) => !/activity/.test(t));
   await setState({ sections: { logs: true } });
   ok(!/activity/.test(nav), `still a link: ${nav.slice(0, 140)}`);
 });
 phase("the owner's Activity page comes back when switched on", async () => {
   await setState({ sections: { logs: true } });
-  await wait(CACHE_MS);
-  const nav = await ownerNavLabels();
+  const nav = await settleUntil(ownerNavLabels, (t) => /activity/.test(t));
   ok(/activity/.test(nav), `did not return: ${nav.slice(0, 140)}`);
 });
 phase("the owner's log ENDPOINT refuses while that page is off", async () => {
