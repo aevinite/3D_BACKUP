@@ -249,6 +249,18 @@ const GUARDS = [
   ["test safety — no script can raise a false alert", "verify:test-safety", false],
   ["money maths unit tests", "test:money", false],
   ["order totals end-to-end", "test:totals", true],
+  // GUARD ORDER: LEAVE IT ALONE UNLESS YOU MEASURE.
+  //
+  // Each of these fourteen guards launches its own browser and most of them seat, close or
+  // back-date tables. Chained on a busy machine they interfere, and the failure always LOOKS like
+  // a product fault ("couldn't seat table 30", "the clashing order was NOT flagged", "the check
+  // stopped early") when it is really the previous guard's floor or a browser that could not
+  // start. Every one of them passes standalone.
+  //
+  // I tried moving `offline` ahead of the table guards to give it a clean floor: it fixed offline
+  // and broke table-ownership, verify:live and access-live instead — one cascade traded for three.
+  // Reverted. If this needs solving properly, the fix is for each guard to tolerate the floor it
+  // finds (or claim its own table), not to shuffle this list.
   ["table ownership — a table shows only its own party", "verify:table-ownership", true],
   ["two parties never mix", "verify:two-parties", true],
   ["table lifecycle", "verify:lifecycle", true],
