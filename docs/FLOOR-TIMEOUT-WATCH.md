@@ -252,3 +252,54 @@ change). The sensible trigger is this check coming back **FIXED** on backup — 
 to show him, rather than a promise. What to tell him when asking: it changes no wording, no price
 and no tile on any screen; it only makes the floor draw faster; it is one database function, no
 deploy of the site needed.
+
+---
+
+# Owner reports — what the research found (2026-07-31)
+
+Researched because I suspected owner analytics of causing the floor timeouts. **They were not the
+cause** (that was two of our own 501-phase test suites saturating this instance). But the research
+found a real, separate bug and two things worth doing. Costs below are measured inside the database.
+
+## Fixed: the busiest-times heatmap could never finish (migration 241)
+
+`lfh_owner_heatmap` looked up the tax rate **once per order row** — `lfh_effective_tax_rate(o.restaurant_id)`
+inside its `SUM`. It was the only one of the 16 functions that use that rate to do so; the other 15
+already resolve it once. Now resolved once per restaurant via a tiny CTE and a LEFT join (a plain
+join would drop orphan orders and quietly change the revenue).
+
+|  | before | after |
+|---|---|---|
+| one busy tenant, all of 2026 | 8.2–16.3 s — **cancelled at 8 s** | 4.5–6.7 s — **finishes** |
+| all 15 restaurants, all of 2026 | 34.7–35.6 s — cancelled | 12.5–21 s — **still cancelled** |
+
+Proved with `node scripts/verify-heatmap-parity.mjs`: 62 comparisons, every day/hour bucket
+identical for orders *and* revenue, including all restaurants in one call (the only shape where rows
+carry different rates). The comparison was itself checked against a deliberate 0.01 rate nudge and
+caught it.
+
+## Still open, in priority order
+
+1. **The whole-portfolio heatmap over a long range still exceeds 8 s and still fails.** The remaining
+   cost is the scan, not the rate. It needs the data pre-aggregated by day-of-week **and hour** — the
+   existing `orders_daily_agg` cannot serve it because it has no hour dimension. That is a new rollup
+   plus a refresher, and it must come with the same parity proof. Not started.
+2. **`lfh_owner_sales_report` skips a tier.** It reads `orders_report_monthly_agg` and then scans raw
+   orders — with nothing in between — even though `orders_daily_agg` already summarises the current
+   month's completed days. Monthly rollup is rolled through **June**, so a July report scans ~49k raw
+   rows. One tenant, July: **32–53 ms** via raw vs **4–11 ms** for the daily-rollup path used by
+   `lfh_owner_revenue_timeseries`. Small in absolute terms, cheap to fix, do it when nearby.
+3. **The daily rollup runs two days behind** (`orders_daily_agg_state.rolled_through` = 2026-07-29
+   while today is 07-31). Every function that uses it therefore scans two days of raw orders instead
+   of none. Worth finding out what refreshes it and why it lags.
+4. **The amplifier, and it is not a code bug:** `orders` is **281 MB** while this instance's
+   `shared_buffers` is **224 MB**. The table cannot be cached, so any large scan reads from disk *and*
+   evicts the floor's hot pages — which is how heavy analytics makes unrelated panel reads slow.
+   Two honest options: shrink the hot set (much of the 399k orders here is demo/test data) or give the
+   instance more memory. Worth checking what AV live's real order count is before assuming it has the
+   same problem — it almost certainly has far fewer.
+
+**Measured and worth not forgetting:** for one tenant over one month every report is tens of
+milliseconds. The expensive shapes are *long ranges* and *all restaurants at once*. Any future work
+here should be judged on those two, not on a single-restaurant month.
+
