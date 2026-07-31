@@ -815,3 +815,234 @@ same page and same scroll level."*
 - [x] **Works on the phone too** — the admin's scrollport is `.adm-main` on desktop but `.adm`
   at 390px, where the document itself doesn't scroll at all; the first version only checked
   `.adm-main` and silently did nothing on a phone. Verified 390px and 1500px.
+
+## 2026-07-31 — The live floor rebuilt: no open/close, Take order everywhere, one bill popup
+
+Owner: *"make the whole table live of the manager panel like [PetPooja screenshot] … session will
+be mainly off so take order button will show in all tables … when the order is served there will
+be a small print button on the table, click it and it opens a whole popup with the whole bill and
+tax for preview, and at the bottom generate invoice and print, and mark as paid can be done there
+… we have to make the app fast, less clicks, no unnecessary two-time ask … remove the logic of
+open and close table completely from the whole code … [tile sketch: T1 top-left, seats top-right,
+notifications, live status, Take Order]"* — shown on **port 4937** for review before anything ships.
+
+- [x] **The tile has one fixed shape, from his sketch** — `T1` top-left, seats top-right (always,
+  not only when free), the notification badges on their own row, the live-status block, then
+  `＋ Take order` with the small 🖨 bill button beside it. Same four rows on every tile whatever
+  the table is doing. Verified on 30 tiles: 30 take buttons, 30 seat counts, 30 status blocks.
+- [x] **Take order on EVERY table** — reuses `data-take-order`, so the existing permission check
+  and the server's own re-check apply to it unchanged.
+- [x] **The 🖨 opens the bill popup** — the bill as it will print (dishes, subtotal, discount,
+  tax, total) with **Print · Generate invoice · Mark paid · Close**. Print generates the invoice
+  first if there isn't one (that IS the document that prints), so it never dead-ends.
+- [x] **Paid → the table frees itself**, proven live: order → serve → Mark paid → the tile went
+  back to `Free` on its own and the 🖨 disappeared.
+- [x] **Open / Close / Free are gone from the whole panel** — the tile's Open + RST/CLS, the
+  floor's "⬆ Open all / ⬇ Close all", the detail's "✓ Free table / ⏻ Close table", the orders
+  card's and the bill modal's "🪑 Free table", and the waiter tablet's "Open" chip + "Open this
+  table". Their dead functions were deleted, not left hanging. Verified: 0 such buttons render.
+- [x] **"Open · waiting for guests" is no longer shown** — a party with nothing ordered reads
+  `Free`. Normalised in ONE place per panel so tiles, filter counts and the detail always agree.
+- [x] **The walk-out escape hatch he chose: ✕ Cancel on each ticket** — `cancelOrder` existed but
+  NOTHING rendered a button for it, so this had to be built. Gated by `void_bills` (whose own
+  description is "…or closing a table unpaid after a walk-out") **and refused by the server** for
+  a role without it. Cancelling the last live order frees the table by itself. Verified live.
+- [x] **Two "are you sure"s removed** — sending an order no longer asks again after you press
+  "Send to kitchen", and cancelling no longer asks a second time about freeing the table.
+- [x] **The bill's customer is asked BEFORE the money**, not after. Paying used to fail its
+  auto-invoice with a 400 on any restaurant that requires a customer, leaving a settled bill with
+  no invoice — and when it did ask, the sheet appeared on top of a finger that had just tapped
+  Cash. Now: Mark paid → who is this bill for? → how did they pay? → done.
+- [x] **Size is a per-restaurant setting, not a per-device toggle** (his "classic" mode) — the
+  admin's "Tables per row" now goes to **20** and a tile may shrink to **100px**. It stays a
+  perfect SQUARE and sheds detail instead of clipping: the sub-line at 132px, the button's label
+  and the seat count at 112px. Measured at 20-per-row: 109×109, square, nothing clipped.
+- [x] **Every order now belongs to a party (migration 237)** — the guest QR path left
+  `session_id` NULL, so with sessions off a guest's order had no bill number, could not be
+  invoiced, could never auto-free the table, and **stopped counting on the tile** the moment a
+  waiter also ordered there. Applied to the dev DB.
+- [x] **A settled table always clears itself** — "Off — do nothing" is gone from that setting
+  (it would strand finished tables now that nobody can free one by hand). The choice left is
+  "free the table" or "keep the party seated", and with sessions off it's automatic.
+- [x] Guards green: `verify:ui`, `verify:taps`, `verify:clash`, `verify:access`,
+  `verify:table-ownership`, `verify:lifecycle`, `verify:two-parties`, `tsc`, `npm run build`.
+  `verify-table-ownership.mjs` was itself updated — it asserted the old "Open · waiting for
+  guests" wording.
+- [ ] **NOT done yet (agreed: after he looks at 4937)** — the guest side: name + phone captured
+  when ordering from the menu and the number verified at place-order (that becomes the whole of
+  what "sessions on" means), and the waiter tablet's tile getting the same four-row treatment.
+- [ ] **Nothing deployed.** Runs on port 4937 from the `feat/live-floor` worktree; AV live and
+  the backup site are both untouched.
+
+### Same day, second pass — the rail goes, tiles shrink, two buttons on the bill
+
+Owner: *"we don't even need the right side panel of req and stuff, and make the table small like
+the image I show you … there should only be option of generate invoice and print … I do not want
+this option completely on top, who serves what … not this right side panel option, only popup
+option, no right side popup option at all."*
+
+- [x] **The right-hand rail is gone completely** — both halves of it. The cards ("To accept",
+  Requests, Needs, Blocked) and the docked table detail, plus the collapse chevron, the
+  drag-to-resize divider and the "⇱ Dock" button. Their builders and handlers were deleted, not
+  hidden. Verified: 0 `.floor-side` / `.fc-card` / resizer / toggle nodes on the floor.
+- [x] **A table opens as a POPUP, always** — there used to be two modes and which one you got
+  depended on remembered state, so the same tap behaved differently on different days. One entry
+  point now (`openFloatingTable`), one closer (`closeFloatingTable`, which also drops the tile's
+  ring and stops that table pulling its slice). Verified: 1 popup, 0 rails, no Dock button.
+- [x] **👥 "Who serves what" is off the floor header** — its home is Settings → Access.
+- [x] **Tiles are compact like his reference** — default tables-per-row 6 → **12** (and
+  French House set to 12 on dev so he sees it). Tile is 111×111 at his window.
+- [x] **Fixed a padding bug that fell out of it** — a tile's own padding used `cqw`, but a
+  container-query unit inside the container's OWN declaration resolves against an ANCESTOR, so it
+  always clamped to the 13px maximum: 28px of a 111px tile was padding and the button had no room
+  for its label, showing a bare "＋". Padding now derives from `--per-row`, so a dense floor gets
+  tight padding and a 6-per-row floor keeps exactly what it had. Inner width 83px → 95px, and the
+  button reads "Take order" again. The shed-detail thresholds were re-based on inner width too
+  (they were written as if they were the tile's outer width).
+- [x] **The bill popup shows only 🧾 Generate invoice and 🖨 Print** — 💳 Mark paid appears
+  **after** it's issued/printed, which is the order he asked for ("when printed then mark as
+  paid"). Proven end to end: two buttons → Print → asked who the bill is for → invoice #, printed
+  → popup returns with Print + Mark paid → Cash → the tile goes back to **Free** by itself.
+- [x] **Fixed: printing silently did nothing on a bill that needed an invoice first.**
+  `ensureTableSlice` skipped its refetch for an already-open table, and the invoice number lives
+  on the SESSION row — which the summary refresh doesn't carry. So the code generated invoice #41,
+  re-read a pre-invoice copy, decided its own invoice had failed and returned without printing.
+  It now force-refreshes that one table when something was just written to its session.
+- [x] **The stats strip shows with sessions OFF** — it used to render nothing at all in that mode,
+  which is now the normal setup, so the floor lost "how full am I / who owes me" for exactly the
+  restaurants that live on this screen.
+- [x] **"Needs you" counts only what you can act on** — a request for a table the restaurant
+  doesn't have was counted anyway; with the queue card gone it would have sat there forever with
+  nothing on screen to answer it (it read 4 with nothing to click; now 0).
+- [x] Guards green again after all of it: `verify:ui`, `verify:taps`, `verify:clash`,
+  `verify:access`, `verify:table-ownership`, `verify:lifecycle`, `verify:two-parties`, `tsc`,
+  `npm run build`. `verify-table-ownership.mjs` needed updating a second time — it clicked a tile
+  and read the docked detail, which no longer exists, and left popups covering the grid.
+- [ ] Still not deployed; still on port 4937 from the `feat/live-floor` worktree.
+
+### Same day, third pass — tap a free table to order; KOT moves to the top
+
+Owner: *"when the table is free and you click the table directly the ordering thing should pop, no
+option for take order; and whenever an order is going on, at that time we want take order option.
+I want the KOT option on the top where who does what was, and it will have to choose a table and
+it will work after like it was before, so before a table or order is taken you can mark table as
+VIP from that option."*
+
+- [x] **An empty tile has NO buttons at all** — tapping the tile itself opens the order builder.
+  One tap instead of tile → popup → button. Verified: a free tile renders 0 buttons and tapping
+  it opens "＋ Take order · Table 5" with no table popup in between.
+- [x] **"＋ Take order" appears only once there IS an order** (to add to it), alongside the ✓
+  accept and the 🖨 bill. A busy tile still opens its popup on tap. Verified both ways.
+- [x] **The permission still decides what a tap does** — the free-tile shortcut has no button for
+  the x-ray to hide, so a manager without `take_orders` gets the table popup instead of a builder
+  they can't use (`takeOrdersAllowed()`); the server refuses it regardless.
+- [x] **🧾 KOT ▾ sits at the top of the floor**, exactly where "Who serves what" used to be, and
+  asks **which table** first — then hands over to the same table-and-KOT menu as before, so
+  everything downstream is unchanged. Gated by `table_ops` (module + power) and registered in
+  XRAY_CONTROLS like the in-popup one.
+- [x] **Table type / VIP is in that menu and works on an empty table** — which is the point: with
+  a free tile going straight to ordering, there was no other way to mark a table before the guests
+  order. Verified end to end: KOT ▾ → Which table? (30 offered) → free T7 → Table type → VIP →
+  the tile picked up the 👑 VIP ribbon. Everything that genuinely needs a party (change table,
+  merge, move, split, reprint) shows greyed with its honest reason ("table closed", "no movable
+  KOT"), which is how that menu already behaved.
+- [x] Guards green: `verify:ui`, `verify:taps`, `verify:access`, `tsc`. Test VIP mark reverted.
+- [ ] **Open question for the owner:** he reports "in the setting there is still a size toggle and
+  stuff" — the old S/M/L tile-size buttons are gone from the code (grep-verified), and the manager
+  Settings → Tables holds only Number of tables (admin-only), per-table name+seats, QR links and
+  Auto-clear. The only size control left anywhere is the ADMIN panel's "Tables per row" + its
+  preview, which is the one he asked for. Asked him to point at which screen.
+
+### Same day, fourth pass — your row number wins, and a Classic/Custom floor plan
+
+Owner: *"I will just tell you how much tables I want in a particular row. You have to make it
+dynamic such that even if you have to make it very small, you will make it very small… I will keep
+a reasonable number."* and *"there will be a toggle option for classic and customise. Whenever
+custom is selected it will be hardcoded by me according to restaurant structure — where the
+vegetable is, where in the restaurant… I will hardcode that, so you don't need to do that."*
+
+- [x] **Tables-per-row is now an instruction, not a suggestion.** It used to be a polite target:
+  the grid refused to shrink a tile past a readability floor and quietly returned FEWER columns
+  than asked (16 gave you 14, with nothing saying why). Now the tile shrinks to honour the number.
+  Measured on his window: 6→6 (235px), 12→12 (117px), 20→20 (70px), 30→30 (47px) — every one
+  square, none clipped.
+- [x] **Two fixed sizes were secretly fighting the number** and both had to scale with density:
+  the 14px grid gap (at 30 per row that's ~400px of pure gutter — the actual reason 30 became 25)
+  and the progress bar's 8px top margin (which alone overflowed a 46px tile: 35px of content in a
+  34px box, the "clipped" flag). Wide floors keep exactly the gap and spacing they had.
+- [x] **The floor sheds detail as it shrinks, in priority order** — the decorative ＋, then the
+  sub-line, then the seat count, then the state WORD. The table number, the state COLOUR and the
+  progress bar always survive, because that is how a dense floor is read: scan colour, then tap.
+  The tile number's own font floor (19px) had to go too — it overflowed anything under ~60px.
+- [x] **`TILE_MIN_PX` re-purposed honestly**: 100px "readability" → 44px **tappability**. A column
+  only comes back when a tile would stop being a finger target, which in practice means a phone.
+- [x] **Classic / Custom toggle** (migration 238, `settings.floor_layout_mode`, admin-owned,
+  default classic, with a DB CHECK so a typo can't take a floor away). Admin → the restaurant →
+  Settings → **Floor layout**.
+- [x] **Custom draws the room as it really is** — from a hand-written plan per restaurant in
+  **`public/panels/floor-layouts.js`** (keyed by slug; documented shape + a worked example). He
+  writes `{ t, x, y, w, h }` per table plus optional zone captions ("A/C", "Terrace"); empty cells
+  are how an aisle or the kitchen gets drawn. Proven live: a 2×2 table renders 363×363, a 3×1
+  table renders 550×177 (a long table, not a giant square), captions sit on their own text-height
+  rows, and the empty column reads as an aisle.
+- [x] **Two ways it refuses to lose a table.** Custom on with no plan yet → the classic grid plus
+  an on-screen line saying exactly that (proven: 30 tiles, no empty floor). A half-written plan →
+  the unplaced tables appear underneath under "Not placed on the plan yet — 18 tables".
+- [x] **The admin's own Auto-close wording fixed too** — it still offered "Off — do nothing",
+  which can't be true now that nobody can free a table by hand.
+- [x] Guards green: `verify:ui`, `verify:taps`, `verify:access`, `verify:clash`,
+  `verify:table-ownership`, `verify:lifecycle`, `verify:two-parties`, `tsc`, `npm run build`.
+  `verify-table-ownership.mjs` needed a third update: it tapped a free tile and waited for a popup
+  — which is the behaviour we changed. It now asserts the NEW promise (a free tile opens the order
+  builder, for that table, on an empty cart) and keeps the stronger data checks unchanged.
+
+### Same day, fifth pass — the ghost-bill root cause, and a full-suite sweep
+
+Owner: *"what is this error whenever I go in the detail section… when it was not clicked 0/1 was
+written and when I click it, 0/7 was written… I go to the root and this error is from before also"*
+then *"fix all the other fix, if all bugs are fixed make it live and do the full test again… if you
+find anything just instantly fix it… till every error is not solved."*
+
+- [x] **THE BUG WAS A BILLING BUG, not a display glitch.** Table 2 held three live orders: one from
+  that evening's party, and **two from 7 July with no party at all**. The tile asked the server,
+  which counts only the current party → 0/1 · ₹441 (right). The detail counted in the browser, which
+  admitted *any* party-less row with no date test → 7 dishes · ₹6,048. "Mark all paid" there would
+  have charged that evening's guests for food ordered 24 days earlier, and the number jumping on
+  click was simply the two answers disagreeing.
+- [x] **One rule now, in all three readers** (the `?table=` slice, the manager's `ordersForTable`,
+  the waiter's `ordersOf`): an order is this party's if it carries the party's id, **or** has no
+  party but was taken after the party sat down (60s of slack for an order that beats its session
+  row). An order older than the party cannot be theirs. Nothing is hidden: a genuinely party-less
+  order taken during this sitting still counts. The 30 July fix closed the *closed-session* door;
+  this closes the *no-session* one.
+- [x] **Proven on another table, not on his** (he asked that table 2 be left as evidence): planted
+  a 3-week-old party-less order plus a fresh party on table 3 → tile and detail both read the
+  party's order only, server hands over 1 row, waiter agrees. **Table 2's data was never touched.**
+- [x] **Migration 239 cleans the rows themselves** — 38 ownerless live orders (₹12,873, oldest
+  7 July, 27 of them still New/Cooking so they sat on the kitchen pass as three-week-old tickets).
+  Same two moves migration 232 makes on close: unpaid non-khata → a visible ✕ void + archived,
+  everything else archived only. Nothing deleted; all still in Bills and the records. 38 → 2 left,
+  and both survivors are legitimate (their parties opened *before* those orders).
+- [x] **Migration 240 — the parity red went to one.** Five functions were live with no migration
+  (`verify:db-parity`). Four are load-bearing (`lfh_banquet_place_order` calls them) so they are
+  written down verbatim with their real grants; `lfh_owner_heatmap_old` is called by nothing and was
+  dropped instead of enshrined.
+- [x] **A real UI leak found by the sweep and fixed:** three admin screens printed
+  `<!DOCTYPE html> <!--[if lt IE 7]> … -->` — a proxy error page stored as an error detail and
+  rendered verbatim (verify:everything's "leaked: -->"). New `readableDetail()` in
+  components/admin/shared.tsx strips markup only when the text really is an HTML page, so genuine
+  stack traces keep their line breaks; applied at the four render sites, and the summary is capped
+  at the source too. 0 leaks on all three pages now, `verify:live` green.
+- [x] **Two "failures" that were the test environment, not the app.** The offline suite's guest-menu
+  and owner-panel checks fail against `next dev`: Next's dev bundle can't finish loading offline, so
+  React never hydrates — the page shows its cached shell with no dish list and no notice. Proof it's
+  the environment: with the network cut, a fetch from inside that same page returns all 59 dishes.
+  Against a production build the same suite passes **52/52**. Written into the suite's header so the
+  next person doesn't lose an hour to it.
+- [x] Guards green: ui · taps · clash · access · test-safety · board-sig · tsc · build ·
+  table-ownership · lifecycle · two-parties · customers (64/64) · offline (52/52 on a prod build) ·
+  live (21/21) · owner-home · live-rush · db-parity (bar the AV-live item below).
+- [ ] **NEEDS HIS YES — one AV-live item.** `lfh_owner_heatmap` DIFFERS between the two databases:
+  AV live is running older code than we test. Fixing it means running the pending migration on the
+  AV live database, which is an explicit-permission action. Nothing was touched.
+- [ ] The 347-phase `verify:everything` sweep is still running at the time of writing.

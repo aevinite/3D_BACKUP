@@ -28,9 +28,19 @@ export async function maybeAutoSettle(
     const rid = orders[0]?.restaurant_id;
     if (!rid) return;                                                    // can't scope settings without it → bail safely
 
-    const s = await sb.from("settings").select("auto_table_action").eq("restaurant_id", rid).maybeSingle();
-    const mode = (s.data as { auto_table_action?: string } | null)?.auto_table_action;
-    if (mode !== "close" && mode !== "restart") return; // 'off' / unset → never act
+    const s = await sb.from("settings").select("auto_table_action,sessions_enabled").eq("restaurant_id", rid).maybeSingle();
+    const cfg = s.data as { auto_table_action?: string; sessions_enabled?: boolean } | null;
+    // A SETTLED TABLE ALWAYS CLEARS ITSELF (owner, 2026-07-31). Staff have no way to open,
+    // close or free a table by hand any more, so "do nothing" is no longer one of the choices:
+    // it would leave every finished table sitting on the floor with no way out but cancelling a
+    // paid order. The only real question left is WHICH kind of clearing, and it only matters
+    // when dining sessions are on:
+    //   • sessions ON  + 'restart' → clear the round, keep the party seated for their next order
+    //   • sessions ON  + anything else → free the table
+    //   • sessions OFF → free the table (there is no party to keep seated)
+    // 'off' / unset therefore reads as 'close' — deliberately, so an old row or a restaurant
+    // that never touched the setting still gets a floor that empties itself.
+    const mode = cfg?.sessions_enabled && cfg?.auto_table_action === "restart" ? "restart" : "close";
 
     if (!orders.every((o) => o.payment_status === "paid")) return;        // bill not fully paid
     if (!orders.every((o) => o.status === "served")) return;             // something not served

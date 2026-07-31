@@ -14,6 +14,18 @@
 //   6. The GUEST menu also survives an offline reload with its dishes intact.
 //
 // Headless, against a dev server. Nothing here touches a live stack.
+// ⚠ RUN THIS AGAINST A PRODUCTION BUILD, not `next dev` (learned the hard way, 2026-07-31).
+//   npm run build && npx next start --port 4938
+//   npm run verify:offline -- --base http://localhost:4938
+// Against a dev server the client-rendered checks fail for a reason that has nothing to do with
+// the app: Next's dev bundle is split into many chunks and served through HMR, so once the
+// network is cut the page's JavaScript can't finish loading and React never hydrates. The page
+// then shows its cached HTML shell with no dish list and no <OfflineNotice> — which reads exactly
+// like "the guest menu is empty offline" and "the owner panel shows figures with no offline
+// warning". Proof it is the environment: with the network cut, a fetch from inside that same page
+// returns the saved menu (200, all 59 dishes) — the service worker is fine, nobody is asking it.
+// The same suite passes 52/52 against a production build.
+
 import { chromium } from "playwright";
 import { loginAs as loginOnce } from "./sweep/login.mjs";
 

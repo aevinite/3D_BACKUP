@@ -68,12 +68,36 @@ for (const [name, body] of [["manager ordersForTable", mgr], ["waiter ordersOf",
 // ── DB helpers ───────────────────────────────────────────────────────────────
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const must = (r) => { if (r.error) throw new Error(r.error.message); return r.data; };
+// The floor-wide scans below read a LOT of rows, and against a big shared dev database the API
+// gateway sometimes answers "upstream request timeout". That is a blip, not a finding — but it
+// killed the whole run before the later sections could even start (twice on 2026-07-31). Retry a
+// few times, then fail honestly. No check is weakened: the same query, the same assertions.
+const mustRetry = async (make, tries = 4) => {
+  for (let i = 1; ; i++) {
+    const r = await make();
+    if (!r.error) return r.data;
+    if (i >= tries || !/timeout|502|503|504|fetch failed/i.test(r.error.message || "")) throw new Error(r.error.message);
+    console.log(`  · the database timed out reading the floor — retry ${i}/${tries - 1}`);
+    await new Promise((res) => setTimeout(res, 1500 * i));
+  }
+};
 
 // ── B. DATA: nothing on any floor belongs to a party that has left ───────────
 head("B. Live data — no order left behind by a closed session");
 {
-  const live = must(await sb.from("orders").select("id,restaurant_id,table_number,session_id,status,payment_status")
-    .eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(5000));
+  // ONE QUERY PER RESTAURANT, not one across all of them (2026-07-31). The unscoped version
+  // filtered only on archived/deleted/status, which on a database with a few hundred thousand
+  // demo orders is a full scan — the API gateway answered "upstream request timeout" every time
+  // and the whole run died before section C even started. Scoping by restaurant_id uses the
+  // orders(restaurant_id, …) index, so each read is small and fast. Identical coverage: every
+  // restaurant is still visited, and the assertions below are untouched.
+  const rests = await mustRetry(() => sb.from("restaurants").select("id").limit(200));
+  const live = [];
+  for (const r of rests) {
+    const part = await mustRetry(() => sb.from("orders").select("id,restaurant_id,table_number,session_id,status,payment_status")
+      .eq("restaurant_id", r.id).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000));
+    live.push(...part);
+  }
   const sids = [...new Set(live.map((o) => o.session_id).filter(Boolean))];
   const sess = sids.length ? must(await sb.from("sessions").select("id,status").in("id", sids)) : [];
   const status = new Map(sess.map((s) => [s.id, s.status]));
@@ -85,11 +109,13 @@ head("B. Live data — no order left behind by a closed session");
   // had time to settle, and skip only rows written in the last few seconds. Nothing real is hidden
   // — a genuine leak is still failing on the very next run. (2026-07-31)
   const SETTLING_MS = 15000;
-  const freshIds = new Set(
-    must(await sb.from("orders").select("id")
-      .eq("archived", false).is("deleted_at", null).neq("status", "cancelled")
-      .gte("created_at", new Date(Date.now() - SETTLING_MS).toISOString()).limit(500)).map((o) => o.id),
-  );
+  const fresh = [];
+  for (const r of rests) {
+    fresh.push(...await mustRetry(() => sb.from("orders").select("id")
+      .eq("restaurant_id", r.id).eq("archived", false).is("deleted_at", null).neq("status", "cancelled")
+      .gte("created_at", new Date(Date.now() - SETTLING_MS).toISOString()).limit(500)));
+  }
+  const freshIds = new Set(fresh.map((o) => o.id));
   const ghosts = live.filter((o) => o.session_id && status.get(o.session_id) !== "open" && !freshIds.has(o.id));
   ghosts.length === 0
     ? pass(`${live.length} live orders checked — every settled one belongs to an OPEN session`)
@@ -150,6 +176,72 @@ head("C. Closing a session — its food leaves the floor with it");
       await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true }).in("id", [unpaidId, paidId]);
       await sb.from("sessions").delete().eq("id", s1.id);
     }
+  }
+}
+
+// ── C2. AN ORDER OLDER THAN THE PARTY IS NOT THE PARTY'S ─────────────────────
+// The second door to the same bug (owner report, 2026-07-31). Section C covers an order whose
+// session was CLOSED. This covers one with NO session at all: table 2 carried two live orders
+// from 7 July with session_id NULL, and every reader admitted "any session-less row" without a
+// date test. The tile counted the party's 1 dish (right); the browser's slice handed over all
+// three, so the detail said 7 dishes / ₹6,048 and "Mark all paid" would have charged tonight's
+// guests for July. A party-less row taken DURING this sitting still counts — never hide an order.
+{
+  head("C2. A party-less order from before the party sat down never joins its bill");
+  const rid = must(await sb.from("staff_users").select("restaurant_id").eq("username", "diagm1").limit(1))[0].restaurant_id;
+  const count = must(await sb.from("settings").select("table_count").eq("restaurant_id", rid).limit(1))[0]?.table_count || 10;
+  const busy = new Set([
+    ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", rid).neq("status", "closed")).map((s) => String(s.table_number)),
+    ...must(await sb.from("orders").select("table_number").eq("restaurant_id", rid).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
+  ]);
+  const T = [...Array(count).keys()].map((n) => n + 1).reverse().find((n) => !busy.has(String(n)));
+  if (!T) console.log("  ! no empty table to test on — skipped");
+  else {
+    const t = String(T);
+    // three weeks old, no party at all — exactly the shape of the rows found on table 2
+    const stray = must(await sb.from("orders").insert({
+      restaurant_id: rid, table_number: t, session_id: null, status: "preparing", payment_status: "pending",
+      items: [{ id: "own-check", title: "OWNCHK stray dish", qty: 2, price: 500, status: "preparing" }],
+      subtotal: 1000, tax: 50, total: 1050, created_at: new Date(Date.now() - 21 * 864e5).toISOString(),
+    }).select("id"))[0];
+    // tonight's party, seated now, with one dish of its own
+    const party = must(await sb.from("sessions").insert({
+      restaurant_id: rid, table_number: t, status: "open", opened_by: "waiter",
+      opened_at: new Date().toISOString(), last_activity_at: new Date().toISOString(),
+    }).select("id,opened_at"))[0];
+    const mine = must(await sb.from("orders").insert({
+      restaurant_id: rid, table_number: t, session_id: party.id, status: "preparing", payment_status: "pending",
+      items: [{ id: "own-now", title: "OWNCHK tonight dish", qty: 1, price: 200, status: "preparing" }],
+      subtotal: 200, tax: 10, total: 210,
+    }).select("id"))[0];
+
+    const sum = must(await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: t }));
+    const tile = (sum && sum.tiles && sum.tiles[t]) || {};
+    const due = Math.round(Number(tile.due) || 0);
+    due === 210
+      ? pass(`the server tile bills only tonight's party (₹${due})`)
+      : fail(`the server tile says ₹${due} due — tonight's party ordered ₹210; a 3-week-old party-less order has joined the bill`);
+
+    if (BASE) {
+      const { loginAs } = await import("./sweep/login.mjs");
+      const { chromium } = await import("playwright");
+      const br = await chromium.launch();
+      const ctx = await br.newContext();
+      await loginAs(ctx, "manager", BASE);
+      const rows = await (await ctx.request.get(`${BASE}/api/editor/orders?table=${t}`)).json();
+      const titles = (Array.isArray(rows) ? rows : []).flatMap((o) => (o.items || []).map((i) => i.title)).join(" | ");
+      !/stray dish/.test(titles)
+        ? pass("the browser is never even sent the older party-less order")
+        : fail(`the ?table= slice still hands over the 3-week-old order (got: ${titles})`);
+      /tonight dish/.test(titles)
+        ? pass("tonight's own order is still there (the fix hides nothing that belongs)")
+        : fail(`tonight's order is missing from the slice (got: ${titles})`);
+      await br.close();
+    }
+
+    await sb.from("orders").update({ deleted_at: new Date().toISOString(), archived: true, status: "cancelled" }).in("id", [stray.id, mine.id]);
+    await sb.from("sessions").delete().eq("id", party.id);
+    console.log("  · test rows cleaned up");
   }
 }
 
@@ -216,15 +308,28 @@ if (!BASE) {
     }
 
     const tile = (await fr.locator(`.ftile[data-floor-table="${T}"]`).innerText()).replace(/\n/g, " · ");
-    /Open · waiting for guests/.test(tile) ? pass(`manager tile: "${tile}"`) : fail(`manager tile reads "${tile}" — expected the fresh "Open · waiting for guests"`);
+    // A fresh party with nothing ordered reads "Free" (owner, 2026-07-31): opening and closing
+    // a table by hand is gone, so "Open · waiting for guests" is no longer a state a person is
+    // shown — an empty table is simply available. What this check is really about is that the
+    // tile does NOT wear the PREVIOUS party's state, so it asserts that instead.
+    /Free/.test(tile) && !/Preparing|Ready to serve|Served|due/.test(tile)
+      ? pass(`manager tile: "${tile}"`)
+      : fail(`manager tile reads "${tile}" — a table whose party has left must read as free, with no leftover state`);
+    // Tapping an EMPTY tile goes straight into taking an order now (owner, 2026-07-31) — there is
+    // no table popup to inspect for a free table, by design. So the "inherits nothing" promise is
+    // checked where it now shows: the order builder must open on an EMPTY cart, with none of the
+    // previous party's dishes carried into it. (The stronger data checks — the floor slice and the
+    // records search — run below and are unchanged.)
     await fr.locator(`.ftile[data-floor-table="${T}"]`).click();
-    await fr.locator("[data-table-detail]").waitFor({ timeout: 30000 });
-    await page.waitForTimeout(2500); // let the per-table slice land
-    const detail = await fr.locator("[data-table-detail]").innerText();
-    !/LEFTOVER check dish/.test(detail) ? pass("manager detail lists none of the old party's dishes") : fail("manager detail adopted the old order:\n" + detail.slice(0, 400));
-    !/KOT #/.test(detail) ? pass("manager detail has no order rows at all (the table really is fresh)") : fail("manager detail lists order rows on a table nobody has ordered at:\n" + detail.slice(0, 300));
-    !/Due ₹/.test(detail) ? pass("manager detail shows no money due on the new table") : fail("manager detail shows money due that isn't this party's");
-    !/Preparing/.test(detail) ? pass('manager detail is not "Preparing"') : fail('manager detail says "Preparing" on a table nobody has ordered at');
+    await fr.locator(".to-body").waitFor({ timeout: 30000 });
+    await page.waitForTimeout(1500);
+    const builder = await fr.locator(".to-body").innerText();
+    /Table ${T}\b/.test(await fr.locator(".tbl-modal-head h3").first().innerText()) || true; // heading is cosmetic
+    !/LEFTOVER check dish/.test(builder) ? pass("the order builder carries none of the old party's dishes") : fail("the order builder opened holding the previous party's dish:\n" + builder.slice(0, 300));
+    const cartLines = await fr.locator(".to-lines .to-line").count();
+    cartLines === 0 ? pass("the order builder opens on an empty cart (a fresh party starts from nothing)") : fail(`the order builder opened with ${cartLines} line(s) already in the cart`);
+    await fr.locator(".tbl-modal-close").first().click().catch(() => {});
+    await page.waitForTimeout(600);
 
     // TWO SEPARATE PROMISES, and they must BOTH hold:
     //  (a) the FLOOR slice (?table=) carries only the party sitting there now — since the
@@ -241,22 +346,41 @@ if (!BASE) {
       ? pass("the old order is still findable in the records (Bills search) — off the floor, not erased")
       : fail("the old order is not in the records search — taking it off the floor must never hide it");
 
+    // Close whatever popup is still open from the checks above — a centred popup covers the
+    // grid, so the first click of the sweep below would land on the card, not on a tile.
+    for (const btn of await fr.locator("[data-float-close]").all()) await btn.click().catch(() => {});
+    await page.waitForTimeout(400);
+
     // CROSS-TABLE SWEEP (owner, 2026-07-30): walk tile → tile and check the detail always
     // describes the table you actually clicked, and its dish count matches that tile.
     const tiles = await fr.locator(".ftile").evaluateAll((els) => els.slice(0, 8).map((e) => ({
       t: e.getAttribute("data-floor-table"), text: e.innerText.replace(/\n/g, " · "),
     })));
     for (const { t, text } of tiles) {
+      const tileFree = /Free/.test(text) && !/Preparing|Ready to serve|Served|due/.test(text);
       await fr.locator(`.ftile[data-floor-table="${t}"]`).click();
-      await page.waitForTimeout(900);
-      const d = await fr.locator("[data-table-detail]").innerText();
-      const heading = (d.split("\n")[0] || "").trim();
-      const okName = new RegExp(`(^|\\D)${t}(\\D|$)`).test(heading) || /Table/.test(heading);
-      const tileFree = /Free · /.test(text) || /waiting for guests/.test(text);
-      const detailBusy = /Due ₹|Preparing|Ready to serve/.test(d);
-      if (!okName) fail(`clicked table ${t} but the detail is headed "${heading}"`);
-      else if (tileFree && detailBusy) fail(`table ${t}'s tile says "${text}" while its detail shows orders/money — the panels disagree about whose food this is`);
-      else pass(`table ${t}: tile "${text}" matches its own detail`);
+      await page.waitForTimeout(1100);
+      // What a tap opens depends on the tile (owner, 2026-07-31): an EMPTY table goes straight
+      // into taking an order, a busy one opens its own popup. Either way the promise under test is
+      // the same — you land on the table you actually pressed, carrying only that table's work.
+      if (tileFree) {
+        const head = (await fr.locator(".to-body").isVisible().catch(() => false))
+          ? (await fr.locator(".tbl-modal-head h3").first().innerText().catch(() => "")).trim()
+          : "";
+        if (!head) fail(`tapped free table ${t} but no order builder opened`);
+        else if (!new RegExp(`(^|\\D)${t}(\\D|$)`).test(head)) fail(`tapped free table ${t} but the order builder is headed "${head}"`);
+        else pass(`table ${t}: tile "${text}" → order builder for ${t}`);
+        await fr.locator(".tbl-modal-close").first().click().catch(() => {});
+      } else {
+        const card = fr.locator(`[data-floating-table="${t}"] [data-table-detail]`);
+        const d = await card.innerText().catch(() => "");
+        const heading = (d.split("\n")[0] || "").trim();
+        if (!d) fail(`tapped busy table ${t} but its popup never opened`);
+        else if (!(new RegExp(`(^|\\D)${t}(\\D|$)`).test(heading) || /Table/.test(heading))) fail(`clicked table ${t} but the detail is headed "${heading}"`);
+        else pass(`table ${t}: tile "${text}" matches its own detail`);
+        await fr.locator(`[data-floating-table="${t}"] [data-float-close]`).click().catch(() => {});
+      }
+      await page.waitForTimeout(300);
     }
     errs.length ? fail("console errors: " + errs.slice(0, 3).join(" | ")) : pass("no console errors while clicking around the floor");
 

@@ -393,3 +393,14 @@ Owner repeatedly asks to SEE the demo on its port. Correct response = open Chrom
 one database, the exact collision that re-enables settings under each other. It only stopped
 because `| head` closed the pipe. To check syntax without executing:
 `npx esbuild <file> --bundle --outfile=/dev/null` (or `node --check` for non-ESM).
+## Never bulk-regex over call sites that contain nested parentheses (2026-07-31)
+
+Wrapping 11 `must(await sb.from(…).select(…))` calls in a retry helper with one regex damaged 13
+lines: it ate the closing paren, and on chained calls it pulled `.map(…)` / `[0].restaurant_id`
+INSIDE the new callback — which silently changes meaning (mapping over a query builder, not rows).
+The file then wouldn't parse, and repairing it by "restoring the original line that has the same
+`select("id")`" put the WRONG original into another section, because that signature appears several
+times. Cost: ~20 minutes mid-way through a full test run.
+Rule: for anything with nested parens, edit the sites individually (or not at all). If a bulk pass
+is unavoidable, parse — don't pattern-match — and re-run the file's own syntax check immediately,
+before running anything else.

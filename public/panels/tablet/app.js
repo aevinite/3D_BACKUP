@@ -327,10 +327,18 @@ const sessionOf = (t) => state.data.sessions.find((s) => String(s.table_number) 
 // dishes, and this panel would have carried them onto the new bill. state.data.sessions only
 // ever holds NON-closed sessions, so an order pointing at a closed session fails this test.
 // `archived` rows are off the floor by definition. Mirrors lfh_table_view_summary.
+// Whose orders are at table t? THIS party's — its own session id, or a party-LESS row taken
+// during this sitting (banquet / legacy paths, never hidden). An order OLDER than the party is not
+// the party's: table 2 held two live orders from 7 July with no session, and admitting every
+// party-less row put them on tonight's bill (owner report, 2026-07-31; the manager panel and the
+// server slice enforce the same rule, so all three agree).
 const ordersOf = (t) => {
   const s = sessionOf(t);
+  const since = s && s.opened_at ? new Date(s.opened_at).getTime() - 60000 : 0; // 60s of slack for an order that beat its session row
   return state.data.orders.filter((o) => String(o.table_number) === String(t) && o.status !== "cancelled" && !o.archived
-    && (!o.session_id || (s && o.session_id === s.id)));
+    && (s
+      ? (o.session_id === s.id || (!o.session_id && (!since || new Date(o.created_at || 0).getTime() >= since)))
+      : !o.session_id));
 };
 // sliceLoaded(t): has table t's FULL slice (session row or a live order) landed yet? The grid
 // runs on the slim summary; a table's full detail slice is only fetched when you tap it. Before
@@ -384,8 +392,15 @@ function dishRowsOf(o) {
 // badge counts), or a synthetic "free" tile when the summary has none. The grid reads ONLY
 // this — never the full board — so an unselected table needs no order rows cached.
 function summaryTile(t) {
-  return (state.summary.tiles || {})[String(t)]
-    || { state: "free", label: "Free", meta: "tap to open", members: 0, pending: 0, counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, due: 0, pay: "", hasNew: false, hasCall: false, hasReq: false, hasJoin: false, reqs: 0, calls: 0 };
+  const tile = (state.summary.tiles || {})[String(t)];
+  if (!tile) return { state: "free", label: "Free", meta: "", members: 0, pending: 0, counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, due: 0, pay: "", hasNew: false, hasCall: false, hasReq: false, hasJoin: false, reqs: 0, calls: 0 };
+  // "Open · waiting for guests" is not a state anybody manages any more (owner, 2026-07-31):
+  // a party with nothing ordered is an AVAILABLE table. The server RPC still computes it (it's
+  // shared with other panels), so it's re-presented here — at the source, so the tiles, the
+  // Active/Free filter counts and tileIsOpen() can never tell three different stories.
+  if (tile.state === "waiting") return Object.assign({}, tile, { state: "free", label: "Free", meta: "" });
+  if (tile.state === "free") return Object.assign({}, tile, { meta: "" }); // "tap to open" is dead wording
+  return tile;
 }
 // The per-restaurant waiter calls for table t (with their notes → the call emoji). Comes from
 // the summary's tiny calls[] list (only OPEN-session calls), NOT the full board.
@@ -475,7 +490,9 @@ function tileState(t) {
     // always said "Served", so a paid table's tile FLIPPED "Cleared"→"Served" the moment
     // you selected it (the summary said "Cleared", this recompute said "Served").
     if (a.hasOrders && a.sv > 0) return { cls: a.unpaid ? "bill" : "done", label: a.unpaid ? "Served" : "Cleared" };
-    if (s) return a.guests ? { cls: "seated", label: "Seated" } : { cls: "waiting", label: "Open" };
+    // A party with nobody seated and nothing ordered reads as FREE — "Open" was the
+    // open/close-era word for it and staff have no such step now (owner, 2026-07-31).
+    if (s) return a.guests ? { cls: "seated", label: "Seated" } : { cls: "free", label: "Free" };
     if (reqsOf(t).length) return { cls: "req", label: "Wants in" };
     return { cls: "free", label: "Free" };
   }
@@ -711,7 +728,10 @@ function tileHtml(i) {
     // the manager floor uses. Only shown on free/req tiles — occupied tiles show the
     // guest count instead (already more useful once a party is actually seated).
     const seats = ((state.data.settings || {}).table_seats || {})[String(i)] || 4;
-    body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to open"}</span><span class="tseats">🪑 ${seats} seats</span><span class="topen" data-quick="open" data-qt="${i}">Open</span>`;
+    // No "Open" chip (owner, 2026-07-31): opening a table isn't a step any more — the first
+    // order starts the party — so a free tile just says how many can sit here, and tapping it
+    // goes straight to the table where ＋ Take order lives.
+    body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to take an order"}</span><span class="tseats">🪑 ${seats} seats</span>`;
   } else {
     // KOT # rides on the full slice only (the summary RPC carries no KOT — it's the shared
     // manager RPC). For the selected table we show "KOT #…"; for every other tile we show the
@@ -862,8 +882,6 @@ function bindFloorDelegation() {
   const tilesEl = $("#tiles");
   if (tilesEl) tilesEl.addEventListener("click", async (e) => {
     let q;
-    // Quick "Open" on a free tile.
-    if ((q = e.target.closest(".topen[data-quick='open']"))) { optimisticOpen(q.dataset.qt); return; }
     // Quick "Accept" — load the table's orders first (grid has only the slim summary), then accept.
     if ((q = e.target.closest(".tacc[data-quick='accept']"))) {
       const qt = q.dataset.qt;
@@ -1259,7 +1277,6 @@ function renderPanel() {
       <div class="sec"><h3>Orders</h3>${unsentBox}${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}${Number(s && s.discount) > 0 ? `<div class="bill-disc-note" style="margin-top:8px;font-size:13px;font-weight:700;color:#f0b232">🏷️ Whole-bill discount − ${inr(s.discount)}${s.discount_note ? ` · ${esc(s.discount_note)}` : ""}</div>` : ""}</div>
     </div>
     <div class="dacts">
-      ${s || !sessionsOn() ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
       ${s && kotOpsOn() ? `<button class="btn${txray("tablet_table_ops")}" id="kotMenuBtn">🧾 KOT ▾</button>` : ""}
       ${s && !kotOpsOn() ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
@@ -1384,7 +1401,6 @@ function renderPanel() {
     chip.classList.toggle("on");   // INSTANT visual feedback — before this it only hit the server, so the tap felt dead ("allergy not clicking")
     act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }));
   }));
-  const ob = $("#openTable"); if (ob) ob.onclick = () => optimisticOpen(t);
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
   const mob = $("#moveOrderBtn"); if (mob && s) mob.onclick = () => renderMoveOrderPicker(t);   // was dead: renderMoveOrderPicker/Target existed but nothing opened them (fixed 2026-07-06)
   const kmb = $("#kotMenuBtn"); if (kmb && s) kmb.onclick = () => renderKotMenu(t, s);
@@ -2012,28 +2028,8 @@ async function ensureTableSlice(t, force) {
 // Open a table INSTANTLY (mirrors the manager): drop a pending "open" session into
 // local state + repaint NOW, then create it on the server and reconcile. On failure
 // runOptimistic's load() refetches and the pending session disappears. (owner, 2026-06-19)
-function optimisticOpen(table) {
-  const t = String(table);
-  if (sessionOf(t)) return; // already open
-  runOptimistic(
-    () => {
-      state.data.sessions = [...(state.data.sessions || []), { id: "pending-" + t, table_number: t, status: "open", auto_approve: false }];
-      if (Array.isArray(state.data.requests)) state.data.requests = state.data.requests.filter((r) => !(r.type === "open" && String(r.table_number) === t));
-      // The GRID tile reads the slim SUMMARY (tier 1), not the slice patched above — without
-      // this the tile sat on "Free" for the whole server round-trip (~2s) while the detail
-      // already said open (owner report, 2026-07-02). Mirror the manager's openTableSession:
-      // flip this tile to "Open / waiting" locally NOW; load() reconciles to server truth after.
-      const tiles = Object.assign({}, state.summary.tiles || {});
-      tiles[t] = Object.assign({}, tiles[t] || {}, {
-        state: "waiting", label: "Open", meta: "waiting for guests",
-        counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, due: 0, pay: "",
-        members: 0, pending: 0, hasNew: false, hasCall: false, hasReq: false, hasJoin: false, reqs: 0, calls: 0,
-      });
-      state.summary = Object.assign({}, state.summary, { tiles });
-    },
-    () => api("POST", "/sessions/open", { table: t }),
-  );
-}
+// (optimisticOpen went with the "Open this table" button — opening a table is not a step
+// any more. The first order starts the party, server-side; see migration 237.)
 
 // Mark a table's whole bill paid INSTANTLY: flip every order's payment_status to
 // "paid" locally so the tile/detail re-read as paid (no due) right away, then persist

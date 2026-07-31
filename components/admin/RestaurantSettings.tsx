@@ -30,7 +30,7 @@ const KEYS = [
   "banquet_fields", "banquet_bill_prefix", "banquet_bill_style", "banquet_bill_next",
   "banquet_tax_components", "banquet_paper", "banquet_paper_size", "banquet_paper_top",
   "banquet_paper_bot", "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign",
-  "banquet_paper_fill", "floor_per_row",
+  "banquet_paper_fill", "floor_per_row", "floor_layout_mode",
 ] as const;
 
 const inputStyle: React.CSSProperties = {
@@ -661,9 +661,26 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
         </div>
         <p className="hint" style={{ marginTop: 10 }}>
           <b>Tables per row</b>{" "}sets how many table boxes sit on one line in the manager&apos;s floor view — and so how big
-          each box is. It&apos;s a target, not a hard rule: a narrow screen (a phone, or the side panel open) shows fewer
-          per row rather than shrinking the boxes until nobody can read them.
+          each box is. Your number is honoured: the boxes SHRINK to fit it, dropping detail as they go (the seat count,
+          then the wording) while the table number and its colour always stay. Only if a box would get too small to tap —
+          which in practice means on a phone — does the floor show fewer per row.
         </p>
+        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border-color, #333)" }}>
+          <label style={{ ...labelStyle, maxWidth: 300 }}>
+            Floor layout
+            <select value={String(draft.floor_layout_mode || "classic")} disabled={!loadOk || busy}
+              onChange={(e) => set("floor_layout_mode", e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
+              <option value="classic">Classic — tables in number order</option>
+              <option value="custom">Custom — this room&apos;s real shape</option>
+            </select>
+          </label>
+          <p className="hint" style={{ marginTop: 8 }}>
+            <b>Classic</b> lays the tables out in number order, {perRow} per row. <b>Custom</b> draws the room as it
+            really is — window seats, the A/C section, an aisle where the aisle is. A custom plan is written by hand per
+            restaurant in <code>public/panels/floor-layouts.js</code>; a restaurant switched to Custom before its plan
+            exists keeps showing the classic grid and says so on the floor, so this switch can never empty a floor.
+          </p>
+        </div>
         {/* Two previews, cheapest first. The shape strip answers "how big is a box?" at a
             glance with zero loading; the button opens the REAL manager floor with a slider
             when the admin wants to be sure before saving. */}
@@ -760,16 +777,16 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Auto close / restart tables</h2>
         <p className="hint">
-          When a table&apos;s bill is fully <b>paid</b> and every dish is <b>served</b>, free it automatically.
-          <b> Off</b> = the staff close/restart by hand (the default). Also visible to the manager.
+          A table always clears itself once its bill is fully <b>paid</b> and every dish is <b>served</b> — staff have no
+          way to close or free a table by hand any more, so &quot;do nothing&quot; is not an option: finished tables would
+          pile up on the floor. Choose WHICH way it clears. Also visible to the manager.
         </p>
-        <label style={{ ...labelStyle, maxWidth: 300 }}>
+        <label style={{ ...labelStyle, maxWidth: 320 }}>
           When a table is paid &amp; fully served
-          <select value={String(draft.auto_table_action || "off")} disabled={!loadOk || busy}
+          <select value={String(draft.auto_table_action) === "restart" ? "restart" : "close"} disabled={!loadOk || busy}
             onChange={(e) => set("auto_table_action", e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
-            <option value="off">Off — do nothing</option>
-            <option value="close">Auto-close the table</option>
-            <option value="restart">Auto-restart the table</option>
+            <option value="close">Free the table</option>
+            <option value="restart">Keep the party seated (dining sessions only)</option>
           </select>
         </label>
       </div>

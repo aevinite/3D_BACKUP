@@ -108,6 +108,9 @@
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
   <script src="/panels/backstack.js"></script>
+  <!-- Hand-written per-restaurant floor plans, read only when a restaurant's layout mode is
+       Custom (mig 238). Pure data; loads before app.js so the first floor render can see it. -->
+  <script src="/panels/floor-layouts.js?v=1"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
   <script src="/panels/errlog.js?v=2"></script>
   <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
