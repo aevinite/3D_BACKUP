@@ -341,7 +341,14 @@ async function run() {
     }, 40000);
     if (!drained) bad("the queue never emptied after reconnecting");
     else {
-      drained.failed.length === 0 ? ok("the saved order was sent on reconnect") : bad(`it came back needing attention: ${drained.failed[0].error}`);
+      if (drained.failed.length === 0) ok("the saved order was sent on reconnect");
+      else {
+        const why = String(drained.failed[0].plain || drained.failed[0].error || "");
+        const perms = /isn't enabled for you|ask a manager|permission/i.test(why);
+        bad(`it came back needing attention: ${why}`, perms
+          ? "that is a PERMISSION refusal, not an offline fault — another session's suite toggles\n       waiter permissions while it runs; re-run when nothing else is testing"
+          : undefined);
+      }
     }
     // EXACTLY ONCE is the money question. The table was FREE before this test, so asking
     // the server what's on it now is the whole answer: 1 = right, 2 = a double bill.
