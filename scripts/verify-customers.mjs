@@ -5,7 +5,7 @@
 // Discipline: ONE login per role for the whole run (a login inside a loop is what pinged
 // the owner's phone about himself), and every fixture it creates is cleaned up at the end.
 import { chromium } from "playwright";
-import { loginAs } from "./sweep/login.mjs";
+import { loginAs, adminCookie } from "./sweep/login.mjs";
 import fs from "fs";
 import { createClient } from "@supabase/supabase-js";
 
@@ -42,7 +42,9 @@ await loginAs(mctx, "manager", BASE);                       // ONE manager login
 const octx = await b.newContext();
 await loginAs(octx, "owner", BASE);                         // ONE owner login
 const actx = await b.newContext();
-await actx.request.post(`${BASE}/api/staff-login`, { multipart: { password: env.ADMIN_PASSWORD, next: "/aevinite" }, headers: { accept: "application/json" } });
+// Zero-request admin auth: present the gate cookie instead of signing in. A login per run
+// is what pushed the owner's own panel over the admin login limit and pinged his phone.
+await actx.addCookies([adminCookie(BASE)]);
 
 const freshBill = async () => {
   const { data } = await sb.from("sessions").select("id, table_number")
