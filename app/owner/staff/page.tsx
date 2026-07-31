@@ -268,7 +268,16 @@ export default function OwnerStaffPage() {
         </button>
       </div>
 
-      {err && <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 14 }}><b>Something went wrong.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span> <button className="ost-x" onClick={() => setErr(null)}>dismiss</button></div>}
+      {err && (
+        <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 14 }}>
+          <b>Something went wrong.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span>
+          {/* The server now answers 503 "please try again" when it couldn't READ your setup
+              (instead of wrongly saying the feature is off), so this banner needs a retry. */}
+          <button className="ost-mini" style={{ marginLeft: 10 }} disabled={busy}
+            onClick={() => { setErr(null); setLoading(true); load(); }}>Try again</button>
+          <button className="ost-x" onClick={() => setErr(null)}>dismiss</button>
+        </div>
+      )}
 
       {reveal && (
         <div className="adm-card ost-reveal" ref={revealRef}>

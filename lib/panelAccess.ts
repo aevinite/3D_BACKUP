@@ -74,11 +74,38 @@ const _ownerCache = new Map<string, { at: number; ids: string[] }>();
 // owner tab loses that restaurant within the 30s cache TTL instead of keeping full access
 // for the 7-day cookie life (audit 2026-07-07 — the parallel M3/H2 fix for the other panels
 // was never carried over to the owner layer). Cached (30s) so the hot path adds no read.
+/** Thrown when we could not READ whether someone owns anything — as opposed to knowing they
+ *  own nothing. Callers turn this into "couldn't load, please try again", never into a
+ *  permission or "not set up" message. */
+export class OwnedLookupFailed extends Error {
+  constructor(cause?: unknown) {
+    super("Couldn't read which restaurants this owner has");
+    this.name = "OwnedLookupFailed";
+    if (cause && typeof cause === "object" && "message" in cause) this.cause = (cause as { message: unknown }).message;
+  }
+}
+
+// On a failed read: hand back the last answer we trusted (even if the TTL has passed — stale
+// truth beats a confident lie), otherwise throw. Nothing is written to the cache either way,
+// so the next call retries instead of serving the blip for 30s.
+function staleOrThrow(userId: string, cause: unknown): string[] {
+  const prev = _ownerCache.get(userId);
+  if (prev) return prev.ids;
+  throw new OwnedLookupFailed(cause);
+}
+
 export async function enabledOwnedRestaurantIds(userId: string, cached = true): Promise<string[]> {
   if (!userId) return [];
   const hit = cached ? _ownerCache.get(userId) : undefined;
   if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.ids;
   const links = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", userId).limit(50);
+  // A FAILED read must never look like "this owner has no restaurants". Every `.data || []`
+  // here used to swallow the error, so one DB blip produced an empty list — and the caller
+  // then told the owner "no restaurants are assigned to you" / "staff management isn't
+  // enabled", which is a lie about their setup, AND it got cached for the whole TTL.
+  // Now: reuse the last known-good answer if we have one, else throw so the caller can say
+  // "couldn't load, try again" instead of inventing a configuration problem. (2026-07-31)
+  if (links.error) return staleOrThrow(userId, links.error);
   const owned = (links.data || []).map((r) => r.restaurant_id as string);
   let ids: string[] = [];
   if (owned.length) {
@@ -87,6 +114,8 @@ export async function enabledOwnedRestaurantIds(userId: string, cached = true): 
       sb.from("restaurants").select("id").in("id", owned).is("deleted_at", null),
       sb.from("settings").select("restaurant_id, enabled_panels").in("restaurant_id", owned),
     ]);
+    if (restQ.error) return staleOrThrow(userId, restQ.error);
+    if (setQ.error) return staleOrThrow(userId, setQ.error);
     const live = new Set((restQ.data || []).map((r) => r.id as string));
     const panelsByRid = new Map((setQ.data || []).map((r) => [r.restaurant_id as string, r.enabled_panels as Record<string, unknown> | null]));
     ids = owned.filter((rid) => {
