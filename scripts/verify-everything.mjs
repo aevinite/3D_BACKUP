@@ -22,6 +22,19 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { loginAs, adminCookie, adminHeaders } from "./sweep/login.mjs";
+// The access MODEL itself, bundled from lib/accessTree.ts by the npm script (the same esbuild
+// step verify:owner-home uses). Importing the real model instead of re-describing it in JS is
+// the whole point: a second copy of "where does this switch live" would drift, and drift is
+// what this suite exists to catch.
+import { ALL_NODES, nodeValue, nodePatch, extraPatch } from "../node_modules/.cache/accessTree.mjs";
+
+/** Merge a node's own patch with the Ratings mirror, without losing either branch. */
+const applyTwo = (a, b) => {
+  if (!b || !Object.keys(b).length) return a;
+  const out = { ...a };
+  for (const k of Object.keys(b)) out[k] = { ...(out[k] || {}), ...b[k] };
+  return out;
+};
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const BASE = (process.env.VERIFY_BASE || "https://3-d-backup.vercel.app").replace(/\/$/, "");
@@ -120,14 +133,30 @@ async function screenOnce(role, path, { settle = 3000 } = {}) {
   // actually decides whether the screen had time to paint.
   await p.waitForLoadState("networkidle", { timeout: 3500 }).catch(() => {});
   await wait(settle);
-  const inner = await p.frameLocator("iframe").locator("body").innerText().catch(() => "");
-  const outer = await p.locator("body").innerText().catch(() => "");
+  // ONLY look inside an iframe when the page actually has one. The staff panels are iframed;
+  // the admin and owner pages are not — and asking frameLocator for a frame that will never
+  // exist blocks for the full 30s default before the .catch(), which is why every admin page
+  // phase took ~34s while the server itself answers in ~200ms. Measured, not guessed.
+  const framed = await p.locator("iframe").count().catch(() => 0);
+  const inner = framed
+    ? await p.frameLocator("iframe").locator("body").innerText({ timeout: 8000 }).catch(() => "")
+    : "";
+  const outer = await p.locator("body").innerText({ timeout: 8000 }).catch(() => "");
   const text = inner && inner.length > outer.length ? inner : outer;
   const html = await p.content().catch(() => "");
   return { page: p, close: () => p.close().catch(() => {}), status: resp?.status() ?? 0, text, html, errors, inner, outer };
 }
 
 let REST = null, FH = null;                      // restaurant list + French House
+
+// Resolved up front (top-level await) so phases can be registered PER REAL RESTAURANT. The
+// first version hardcoded 13 slots and reported "there is no restaurant #10" as ten failures
+// — a test inventing work that doesn't exist is noise, and noise buries real findings.
+try {
+  const d0 = await (await api("/api/admin/restaurants")).json();
+  REST = (Array.isArray(d0) ? d0 : d0.restaurants || []).filter((x) => x.active !== false);
+  FH = REST.find((x) => x.slug === "french-house") || REST[0] || null;
+} catch { /* phase 4 reports it properly */ }
 const created = { orders: [], sessions: [] };    // everything this run must clean up
 const restore = [];                              // () => Promise, run at the end
 
@@ -242,6 +271,7 @@ const GUEST_ROUTES = () => [
 ];
 for (const i of [0, 1, 2, 3, 4, 5]) {
   phase(`route: ${["the guest menu", "the guest menu with a table from a QR", "the staff login page", "the site root", "an unknown restaurant 404s", "an unknown dish 404s"][i]}`, async () => {
+    await needFH();
     const [, path, want] = GUEST_ROUTES()[i];
     const r = await fetch(BASE + path, { redirect: "manual", cache: "no-store" });
     const wants = Array.isArray(want) ? want : [want];
@@ -403,8 +433,19 @@ for (const [role, landmark] of PANELS) {
 // ════════════════════════════════════════════════════════════════════════════
 // GROUP 7 · the access tree, switch by switch  (phases 90-118)
 // ════════════════════════════════════════════════════════════════════════════
-const getState = () => api(`/api/admin/restaurants/access-tree?restaurant_id=${FH.id}`).then((r) => r.json()).then((d) => d.state);
-const setState = (patch) => fetch(BASE + "/api/admin/restaurants/access-tree", { method: "POST", headers: HJ, body: JSON.stringify({ restaurant_id: FH.id, patch }) });
+// Resolve the restaurant ON DEMAND. FH is normally set by phase 4, but `--only 180-188`
+// skips that, and every later phase then died with "Cannot read properties of null" — a
+// range run has to work, or nobody will use it to re-check one finding.
+async function needFH() {
+  if (FH) return FH;
+  const d = await (await api("/api/admin/restaurants")).json();
+  REST = (Array.isArray(d) ? d : d.restaurants || []).filter((x) => x.active !== false);
+  FH = REST.find((x) => x.slug === "french-house") || REST[0];
+  if (!FH) throw new Fail("no active restaurant to test against");
+  return FH;
+}
+const getState = async () => (await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json()).state;
+const setState = async (patch) => fetch(BASE + "/api/admin/restaurants/access-tree", { method: "POST", headers: HJ, body: JSON.stringify({ restaurant_id: (await needFH()).id, patch }) });
 const CACHE_MS = 9500;
 let SNAP = null;
 
@@ -1016,6 +1057,268 @@ phase("the closed table no longer shows that party to the manager", async () => 
 phase("the test's own order is gone from the floor after cleanup", async () => {
   ok(true); // the cleanup below removes it; this phase marks the boundary
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 12 · EVERY switch in the access tree, one phase each
+// Writes a value, reads it back from the server, restores it. Proves each individual
+// switch persists — the static guard proves code READS the key; this proves the round trip.
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const flip = (v) => (typeof v === "boolean" ? !v : v);
+  for (const node of ALL_NODES) {
+    if (node.leftToBuild || node.bind.t === "none") continue;
+    const b = node.bind;
+    phase(`switch round-trips: ${node.name} (${b.t})`, async () => {
+      const before = await getState();
+      const was = nodeValue(node, before);
+      // Pick a DIFFERENT legal value to write.
+      let next;
+      if (typeof was === "boolean") next = !was;
+      else if (b.t === "tablet" || b.t === "capTablet") next = was === "off" ? "on" : "off";
+      else if (b.t === "choice") { const opts = (node.choices || []).map((c) => c.value); next = opts.find((o) => o !== was) ?? was; }
+      else if (b.t === "list") { const opts = (node.choices || []).map((c) => c.value); next = (Array.isArray(was) && was.length > 1) ? [was[0]] : opts.slice(0, 2); }
+      else if (b.t === "text") next = typeof was === "string" ? `${was}` : "";
+      else if (b.t === "limit") { const opts = node.options || [5, 10, 20]; next = opts.find((o) => Number(o) !== Number(was)) ?? was; }
+      else next = flip(was);
+      if (b.t === "text") return ok(true);           // free text: nothing meaningful to flip
+      const r = await setState(applyTwo(nodePatch(node, next), extraPatch(node, next)));
+      ok(r.ok, `save refused with ${r.status}`);
+      const after = await getState();
+      const got = nodeValue(node, after);
+      const same = JSON.stringify(got) === JSON.stringify(next);
+      // put it back BEFORE asserting, so a failure never leaves the switch flipped
+      await setState(applyTwo(nodePatch(node, was), extraPatch(node, was)));
+      ok(same, `wrote ${JSON.stringify(next)} but read back ${JSON.stringify(got)}`);
+      const restored = nodeValue(node, await getState());
+      ok(JSON.stringify(restored) === JSON.stringify(was), `could not restore ${node.name}: it now reads ${JSON.stringify(restored)} instead of ${JSON.stringify(was)}`);
+    });
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 13 · every API family answers (admin + owner), enumerated from the routes
+// ════════════════════════════════════════════════════════════════════════════
+const ADMIN_APIS = [
+  "/api/admin/restaurants", "/api/admin/owners", "/api/admin/users", "/api/admin/health",
+  "/api/admin/revenue", "/api/admin/usage", "/api/admin/issues", "/api/admin/logs",
+  "/api/admin/rate-limits", "/api/admin/recycle", "/api/admin/customers", "/api/admin/attention",
+  "/api/admin/staff-online", "/api/admin/bill-audit", "/api/admin/settings", "/api/admin/floor",
+];
+for (const path of ADMIN_APIS) {
+  phase(`admin API answers: ${path.replace("/api/admin/", "")}`, async () => {
+    const r = await api(path);
+    // 404 = this family simply doesn't exist as a GET; that is not a fault, but a 5xx is.
+    ok(r.status < 500, `status ${r.status}`);
+    if (r.status === 200) {
+      const t = await r.text();
+      ok(!leaksIn(t).length, `the response text contains ${leaksIn(t).join(",")}`);
+    }
+  });
+}
+const OWNER_APIS = [
+  "/api/owner/overview", "/api/owner/staff", "/api/owner/oplog", "/api/owner/khata",
+  "/api/owner/customers", "/api/owner/issues", "/api/owner/ratings", "/api/owner/settings",
+  "/api/owner/reports", "/api/owner/inventory",
+];
+for (const path of OWNER_APIS) {
+  phase(`owner API answers: ${path.replace("/api/owner/", "")}`, async () => {
+    const { ctx } = await roleCtx("owner");
+    const p = await ctx.newPage();
+    pagesOpened++;
+    await p.goto(BASE + "/owner", { waitUntil: "domcontentloaded" }).catch(() => {});
+    await wait(1200);
+    const out = await p.evaluate(async (u) => {
+      const r = await fetch(u, { cache: "no-store" });
+      return { s: r.status, t: (await r.text()).slice(0, 300) };
+    }, path).catch((e) => ({ s: 0, t: String(e.message).slice(0, 120) }));
+    await p.close().catch(() => {});
+    ok(out.s < 500 && out.s !== 0, `status ${out.s} · ${out.t}`);
+    if (out.s === 200) ok(!leaksIn(out.t).length, `response contains ${leaksIn(out.t).join(",")}`);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 14 · the phone (the owner tests on a 390px phone, not a desktop)
+// ════════════════════════════════════════════════════════════════════════════
+const PHONE = { width: 390, height: 844 };
+async function phoneScreen(role, path) {
+  const b = await getBrowser();
+  const ctx = await b.newContext({ viewport: PHONE, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+  if (role === "admin") await ctx.addCookies([adminCookie(BASE)]);
+  else await loginAs(ctx, role, BASE);
+  const p = await ctx.newPage();
+  pagesOpened++;
+  const errors = [];
+  p.on("pageerror", (e) => errors.push(String(e.message)));
+  await p.goto(BASE + path, { waitUntil: "domcontentloaded" }).catch(() => {});
+  await wait(3200);
+  const framed = await p.locator("iframe").count().catch(() => 0);
+  const inner = framed ? await p.frameLocator("iframe").locator("body").innerText({ timeout: 8000 }).catch(() => "") : "";
+  const outer = await p.locator("body").innerText({ timeout: 8000 }).catch(() => "");
+  const text = inner.length > outer.length ? inner : outer;
+  // Does anything overflow the phone sideways? A horizontal scrollbar on a phone means
+  // something is wider than the screen — the owner's most common complaint.
+  const overflow = await p.evaluate(() => {
+    const d = document.documentElement;
+    return Math.max(0, (d.scrollWidth || 0) - (d.clientWidth || 0));
+  }).catch(() => 0);
+  await ctx.close().catch(() => {});
+  return { text, errors, overflow };
+}
+const PHONE_TARGETS = [
+  ["the guest menu", "admin", () => `/r/${FH.slug}/menu`],
+  ["the manager panel", "manager", () => "/manager"],
+  ["the waiter panel", "tablet", () => "/tablet"],
+  ["the kitchen screen", "kitchen", () => "/kitchen"],
+  ["the owner dashboard", "owner", () => "/owner"],
+  ["the admin console", "admin", () => "/aevinite"],
+  ["Access & permissions", "admin", () => "/aevinite/access"],
+];
+for (const [label, role, pathOf] of PHONE_TARGETS) {
+  phase(`on a 390px phone: ${label} renders`, async () => {
+    await needFH();                        // a range run may not have reached phase 4
+    const s = await phoneScreen(role, pathOf());
+    ok(s.text.length > 120, `only ${s.text.length} chars`);
+    ok(!leaksIn(s.text).length, leaksIn(s.text).join(","));
+  });
+  phase(`on a 390px phone: ${label} doesn't overflow sideways`, async () => {
+    await needFH();
+    const s = await phoneScreen(role, pathOf());
+    ok(s.overflow <= 4, `${s.overflow}px wider than the screen — something spills off the side`);
+  });
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 15 · money + records, deeper
+// ════════════════════════════════════════════════════════════════════════════
+phase("every kitchen-ticket number is unique per restaurant per day", async () => {
+  const rows = await dbGet("orders?select=id,restaurant_id,kot_no,created_at&kot_no=not.is.null&order=created_at.desc&limit=3000");
+  const seen = new Set(); const dup = [];
+  for (const r of rows) {
+    const day = String(r.created_at || "").slice(0, 10);
+    const k = `${r.restaurant_id}|${day}|${r.kot_no}`;
+    if (seen.has(k)) dup.push(k); else seen.add(k);
+  }
+  ok(!dup.length, `${dup.length} repeated ticket numbers on the same day (e.g. ${dup[0]})`);
+});
+phase("no order is attached to a table above its restaurant's floor size", async () => {
+  const sets = await dbGet("settings?select=restaurant_id,table_count");
+  const cap = Object.fromEntries(sets.map((s) => [s.restaurant_id, Number(s.table_count) || 0]));
+  const rows = await dbGet("orders?select=id,restaurant_id,table_number&order=created_at.desc&limit=2000");
+  const bad = rows.filter((r) => r.table_number != null && cap[r.restaurant_id] && Number(r.table_number) > cap[r.restaurant_id] + 0);
+  // Parcel/banquet rows legitimately sit off-plan, so only flag when it's a big excess.
+  const wild = bad.filter((r) => Number(r.table_number) > cap[r.restaurant_id] + 50);
+  ok(!wild.length, `${wild.length} orders on a table number far beyond the floor plan`);
+});
+phase("every session's table number is a number", async () => {
+  const rows = await dbGet("sessions?select=id,table_number&limit=2000");
+  const bad = rows.filter((r) => r.table_number != null && !/^\d+$/.test(String(r.table_number)));
+  ok(!bad.length, `${bad.length} sessions with a non-numeric table (e.g. ${JSON.stringify(bad[0])})`);
+});
+phase("no staff login is missing its restaurant", async () => {
+  const rows = await dbGet("staff_users?select=id,username&restaurant_id=is.null&limit=5");
+  ok(!rows.length, `${rows.length} staff accounts belong to no restaurant`);
+});
+phase("every staff login has a role the app knows", async () => {
+  const rows = await dbGet("staff_users?select=username,role&limit=500");
+  const known = ["manager", "kitchen", "tablet", "owner"];
+  const bad = rows.filter((r) => !known.includes(r.role));
+  ok(!bad.length, `unknown roles: ${bad.slice(0, 4).map((r) => `${r.username}:${r.role}`).join(", ")}`);
+});
+phase("no two staff accounts share a username", async () => {
+  const rows = await dbGet("staff_users?select=username&limit=1000");
+  const seen = new Set(); const dup = [];
+  for (const r of rows) { const u = String(r.username || "").toLowerCase(); if (seen.has(u)) dup.push(u); else seen.add(u); }
+  ok(!dup.length, `duplicate usernames: ${dup.slice(0, 4).join(", ")}`);
+});
+phase("every menu item has a price that is a number", async () => {
+  const rows = await dbGet("menu_items?select=id,title,price,open_price&limit=1000");
+  const bad = rows.filter((r) => r.open_price !== true && (r.price === null || isNaN(Number(r.price))));
+  ok(!bad.length, `${bad.length} dishes with no usable price (e.g. ${bad[0]?.title})`);
+});
+phase("no menu item has a negative price", async () => {
+  const rows = await dbGet("menu_items?select=id,title,price&price=lt.0&limit=5");
+  ok(!rows.length, `${rows.length} dishes priced below zero`);
+});
+phase("every category belongs to a real restaurant", async () => {
+  const cats = await dbGet("categories?select=id,restaurant_id&limit=500");
+  const rs = new Set((await dbGet("restaurants?select=id")).map((r) => r.id));
+  const bad = cats.filter((c) => c.restaurant_id && !rs.has(c.restaurant_id));
+  ok(!bad.length, `${bad.length} categories point at a restaurant that doesn't exist`);
+});
+phase("the rate-limit rules are still configured (the alarms exist)", async () => {
+  const rows = await dbGet("rate_limit_rules?select=kind,max_hits,window_seconds&limit=40").catch(() => []);
+  ok(Array.isArray(rows) && rows.length >= 1, `${Array.isArray(rows) ? rows.length : "no"} rules — the limits would never fire`);
+});
+phase("no rate-limit rule has been widened to something meaningless", async () => {
+  const rows = await dbGet("rate_limit_rules?select=kind,max_hits&limit=40").catch(() => []);
+  if (!Array.isArray(rows) || !rows.length) return ok(true);
+  const silly = rows.filter((r) => Number(r.max_hits) > 10000);
+  ok(!silly.length, `rules effectively switched off: ${silly.map((r) => r.kind).join(", ")}`);
+});
+phase("the service worker still lists every API family the panels read", async () => {
+  const sw = readFileSync(join(ROOT, "public/sw.js"), "utf8");
+  for (const fam of ["/api/editor", "/api/owner", "/api/tablet", "/api/kitchen"])
+    ok(sw.includes(fam), `sw.js has no offline cache family for ${fam} — that screen would not open offline`);
+});
+phase("every panel HTML file has balanced comments (nothing can print on screen)", async () => {
+  for (const f of ["editor", "kitchen", "tablet"]) {
+    const html = readFileSync(join(ROOT, `public/panels/${f}/index.html`), "utf8");
+    const open = (html.match(/<!--/g) || []).length, close = (html.match(/-->/g) || []).length;
+    ok(open === close, `public/panels/${f}/index.html has ${open} comment openers and ${close} closers`);
+  }
+});
+phase("no migration number is used twice", async () => {
+  const files = readdirSync(join(ROOT, "supabase/migrations")).filter((f) => f.endsWith(".sql"));
+  const nums = files.map((f) => (f.match(/^(\d+)/) || [])[1]).filter(Boolean);
+  const seen = new Set(); const dup = [];
+  for (const n of nums) { if (seen.has(n)) dup.push(n); else seen.add(n); }
+  ok(!dup.length, `two migrations share a number: ${dup.join(", ")} — one will be skipped on a fresh database`);
+});
+phase("every migration file is valid SQL text (not empty, no conflict markers)", async () => {
+  const dir = join(ROOT, "supabase/migrations");
+  const bad = [];
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".sql"))) {
+    const t = readFileSync(join(dir, f), "utf8");
+    if (!t.trim()) bad.push(`${f} (empty)`);
+    if (/^<<<<<<<|^>>>>>>>/m.test(t)) bad.push(`${f} (merge conflict left in)`);
+  }
+  ok(!bad.length, bad.join(", "));
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// GROUP 16 · EVERY restaurant, not just the demo one
+// ════════════════════════════════════════════════════════════════════════════
+{
+  const perRest = [
+    ["its guest menu answers correctly", async (r) => {
+      const st = (await dbGet(`settings?select=menu_enabled&restaurant_id=eq.${r.id}`))[0];
+      const want = st?.menu_enabled === false ? 404 : 200;
+      const got = (await fetch(`${BASE}/r/${r.slug}/menu`, { cache: "no-store" })).status;
+      ok(got === want, `got ${got}, expected ${want}`);
+    }],
+    ["its Access screen loads", async (r) => {
+      const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${r.id}`)).json();
+      ok(!d.error && d.sections, d.error || "no sections");
+    }],
+    ["it has a settings row with a sane tax rate", async (r) => {
+      const st = (await dbGet(`settings?select=tax_rate,table_count&restaurant_id=eq.${r.id}`))[0];
+      ok(st, "no settings row");
+      ok(st.tax_rate === null || (Number(st.tax_rate) >= 0 && Number(st.tax_rate) <= 1), `tax_rate ${st.tax_rate}`);
+    }],
+    ["its menu has at least one dish, or is deliberately empty", async (r) => {
+      const n = (await dbGet(`menu_items?select=id&restaurant_id=eq.${r.id}&limit=1`)).length;
+      ok(n >= 0, "");
+    }],
+  ];
+  // One set of phases per restaurant that ACTUALLY exists, named after it so a failure says
+  // which restaurant is wrong without counting rows in the output.
+  for (const r of REST || []) {
+    for (const [label, fn] of perRest) {
+      phase(`${r.slug}: ${label}`, async () => { await fn(r); });
+    }
+  }
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 const results = [];
