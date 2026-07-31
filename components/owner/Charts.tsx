@@ -52,10 +52,15 @@ const soleValue = (values: number[]) => values.find((v) => (Number(v) || 0) > 0)
 /** Horizontal-scroll frame. Bars keep ≥`per`px each; past what fits, the plot
  *  scrolls. `width: max(100%, …)` means it fills the card (no scrollbar) whenever
  *  the natural width already fits — so normal 7/30-day charts are unchanged. */
-function ScrollX({ count, per = 24, height, children }: { count: number; per?: number; height: number; children: React.ReactNode }) {
+function ScrollX({ count, per = 24, height, extra = 0, children }: { count: number; per?: number; height: number; extra?: number; children: React.ReactNode }) {
+  // `extra` = the width the plot's own chrome eats before any bar is drawn (the y-axis
+  // and the right margin). Without it, `count * per` was the width of the WHOLE box, so
+  // each bar really got (per − chrome/count) px — on a phone that turned a 46px column
+  // into 36px under a 42px-wide "₹38.8L" label and the amounts crowded each other.
+  // Defaults to 0, so every existing caller keeps the exact width it had.
   return (
     <div className="owx-scrollx" style={{ width: "100%", overflowX: "auto", overflowY: "hidden" }}>
-      <div style={{ width: `max(100%, ${Math.round(count * per)}px)`, height }}>{children}</div>
+      <div style={{ width: `max(100%, ${Math.round(count * per + extra)}px)`, height }}>{children}</div>
     </div>
   );
 }
@@ -252,23 +257,33 @@ export function TimeBar({ data, color, height = 240 }: { data: { label: string; 
 
 // ── LeaderBar — "who earns more" across restaurants (3+ scope). Clickable. ──
 export type RevDatum = { id: string; name: string; revenue: number; orders: number; accentColor: string };
-export function LeaderBar({ data, onSelect, valueLabel = "Revenue" }: { data: RevDatum[]; onSelect?: (id: string) => void; valueLabel?: string }) {
+export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues = false }: { data: RevDatum[]; onSelect?: (id: string) => void; valueLabel?: string; showValues?: boolean }) {
   if (!data.length) return <Empty />;
   const max = Math.max(1, ...data.map((d) => d.revenue));
   // Ranking bars: comfortable row height, but past ~8 rows the card would grow
   // unbounded — cap the visible height and scroll instead of stretching the page.
   const rowH = 42, visible = Math.min(data.length, 8);
+  // `showValues` writes the amount just past the end of each bar. Used by
+  // WhoEarnsMore, where this IS the only view once a portfolio passes 9 restaurants,
+  // so the money has to be readable without hovering. The extra right margin is the
+  // room that label needs — the domain still ends at the data max, so the longest
+  // bar can never grow over its own number. Off everywhere else, so the reports
+  // pages and the dish ranking render exactly as before.
   return (
     <div style={{ width: "100%", maxHeight: visible * rowH + 20, overflowY: data.length > 8 ? "auto" : "visible" }}>
      <div style={{ width: "100%", height: Math.max(140, data.length * rowH) }}>
       <ResponsiveContainer>
-        <BarChart data={data} layout="vertical" margin={{ left: 8, right: 16, top: 4, bottom: 4 }}>
+        <BarChart data={data} layout="vertical" margin={{ left: 8, right: showValues ? 58 : 16, top: 4, bottom: 4 }}>
           <CartesianGrid horizontal={false} stroke={GRID} />
           <XAxis type="number" domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} allowDecimals={false} />
           <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11.5, fill: AXIS }} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name={valueLabel} radius={[0, 6, 6, 0]} cursor={onSelect ? "pointer" : undefined}
             onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>
+            {showValues && (
+              <LabelList dataKey="revenue" position="right" formatter={((value: unknown) => compact(Number(value))) as never}
+                style={{ fill: "var(--text)", fontSize: 11, fontWeight: 700 }} />
+            )}
             {data.map((d) => <Cell key={d.id} fill={d.accentColor} />)}
           </Bar>
         </BarChart>
@@ -279,10 +294,10 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue" }: { data: Re
 }
 
 // ── WhoEarnsMore — the "Who earns more" card body (owner 2026-07-27) ─────────
-// Same ranking data, three ways: 3-D Columns (default) · Bars (the ranked
-// horizontal LeaderBar) · Line (the per-restaurant multi-line trend, reused from
-// AreaTrend). A small segmented toggle at the top-right flips between them. This
-// is the ONLY chart that changed — every other owner card is untouched.
+// The ranking, in the ONE shape that suits the number of restaurants — the reader
+// never picks it (the Columns/Bars/Line toggle was REMOVED 2026-07-31: the shape was
+// already decided, so the buttons were just three ways to make it worse). Up to 9
+// restaurants → vertical columns; 10+ → the ranked horizontal LeaderBar.
 // Flat gradient column (owner 2026-07-27: "forget 3d" — the drop-shadow + gloss looked
 // blurry on the client site). Crisp rounded column, full colour at the top fading gently
 // toward the base — the exact look from the approved design demo.
@@ -307,10 +322,25 @@ function Column3D(props: {
 
 function ColumnsChart({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: string) => void }) {
   const max = Math.max(1, ...data.map((d) => d.revenue));
+  // The amount above each column is THEME text, never a fixed colour. It used to say
+  // `var(--ink)` — a variable this app has never defined anywhere — so the invalid
+  // var() fell back to the SVG initial fill, pure BLACK, and every amount sat
+  // unreadable on the dark owner console (owner's screenshot, 2026-07-31). `--text`
+  // is defined in BOTH .adm.owx skins, so it flips with the theme.
+  // ScrollX guarantees each column ≥46px — the room a "₹40.8L" label needs — so two
+  // amounts can never print on top of one another (the owner's dynamic-chart rule:
+  // dense → scroll, don't squeeze). `width: max(100%, …)` means it only scrolls when it
+  // must: on a desktop card all 9 fit with no scrollbar, on an A35 phone (≈236px of
+  // plot) even 7 must scroll, because 7 readable labels need ≈294px and squeezing them
+  // to fit is what made the amounts unreadable in the first place.
   return (
-    <div style={{ width: "100%", height: 300 }}>
+    <ScrollX count={data.length} per={46} extra={46 + 22} height={300}>
       <ResponsiveContainer>
-        <BarChart data={data} margin={{ left: 0, right: 8, top: 24, bottom: 6 }}>
+        {/* right:22 — NOT 8. The amount sits CENTRED over its column, so above the last
+            column it needs room past the column's own right edge; with 8 the final label
+            was sliced in half by the SVG's edge on an A35 phone ("₹16.7L" read "₹16.").
+            top:24 is the matching room for the tallest column's label. */}
+        <BarChart data={data} margin={{ left: 0, right: 22, top: 24, bottom: 6 }}>
           <CartesianGrid vertical={false} stroke={GRID} />
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: AXIS }} interval={0} angle={-28} textAnchor="end" height={74} />
           <YAxis domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} width={46} allowDecimals={false} />
@@ -318,45 +348,30 @@ function ColumnsChart({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: st
           <Bar dataKey="revenue" name="Revenue" shape={<Column3D />} maxBarSize={72} isAnimationActive={false}
             cursor={onSelect ? "pointer" : undefined}
             onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>
-            <LabelList dataKey="revenue" position="top" formatter={((value: unknown) => compact(Number(value))) as never} style={{ fill: "var(--ink)", fontSize: 11, fontWeight: 700 }} />
+            <LabelList dataKey="revenue" position="top" formatter={((value: unknown) => compact(Number(value))) as never} style={{ fill: "var(--text)", fontSize: 11, fontWeight: 700 }} />
             {data.map((d) => <Cell key={d.id} fill={d.accentColor} />)}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-    </div>
+    </ScrollX>
   );
 }
 
-export function WhoEarnsMore({ data, trendData, trendLines, onSelect }: {
+/** Past this many restaurants the ranking turns HORIZONTAL — a vertical column can no
+ *  longer hold a readable restaurant name or amount (owner's decision, 2026-07-31). */
+const COLUMNS_MAX = 9;
+export function WhoEarnsMore({ data, onSelect }: {
   data: RevDatum[];
-  trendData?: Record<string, unknown>[];
-  trendLines?: { key: string; name: string; color: string }[];
   onSelect?: (id: string) => void;
 }) {
-  const [view, setView] = useState<"columns" | "bars" | "line">("columns");
   if (!data.length) return <Empty />;
+  // The chart picks itself off the count — no toggle. "Line" is gone with the toggle
+  // because the card sitting immediately beside this one is already the
+  // revenue-over-time lines, so it was the same picture twice.
   const sorted = [...data].sort((a, b) => b.revenue - a.revenue);
-  const canLine = !!(trendData && trendData.length && trendLines && trendLines.length);
-  const opts: [typeof view, string][] = [["columns", "Columns"], ["bars", "Bars"]];
-  if (canLine) opts.push(["line", "Line"]);
-  const v = view === "line" && !canLine ? "columns" : view;
-  return (
-    <div>
-      <div style={{ display: "inline-flex", gap: 2, padding: 3, marginLeft: "auto", marginBottom: 8,
-        background: "rgba(128,128,128,.14)", borderRadius: 9, float: "right" }}>
-        {opts.map(([o, label]) => (
-          <button key={o} type="button" onClick={() => setView(o)} aria-pressed={v === o}
-            style={{ border: 0, cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "4px 10px", borderRadius: 6,
-              background: v === o ? "#e6b93f" : "transparent", color: v === o ? "#1a1205" : "var(--muted)" }}>{label}</button>
-        ))}
-      </div>
-      <div style={{ clear: "both" }}>
-        {v === "line" ? <AreaTrend data={trendData!} lines={trendLines!} height={248} />
-          : v === "bars" ? <LeaderBar data={sorted} onSelect={onSelect} />
-          : <ColumnsChart data={sorted} onSelect={onSelect} />}
-      </div>
-    </div>
-  );
+  return sorted.length > COLUMNS_MAX
+    ? <LeaderBar data={sorted} onSelect={onSelect} showValues />
+    : <ColumnsChart data={sorted} onSelect={onSelect} />;
 }
 
 // ── HourlyBar — busy hours (orders by hour, count not money) ────────────────
