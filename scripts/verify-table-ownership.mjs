@@ -77,9 +77,22 @@ head("B. Live data — no order left behind by a closed session");
   const sids = [...new Set(live.map((o) => o.session_id).filter(Boolean))];
   const sess = sids.length ? must(await sb.from("sessions").select("id,status").in("id", sids)) : [];
   const status = new Map(sess.map((s) => [s.id, s.status]));
-  const ghosts = live.filter((o) => o.session_id && status.get(o.session_id) !== "open");
+  // A real leak is an order that STAYS on the floor after its party left — it persists for
+  // minutes or hours. This scan reads the WHOLE shared dev database, so it also used to catch
+  // another session's fixture MID-FLIGHT (a test that opens a table, orders, and closes it inside
+  // one second) and reported it as a leak. That is a false alarm about someone else's in-flight
+  // write, not a product fault, and it cost real time twice. So: still fail for anything that has
+  // had time to settle, and skip only rows written in the last few seconds. Nothing real is hidden
+  // — a genuine leak is still failing on the very next run. (2026-07-31)
+  const SETTLING_MS = 15000;
+  const freshIds = new Set(
+    must(await sb.from("orders").select("id")
+      .eq("archived", false).is("deleted_at", null).neq("status", "cancelled")
+      .gte("created_at", new Date(Date.now() - SETTLING_MS).toISOString()).limit(500)).map((o) => o.id),
+  );
+  const ghosts = live.filter((o) => o.session_id && status.get(o.session_id) !== "open" && !freshIds.has(o.id));
   ghosts.length === 0
-    ? pass(`${live.length} live orders checked — every one belongs to an OPEN session`)
+    ? pass(`${live.length} live orders checked — every settled one belongs to an OPEN session`)
     : fail(`${ghosts.length} order(s) still on the floor after their party left: ` +
         JSON.stringify(ghosts.slice(0, 8).map((o) => `T${o.table_number} ${o.status}/${o.payment_status}`)) +
         " — the next guests at those tables would inherit them (mig 232 should have archived these)");
@@ -115,7 +128,16 @@ head("C. Closing a session — its food leaves the floor with it");
         : fail("an order row disappeared — that would be hiding a sale");
       // A new party at the same table starts clean.
       const s2 = must(await sb.from("sessions").insert({ restaurant_id: rid, table_number: T, status: "open", opened_by: "waiter", opened_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).select("id"))[0];
-      const tile = (await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: T })).data?.tiles?.[T];
+      // Read the tile with a short retry. The INSERT above and this summary read are two
+      // round-trips, so a first read can land before the new session is visible to the RPC and
+      // report the tile as "undefined · undefined" — which reads like a broken floor but is just
+      // this script racing its own fixture (seen intermittently 2026-07-31). Poll briefly; a
+      // genuinely wrong tile still fails, because the CONTENT is what's asserted below.
+      let tile = null;
+      for (let i = 0; i < 12 && !tile; i++) {
+        tile = (await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: T })).data?.tiles?.[T] || null;
+        if (!tile) await new Promise((r) => setTimeout(r, 250));
+      }
       tile && tile.state === "waiting" && Number(tile.due) === 0 && tile.counts.ck === 0
         ? pass(`reopened → "${tile.label} · ${tile.meta}", 0 dishes, ₹0 due`)
         : fail(`reopened tile is "${tile?.label} · ${tile?.meta}" due=${tile?.due} counts=${JSON.stringify(tile?.counts)} — a new party must start empty`);

@@ -7,14 +7,17 @@
 // its endpoint refuses, the menu master really removes the guest menu, the manager panel
 // configures no permissions, and the owner panel has no permission screens left.
 //
-//   node scripts/verify-access-live.mjs                  (defaults to http://localhost:4010)
+//   node scripts/verify-access-live.mjs                  (defaults to http://localhost:4000)
 //   VERIFY_BASE=http://localhost:4000 node scripts/verify-access-live.mjs
 //
 // Signs in ONCE per role — loginAs caches the session, so this never trips the login limit.
 import { chromium } from "playwright";
 import { loginAs, adminHeaders } from "./sweep/login.mjs";
 import { readFileSync } from "node:fs";
-const B = process.env.VERIFY_BASE || "http://localhost:4010";
+// Default to the ONE dev port the app actually runs on. It used to default to :4010 — a
+// leftover from when the panels were separate servers — so a plain run died with
+// ECONNREFUSED before its first check. VERIFY_BASE still overrides. (2026-07-31)
+const B = process.env.VERIFY_BASE || "http://localhost:4000";
 const H = adminHeaders(B);
 const env = {}; for (const l of readFileSync(new URL("../.env.local", import.meta.url),"utf8").split("\n")) { const m=l.match(/^([A-Z0-9_]+)=(.*)$/); if(m) env[m[1]]=m[2].trim(); }
 const U = env.NEXT_PUBLIC_SUPABASE_URL, K = env.SUPABASE_SERVICE_ROLE_KEY;
@@ -36,7 +39,10 @@ for (const role of ["manager", "owner", "kitchen", "tablet"]) {
   const route = await loginAs(ctx, role, B);
   const p = await ctx.newPage();
   const errs = []; p.on("pageerror", (e) => errs.push(String(e.message)));
-  await p.goto(B + route, { waitUntil: "networkidle" });
+  await p.goto(B + route, { // A live panel POLLS (and holds a realtime channel), so the network never goes idle and
+    // "networkidle" waits forever. Wait for the DOM and let the explicit checks below do the
+    // real waiting. (2026-07-31)
+    waitUntil: "domcontentloaded" });
   await p.waitForTimeout(2500);
   // manager/kitchen/tablet are served INSIDE an iframe (PanelFrame), so the outer body is
   // empty by design — read the frame, or this "check" can never fail for the wrong reason.
@@ -63,7 +69,10 @@ await setTab("log", false);
   const ctx = await browser.newContext();
   const route = await loginAs(ctx, "manager", B);
   const p = await ctx.newPage();
-  await p.goto(B + route, { waitUntil: "networkidle" });
+  await p.goto(B + route, { // A live panel POLLS (and holds a realtime channel), so the network never goes idle and
+    // "networkidle" waits forever. Wait for the DOM and let the explicit checks below do the
+    // real waiting. (2026-07-31)
+    waitUntil: "domcontentloaded" });
   await p.waitForTimeout(3000);
   const tabs = await p.frameLocator("iframe").locator(".tabs .tab:not([hidden])").allInnerTexts().catch(() => []);
   const flat = tabs.join(" ").toLowerCase();
@@ -77,7 +86,10 @@ await setTab("log", true);
   const ctx = await browser.newContext();
   const route = await loginAs(ctx, "manager", B);
   const p = await ctx.newPage();
-  await p.goto(B + route, { waitUntil: "networkidle" });
+  await p.goto(B + route, { // A live panel POLLS (and holds a realtime channel), so the network never goes idle and
+    // "networkidle" waits forever. Wait for the DOM and let the explicit checks below do the
+    // real waiting. (2026-07-31)
+    waitUntil: "domcontentloaded" });
   await p.waitForTimeout(3000);
   const api = await p.evaluate(async () => (await fetch("/api/editor/oplog", { cache: "no-store" })).status);
   ck("switching it back on restores the endpoint", api === 200, api);
@@ -110,7 +122,10 @@ console.log("\n[4] the manager panel configures no permissions");
   const ctx = await browser.newContext();
   const route = await loginAs(ctx, "manager", B);
   const p = await ctx.newPage();
-  await p.goto(B + route, { waitUntil: "networkidle" });
+  await p.goto(B + route, { // A live panel POLLS (and holds a realtime channel), so the network never goes idle and
+    // "networkidle" waits forever. Wait for the DOM and let the explicit checks below do the
+    // real waiting. (2026-07-31)
+    waitUntil: "domcontentloaded" });
   await p.waitForTimeout(3000);
   const f = p.frameLocator("iframe");
   await f.locator('.tab[data-tab="general"]').click().catch(() => {});
@@ -130,12 +145,18 @@ console.log("\n[5] owner panel — no permission screens, roster intact");
   const ctx = await browser.newContext();
   await loginAs(ctx, "owner", B);
   const p = await ctx.newPage();
-  await p.goto(B + "/owner/staff", { waitUntil: "networkidle" });
+  await p.goto(B + "/owner/staff", { // A live panel POLLS (and holds a realtime channel), so the network never goes idle and
+    // "networkidle" waits forever. Wait for the DOM and let the explicit checks below do the
+    // real waiting. (2026-07-31)
+    waitUntil: "domcontentloaded" });
   await p.waitForTimeout(2500);
   const txt = await p.locator("body").innerText();
   ck("Powers tab is gone", !/\bPowers\b/.test(txt), txt.match(/Powers/g));
   ck("the team roster still renders", txt.length > 400, txt.length);
-  await p.goto(B + "/owner/settings", { waitUntil: "networkidle" });
+  await p.goto(B + "/owner/settings", { // A live panel POLLS (and holds a realtime channel), so the network never goes idle and
+    // "networkidle" waits forever. Wait for the DOM and let the explicit checks below do the
+    // real waiting. (2026-07-31)
+    waitUntil: "domcontentloaded" });
   await p.waitForTimeout(2000);
   const s = await p.locator("body").innerText();
   ck("'Features you control' is gone", !s.includes("Features you control"), true);
