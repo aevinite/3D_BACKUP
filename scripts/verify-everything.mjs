@@ -17,16 +17,11 @@
  * restores every setting it flips, and deletes every row it creates.
  */
 import { chromium } from "playwright";
-import { execFile } from "node:child_process";
-import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { execFile, execFileSync } from "node:child_process";
+import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { loginAs, adminCookie, adminHeaders } from "./sweep/login.mjs";
-// The access MODEL itself, bundled from lib/accessTree.ts by the npm script (the same esbuild
-// step verify:owner-home uses). Importing the real model instead of re-describing it in JS is
-// the whole point: a second copy of "where does this switch live" would drift, and drift is
-// what this suite exists to catch.
-import { ALL_NODES, nodeValue, nodePatch, extraPatch } from "../node_modules/.cache/accessTree.mjs";
 
 /** Merge a node's own patch with the Ratings mirror, without losing either branch. */
 const applyTwo = (a, b) => {
@@ -37,6 +32,31 @@ const applyTwo = (a, b) => {
 };
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// The access MODEL itself, bundled from lib/accessTree.ts. Importing the real model instead of
+// re-describing it in JS is the whole point: a second copy of "where does this switch live" would
+// drift, and drift is what this suite exists to catch.
+//
+// The bundle is built HERE, not only by the npm script, because `node scripts/verify-everything.mjs`
+// is how every range run and every parallel lane actually starts this file — and without the bundle
+// that crashed on line 1 with a bare ERR_MODULE_NOT_FOUND naming a path inside node_modules. A
+// suite that can't start looks nothing like a suite that passed, but it also tells you nothing
+// about what to do. It rebuilds when lib/accessTree.ts is newer, so a stale bundle can't pass a
+// check the current model would fail.
+const MODEL_SRC = join(ROOT, "lib/accessTree.ts");
+const MODEL_OUT = join(ROOT, "node_modules/.cache/accessTree.mjs");
+const mtime = (p) => { try { return statSync(p).mtimeMs; } catch { return 0; } };
+if (mtime(MODEL_OUT) < mtime(MODEL_SRC)) {
+  try {
+    execFileSync("npx", ["esbuild", "lib/accessTree.ts", "--bundle", "--platform=node", "--format=esm",
+      "--alias:@=.", `--outfile=${MODEL_OUT}`, "--log-level=warning"], { cwd: ROOT, stdio: "inherit" });
+  } catch {
+    console.error("\n✗ could not bundle lib/accessTree.ts (needs esbuild). Run: npm run verify:everything\n");
+    process.exit(1);
+  }
+}
+const { ALL_NODES, SECTIONS, nodeValue, nodePatch, extraPatch } = await import(pathToFileURL(MODEL_OUT).href);
+
 const ARGS = process.argv.slice(2);
 // Every OTHER suite in this folder takes `--base`, so `--base` is what a person types here too —
 // and it used to be accepted in silence and ignored, leaving the run pointed at the deployed site
@@ -555,10 +575,16 @@ async function restoreSnapshot() {
   });
 }
 
-phase("the access tree loads all five sections", async () => {
+// Counts the sections the MODEL declares rather than a number typed in here. It said "five" and
+// went red the moment Staff apps was removed (owner, 2026-07-31) — a test that has to be edited
+// every time the screen legitimately changes teaches people to edit tests instead of reading them.
+// What actually matters is that the endpoint serves the same sections the app is built from.
+phase("the access tree loads every section the model declares", async () => {
   await ensureSnap();                       // takes the snapshot AND registers the undo
   const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json();
-  ok(Array.isArray(d.sections) && d.sections.length === 5, `${d.sections?.length ?? "no"} sections`);
+  const want = SECTIONS.map((s) => s.id);
+  const got = Array.isArray(d.sections) ? d.sections.map((s) => s.id) : [];
+  ok(want.length > 0 && want.join(",") === got.join(","), `model has ${want.join(", ")} · endpoint sent ${got.join(", ") || "nothing"}`);
 });
 
 // each guest sub-switch: OFF removes its mark from the served page, ON brings it back
@@ -745,22 +771,32 @@ phase("the owner's log ENDPOINT refuses while that page is off", async () => {
   await setState({ sections: { logs: true } });
   ok(st === 403, `status ${st}`);
 });
-phase("a staff-app switch OFF refuses that login at the door", async () => {
-  await setState({ panels: { kitchen: false } });
-  await wait(CACHE_MS);
-  const r = await fetch(BASE + "/api/staff-login", { method: "POST", redirect: "manual",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ username: "diagkitchen", password: "diag-kitchen-2026" }).toString() });
-  await setState({ panels: { kitchen: true } });
-  ok(r.status !== 200 || true, "");            // the redirect target is what matters, checked next
-  ok(true);
+// The four staff-app switches were REMOVED (owner, 2026-07-31: "remove it completely, all panels
+// always on"). What replaced the old pair of phases is the guard for the trap that removal created:
+// a restaurant could still have `enabled_panels.<app> = false` stored from before, and if anything
+// went on reading it, that login would be refused by a switch no screen can reach any more.
+// demo-bistro had exactly that (owner panel off), so this is not hypothetical.
+//
+// The old phase this replaces asserted `ok(r.status !== 200 || true, "")` — an expression that is
+// true whatever happens. It could not fail, so it never proved the thing its name claimed.
+phase("the model offers no staff-app switch any more", async () => {
+  const panelNodes = ALL_NODES.filter((n) => n.bind.t === "panel");
+  ok(panelNodes.length === 0, `${panelNodes.length} panel switch(es) still in the model: ${panelNodes.map((n) => n.id).join(", ")}`);
 });
-phase("…and switching it back on lets that login through again", async () => {
-  await setState({ panels: { kitchen: true } });
-  await wait(CACHE_MS);
+phase("a stored 'app off' from before can no longer refuse a login", async () => {
+  // Read it straight from the database: the switch is gone from the API, so this is the only way to
+  // see whether any restaurant still carries an old false — and to prove it doesn't matter.
+  const rows = await dbGet("settings?select=restaurant_id,enabled_panels");
+  const stale = (rows || []).filter((r) => {
+    const p = r.enabled_panels || {};
+    return ["manager", "kitchen", "tablet", "owner"].some((k) => p[k] === false);
+  });
+  // Whatever is stored, the gate must answer ON. Proven through a real login for the one role we
+  // can check without spending the login budget: the kitchen screen has to open.
   const s = await screen("kitchen", "/kitchen", { settle: 3500 });
   s.close();
-  ok(/Kitchen live orders/i.test(s.text), s.text.slice(0, 80));
+  ok(/Kitchen live orders/i.test(s.text),
+    `${stale.length} restaurant(s) still carry a stored "off" — kitchen screen said: ${s.text.slice(0, 80)}`);
 });
 phase("the per-person tab lists this restaurant's people", async () => {
   const d = await (await api(`/api/owner/staff?rid=${FH.id}`)).json();
@@ -908,34 +944,47 @@ phase("no order belongs to a session that is already closed", async () => {
   // a 300-row diagnostic it is the only shape that completes.)
   const rows = [];
   for (const r of REST || []) {
-    const page = await dbGet(`orders?select=id,session_id,status,archived,created_at&restaurant_id=eq.${r.id}&order=created_at.desc&limit=300`);
-    rows.push(...page.filter((o) => o.archived !== true));
+    const page = await dbGet(`orders?select=id,session_id,status,archived,created_at,deleted_at&restaurant_id=eq.${r.id}&order=created_at.desc&limit=300`);
+    // A SOFT-DELETED order is not on the floor — it is in the recycle bin, and the close trigger
+    // deliberately leaves it alone (`deleted_at IS NULL` is in its WHERE clause, mig 232). Not
+    // excluding it here is why this check reported a "stranded order" that was nothing of the kind:
+    // the row had been recycled ONE SECOND before its session closed, so the trigger was right and
+    // the check was wrong — and it would have gone on failing on that row forever. (2026-07-31)
+    rows.push(...page.filter((o) => o.archived !== true && !o.deleted_at));
   }
   const ids = [...new Set(rows.map((r) => r.session_id).filter(Boolean))];
   if (!ids.length) return ok(true);
   const chunks = [];
   for (let i = 0; i < ids.length; i += 60) chunks.push(ids.slice(i, i + 60));
-  const closed = new Set();
+  const closedAt = new Map();
   for (const c of chunks) {
-    const ss = await dbGet(`sessions?select=id,status&id=in.(${c.join(",")})`);
-    for (const s of ss) if (s.status === "closed") closed.add(s.id);
+    const ss = await dbGet(`sessions?select=id,status,closed_at&id=in.(${c.join(",")})`);
+    for (const s of ss) if (s.status === "closed") closedAt.set(s.id, s.closed_at);
   }
-  // A REAL stranded order sits there for minutes; anything seconds old is still settling. Several
-  // sessions share this database and their fixtures open, order and close a table inside one
-  // second, so without this the scan reports SOMEONE ELSE'S in-flight write as a stranded order —
-  // the same false alarm that cost time in verify-table-ownership. Skip only the very fresh rows;
-  // anything older still fails, so a genuine leak is caught on this run, not the next. (2026-07-31)
-  const SETTLING_MS = 15000;
-  const settled = (r) => !r.created_at || Date.now() - new Date(r.created_at).getTime() > SETTLING_MS;
-  const candidates = rows.filter((r) => r.session_id && closed.has(r.session_id) && !["cancelled", "paid"].includes(r.status) && settled(r));
+  // A REAL stranded order sits there for minutes; anything freshly closed is still settling.
+  // Several sessions share this database and their fixtures open, order and close a table inside a
+  // second, so without a window the scan reports an IN-FLIGHT write as a stranded order.
+  //
+  // The window is keyed on when the SESSION CLOSED, not on the order's age — that was the bug in
+  // this check. Closing is the event that triggers the cleanup, so an order created 40s ago on a
+  // session closed 9s ago is not evidence of anything: it sailed through an order-age window and
+  // was reported as a fault (2026-07-31, and the rows were gone minutes later). Anything closed
+  // longer ago than this still fails, so a genuine leak is caught on THIS run, not the next.
+  const SETTLING_MS = 60000;
+  const settled = (sid) => {
+    const at = closedAt.get(sid);
+    return !at || Date.now() - new Date(at).getTime() > SETTLING_MS;
+  };
+  const candidates = rows.filter((r) => r.session_id && closedAt.has(r.session_id)
+    && !["cancelled", "paid"].includes(r.status) && settled(r.session_id));
   // RE-READ before failing. The close trigger cancels + archives a moment AFTER the session
   // flips to closed, so a row read mid-flight looks stranded when it is about to be handled —
   // this caught THIS SUITE'S own lifecycle order and called the app broken. Ask again.
   const orphans = [];
   if (candidates.length) await wait(2500);   // let the close trigger finish before we accuse it
   for (const c of candidates.slice(0, 20)) {
-    const now = (await dbGet(`orders?select=id,status,archived&id=eq.${c.id}`))[0];
-    if (now && now.archived !== true && !["cancelled", "paid"].includes(now.status)) orphans.push(now.id);
+    const now = (await dbGet(`orders?select=id,status,archived,deleted_at&id=eq.${c.id}`))[0];
+    if (now && now.archived !== true && !now.deleted_at && !["cancelled", "paid"].includes(now.status)) orphans.push(now.id);
   }
   ok(!orphans.length, `${orphans.length} live orders still on closed sessions after a re-read (e.g. ${orphans[0]})`);
 });
@@ -1619,7 +1668,7 @@ async function aanState() {
   if (!d.state) throw new Fail(`the Access screen returned no state (${r.status}) ${d.error || ""}`);
   return (AAN_STATE = d.state);
 }
-const DEFAULT_NODES = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && !n.leftToBuild);
+const DEFAULT_NODES = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild);
 const showVal = (v) => (v === true ? "ON" : v === false ? "off" : JSON.stringify(v));
 
 phase("Aangan exists and its Access screen loads", async () => {
@@ -1640,7 +1689,7 @@ phase("the defaults applier and this suite agree on which switches have a defaul
   // them and this group asserts them. If they ever disagree, one of them is silently skipping a
   // switch — so make the disagreement a failure instead of a surprise.
   const applier = readFileSync(join(ROOT, "scripts/set-access-defaults.mjs"), "utf8");
-  const filter = `n.bind.t !== "none" && n.bind.t !== "text" && !n.leftToBuild`;
+  const filter = `n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild`;
   ok(applier.includes(filter), "the applier no longer selects nodes the same way this suite does");
   ok(DEFAULT_NODES.length >= 60, `only ${DEFAULT_NODES.length} switches carry a default — the model shrank unexpectedly`);
 });

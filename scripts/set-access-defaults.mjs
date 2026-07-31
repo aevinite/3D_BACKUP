@@ -13,13 +13,30 @@
  * (GSTIN, legal name, bill address) are left alone — blanking a restaurant's real legal
  * details is destructive and is never what "reset the permissions" means.
  */
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { readFileSync, statSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { adminHeaders } from "./sweep/login.mjs";
-import { ALL_NODES, nodeValue, nodePatch, extraPatch, applyPatch } from "../node_modules/.cache/accessTree.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// Bundled here rather than only by `npm run access:defaults`, for the same reason the sweep does
+// it: run this file directly (which is how it gets used) and a missing bundle used to crash on
+// line 1 with a path inside node_modules and no hint. Rebuilds when the model is newer, so this
+// can never write yesterday's idea of "factory default".
+const MODEL_OUT = join(ROOT, "node_modules/.cache/accessTree.mjs");
+const mtime = (p) => { try { return statSync(p).mtimeMs; } catch { return 0; } };
+if (mtime(MODEL_OUT) < mtime(join(ROOT, "lib/accessTree.ts"))) {
+  try {
+    execFileSync("npx", ["esbuild", "lib/accessTree.ts", "--bundle", "--platform=node", "--format=esm",
+      "--alias:@=.", `--outfile=${MODEL_OUT}`, "--log-level=warning"], { cwd: ROOT, stdio: "inherit" });
+  } catch {
+    console.error("\n✗ could not bundle lib/accessTree.ts (needs esbuild). Run: npm run access:defaults\n");
+    process.exit(1);
+  }
+}
+const { ALL_NODES, nodeValue, nodePatch, extraPatch, applyPatch } = await import(pathToFileURL(MODEL_OUT).href);
 const BASE = (process.env.VERIFY_BASE || "https://3-d-backup.vercel.app").replace(/\/$/, "");
 const ARGS = process.argv.slice(2);
 const arg = (n, d) => { const i = ARGS.indexOf(n); return i === -1 ? d : ARGS[i + 1]; };
@@ -46,14 +63,29 @@ const api = (p, init) => fetch(BASE + p, { cache: "no-store", ...init, headers: 
 
 const list = await (await api("/api/admin/restaurants")).json();
 const rests = Array.isArray(list) ? list : list.restaurants || [];
-const rest = rests.find((r) => r.slug === SLUG);
+// Exact slug wins. Failing that, a UNIQUE partial match is accepted, because the two databases
+// name the same restaurant differently ("aangan" live vs "aangan-garden-restaurant" here) and this
+// script's own default was "aangan" — so running it with no arguments failed on backup. Two matches
+// is refused rather than guessed: this script REWRITES a restaurant's permissions, and picking the
+// wrong one silently is far worse than making someone type the full slug.
+let rest = rests.find((r) => r.slug === SLUG);
+if (!rest) {
+  const near = rests.filter((r) => r.slug.includes(SLUG) || SLUG.includes(r.slug));
+  if (near.length === 1) {
+    rest = near[0];
+    console.log(`(no exact slug "${SLUG}" — using the one match: ${rest.slug})`);
+  } else if (near.length > 1) {
+    console.error(`"${SLUG}" matches ${near.length} restaurants (${near.map((r) => r.slug).join(", ")}). Name one exactly.`);
+    process.exit(1);
+  }
+}
 if (!rest) { console.error(`No restaurant with slug "${SLUG}". Have: ${rests.map((r) => r.slug).join(", ")}`); process.exit(1); }
 
 const before = (await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${rest.id}`)).json()).state;
 if (!before) { console.error("The Access screen did not return a state for that restaurant."); process.exit(1); }
 
 /** Every node whose default we can honestly write and read back. */
-const defaultNodes = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && !n.leftToBuild);
+const defaultNodes = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild);
 
 let patch = {};
 const diffs = [];

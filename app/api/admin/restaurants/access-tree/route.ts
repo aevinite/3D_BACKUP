@@ -16,7 +16,7 @@ import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { menuTag } from "@/lib/menuDataServer";
 import {
   SECTIONS, ALL_NODES, NODE_BY_ID, SETTINGS_COLUMNS, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
-  LIST_KEYS, TEXT_KEYS, MODULE_KEYS, PANEL_KEYS, CHANNEL_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
+  LIST_KEYS, TEXT_KEYS, MODULE_KEYS, PANEL_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
   TABLET_COLS, TAB_KEYS, type TreeState,
 } from "@/lib/accessTree";
 
@@ -84,6 +84,16 @@ export async function GET(req: NextRequest) {
   const channels: Record<string, boolean> = {};
   for (const k of CHANNEL_KEYS) channels[k] = obj(pc[k]).on === true;
 
+  // A channel's API key belongs to the restaurant's Zomato/Swiggy account, so it goes OUT only as
+  // a hint that tells you WHICH key is stored without being the key: "••••1234". The value itself
+  // has no path back to the browser — not in this response, not anywhere — so it cannot be read
+  // off the Access screen or out of a saved network log.
+  const creds: Record<string, string> = {};
+  for (const k of CREDS_KEYS) {
+    const raw = obj(pc[k]).api_key;
+    creds[k] = typeof raw === "string" && raw.length ? `••••${raw.slice(-4)}` : "";
+  }
+
   const mp = obj(r.manager_permissions);
   const grants: Record<string, boolean> = {};
   for (const f of GRANT_FLAGS) if (f in mp) grants[f] = mp[f] === true;
@@ -101,7 +111,7 @@ export async function GET(req: NextRequest) {
     for (const key of TAB_ALLOWED[panel]) if (typeof stored[key] === "boolean") tabs[panel][key] = stored[key];
   }
 
-  const state: TreeState = { features, settings, panels, channels, grants, sections, tabs, config: cfg };
+  const state: TreeState = { features, settings, panels, channels, grants, sections, tabs, config: cfg, creds };
   return NextResponse.json({ sections: SECTIONS, state });
 }
 
@@ -195,12 +205,27 @@ export async function POST(req: NextRequest) {
     for (const [k, v] of Object.entries(obj(patch.panels))) if (PANEL_KEYS.includes(k)) next[k] = v === true;
     setPatch.enabled_panels = next;
   }
-  if (patch.channels) {
+  // Channels and their API keys live in the SAME column, so they are merged into ONE object here.
+  // Doing them in two independent branches would have let a patch carrying both write the column
+  // twice, the second overwriting the first — a saved key silently lost, or a channel switched
+  // back on by the write that stored its key.
+  if (patch.channels || patch.creds) {
     const curPc = obj((await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle()).data?.platform_channels);
     const next = { ...curPc };
     for (const [k, v] of Object.entries(obj(patch.channels))) {
       if (!CHANNEL_KEYS.includes(k)) continue;
       next[k] = { ...obj(next[k]), on: v === true }; // keep any stored API credentials
+    }
+    for (const [k, v] of Object.entries(obj(patch.creds))) {
+      if (!CREDS_KEYS.includes(k)) continue;
+      const cur = obj(next[k]);
+      // "" = the form was saved without retyping the key, so leave the stored one alone. null =
+      // remove it deliberately. Anything else replaces it. Trimmed because a pasted key almost
+      // always arrives with a newline, and a key with a stray newline fails with no clue why.
+      if (v === null) { const { api_key: _drop, ...rest } = cur; next[k] = rest; continue; }
+      const key = String(v ?? "").trim();
+      if (!key) continue;
+      next[k] = { ...cur, api_key: key.slice(0, 400) };
     }
     setPatch.platform_channels = next;
   }

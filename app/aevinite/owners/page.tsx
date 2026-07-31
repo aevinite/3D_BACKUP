@@ -10,6 +10,7 @@
 // Opening a panel carries &uid=<owner> so it lands on THAT owner's cockpit even when
 // the restaurant has several owners (the dashboard chooser uses the same uid).
 // Data + writes: /api/admin/owners (admin-cookie gated, service-role) — unchanged.
+import { errorHeadline } from "@/lib/errorSignature";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { CopyButton } from "@/components/admin/CopyButton";
@@ -765,7 +766,9 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
                   <span style={{ fontWeight: 700 }}>{a.action.replace(/_/g, " ")}</span>
                   {a.actor ? <span style={{ color: "var(--muted)" }}> · by {a.actor}</span> : null}
                   {a.restaurant ? <span style={{ color: "var(--muted)" }}> · {a.restaurant}</span> : null}
-                  {a.detail ? <div style={{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.detail}>{a.detail}</div> : null}
+                  {/* Same as the Problems board: a legacy row can hold a whole gateway HTML page,
+                      and this is a one-line activity row. The hover title keeps the full text. */}
+                  {a.detail ? <div style={{ color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={a.detail}>{errorHeadline(a.detail)}</div> : null}
                 </div>
                 <span style={{ flexShrink: 0, color: "var(--muted)", fontSize: 11 }} title={a.at}>{when(a.at)}</span>
               </div>

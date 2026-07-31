@@ -4,6 +4,7 @@
 // right-side drawer listing them. Tickets can be resolved inline; a restaurant name
 // jumps to that restaurant's detail. Polls /api/admin/notifications every 60s (only
 // while the tab is active — useActiveAutoRefresh), one cheap call.
+import { errorHeadline } from "@/lib/errorSignature";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useActiveAutoRefresh } from "@/components/admin/shared";
@@ -214,7 +215,10 @@ function BellDrawer({ feed, onClose, onChanged }: { feed: Feed | null; onClose: 
                         style={{ fontWeight: 700, fontSize: 13.5, background: "none", border: 0, padding: 0, cursor: a.restaurantSlug ? "pointer" : "default", color: "var(--text)" }}>
                         {a.restaurantName}
                       </button>
-                      <div style={{ fontSize: 12, color: "var(--muted)" }}>{a.detail}</div>
+                      {/* Rows recorded before readableError() landed hold a whole gateway HTML page
+                          as their detail, and this drawer is the thing that tells the owner
+                          something is wrong — the one place it must read as a sentence. */}
+                      <div style={{ fontSize: 12, color: "var(--muted)" }}>{errorHeadline(a.detail)}</div>
                     </div>
                   </div>
                 ))}

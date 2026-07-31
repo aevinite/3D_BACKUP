@@ -386,3 +386,10 @@ Porting the rate-limit feature to AV live, I `git apply`'d the patch then `git c
 
 ## When owner says "show me / open chrome" — just open it, no essay (2026-07-27)
 Owner repeatedly asks to SEE the demo on its port. Correct response = open Chrome to the URL + ONE short line. Do NOT write long tables/recaps describing what he's about to look at — he's staring at it. Over-explaining reads as ignoring "as simple as that." Open, one line, stop.
+
+## Never `import()` a script to check its syntax — it RUNS it (2026-07-31)
+`node -e 'import("./scripts/verify-everything.mjs")'` to "check it parses" launched a second full
+501-phase run against the DEPLOYED site while the real one was mid-flight — two mutating suites on
+one database, the exact collision that re-enables settings under each other. It only stopped
+because `| head` closed the pipe. To check syntax without executing:
+`npx esbuild <file> --bundle --outfile=/dev/null` (or `node --check` for non-ESM).

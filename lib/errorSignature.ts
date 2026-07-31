@@ -64,6 +64,38 @@ export function errorSig(detail: string | null | undefined): string {
     .slice(0, 160);                                                         // long tails add nothing
 }
 
+/** Does this error detail carry a whole HTML page rather than a message? */
+export function looksLikeHtmlPage(detail: string | null | undefined): boolean {
+  const s = String(detail ?? "");
+  return /<!DOCTYPE\s+html/i.test(s) || /<html[\s>]/i.test(s);
+}
+
+/**
+ * What the CLOSED row on the Repair board shows.
+ *
+ * readableError() above fixes this at the source, so rows recorded from now on are already
+ * readable. This is the DISPLAY side, and it is still needed for two reasons: rows recorded
+ * BEFORE that fix are in the database with the markup in them, and a closed row is one line of
+ * 34px — so it also says the full text is one press away.
+ *
+ * It does no parsing of its own: the "what does this page actually say" part is readableError's
+ * job, called here on the markup only. Two copies of that logic would drift, and this file exists
+ * because drift is the bug.
+ *
+ * HIDES NOTHING: the open row still prints the captured text byte for byte, and what gets
+ * recorded, grouped or alarmed is untouched.
+ */
+export function errorHeadline(detail: string | null | undefined): string {
+  const s = String(detail ?? "");
+  if (!looksLikeHtmlPage(s)) return s;
+  // Whatever came before the markup is OURS and names the failing request ("GET summary — "), so
+  // split there and hand only the markup to readableError.
+  const at = s.search(/<!DOCTYPE\s+html|<html[\s>]/i);
+  const prefix = (at > 0 ? s.slice(0, at) : "").trim();
+  const markup = at >= 0 ? s.slice(at) : s;
+  return `${prefix ? `${prefix} ` : ""}${readableError(markup)} — open it to read the whole page`;
+}
+
 /**
  * The visual group key the Repair page shows as one tile (panel + restaurant + action + signature).
  * Kept here next to errorSig so the tile the owner acts on and the memory row we write always

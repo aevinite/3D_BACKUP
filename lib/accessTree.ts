@@ -47,6 +47,11 @@ export type Bind =
   | { t: "choice"; key: string }         // settings.<key>  string, one of node.choices
   | { t: "list"; key: string }           // settings.<key>  text[]  (multi-select)
   | { t: "text"; key: string }           // settings.<key>  text
+  // settings.platform_channels[key].api_key — a third party's API key for one delivery channel.
+  // WRITE-ONLY BY DESIGN: the browser sends a key and only ever gets a masked hint back
+  // ("••••1234"), so a stored credential can't be read off the Access screen or out of a response.
+  // Saving an empty value changes nothing; clearing is a deliberate separate action.
+  | { t: "creds"; key: string }
   // access_config[id].<side>_opts[key] — the EXACT shape menuSubAllowed() in the editor
   // API already reads for the nine Edit-menu parts. Do not "tidy" this path: those nine
   // are the only sub-options the old model ever really enforced, and they enforce through
@@ -222,15 +227,29 @@ export const SECTIONS: Section[] = [
       { id: "khata", name: "Pay later (khata)", def: false, bind: { t: "module", key: "khata" },
         what: "Parking a bill on a named regular to collect later, and the book that tracks who owes what. OFF removes the khata screens from the manager AND owner panels entirely." },
       {
-        id: "takeaway", name: "Takeaway & delivery", def: false, bind: { t: "module", key: "takeaway" },
-        what: "Orders that aren't sitting at a table: a counter takeaway, an order from the restaurant's own website, and the delivery apps. OFF removes the Platform board and the 🥡 New Parcel button.",
+        // "Platforms" (owner, 2026-07-31). The stored key stays `takeaway`: that is the mig-235
+        // column name, and renaming a LABEL must never rename a column.
+        id: "takeaway", name: "Platforms", def: false, bind: { t: "module", key: "takeaway" },
+        what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board and the 🥡 New Parcel button.",
         children: [
           { id: "ch_website", name: "Takeaway / own website", def: true, bind: { t: "channel", key: "website" },
-            what: "A counter takeaway punched in by staff, and orders coming from the restaurant's own website. Needs no outside account." },
+            what: "A counter takeaway punched in by staff, and orders coming from the restaurant's own website. Needs no outside account.",
+            children: [
+              { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
+                what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },
+            ] },
           { id: "ch_zomato", name: "Zomato", def: false, bind: { t: "channel", key: "zomato" },
-            what: "Zomato orders land on the Platform board. Needs Zomato's API credentials — until they're entered the channel shows as “not connected”." },
+            what: "Zomato orders land on the Platform board. Needs Zomato's API key — until it is entered the channel shows as “not connected”.",
+            children: [
+              { id: "ch_zomato_key", name: "Zomato API key", bind: { t: "creds", key: "zomato" }, placeholder: "Paste the Zomato API key",
+                what: "From the restaurant's own Zomato partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
+            ] },
           { id: "ch_swiggy", name: "Swiggy", def: false, bind: { t: "channel", key: "swiggy" },
-            what: "Swiggy orders land on the Platform board. Needs Swiggy's API credentials — until they're entered the channel shows as “not connected”." },
+            what: "Swiggy orders land on the Platform board. Needs Swiggy's API key — until it is entered the channel shows as “not connected”.",
+            children: [
+              { id: "ch_swiggy_key", name: "Swiggy API key", bind: { t: "creds", key: "swiggy" }, placeholder: "Paste the Swiggy API key",
+                what: "From the restaurant's own Swiggy partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
+            ] },
         ],
       },
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false, bind: { t: "setting", key: "auto_print_kot_allowed" },
@@ -269,24 +288,11 @@ export const SECTIONS: Section[] = [
   },
 
   // ──────────────────────────── A2 · STAFF APPS ─────────────────────────────
-  // NOT on the owner's list, kept deliberately: these are in real use (Aangan runs on the
-  // waiter tablet only) and switching one off REFUSES that login at the door — a capability
-  // with no substitute anywhere else. They moved here from the restaurant detail page, which
-  // now carries no permissions at all. Flagged to the owner 2026-07-31.
-  {
-    id: "apps", name: "Staff apps", icon: "grid",
-    blurb: "Which of the four staff apps this restaurant has. Switching one off refuses that login — nobody can open it.",
-    children: [
-      { id: "panel_manager", name: "Manager panel", def: true, bind: { t: "panel", key: "manager" },
-        what: "The full control room: floor, bills, editor, reports. Off refuses a manager login." },
-      { id: "panel_kitchen", name: "Kitchen display", def: true, bind: { t: "panel", key: "kitchen" },
-        what: "The New → Cooking → Ready ticket board and the sold-out list. Off refuses a kitchen login." },
-      { id: "panel_tablet", name: "Waiter tablet", def: true, bind: { t: "panel", key: "tablet" },
-        what: "The floor tiles and take-order app the waiters carry. Off refuses a waiter login." },
-      { id: "panel_owner", name: "Owner panel", def: true, bind: { t: "panel", key: "owner" },
-        what: "The owner's own dashboard, reports and staff pages. Off refuses an owner login." },
-    ],
-  },
+  // REMOVED (owner, 2026-07-31: "remove it completely, all panels always on"). Every restaurant
+  // now has all four staff apps; there is no per-restaurant switch and no screen that offers one.
+  // The gate in lib/panelAccess.ts answers ON for all four regardless of what is stored, so no
+  // restaurant can be left with a login refused by a switch nobody can reach any more.
+  // Whether the MENU editor exists is decided by the Menu feature in Main features, not here.
 
   // ────────────────────────── B · MANAGER'S MENU ────────────────────────────
   {
@@ -400,6 +406,7 @@ export const TEXT_KEYS = collect((b) => (b.t === "text" ? b.key : null));
 export const MODULE_KEYS = collect((b) => (b.t === "module" ? b.key : null));
 export const PANEL_KEYS = collect((b) => (b.t === "panel" ? b.key : null));
 export const CHANNEL_KEYS = collect((b) => (b.t === "channel" ? b.key : null));
+export const CREDS_KEYS = collect((b) => (b.t === "creds" ? b.key : null));
 export const GRANT_FLAGS = collect((b) => (b.t === "grant" ? b.flag : null));
 export const SECTION_ENTITLEMENTS = collect((b) => (b.t === "section" ? b.key : null));
 export const TABLET_COLS = collect((b) => (b.t === "tablet" ? b.key : null));
@@ -428,10 +435,13 @@ export type TreeState = {
   sections: Record<string, boolean>;          // restaurants.owner_entitlements
   tabs: Record<string, Record<string, boolean>>; // access_config.menus[panel][key]
   config: Record<string, any>;                // restaurants.access_config
+  // MASKED hints only — "" when no key is stored, else "••••1234". Never the key itself: the
+  // server builds this and the real value has no path back to the browser.
+  creds: Record<string, string>;
 };
 
 export const emptyState = (): TreeState => ({
-  features: {}, settings: {}, panels: {}, channels: {}, grants: {}, sections: {}, tabs: {}, config: {},
+  features: {}, settings: {}, panels: {}, channels: {}, grants: {}, sections: {}, tabs: {}, config: {}, creds: {},
 });
 
 export type TreePatch = Partial<{
@@ -443,6 +453,9 @@ export type TreePatch = Partial<{
   sections: Record<string, boolean>;
   tabs: Record<string, Record<string, boolean>>;
   config: Record<string, any>;
+  // The REAL key on the way IN. "" means "leave whatever is stored alone" (so saving the form
+  // without retyping a key can't silently disconnect a channel); null means "remove it".
+  creds: Record<string, string | null>;
 }>;
 
 const present = <T,>(v: T | undefined | null, def: T): T => (v === undefined || v === null ? def : v);
@@ -463,6 +476,8 @@ export function nodeValue(n: Node, s: TreeState): any {
     case "capTablet":return present(s.config?.[b.id]?.tablet as string, d as string) || "off";
     case "choice":   return present(s.settings?.[b.key] as string, d as string);
     case "text":     return present(s.settings?.[b.key] as string, (d as string) || "");
+    // The masked hint the server sent, never a key. "" reads as "nothing stored yet".
+    case "creds":    return present(s.creds?.[b.key] as string, "");
     case "list": {
       const v = s.settings?.[b.key];
       return Array.isArray(v) && v.length ? (v as string[]) : ((d as string[]) || []);
@@ -493,6 +508,7 @@ export function nodePatch(n: Node, v: any): TreePatch {
     case "capTablet":return { config: { [b.id]: { tablet: String(v) } } };
     case "choice":   return { settings: { [b.key]: String(v) } };
     case "text":     return { settings: { [b.key]: String(v ?? "") } };
+    case "creds":    return { creds: { [b.key]: String(v ?? "") } };
     case "list":     return { settings: { [b.key]: (Array.isArray(v) ? v : []).map(String) } };
     case "opt":      return { config: { [b.id]: { [`${b.side}_opts`]: { [b.key]: v } } } };
     case "limit":    return { config: { [b.id]: { limit: { [b.side]: Number(v) } } } };
