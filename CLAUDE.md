@@ -755,6 +755,13 @@ mig 238 cuts the COST of each.** Read the history here so neither gets undone:
   a candidate against the live one tile by tile, for every restaurant and every occupied table,
   and it is itself proven to catch a trailing space in a label, money rounded to 1 decimal, and
   an off-by-one in the ready threshold. Do not hand-review a diff of this function instead.
+- ⏳ **OPEN FOLLOW-UP — run `npm run check:floor-timeouts` and act on the verdict.** Mig 238 landed
+  after the day's timeout bursts had already stopped, so "none since" proved nothing. The check
+  reports FIXED / TOO EARLY / NOT FIXED against the real error rows and prints what a floor read
+  costs now. **`docs/FLOOR-TIMEOUT-WATCH.md`** holds the ordered what-to-do-if-not-fixed list (and
+  the trap: if a floor read is already ~10–30ms, the remaining cause is CONTENTION, so making the
+  query faster again achieves nothing). On FIXED, delete the doc + script + npm script — it's
+  designed to be retired. AV live has the sharing fix but NOT mig 238; that needs its own ask.
 
 Whole-floor reads for the same restaurant inside a **1.5s window still share ONE database call**
 (`lib/floorSummary.ts`, wired into both panel routes). Three properties keep that safe, and

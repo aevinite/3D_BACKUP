@@ -30,7 +30,8 @@
     "verify:clash": "node scripts/verify-clash-coverage.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
-    "verify:floor": "node scripts/verify-floor-share.mjs"
+    "verify:floor": "node scripts/verify-floor-share.mjs",
+    "check:floor-timeouts": "node scripts/check-floor-timeouts.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
