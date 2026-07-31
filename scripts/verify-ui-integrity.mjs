@@ -96,6 +96,50 @@ if (!HOOK || !touched || /(^|\/)_[^/]*\.(mjs|js|ts)$/.test(touched)) {
   } catch { /* not a git repo → skip */ }
 }
 
+// ── 5. no two migrations share a number ─────────────────────────────────────────
+// Not a screen fault, but the same shape of mistake and it belongs on the instant guard: two
+// sessions each take "the next free number", both rebase cleanly (the FILENAMES differ, so git
+// sees no conflict and `git diff --stat` looks innocent), and main ends up with two migrations
+// numbered the same — after which "which one ran first?" is unanswerable. It has now happened
+// twice: mig 236 renumbered from 235, and mig 238 from 237. verify:db-parity already checks this
+// but it reads both databases and takes minutes, so in practice it gets run early and not again
+// after the final rebase — which is exactly when the collision appears. Here it costs no network
+// and runs on every migration edit.
+if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
+  let files = [];
+  try { files = fs.readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql")); } catch { /* no folder → skip */ }
+  const byNumber = new Map();
+  for (const f of files) {
+    const m = /^(\d+)/.exec(f);
+    if (!m) continue;
+    const n = m[1].padStart(3, "0");
+    byNumber.set(n, [...(byNumber.get(n) || []), f]);
+  }
+  const clashes = [...byNumber.entries()].filter(([, list]) => list.length > 1);
+  // 18 numbers were already doubled before anyone checked (057…229). verify:db-parity keeps a
+  // hand-written list of those; copying it here would just be a second list to keep in step. A
+  // collision is NEW exactly when one of its files is not on main yet — which is also precisely
+  // the window where saying so is useful, because after the merge it is too late to renumber.
+  let shipped = null;
+  try {
+    shipped = new Set(execSync("git ls-tree -r origin/main --name-only supabase/migrations/ 2>/dev/null || true", { encoding: "utf8" })
+      .split("\n").map((p) => p.split("/").pop()).filter(Boolean));
+  } catch { /* no origin/main to compare against → fall through */ }
+  const fresh = shipped && shipped.size
+    ? clashes.filter(([, list]) => list.some((f) => !shipped.has(f)))
+    : [];
+  if (!shipped || !shipped.size) {
+    ok(`${files.length} migrations (no origin/main to compare against, so new-collision check skipped)`);
+  } else if (fresh.length === 0) {
+    ok(`${files.length} migrations, no NEW duplicated number (${clashes.length} already on main)`);
+  } else {
+    bad(
+      `${fresh.length} migration number(s) duplicated by a file that is NOT on main yet — renumber yours to the next free number`,
+      fresh.map(([n, list]) => `${n}: ${list.map((f) => (shipped.has(f) ? `${f} (on main)` : `${f} (YOURS)`)).join("  +  ")}`).join("\n     "),
+    );
+  }
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");

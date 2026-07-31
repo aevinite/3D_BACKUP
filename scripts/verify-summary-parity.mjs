@@ -12,7 +12,7 @@
 //   node scripts/verify-summary-parity.mjs --against <file>    # prove it still says the same
 //   node scripts/verify-summary-parity.mjs                     # compare live vs a twin function
 //
-// USE IT LIKE THIS next time this function is touched (mig 237 was proved exactly this way):
+// USE IT LIKE THIS next time this function is touched (mig 238 was proved exactly this way):
 //   1. snapshot the answers  ->  --snapshot /tmp/floor-before.json
 //   2. create the candidate ALONGSIDE the live one, named lfh_table_view_summary_v2
 //      (copy the live body with `SELECT pg_get_functiondef('lfh_table_view_summary(uuid,text)'
@@ -131,7 +131,7 @@ if (!SNAPSHOT && !AGAINST) {
     console.error("  …make the change…");
     console.error("  node scripts/verify-summary-parity.mjs --against /tmp/floor-before.json\n");
     console.error(`or create the candidate alongside the live function as ${NEW_FN} and run this again`);
-    console.error("(see the notes at the top of this file — that is how migration 237 was proved).");
+    console.error("(see the notes at the top of this file — that is how migration 238 was proved).");
     process.exit(2);
   }
 }
