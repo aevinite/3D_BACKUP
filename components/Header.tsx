@@ -6,6 +6,9 @@ import NavPicker from "./NavPicker";
 import ConnectionBadge from "./ConnectionBadge";
 // Per-restaurant feature switches: currency/language pickers can be turned off.
 import { useFeatures } from "@/lib/features";
+// Which languages/currencies THIS restaurant offers (Access → Menu → Format) — the same
+// short-TTL de-duplicated settings read useFeatures makes, so it adds no request.
+import { getSettings } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
 import {
   CURRENCIES,
@@ -123,6 +126,33 @@ export default function Header({ logoText }: { logoText?: string }) {
     // Re-runs only when a feature flag resolves/changes — never on the guest's own pick.
   }, [features.currency, features.languages]);
 
+  // WHICH languages / currencies this restaurant offers (Access → Menu → Format). Exactly
+  // one means the switcher is REMOVED, not disabled — the owner's rule. getSettings is the
+  // same short-TTL, de-duplicated read useFeatures already makes, so this costs no extra
+  // request. Until it resolves we show nothing rather than the full six, so a single-language
+  // restaurant never flashes a picker it doesn't have.
+  const [menuLangs, setMenuLangs] = useState<string[] | null>(null);
+  const [menuCurrs, setMenuCurrs] = useState<string[] | null>(null);
+  useEffect(() => {
+    let alive = true;
+    getSettings(restaurantId)
+      .then((s) => { if (alive) { setMenuLangs(s.menuLanguages); setMenuCurrs(s.menuCurrencies); } })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [restaurantId]);
+  // A guest carrying a choice from ANOTHER restaurant must not keep a language this one
+  // doesn't offer — that would render the menu in a language the restaurant switched off.
+  useEffect(() => {
+    if (menuLangs && menuLangs.length && !menuLangs.includes(getLanguage().code)) setLanguage(menuLangs[0] as LanguageMeta["code"]);
+    if (menuCurrs && menuCurrs.length && !menuCurrs.includes(getCurrency().code)) setCurrency(menuCurrs[0] as CurrencyMeta["code"]);
+  }, [menuLangs, menuCurrs]);
+
+  const currencyOptions = CURRENCIES.filter((c) => (menuCurrs ? menuCurrs.includes(c.code) : true));
+  const languageOptions = LANGUAGES.filter((l) => (menuLangs ? menuLangs.includes(l.code) : true));
+  // The switcher exists only when there is a real choice to make.
+  const showCurrency = features.currency && !!menuCurrs && currencyOptions.length > 1;
+  const showLanguage = features.languages && !!menuLangs && languageOptions.length > 1;
+
   // toggleTheme(): flip between dark and light when the toggle is tapped.
   const toggleTheme = () => {
     const next: Theme = theme === "dark" ? "light" : "dark"; // pick the opposite
@@ -172,10 +202,10 @@ export default function Header({ logoText }: { logoText?: string }) {
         {/* Currency dropdown: button shows the current symbol; the list lets
             the guest pick another. onSelect calls setCurrency to switch.
             Gone when the currency feature is off (₹-only menu). */}
-        {features.currency && <NavPicker
+        {showCurrency && <NavPicker
           buttonLabel="Currency"
           buttonContent={<span style={{ fontSize: 14 }}>{currency.symbol}</span>}
-          options={CURRENCIES.map((c) => ({
+          options={currencyOptions.map((c) => ({
             key: c.code,
             label: (
               <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -189,10 +219,10 @@ export default function Header({ logoText }: { logoText?: string }) {
         />}
         {/* Language dropdown: same idea as currency, but for the menu language.
             Gone when the languages feature is off (English-only menu). */}
-        {features.languages && <NavPicker
+        {showLanguage && <NavPicker
           buttonLabel="Language"
           buttonContent={<span style={{ fontSize: 12 }}>{language.short}</span>}
-          options={LANGUAGES.map((l) => ({
+          options={languageOptions.map((l) => ({
             key: l.code,
             label: (
               <span style={{ display: "flex", gap: 10, alignItems: "center" }}>

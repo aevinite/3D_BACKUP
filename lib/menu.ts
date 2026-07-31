@@ -365,6 +365,17 @@ export interface Settings {
   // How the Google-review invite behaves relative to the in-menu review (mig 187, admin-only).
   //   off · google (Google CTA only) · google_plus_normal (both) · google_after_normal (post-rating nudge)
   googleReviewMode: "off" | "google" | "google_plus_normal" | "google_after_normal";
+  // ── the guest-menu switches from the access rebuild (mig 235) ──────────────
+  // The MASTER: false means this restaurant has no guest menu at all — the menu routes
+  // answer "not found" and no QR link resolves. It runs on staff panels only.
+  menuEnabled: boolean;
+  // What a FIRST-time guest sees before they change anything (they still may).
+  menuDefaultLayout: "grid" | "list";
+  menuDefaultMode: "light" | "dark";
+  // Which languages / currencies the menu offers. Exactly ONE means the switcher is
+  // REMOVED from the menu (not disabled) — the owner's rule for a single-language menu.
+  menuLanguages: string[];
+  menuCurrencies: string[];
 }
 // Reads the single site-wide settings row and returns it with safe defaults,
 // so the app still works even if settings haven't been configured yet.
@@ -396,7 +407,7 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
   // prefix, phone…) that `*` was silently shipping to every menu visitor.
   const { data, error } = await supabase
     .from("settings")
-    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components, google_review_url, google_review_mode")
+    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components, google_review_url, google_review_mode, menu_enabled, menu_default_layout, menu_default_mode, menu_languages, menu_currencies")
     .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
@@ -427,7 +438,21 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
     googleReviewMode: (data && ["google", "google_plus_normal", "google_after_normal"].includes(String(data.google_review_mode)))
       ? (data.google_review_mode as "google" | "google_plus_normal" | "google_after_normal")
       : "off",
+    // Access rebuild (mig 235). All default to today's behaviour, so a restaurant whose
+    // row predates the migration (or is missing entirely) keeps a working menu.
+    menuEnabled: data ? data.menu_enabled !== false : true,
+    menuDefaultLayout: data && data.menu_default_layout === "list" ? "list" : "grid",
+    menuDefaultMode: data && data.menu_default_mode === "dark" ? "dark" : "light",
+    menuLanguages: strList(data?.menu_languages, ["en"]),
+    menuCurrencies: strList(data?.menu_currencies, ["INR"]),
   };
+}
+
+// A text[] column → a clean string list, never empty (an empty list would leave the menu
+// with no language to render labels in, or no currency to price in).
+function strList(v: unknown, fallback: string[]): string[] {
+  const list = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim()) : [];
+  return list.length ? Array.from(new Set(list)) : fallback;
 }
 
 // Leave feedback for one past order (rating 1–5 + optional comment). Holding

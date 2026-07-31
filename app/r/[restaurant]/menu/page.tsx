@@ -7,6 +7,7 @@
 import { notFound } from "next/navigation";
 import MenuView from "@/components/MenuView";
 import { getRestaurantBySlug } from "@/lib/tenant";
+import { getSettings } from "@/lib/menu";
 
 // White-label: a guest's browser tab, its shared-link preview, AND its tab icon
 // all show THIS restaurant — not the SaaS platform (audit fix bugs #8, #14). Any
@@ -46,17 +47,37 @@ export default async function RestaurantMenuPage({
   const { restaurant } = await params;
   const r = await getRestaurantBySlug(restaurant);
   if (!r || !r.active) notFound();
+  // MENU MASTER SWITCH (access rebuild): a restaurant whose Menu feature is off has no
+  // guest menu at all — no QR menu, nothing for a diner to open. It must be genuinely
+  // absent rather than an empty page, so this is the same "not found" a wrong slug gets.
+  const settings = await getSettings(r.id);
+  if (!settings.menuEnabled) notFound();
   return (
-    <MenuView
-      restaurantId={r.id}
-      restaurantSlug={restaurant}
-      restaurantName={r.name ?? undefined}
-      logoText={r.logoText ?? undefined}
-      heroTitle={r.heroTitle ?? undefined}
-      tagline={r.tagline ?? undefined}
-      accentColor={r.accentColor ?? undefined}
-      theme={r.theme ?? undefined}
-      logoUrl={r.logoUrl ?? undefined}
-    />
+    <>
+      {/* Access → Menu → Format → Default light/dark. The root <html> is stamped 'light' by
+          the global boot script in app/layout.tsx, which can't know WHICH restaurant is
+          opening; this runs as the parser reaches it — before the menu paints — so a
+          dark-default restaurant never flashes light. A guest who has chosen a mode keeps
+          it: we only act when nothing is saved. */}
+      {settings.menuDefaultMode === "dark" && (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "(function(){try{if(!localStorage.getItem('lfh_theme'))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();",
+          }}
+        />
+      )}
+      <MenuView
+        restaurantId={r.id}
+        restaurantSlug={restaurant}
+        restaurantName={r.name ?? undefined}
+        logoText={r.logoText ?? undefined}
+        heroTitle={r.heroTitle ?? undefined}
+        tagline={r.tagline ?? undefined}
+        accentColor={r.accentColor ?? undefined}
+        theme={r.theme ?? undefined}
+        logoUrl={r.logoUrl ?? undefined}
+        defaultLayout={settings.menuDefaultLayout === "list" ? "list" : "gallery"}
+      />
+    </>
   );
 }

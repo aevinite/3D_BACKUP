@@ -5,7 +5,7 @@
 // restaurant (a guest browsing /r/pizza-palace never falls back to restaurant #1).
 import { notFound } from "next/navigation";
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
-import { getMenuItem } from "@/lib/menu";
+import { getMenuItem, getSettings } from "@/lib/menu";
 import { accentPaletteCss } from "@/lib/accent";
 import ItemClient from "@/app/item/[slug]/ItemClient";
 
@@ -32,6 +32,9 @@ export default async function RestaurantItemPage({
   const { cat } = await searchParams;
   const r = await getRestaurantBySlug(restaurant);
   if (!r || !r.active) notFound();
+  // Menu master switch (access rebuild): no guest menu means no dish pages either —
+  // gating only the list would leave every dish reachable by its own URL.
+  if (!(await getSettings(r.id)).menuEnabled) notFound();
   // WHITE-LABEL (audit fix 2026-07-08): this page renders ItemClient WITHOUT the
   // AppShell that themes the menu, so its price + "Add to Cart" button fell back to
   // restaurant #1's GOLD accent for every OTHER restaurant. Emit this restaurant's

@@ -15,6 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, inScope } from "@/lib/ownerScope";
+import { entitledSubset } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 
 export const dynamic = "force-dynamic";
@@ -23,8 +24,19 @@ export const dynamic = "force-dynamic";
 const COLS = "id, panel, action, actor, actor_id, device_id, order_id, detail, table_number, restaurant_id, level, seen_at, resolved_at, created_at";
 
 export async function GET(req: NextRequest) {
-  const scope = await ownerScope(req);
+  let scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  // The owner's Log page is a listed switch (Access → Owner's menu → Logs) since the access
+  // rebuild, so hiding the nav item is not enough — this endpoint has to refuse too, or the
+  // page would still answer to anyone who typed the URL. A real owner loses restaurants whose
+  // "logs" entitlement the admin switched off; the admin's own session is never gated.
+  if (!scope.all && !scope.admin) {
+    const allowed = await entitledSubset(scope.ids, "logs");
+    if (!allowed.length)
+      return NextResponse.json({ error: "The activity log isn't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
+    scope = { ...scope, ids: allowed };
+  }
 
   const url = new URL(req.url);
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "200", 10) || 200, 1), 200);

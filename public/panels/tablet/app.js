@@ -584,6 +584,13 @@ function tileIsOpen(i) {
   const s = summaryTile(i).state;
   return s !== "free" && s !== "req";
 }
+// Does this restaurant use dining sessions? OFF means there is no "Open table" step at all
+// (Access → Menu → Dining sessions, owner 2026-07-31): the floor goes straight to taking an
+// order, and the server attaches it without a session. The manager panel has always gated its
+// Open button this way; the tablet did not, so a waiter could still open a table on a floor
+// that has no session step — the two panels disagreed about the same restaurant.
+const sessionsOn = () => !!(state.data.settings || {}).sessions_enabled;
+
 // Tablet billing permission for an action (set by the manager in General settings):
 // 'off' (hidden — default) | 'on' (waiter can do it) | 'pin' (needs a manager PIN).
 const tperm = (k) => ((state.data.settings || {})[k] || "off");
@@ -1252,7 +1259,7 @@ function renderPanel() {
       <div class="sec"><h3>Orders</h3>${unsentBox}${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}${Number(s && s.discount) > 0 ? `<div class="bill-disc-note" style="margin-top:8px;font-size:13px;font-weight:700;color:#f0b232">🏷️ Whole-bill discount − ${inr(s.discount)}${s.discount_note ? ` · ${esc(s.discount_note)}` : ""}</div>` : ""}</div>
     </div>
     <div class="dacts">
-      ${s ? "" : `<button class="btn" id="openTable">Open this table</button>`}
+      ${s || !sessionsOn() ? "" : `<button class="btn" id="openTable">Open this table</button>`}
       ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
       ${s && kotOpsOn() ? `<button class="btn${txray("tablet_table_ops")}" id="kotMenuBtn">🧾 KOT ▾</button>` : ""}
       ${s && !kotOpsOn() ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}

@@ -273,10 +273,14 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           <div className="dish-price">{formatPrice(item.price, currency || DEFAULT_CURRENCY)}</div>
         </div>
 
-        {/* The veg / non-veg marker in the corner */}
-        <div className="diet-badge" aria-hidden="true">
-          <VegIcon isVeg={item.veg} size={18} />
-        </div>
+        {/* The veg / non-veg marker in the corner. One switch now covers the filter chips
+            AND this mark (Access → Menu → Veg / non-veg): a pure-veg restaurant has nothing
+            to distinguish, so marking every dish green was noise (owner, 2026-07-31). */}
+        {features.diet_filter && (
+          <div className="diet-badge" aria-hidden="true">
+            <VegIcon isVeg={item.veg} size={18} />
+          </div>
+        )}
         {/* The bottom-right control changes depending on the dish's state: */}
         {soldOut ? (
           // 1) Sold out: a non-clickable "Not available" pill.

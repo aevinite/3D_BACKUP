@@ -836,14 +836,20 @@ export default function CartPanel() {
                     🚫 {s}
                   </button>
                 ))}
-                <button
-                  type="button"
-                  className={`allergy-toggle ${otherOpen ? "on" : ""}`}
-                  aria-pressed={otherOpen}
-                  onClick={() => setOtherOpen((o) => !o)}
-                >
-                  ✏️ Other
-                </button>
+                {/* Free-text allergies are their own switch (Access → Menu → Allergy & notes
+                    → "Guest can add their own allergy"). Off keeps every preset chip above and
+                    removes only the typing. Conditional render, NOT the `hidden` attribute —
+                    .allergy-toggle sets its own display, which would beat `hidden`. */}
+                {features.allergy_other && (
+                  <button
+                    type="button"
+                    className={`allergy-toggle ${otherOpen ? "on" : ""}`}
+                    aria-pressed={otherOpen}
+                    onClick={() => setOtherOpen((o) => !o)}
+                  >
+                    ✏️ Other
+                  </button>
+                )}
               </div>
               {/* Make the order-wide behaviour explicit: an allergen tapped here is
                   left out of EVERY dish in the order, not just one. (owner, 2026-06-16) */}
@@ -851,7 +857,7 @@ export default function CartPanel() {
                 <i className="fas fa-circle-info"></i> Anything you tap here is removed from <b>all the dishes</b> in this order.
               </p>
               {/* Free-text "other allergy" box, shown only when "Other" is toggled on. */}
-              {otherOpen && (
+              {otherOpen && features.allergy_other && (
                 <input
                   type="text"
                   className="table-input"

@@ -66,6 +66,21 @@ export async function allModuleLadders(rid: string): Promise<Record<string, Tabl
 export const tableTagsLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" });
 
+// Pay later (khata) — its OWN module since the access rebuild (mig 235). It used to share
+// table_tags_*, so switching "table types" off silently killed pay-later too; in the new
+// model Pay later is a Main feature and marking a table VIP is a per-role permission, so
+// they cannot share a column. Every "Pay later (khata) isn't enabled" gate reads THIS.
+export const khataLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "khata_allowed", control: "khata_owner_control", enabled: "khata_enabled" });
+
+// Takeaway & delivery — ONE switch over what used to be two (parcel_* and platform_*),
+// because the owner treats counter takeaway, the restaurant's own website and the delivery
+// apps as one feature (mig 235). Which channels are live stays a separate per-restaurant
+// config (settings.platform_channels). parcelLadder/platformLadder below are aliases of it
+// so every existing call site keeps working and can never disagree with this one.
+export const takeawayLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "takeaway_allowed", control: "takeaway_owner_control", enabled: "takeaway_enabled" });
+
 // Banquet's ladder (mig 130 + 167).
 export const banquetLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "banquet_allowed", control: "banquet_owner_control", enabled: "banquet_enabled" });
@@ -78,15 +93,15 @@ export const tableOpsLadder = (rid: string) =>
 // Order-taking — the manager panel's ＋Take order builder + the waiter tablet's order
 // button (mig 179). Same canonical module ladder as the others, but its _allowed is
 // BACKFILLED true (ordering is the app's core function — a new rung on a pre-existing
-// feature defaults to current behaviour, per docs/ACCESS-LADDER.md).
+// feature defaults to current behaviour, per docs/ACCESS-MODEL.md).
 export const takeOrdersLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" });
 
 // Parcel / takeaway quick-order — the 🥡 New Parcel button (manager + tablet), which
-// writes a takeaway order into the Platform system. A brand-new module (mig 197): every
-// rung starts OFF (unlike take_orders), so no restaurant gets it until the admin grants it.
-export const parcelLadder = (rid: string) =>
-  moduleLadder(rid, { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" });
+// writes a takeaway order into the Platform system. Since mig 235 this is the SAME feature
+// as the Platform board in the owner's model ("Takeaway & delivery"), so it reads the
+// takeaway_* columns; parcel_* is left in the table but no longer read.
+export const parcelLadder = takeawayLadder;
 
 // Staff profiles, salary records & the performance report (mig 220). A brand-new module:
 // every rung starts OFF, so no restaurant sees profiles or pay until the admin grants it
@@ -102,9 +117,9 @@ export const payrollLadder = (rid: string) =>
 export const inventoryLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "inventory_allowed", control: "inventory_owner_control", enabled: "inventory_enabled" });
 
-// Platform board (Zomato / Swiggy / Website takeaway) — the 🛵 Platform tab (mig 209). A rung
-// on a PRE-EXISTING feature: _allowed is BACKFILLED true for every restaurant that existed at
-// mig 209 (the board was already live for all of them), while new restaurants default OFF.
-// Which channels are actually live is a separate per-restaurant config (settings.platform_channels).
-export const platformLadder = (rid: string) =>
-  moduleLadder(rid, { allowed: "platform_allowed", control: "platform_owner_control", enabled: "platform_enabled" });
+// Platform board (Zomato / Swiggy / Website takeaway) — the 🛵 Platform tab (mig 209).
+// Since mig 235 it is one half of the single "Takeaway & delivery" feature, so it reads the
+// same takeaway_* columns as parcel; platform_* is left in the table but no longer read.
+// Which channels are actually live stays a separate per-restaurant config
+// (settings.platform_channels), edited under the same Main-features row.
+export const platformLadder = takeawayLadder;

@@ -319,16 +319,21 @@ export default function OrderConfirmModal() {
                   </button>
                 );
               })}
-              <button
-                type="button"
-                className={`oc-allergen oc-other ${otherOn ? "on" : ""}`}
-                onClick={() => setOtherOn((v) => !v)}
-              >
-                ➕ Other allergy
-              </button>
+              {/* Free-text allergies are their own switch (Access → Menu → Allergy & notes →
+                  "Guest can add their own allergy"). Off = the preset chips above stay, only
+                  the typing goes — so the button itself must not render. */}
+              {features.allergy_other && (
+                <button
+                  type="button"
+                  className={`oc-allergen oc-other ${otherOn ? "on" : ""}`}
+                  onClick={() => setOtherOn((v) => !v)}
+                >
+                  ➕ Other allergy
+                </button>
+              )}
             </div>
             {/* The free-text "other allergy" box, shown only when toggled on. */}
-            {otherOn && (
+            {otherOn && features.allergy_other && (
               <input
                 type="text"
                 className="oc-other-input"
@@ -348,17 +353,21 @@ export default function OrderConfirmModal() {
           </div>
         )}
 
-        {/* A free-text note that goes to the kitchen with this dish. */}
-        <div className="oc-note-wrap">
-          <input
-            type="text"
-            className="oc-note"
-            placeholder="Anything else? (e.g. less ice, no sugar)"
-            value={note}
-            maxLength={200}
-            onChange={(e) => setNote(e.target.value)}
-          />
-        </div>
+        {/* A free-text note that goes to the kitchen with this dish. Its own switch
+            (Access → Menu → Allergy & notes → "Guest can write their own note"): a
+            restaurant can take orders without letting guests type instructions. */}
+        {features.guest_note && (
+          <div className="oc-note-wrap">
+            <input
+              type="text"
+              className="oc-note"
+              placeholder="Anything else? (e.g. less ice, no sugar)"
+              value={note}
+              maxLength={200}
+              onChange={(e) => setNote(e.target.value)}
+            />
+          </div>
+        )}
 
         {/* Quantity stepper: minus / number / plus. Clamped between 1 and 99. */}
         <div className="order-confirm-qty">

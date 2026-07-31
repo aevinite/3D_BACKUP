@@ -57,22 +57,9 @@ function healthStatus(active: boolean, h: Health | undefined, createdAt?: string
 // The seeded default restaurant (#1) — can never be deleted (matches the API + SQL guards).
 const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
 
-// The ten guest-facing switches (same set + labels as the Features tab).
-const FEATURES = [
-  { key: "model3d", label: "3D dish viewer" }, { key: "ratings", label: "Star ratings" },
-  { key: "reviews", label: "Written reviews" }, { key: "allergies", label: "Allergy system" },
-  { key: "favorites", label: "Favorites" }, { key: "waiter_calls", label: "Call waiter" },
-  { key: "search", label: "Dish search" }, { key: "languages", label: "Languages" },
-  { key: "currency", label: "Currency picker" },
-  { key: "diet_filter", label: "Veg / Non-Veg filter" },
-];
-
-// The four operational PANELS a restaurant can have (mig 106). Turning one OFF blocks that
-// role's login + hides it (e.g. a restaurant that doesn't want an Owner panel).
-const PANEL_OPTS = [
-  { key: "manager", label: "Manager panel" }, { key: "kitchen", label: "Kitchen display" },
-  { key: "tablet", label: "Waiter tablet" }, { key: "owner", label: "Owner dashboard" },
-];
+// (The guest-feature and staff-app lists that used to live here are gone with their
+// toggle grids — both are Access & permissions now, which is the only screen that
+// owns a permission. Keeping copies here is how two screens start disagreeing.)
 
 export default function AdminRestaurants() {
   const toast = useToast();
@@ -625,97 +612,6 @@ function StatusCard({ restaurant }: { restaurant: Restaurant }) {
   );
 }
 
-// Google review — a sub-option that sits UNDER the reviews feature. A single-select (pick one)
-// for how the Google-review invite behaves relative to the normal in-menu review, plus the
-// destination link. Admin-only; the owner can't change it. DEFAULT OFF for every restaurant
-// (owner 2026-07-24). Saved to settings.google_review_mode (mig 187) + google_review_url (155).
-const GR_MODES = [
-  { key: "off", label: "Off", hint: "No Google invite — guests see only the normal in-menu reviews." },
-  { key: "google", label: "Google only", hint: "Show a “Review us on Google” button instead of the in-menu rate form." },
-  { key: "google_plus_normal", label: "Google + in-menu reviews", hint: "The in-menu review form AND a Google button, shown together." },
-  { key: "google_after_normal", label: "Google after a review", hint: "The Google invite appears after a guest leaves a 4–5★ in-menu review." },
-] as const;
-type GrMode = (typeof GR_MODES)[number]["key"];
-function GoogleReviewCard({ restaurant }: { restaurant: Restaurant }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [mode, setMode] = useState<GrMode>("off");        // saved mode
-  const [draftMode, setDraftMode] = useState<GrMode>("off"); // being edited
-  // loadOk gates Save: it's true ONLY after a SUCCESSFUL load. Before this, a FAILED load
-  // set loaded=true too, so a network hiccup looked identical to "off" and pressing Save
-  // would overwrite the real, saved link/mode (mirrors BrandingCard's brandLoaded guard).
-  const [loadOk, setLoadOk] = useState(false);
-  const [loadErr, setLoadErr] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const loadReview = useCallback(() => {
-    setLoadErr(false);
-    fetch(`/api/admin/restaurants/google-review?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.error || typeof j.url === "undefined") { setLoadErr(true); return; }
-        const m = (GR_MODES.some((x) => x.key === j.mode) ? j.mode : "off") as GrMode;
-        setUrl(j.url || null); setDraft(j.url || ""); setMode(m); setDraftMode(m); setLoadOk(true);
-      })
-      .catch(() => setLoadErr(true));
-  }, [restaurant.id]);
-  useEffect(() => { loadReview(); }, [loadReview]);
-  const needsLink = draftMode !== "off" && !draft.trim();  // a Google mode with no URL is invalid
-  const dirty = draftMode !== mode || draft.trim() !== (url || "");
-  const save = async () => {
-    setBusy(true); setErr(null); setMsg(null);
-    try {
-      const r = await fetch("/api/admin/restaurants/google-review", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, url: draft.trim(), mode: draftMode }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      const m = (GR_MODES.some((x) => x.key === d.mode) ? d.mode : "off") as GrMode;
-      setUrl(d.url || null); setDraft(d.url || ""); setMode(m); setDraftMode(m);
-      setMsg(m === "off" ? "Saved — Google invite is off; guests see only normal reviews." : `Saved — ${GR_MODES.find((x) => x.key === m)?.label}.`);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
-  };
-  return (
-    <div className="adm-card" style={{ marginBottom: 14 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 4 }}>
-        <div className="adm-section-h" style={{ fontWeight: 800 }}>Google review</div>
-        {loadOk && (
-          <span className="adm-chip" style={mode !== "off"
-            ? { background: "color-mix(in srgb, var(--adm-ok) 20%, transparent)", color: "var(--adm-ok)" }
-            : { background: "var(--muted2)", color: "var(--muted)" }}>{mode === "off" ? "OFF" : "ON"}</span>
-        )}
-      </div>
-      <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Sits under the reviews feature. Pick how the Google-review invite works — this is separate from the normal in-menu reviews (turned on/off in <b>Features</b> above). Default is Off.</p>
-      {/* Pick-one mode list — the same toggle format used elsewhere in this panel. */}
-      <div style={{ display: "grid", gap: 6, marginBottom: 10, opacity: loadOk ? 1 : 0.5, pointerEvents: loadOk && !busy ? "auto" : "none" }}>
-        {GR_MODES.map((m) => {
-          const on = draftMode === m.key;
-          return (
-            <button key={m.key} type="button" className="adm-card" onClick={() => setDraftMode(m.key)}
-              style={{ display: "flex", alignItems: "flex-start", gap: 10, textAlign: "left", padding: "9px 11px", cursor: "pointer",
-                border: on ? "2px solid var(--adm-ok)" : "1px solid var(--adm-border, rgba(128,128,128,0.3))",
-                background: on ? "color-mix(in srgb, var(--adm-ok) 8%, transparent)" : "transparent" }}>
-              <span aria-hidden="true" style={{ marginTop: 1, fontWeight: 800, color: on ? "var(--adm-ok)" : "var(--muted)" }}>{on ? "◉" : "○"}</span>
-              <span><span style={{ fontWeight: 700 }}>{m.label}</span><span className="adm-muted" style={{ display: "block", fontSize: 12 }}>{m.hint}</span></span>
-            </button>
-          );
-        })}
-      </div>
-      {/* The destination link — only relevant when a Google mode is chosen. */}
-      {draftMode !== "off" && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
-          <input className="adm-input" style={{ flex: 1, minWidth: 240 }} type="url" inputMode="url" placeholder="https://g.page/r/…/review" value={draft} maxLength={500} disabled={!loadOk || busy} onChange={(e) => setDraft(e.target.value)} />
-        </div>
-      )}
-      {needsLink && <div className="adm-muted" style={{ fontSize: 12, marginBottom: 6 }}>Add the Google review link to use this mode.</div>}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button className="adm-btn primary" disabled={!loadOk || busy || !dirty || needsLink} onClick={save}>{busy ? "Saving…" : "Save"}</button>
-      </div>
-      {loadErr && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>Couldn&rsquo;t load the current setting — editing is locked so you don&rsquo;t overwrite it by mistake. <button className="adm-btn" style={{ marginLeft: 6, padding: "3px 9px" }} onClick={loadReview}>Retry</button></div>}
-      {msg && <div style={{ color: "var(--adm-ok,#16a34a)", fontSize: 12.5, marginTop: 8 }}>{msg}</div>}
-      {err && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
-    </div>
-  );
-}
-
 // Tickets card at the TOP of a restaurant's detail view — the issues its staff raised
 // (manager/kitchen/tablet), newest first, resolvable inline. Defaults to OPEN tickets;
 // a toggle reveals resolved history. Scoped read: ?restaurant_id= narrows the admin's
@@ -805,155 +701,11 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
 // NOTE: auto-print KOT is NOT here — it lives ONLY in the Settings tab's "KOT printing"
 // section (owner 2026-07-26). Having it in both places showed two toggles that shared one
 // saved value but not one on-screen state, so they looked out of sync — one control now.
-const QUICK_FEATURES = [
-  { key: "platform", label: "Platform board (Zomato / Swiggy)", hint: "The 🛵 online-delivery board in the manager panel. Turn it off for restaurants that aren't on the delivery apps. Choose which channels are live below." },
-  { key: "banquet", label: "Banquet billing", hint: "Per-plate event billing that runs without a table." },
-  // Staff profiles & pay (mig 220, owner 2026-07-29): an ADDITIONAL feature — off for everyone
-  // until a client asks for it. Off hides the whole thing (profiles, salary records, the
-  // performance report) from the owner, the manager and the staff's own panels.
-  { key: "payroll", label: "Staff profiles & pay", hint: "Each person's profile (details, job, documents), a record of salary and advances paid, and the team performance report. Salary is owner-only unless the owner hands it to a manager." },
-] as const;
-type QuickKey = (typeof QUICK_FEATURES)[number]["key"];
-
-// The delivery channels a restaurant can turn on inside the Platform board (mig 209). Website =
-// the restaurant's own site (stored under the 'takeaway' source; labelled Website to keep it
-// distinct from a staff Parcel). Each carries an optional API key (stored server-side only).
-const PLATFORM_CHANNELS: [string, string][] = [["zomato", "Zomato"], ["swiggy", "Swiggy"], ["website", "Website (own site)"]];
-
-// The channel sub-panel shown UNDER the Platform toggle when it's on. On/off + API key per
-// channel. Keys are write-only from the UI's side: the server returns hasKey, never the value,
-// and a channel with no key still works as a live demo (the manager's "Simulate order").
-function PlatformChannels({ restaurant }: { restaurant: Restaurant }) {
-  const [ch, setCh] = useState<Record<string, { on: boolean; hasKey: boolean }> | null>(null);
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  const [pending, setPending] = useState<Set<string>>(new Set());
-  const [loadErr, setLoadErr] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const load = useCallback(() => {
-    setLoadErr(false);
-    fetch(`/api/admin/restaurants/platform-channels?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => { if (j.error || !j.channels) { setLoadErr(true); return; } setCh(j.channels); })
-      .catch(() => setLoadErr(true));
-  }, [restaurant.id]);
-  useEffect(() => { load(); }, [load]);
-  const post = async (channel: string, patch: { on?: boolean; key?: string }) => {
-    if (pending.has(channel)) return;
-    setErr(null); setPending((s) => new Set(s).add(channel));
-    try {
-      const r = await fetch("/api/admin/restaurants/platform-channels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, channel, ...patch }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setCh(d.channels);
-      if (typeof patch.key === "string") setDraft((s) => ({ ...s, [channel]: "" })); // clear the input after saving a key
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setPending((s) => { const n = new Set(s); n.delete(channel); return n; }); }
-  };
-  return (
-    <div style={{ margin: "6px 0 2px 26px", display: "grid", gap: 6 }}>
-      {loadErr && <div style={{ color: "var(--adm-danger)", fontSize: 12 }}>Couldn&rsquo;t load channels. <button className="adm-btn" style={{ marginLeft: 6, padding: "2px 8px" }} onClick={load}>Retry</button></div>}
-      {ch && PLATFORM_CHANNELS.map(([key, label]) => {
-        const c = ch[key] || { on: false, hasKey: false };
-        const busy = pending.has(key);
-        return (
-          <div key={key} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", padding: "7px 10px", borderRadius: 9, border: "1px solid var(--adm-border, rgba(128,128,128,0.25))", background: c.on ? "color-mix(in srgb, var(--adm-ok) 6%, transparent)" : "transparent" }}>
-            <button type="button" className={`adm-toggle ${c.on ? "on" : "off"}`} disabled={busy} onClick={() => post(key, { on: !c.on })} style={{ minWidth: 128 }} title={c.on ? "On — tap to turn off" : "Off — tap to turn on"}>
-              <span>{label}</span><span className="pill">{c.on ? "ON" : "OFF"}</span>
-            </button>
-            <input className="adm-input" type="password" autoComplete="off" style={{ flex: 1, minWidth: 170, opacity: c.on ? 1 : 0.5 }} disabled={!c.on || busy}
-              placeholder={c.hasKey ? "•••••••• saved — type to replace" : "API key — blank = demo mode"}
-              value={draft[key] || ""} maxLength={500} onChange={(e) => setDraft((s) => ({ ...s, [key]: e.target.value }))} />
-            <button className="adm-btn" disabled={!c.on || busy || !((draft[key] || "").trim())} onClick={() => post(key, { key: draft[key] || "" })}>Save key</button>
-            {c.hasKey && <button className="adm-btn" disabled={busy} onClick={() => post(key, { key: "" })} title="Remove the saved key (back to demo mode)">Clear</button>}
-            <span className="adm-muted" style={{ fontSize: 11.5, width: "100%" }}>{c.hasKey ? "Live key set." : "Demo mode — the manager can simulate orders on this channel."}</span>
-          </div>
-        );
-      })}
-      {err && <div style={{ color: "var(--adm-danger)", fontSize: 12 }}>{err}</div>}
-    </div>
-  );
-}
-function QuickFeaturesCard({ restaurant }: { restaurant: Restaurant }) {
-  const [state, setState] = useState<Record<QuickKey, boolean> | null>(null);
-  const [loadErr, setLoadErr] = useState(false);
-  const [pending, setPending] = useState<Set<string>>(new Set());
-  const [err, setErr] = useState<string | null>(null);
-  const load = useCallback(() => {
-    setLoadErr(false);
-    fetch(`/api/admin/restaurants/quick-features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.error || typeof j.banquet === "undefined") { setLoadErr(true); return; }
-        setState(Object.fromEntries(QUICK_FEATURES.map((f) => [f.key, !!j[f.key]])) as Record<QuickKey, boolean>);
-      })
-      .catch(() => setLoadErr(true));
-  }, [restaurant.id]);
-  useEffect(() => { load(); }, [load]);
-  const toggle = async (key: QuickKey) => {
-    if (!state || pending.has(key)) return;
-    const next = !state[key];
-    setErr(null);
-    setPending((s) => new Set(s).add(key));
-    setState((s) => (s ? { ...s, [key]: next } : s)); // optimistic
-    try {
-      const r = await fetch("/api/admin/restaurants/quick-features", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: restaurant.id, feature: key, on: next }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      // Trust the server's effective read for EVERY key (derived from the list, so a new
-      // quick feature can't be silently dropped here the way a hand-typed pair would be).
-      setState(Object.fromEntries(QUICK_FEATURES.map((f) => [f.key, !!d[f.key]])) as Record<QuickKey, boolean>);
-    } catch (e) {
-      setState((s) => (s ? { ...s, [key]: !next } : s)); // revert
-      setErr(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPending((s) => { const n = new Set(s); n.delete(key); return n; });
-    }
-  };
-  return (
-    <div className="adm-card" style={{ marginBottom: 14 }}>
-      <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Main features</div>
-      <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Quick on/off for this restaurant&apos;s main operational features. Same switches as <b>Access &amp; permissions</b> below — changing one changes the other. Fine-tune who can use them (owner / manager / tablet) in Access.</p>
-      {state === null && !loadErr
-        ? <div className="adm-empty">Loading…</div>
-        : <div style={{ display: "grid", gap: 6 }}>
-            {/* Green-box rows — same visual language as the Google-review mode cards above:
-                selected/on = 2px green border + faint green fill + ✓, off = muted outline + ○,
-                with a right-aligned ON/OFF chip. Platform reveals its channel sub-panel when on. */}
-            {QUICK_FEATURES.map((f) => {
-              const on = !!state?.[f.key];
-              const busy = !state || pending.has(f.key);
-              return (
-                <div key={f.key}>
-                  <button type="button" className="adm-card" disabled={busy} onClick={() => toggle(f.key)}
-                    title={on ? "On — tap to turn off" : "Off — tap to turn on"}
-                    style={{ width: "100%", display: "flex", alignItems: "flex-start", gap: 10, textAlign: "left", padding: "10px 12px", cursor: busy ? "default" : "pointer",
-                      border: on ? "2px solid var(--adm-ok)" : "1px solid var(--adm-border, rgba(128,128,128,0.3))",
-                      background: on ? "color-mix(in srgb, var(--adm-ok) 8%, transparent)" : "transparent" }}>
-                    <span aria-hidden="true" style={{ marginTop: 1, fontWeight: 800, color: on ? "var(--adm-ok)" : "var(--muted)" }}>{on ? "✓" : "○"}</span>
-                    <span style={{ flex: 1 }}><span style={{ fontWeight: 700 }}>{f.label}</span><span className="adm-muted" style={{ display: "block", fontSize: 12 }}>{f.hint}</span></span>
-                    <span className="adm-chip" style={on
-                      ? { background: "color-mix(in srgb, var(--adm-ok) 20%, transparent)", color: "var(--adm-ok)" }
-                      : { background: "var(--muted2)", color: "var(--muted)" }}>{on ? "ON" : "OFF"}</span>
-                  </button>
-                  {f.key === "platform" && on && <PlatformChannels restaurant={restaurant} />}
-                </div>
-              );
-            })}
-          </div>}
-      {loadErr && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>Couldn&rsquo;t load — editing is locked so you don&rsquo;t change it by mistake. <button className="adm-btn" style={{ marginLeft: 6, padding: "3px 9px" }} onClick={load}>Retry</button></div>}
-      {err && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
-    </div>
-  );
-}
-
 function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restaurant: Restaurant; owners: Owner[]; onBack: () => void; onChanged: () => void }) {
   const [panels, setPanels] = useState<Record<string, boolean> | null>(null);
-  const [staffFeat, setStaffFeat] = useState<Record<string, boolean> | null>(null);
   // Per-switch in-flight set: toggling ONE switch disables only THAT switch. The old single
-  // `busy` boolean disabled EVERY grid (guest features + panels + staff features) while any
-  // one save was in flight, so flipping a guest feature froze the panel switches too (audit
-  // 2026-07-23). Keys are namespaced (f:/p:/s:) so the three grids never collide.
-  const [pending, setPending] = useState<Set<string>>(new Set());
-  const startPending = (id: string) => setPending((s) => new Set(s).add(id));
-  const endPending = (id: string) => setPending((s) => { const n = new Set(s); n.delete(id); return n; });
+  // (The per-switch in-flight tracker went with the toggle grids — this page has no
+  // switches left to disable while a save is in flight.)
   // Which staff-feature help screenshot is zoomed full-size (null = none).
   const [zoomImg, setZoomImg] = useState<string | null>(null);
   // "Full report" (owner's words: "every single bit" of ONE restaurant) swaps the
@@ -1103,80 +855,13 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   }, [restaurant.id, flash]);
   useEffect(() => { loadPanels(); }, [loadPanels]);
 
-  const loadStaffFeat = useCallback(async () => {
-    try {
-      const j = await (await fetch(`/api/admin/restaurants/staff-features?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })).json();
-      if (!j.error) setStaffFeat(j.flags || {}); else flash("Couldn't load staff features.");
-    } catch { flash("Couldn't load staff features."); }
-  }, [restaurant.id, flash]);
-  useEffect(() => { loadStaffFeat(); }, [loadStaffFeat]);
+  // (The staff-feature entitlement read that used to live here went with the "Main features"
+  // card — those switches are Access & permissions → Main features now, and fetching them
+  // here would have been a request whose answer nothing on this page renders.)
 
-  // Panels default ON unless this restaurant explicitly turned one off (mig 106).
-  const onP = (key: string) => { const v = panels?.[key]; return v === undefined ? true : v === true; };
-  const togglePanel = async (key: string, current: boolean) => {
-    const pid = `p:${key}`; startPending(pid);
-    setPanels((p) => ({ ...(p || {}), [key]: !current })); // optimistic; reconciled by loadPanels()
-    try {
-      const r = await fetch("/api/admin/restaurants/panels", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restaurant_id: restaurant.id, panel: key, enabled: !current }),
-      });
-      if (!r.ok) throw new Error();
-      await loadPanels();
-    } catch { flash("Couldn't save that change — reverted."); await loadPanels(); }
-    finally { endPending(pid); }
-  };
-  // Plain render helper, NOT a component — defining a component inside render remounts
-  // it on every parent render (and the lint rule rightly errors on it).
-  const panelToggle = (k: string, label: string) => {
-    const isOn = onP(k);
-    return (
-      <button key={k} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!panels || pending.has(`p:${k}`)} onClick={() => togglePanel(k, isOn)}
-        title={isOn ? "On — tap to turn off (blocks that login)" : "Off — tap to turn on"}>
-        <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
-      </button>
-    );
-  };
-
-  // Staff-feature ENTITLEMENTS the admin grants (e.g. allow the restaurant to auto-print KOTs).
-  // Default OFF — the owner's own on/off lives in the manager settings; both must be on.
-  const onS = (key: string) => staffFeat?.[key] === true;
-  const toggleStaffFeat = async (key: string, current: boolean) => {
-    const pid = `s:${key}`; startPending(pid);
-    setStaffFeat((s) => ({ ...(s || {}), [key]: !current }));
-    try {
-      const r = await fetch("/api/admin/restaurants/staff-features", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restaurant_id: restaurant.id, key, value: !current }),
-      });
-      if (!r.ok) throw new Error();
-      await loadStaffFeat();
-    } catch { flash("Couldn't save that change — reverted."); await loadStaffFeat(); }
-    finally { endPending(pid); }
-  };
-  const staffToggle = (k: string, label: string) => {
-    const isOn = onS(k);
-    return (
-      <button key={k} className={`adm-toggle ${isOn ? "on" : "off"}`} disabled={!staffFeat || pending.has(`s:${k}`)} onClick={() => toggleStaffFeat(k, isOn)}
-        title={isOn ? "Allowed — tap to disallow" : "Not allowed — tap to allow"}>
-        <span>{label}</span><span className="pill">{isOn ? "ON" : "OFF"}</span>
-      </button>
-    );
-  };
-  // Staff-feature CARD: the toggle plus a tiny real screenshot + one-line reminder of
-  // what the feature actually is (owner 2026-07-06: "add small ss images in admin panel
-  // so admin can remember what it's for"). The thumbnail zooms on tap (setZoomImg).
-  const staffFeatCard = (k: string, label: string, hint: string, img: string) => (
-    <div key={k} className="adm-featcard">
-      {/* eslint-disable-next-line @next/next/no-img-element -- tiny local help shot, no next/image needed */}
-      <img src={img} alt={`What "${label}" looks like`} loading="lazy"
-        onClick={() => setZoomImg(img)} title="Tap to enlarge" />
-      <div className="adm-featcard-body">
-        {staffToggle(k, label)}
-        <p>{hint}</p>
-      </div>
-    </div>
-  );
+  // (The panel on/off switches moved to Access & permissions → Staff apps with the rest
+  // of the permissions. `panels` is still read above because the Enter card needs to know
+  // which apps exist before offering a door into them.)
 
   if (showReport) {
     return <RestaurantReport restaurantId={restaurant.id} restaurantName={restaurant.name} onBack={() => setShowReport(false)} />;
@@ -1204,7 +889,7 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {/* Access & permissions is its OWN screen (owner 2026-07-23) reached by a button
-              from here, not shown inline. Carries ?rid so access2 preselects this restaurant;
+              from here, not shown inline. Carries ?rid so Access preselects this restaurant;
               &from=rest lets its breadcrumb come back to this detail view. */}
           <a className="adm-btn" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}
             title={`Manage who can do what at ${restaurant.name}`}>
@@ -1258,8 +943,9 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           {/* Quick jump chips — scrollable on phones, so any section is one tap away. */}
           <div className="adm-setchips" aria-label="Jump to a settings section">
             {([
-              ["det-main-features", "fa-toggle-on", "Features"],
-              ["det-review", "fa-star", "Google review"],
+              // "Features" and "Google review" left this page in the access rebuild (owner,
+              // 2026-07-31): the restaurant detail carries NO permissions or feature switches
+              // at all — they live in Access & permissions, so exactly one screen owns them.
               ["det-branding", "fa-palette", "Branding"],
               ["det-billing", "fa-file-invoice", "Billing"],
               ["det-kitchen", "fa-print", "KOT printing"],
@@ -1272,10 +958,10 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
             ))}
           </div>
 
-          <div id="det-main-features"><QuickFeaturesCard restaurant={restaurant} /></div>
-
-          <div id="det-review"><GoogleReviewCard restaurant={restaurant} /></div>
-
+          {/* NO permissions or feature switches on this page (owner, 2026-07-31). The
+              "Main features" quick card and the Google-review picker moved into Access &
+              permissions — Main features and Menu → Ratings — so a feature is never
+              switchable from two screens that can disagree with each other. */}
           <div id="det-branding"><BrandingCard restaurant={restaurant} /></div>
 
           {/* Billing · KOT printing · Dining sessions · Tables & QR — the four sections moved

@@ -4,13 +4,13 @@
 // the manager panel; owners monitor here.
 //
 // Scoped to restaurants the owner owns (ownerScope) AND that still have the pay-later
-// module effective (tableTagsLadder) — so a restaurant without the module contributes
+// module effective (khataLadder) — so a restaurant without the module contributes
 // nothing and the section shows a clean empty state, never dead UI. Uses the SAME
 // mig-184 RPCs as the manager panel, so the two views can never disagree on what's owed.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, type OwnerScope } from "@/lib/ownerScope";
-import { tableTagsLadder } from "@/lib/tableTags";
+import { khataLadder } from "@/lib/tableTags";
 import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +35,7 @@ export async function GET(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ summary: emptySummary(), customers: [] });
 
   // Keep only restaurants whose pay-later module is actually on.
-  const ladders = await Promise.all(ids.map((id) => tableTagsLadder(id)));
+  const ladders = await Promise.all(ids.map((id) => khataLadder(id)));
   const moduleIds = ids.filter((_, i) => ladders[i].effective);
   if (!moduleIds.length) return NextResponse.json({ summary: emptySummary(), customers: [], moduleOff: true });
 

@@ -135,9 +135,13 @@ export const PERMISSIONS: Perm[] = [
       { id: "inv_generate", name: "Generate the invoice", what: "Assigns the next invoice number." },
       { id: "inv_reprint", name: "Reprint an invoice", what: "Prints a copy of an already-issued invoice." },
     ] },
+  // Pay later got its OWN module columns in the access rebuild (mig 235) — it used to share
+  // table_tags_*, so switching table types off silently killed pay-later. Keep these in step
+  // with khataLadder() in lib/tableTags.ts: allModuleLadders() derives the manager panel's
+  // effective powers from HERE, so a stale column here shows a feature the gate then refuses.
   { id: "khata", group: "money", kind: "ladder", power: "khata", tablet: "tablet_khata", waiter: true, ownerUse: "panel",
-    module: { allowed: "table_tags_allowed", control: "table_tags_owner_control", enabled: "table_tags_enabled" },
-    moduleLabel: "Table types (VIP / Family / Guest) + pay later", name: "Khata — put it on their tab",
+    module: { allowed: "khata_allowed", control: "khata_owner_control", enabled: "khata_enabled" },
+    moduleLabel: "Pay later (khata)", name: "Khata — put it on their tab",
     what: "Parking a bill against a named regular to collect later, and the book that tracks who owes what.",
     sub: [
       { id: "khata_add", name: "Park a bill on a person", what: "Moves the amount to that person's tab." },
@@ -150,11 +154,13 @@ export const PERMISSIONS: Perm[] = [
     module: { allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" }, name: "Take a new order",
     what: "Punching in a dine-in order. Waiters do this by default; you can hand it to the manager too, or pull it back." },
   { id: "parcel", group: "floor", kind: "ladder", power: "parcel", tablet: "tablet_parcel", waiter: true, ownerUse: "manager",
-    module: { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" }, name: "Parcel / takeaway orders",
+    // parcel + platform are ONE feature since mig 235 ("Takeaway & delivery"), so they share
+    // the takeaway_* columns and MODULE_DEFS dedupes them into a single module.
+    module: { allowed: "takeaway_allowed", control: "takeaway_owner_control", enabled: "takeaway_enabled" }, name: "Parcel / takeaway orders",
     what: "The 🥡 New Parcel button — punch in a quick takeaway order from the floor (no table). It shows in the Platform board as a Takeaway, next to Zomato/Swiggy." },
   { id: "platform", group: "floor", kind: "ladder", power: "platform", ownerUse: "manager",
-    module: { allowed: "platform_allowed", control: "platform_owner_control", enabled: "platform_enabled" },
-    name: "Platform board (Zomato / Swiggy)",
+    module: { allowed: "takeaway_allowed", control: "takeaway_owner_control", enabled: "takeaway_enabled" },
+    moduleLabel: "Takeaway & delivery", name: "Platform board (Zomato / Swiggy)",
     what: "The 🛵 Platform tab — online delivery orders from Zomato / Swiggy and the restaurant's own website. Turn it off for restaurants that aren't on the delivery apps. Which channels are live (and their API keys) are set in the restaurant's Platform card. Takeaway parcels have their own separate switch and keep their board either way." },
   { id: "table_ops", group: "floor", kind: "ladder", power: "table_ops", tablet: "tablet_table_ops", waiter: true, ownerUse: "manager",
     module: { allowed: "table_ops_allowed", control: "table_ops_owner_control", enabled: "table_ops_enabled" }, name: "Table & ticket operations",

@@ -129,32 +129,10 @@ export default function OwnerSettings() {
         )}
       </div>
 
-      {/* Features you control (mig 166): modules whose on/off the admin handed to this
-          owner — flipping one takes effect on the manager + tablet panels immediately. */}
-      {data && (data.modules || []).length > 0 && (
-        <div className="adm-card" style={{ marginBottom: 14 }}>
-          <div className="adm-section-h" style={{ fontWeight: 800, marginBottom: 4 }}>Features you control</div>
-          <p className="adm-muted" style={{ fontSize: 12.5, marginBottom: 10 }}>Aevidine handed you the switch for these. Off = the feature disappears from your manager and waiter panels.</p>
-          {(data.modules || []).map((m) => (
-            <div key={m.restaurant_id + m.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--adm-line, rgba(128,128,128,.2))" }}>
-              <span style={{ fontSize: 13.5 }}>
-                {m.label}
-                {data.restaurants.length > 1 && <span className="adm-muted" style={{ display: "block", fontSize: 11.5 }}>{m.name}</span>}
-              </span>
-              <button type="button" role="switch" aria-checked={m.enabled} className="adm-btn"
-                style={m.enabled ? { borderColor: "var(--adm-ok,#16a34a)", color: "var(--adm-ok,#16a34a)", minWidth: 64 } : { minWidth: 64 }}
-                onClick={async () => {
-                  const next = !m.enabled;
-                  setData((d) => d ? { ...d, modules: (d.modules || []).map((x) => x === m ? { ...x, enabled: next } : x) } : d);
-                  const r = await fetch(`/api/owner/settings${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ restaurant_id: m.restaurant_id, key: m.key, enabled: next }) });
-                  if (!r.ok) load(); // revert to the server truth on failure
-                }}>
-                {m.enabled ? "On" : "Off"}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* "Features you control" was removed in the access rebuild (owner, 2026-07-31):
+          owners configure no features at all now — every switch lives on the admin's
+          Access & permissions screen, so a feature can never be on in one place and off
+          in another. The API still answers `modules` for older clients; nothing renders it. */}
 
       {/* Your restaurants */}
       {data && data.restaurants.length > 0 && (

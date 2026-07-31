@@ -22,7 +22,7 @@ import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role 
 import { logAction } from "@/lib/oplog";
 import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/lib/ownerEntitlements";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
-import { banquetLadder, tableTagsLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
+import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { newWaiterTables } from "@/lib/tableAssign";
 import {
@@ -37,7 +37,7 @@ import {
 const CAP_MODULE_GATE: Record<string, (rid: string) => Promise<{ effective: boolean }>> = {
   tablet_banquet: banquetLadder,
   tablet_table_tags: tableTagsLadder,
-  tablet_khata: tableTagsLadder,
+  tablet_khata: khataLadder,
   tablet_table_ops: tableOpsLadder,
   tablet_take_orders: takeOrdersLadder,
   tablet_parcel: parcelLadder,

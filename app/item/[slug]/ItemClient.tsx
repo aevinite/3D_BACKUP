@@ -589,10 +589,13 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         <div className="detail-img-overlay"></div>
         {/* The little "expand" icon hinting you can tap to zoom. */}
         <span className="img-zoom-hint"><i className="fas fa-expand-alt"></i></span>
-        {/* The veg / non-veg badge in the corner. */}
-        <span className="detail-diet-badge">
-          <VegIcon isVeg={item.veg} size={28} />
-        </span>
+        {/* The veg / non-veg badge in the corner — same single switch as the menu cards
+            (Access → Menu → Veg / non-veg); a pure-veg restaurant shows no mark anywhere. */}
+        {features.diet_filter && (
+          <span className="detail-diet-badge">
+            <VegIcon isVeg={item.veg} size={28} />
+          </span>
+        )}
       </div>
 
       {/* The full-screen zoom view ("lightbox"), shown only when imgZoom is on.

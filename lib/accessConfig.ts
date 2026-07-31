@@ -2,7 +2,7 @@
 // per-restaurant Access editor (app/api/admin/restaurants/access) AND the create-
 // restaurant flow (app/api/admin/restaurants) so the two can never drift.
 //
-// These mirror docs/ACCESS-LADDER.md. Keep the DEFAULTS matching the migrations —
+// These mirror docs/ACCESS-MODEL.md. Keep the DEFAULTS matching the migrations —
 // enforcement (managerCan) reads an ABSENT manager-permission key as false, so display
 // and truth must agree.
 
