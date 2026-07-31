@@ -222,14 +222,19 @@
   // The MANAGER panel has no drawer row to hang this off, so the script wires its own
   // topbar button (#myProfileBtn) and reveals it only when the feature is really there.
   // .hidden alone loses to a display rule in this codebase, so clear both.
-  document.addEventListener("DOMContentLoaded", function () {
+  function wireManagerButton() {
     var btn = document.getElementById("myProfileBtn");
     if (!btn) return;
     btn.onclick = function () { open(); };
     available().then(function (yes) {
       if (yes) { btn.hidden = false; btn.style.display = ""; }
     });
-  });
+  }
+  // Run NOW if the document is already parsed. Waiting only on DOMContentLoaded left the
+  // button hidden at tablet width, where the panel iframe re-mounts and this script loads
+  // AFTER that event has already fired — so the listener never ran (2026-07-31 sweep, pass 2).
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", wireManagerButton);
+  else wireManagerButton();
 
   // Styles ride with the script so a panel only has to add the <script> tag.
   var css = document.createElement("style");
