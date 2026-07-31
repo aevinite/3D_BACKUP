@@ -21,7 +21,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
 import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/lib/ownerEntitlements";
-import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
+import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { newWaiterTables } from "@/lib/tableAssign";
@@ -73,6 +73,12 @@ type Scope =
   | { ok: true; actor: "admin" | "owner" | "manager"; actorId: string | null; restaurants: Restaurant[] }
   | { ok: false; resp: NextResponse };
 
+// ONE answer for "we could not read your setup" — deliberately different from both
+// "the feature is off" (403 + disabled) and "that isn't yours" (403). 503 tells the client to
+// retry and the panel shows a normal try-again, never a false configuration message.
+const transient = () => NextResponse.json(
+  { error: "Couldn't load your team just now — please try again.", transient: true }, { status: 503 });
+
 // Resolve which restaurants this caller may manage staff for (see header).
 async function scope(req: NextRequest): Promise<Scope> {
   // owner_entitlements rides along for the mig-133 ladder checks below.
@@ -90,7 +96,14 @@ async function scope(req: NextRequest): Promise<Scope> {
     // so the section dies server-side too, not just in the nav.
     // Only LIVE restaurants whose owner panel the admin still allows (audit 2026-07-07) —
     // a binned or owner-panel-disabled restaurant drops out here, matching lib/ownerScope.
-    const ownedIds = await enabledOwnedRestaurantIds(u.id);
+    let ownedIds: string[];
+    try { ownedIds = await enabledOwnedRestaurantIds(u.id); }
+    catch (e) {
+      // OwnedLookupFailed = we couldn't tell what they own. Saying "no restaurants are assigned
+      // to you yet" there would be a lie; ask them to retry instead.
+      if (e instanceof OwnedLookupFailed) return { ok: false, resp: transient() };
+      throw e;
+    }
     if (!ownedIds.length) return { ok: true, actor: "owner", actorId: u.id, restaurants: [] };
     // A pinned context — e.g. the manager panel viewing ONE restaurant via ?rid= — narrows
     // to just that restaurant (if the owner actually owns it), so a multi-restaurant owner
@@ -99,7 +112,12 @@ async function scope(req: NextRequest): Promise<Scope> {
     const osp = req.nextUrl?.searchParams;
     const opin = osp?.get("scope") || osp?.get("rid");
     const scopeIds = (opin && opin !== "all" && ownedIds.includes(opin)) ? [opin] : ownedIds;
-    const { data } = await sb.from("restaurants").select(cols).in("id", scopeIds).order("name");
+    const { data, error } = await sb.from("restaurants").select(cols).in("id", scopeIds).order("name");
+    // A failed READ is not a switched-off feature. Before this, `data` came back null on any DB
+    // blip, `rows` was empty, and the owner was told "Staff management isn't enabled for your
+    // restaurant — contact Aevidine" — a lie about their setup that would send them to support.
+    // (Root-caused from two unexplained 403s in the 2026-07-31 sweep.)
+    if (error) return { ok: false, resp: transient() };
     const rows = ((data || []) as Restaurant[]).filter((r) => mergeOwnerEntitlements(r.owner_entitlements).staff !== false);
     if (!rows.length)
       // `disabled` = a legitimate "not turned on" state → the page shows a calm info card,
@@ -108,7 +126,9 @@ async function scope(req: NextRequest): Promise<Scope> {
     return { ok: true, actor: "owner", actorId: u.id, restaurants: rows };
   }
   if (u?.role === "manager") {
-    const { data } = await sb.from("restaurants").select(cols).eq("id", u.restaurant_id).limit(1);
+    const { data, error } = await sb.from("restaurants").select(cols).eq("id", u.restaurant_id).limit(1);
+    // …and a failed read here must not read as "your owner hasn't given you staff management".
+    if (error) return { ok: false, resp: transient() };
     const r = (data || [])[0] as Restaurant | undefined;
     // The full ladder: the admin must still entitle the power (mig 133) AND the
     // owner must have granted it — same rule as managerCan() in the editor route.
@@ -138,10 +158,12 @@ async function scope(req: NextRequest): Promise<Scope> {
       let ids: string[] = [];
       if (ownerId) ids = ((await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId)).data || []).map((x) => x.restaurant_id as string);
       if (!ids.includes(pin)) ids.push(pin); // never lose the entered restaurant
-      const { data } = await sb.from("restaurants").select(cols).in("id", ids).order("name");
+      const { data, error } = await sb.from("restaurants").select(cols).in("id", ids).order("name");
+      if (error) return { ok: false, resp: transient() };
       return { ok: true, actor: "admin", actorId: null, restaurants: (data || []) as Restaurant[] };
     }
-    const { data } = await sb.from("restaurants").select(cols).order("name");
+    const { data, error } = await sb.from("restaurants").select(cols).order("name");
+    if (error) return { ok: false, resp: transient() };
     return { ok: true, actor: "admin", actorId: null, restaurants: (data || []) as Restaurant[] };
   }
   if (!u) return { ok: false, resp: bad("Not authorised — please log in.", 401) };
