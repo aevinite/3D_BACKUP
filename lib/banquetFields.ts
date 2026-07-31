@@ -109,3 +109,12 @@ export function banquetBillNo(prefix: string, style: string, seq: number, when: 
   if (style === "plain") return `${p}-${String(seq).padStart(6, "0")}`;
   return `${p}/${fy}/${String(seq).padStart(6, "0")}`;
 }
+
+/** The banquet's own tax lines, or [] when it borrows the restaurant's normal tax (mig 239). */
+export function banquetTaxOf(s: Record<string, unknown> | null | undefined): { label: string; rate: number }[] {
+  const raw = Array.isArray((s || {}).banquet_tax_components) ? ((s || {}) as Record<string, unknown>).banquet_tax_components as unknown[] : [];
+  return raw
+    .map((c) => ({ label: String((c as Record<string, unknown>)?.label ?? "").trim().slice(0, 24), rate: Math.round((Number((c as Record<string, unknown>)?.rate) || 0) * 100) / 100 }))
+    .filter((c) => c.label && c.rate > 0 && c.rate <= 100)
+    .slice(0, 6);
+}

@@ -10200,7 +10200,7 @@ function bqLines() {
 }
 // The same money the server will compute (mig 237): discount BEFORE tax, whole-rupee total.
 function bqMath(lines) {
-  const tm = taxModel(state.data.settings);
+  const tm = bqTaxModel();
   let sub = 0, disc = 0;
   for (const l of lines) {
     const gross = l.qty * l.price;
@@ -10416,8 +10416,24 @@ function bqNewHtml() {
       In words: ${esc(bqWords(m.total))}${m.paid ? (m.bal > 0 ? ` · ${inr(m.bal)} still to collect` : " · settled in full") : ""}</div>
   </div>`;
 }
+// A BANQUET IS TAXED AT ITS OWN RATE (mig 239). Aangan's paper proves why: restaurant
+// service is 5% (CGST 2.5 + SGST 2.5) while a banquet is 18% (CGST 9 + SGST 9) — one
+// restaurant, two rates. settings.banquet_tax_components wins when set; empty falls back
+// to the restaurant's normal tax, so nothing changes for anyone who never sets it.
+function bqTaxModel() {
+  const s = state.data.settings || {};
+  const raw = Array.isArray(s.banquet_tax_components) ? s.banquet_tax_components : [];
+  const comps = raw.map((c) => ({ label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 }))
+    .filter((c) => c.label && c.rate > 0);
+  if (comps.length) {
+    const pct = comps.reduce((a, c) => a + c.rate, 0);
+    return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, own: true };
+  }
+  const tm = taxModel(s);
+  return { rate: tm.rate, pct: tm.pct, components: tm.components, own: false };
+}
 function bqTaxLabel() {
-  const tm = taxModel(state.data.settings);
+  const tm = bqTaxModel();
   return tm.components && tm.components.length
     ? tm.components.map((c) => c.label + " " + c.rate + "%").join(" + ")
     : taxLabel() + " " + tm.pct + "%";
@@ -10651,20 +10667,31 @@ function printBanquetBill(b, lines) {
   const recv = Number(b.received) || 0;
   const bal = Math.round((total - recv) * 100) / 100;
   const taxable = Math.round((sub - disc) * 100) / 100;
-  const b2b = !!String(b.cust_gstin || "").trim();
+  // Owner 2026-07-31: "whatever is in the bill I have sent you of banquet, it should be
+  // like that" — a banquet bill ALWAYS prints as a tax invoice with the per-line taxable
+  // value + CGST/SGST columns. The receiver's GSTIN line only shows when there is one.
+  const b2b = true;
+  const hasCustGstin = !!String(b.cust_gstin || "").trim();
   // named tax components, or the historical CGST+SGST halves; the last one takes the
   // remainder so the printed lines always foot to the tax on the total.
-  const tm = taxModel(s);
-  const comps = (tm.components && tm.components.length) ? tm.components
-    : [{ label: "CGST", rate: tm.pct / 2 }, { label: "SGST", rate: tm.pct / 2 }];
-  const rateSum = comps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
-  let run = 0;
-  const taxRows = comps.map((c, i) => {
-    const amt = i === comps.length - 1 ? Math.round((taxAmt - run) * 100) / 100
-      : Math.round(taxAmt * ((Number(c.rate) || 0) / rateSum) * 100) / 100;
-    run = Math.round((run + amt) * 100) / 100;
-    return { label: c.label, rate: Number(c.rate) || 0, amt };
-  });
+  // The split PRINTED on this bill. A saved bill carries its own frozen tax_lines
+  // (mig 239), so re-printing after a rate change can never re-split an old total.
+  const tmB = bqTaxModel();
+  const comps = (tmB.components && tmB.components.length) ? tmB.components
+    : [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }];
+  let taxRows;
+  if (Array.isArray(b.tax_lines) && b.tax_lines.length) {
+    taxRows = b.tax_lines.map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
+  } else {
+    const rateSum = comps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
+    let run = 0;
+    taxRows = comps.map((c, i) => {
+      const amt = i === comps.length - 1 ? Math.round((taxAmt - run) * 100) / 100
+        : Math.round(taxAmt * ((Number(c.rate) || 0) / rateSum) * 100) / 100;
+      run = Math.round((run + amt) * 100) / 100;
+      return { label: c.label, rate: Number(c.rate) || 0, amt };
+    });
+  }
   const L = (lines || []).map((l) => {
     const gross = (Number(l.qty) || 0) * (Number(l.price) || 0);
     return { title: l.title, qty: Number(l.qty) || 0, price: Number(l.price) || 0, gross };
@@ -10673,16 +10700,16 @@ function printBanquetBill(b, lines) {
   const grossAll = L.reduce((a, l) => a + l.gross, 0) || 1;
   L.forEach((l) => { l.taxable = Math.round((l.gross - disc * (l.gross / grossAll)) * 100) / 100; });
 
-  const cols = b2b ? 5 + comps.length * 2 : 5;
+  const cols = 5 + taxRows.length * 2;
   // One <col> per column. Built by concatenation, NOT by joining half-open tags — the
   // clever join printed a stray "<" on the paper (caught in the print check).
   const colg = b2b
     ? `<col style="width:7mm"><col><col style="width:11mm"><col style="width:14mm"><col style="width:19mm">`
-      + comps.map(() => `<col style="width:10mm"><col style="width:15mm">`).join("")
+      + taxRows.map(() => `<col style="width:10mm"><col style="width:15mm">`).join("")
     : `<col style="width:7mm"><col><col style="width:14mm"><col style="width:18mm"><col style="width:22mm">`;
   const head = b2b
-    ? `<tr><th rowspan="2">Sr</th><th rowspan="2">Item Name</th><th rowspan="2">Qty.</th><th rowspan="2">Rate</th><th rowspan="2">Taxable<br/>Value</th>${comps.map((c) => `<th colspan="2">${esc(c.label)}</th>`).join("")}</tr>
-       <tr>${comps.map(() => "<th>Rate</th><th>Amount</th>").join("")}</tr>`
+    ? `<tr><th rowspan="2">Sr</th><th rowspan="2">Item Name</th><th rowspan="2">Qty.</th><th rowspan="2">Rate</th><th rowspan="2">Taxable<br/>Value</th>${taxRows.map((c) => `<th colspan="2">${esc(c.label)}</th>`).join("")}</tr>
+       <tr>${taxRows.map(() => "<th>Rate</th><th>Amount</th>").join("")}</tr>`
     : `<tr><th>Sr</th><th>Item Name</th><th>Qty.</th><th>Rate</th><th>Amount</th></tr>`;
   const rows = L.map((l, i) => {
     const nameCell = `<td class="n">${esc(l.title)}</td>`;
@@ -10693,6 +10720,10 @@ function printBanquetBill(b, lines) {
   const fillN = P.fill ? Math.max(0, (isA4 ? 12 : 6) - L.length) : 0;
   let fill = "";
   for (let i = 0; i < fillN; i++) fill += `<tr class="fill">${"<td></td>".repeat(cols)}</tr>`;
+  // The reference bill foots its columns INSIDE the table (TOTAL | taxable | each tax),
+  // which is also the proof that the per-line tax columns add up to the summary.
+  const totRow = `<tr class="tot"><td colspan="4" class="r">TOTAL</td><td class="r">${bq2(taxable)}</td>`
+    + taxRows.map((c) => `<td></td><td class="r">${bq2(c.amt)}</td>`).join("") + `</tr>`;
 
   // Terms box: the advances, the remark, and the function line — each only if present.
   const terms = [];
@@ -10713,7 +10744,7 @@ function printBanquetBill(b, lines) {
   if (b.cust_addr) toBits.push(`<div class="adr">${esc(b.cust_addr).split("\n").join("<br/>")}</div>`);
   const line2 = [b.cust_person, b.cust_phone].filter(Boolean).map(esc).join(" · ");
   if (line2) toBits.push(`<div class="adr">${line2}</div>`);
-  if (b2b) toBits.push(`<div style="font-size:7.6pt;margin-top:1.2mm">GSTIN / UID&nbsp;: <b>${esc(b.cust_gstin)}</b></div>`);
+  if (hasCustGstin) toBits.push(`<div style="font-size:7.6pt;margin-top:1.2mm">GSTIN / UID&nbsp;: <b>${esc(b.cust_gstin)}</b></div>`);
 
   const money = [];
   money.push(`<div class="ms"><span>Subtotal</span><i>${bq2(sub)}</i></div>`);
@@ -10721,7 +10752,7 @@ function printBanquetBill(b, lines) {
   taxRows.forEach((c) => money.push(`<div class="ms"><span>${esc(c.label)} ${c.rate}%</span><i>${bq2(c.amt)}</i></div>`));
   const roundOff = Math.round((total - (taxable + taxAmt)) * 100) / 100;
   if (roundOff) money.push(`<div class="ms"><span>Round off</span><i>${(roundOff > 0 ? "+" : "") + bq2(roundOff)}</i></div>`);
-  money.push(`<div class="ms tot"><span>BILL TOTAL</span><i>${bq2(total)}</i></div>`);
+  money.push(`<div class="ms tot"><span>INVOICE TOTAL</span><i>${bq2(total)}</i></div>`);
   if (recv > 0) {
     money.push(`<div class="ms bal"><span>Received</span><i>${bq2(recv)}</i></div>`);
     money.push(`<div class="ms" style="font-weight:700"><span>${bal > 0 ? "Balance due" : "Balance"}</span><i>${bq2(Math.max(0, bal))}</i></div>`);
@@ -10729,7 +10760,7 @@ function printBanquetBill(b, lines) {
 
   const w = window.open("", "_blank", "width=780,height=980");
   if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Banquet bill ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
+  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Tax Invoice ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
 <style>
   /* A5/A4 sheet print recipe: an EXPLICIT @page size is correct here (unlike the 80mm
      thermal bill, where forcing a size makes CUPS rotate the job) because the tray
@@ -10760,6 +10791,7 @@ function printBanquetBill(b, lines) {
   table.it td.n{text-align:left}table.it td.c{text-align:center}
   table.it td.r{text-align:right;font-variant-numeric:tabular-nums}
   table.it tr.fill td{height:5.4mm;border-top:0;border-bottom:0}
+  table.it tr.tot td{font-weight:700;border-top:1px solid #000}
   .footg{display:flex;border:1px solid #000;border-top:0}
   .footg .fl{flex:1;padding:1.6mm 1.9mm;border-right:1px solid #000;min-width:0}
   .footg .fr{width:${isA4 ? 74 : 56}mm;padding:1.2mm 1.9mm}
@@ -10779,14 +10811,14 @@ function printBanquetBill(b, lines) {
   <div class="body">
     ${P.pad ? "" : `<div class="selfhead"><div class="nm">${esc(bi.name)}</div>
       <div class="ad">${esc(bi.address)}${bi.phone ? "<br/>Ph " + esc(bi.phone) : ""}${bi.gstin ? "<br/>GSTIN " + esc(bi.gstin) : ""}</div></div>`}
-    <div class="doct"><b>${b2b ? "Tax Invoice" : "Bill"}</b></div>
+    <div class="doct"><b>Tax Invoice</b></div>
     <table class="bx">
       <tr>
         <td style="width:53%"><div class="lbl">Supplier</div><div class="who">${esc(bi.name)}</div>
           <div class="adr">${esc(bi.address)}</div>
           ${bi.gstin ? `<div style="font-size:7.5pt;margin-top:1mm">GSTIN&nbsp;: <b>${esc(bi.gstin)}</b></div>` : ""}</td>
         <td><div class="metag">
-          <div><div class="lbl">Bill No.</div><div class="v">${esc(b.bill_no || "—")}</div></div>
+          <div><div class="lbl">Invoice No.</div><div class="v">${esc(b.bill_no || "—")}</div></div>
           <div><div class="lbl">Dated</div><div class="v">${esc(dstr)}</div></div>
           ${b.hall ? `<div><div class="lbl">Banq. Name</div><div class="v">${esc(b.hall)}</div></div>` : ""}
           <div><div class="lbl">Time</div><div class="v">${esc(tstr)}</div></div>
@@ -10802,15 +10834,15 @@ function printBanquetBill(b, lines) {
           ${!terms.length && !fnBits.length ? `<div class="terms" style="margin-top:.6mm">—</div>` : ""}</td>
       </tr>` : ""}
     </table>
-    <table class="it" style="border-top:0"><colgroup>${colg}</colgroup><thead>${head}</thead><tbody>${rows}${fill}</tbody></table>
+    <table class="it" style="border-top:0"><colgroup>${colg}</colgroup><thead>${head}</thead><tbody>${rows}${fill}${totRow}</tbody></table>
     <div class="footg">
-      <div class="fl"><div class="lbl">Bill total (in words)</div>
+      <div class="fl"><div class="lbl">Invoice Total (In Words)</div>
         <div class="wrd">${esc(bqWords(total))}</div>
         ${recv > 0 ? `<div class="stamp">${bal > 0 ? "BALANCE DUE " + bq0(bal) : "PAID IN FULL"}</div>` : ""}</div>
       <div class="fr">${money.join("")}</div>
     </div>
     ${P.sign ? `<div class="sign">For <b>${esc(bi.name)}</b><div class="sp"></div>Authorised Signatory</div>` : ""}
-    ${b.prepared_by ? `<div style="font-size:7pt;margin-top:1.4mm">Prepared by ${esc(b.prepared_by)}</div>` : ""}
+    ${bqOn("by") && b.prepared_by ? `<div style="font-size:7pt;margin-top:1.4mm">Prepared by ${esc(b.prepared_by)}</div>` : ""}
     ${P.foot ? `<div class="pfoot">${esc(bi.footer)}${bi.gstin ? "<br/>GST No: " + esc(bi.gstin) : ""}</div>` : ""}
   </div>
 </div>

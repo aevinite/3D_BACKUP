@@ -2742,7 +2742,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // in the admin panel"). Strip them from ANY staff-cookie save — manager or owner
         // — so the only way in is the admin route. (mig 237)
         if (g.user) {
-          for (const k of Object.keys(body)) if (k === "banquet_fields" || /^banquet_paper/.test(k)) delete (body as Record<string, unknown>)[k];
+          for (const k of Object.keys(body)) if (k === "banquet_fields" || k === "banquet_tax_components" || /^banquet_paper/.test(k)) delete (body as Record<string, unknown>)[k];
         }
         // The banquet series: shape it here so a bad value can never reach the CHECK
         // constraint, and REFUSE (never silently drop) a start-number change once bills

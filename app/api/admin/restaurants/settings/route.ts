@@ -33,6 +33,7 @@ const SETTINGS_COLS = [
   // series, and WHICH paper it prints on. Admin-owned — the manager/owner save path strips
   // these (owner 2026-07-31: the info-format option lives in the admin panel).
   "banquet_fields", "banquet_bill_prefix", "banquet_bill_style", "banquet_bill_next",
+  "banquet_tax_components",
   "banquet_paper", "banquet_paper_size", "banquet_paper_top", "banquet_paper_bot",
   "banquet_paper_side", "banquet_paper_foot", "banquet_paper_sign", "banquet_paper_fill",
 ] as const;
@@ -120,6 +121,15 @@ function sanitize(body: Patch): Patch {
   // never reach the DB and the SQL side (which filters every stored value by this
   // same list) can always be trusted.
   if ("banquet_fields" in body) out.banquet_fields = cleanBanquetFields(body.banquet_fields);
+  // A banquet's own tax lines (mig 239) — empty means "use the restaurant's normal tax".
+  // Same shape and same clamps as tax_components, so the two can never drift.
+  if ("banquet_tax_components" in body) {
+    const raw = Array.isArray(body.banquet_tax_components) ? body.banquet_tax_components : [];
+    out.banquet_tax_components = raw
+      .map((c) => ({ label: String((c as Patch)?.label || "").trim().slice(0, 24), rate: Math.round((Number((c as Patch)?.rate) || 0) * 100) / 100 }))
+      .filter((c) => c.label && c.rate > 0 && c.rate <= 100)
+      .slice(0, 6);
+  }
   if ("banquet_bill_prefix" in body) {
     out.banquet_bill_prefix = String(body.banquet_bill_prefix || "BQB").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) || "BQB";
   }
