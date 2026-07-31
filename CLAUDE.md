@@ -719,6 +719,31 @@ work. It is all kept above as history — nothing has been removed — but the L
   to those defaults with **`npm run access:defaults -- --slug <slug> --apply`** (dry run
   without `--apply`); it refuses to point at anything but the backup database.
 
+## 🧾 THE FLOOR IS READ ONCE AND SHARED — a write MUST drop that snapshot (2026-07-31)
+
+`lfh_table_view_summary` runs ~6 queries per table (~1,800 statements on a 300-table floor).
+Alone that is ~300ms; the fault was CONCURRENCY — every manager/waiter device polls the WHOLE
+floor as its 60s backstop, and a dozen landing together queued and crossed the statement
+timeout (134 error rows in 12h, and pings on the owner's phone). A set-based REWRITE of the
+function was tried and **rejected by measurement**: byte-identical output, 5× faster at 4
+concurrent reads, **2× slower at 12**. Making each call faster was the wrong lever.
+
+So whole-floor reads for the same restaurant inside a **1.5s window share ONE database call**
+(`lib/floorSummary.ts`, wired into both panel routes). Three properties keep that safe, and
+each is easy to break with no symptom in any other test:
+
+- **Every write handler drops that restaurant's snapshot** (`invalidateFloor(rid)`, one line
+  right after the handler resolves `rid`). Without it, a device that changes something and
+  reloads is handed a floor computed BEFORE its own action — a waiter marks a table paid and
+  watches the tile flick back. **Add a write path → add that line.**
+- **A targeted `?table=N` refetch is NEVER shared** — that is what makes a tile update the
+  instant its order lands. Keep the `tbl ? …live… : …shared…` shape.
+- **The window stays ~1.5s.** The floor is a live screen; widening it makes it stale.
+
+Guarded by **`npm run verify:floor`** (`scripts/verify-floor-share.mjs`) — static, instant,
+proven to fail when an invalidation is removed. Run it against another checkout with
+`--repo <path>` (that is how AV live is checked without adding a file there).
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The
