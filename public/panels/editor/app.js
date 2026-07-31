@@ -10620,9 +10620,22 @@ function applyHierarchyView() {
     xraySetTint(btn, true, xrayTintTitle(entry.label, entry.flag));
     zones.push({ ...entry, el: btn });
   }
-  // A real manager must never be LEFT ON a tab that just got hidden (e.g. the default
-  // "items" tab with edit_menu off) — hop to the first visible tab instead.
-  if (!higher) {
+  // MANAGER'S MENU (access rebuild, 2026-07-31): tabs this RESTAURANT doesn't have at all.
+  // A different question from the powers above — that is what a PERSON may do; this is what
+  // the restaurant bought. So it is hidden for EVERYONE below the admin, never tinted: the
+  // owner doesn't get a tab their restaurant hasn't got either, and a greyed ghost is exactly
+  // what the rebuild removed. The server sends an empty list for the admin, and refuses these
+  // tabs' endpoints for everyone else (tabGate in the editor API), so hiding is never the only
+  // guard. Model keys → DOM tab names: the menu editor's tab is called "items".
+  const TAB_DOM = { editor: "items", ratings: "ratings", log: "log" };
+  for (const key of XRAY_WHO.tabsOff || []) {
+    const btn = document.querySelector(`.tabs .tab[data-tab="${TAB_DOM[key] || key}"]`);
+    if (btn) { xraySetTint(btn, false); xraySetHidden(btn, true); }
+  }
+
+  // Nobody must be LEFT ON a tab that just got hidden (e.g. the default "items" tab with
+  // edit_menu off, or a tab this restaurant doesn't have) — hop to the first visible tab.
+  if (!higher || (XRAY_WHO.tabsOff || []).length) {
     const active = document.querySelector(".tabs .tab.active");
     if (active && active.hidden) {
       const first = document.querySelector(".tabs .tab:not([hidden])");

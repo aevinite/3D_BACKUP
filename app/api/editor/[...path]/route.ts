@@ -34,6 +34,7 @@ import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
+import { managerTabsOff, managerTabOn, type ManagerTabKey } from "@/lib/accessTree";
 import { saveBillCustomer } from "@/lib/billCustomer";
 
 export const dynamic = "force-dynamic"; // always live, never cached
@@ -120,6 +121,28 @@ async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<
   if (ov === "off") return false;
   if (r?.manager_permissions?.view_logs === false) return false;        // owner pulled it back from managers
   return true;
+}
+
+// ── MANAGER'S MENU rung (access rebuild, 2026-07-31) ────────────────────────
+// Which manager tabs this RESTAURANT has. Hiding a tab in the panel is never the only
+// guard, so a switched-off tab's endpoints refuse here too — otherwise typing the URL
+// still reached it. Deliberately ONE gate called from every handler rather than a check
+// sprinkled per endpoint: a new endpoint under an existing tab is covered automatically.
+// The lookup only runs for paths that belong to a tab, so ordinary requests pay nothing.
+const TAB_PATHS: { tab: ManagerTabKey; test: (p: string) => boolean }[] = [
+  { tab: "ratings", test: (p) => p === "ratings" || p.startsWith("ratings/") },
+  { tab: "log", test: (p) => p === "oplog" || p.startsWith("oplog/") },
+  { tab: "editor", test: (p) => /^(items|categories|filters)(\/|$)/.test(p) },
+];
+async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[]): Promise<NextResponse | null> {
+  if (!g.user) return null;                         // admin super-user keeps every tab
+  const p = path.join("/");
+  const hit = TAB_PATHS.find((t) => t.test(p));
+  if (!hit) return null;
+  const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config;
+  if (managerTabOn(cfg, hit.tab)) return null;
+  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log" };
+  return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
 
 // Granular Edit-the-menu sub-option gate (owner 2026-07-24). Only restricts a plain MANAGER:
@@ -314,6 +337,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   // offer an unfixable mystery — nobody could tell if it was the Dashboard, the Z-report
   // or the log. (bug 2026-07-28)
   const { path = [] } = await ctx.params;
+  // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
+  { const tg = await tabGate(g, rid, path); if (tg) return tg; }
   const p = path.join("/");
   try {
     // customer-recognize?phone=… — repeat-customer lookup for the pay sheet
@@ -414,7 +439,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // of showing-then-refusing it. Same rule as the server: admin/owner get full menu editing
       // (all true); a manager is limited only when the owner configured manager_opts, and then
       // only an EXPLICIT true allows it (an absent/unconfigured key stays ALLOWED = default).
-      const MENU_SUB_KEYS = ["add_dish", "edit_dish", "edit_price", "delete_dish", "mark_86", "manage_categories", "manage_filters", "edit_3d"];
+      // "edit_options" (a dish's Size/Milk/Extras choice groups) joined this list in the
+      // access rebuild — it is the "Customisation" row under Default set for user → Manager
+      // → Edit menu, and without it here that row would save and never be read.
+      const MENU_SUB_KEYS = ["edit_options", "add_dish", "edit_dish", "edit_price", "delete_dish", "mark_86", "manage_categories", "manage_filters", "edit_3d"];
       const mo = ((g.user && g.user.role === "manager") || simulate) ? r?.access_config?.edit_menu?.manager_opts : null;
       const menuRestricted = !!(mo && typeof mo === "object");
       const menuSub: Record<string, boolean> = {};
@@ -431,6 +459,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         effectivePowers,
         offByAdmin,
         menuSub,
+        // MANAGER'S MENU (access rebuild): which tabs this RESTAURANT has at all — a
+        // different question from what a PERSON may do, which is the powers above. The panel
+        // removes these tabs entirely (never greys them), and the guards below refuse their
+        // endpoints so a hidden tab can't be reached by typing a URL. The admin keeps
+        // everything (admin = top power), so a switched-off tab stays inspectable.
+        tabsOff: actor === "admin" ? [] : managerTabsOff(r?.access_config),
         // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
         // button only when the owner ticked it (admin/owner always true; the simulate mode
         // resolves it like a real manager: only when the owner explicitly ticked it).
@@ -1315,6 +1349,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   if (rid instanceof NextResponse) return rid;
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
+  // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
+  { const tg = await tabGate(g, rid, path); if (tg) return tg; }
   try {
     const [a, b, c] = path;
     // A missing client id arrives as literal "undefined"/"null"/"NaN" — reject before it
@@ -2850,6 +2886,8 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   if (rid instanceof NextResponse) return rid;
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
+  // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
+  { const tg = await tabGate(g, rid, path); if (tg) return tg; }
   try {
     const [a, id] = path;
     // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).
@@ -2979,6 +3017,8 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   if (rid instanceof NextResponse) return rid;
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
+  // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
+  { const tg = await tabGate(g, rid, path); if (tg) return tg; }
   try {
     const [a, id] = path;
     // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).

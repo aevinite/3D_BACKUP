@@ -39,11 +39,26 @@ UPDATE settings SET menu_currencies = ARRAY['INR']::TEXT[] WHERE menu_currencies
 -- Existing restaurants keep today's behaviour: they currently offer the switchers
 -- (features.languages / features.currency default true), so a restaurant that has
 -- NOT switched them off keeps a multi-language menu rather than silently losing five
--- languages the moment this ships.
+-- languages the moment this ships. The codes MUST match LANGUAGES / CURRENCIES in
+-- lib/format.ts — a code the app can't render would show English while claiming otherwise.
 UPDATE settings
-   SET menu_languages = ARRAY['en','fr','hi','gu','es','de']::TEXT[]
+   SET menu_languages = ARRAY['en','de','fr','ar','hi','ko']::TEXT[]
  WHERE COALESCE((features->>'languages')::BOOLEAN, TRUE) IS TRUE
    AND menu_languages = ARRAY['en']::TEXT[];
+
+UPDATE settings
+   SET menu_currencies = ARRAY['INR','USD','EUR','AED','SAR','QAR']::TEXT[]
+ WHERE COALESCE((features->>'currency')::BOOLEAN, TRUE) IS TRUE
+   AND menu_currencies = ARRAY['INR']::TEXT[];
+
+-- Normalise away anything the app cannot actually render (also repairs a row written
+-- with an unknown code), and never leave a row with an empty list.
+UPDATE settings SET menu_languages = ARRAY(
+  SELECT x FROM unnest(menu_languages) AS x WHERE x IN ('en','de','fr','ar','hi','ko'));
+UPDATE settings SET menu_currencies = ARRAY(
+  SELECT x FROM unnest(menu_currencies) AS x WHERE x IN ('INR','USD','EUR','AED','SAR','QAR'));
+UPDATE settings SET menu_languages  = ARRAY['en']::TEXT[]  WHERE cardinality(menu_languages)  = 0;
+UPDATE settings SET menu_currencies = ARRAY['INR']::TEXT[] WHERE cardinality(menu_currencies) = 0;
 
 -- ── 4 · pay later (khata) gets its own module columns ───────────────────────
 -- khata used to ride on table_tags_allowed, so switching "table types" off also

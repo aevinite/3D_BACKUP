@@ -62,7 +62,8 @@ const DIETS = [
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
-export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme, logoUrl, qrTable }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown>; logoUrl?: string; qrTable?: string }) {
+export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme, logoUrl, qrTable, defaultLayout }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown>; logoUrl?: string; qrTable?: string; /* Access → Menu → Format → Default layout: what a first-time guest sees. Resolved on
+      the server so there is no flash of the wrong layout. */ defaultLayout?: "gallery" | "list" }) {
   // Restaurant #1 keeps its exact current chrome (localized hero, hardcoded
   // wordmark, theme accent); other restaurants get their own brand.
   const isDefault = restaurantId === DEFAULT_RESTAURANT_ID;
@@ -88,7 +89,10 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   const [currentDiet, setCurrentDiet] = useState(""); // "" | "veg" | "non-veg"
   const [chefOnly, setChefOnly] = useState(false); // Chef's Special filter (dishes tagged "chef-special")
   const [favOnly, setFavOnly] = useState(false);   // Favorites filter (the guest's hearted dishes)
-  const [layout, setLayout] = useState("gallery"); // gallery is the default first-visit view
+  // The FIRST-visit view is a per-restaurant setting (Access → Menu → Format → Default
+  // layout). The guest can still switch, and their choice is restored below — this is only
+  // what they see before they choose anything.
+  const [layout, setLayout] = useState(defaultLayout || "gallery");
   const [searchQuery, setSearchQuery] = useState(""); // what's typed in the search box
   const [favorites, setFavorites] = useState<string[]>([]); // dish ids the guest hearted
   const [closedCats, setClosedCats] = useState<string[]>([]); // "All" view: which dropdowns the guest manually FOLDED (default: none — everything starts open)

@@ -78,13 +78,16 @@ export type Section = { id: string; name: string; blurb: string; icon: string; c
 // The six guest menu languages the app already ships (lib/i18n.ts) and the
 // currencies it can price in. A restaurant with ONE language + ONE currency shows
 // no switcher at all on the guest menu — the switcher is removed, not disabled.
+// These MUST mirror LANGUAGES / CURRENCIES in lib/format.ts exactly. Offering a code the
+// app can't render would be a switch that saves and then shows English anyway — the class
+// of dead control this rebuild exists to remove. Guarded by scripts/verify-access-model.mjs.
 export const MENU_LANGUAGES: Choice[] = [
-  { value: "en", label: "English" }, { value: "fr", label: "French" }, { value: "hi", label: "Hindi" },
-  { value: "gu", label: "Gujarati" }, { value: "es", label: "Spanish" }, { value: "de", label: "German" },
+  { value: "en", label: "🇬🇧 English" }, { value: "de", label: "🇩🇪 Deutsch" }, { value: "fr", label: "🇫🇷 Français" },
+  { value: "ar", label: "🇸🇦 العربية" }, { value: "hi", label: "🇮🇳 हिन्दी" }, { value: "ko", label: "🇰🇷 한국어" },
 ];
 export const MENU_CURRENCIES: Choice[] = [
-  { value: "INR", label: "₹ Indian rupee" }, { value: "USD", label: "$ US dollar" },
-  { value: "EUR", label: "€ Euro" }, { value: "GBP", label: "£ Pound" },
+  { value: "INR", label: "₹ INR" }, { value: "USD", label: "$ USD" }, { value: "EUR", label: "€ EUR" },
+  { value: "AED", label: "AED" }, { value: "SAR", label: "SAR" }, { value: "QAR", label: "QAR" },
 ];
 
 // The nine things a person may be allowed to do inside "Edit the menu". These are the
@@ -477,6 +480,24 @@ export function nodePatch(n: Node, v: any): TreePatch {
 export function extraPatch(n: Node, v: any): TreePatch {
   if (n.id !== "ratings") return {};
   return { features: { ratings: v !== "google" } };
+}
+
+// ── the MANAGER'S MENU rung (new in this rebuild) ───────────────────────────
+// Which tabs exist in a restaurant's manager panel, read from
+// restaurants.access_config.menus.manager. ABSENT MEANS ON, so no restaurant changes
+// until the admin switches a tab off. Used by the editor API's whoami (to tell the panel
+// what to hide) AND by its route guards (so a hidden tab's endpoints refuse too) — one
+// helper, so the screen and the server can never disagree.
+export const MANAGER_TAB_KEYS = ["editor", "ratings", "log"] as const;
+export type ManagerTabKey = (typeof MANAGER_TAB_KEYS)[number];
+
+export function managerTabsOff(accessConfig: unknown): ManagerTabKey[] {
+  const menus = (accessConfig as any)?.menus?.manager;
+  if (!menus || typeof menus !== "object") return [];
+  return MANAGER_TAB_KEYS.filter((k) => menus[k] === false);
+}
+export function managerTabOn(accessConfig: unknown, key: ManagerTabKey): boolean {
+  return !managerTabsOff(accessConfig).includes(key);
 }
 
 /** Deep-merge a TreePatch into a TreeState (2 levels is all the shapes need). */

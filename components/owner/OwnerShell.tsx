@@ -36,9 +36,11 @@ const GROUPS: NavGroup[] = [
       { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", ent: "staff" },
       { href: "/owner/customers", label: "Customers", icon: "fa-user-group", ent: "customers" },
       // Activity = the owner's read-only log of everything their staff did (staff_actions,
-      // scoped server-side). No `ent` gate — it's a core transparency view every owner gets;
-      // each row opens the shared organized detail popup (owner 2026-07-25).
-      { href: "/owner/activity", label: "Activity", icon: "fa-clock-rotate-left" },
+      // scoped server-side); each row opens the shared organized detail popup.
+      // Gated by the "logs" entitlement since the access rebuild (2026-07-31): the owner's
+      // Log page is now a listed switch under Access → Owner's menu, so it must actually
+      // disappear when switched off. Absent entitlement = ON, so nothing changes by itself.
+      { href: "/owner/activity", label: "Activity", icon: "fa-clock-rotate-left", ent: "logs" },
       // Pay Later (khata, mig 166/184): gated on the pay-later MODULE being effective for the
       // restaurant (ent key injected by the layout), NOT a separate admin section toggle — so
       // it appears only for restaurants that actually have pay-later on (no dead section).

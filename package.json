@@ -18,6 +18,7 @@
     "verify:owner-home": "npx esbuild scripts/verify-owner-home.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/verify-owner-home.mjs --log-level=warning && node --env-file=.env.local node_modules/.cache/verify-owner-home.mjs",
     "verify:test-safety": "node scripts/verify-test-safety.mjs",
     "verify:ui": "node scripts/verify-ui-integrity.mjs",
+    "verify:access": "node scripts/verify-access-model.mjs",
     "verify:live": "node scripts/verify-no-fatal-ui.mjs",
     "verify:clash": "node scripts/verify-clash-coverage.mjs",
     "verify:offline": "node scripts/verify-offline.mjs"
