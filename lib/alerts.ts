@@ -96,11 +96,21 @@ function headerSafe(s: string): string {
 // Loud unless the caller explicitly asks for quiet with `silent: true` (see AlertOpts above).
 const isQuiet = (o?: AlertOpts) => o?.silent === true;
 
+// An alert must NEVER hold up the request that triggered it. Both pushes are outbound HTTP
+// to someone else's server, and they used to be awaited with no upper bound — so on a
+// restaurant's flaky wifi (or if ntfy is slow) a staff action could sit there waiting for a
+// notification nobody is looking at. Caught 2026-07-31: an invoice POST took 30s while the
+// shared test database was saturated and errors were being alerted.
+// 4s is generous for a notification and short enough that a waiter never notices.
+const ALERT_TIMEOUT_MS = 4000;
+const alertFetch = (url: string, init: RequestInit) =>
+  fetch(url, { ...init, signal: AbortSignal.timeout(ALERT_TIMEOUT_MS) });
+
 async function pushNtfy(text: string, o?: AlertOpts): Promise<void> {
   const topic = process.env.NTFY_TOPIC;
   if (!topic) return;
   const server = process.env.NTFY_SERVER || "https://ntfy.sh";
-  await fetch(`${server}/${topic}`, {
+  await alertFetch(`${server}/${topic}`, {
     method: "POST",
     headers: {
       Title: headerSafe(o?.title || "Restaurant alert"),
@@ -116,7 +126,7 @@ async function pushTelegram(text: string, o?: AlertOpts): Promise<void> {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chat = process.env.TELEGRAM_CHAT_ID;
   if (!token || !chat) return;
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  await alertFetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
