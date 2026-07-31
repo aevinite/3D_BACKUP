@@ -704,7 +704,7 @@ work. It is all kept above as history — nothing has been removed — but the L
   the only guard, the endpoint must refuse too.
 - Canonical spec: **`docs/ACCESS-MODEL.md`**. `docs/ACCESS-LADDER.md` is HISTORY only.
 - Guards: **`npm run verify:access`** (a switch that reaches no real code fails) and
-  **`npm run verify:everything`** — **500 numbered phases** against a chosen site, one by one:
+  **`npm run verify:everything`** — **501 numbered phases** against a chosen site, one by one:
   every route, all four panels as their real role, every switch off→gone→on→back, a real
   order followed end to end, the guest journey feature by feature, bills + the compliance
   rules, Inventory/Payroll, the resilience rules, the owner's A35 phone AND a tablet, and
@@ -718,6 +718,14 @@ work. It is all kept above as history — nothing has been removed — but the L
   prove all 68 of its switches still read exactly the model's `def`. Put any restaurant back
   to those defaults with **`npm run access:defaults -- --slug <slug> --apply`** (dry run
   without `--apply`); it refuses to point at anything but the backup database.
+- **Access & permissions has a search bar at the top** (`components/admin/AccessSearch.tsx`) —
+  type a few letters and jump to any of the ~90 settings, phone-Settings style, with the path
+  shown and the same amber ring the `?focus=` deep links use. The index is built ONCE at module
+  load from `SECTIONS` (a constant), so a keystroke costs ~1.3ms and no network call; there is a
+  small synonym map for words people type that aren't labels (khata, zomato, swiggy, 3d, sold
+  out, salary…) — ADD TO IT when you add a node. A row whose parent is off has no row to jump
+  to, so its result is labelled "needs <parent>" and lands on that parent instead. Guarded by
+  **`npm run verify:access-search`** (22 checks, desktop + A35 phone) = phase 501.
 
 ## 🧾 THE FLOOR IS READ ONCE AND SHARED — a write MUST drop that snapshot (2026-07-31)
 
