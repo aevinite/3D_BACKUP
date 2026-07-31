@@ -26,7 +26,8 @@
     "verify:everything": "npx esbuild lib/accessTree.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/accessTree.mjs --log-level=warning && node scripts/verify-everything.mjs",
     "verify:live": "node scripts/verify-no-fatal-ui.mjs",
     "verify:clash": "node scripts/verify-clash-coverage.mjs",
-    "verify:offline": "node scripts/verify-offline.mjs"
+    "verify:offline": "node scripts/verify-offline.mjs",
+    "verify:customers": "node scripts/verify-customers.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
