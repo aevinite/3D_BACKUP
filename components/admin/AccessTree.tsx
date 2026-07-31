@@ -241,6 +241,8 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
   // Groups with a lot inside collapse; a row with 1-2 children just shows them.
   const collapsible = showKids && kids.length > 2;
   const expanded = collapsible ? openNode[node.id] !== false : true;
+  // Pick-one settings that carry a description per choice read far better stacked.
+  const stacked = (node.bind.t === "choice" || (node.bind.t === "opt" && !!node.choices)) && (node.choices || []).length > 0;
 
   return (
     <div className={`at-box d${Math.min(depth, 3)} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
@@ -261,8 +263,15 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
             <a className="at-link" href={node.link.href}><Icon n="link" s={13} /> {node.link.label}</a>
           ) : null}
         </div>
-        <Control node={node} value={v} set={set} />
+        {stacked ? null : <Control node={node} value={v} set={set} />}
       </div>
+
+      {/* A pick-one setting gets its choices as full-width ROWS, not a segmented control squeezed
+          into the corner (owner, 2026-07-31, pointing at the Google-review picker: "see this one
+          rating, how aesthetic it looks"). Three long labels — "Both — Google after the menu one" —
+          never fit on the right, and the description of each choice had nowhere to go but a
+          tooltip. Now each option is a row: radio, its name, and what it actually does. */}
+      {stacked ? <ChoiceRows node={node} value={v} set={set} /> : null}
 
       {showKids && expanded ? (
         <div className="at-box-k">
@@ -273,11 +282,19 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
   );
 }
 
-/** Is this child small enough to be one of the compact boxes in a grid? Only a plain on/off
- *  leaf is: anything with its own children, a segmented choice, a list or a text field needs
- *  the full width to stay readable. */
-const chipable = (n: Node) =>
-  !(n.children || []).length && !n.leftToBuild
+/** Should this row be one of the compact boxes in a grid, or a full-width block?
+ *
+ *  DEPTH decides, not whether it happens to have children (owner, 2026-07-31: "dining sessions
+ *  is a whole big feature — why is there a box which is just an on/off? It should be like the
+ *  whole thing, even though it doesn't have sub options"). Dining sessions sits at the same
+ *  level as Ratings and Allergy & notes; those two got a full-width block only because they
+ *  own sub-options, which made a major feature look like a minor tick-box next to them.
+ *
+ *  So: a feature directly under a master feature (depth 0-1) is ALWAYS a full-width block. Only
+ *  the deep leaf options — "Add a new dish", "Guest can write their own note" — become the
+ *  compact grid boxes, which is exactly where they read well. */
+const chipable = (n: Node, depth: number) =>
+  depth >= 2 && !(n.children || []).length && !n.leftToBuild
   && (isBoolBind(n) || (n.bind.t === "opt" && !n.choices));
 
 /** Lay a row's children out the way the owner asked for: the simple on/off ones as a GRID OF
@@ -296,13 +313,13 @@ function Kids({ nodes, st, depth, openNode, setOpenNode, set, onInfo, flashId }:
     if (!run.length) return;
     out.push(
       <div className="at-grid" key={`grid-${out.length}`}>
-        {run.map((n) => <Chip key={n.id} node={n} st={st} set={set} onInfo={onInfo} flashId={flashId} />)}
+        {run.map((n) => <Chip key={n.id} node={n} st={st} depth={depth} set={set} onInfo={onInfo} flashId={flashId} />)}
       </div>,
     );
     run = [];
   };
   for (const n of nodes) {
-    if (chipable(n)) { run.push(n); continue; }
+    if (chipable(n, depth)) { run.push(n); continue; }
     flush();
     out.push(<Row key={n.id} node={n} st={st} depth={depth} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />);
   }
@@ -313,18 +330,40 @@ function Kids({ nodes, st, depth, openNode, setOpenNode, set, onInfo, flashId }:
 /** One compact setting box. The WHOLE box is the switch — a much bigger target than a 34px
  *  toggle, which matters on the phone the owner tests on. The (i) sits outside that target so
  *  reading about a setting can never flip it by accident. */
-function Chip({ node, st, set, onInfo, flashId }: {
-  node: Node; st: TreeState; set: (n: Node, v: any) => void; onInfo: (n: Node) => void; flashId?: string;
+function Chip({ node, st, depth, set, onInfo, flashId }: {
+  node: Node; st: TreeState; depth: number; set: (n: Node, v: any) => void; onInfo: (n: Node) => void; flashId?: string;
 }) {
   const on = nodeValue(node, st) === true;
   return (
-    <div className={`at-chip ${on ? "on" : ""} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
+    <div className={`at-chip d${Math.min(depth, 3)} ${on ? "on" : ""} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
       <button className="at-chip-hit" role="switch" aria-checked={on} aria-label={node.name}
         onClick={() => set(node, !on)}>
         <span className="at-cbox">{on ? <Icon n="check" s={12} /> : null}</span>
         <span className="at-cnm">{node.name}</span>
       </button>
       <button className="at-i" onClick={() => onInfo(node)} aria-label={`What is ${node.name}?`}><Icon n="info" s={13} /></button>
+    </div>
+  );
+}
+
+/** A pick-one setting as full-width rows: radio, name, and what that choice does. The chosen
+ *  row is outlined and tinted in the level's colour so the answer is readable at a glance. */
+function ChoiceRows({ node, value, set }: { node: Node; value: any; set: (n: Node, v: any) => void }) {
+  return (
+    <div className="at-opts" role="radiogroup" aria-label={node.name}>
+      {(node.choices || []).map((c) => {
+        const on = value === c.value;
+        return (
+          <button key={c.value} role="radio" aria-checked={on} className={`at-opt ${on ? "on" : ""}`}
+            onClick={() => set(node, c.value)}>
+            <span className="at-radio" aria-hidden="true" />
+            <span className="at-opt-t">
+              <span className="at-opt-n">{c.label}</span>
+              {c.what ? <span className="at-opt-d">{c.what}</span> : null}
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -480,29 +519,56 @@ function TreeStyle() {
   /* ── BOXES (owner, 2026-07-31: "make sure all have box like that, well structured") ────────
      Every setting is a box, and a setting's sub-settings are boxes INSIDE its box, so the
      nesting is visible as containment instead of an indent guide you have to trace. */
-  .at-box { border:var(--border); border-radius:13px; background:color-mix(in srgb, var(--card) 74%, var(--bg)); padding:12px 13px; }
-  .at-box + .at-box { margin-top:8px; }
+  /* ── LEVEL COLOURS (owner, 2026-07-31: "blue, green, blue, green … according to theme") ────
+     Nesting is shown by COLOUR as well as containment, so at a glance you can tell a feature
+     from its sub-option from ITS sub-option. One variable per level and everything inherits it:
+       depth 0  master feature (Menu, Takeaway, Payroll…)      BLUE
+       depth 1  a feature inside it (Dining sessions, Ratings) GREEN
+       depth 2  its options (Add a dish, Guest's own note)     BLUE
+       depth 3  deeper still                                   GREEN                          */
+  .at-box.d0, .at-chip.d0 { --lvl: var(--accent); }
+  .at-box.d1, .at-chip.d1 { --lvl: #34d399; }
+  .at-box.d2, .at-chip.d2 { --lvl: var(--accent); }
+  .at-box.d3, .at-chip.d3 { --lvl: #34d399; }
+
+  .at-box { border:1.5px solid color-mix(in srgb, var(--lvl) 30%, transparent); border-radius:14px;
+    background:color-mix(in srgb, var(--lvl) 5%, color-mix(in srgb, var(--card) 78%, var(--bg))); padding:13px 14px; }
+  .at-box + .at-box, .at-box + .at-grid, .at-grid + .at-box { margin-top:9px; }
   .at-box-h { display:flex; align-items:flex-start; gap:14px; }
   .at-box-t { flex:1; min-width:0; }
-  .at-box-t .nm { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:14px; font-weight:750; }
-  .at-box-t .ds { margin-top:3px; font-size:12.5px; line-height:1.55; color:var(--muted); }
-  .at-box-k { margin-top:11px; padding-top:11px; border-top:var(--border); }
-  .at-box.d1 { background:color-mix(in srgb, var(--card) 88%, var(--bg)); }
-  .at-box.d2, .at-box.d3 { background:transparent; }
+  .at-box-t .nm { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:14.5px; font-weight:750; }
+  .at-box-t .ds { margin-top:4px; font-size:12.5px; line-height:1.55; color:var(--muted); max-width:74ch; }
+  /* The divider that separates a feature from the things inside it, tinted to its own level. */
+  .at-box-k { margin-top:12px; padding-top:12px; border-top:1px solid color-mix(in srgb, var(--lvl) 22%, transparent); }
 
-  /* The grid of compact on/off boxes — 1 per row on a phone, filling out on wider screens. */
+  /* Pick-one rows (the Google-review picker's shape, which the owner called aesthetic). */
+  .at-opts { display:flex; flex-direction:column; gap:7px; margin-top:11px; }
+  .at-opt { display:flex; align-items:flex-start; gap:11px; width:100%; text-align:left; cursor:pointer;
+    padding:11px 13px; border-radius:12px; border:1.5px solid color-mix(in srgb, var(--lvl) 20%, transparent);
+    background:color-mix(in srgb, var(--card) 55%, var(--bg)); color:inherit; font:inherit;
+    transition:border-color .15s, background .15s; }
+  .at-opt.on { border-color:color-mix(in srgb, var(--lvl) 66%, transparent); background:color-mix(in srgb, var(--lvl) 12%, transparent); }
+  .at-opt:focus-visible { outline:2px solid var(--lvl); outline-offset:2px; }
+  .at-radio { flex:none; width:16px; height:16px; margin-top:2px; border-radius:50%;
+    border:1.7px solid var(--muted); display:grid; place-items:center; transition:border-color .15s; }
+  .at-opt.on .at-radio { border-color:var(--lvl); box-shadow:inset 0 0 0 4px var(--lvl); }
+  .at-opt-t { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .at-opt-n { font-size:13.5px; font-weight:700; }
+  .at-opt-d { font-size:12px; line-height:1.5; color:var(--muted); }
+
+  /* The grid of compact option boxes — 1 per row on a phone, filling out on wider screens. */
   .at-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(212px, 1fr)); gap:8px; }
-  .at-grid + .at-box, .at-box + .at-grid { margin-top:8px; }
-  .at-chip { display:flex; align-items:center; gap:2px; border:1.5px solid var(--adm-line, rgba(255,255,255,.14));
-    border-radius:11px; background:color-mix(in srgb, var(--card) 60%, var(--bg)); padding-right:4px; transition:border-color .15s, background .15s; }
-  .at-chip.on { border-color:color-mix(in srgb, var(--accent) 60%, transparent); background:color-mix(in srgb, var(--accent) 13%, transparent); }
+  .at-chip { display:flex; align-items:center; gap:2px; border:1.5px solid color-mix(in srgb, var(--lvl) 26%, transparent);
+    border-radius:12px; background:color-mix(in srgb, var(--card) 60%, var(--bg)); padding-right:4px; transition:border-color .15s, background .15s; }
+  .at-chip.on { border-color:color-mix(in srgb, var(--lvl) 62%, transparent); background:color-mix(in srgb, var(--lvl) 14%, transparent); }
+  .at-chip.on .at-cbox { background:var(--lvl); border-color:var(--lvl); }
   /* The whole box is the switch: a far bigger target than a 34px toggle, which is what makes
      this reliable with a thumb on the 360px phone the owner actually uses. */
   .at-chip-hit { flex:1; min-width:0; display:flex; align-items:center; gap:9px; background:none; border:0;
     color:inherit; font:inherit; cursor:pointer; padding:11px 4px 11px 11px; text-align:left; border-radius:10px; }
   .at-cbox { flex:none; width:17px; height:17px; border-radius:5px; border:1.7px solid var(--muted);
     display:grid; place-items:center; color:transparent; transition:background .15s, border-color .15s; }
-  .at-chip.on .at-cbox { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .at-chip.on .at-cbox { color:#fff; }
   .at-cnm { font-size:13px; font-weight:650; line-height:1.35; }
   /* Keyboard users must be able to SEE which box they are on before they press space — without
      this the whole grid is invisible to a tab-through, which is a silent tap in a different form. */
