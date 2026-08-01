@@ -35,7 +35,7 @@ import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
-import { managerTabsOff, managerTabOn, type ManagerTabKey } from "@/lib/accessTree";
+import { managerTabsOff, managerTabOn, managerGrantValue, isConfigurableGrant, type ManagerTabKey } from "@/lib/accessTree";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 
@@ -80,7 +80,10 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   }
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false; // admin cap — nothing below re-grants
+  // The admin cap from the OLD ladder. It is still honoured for a power the Access screen still
+  // offers — but a RETIRED power's cap is unreachable now (no screen writes power_*), so an old
+  // stored `false` would lock a manager out forever with nothing able to undo it.
+  if (isConfigurableGrant(flag) && r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
   // Per-person override (access panel → Per person, mig 115 staff_users.permissions):
   // an individual's setting WINS over the restaurant-wide owner→manager grant, but never
   // over the admin cap above. 'on'/'pin' = allow this person, 'off' = deny them, absent/
@@ -88,7 +91,11 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   const ov = u.permissions?.[flag];
   if (ov === "on" || ov === "pin") return true;
   if (ov === "off") return false;
-  return !!r?.manager_permissions?.[flag];
+  // An ABSENT key used to mean NO here while the Access screen showed the row's default — usually
+  // YES. That one line is why a manager was refused things the admin could see switched on, and
+  // why every power dropped from the screen was stuck off. managerGrantValue() is the single
+  // answer both sides read now (lib/accessTree.ts).
+  return managerGrantValue(flag, r?.manager_permissions?.[flag]);
 }
 const permDenied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 
@@ -171,9 +178,17 @@ async function menuSubAllowed(g: { user: StaffUser | null }, rid: string, action
 async function canDeleteBill(g: { user: StaffUser | null }, rid: string): Promise<boolean> {
   const u = g.user;
   if (!u || u.role !== "manager") return true; // admin / owner: full power
-  const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
-    { void_bills?: { manager_opts?: Record<string, boolean> } } | null;
-  return cfg?.void_bills?.manager_opts?.delete_bill === true; // absent → OFF (deliberate default)
+  // The Access screen's "Delete a bill" row writes manager_permissions.delete_bill. This used to
+  // read ONLY the buried access_config.void_bills.manager_opts.delete_bill, so the row on screen
+  // changed nothing and the switch that mattered was reachable from nowhere (found 2026-08-01).
+  // The row wins when it has been set; otherwise the legacy value still decides, so a restaurant
+  // configured under the old screen keeps exactly what it had. Absent everywhere → OFF, which is
+  // deliberate: deleting a bill is the most destructive money action there is.
+  const r = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
+    { manager_permissions?: Record<string, boolean>; access_config?: { void_bills?: { manager_opts?: Record<string, boolean> } } } | null;
+  const row = r?.manager_permissions?.delete_bill;
+  if (typeof row === "boolean") return row;
+  return r?.access_config?.void_bills?.manager_opts?.delete_bill === true;
 }
 
 // Gate for the KOT ▾ menu (Table & KOT operations — canonical module ladder, mig 177).
@@ -470,8 +485,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
         // button only when the owner ticked it (admin/owner always true; the simulate mode
         // resolves it like a real manager: only when the owner explicitly ticked it).
+        // The SIMULATE path has to answer the same way canDeleteBill() does, or the admin's
+        // "view as a manager" mode shows a button a real manager doesn't get. It read only the
+        // legacy access_config path; the Access screen's row wins there too now.
         canDeleteBill: simulate
-          ? ((r?.access_config as { void_bills?: { manager_opts?: Record<string, boolean> } } | null)?.void_bills?.manager_opts?.delete_bill === true)
+          ? (typeof r?.manager_permissions?.delete_bill === "boolean"
+              ? r.manager_permissions.delete_bill
+              : (r?.access_config as { void_bills?: { manager_opts?: Record<string, boolean> } } | null)?.void_bills?.manager_opts?.delete_bill === true)
           : await canDeleteBill(g, rid),
         // One entry per module-backed capability (same keys as before: table_tags, khata,
         // banquet, table_ops, take_orders, parcel) — derived, so new modules appear here.
@@ -2084,6 +2104,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // bill). Server-authoritative. A RE-issue (after a void) carries a reason and is REFUSED
     // once the bill is settled (mig 189 enforces both — the invoice locks at settlement).
     if (a === "sessions" && c === "invoice") {
+      // "Generate bills" is a row on the Access screen and now genuinely bites. It never did:
+      // the switch wrote manager_permissions.print_invoice and NOTHING read it, so a manager it
+      // was switched off for could still issue a numbered tax invoice (found 2026-08-01).
+      // Default is ON, so no restaurant changes until an admin deliberately turns it off.
+      if (!(await managerCan(g, rid, "print_invoice"))) return permDenied("generate bills");
       // lfh_generate_invoice has no tenant param — confirm the session is THIS restaurant's
       // first (service-role bypasses RLS; a foreign session id must not get an invoice).
       const ownsGen = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
@@ -2201,6 +2226,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // server recomputes the due itself, never trusting the client's number.
     if (a === "tables" && c === "pay-split") {
       const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
+      // Splitting a bill SETTLES money, so it needs the same permission as a plain "Mark paid" —
+      // otherwise switching mark_paid off would leave the split route as a way round it.
+      if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("mark a bill paid");
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
       const splits = Array.isArray(body?.splits) ? body.splits : [];
@@ -3049,6 +3077,10 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       }
       if (body.payment_status !== undefined) {
         if (!["pending", "paid"].includes(body.payment_status)) return err("invalid payment_status");
+        // "Mark a bill paid (and undo)" — the other Access row that wrote a key no code read.
+        // Deliberately ONE permission covering BOTH directions, so undoing a payment is never
+        // easier than taking it. Default ON; only an admin switching it off changes anything.
+        if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("mark a bill paid");
         patch.payment_status = body.payment_status;
         // How the money came in — asked by the "Mark paid" flow (owner, 2026-07-01). Optional:
         // the per-order correction toggle doesn't pass it, and that's fine — it buckets under

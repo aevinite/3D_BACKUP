@@ -167,7 +167,7 @@ function defaultLine(node: Node): string {
 }
 
 const isBoolBind = (n: Node) =>
-  ["feature", "setting", "module", "panel", "channel", "grant", "section", "tab", "ratingsMaster"].includes(n.bind.t);
+  ["feature", "setting", "module", "panel", "channel", "grant", "section", "tab", "menu", "ratingsMaster"].includes(n.bind.t);
 
 /** Does this row read as "on"? Used for the parent gate and the section counter. A row with
  *  no switch of its own (a pure group, e.g. Format / Bill) is always "on" so its children show. */
@@ -647,24 +647,74 @@ function Control({ node, value, set }: { node: Node; value: any; set: (n: Node, 
  *  immediate nudge instead of a server error they'd have to read. */
 function ListControl({ node, value, set }: { node: Node; value: string[]; set: (n: Node, v: any) => void }) {
   const [nudge, setNudge] = useState("");
+  // SINGLE or MULTIPLE (owner, 2026-08-01). Not a second stored setting: the count already IS the
+  // answer, because ONE language is exactly what makes the guest menu drop its switcher. Single
+  // shows a plain picker — no ticking, no way to end up with none; Multiple shows the list and
+  // holds you to at least two, because "multiple" with one in it is just single wearing a
+  // different label.
+  const many = value.length > 1;
+  const single = !many;
+  const setMode = (mode: "single" | "many") => {
+    if (mode === "single") { if (value.length > 1) set(node, [value[0]]); return; }
+    // Turning MULTIPLE on can't guess the second one, so add the first choice that isn't already
+    // picked — visible immediately, and easy to swap.
+    const next = (node.choices || []).map((c) => c.value).find((v) => !value.includes(v));
+    if (next) set(node, [...value, next]);
+  };
   const toggle = (val: string) => {
     const has = value.includes(val);
     const next = has ? value.filter((x) => x !== val) : [...value, val];
-    if (!next.length) { setNudge(val); setTimeout(() => setNudge(""), 600); return; }
+    // In MULTIPLE, dropping to one would silently switch the mode back and take the switcher off
+    // the guest menu — refuse it visibly instead (never a silent no-op).
+    if (next.length < 2) { setNudge(val); setTimeout(() => setNudge(""), 600); return; }
     set(node, next);
   };
+
+  if (!node.singleOrMany) {
+    return (
+      <div className="at-chips">
+        {(node.choices || []).map((c) => {
+          const on = value.includes(c.value);
+          return (
+            <button key={c.value} className={`${on ? "on" : ""} ${nudge === c.value ? "nudge" : ""}`}
+              aria-pressed={on} onClick={() => toggle(c.value)}>
+              <span className="box">{on ? <Icon n="check" s={11} /> : null}</span>{c.label}
+            </button>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
-    <div className="at-chips">
-      {(node.choices || []).map((c) => {
-        const on = value.includes(c.value);
-        return (
-          <button key={c.value} className={`${on ? "on" : ""} ${nudge === c.value ? "nudge" : ""}`}
-            aria-pressed={on} onClick={() => toggle(c.value)}>
-            <span className="box">{on ? <Icon n="check" s={11} /> : null}</span>{c.label}
-          </button>
-        );
-      })}
-      <span className="at-chips-note">{value.length === 1 ? "One only — the switcher is hidden on the menu" : `${value.length} — a switcher shows on the menu`}</span>
+    <div className="at-som">
+      <div className="at-segs" role="radiogroup" aria-label={`${node.name}: one or several`}>
+        <button role="radio" aria-checked={single} className={single ? "on" : ""} onClick={() => setMode("single")}>Single</button>
+        <button role="radio" aria-checked={many} className={many ? "on" : ""} onClick={() => setMode("many")}>Multiple</button>
+      </div>
+      {single ? (
+        <select className="at-select" value={value[0] || ""} aria-label={node.name}
+          onChange={(e) => set(node, [e.target.value])}>
+          {(node.choices || []).map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+        </select>
+      ) : (
+        <div className="at-chips">
+          {(node.choices || []).map((c) => {
+            const on = value.includes(c.value);
+            return (
+              <button key={c.value} className={`${on ? "on" : ""} ${nudge === c.value ? "nudge" : ""}`}
+                aria-pressed={on} onClick={() => toggle(c.value)}>
+                <span className="box">{on ? <Icon n="check" s={11} /> : null}</span>{c.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
+      <span className="at-chips-note">
+        {single
+          ? "One only — guests get no switcher on the menu."
+          : `${value.length} picked — guests can switch between them on the menu.`}
+      </span>
     </div>
   );
 }
@@ -934,6 +984,12 @@ function TreeStyle() {
   .at-chips button.nudge { animation:atNudge .5s ease; border-color:var(--adm-danger); }
   @keyframes atNudge { 0%,100% { transform:translateX(0); } 20% { transform:translateX(-4px); } 60% { transform:translateX(4px); } }
   .at-chips-note { width:100%; text-align:right; font-size:11px; color:var(--muted); }
+  /* Single-or-multiple: the mode, then either a plain picker or the list, then the plain-words
+     consequence — so what a guest ends up seeing is stated, not inferred from a count. */
+  .at-som { display:flex; flex-direction:column; align-items:flex-end; gap:8px; max-width:380px; flex:none; }
+  .at-som .at-segs { align-self:flex-end; }
+  .at-som .at-chips { justify-content:flex-end; }
+  .at-select { height:34px; min-width:190px; border-radius:9px; border:var(--border); background:var(--card); color:var(--text); font-size:13px; font-weight:650; padding:0 10px; }
   .at-text { height:34px; min-width:210px; border-radius:9px; border:var(--border); background:var(--card); color:var(--text); font-size:13px; font-weight:600; padding:0 10px; flex:none; }
   .at-sheet { position:fixed; inset:0; z-index:120; background:rgba(0,0,0,.5); display:grid; place-items:center; padding:20px; }
   .at-sheet-b { background:var(--card); border:var(--border); border-radius:16px; padding:22px; max-width:520px; width:100%; max-height:80dvh; overflow-y:auto; }
@@ -980,6 +1036,10 @@ function TreeStyle() {
     .at-box-h { flex-direction:column; gap:10px; }
     .at-segs.wide, .at-chips { max-width:100%; justify-content:flex-start; }
     .at-chips-note { text-align:left; }
+    .at-som { max-width:100%; width:100%; align-items:flex-start; }
+    .at-som .at-segs { align-self:flex-start; }
+    .at-som .at-chips { justify-content:flex-start; }
+    .at-select { width:100%; min-width:0; }
     .at-text { min-width:0; width:100%; }
     /* One box per row on a phone — two 160px boxes side by side truncate every label. */
     .at-grid { grid-template-columns:1fr; }

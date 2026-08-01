@@ -41,6 +41,12 @@ export type Bind =
   | { t: "grant"; flag: string }         // restaurants.manager_permissions[flag]  → MANAGER default
   | { t: "section"; key: string }        // restaurants.owner_entitlements[key]    → OWNER pages
   | { t: "tab"; panel: string; key: string } // access_config.menus[panel][key]    (NEW gate)
+  // ONE MENU = ONE SWITCH. A manager menu was two separate controls — the panel's tab list
+  // (access_config.menus) and the manager power that its endpoints check (manager_permissions) —
+  // sitting in two different sections of this screen. Two switches for one thing is how a screen
+  // starts disagreeing with itself, so they move together: off means the tab is gone AND the
+  // endpoints behind it refuse. On means both. (owner, 2026-08-01)
+  | { t: "menu"; panel: string; key: string; grant: string }
   // ── other shapes ─────────────────────────────────────────────────────────
   | { t: "tablet"; key: string }         // settings.tablet_<x>   "off" | "on" | "pin"  → WAITER default
   | { t: "capTablet"; id: string }       // access_config[id].tablet  (waiter cap with no column yet)
@@ -81,6 +87,12 @@ export type Node = {
   placeholder?: string;         // for text nodes
   unit?: string;                // for cap nodes
   options?: number[];           // for cap nodes
+  // A "list" node that is really a SINGLE-or-MANY question. The count already IS the answer —
+  // one language means the guest menu shows no switcher, two or more means it does — so the mode
+  // is read off the stored list rather than kept in a second column that could disagree with it
+  // (owner, 2026-08-01: "there should be two options, single and multiple; in single there
+  // shouldn't be the option on top, in multiple you can toggle through them").
+  singleOrMany?: boolean;
   link?: { href: string; label: string }; // read-only row that points at the screen which OWNS this value
   // ── the two flags the 2026-08-01 rework added ────────────────────────────────
   // Its dropdown OPENS while the feature is off. Rule 1 (no greyed-out ghosts) is about
@@ -251,43 +263,16 @@ export const SECTIONS: Section[] = [
               // place the palette, logo and wording are owned.
               { id: "menu_theme", name: "Colours, logo & wording", bind: { t: "none" }, panel: "branding",
                 what: "The restaurant's own look: background, cards, text and accent for both light and dark, the logo image, the header wording and the greeting under it." },
-              { id: "menu_languages", name: "Languages", def: ["en"], bind: { t: "list", key: "menu_languages" }, choices: MENU_LANGUAGES,
-                what: "Which languages the menu is offered in. Pick ONE and the language switcher is removed from the menu completely — pick two or more and it appears." },
-              { id: "menu_currencies", name: "Currencies", def: ["INR"], bind: { t: "list", key: "menu_currencies" }, choices: MENU_CURRENCIES,
-                what: "Which currencies prices can be shown in. Pick ONE and the currency switcher is removed from the menu completely." },
+              { id: "menu_languages", name: "Languages", def: ["en"], bind: { t: "list", key: "menu_languages" }, singleOrMany: true, choices: MENU_LANGUAGES,
+                what: "Which languages the menu is offered in. Single means the menu is only ever in that one language and guests get no language button at all; Multiple puts the switcher on the menu so a guest can change it." },
+              { id: "menu_currencies", name: "Currencies", def: ["INR"], bind: { t: "list", key: "menu_currencies" }, singleOrMany: true, choices: MENU_CURRENCIES,
+                what: "Which currencies prices can be shown in. Single means prices are only ever in that one and guests get no currency button; Multiple puts the switcher on the menu." },
             ],
           },
         ],
       },
       { id: "khata", name: "Pay later (khata)", def: false, bind: { t: "module", key: "khata" },
         what: "Parking a bill on a named regular to collect later, and the book that tracks who owes what. OFF removes the khata screens from the manager AND owner panels entirely." },
-      {
-        // "Platforms" (owner, 2026-07-31). The stored key stays `takeaway`: that is the mig-235
-        // column name, and renaming a LABEL must never rename a column.
-        id: "takeaway", name: "Platforms (Zomato, Swiggy, own website)", def: false, bind: { t: "module", key: "takeaway" },
-        configurableWhenOff: true,
-        what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board and the 🥡 New Parcel button.",
-        children: [
-          { id: "ch_website", name: "Takeaway / own website", def: true, bind: { t: "channel", key: "website" },
-            what: "A counter takeaway punched in by staff, and orders coming from the restaurant's own website. Needs no outside account.",
-            children: [
-              { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
-                what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },
-            ] },
-          { id: "ch_zomato", name: "Zomato", def: false, bind: { t: "channel", key: "zomato" },
-            what: "Zomato orders land on the Platform board. Needs Zomato's API key — until it is entered the channel shows as “not connected”.",
-            children: [
-              { id: "ch_zomato_key", name: "Zomato API key", bind: { t: "creds", key: "zomato" }, placeholder: "Paste the Zomato API key",
-                what: "From the restaurant's own Zomato partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
-            ] },
-          { id: "ch_swiggy", name: "Swiggy", def: false, bind: { t: "channel", key: "swiggy" },
-            what: "Swiggy orders land on the Platform board. Needs Swiggy's API key — until it is entered the channel shows as “not connected”.",
-            children: [
-              { id: "ch_swiggy_key", name: "Swiggy API key", bind: { t: "creds", key: "swiggy" }, placeholder: "Paste the Swiggy API key",
-                what: "From the restaurant's own Swiggy partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
-            ] },
-        ],
-      },
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false, bind: { t: "setting", key: "auto_print_kot_allowed" },
         configurableWhenOff: true,
         what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine.",
@@ -295,27 +280,6 @@ export const SECTIONS: Section[] = [
           { id: "kot_setup", name: "Printer check & sample ticket", bind: { t: "none" }, panel: "settings:kitchen",
             what: "Print a test ticket to check the printer and the ticket layout before the kitchen relies on it." },
         ] },
-      { id: "banquet", name: "Banquet billing", def: false, bind: { t: "module", key: "banquet" },
-        configurableWhenOff: true,
-        what: "Per-plate event billing that runs without a table — a wedding, a party booking. OFF removes the Banquet tab.",
-        children: [
-          { id: "banquet_setup", name: "What the banquet bill asks for and how it prints", bind: { t: "none" }, panel: "settings:banquet",
-            what: "Which fields staff fill in for an event, the banquet bill's own number series, its tax rows, and the paper layout it prints on." },
-        ] },
-      {
-        // Named to match the Main-features card exactly — the two admin screens write the same
-        // settings columns, so they must not call the module two different things.
-        id: "payroll", name: "Staff profiles & pay", def: false, bind: { t: "module", key: "payroll" },
-        what: "Each person's profile (details, job, documents), a record of salary and advances paid, and the team performance report. Pay counts as an expense wherever money is shown: a “Staff pay out” line in the day book and “Staff pay out” + “After staff pay” on the owner dashboard. OFF removes all of it — pages, report and expense lines — from the owner, manager and waiter panels.",
-      },
-      {
-        id: "inventory", name: "Inventory", def: false, bind: { t: "module", key: "inventory" },
-        what: "Ingredients, purchases, stock counting, waste and the expense book.",
-        children: [
-          { id: "inventory_in_reports", name: "Show cost in the main reports", leftToBuild: true, bind: { t: "none" },
-            what: "Adds stock and expense cost as a line inside the normal sales reports, so profit is shown after cost. OFF keeps it on the inventory pages only." },
-        ],
-      },
       {
         id: "bill", name: "Bill", bind: { t: "none" },
         what: "What prints on a bill. There is no on/off here — a restaurant can always issue a bill. These are the details that appear on it.",
@@ -345,6 +309,67 @@ export const SECTIONS: Section[] = [
     ],
   },
 
+  // ───────────────────────── A2 · EXTRA FEATURES ────────────────────────────
+  // Split out of Main features (owner, 2026-08-01: "so that main features doesn't look too full
+  // and looks organised"). The line is what a restaurant runs on EVERY day versus what it takes
+  // on as well: the menu, pay-later, kitchen tickets, the bill and the tables are the first;
+  // delivery apps, events, stock and payroll are the second. Nothing about how any of them work
+  // changed — each row keeps the same storage, the same defaults and the same dropdown.
+  {
+    id: "extra", name: "Extra features", icon: "grid",
+    blurb: "The bigger modules a restaurant takes on as well as its day-to-day running. All off by default — switch one on and its screens appear.",
+    children: [
+      {
+        // "Platforms" (owner, 2026-07-31). The stored key stays `takeaway`: that is the mig-235
+        // column name, and renaming a LABEL must never rename a column.
+        id: "takeaway", name: "Platforms (Zomato, Swiggy, own website)", def: false, bind: { t: "module", key: "takeaway" },
+        configurableWhenOff: true,
+        what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board and the 🥡 New Parcel button.",
+        children: [
+          { id: "ch_website", name: "Takeaway / own website", def: true, bind: { t: "channel", key: "website" },
+            what: "A counter takeaway punched in by staff, and orders coming from the restaurant's own website. Needs no outside account.",
+            children: [
+              { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
+                what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },
+            ] },
+          { id: "ch_zomato", name: "Zomato", def: false, bind: { t: "channel", key: "zomato" },
+            what: "Zomato orders land on the Platform board. Needs Zomato's API key — until it is entered the channel shows as “not connected”.",
+            children: [
+              { id: "ch_zomato_key", name: "Zomato API key", bind: { t: "creds", key: "zomato" }, placeholder: "Paste the Zomato API key",
+                what: "From the restaurant's own Zomato partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
+            ] },
+          { id: "ch_swiggy", name: "Swiggy", def: false, bind: { t: "channel", key: "swiggy" },
+            what: "Swiggy orders land on the Platform board. Needs Swiggy's API key — until it is entered the channel shows as “not connected”.",
+            children: [
+              { id: "ch_swiggy_key", name: "Swiggy API key", bind: { t: "creds", key: "swiggy" }, placeholder: "Paste the Swiggy API key",
+                what: "From the restaurant's own Swiggy partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
+            ] },
+        ],
+      },
+      { id: "banquet", name: "Banquet billing", def: false, bind: { t: "module", key: "banquet" },
+        configurableWhenOff: true,
+        what: "Per-plate event billing that runs without a table — a wedding, a party booking. OFF removes the Banquet tab.",
+        children: [
+          { id: "banquet_setup", name: "What the banquet bill asks for and how it prints", bind: { t: "none" }, panel: "settings:banquet",
+            what: "Which fields staff fill in for an event, the banquet bill's own number series, its tax rows, and the paper layout it prints on." },
+        ] },
+      {
+        // Named to match the Main-features card exactly — the two admin screens write the same
+        // settings columns, so they must not call the module two different things.
+        id: "payroll", name: "Staff profiles & pay", def: false, bind: { t: "module", key: "payroll" },
+        what: "Each person's profile (details, job, documents), a record of salary and advances paid, and the team performance report. Pay counts as an expense wherever money is shown: a “Staff pay out” line in the day book and “Staff pay out” + “After staff pay” on the owner dashboard. OFF removes all of it — pages, report and expense lines — from the owner, manager and waiter panels.",
+      },
+      {
+        id: "inventory", name: "Inventory", def: false, bind: { t: "module", key: "inventory" },
+        what: "Ingredients, purchases, stock counting, waste and the expense book.",
+        children: [
+          { id: "inventory_in_reports", name: "Show cost in the main reports", leftToBuild: true, bind: { t: "none" },
+            what: "Adds stock and expense cost as a line inside the normal sales reports, so profit is shown after cost. OFF keeps it on the inventory pages only." },
+        ],
+      },
+    ],
+  },
+
   // ──────────────────────────── A2 · STAFF APPS ─────────────────────────────
   // REMOVED (owner, 2026-07-31: "remove it completely, all panels always on"). Every restaurant
   // now has all four staff apps; there is no per-restaurant switch and no screen that offers one.
@@ -353,16 +378,59 @@ export const SECTIONS: Section[] = [
   // Whether the MENU editor exists is decided by the Menu feature in Main features, not here.
 
   // ────────────────────────── B · MANAGER'S MENU ────────────────────────────
+  //
+  // ONE ROW PER MENU, and the defaults for that menu live INSIDE it (owner, 2026-08-01:
+  // "Manager's menu — it will give access to the manager for that particular menu; if the access
+  // is not given the manager will not have that menu… and inside, the default set for user, that
+  // option will be removed if the access is not even given").
+  //
+  // Two things follow, and both are the point:
+  //   1. The row's switch is the MENU. It moves the panel's tab list AND the manager power in one
+  //      go (bind "menu"), because two switches for one menu is how a screen ends up disagreeing
+  //      with itself. Off = no tab, and the endpoints behind it refuse.
+  //   2. Its defaults are its CHILDREN, so switching the menu off removes them from the page
+  //      rather than leaving settings on screen for a menu that isn't there.
+  // What a manager may do that ISN'T a menu (the money and floor actions) is one list underneath.
   {
     id: "mgrMenu", name: "Manager's menu", icon: "users",
-    blurb: "Which tabs exist in this restaurant's manager panel. Switch one off and the tab is gone for a real manager — and its endpoints refuse.",
+    blurb: "Which menus a manager gets, and what they may do inside each one. Switch a menu off and it is gone for a real manager — its settings go with it, and its endpoints refuse.",
     children: [
-      { id: "mgr_tab_editor", name: "Edit menu", def: true, fresh: true, bind: { t: "tab", panel: "manager", key: "editor" },
-        what: "The Editor tab — dishes, categories and filters. Off removes the tab; WHAT a person may change inside it is set in Default set for user." },
-      { id: "mgr_tab_ratings", name: "Ratings", def: true, fresh: true, bind: { t: "tab", panel: "manager", key: "ratings" },
-        what: "The Ratings tab, where the manager reads what guests said about the food and handles complaints." },
-      { id: "mgr_tab_log", name: "Logs", def: true, fresh: true, bind: { t: "tab", panel: "manager", key: "log" },
+      {
+        id: "mgr_tab_editor", name: "Edit menu", def: true, fresh: true,
+        bind: { t: "menu", panel: "manager", key: "editor", grant: "edit_menu" },
+        what: "The Editor tab — dishes, categories and filters. Off removes the tab completely; the parts below say which bits of it a manager may change.",
+        children: EDIT_MENU_PARTS.map((p) => ({
+          id: `d_mgr_${p.id}`, name: p.name, what: p.what, def: p.def,
+          bind: { t: "opt", id: "edit_menu", side: "manager", key: p.id } as Bind,
+        })),
+      },
+      { id: "mgr_tab_ratings", name: "Ratings", def: true, fresh: true,
+        bind: { t: "menu", panel: "manager", key: "ratings", grant: "view_ratings" },
+        what: "The Ratings tab, where the manager reads what guests said about the food and marks a complaint handled." },
+      { id: "mgr_tab_log", name: "Log", def: true, fresh: true,
+        bind: { t: "menu", panel: "manager", key: "log", grant: "view_logs" },
         what: "The Log tab — the record of who did what in this restaurant. Admin-only actions never appear there." },
+      {
+        // Not menus, so they can't be rows above: these are things a manager DOES, wherever they
+        // stand. Kept as one list rather than scattered into the tabs they happen to appear on
+        // (owner's pick, 2026-08-01).
+        id: "mgr_may", name: "What a manager may do", bind: { t: "none" },
+        what: "The money and floor actions, for every manager in this restaurant. One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
+        children: [
+          {
+            id: "d_mgr_dashboard", name: "Dashboard", def: true, bind: { t: "grant", flag: "view_dashboard" },
+            what: "The numbers screen and the day's report. A real manager's dashboard is clamped to TODAY by the server today; the two picks below are the settings that will change that once they are built.",
+            children: [
+              { id: "d_mgr_dash_range", name: "What the dashboard shows", leftToBuild: true, bind: { t: "none" },
+                what: "How far back a manager's dashboard reaches.",
+                choices: [{ value: "today", label: "Today only" }, { value: "today_yesterday", label: "Today + yesterday" }] },
+              { id: "d_mgr_daily_report", name: "Generate the daily report", leftToBuild: true, bind: { t: "none" },
+                what: "The button that produces the day's report. It is the SAME report, with the same design, as the owner's daily analysis — one report, two places." },
+            ],
+          },
+          ...ACTIONS.map(mgrAction),
+        ],
+      },
     ],
   },
 
@@ -384,39 +452,12 @@ export const SECTIONS: Section[] = [
 
   // ──────────────────── D · DEFAULT SET FOR USER ────────────────────────────
   {
+    // The MANAGER folder moved into Manager's menu (owner, 2026-08-01) so a menu and its defaults
+    // are one thing. The owner and the waiter keep their lists here for now — his call: "only the
+    // manager for now".
     id: "defaults", name: "Default set for user", icon: "user",
-    blurb: "What a person of each type can do by default. A single person can still be given more or less than this on the Per-person tab — this is only the starting point everyone inherits.",
+    blurb: "What an owner and a waiter start with. A single person can still be given more or less on the Per-person tab — this is only the starting point they inherit. (A manager's set now lives inside Manager's menu.)",
     children: [
-      {
-        id: "d_manager", name: "Manager", bind: { t: "none" },
-        what: "Every manager in this restaurant starts with these. Changing one here changes it for all managers who have no setting of their own.",
-        children: [
-          {
-            id: "d_mgr_edit_menu", name: "Edit menu", def: true, bind: { t: "grant", flag: "edit_menu" },
-            what: "May change the menu at all. The parts underneath say which bits — a manager can be allowed to mark a dish sold out without being allowed to change its price.",
-            children: EDIT_MENU_PARTS.map((p) => ({
-              id: `d_mgr_${p.id}`, name: p.name, what: p.what, def: p.def,
-              bind: { t: "opt", id: "edit_menu", side: "manager", key: p.id } as Bind,
-            })),
-          },
-          { id: "d_mgr_ratings", name: "Ratings", def: true, bind: { t: "grant", flag: "view_ratings" },
-            what: "May read guest ratings and mark a complaint handled." },
-          { id: "d_mgr_logs", name: "Logs", def: true, bind: { t: "grant", flag: "view_logs" },
-            what: "May read the activity log." },
-          {
-            id: "d_mgr_dashboard", name: "Dashboard", def: true, bind: { t: "grant", flag: "view_dashboard" },
-            what: "The numbers screen and the day's report. A real manager's dashboard is clamped to TODAY by the server today; the two picks below are the settings that will change that once they are built.",
-            children: [
-              { id: "d_mgr_dash_range", name: "What the dashboard shows", leftToBuild: true, bind: { t: "none" },
-                what: "How far back a manager's dashboard reaches.",
-                choices: [{ value: "today", label: "Today only" }, { value: "today_yesterday", label: "Today + yesterday" }] },
-              { id: "d_mgr_daily_report", name: "Generate the daily report", leftToBuild: true, bind: { t: "none" },
-                what: "The button that produces the day's report. It is the SAME report, with the same design, as the owner's daily analysis — one report, two places." },
-            ],
-          },
-          ...ACTIONS.map(mgrAction),
-        ],
-      },
       {
         id: "d_owner", name: "Owner", bind: { t: "none" },
         what: "What an owner of this restaurant starts with. An owner is the top of their own restaurant, so only their pages are listed — money actions are always theirs.",
@@ -465,10 +506,17 @@ export const MODULE_KEYS = collect((b) => (b.t === "module" ? b.key : null));
 export const PANEL_KEYS = collect((b) => (b.t === "panel" ? b.key : null));
 export const CHANNEL_KEYS = collect((b) => (b.t === "channel" ? b.key : null));
 export const CREDS_KEYS = collect((b) => (b.t === "creds" ? b.key : null));
-export const GRANT_FLAGS = collect((b) => (b.t === "grant" ? b.flag : null));
+// A "menu" row writes a grant too, so it MUST be in this list — the read/write route builds its
+// allow-list from here, and a flag missing from it is silently dropped on save (the switch would
+// move on screen and change nothing).
+export const GRANT_FLAGS = collect((b) => (b.t === "grant" ? b.flag : b.t === "menu" ? b.grant : null));
 export const SECTION_ENTITLEMENTS = collect((b) => (b.t === "section" ? b.key : null));
 export const TABLET_COLS = collect((b) => (b.t === "tablet" ? b.key : null));
-export const TAB_KEYS = ALL_NODES.map((n) => n.bind).filter((b): b is Extract<Bind, { t: "tab" }> => b.t === "tab");
+// Same for the tab half of a "menu" row.
+export const TAB_KEYS: { panel: string; key: string }[] = ALL_NODES
+  .map((n) => n.bind)
+  .filter((b): b is Extract<Bind, { t: "tab" } | { t: "menu" }> => b.t === "tab" || b.t === "menu")
+  .map((b) => ({ panel: b.panel, key: b.key }));
 
 // Every settings COLUMN the route selects/writes (features + enabled_panels handled apart).
 export const SETTINGS_COLUMNS: string[] = Array.from(new Set([
@@ -530,6 +578,11 @@ export function nodeValue(n: Node, s: TreeState): any {
     case "grant":    return present(s.grants?.[b.flag], d as boolean);
     case "section":  return present(s.sections?.[b.key], d as boolean);
     case "tab":      return present(s.tabs?.[b.panel]?.[b.key], d as boolean);
+    // Both halves have to be on. They can disagree only on a restaurant configured before the two
+    // were joined; showing OFF there is the honest answer, because the manager IS being refused.
+    case "menu":
+      return present(s.tabs?.[b.panel]?.[b.key], d as boolean) === true
+        && managerGrantValue(b.grant, s.grants?.[b.grant]) === true;
     case "tablet":   return present(s.settings?.[b.key] as string, d as string) || "off";
     case "capTablet":return present(s.config?.[b.id]?.tablet as string, d as string) || "off";
     case "choice":   return present(s.settings?.[b.key] as string, d as string);
@@ -571,6 +624,7 @@ export function nodePatch(n: Node, v: any): TreePatch {
     case "grant":    return { grants: { [b.flag]: v === true } };
     case "section":  return { sections: { [b.key]: v === true } };
     case "tab":      return { tabs: { [b.panel]: { [b.key]: v === true } } };
+    case "menu":     return { tabs: { [b.panel]: { [b.key]: v === true } }, grants: { [b.grant]: v === true } };
     case "tablet":   return { settings: { [b.key]: String(v) } };
     case "capTablet":return { config: { [b.id]: { tablet: String(v) } } };
     case "choice":   return { settings: { [b.key]: String(v) } };
@@ -604,6 +658,42 @@ export function extraPatch(n: Node, v: any): TreePatch {
 // until the admin switches a tab off. Used by the editor API's whoami (to tell the panel
 // what to hide) AND by its route guards (so a hidden tab's endpoints refuse too) — one
 // helper, so the screen and the server can never disagree.
+// ── WHAT A MISSING MANAGER PERMISSION MEANS — one answer, used by the screen AND the server ──
+//
+// THE BUG THIS EXISTS TO KILL (found 2026-08-01). managerCan() read an absent
+// manager_permissions key as NO, while this screen showed the row's `def` — usually YES. So on
+// every restaurant that was never hand-fixed, and on EVERY newly created one, the admin read
+// "Mark a table's type: ON" and a real manager was refused. Worse: the rebuild dropped ~14 powers
+// off the screen entirely (khata, banquet, parcel, platform, table_assign, the two inventory
+// ones). The model says an unlisted capability is PERMANENTLY ON for whoever's panel owns it —
+// the code said permanently OFF, and no screen could grant them. Switching "Pay later" on in Main
+// features left the manager staring at "your owner hasn't given managers permission".
+//
+// So there is now exactly one rule, and both sides read it here:
+//   · a flag WITH a row on this screen  → that row's default
+//   · a flag with NO row (retired)      → ON, because its module toggle is the switch now
+// A value that IS stored always wins for a flag that has a row; a retired flag ignores whatever
+// an old screen left behind, since nothing can ever change it again.
+export const MANAGER_GRANT_DEFAULTS: Record<string, boolean> = (() => {
+  const out: Record<string, boolean> = {};
+  for (const n of ALL_NODES) {
+    if (n.bind.t === "grant") out[n.bind.flag] = defOf(n) === true;
+    // A "menu" row owns a power too — miss these and edit_menu / view_ratings / view_logs would
+    // look RETIRED (= always on), which would quietly ignore an admin switching a menu off.
+    if (n.bind.t === "menu") out[n.bind.grant] = defOf(n) === true;
+  }
+  return out;
+})();
+
+export const isConfigurableGrant = (flag: string) => flag in MANAGER_GRANT_DEFAULTS;
+
+/** What `manager_permissions[flag]` means for this restaurant, given what is (or isn't) stored. */
+export function managerGrantValue(flag: string, stored: unknown): boolean {
+  if (!isConfigurableGrant(flag)) return true;              // retired → the module is the switch
+  if (typeof stored === "boolean") return stored;           // the admin set it → honour it
+  return MANAGER_GRANT_DEFAULTS[flag];                      // nothing stored → what the screen shows
+}
+
 export const MANAGER_TAB_KEYS = ["editor", "ratings", "log"] as const;
 export type ManagerTabKey = (typeof MANAGER_TAB_KEYS)[number];
 

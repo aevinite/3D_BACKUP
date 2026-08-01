@@ -6,6 +6,9 @@
 // enforcement (managerCan) reads an ABSENT manager-permission key as false, so display
 // and truth must agree.
 
+import { MANAGER_GRANT_DEFAULTS, managerGrantValue } from "@/lib/accessTree";
+import { MANAGER_POWER_FLAGS } from "@/lib/accessModel";
+
 // Tablet capability tri-states (settings.*), off | on | pin. tablet_take_orders
 // defaults 'on' (order-taking is the tablet's core function, mig 178); the rest 'off'.
 export const TABLET_CAPS = [
@@ -27,26 +30,31 @@ export const FEATURE_SWITCHES = [
 
 // The owner's grant baseline for the manager powers (restaurants.manager_permissions).
 // edit_menu/give_discounts/view_dashboard ON; money-risk + newer powers OFF.
-// banquet is OFF: mig 167 backfilled "banquet":true ONLY onto restaurants that existed
-// then, and the mig-091 column default doesn't include it, so a restaurant created after
-// mig 167 has NO banquet key → managerCan reads absent as false. A `true` default made the
-// admin switch show GRANTED while managers were refused (403) on new restaurants (QA
-// 2026-07-24). Keep matching the migrations — display and truth must agree.
-export const MP_DEFAULT: Record<string, boolean> = {
-  manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true,
-  void_bills: false, edit_settings: false, view_ratings: false, table_tags: false,
-  // parcel: ON for managers by default (owner 2026-07-26 — common counter task; admin can
-  // still switch the module off per restaurant). Its tablet cap stays 'off' below.
-  // platform: ON for managers by default (matches parcel — the board was manager-visible
-  // everywhere before mig 209). The module itself is off for NEW restaurants, so the whoami
-  // overlay hides it until the admin turns the module on; then the manager has it immediately.
-  // table_assign: ON for managers (owner 2026-07-29 — managers run the floor, so they can
-  // hand out sections out of the box; the owner can still revoke it). Matches the mig-221
-  // backfill, which wrote the same `true` onto every restaurant that already existed —
-  // display and truth agree. Harmless until the admin turns the module itself on.
-  khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true, platform: true,
-  table_assign: true,
-};
+// The owner's grant baseline for a NEW restaurant (restaurants.manager_permissions).
+//
+// DERIVED, not hand-typed (2026-08-01). The hand-typed list had drifted from what the Access
+// screen displays — it wrote `false` for view_ratings, table_tags, take_orders, table_ops and
+// void_bills while the screen showed all five ON, so every restaurant created here was born
+// disagreeing with its own permissions screen, and a manager was refused things the admin could
+// see switched on. This file's own comment already said the rule: display and truth must agree.
+// So the defaults now come from the ONE place that decides what an unset permission means.
+//
+// Powers with no row on the screen any more (khata, banquet, parcel, platform, table_assign…)
+// are seeded TRUE: their module toggle in Main / Extra features is the switch, and nothing can
+// grant them individually, so seeding them off would strand a manager the moment an admin turns
+// the module on.
+// …EXCEPT the three payroll powers. lib/staffProfileShared.ts already decides what an unset one
+// means, and it decided deliberately: fixing a phone number or handing over a cash advance reads
+// as ON, but SEEING everyone's salary reads as OFF until it is handed over on purpose. Seeding
+// them here would overrule that and put every manager inside the pay ledger the moment Payroll
+// is switched on. Not seeded = that module's own rule still applies.
+const OWNED_BY_PAYROLL = new Set(["see_staff_pay", "record_staff_payment", "edit_staff_profiles"]);
+
+export const MP_DEFAULT: Record<string, boolean> = Object.fromEntries(
+  [...new Set([...MANAGER_POWER_FLAGS, ...Object.keys(MANAGER_GRANT_DEFAULTS)])]
+    .filter((flag) => !OWNED_BY_PAYROLL.has(flag))
+    .map((flag) => [flag, managerGrantValue(flag, undefined)]),
+);
 
 // New-restaurant DEFAULT tablet caps (mirrors lib/settingsClone.ts). take_orders 'on'.
 export const TABLET_CAP_DEFAULTS: Record<string, "off" | "on" | "pin"> = {

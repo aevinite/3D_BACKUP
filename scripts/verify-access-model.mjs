@@ -18,6 +18,10 @@ const oks = [];
 const ok = (m) => oks.push(m);
 const fail = (m) => fails.push(m);
 
+// The model itself, compiled. `npm run verify:access` bundles it first (see package.json), so
+// these are the REAL exported values — every generated row included.
+const { MANAGER_GRANT_DEFAULTS, isConfigurableGrant } = await import("../node_modules/.cache/accessTree.mjs");
+
 const tree = read("lib/accessTree.ts");
 const format = read("lib/format.ts");
 const migration = read("supabase/migrations/235_access_model_v2.sql");
@@ -85,15 +89,72 @@ for (const m of tree.matchAll(/t:\s*"module",\s*key:\s*"([^"]+)"/g)) {
   else ok(`module "${mod}" is read by a ladder in lib/tableTags.ts`);
 }
 
-// ── 4 · manager-default rows must bind to a flag managerCan() enforces ──────
-const grantFlags = [...tree.matchAll(/t:\s*"grant",\s*flag:\s*"([^"]+)"/g)].map((m) => m[1]);
-const knownPowers = new Set([...accessModel.matchAll(/power:\s*"([^"]+)"/g)].map((m) => m[1]));
+// ── 4 · every manager row must reach code, and every enforced power must have a home ─────
+//
+// THE CHECK THAT WASN'T HERE, AND WHY (2026-08-01). This section used to ask only "is this flag
+// listed as a power in lib/accessModel.ts?". Being LISTED is not being READ: `mark_paid` and
+// `print_invoice` were listed, had rows on this screen, and no code anywhere consulted them —
+// so an admin could switch "Mark a bill paid" off and a manager kept settling bills. It also
+// never looked the other way, at flags the SERVER enforces that no row offers, which is how ~14
+// powers ended up permanently refused with no screen able to grant them. Both directions now.
+// Read the flags from the BUILT model, not from the source text. Regexing `flag: "..."` out of
+// the file finds only the rows written by hand — and the ten that matter most (give a discount,
+// mark a bill paid, generate bills, void, delete, take an order, move tables, manage staff,
+// change settings, mark a table's type) are generated from one ACTIONS table, so a text scan
+// could not see a single one of them. That blind spot is why this guard stayed green through
+// the whole fault.
+const grantFlags = Object.keys(MANAGER_GRANT_DEFAULTS);
+const inventoryApi = read("app/api/inventory/[...path]/route.ts");
+// EVERY server route, not just the two panel ones. `manage_staff` is enforced in
+// app/api/owner/staff/route.ts, so a two-file scan reported it as an unread row — a false alarm
+// is as corrosive as a missed one, because it teaches you to skim past this output.
+const allRoutes = (function walk(dir, acc = []) {
+  for (const e of readdirSync(join(root, dir), { withFileTypes: true })) {
+    const rel = `${dir}/${e.name}`;
+    if (e.isDirectory()) walk(rel, acc);
+    else if (e.name === "route.ts") acc.push(read(rel));
+  }
+  return acc;
+})("app/api").join("\n");
+const serverCode = allRoutes + editorApi + inventoryApi + read("lib/staffProfile.ts");
+
 for (const f of grantFlags) {
-  // delete_bill is deliberately its own thing (canDeleteBill), not a PERMISSIONS power.
-  if (f === "delete_bill") { if (!editorApi.includes("canDeleteBill")) fail(`"delete_bill" has no canDeleteBill gate`); continue; }
-  if (!knownPowers.has(f)) fail(`manager default "${f}" is not a power in lib/accessModel.ts — managerCan() would read nothing`);
+  // A flag has to be CONSULTED somewhere, by name, or the row is decoration. Any of the real
+  // shapes counts: managerCan(g, rid, "x"), invCan(..., "x"), or a direct read of the column.
+  const named = new RegExp(`(managerCan\\([^)]*"${f}"|invCan\\([^)]*"${f}"|manager_permissions[?.\\[]+"?${f}\\b)`);
+  if (!named.test(serverCode))
+    fail(`"${f}" has a row on the Access screen but NO code reads it — switching it off would change nothing (this is exactly what mark_paid and print_invoice did)`);
 }
-if (!fails.length || grantFlags.length) ok(`all ${grantFlags.length} manager-default rows bind to a real power flag`);
+ok(`all ${grantFlags.length} manager rows are read by real server code`);
+
+// The other direction: a power the server refuses on must be reachable from SOME screen, or be
+// answered permanently-on by the model. Anything else is a manager locked out with no way back.
+const enforced = new Set([
+  ...[...serverCode.matchAll(/managerCan\(g,\s*rid,\s*"([a-z_]+)"\)/g)].map((m) => m[1]),
+  ...[...serverCode.matchAll(/invCan\(g,\s*rid,\s*"([a-z_]+)"\)/g)].map((m) => m[1]),
+]);
+const onScreen = new Set(grantFlags);
+const strandable = [...enforced].filter((f) => !onScreen.has(f));
+// `isConfigurableGrant` is what makes a flag with no row answer ON instead of OFF. Without that
+// single line every one of these is refused forever.
+if (strandable.length && !/isConfigurableGrant/.test(tree))
+  fail(`${strandable.length} powers are enforced with no row on the screen (${strandable.join(", ")}) and lib/accessTree.ts has no rule making them permanently on — a manager would be refused with nothing able to grant it`);
+else ok(`${strandable.length} powers with no row (${strandable.join(", ") || "none"}) are answered permanently-on by the model`);
+
+// ── 4b · what the screen SHOWS and what the server ASSUMES must be the same number ────────
+// A new restaurant used to be seeded from a hand-typed list that had drifted from this screen —
+// six rows read ON while the stored value was false. Deriving it is the only way they stay equal.
+const accessConfigLib = read("lib/accessConfig.ts");
+if (!/MP_DEFAULT[\s\S]{0,400}managerGrantValue/.test(accessConfigLib))
+  fail("MP_DEFAULT in lib/accessConfig.ts no longer derives from managerGrantValue() — a new restaurant can be born disagreeing with its own Access screen");
+else ok("a new restaurant is seeded from the same rule the screen displays");
+
+// The absent-key rule must be the SHARED one, not re-implemented per route.
+for (const [file, src] of [["editor", editorApi], ["inventory", inventoryApi]]) {
+  if (/return\s+!!\s*r\?\.manager_permissions\?\.\[flag\]/.test(src))
+    fail(`the ${file} route still reads an absent manager permission as NO — that is the bug: the screen shows the row's default, which is usually YES`);
+}
+ok("both routes answer a missing permission the same way the screen does");
 
 // ── 5 · owner pages must bind to a key OWNER_SECTION_KEYS knows ─────────────
 for (const m of tree.matchAll(/t:\s*"section",\s*key:\s*"([^"]+)"/g)) {

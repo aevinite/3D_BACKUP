@@ -24,6 +24,7 @@ import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { inventoryLadder } from "@/lib/tableTags";
 import { powerEntitlementKey } from "@/lib/ownerEntitlements";
+import { managerGrantValue, isConfigurableGrant } from "@/lib/accessTree";
 
 export const dynamic = "force-dynamic";
 
@@ -59,19 +60,22 @@ async function moduleOn(g: { user: StaffUser | null }, rid: string): Promise<boo
   return (await inventoryLadder(rid)).effective;
 }
 
-// inv_stock / inv_expenses — absent manager grant = OFF (money-adjacent; the owner
-// hands these over deliberately). Owner always passes; per-person override wins over
-// the restaurant-wide grant but never over the admin cap.
+// inv_stock / inv_expenses. These had NO row on any screen after the access rebuild, so an
+// absent grant (= "off" under the old rule) left a manager locked out of Inventory with nothing
+// anywhere able to grant it — the admin could switch the Inventory module ON and the manager
+// would still be refused. The module toggle IS the switch for them now; managerGrantValue()
+// gives the same answer here as the Access screen does (lib/accessTree.ts). A per-person
+// override and the admin cap still win, in that order.
 async function invCan(g: { user: StaffUser | null }, rid: string, flag: "inv_stock" | "inv_expenses"): Promise<boolean> {
   const u = g.user;
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  if (r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
+  if (isConfigurableGrant(flag) && r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
   const ov = u.permissions?.[flag];
   if (ov === "on" || ov === "pin") return true;
   if (ov === "off") return false;
-  return !!r?.manager_permissions?.[flag];
+  return managerGrantValue(flag, r?.manager_permissions?.[flag]);
 }
 const denied = (what: string) => err(`Your owner hasn't given managers permission to ${what}.`, 403);
 const actorOf = (g: { user: StaffUser | null }) =>

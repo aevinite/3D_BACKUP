@@ -23,19 +23,40 @@ const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager",
 const ROLE_COLOR: Record<string, string> = { owner: "#b491f0", manager: "#d4a574", tablet: "#60a5fa", kitchen: "#7ec88a" };
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, tablet: 2, kitchen: 3 };
 
-// The rows each role can be given or denied, lifted straight out of the tree's
-// "Default set for user" section so this list is never a second, drifting copy.
+// The rows each role can be given or denied, lifted straight out of the tree so this list is
+// never a second, drifting copy.
+//
+// A MANAGER's rows moved (owner, 2026-08-01): they live in Manager's menu now — the three menu
+// rows themselves, plus everything under "What a manager may do" — while the owner and the
+// waiter still have folders in "Default set for user". This walks whichever section holds them
+// rather than naming one folder, so a row moving again can't silently empty this tab. It used to
+// name "d_manager" outright, and the moment that folder was dissolved every manager's Per-person
+// list would have rendered EMPTY with no error.
 type Cap = { node: Node; key: string; pin: boolean };
 function capsForRole(role: string): Cap[] {
-  const defaults = SECTIONS.find((s) => s.id === "defaults");
-  const folder = defaults?.children.find((c) => c.id === (role === "manager" ? "d_manager" : role === "tablet" ? "d_waiter" : ""));
-  if (!folder?.children) return [];
+  const roots: Node[] =
+    role === "manager"
+      ? (SECTIONS.find((s) => s.id === "mgrMenu")?.children ?? [])
+      : (SECTIONS.find((s) => s.id === "defaults")?.children.find((c) => c.id === (role === "tablet" ? "d_waiter" : ""))?.children ?? []);
+
   const out: Cap[] = [];
-  for (const n of folder.children) {
-    if (role === "manager" && n.bind.t === "grant") out.push({ node: n, key: n.bind.flag, pin: false });
-    // A waiter's money rows keep the manager-PIN middle state; everything else is on/off.
-    else if (role === "tablet" && n.bind.t === "tablet") out.push({ node: n, key: n.bind.key, pin: !!n.pin });
-  }
+  const seen = new Set<string>();
+  const walk = (nodes: Node[]) => {
+    for (const n of nodes) {
+      // A manager reads the BARE power flag (managerCan), a waiter the tablet_* column
+      // (tabletPerm) — writing an override under the wrong one is stored-but-dead.
+      if (role === "manager" && (n.bind.t === "grant" || n.bind.t === "menu")) {
+        const key = n.bind.t === "grant" ? n.bind.flag : n.bind.grant;
+        if (!seen.has(key)) { seen.add(key); out.push({ node: n, key, pin: false }); }
+      } else if (role === "tablet" && n.bind.t === "tablet") {
+        if (!seen.has(n.bind.key)) { seen.add(n.bind.key); out.push({ node: n, key: n.bind.key, pin: !!n.pin }); }
+      }
+      // Only descend through GROUPS ("What a manager may do", a menu's own parts). A row's
+      // sub-options are not separate permissions and must not become their own toggles here.
+      if (n.children?.length && n.bind.t === "none") walk(n.children);
+    }
+  };
+  walk(roots);
   return out;
 }
 
