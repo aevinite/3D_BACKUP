@@ -47,6 +47,52 @@ const hintStyle: React.CSSProperties = { fontSize: 11.5, marginTop: 3 };
  *  saves the whole settings row either way, so the same values are edited from either place. */
 export type SettingsSection = "billing" | "banquet" | "kitchen" | "sessions" | "tables" | "floor" | "qr";
 
+/**
+ * ONE SAVE BAR FOR THE WHOLE PAGE.
+ *
+ * This component used to render its own fixed-position "Unsaved changes · Discard · Save" bar.
+ * That was fine when it was mounted once on the restaurant-detail page. Access mounts it SEVEN
+ * times — billing, banquet, kitchen, sessions, tables, floor, qr — so seven bars stacked on the
+ * same spot, which is what the owner saw as "two buttons coming" and as flicker (they overlap,
+ * so the hover highlight lands on whichever won the paint).
+ *
+ * Worse than the duplicate: every instance kept its OWN draft of the SAME settings row, so two
+ * open panels could each save and silently undo the other. The registry fixes both — instances
+ * publish their dirty state and their save/discard here, ONE bar renders, and pressing Save
+ * saves every dirty panel.
+ */
+type SaveEntry = { dirty: boolean; busy: boolean; save: () => Promise<void>; discard: () => void };
+const saveRegistry = new Map<string, SaveEntry>();
+const saveListeners = new Set<() => void>();
+const publish = () => { for (const fn of saveListeners) fn(); };
+function registerSave(id: string, entry: SaveEntry) { saveRegistry.set(id, entry); publish(); }
+function unregisterSave(id: string) { saveRegistry.delete(id); publish(); }
+
+/** The single bar. Mounted once by the page; renders nothing while everything is saved. */
+export function SettingsSaveBar() {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const fn = () => tick((n) => n + 1);
+    saveListeners.add(fn);
+    return () => { saveListeners.delete(fn); };
+  }, []);
+  const dirty = [...saveRegistry.values()].filter((e) => e.dirty);
+  const busy = dirty.some((e) => e.busy);
+  if (!dirty.length) return null;
+  return (
+    <div className="adm-savebar" role="status">
+      <span className="adm-savebar-t">
+        {dirty.length > 1 ? `Unsaved changes in ${dirty.length} sections` : "Unsaved changes"}
+      </span>
+      <button className="adm-savebar-x" disabled={busy} onClick={() => dirty.forEach((e) => e.discard())}>Discard</button>
+      <button className="adm-savebar-go" disabled={busy}
+        onClick={async () => { for (const e of dirty) await e.save(); }}>
+        {busy ? "Saving…" : "Save"}
+      </button>
+    </div>
+  );
+}
+
 export default function RestaurantSettings({ restaurant, only }: { restaurant: Rest; only?: SettingsSection[] }) {
   const show = (k: SettingsSection) => !only || only.includes(k);
   const [draft, setDraft] = useState<Draft>({});
@@ -125,6 +171,14 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const discard = () => { setDraft(JSON.parse(JSON.stringify(base))); setErr(null); setMsg(null); };
+
+  // Publish this panel's state to the ONE bar. Keyed by the sections it owns, so mounting the
+  // same section twice can't register twice.
+  const regId = (only || ["all"]).join(",");
+  useEffect(() => {
+    registerSave(regId, { dirty, busy, save, discard });
+    return () => unregisterSave(regId);
+  });
 
   // ── AUTO-SAVE, for discrete controls only (owner, 2026-07-30: "I change value to 8 and it
   // doesn't auto save"). Debounced so a drag or fast typing writes ONCE, not per keystroke.
@@ -807,16 +861,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         </div>
       )}
 
-      {/* Floating save bar — appears the moment anything is edited, stays reachable however long the page is. */}
-      {dirty && (
-        <div style={{ position: "fixed", left: "50%", bottom: 18, transform: "translateX(-50%)", zIndex: 1002, display: "flex", gap: 10, alignItems: "center", background: "var(--card)", border: "var(--border)", borderRadius: 14, padding: "10px 16px", boxShadow: "0 10px 34px rgba(0,0,0,0.3)" }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700 }}>Unsaved changes</span>
-          <button className="adm-btn" disabled={busy} onClick={discard}>Discard</button>
-          <button className="adm-btn primary" disabled={busy} onClick={save}>
-            <i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Saving…" : "Save"}
-          </button>
-        </div>
-      )}
+      {/* The save bar is NOT drawn here any more — see SettingsSaveBar above. */}
     </>
   );
 }

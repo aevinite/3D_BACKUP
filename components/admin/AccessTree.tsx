@@ -428,11 +428,18 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
   return (
     <div className={`at-box d${Math.min(depth, 3)} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
       <div className="at-box-h">
-        <div className="at-box-t">
+        {/* THE WHOLE ROW OPENS IT, not just the chevron (owner, 2026-08-01: "you have to click that
+            particular arrow to go on the dropdown — it should not be like that"). The name and its
+            description are the target now; the chevron stays as the affordance that says so. The
+            controls sit outside this button, so opening a row can never flip a switch by accident. */}
+        <div className={`at-box-t ${collapsible ? "clickable" : ""}`}
+          onClick={collapsible ? () => setOpenNode((s) => ({ ...s, [node.id]: !expanded })) : undefined}
+          role={collapsible ? "button" : undefined} tabIndex={collapsible ? 0 : undefined}
+          aria-expanded={collapsible ? expanded : undefined}
+          onKeyDown={collapsible ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpenNode((s) => ({ ...s, [node.id]: !expanded })); } } : undefined}>
           <div className="nm">
             {collapsible ? (
-              <button className={`at-tw ${expanded ? "o" : ""}`} aria-label={expanded ? "Collapse" : "Expand"}
-                onClick={() => setOpenNode((s) => ({ ...s, [node.id]: !expanded }))}><Icon n="chevron" s={14} /></button>
+              <span className={`at-tw ${expanded ? "o" : ""}`} aria-hidden="true"><Icon n="chevron" s={14} /></span>
             ) : null}
             {node.name}
             {node.leftToBuild ? <span className="at-tag build">Left to build</span> : null}
@@ -1009,8 +1016,7 @@ function TreeStyle() {
 
   .at-box { position:relative; border:1.5px solid color-mix(in srgb, var(--lvl) 30%, transparent); border-radius:14px;
     background:color-mix(in srgb, var(--lvl) 5%, color-mix(in srgb, var(--card) 78%, var(--bg))); padding:13px 14px; }
-  /* room for the corner (i) so a long name never runs under it */
-  .at-box > .at-box-h > .at-box-t { padding-right:22px; }
+
   .at-box + .at-box, .at-box + .at-grid, .at-grid + .at-box { margin-top:9px; }
   .at-box:hover { border-color:color-mix(in srgb, var(--hov) 42%, transparent); }
   .at-box-h { display:flex; align-items:flex-start; gap:14px; }
@@ -1037,6 +1043,39 @@ function TreeStyle() {
      the four Tables cards apart. */
   .at-panel .adm-card:first-child > h2 { display:none; }
   .at-panel-wait { margin-top:12px; font-size:12.5px; color:var(--muted); }
+  /* An embedded panel's own toggles were as tall as their label — "Require location (guest must
+     be near the café)" wrapped to five lines and the box grew with it (owner, 2026-08-01: "the
+     toggle is also very fat, vertically it is too much"). Cap the height, let the label use the
+     width it needs, and lay them out side by side. */
+  .at-panel .adm-togglegrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px; }
+  .at-panel .adm-toggle { min-height:44px; height:auto; padding:8px 12px; align-items:center; }
+  .at-panel .adm-toggle > span:first-child { font-size:12.5px; line-height:1.35; }
+
+  /* ── THE SAVE BAR ────────────────────────────────────────────────────────────────────────
+     Bottom-CENTRE and stuck there until it is dealt with. In this screen's own palette, not the
+     yellow it used to be. The flicker came from SEVEN of these bars stacked on the same spot:
+     the cursor hovered whichever won the paint, that one re-rendered, another took the hover…
+     every frame. One bar is the fix; there is nothing left to fight with. */
+  .adm-savebar { position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:1200;
+    display:flex; align-items:center; gap:10px; padding:10px 12px 10px 18px; border-radius:14px;
+    background:color-mix(in srgb, var(--card) 92%, #000); border:1.5px solid color-mix(in srgb,#8344ee 55%,transparent);
+    box-shadow:0 14px 40px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.04) inset; backdrop-filter:blur(10px);
+    animation:barIn .22s ease-out; }
+  @keyframes barIn { from { opacity:0; transform:translate(-50%,10px); } to { opacity:1; transform:translateX(-50%); } }
+  .adm-savebar-t { font-size:12.5px; font-weight:750; color:var(--text); white-space:nowrap; }
+  .adm-savebar-x, .adm-savebar-go { min-height:34px; padding:0 15px; border-radius:9px; font-size:12.5px;
+    font-weight:800; cursor:pointer; border:1.5px solid transparent; }
+  .adm-savebar-x { background:transparent; border-color:color-mix(in srgb,var(--muted) 40%,transparent); color:var(--muted); }
+  .adm-savebar-x:hover { color:var(--text); border-color:var(--muted); }
+  .adm-savebar-go { background:linear-gradient(135deg,#5f47ed,#8344ee); color:#fff; }
+  .adm-savebar-go:hover { filter:brightness(1.12); }
+  .adm-savebar-go:disabled, .adm-savebar-x:disabled { opacity:.55; cursor:not-allowed; }
+  /* On a phone it spans the width instead of centring — and it must drop the translate, or the
+     centring transform fights the full-width position. A nested @keyframes here breaks the
+     styled-jsx parser, so the phone variant simply has no entry animation. */
+  @media (max-width:640px) {
+    .adm-savebar { left:12px; right:12px; transform:none; width:auto; justify-content:space-between; animation:none; }
+  }
 
   /* Pick-one rows (the Google-review picker's shape, which the owner called aesthetic). */
   .at-opts { display:flex; flex-direction:column; gap:7px; margin-top:11px; }
@@ -1075,13 +1114,21 @@ function TreeStyle() {
   .at-chip-hit:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   .at-chip:has(.at-chip-hit:focus-visible) { border-color:var(--accent); }
   .at-chip.on .at-cnm { color:var(--text); }
-  .at-tw { display:grid; place-items:center; width:20px; height:20px; margin-right:-2px; border:none; background:none; color:var(--muted); cursor:pointer; transition:transform .18s; flex:none; }
+  .at-tw { display:grid; place-items:center; width:20px; height:20px; margin-right:-2px; border:none; background:none; color:var(--muted); transition:transform .18s; flex:none; }
+  .at-box-t.clickable { cursor:pointer; border-radius:9px; }
+  .at-box-t.clickable:hover .nm { color:var(--hov); }
+  .at-box-t.clickable:focus-visible { outline:2px solid var(--lvl); outline-offset:3px; }
   .at-tw.o { transform:rotate(180deg); color:var(--accent); }
   .at-tw:hover { color:var(--hov); }
   .at-i { display:grid; place-items:center; width:20px; height:20px; border:none; background:none; color:var(--muted); cursor:pointer; flex:none; }
   .at-i:hover { color:var(--hov); }
   /* Top-right corner, out of the controls' way, and out of the name's way. */
-  .at-i.corner { position:absolute; top:9px; right:10px; opacity:.55; }
+  /* The (i) used to sit at the row's top-right — directly on top of the switch, which is also
+     right-aligned (owner, 2026-08-01: "the toggle of on and off is overwriting the i button").
+     It goes to the top-LEFT of the controls instead: still out of the text's way, nowhere near
+     anything that can be switched by accident. */
+  .at-i.corner { align-self:flex-start; margin:2px 0 0 8px; opacity:.5; }
+  .at-i.corner:hover { opacity:1; }
   .at-i.corner:hover { opacity:1; }
 
   /* ── THE ROW'S CONTROLS (owner picked design 20, 2026-08-01) ───────────────────────────────
