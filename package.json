@@ -37,7 +37,8 @@
     "verify:busy": "node scripts/verify-busy-server.mjs",
     "load:ramp": "node scripts/load-ramp-orders.mjs",
     "db:maintain": "node scripts/db-maintain.mjs",
-    "demo:reset": "node scripts/reset-demo-history.mjs"
+    "demo:reset": "node scripts/reset-demo-history.mjs",
+    "verify:panel-cache": "node scripts/verify-panel-cache.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",

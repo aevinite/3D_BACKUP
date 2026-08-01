@@ -12,9 +12,9 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=20260731inv5" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=6c33051f" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
-  <script src="/panels/theme.js"></script>
+  <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
 <body>
   <header class="topbar">
@@ -93,41 +93,41 @@
   <!-- Chart.js powers the Dashboard graphs. SELF-HOSTED (was a jsdelivr CDN link) so the
        Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
   <script src="/panels/vendor/chart.umd.min.js?v=4.4.7"></script>
-  <script src="/panels/maint.js?v=b10"></script>
-  <script src="/panels/realtime.js?v=b14"></script>
+  <script src="/panels/maint.js?v=34e2db07"></script>
+  <script src="/panels/realtime.js?v=078e53ce"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=1"></script>
+  <script src="/panels/outbox.js?v=f05cc89a"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=6"></script>
+  <script src="/panels/connbadge.js?v=3dba4d45"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
-  <script src="/panels/swreg.js?v=1"></script>
-  <script src="/panels/offline.js?v=1"></script>
+  <script src="/panels/swreg.js?v=e799eb96"></script>
+  <script src="/panels/offline.js?v=a489923e"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
-  <script src="/panels/backstack.js"></script>
+  <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- Hand-written per-restaurant floor plans, read only when a restaurant's layout mode is
        Custom (mig 238). Pure data; loads before app.js so the first floor render can see it. -->
-  <script src="/panels/floor-layouts.js?v=1"></script>
+  <script src="/panels/floor-layouts.js?v=2ec8b2f2"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script src="/panels/errlog.js?v=2"></script>
+  <script src="/panels/errlog.js?v=d74c7524"></script>
   <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
        BEFORE app.js so openIssueModal() can call it. -->
-  <script src="/panels/issue-raise.js?v=1"></script>
+  <script src="/panels/issue-raise.js?v=99268ea5"></script>
   <!-- My profile & pay (mig 220) — shared with the waiter tablet -->
-  <script src="/panels/myprofile.js?v=3"></script>
+  <script src="/panels/myprofile.js?v=0bc664c0"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
-  <script src="/panels/undobar.js?v=3"></script>
+  <script src="/panels/undobar.js?v=9890d642"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
-  <script src="/panels/billcustomer.js?v=1"></script>
+  <script src="/panels/billcustomer.js?v=664fa6d0"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script src="/panels/fitnums.js?v=1" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
+  <script src="/panels/fitnums.js?v=84090f97" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
-  <script src="/panels/editor/inventory.js?v=5"></script>
+  <script src="/panels/editor/inventory.js?v=6dab7654"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=20260730billcust"></script>
+  <script src="/panels/editor/app.js?v=7fe97825"></script>
 </body>
 </html>

@@ -6,9 +6,9 @@
   <title>Kitchen — live orders</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=20260726plat">
+  <link rel="stylesheet" href="style.css?v=a539ec9c">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
-  <script src="/panels/theme.js"></script>
+  <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
 <body>
   <!-- Top bar: title, the live clock, sound toggle, and the 86 (sold-out) board. -->
@@ -47,26 +47,26 @@
   </div>
 
   <div id="toasts" class="toasts"></div>
-  <script src="/panels/maint.js?v=b10"></script>
-  <script src="/panels/realtime.js?v=b14"></script>
+  <script src="/panels/maint.js?v=34e2db07"></script>
+  <script src="/panels/realtime.js?v=078e53ce"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=1"></script>
+  <script src="/panels/outbox.js?v=f05cc89a"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=7"></script>
+  <script src="/panels/connbadge.js?v=3dba4d45"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and after backstack.js
        is available for the back button. -->
-  <script src="/panels/swreg.js?v=1"></script>
-  <script src="/panels/offline.js?v=1"></script>
-  <script src="/panels/backstack.js"></script>
+  <script src="/panels/swreg.js?v=e799eb96"></script>
+  <script src="/panels/offline.js?v=a489923e"></script>
+  <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script src="/panels/errlog.js?v=2"></script>
-  <script src="/panels/issue-raise.js?v=1"></script>
+  <script src="/panels/errlog.js?v=d74c7524"></script>
+  <script src="/panels/issue-raise.js?v=99268ea5"></script>
   <!-- undobar: the shared "take it back" bar after a Ready mis-tap. -->
-  <script src="/panels/undobar.js?v=3"></script>
+  <script src="/panels/undobar.js?v=9890d642"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
-  <script src="/panels/fitnums.js?v=1" data-fit=".kot"></script>
-  <script src="app.js?v=20260729tablename"></script>
+  <script src="/panels/fitnums.js?v=84090f97" data-fit=".kot"></script>
+  <script src="app.js?v=cad70933"></script>
 </body>
 </html>

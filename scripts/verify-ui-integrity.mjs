@@ -174,6 +174,24 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
   else bad(`${broken.length} panel script(s) will not load at all — the panel renders blank`, broken.join("\n         "));
 }
 
+// ── 6. no panel asset may be cached under a stale version ───────────────────────────────────────
+// Same family as the rest of this file: invisible in the source, catastrophic on a screen. A panel
+// asset whose ?v= no longer matches its content leaves browsers on the OLD file for up to 24h
+// (vercel.json allows stale-while-revalidate=86400) — two manager devices reported a crash in code
+// that no longer existed because of exactly this. The version is the file's content hash, so this
+// is a pure equality check, and the fix is one command.
+if (!HOOK || !touched || /public\/panels\//.test(touched)) {
+  try {
+    execSync("node scripts/verify-panel-cache.mjs", { encoding: "utf8", stdio: "pipe" });
+    ok("every panel asset's ?v= matches its content (no browser left on a stale file)");
+  } catch (e) {
+    const out = String((e && (e.stdout || e.message)) || "");
+    const first = out.split("\n").filter((l) => l.includes("content says")).slice(0, 3).join("\n     ");
+    bad("a panel asset is cached under a version that no longer matches the file — run: npm run verify:panel-cache -- --fix",
+      first || out.slice(0, 200));
+  }
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");
