@@ -82,6 +82,24 @@ for (const panel of (wantPanels ? ["editor", "kitchen", "tablet"] : [])) {
     : bad(`${file}: ${raw - live} panel script(s) are INSIDE A COMMENT — they never run, so that feature is silently missing`);
 }
 
+// ── 3b. NO PANEL SCRIPT IS LOADED TWICE ─────────────────────────────────────────
+// A duplicated <script src> re-runs the file, so every top-level `const` is declared twice and the
+// browser throws "Identifier 'X' has already been declared" — the panel dies on load. It happened
+// on 2026-08-01: resolving a rebase conflict in index.html kept BOTH sides of the app.js tag. The
+// conflict-marker check above passed (the markers were gone), the HTML was valid, and the panel was
+// broken — so the shape to check is the duplication itself.
+for (const panel of (wantPanels ? ["editor", "kitchen", "tablet"] : [])) {
+  const file = `public/panels/${panel}/index.html`;
+  let html;
+  try { html = fs.readFileSync(file, "utf8"); } catch { continue; }
+  const live = html.replace(/<!--[\s\S]*?-->/g, "");
+  const srcs = [...live.matchAll(/<script src="([^"?]+)/g)].map((m) => m[1]);
+  const dupes = [...new Set(srcs.filter((s, i) => srcs.indexOf(s) !== i))];
+  dupes.length === 0
+    ? ok(`${file}: no script is loaded twice`)
+    : bad(`${file}: ${dupes.length} script(s) loaded TWICE — every top-level const is redeclared and the panel throws on load`, dupes.join("  "));
+}
+
 // ── 4. no throwaway scripts committed ───────────────────────────────────────────
 // Same family as the others: `git add -A` swept five `_probe.mjs`-style files I had written for
 // one-off debugging into a commit, and they reached main. Harmless, but litter — the rule is that

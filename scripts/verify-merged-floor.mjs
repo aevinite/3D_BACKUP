@@ -13,7 +13,7 @@
 // assert BOTH that the party moved together AND that the three separate tables did not move at all —
 // that second half is the "don't break other things" test.
 import { chromium } from "playwright";
-import { loginAs } from "./scripts/sweep/login.mjs";
+import { loginAs } from "./sweep/login.mjs";
 import fs from "node:fs";
 const B = "http://localhost:4937";
 const env = fs.readFileSync("/Users/aevinite/Documents/Projects/backup_Menu/.env.local", "utf8");
