@@ -287,6 +287,14 @@ export const SECTIONS: Section[] = [
                 what: "Which currencies prices can be shown in. Single means prices are only ever in that one and guests get no currency button; Multiple puts the switcher on the menu." },
             ],
           },
+          {
+            // LAST sub-option of Menu (owner, 2026-08-01). It is the only guest-menu look setting
+            // that was still nowhere on this screen — it lived on the old manager Settings page.
+            // settings.bubbles_enabled, read by lib/menu.ts → bubblesEnabled; absent = ON, which is
+            // how every restaurant already behaves, so adding the row changes nothing by itself.
+            id: "bubbles", name: "Bubble effect", def: true, bind: { t: "setting", key: "bubbles_enabled" },
+            what: "The rising bubble particles drifting up the guest menu's background. OFF gives a flat, calm background instead — some restaurants want the menu to sit still.",
+          },
         ],
       },
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,

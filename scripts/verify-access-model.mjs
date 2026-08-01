@@ -66,18 +66,19 @@ for (const m of tree.matchAll(/t:\s*"module",\s*key:\s*"([^"]+)"/g)) {
   settingCols.add(`${m[1]}_allowed`); settingCols.add(`${m[1]}_enabled`);
 }
 for (const m of tree.matchAll(/t:\s*"tablet",\s*key:\s*"([^"]+)"/g)) settingCols.add(m[1]);
-// Columns that predate this rebuild live in older migrations; only the NEW ones must be in 235.
-const preExisting = new Set([
-  "sessions_enabled", "google_review_mode", "google_review_url", "auto_print_kot_allowed", "gstin", "restaurant_name",
-  "restaurant_address", "banquet_allowed", "banquet_enabled", "payroll_allowed", "payroll_enabled",
-  "inventory_allowed", "inventory_enabled",
-  "tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_take_orders",
-  "tablet_table_tags", "tablet_table_ops",
-]);
+// A column the screen writes has to EXIST — but it may have been created by any migration, not
+// only 235. The hand-typed allow-list of "pre-existing" names below had to be extended by hand
+// every time an older column was surfaced on this screen, and it failed the moment one was
+// (bubbles_enabled, 2026-08-01 — a column from the very first migrations). Scan the whole folder
+// instead: that is the real question, and it needs no maintenance.
+const allMigrations = readdirSync(join(root, "supabase/migrations"))
+  .filter((f) => f.endsWith(".sql"))
+  .map((f) => { try { return readFileSync(join(root, "supabase/migrations", f), "utf8"); } catch { return ""; } })
+  .join("\n");
 let colMiss = 0;
 for (const c of settingCols) {
-  if (preExisting.has(c)) continue;
-  if (!migration.includes(c)) { fail(`settings column "${c}" is written by the Access screen but never created by migration 235`); colMiss++; }
+  if (allMigrations.includes(c)) continue;
+  fail(`settings column "${c}" is written by the Access screen but no migration ever creates it`); colMiss++;
 }
 if (!colMiss) ok(`all ${settingCols.size} settings columns the tree writes exist`);
 
