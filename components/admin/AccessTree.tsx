@@ -184,8 +184,27 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
   const [err, setErr] = useState("");
   // CLOSED by default (owner, 2026-07-31: "by default dropdown should be close"). Each header
   // carries a counter, so you can see what a section holds without opening it.
-  const [openSec, setOpenSec] = useState<Record<string, boolean>>({});
-  const [openNode, setOpenNode] = useState<Record<string, boolean>>({});
+  // WHERE YOU WERE, ACROSS A REFRESH (owner, 2026-08-01: "whatever dropdown was open closes and it
+  // takes me to the top — I will stay there only"). Which sections and rows are open is kept per
+  // RESTAURANT in sessionStorage: per-tab-of-the-browser, dies when the tab closes, never touches
+  // the database. Read synchronously in the initialiser, not in an effect, so the tree's FIRST
+  // paint already has the right things open — restoring afterwards would flash everything shut.
+  const openKey = `adm:access-open:${rid}`;
+  const readOpen = (): { sec: Record<string, boolean>; node: Record<string, boolean> } => {
+    try {
+      const raw = typeof window === "undefined" ? null : sessionStorage.getItem(openKey);
+      const j = raw ? JSON.parse(raw) : null;
+      return { sec: (j && j.sec) || {}, node: (j && j.node) || {} };
+    } catch { return { sec: {}, node: {} }; }
+  };
+  const [openSec, setOpenSec] = useState<Record<string, boolean>>(() => readOpen().sec);
+  const [openNode, setOpenNode] = useState<Record<string, boolean>>(() => readOpen().node);
+  useEffect(() => {
+    try { sessionStorage.setItem(openKey, JSON.stringify({ sec: openSec, node: openNode })); } catch {}
+  }, [openKey, openSec, openNode]);
+  // A different restaurant has its own memory — otherwise picking one in the dropdown would open
+  // whatever the previous one had open.
+  useEffect(() => { const o = readOpen(); setOpenSec(o.sec); setOpenNode(o.node); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [rid]);
   const [info, setInfo] = useState<Node | null>(null);
   const flash = useRef<number>(0);
 
@@ -289,6 +308,55 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
     };
     setTimeout(locate, 150);
   }, []);
+
+  // …and the SCROLL. Same approach as the restaurant-detail page, which had this problem first:
+  // the admin's scrollport is NOT the window — it is .adm-main on desktop and .adm on a phone,
+  // where the document itself does not scroll at all, so a window.scrollTo silently does nothing.
+  // The tree also keeps GROWING for a moment after mount (the panels fetch their own data), so one
+  // scrollTop on mount lands short; re-apply briefly and abandon it the instant a real gesture
+  // happens, so we never fight the person.
+  useEffect(() => {
+    if (!st) return;                       // wait until there is a tree to scroll
+    const key = `adm:access-scroll:${rid}`;
+    const scrolls = (el: HTMLElement | null): el is HTMLElement => !!el && el.scrollHeight > el.clientHeight + 4;
+    const port = (): HTMLElement | null => {
+      for (const sel of [".adm-main", ".adm"]) {
+        const el = document.querySelector(sel) as HTMLElement | null;
+        if (scrolls(el)) return el;
+      }
+      return null;
+    };
+    const readTop = () => { const p = port(); return p ? p.scrollTop : window.scrollY; };
+    const writeTop = (v: number) => { const p = port(); if (p) p.scrollTop = v; else window.scrollTo(0, v); };
+
+    let stop = false;
+    const giveUp = () => { stop = true; };
+    let want = 0;
+    try { want = Number(sessionStorage.getItem(key) || 0); } catch {}
+    const gestures = ["wheel", "touchstart", "keydown"] as const;
+    if (want > 0) {
+      gestures.forEach((e) => window.addEventListener(e, giveUp, { passive: true }));
+      const deadline = Date.now() + 2500;
+      const tick = () => { if (stop || Date.now() > deadline) return; writeTop(want); window.setTimeout(tick, 120); };
+      window.setTimeout(tick, 60);
+    }
+    let t: number | undefined;
+    const onScroll = () => {
+      window.clearTimeout(t);
+      t = window.setTimeout(() => { try { sessionStorage.setItem(key, String(readTop())); } catch {} }, 150);
+    };
+    const targets: (HTMLElement | Window)[] = [
+      ...([".adm-main", ".adm"].map((sel) => document.querySelector(sel)).filter(Boolean) as HTMLElement[]),
+      window,
+    ];
+    targets.forEach((el) => el.addEventListener("scroll", onScroll, { passive: true }));
+    return () => {
+      stop = true;
+      window.clearTimeout(t);
+      targets.forEach((el) => el.removeEventListener("scroll", onScroll));
+      gestures.forEach((e) => window.removeEventListener(e, giveUp));
+    };
+  }, [rid, st]);
 
   const focusDone = useRef(false);
   useEffect(() => {
