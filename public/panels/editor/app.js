@@ -2040,8 +2040,7 @@ function formGeneral(s) {
         <button type="button" class="icon-btn" data-action="rmTax" data-arg="${i}" title="Remove this tax"><i class="fas fa-trash"></i></button>
       </div>`).join("");
     return `
-  <div class="card"><h3>① Printed bill — what the customer gets</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+  <div class="card"><h3>① Printed bill — what the customer gets</h3>    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       Everything below prints on the customer's bill exactly as typed, and the form is
       pre-filled with what the bill prints <b>right now</b> — change anything and Save.
       <b>Invoice prefix</b> + financial year build the number (e.g. <code>LFH/2025-26/000042</code>).
@@ -2064,6 +2063,14 @@ function formGeneral(s) {
     <div class="tax-total">Total tax: <b>${compTotal}%</b></div>
     <button type="button" class="btn small" data-action="addTax" style="margin-top:10px">+ Add tax</button>
     <div style="max-width:220px;margin-top:16px">${tf("Fallback tax rate (0.05 = 5%)", "tax_rate", s.tax_rate ?? "", { type: "number", step: "any", min: 0, hint: "Used only if you remove every named tax above." })}</div>
+    <div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--line)">
+      ${toggle("Allow splitting a bill", "split_bill_enabled", !!s.split_bill_enabled)}
+      <p style="color:var(--muted);font-size:12.5px;margin:8px 0 0;line-height:1.5">
+        Off by default. When on, <b>Split the bill</b> appears at the end of the 🧾 KOT menu and in a
+        table's own screen — one table's bill can then be settled in several payments (equally, by
+        custom amounts, or dish by dish). Splits already taken are never affected by this switch.
+      </p>
+    </div>
   </div>`;
   }
   if (sec === "kitchen") {
@@ -5606,7 +5613,31 @@ function flipOrderItems(o, from, to) {
 // summaryTableOpen(t): is table t currently OPEN, per the slim summary? A tile is open
 // when it has a summary entry whose state is anything but 'free' or 'req' (those two mean
 // no open session). The board is no longer fetched whole, so the bulk actions read this.
+// IS THIS TABLE BUSY? — answered by exactly what the FLOOR SHOWS, never by the raw server state
+// (owner, 2026-08-01: "see table 30 look[s] close[d] but at back-end it say[s] it's open — only
+// table 6 is on, and you merge table it show[s] table 30 as open, why all this").
+// He was looking at a real contradiction that MY change created. The server still reports the
+// old open/close-era state 'waiting' (a party row with no guests and no orders — "Open, waiting
+// for guests"), and normalizeTileState turns that into **Free** on the tile, because opening a
+// table isn't a step any more. This function read the RAW state, so the floor called T30 free
+// while Merge tables offered it as an open party to join. One answer now: whatever the tile says.
+// Is splitting a bill offered at all? A per-restaurant switch, OFF by default (owner,
+// 2026-08-01, mig 248: "in setting bill section is should have toggle to turn it on and off split
+// and keep it off as default"). Read it HERE, never re-derive it: the option has three entry
+// points (the KOT menu on desktop, the same menu on a phone, and the table's own footer) and a
+// switch that only reaches two of them is worse than no switch.
+function splitBillOn() {
+  return !!(state.data.settings || {}).split_bill_enabled;
+}
+
 function summaryTableOpen(t) {
+  return tableTileState(t).st !== "free";
+}
+// Does a party ROW exist at all, empty or not? Used only to keep such a table out of the
+// "free table" lists: the floor calls it free, but shifting another party onto it would land two
+// sessions on one table. It is offered in neither list, which is the honest answer for a state
+// the floor deliberately no longer shows.
+function tableHasAnyParty(t) {
   const tile = (state.summary.tiles || {})[String(t)];
   return !!tile && tile.state !== "free" && tile.state !== "req";
 }
@@ -6066,9 +6097,12 @@ function floorTileHtml(i) {
   // exactly his point — and what's left is the progress line plus a tiny count riding at its end.
   // The line keeps the per-state segments (amber new · blue cooking · pink on the pass · green
   // served), so it still shows the MIX at a glance, not just a total.
+  // THE LINE RUNS THE FULL WIDTH, WITH THE COUNT ABOVE IT (owner, 2026-08-01: "the line should be
+  // full — on top of line that should be written"). First pass put the count beside the line, which
+  // ate about a third of the bar; now the bar is the whole tile width and "0/3 served" sits over it.
   const servedTxt = cTot > 0 ? `${counts.sv}/${cTot} served` : "";
   const statusRow = cTot > 0
-    ? `<div class="ft-line" title="${esc(label)}${meta ? " · " + esc(meta) : ""}">${strip}<span class="ft-linenum">${esc(servedTxt)}</span></div>`
+    ? `<div class="ft-line" title="${esc(label)}${meta ? " · " + esc(meta) : ""}"><span class="ft-linenum">${esc(servedTxt)}</span>${strip}</div>`
     // No dishes yet (free, or a party sitting with nothing ordered): there is no progress to draw,
     // so the one word that IS information stays. A blank row here read as a broken tile.
     : `<div class="ft-line ft-line-plain" title="${esc(label)}"><span class="ft-linenum">${esc(label)}</span></div>`;
@@ -6341,7 +6375,13 @@ function floorHtml() {
   // legend entry to explain it. That is his call and he made it twice; the state word is still in
   // every tile's tooltip and in the table's own detail popup.
   const LEG = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
-  const legend = `<div class="floor-legend"><span class="lgcap">inside:</span>${LEG.map(([k, v]) => `<span class="lgi"><i class="ldot ldot-${k}"></i>${v}</span>`).join("")}${sessionsOn ? `<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span>` : ""}<span class="lgcap">outline:</span><span class="lgi"><i class="lring lring-red"></i>unpaid</span><span class="lgi"><i class="lring lring-green"></i>paid</span></div>`;
+  // THE BELL ONLY WHERE A GUEST CAN ACTUALLY RING IT (owner, 2026-08-01: "whenever the session is
+  // off, also remove that called thing" and then "if [the] menu will [be] off then this also
+  // [should] not show"). Two things have to be true: the restaurant runs guest sessions, AND the
+  // Waiter calls feature is on. With the guest menu's bell switched off nobody can ever ring, so a
+  // legend entry for it is explaining a colour the floor can never show.
+  const callsPossible = sessionsOn && featureOn("waiter_calls");
+  const legend = `<div class="floor-legend"><span class="lgcap">inside:</span>${LEG.map(([k, v]) => `<span class="lgi"><i class="ldot ldot-${k}"></i>${v}</span>`).join("")}${callsPossible ? `<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span>` : ""}<span class="lgcap">outline:</span><span class="lgi"><i class="lring lring-red"></i>unpaid</span><span class="lgi"><i class="lring lring-green"></i>paid</span></div>`;
 
   // FIRST PAINT before the live board has arrived: show a shimmer skeleton sized
   // to the real table count, instead of briefly drawing every table as "Free"
@@ -7276,7 +7316,7 @@ function tablePanelParts(t, host = "float") {
   // Split among guests = what's still DUE (exclude any order already paid), not the
   // whole historical total — matches the KOT-on split-settle path.
   const splitDue = billMath(os.filter((o) => o.status !== "cancelled" && o.payment_status !== "paid")).total || mBill.total;
-  const splitBtn = os.length ? `<button class="btn" data-split="${esc(splitDue)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
+  const splitBtn = os.length && splitBillOn() ? `<button class="btn" data-split="${esc(splitDue)}" title="Split the bill evenly between guests">🍴 Split</button>` : "";
   // Invoice-first billing (owner 2026-07-24): NO direct Print on a running tab — show
   // "Generate invoice" first; Print (+ Reopen) appears only once an invoice exists. A
   // settled bill is always invoiced (markTablePaid auto-generates it), so it shows Print.
@@ -7985,27 +8025,41 @@ function tableOpsOn() {
      and the tiles come out 165px wide with every label wrapping.
      NOTE: this whole stylesheet is a JS template literal — never put a backtick in a comment
      here, it ends the string and takes the entire panel down with a syntax error. */
-  .kotm-col.kotm-col-ops { width: 500px; max-height: none; overflow: visible; }
-  .kotm-ops { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 2px 0 4px; }
-  .kotm-op { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;
-    text-align: left; padding: 12px 12px 11px; border-radius: 13px; border: 1px solid var(--line);
+  /* ONE COLUMN, BIGGER (owner, 2026-08-01: "1 colum manage — why making small, this UI look more
+     shittier, make it bigger if possible"). Two across made each tile ~236px and stacked the icon
+     over the words, which read as cramped. One column at 470px puts the icon BESIDE the text like
+     a proper menu row, and each row is taller and easier to hit. Seven rows (six with Split off,
+     its new default) at ~70px still fit with NO scrolling — his other rule. */
+  .kotm-col.kotm-col-ops { width: 470px; max-height: none; overflow: visible; }
+  .kotm-ops { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 2px 0 4px; }
+  .kotm-op { display: flex; flex-direction: row; align-items: center; gap: 13px; width: 100%;
+    text-align: left; padding: 11px 14px; border-radius: 13px; border: 1px solid var(--line);
     background: var(--panel-2); color: var(--text); cursor: pointer;
     transition: border-color .14s ease, background .14s ease, transform .1s ease; }
+  .kotm-op .kotm-txt { flex: 1 1 auto; min-width: 0; }
   .kotm-op:hover:not(:disabled) { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 7%, var(--panel-2)); }
   .kotm-op:active:not(:disabled) { transform: scale(.985); }
   .kotm-op:disabled { opacity: .45; cursor: default; }
   .kotm-op.sel { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, var(--panel-2)); }
-  .kotm-op .kotm-ico { width: 38px; height: 38px; border-radius: 10px; font-size: 19px; }
-  .kotm-op .kotm-txt b { font-size: 14.5px; line-height: 1.2; }
-  .kotm-op .kotm-txt small { font-size: 11.5px; line-height: 1.3; }
-  .kotm-op .kotm-off-why { margin-top: 1px; }
-  /* A phone gets one per row — two 14.5px labels side by side at 360px would truncate, and
-     truncated words are the thing this popup exists to avoid. It may scroll there; his rule was
-     about the desktop card he was looking at, and a phone screen cannot hold seven tiles. */
+  .kotm-op .kotm-ico { width: 40px; height: 40px; border-radius: 11px; font-size: 20px; flex: none; }
+  .kotm-op .kotm-txt b { font-size: 15px; line-height: 1.2; }
+  .kotm-op .kotm-txt small { font-size: 12px; line-height: 1.3; }
+  .kotm-op .kotm-off-why { flex: none; margin-left: auto; }
+  /* A phone keeps the same one-per-row shape (it may scroll there — a phone screen cannot hold
+     seven rows, and his no-scroll rule was about the desktop card he was looking at). */
   @media (max-width: 620px) {
     .kotm-col.kotm-col-ops { width: 100%; }
-    .kotm-ops { grid-template-columns: 1fr; }
   }
+  /* FIVE TABLES A ROW IN THE PICKER (owner, 2026-08-01: "5 table in 1 row, little bit make table
+     some small and that thing big"). It was four across at 78px minimum, so a 30-table floor
+     needed 8 rows and scrolled; five smaller tiles fit 30 tables in 6 rows in the same column. */
+  /* Three classes deep on purpose: the generic two-class rule for .kotm-grid (auto-fill, 78px) is
+     declared further DOWN this same injected stylesheet, so a two-class selector here would lose to
+     it and the picker would stay four across. (Same trap as the column width above.) */
+  .kotm-cols .kotm-col .kotm-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; }
+  .kotm-cols .kotm-col .kotm-tile { padding: 7px 4px; }
+  .kotm-cols .kotm-col .kotm-tile b { font-size: 13.5px; }
+  .kotm-cols .kotm-col .kotm-tile small { font-size: 9.5px; }
   .kotm-col { width: 360px; flex: none; padding: 6px 10px; overflow-y: auto;
     max-height: min(64vh, 560px); border-right: 1px solid var(--line);
     animation: kotmColIn .16s ease-out; }
@@ -8081,8 +8135,10 @@ function openKotColumns(t, sess) {
     { id: "merge", icon: "🪢", label: "Merge tables", sub: "One table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
     { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "One order moves", on: movable.length > 0, why: "no movable KOT" },
     { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
-    { id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" },
     { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
+    // LAST, and only when the restaurant has switched it on (owner, 2026-08-01: "split a bill
+    // should be on the last"). Sitting mid-list it was one mis-tap from a half-settled table.
+    ...(splitBillOn() ? [{ id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" }] : []),
   ];
   let sel1 = null, sel2 = null; // op id · chosen KOT/dish id
   const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal kotm-colwrap">
@@ -8108,7 +8164,10 @@ function openKotColumns(t, sess) {
   // Tile grids per purpose. `mark` = the currently-selected tile (kept highlighted).
   const tiles = (list, attr, subOf) => `<div class="kotm-grid">` +
     list.map((i) => `<button class="kotm-tile${summaryTableOpen(i) ? " occ" : ""}" data-${attr}="${i}"><b>T${i}</b><small>${subOf(i)}</small></button>`).join("") + `</div>`;
-  const freeTables = () => { const reqT = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number))); const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && !summaryTableOpen(i) && !reqT.has(String(i))) out.push(i); return out; };
+  // A "free" target must have NO party row at all — not even the invisible empty one the floor
+  // draws as Free (see tableHasAnyParty). Moving a party onto it would put two sessions on one
+  // table, and the second one is the kind of thing nobody notices until a bill is wrong.
+  const freeTables = () => { const reqT = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number))); const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && !tableHasAnyParty(i) && !reqT.has(String(i))) out.push(i); return out; };
   const occTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) out.push(i); return out; };
   const allTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t)) out.push(i); return out; };
   const tileDue = (i) => { const tile = (state.summary && state.summary.tiles || {})[String(i)]; return tile && tile.due > 0 ? "due " + inr(tile.due) : "open"; };
@@ -8253,8 +8312,10 @@ function openKotMenu(t, sess) {
     { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "Send one order to another table's bill", on: movable.length > 0, why: "no movable KOT" },
     // Only DB-backed dish rows (kind "session") can move — legacy JSON lines have no row id.
     { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves — it gets its own new KOT there", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
-    { id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom amounts · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" },
     { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Print an order's kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
+    // Same order and the same switch as the desktop list above — a phone must not offer a
+    // different set of operations from the screen next to it.
+    ...(splitBillOn() ? [{ id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom amounts · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" }] : []),
   ];
   const rowHtml = (r) => `<button class="kotm-row" data-kotop="${r.id}" data-tip="${esc(KOT_TIPS[r.id] || "")}" ${r.on ? "" : "disabled"}>
     <span class="kotm-ico">${r.icon}</span>

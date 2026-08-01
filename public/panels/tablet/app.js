@@ -1749,7 +1749,12 @@ function renderKotMenu(t, s) {
     row("merge", "🪢", "Merge tables", "Join another table's party — one table, one bill", !!s && occupiedOthers > 0) +
     row("movekot", "🧾", "Move a KOT to another table", "Send ONE order (one KOT) to a different table's bill", movable.length > 0) +
     row("moveitem", "🍛", "Move a single dish", "Send one dish to another table — new KOT there", movable.some((o) => dishRowsOf(o).some((r) => r.fromDb))) +
-    row("split", "🍴", "Split the bill", "Collect one bill as several payments — equal, custom, or by dish", tshow("tablet_mark_paid") && movable.some((o) => o.status !== "received"));
+    // Splitting is a per-restaurant switch and it starts OFF (owner, 2026-08-01, mig 248 —
+    // Settings → Bill in the manager panel). It also sits LAST, matching the manager's list: the
+    // waiter and the manager must not be offered a different set of operations for one table.
+    (!!(state.data.settings || {}).split_bill_enabled
+      ? row("split", "🍴", "Split the bill", "Collect one bill as several payments — equal, custom, or by dish", tshow("tablet_mark_paid") && movable.some((o) => o.status !== "received"))
+      : "");
   const { dropLayer } = renderPickerShell(`Table ${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
   document.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
     dropLayer(); // drop this step's back layer before advancing (same rule as move-order's step 1)

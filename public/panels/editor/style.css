@@ -1343,12 +1343,15 @@ html[data-theme="light"] .ft-status {
    was — the box repeated it), and what remains is the progress line with a small count at its
    end. `.ft-status` / `.ft-label` / `.ft-meta` above are kept for the table DETAIL views that
    still use them; the floor tile no longer renders them. */
-.ft-line { margin-top: auto; display: flex; align-items: center; min-width: 0;
-  gap: clamp(3px, 4cqw, 7px); }
-.ft-line .ft-strip { flex: 1 1 auto; min-width: 0; margin-top: 0; }
-.ft-linenum { flex: 0 0 auto; font-size: clamp(8px, 7cqw, 10.5px); line-height: 1.1; font-weight: 700;
+/* THE BAR IS FULL WIDTH, THE COUNT SITS ABOVE IT (owner, 2026-08-01: "the line should be full —
+   on top of line that should be written"). Side by side, the count was taking about a third of
+   the bar, so a "0/3" table looked barely started. Stacked, the bar measures the whole tile. */
+.ft-line { margin-top: auto; display: flex; flex-direction: column; align-items: stretch;
+  min-width: 0; gap: clamp(1px, 1.6cqw, 3px); }
+.ft-line .ft-strip { width: 100%; min-width: 0; margin-top: 0; }
+.ft-linenum { font-size: clamp(8px, 7cqw, 10.5px); line-height: 1.15; font-weight: 700;
   color: color-mix(in srgb, var(--c) 62%, var(--muted)); font-variant-numeric: tabular-nums;
-  white-space: nowrap; }
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Nothing ordered yet → no line to draw, so the one word that carries information takes the
    whole row (and keeps the tile from looking half-rendered). */
 .ft-line-plain .ft-linenum { flex: 1 1 auto; text-align: left; overflow: hidden; text-overflow: ellipsis;

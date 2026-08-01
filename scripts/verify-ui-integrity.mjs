@@ -191,7 +191,24 @@ if (!HOOK || !touched || /public\/panels\//.test(touched)) {
       first || out.slice(0, 200));
   }
 }
-
+// ── 7. WHY THERE IS NO STATIC CHECK FOR "A BACKTICK INSIDE THE INJECTED STYLESHEET" ───────
+//
+// I made that mistake twice on 2026-08-01 (a class name in backticks inside a /* … */ comment in
+// the panels' runtime-injected CSS, which is a template literal — the backtick ENDS the string).
+// The first time the rest of the file failed to parse and /manager rendered EMPTY; check 4 above
+// catches that. The second time the remainder happened to be VALID JavaScript, so it loaded and
+// then threw "ReferenceError: col is not defined" — and the floor drew no tiles.
+//
+// I tried to add a scanner for "a comment containing a backtick inside a template literal" and it
+// was WRONG: inside a template literal `//` is ordinary text (every URL contains one), so treating
+// it as a comment threw the scan out of step and it accused 43 innocent comments. A guard that
+// cries wolf is worse than no guard — it trains you to ignore it — so it is deliberately not here.
+//
+// What actually catches this class of fault is RUNTIME, and it already exists: run
+//   node scripts/verify-no-fatal-ui.mjs --base http://localhost:4937
+// against the LOCAL server before deploying (not only against the deploy afterwards). It loads
+// each panel, reads the rendered text and fails on a console error or an empty screen — which is
+// exactly what both incidents produced.
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");
