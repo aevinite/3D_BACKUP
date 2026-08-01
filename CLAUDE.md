@@ -727,6 +727,29 @@ work. It is all kept above as history — nothing has been removed — but the L
   to, so its result is labelled "needs <parent>" and lands on that parent instead. Guarded by
   **`npm run verify:access-search`** (22 checks, desktop + A35 phone) = phase 501.
 
+## 👤 EVERY PERSON HAS ONE PROFILE, AND IT HAS ONE SHAPE (owner, 2026-08-01 — ALWAYS)
+
+Owner, manager, waiter, kitchen — every human in this product opens the **same** profile panel
+(`components/admin/StaffProfile.tsx`, his chosen "Dossier" design). His instruction was explicit:
+*"whenever Claude does something, he should see this and arrange in this structure only."* So
+before adding anything about a PERSON — a field, a number, a control, a new panel's idea of a
+user — read **`docs/STAFF-PROFILE.md`** and put it inside that structure instead of inventing a
+second one. Left rail: photo (optional) · name · role · "record complete X of 14" · the daily
+buttons. Right column: Permissions → who they are → emergency → job → pay → papers → signing in
+→ activity → private note → danger zone.
+
+- **Permissions are the Access & permissions rows for that role and nothing else.** ONE list
+  feeds the profile, the Access screen's Per-person tab and the write route's allow-list
+  (`lib/staffCaps.ts`); an unknown key is REFUSED, never stored — a stored key no enforcer reads
+  looks granted and isn't.
+- **One dropdown per row: `Default (On)` · `On` · `Off`** (waiter money rows add `On + manager
+  PIN`). The bracket states what the restaurant gives that role. **Every new person starts on
+  Default for everything** (`permissions: {}` at create).
+- **Manager = two blocks** (their menus + what they may manage). **Owner = one** (their menu,
+  read-only — owner_entitlements is a restaurant setting; a dropdown that saves nothing is the
+  dead switch the access rebuild deleted). **Waiter = one. Kitchen = none, said in a line.**
+- The photo is **optional everywhere** and never required by anything.
+
 ## 🧾 THE FLOOR IS READ ONCE AND SHARED — a write MUST drop that snapshot (2026-07-31)
 
 `lfh_table_view_summary` USED TO run ~6 queries per table (~1,800 statements on a 300-table

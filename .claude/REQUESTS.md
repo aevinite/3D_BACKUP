@@ -1046,3 +1046,29 @@ find anything just instantly fix it… till every error is not solved."*
   AV live is running older code than we test. Fixing it means running the pending migration on the
   AV live database, which is an explicit-permission action. Nothing was touched.
 - [ ] The 347-phase `verify:everything` sweep is still running at the time of writing.
+
+## 2026-08-01 — THE PERSON PROFILE (owner picked design 1 "Dossier")
+
+- [x] **One profile panel for every person** — owner, manager, waiter, kitchen — opened from
+  `/aevinite → Users` and from `/aevinite → Owners → Full profile`.
+  `components/admin/StaffProfile.tsx`; the shape is written down in `docs/STAFF-PROFILE.md`
+  and pinned in CLAUDE.md ("arrange in this structure only").
+- [x] **Permissions block = the Access & permissions rows for that role, nothing else.** One
+  shared list (`lib/staffCaps.ts`) now feeds the profile, the Access screen's Per-person tab
+  and the admin write route's allow-list — the Per-person tab's private copy was deleted.
+- [x] **One dropdown per row: `Default (On)` · `On` · `Off`** (waiter money rows add
+  `On + manager PIN`); the bracket states the restaurant's own setting. Saves per row.
+- [x] **Every new user starts on Default for every permission** (`permissions: {}` at create).
+- [x] **Manager has two blocks** (menus + what they may manage); **owner has one** (Owner's
+  menu, read-only — a per-owner override has no enforcement path, so no dead switch);
+  **waiter one**; **kitchen none**, said in a line.
+- [x] **Optional photo** — `POST/DELETE /api/admin/users/photo`, public `branding` bucket under
+  `staff/<id>/`, URL in `profile.photo_url`. No photo = their initial.
+- [x] Whole record editable: personal details, emergency contact, job, pay + the append-only
+  pay ledger (only when the payroll module is on AND they're on the pay list), papers (last 4
+  digits only), sign-in switches, password/PIN, activity, private note, danger zone.
+- [x] Verified in a browser on the real page: 17/17 checks, desktop + 390px phone, 0 console
+  errors, a permission changed → saved → put back; owner profile opens with one read-only block.
+- [ ] **Open follow-up:** a per-OWNER permission override would need enforcement threaded
+  through the owner routes (owner_entitlements is per restaurant today). Not built — the rows
+  are honest read-only until he asks for it.

@@ -2,6 +2,12 @@
 // gate (valid staff cookie); the menu and panels never touch this.
 //
 //   GET    → list all staff users (no hashes ever leave the server).
+//   GET ?id → ONE person's whole PROFILE (identity, personal details, job, pay setup +
+//            what has been paid, their permission overrides, what they did lately). This is
+//            what components/admin/StaffProfile renders. Deliberately NOT the owner panel's
+//            /api/owner/staff?staff= detail: that one refuses when the payroll module is off
+//            and refuses kitchen outright, and the admin's profile must open for every person
+//            in every restaurant — it just leaves the pay block out when the module is off.
 //   POST   → create a user {username, role, password?, name?, phone?}; if no
 //            password is given we generate one and return it ONCE (it's stored
 //            hashed and can't be read back later).
@@ -17,6 +23,8 @@ import { hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { logAction } from "@/lib/oplog";
 import { newWaiterTables } from "@/lib/tableAssign";
+import { PROFILE_FIELDS, mergeProfilePatch, jobPatchFrom } from "@/lib/staffProfile";
+import { capsForRole, isCapValue } from "@/lib/staffCaps";
 
 export const dynamic = "force-dynamic";
 
@@ -38,8 +46,56 @@ function genPassword(): string {
   return s;
 }
 
+// The profile columns (migration 220/221). `profile` is one jsonb of soft personal details;
+// anything a report FILTERS or SUMS is a real column.
+const PROFILE_COLS =
+  "profile, joined_on, left_on, designation, employment_type, shift_label, weekly_off, " +
+  "pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay, in_payroll";
+
+// ── ONE person's whole profile ───────────────────────────────────────────────
+// Every read is scoped to this one person / their one restaurant and column-listed; the
+// heavy-ish extras (payments, what they did lately) are small, capped and fire in parallel.
+async function detail(id: string) {
+  const { data: rows, error } = await sb.from("staff_users")
+    .select(`id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at,
+             pin_hash, permissions, can_self_reset, can_self_set_pin, ${PROFILE_COLS}`)
+    .eq("id", id).limit(1);
+  if (error) return bad("Couldn't open that person — please try again.", 500);
+  const u = (rows || [])[0] as any;
+  if (!u) return bad("User not found.", 404);
+
+  const [restQ, payrollQ, paysQ, actsQ] = await Promise.all([
+    sb.from("restaurants").select("id, name, slug").eq("id", u.restaurant_id).maybeSingle(),
+    sb.from("settings").select("payroll_allowed, payroll_owner_control, payroll_enabled")
+      .eq("restaurant_id", u.restaurant_id).maybeSingle(),
+    // The pay ledger is append-only; the newest 40 entries are a year of salary plus advances.
+    sb.from("staff_payments")
+      .select("id, kind, amount, for_period, mode, paid_on, note, recorded_by, voided_at, void_reason")
+      .eq("staff_id", id).eq("restaurant_id", u.restaurant_id)
+      .order("paid_on", { ascending: false }).limit(40),
+    sb.from("staff_actions").select("action, detail, created_at, panel")
+      .eq("actor_id", id).order("created_at", { ascending: false }).limit(15),
+  ]);
+
+  // The module ladder, read the same way lib/tableTags does it: the admin allows it, and it
+  // is enabled (either by the admin, or by the owner when control was handed over).
+  const s: any = payrollQ.data || {};
+  const payrollOn = !!s.payroll_allowed && (s.payroll_owner_control ? !!s.payroll_enabled : s.payroll_enabled !== false);
+
+  const { pin_hash, ...safe } = u;
+  return ok({
+    person: { ...safe, hasPin: !!pin_hash },
+    restaurant: restQ.data || null,
+    payrollOn,
+    payments: payrollOn ? (paysQ.data || []) : [],
+    activity: actsQ.data || [],
+  });
+}
+
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
+  const one = new URL(req.url).searchParams.get("id");
+  if (one) return await detail(one);
   const [usersQ, restsQ] = await Promise.all([
     sb.from("staff_users")
       .select("id, username, role, name, phone, active, last_seen_at, created_at, pin_hash, can_self_reset, can_self_set_pin, restaurant_id")
@@ -88,6 +144,11 @@ export async function POST(req: NextRequest) {
     password_hash: await hashSecret(password),
     name: display,
     phone: String(body?.phone || "").trim().slice(0, 20) || null,
+    // EVERY new person starts on DEFAULT for every permission (owner, 2026-08-01). Empty
+    // means "follow this restaurant's setting for my role", so a new manager has exactly
+    // what Access & permissions gives managers — never a power nobody granted, and never
+    // one silently missing. Stated here rather than relying on the column default.
+    permissions: {},
   };
   // Waiter sections (migs 222-225) — same rule as the owner/manager create screen, so it
   // can't matter which screen the person was added from. See newWaiterTables().
@@ -111,9 +172,68 @@ export async function PATCH(req: NextRequest) {
   if (!id) return bad("Missing user id.");
   const u = (await sb.from("staff_users").select("*").eq("id", id).limit(1)).data?.[0];
   if (!u) return bad("User not found.", 404);
-  // Owners are off-limits here — the only place they can be changed is the Owners
-  // page, which keeps primary/co-owner state consistent. Block every write action.
-  if (u.role === "owner") return bad("Owners are managed on the Owners page, not here.", 403);
+  // Owners keep a DIFFERENT lifecycle (multi-restaurant, primary/co-owner handoff), so the
+  // account itself — role, name, active, delete — is still changed only on the Owners page.
+  // Their PROFILE is not account state: an owner fills the same record as everybody else
+  // (owner, 2026-08-01 "the same profile will be built for owner also"), so the three profile
+  // actions below are allowed for them and nothing else is.
+  const OWNER_OK = new Set(["set_profile", "set_job", "set_permissions"]);
+  if (u.role === "owner" && !OWNER_OK.has(action))
+    return bad("Owners are managed on the Owners page, not here.", 403);
+
+  // ── the PROFILE actions (the panel in components/admin/StaffProfile) ───────
+  if (action === "set_profile") {
+    // Personal details → the `profile` jsonb. Every value goes through the shared sanitisers;
+    // an unknown key is dropped rather than stored, and "" clears a field.
+    const patch = body?.profile;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing profile.");
+    const merged = mergeProfilePatch(u.profile, patch, PROFILE_FIELDS);
+    const write: Record<string, unknown> = { profile: merged };
+    // The phone lives in its own column, not the jsonb. It rides along here so an OWNER's
+    // number can be corrected too — their NAME is still Owners-page-only (it is tied to the
+    // login and the primary/co-owner handoff), but a phone number is just a detail.
+    if (body?.phone !== undefined) write.phone = String(body.phone || "").trim().slice(0, 20) || null;
+    const wr = await sb.from("staff_users").update(write).eq("id", id);
+    if (wr.error) return bad("Couldn't save those details — please try again.", 500);
+    return ok({ ok: true, profile: merged });
+  }
+  if (action === "set_job") {
+    // Job + pay setup → real columns. jobPatchFrom validates every enum and the amount and
+    // throws a user-safe message, so a typo can't skew a report later.
+    let patch: Record<string, unknown>;
+    try { patch = jobPatchFrom(body?.job || {}); }
+    catch (e) { return bad(e instanceof Error ? e.message : "That value isn't valid."); }
+    if (body?.in_payroll !== undefined) patch.in_payroll = !!body.in_payroll;
+    if (body?.can_see_own_pay !== undefined) patch.can_see_own_pay = !!body.can_see_own_pay;
+    if (!Object.keys(patch).length) return bad("Nothing to change.");
+    const wr = await sb.from("staff_users").update(patch).eq("id", id);
+    if (wr.error) return bad("Couldn't save the job details — please try again.", 500);
+    await logAction("admin", "user_set_job", { actor: "admin", restaurant_id: u.restaurant_id, detail: `job/pay for "${u.username}" · ${Object.keys(patch).join(", ")}` });
+    return ok({ ok: true });
+  }
+  if (action === "set_permissions") {
+    // A person may only ever hold the rows that EXIST for their role in Access & permissions
+    // (lib/staffCaps) — an unknown key is refused rather than stored, because a stored key no
+    // enforcer reads is a permission that looks granted and isn't. "default"/"" REMOVES the
+    // person's own value so they follow the restaurant again.
+    const patch = body?.permissions;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions.");
+    const caps = capsForRole(u.role);
+    const merged: Record<string, string> = { ...(u.permissions && typeof u.permissions === "object" ? u.permissions : {}) };
+    const noted: string[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      const cap = caps.find((c) => c.key === k && c.perPerson);
+      if (!cap) return bad(`"${k}" isn't a permission a ${u.role} has.`);
+      if (v === null || v === "" || v === "default") { delete merged[k]; noted.push(`${k}→default`); continue; }
+      if (!isCapValue(v, cap.pin) || v === "default") return bad(`Bad value for "${k}".`);
+      merged[k] = String(v); noted.push(`${k}→${v}`);
+    }
+    if (!noted.length) return bad("Nothing to change.");
+    const wr = await sb.from("staff_users").update({ permissions: merged }).eq("id", id);
+    if (wr.error) return bad("Couldn't save that permission — please try again.", 500);
+    await logAction("admin", "user_set_permissions", { actor: "admin", restaurant_id: u.restaurant_id, detail: `"${u.username}": ${noted.join(", ")}` });
+    return ok({ ok: true, permissions: merged });
+  }
 
   if (action === "reset_password") {
     const password = String(body?.password || "").trim() || genPassword();
