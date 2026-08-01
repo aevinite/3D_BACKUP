@@ -2823,25 +2823,17 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
    dot, so the floor and the key can't disagree. */
 .ftile.ft-merged { --c: #a855f7; }
 .ldot-merged { background: #a855f7; }
-.ft-merge { margin-top: clamp(2px, 2.5cqw, 5px); display: flex; flex-direction: column; gap: 0; min-width: 0;
-  align-items: center; text-align: center;
-  padding: clamp(3px, 3.2cqw, 7px) clamp(4px, 4cqw, 8px);
+.ft-merge { margin-top: clamp(2px, 2.5cqw, 5px); display: flex; align-items: center; min-width: 0;
+  padding: clamp(2px, 2.4cqw, 5px) clamp(5px, 5cqw, 9px);
   border-radius: clamp(6px, 6.5cqw, 10px);
   background: color-mix(in srgb, #a855f7 22%, transparent);
   border: 1px solid color-mix(in srgb, #a855f7 55%, transparent);
   line-height: 1.1; color: color-mix(in srgb, #a855f7 78%, var(--text));
   min-width: 0; overflow: hidden; }
-/* BIG, because it is the whole message of this tile. It scales with the tile like the table number
-   does, so it stays the loudest thing on a small floor too. */
-.ft-merge-big { display: block; font-size: clamp(11px, 15cqw, 22px); font-weight: 900;
-  letter-spacing: .01em; line-height: 1; }
-.ft-merge-with { display: block; font-size: clamp(9px, 9.5cqw, 13px); font-weight: 800;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 /* On the PARENT it is a slim chip under the progress line — the line is still the main reading. */
 .ft-merge-parent { margin-top: clamp(2px, 2.5cqw, 5px); flex-direction: row; align-items: center;
   font-size: clamp(8px, 7.5cqw, 11px); font-weight: 800; padding-block: clamp(1px, 1.6cqw, 3px);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-@container (max-width: 64px) { .ft-merge-with { display: none; } }  /* the big word survives longest */
 @container (max-width: 64px) { .ft-merge-parent { font-size: 8px; padding: 0 3px; } }
 html[data-theme="light"] .ft-merge { background: color-mix(in srgb, #a855f7 20%, #fff); }
 
