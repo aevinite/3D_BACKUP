@@ -119,7 +119,7 @@ const state = {
   // Settings tab: which SECTION the left sidebar has selected (owner, 2026-07-03 —
   // "settings should be organized": General / Tables / Users / Access / Billing /
   // Dining sessions instead of one long scroll). See SETTINGS_SECTIONS.
-  settingsSection: "general",
+  settingsSection: "tables",   // "general" was removed — see SETTINGS_SECTIONS
 };
 
 // ---------- tiny helpers ----------
@@ -1816,7 +1816,11 @@ function openTableHolderPicker(i) {
 // Each section groups related cards; renderList() draws the sidebar from this same
 // array, and formGeneral() below dispatches on state.settingsSection.
 const SETTINGS_SECTIONS = [
-  { id: "general", label: "General", sub: "site basics", icon: "fa-gear", title: "General settings" },
+  // "General" IS GONE (owner, 2026-08-01: "this setting will be completely removed"). It held two
+  // switches — service mode and the bubble effect — and both are decided on Access & permissions
+  // now: service mode behind "Put menu on maintenance" (which says WHO may use it), the bubbles as
+  // Menu's last sub-option. Leaving the page here would have been a second place to change them,
+  // and a manager quietly taking the menu down was exactly what that permission exists to stop.
   { id: "tables", label: "Tables", sub: "floor & seats", icon: "fa-chair", title: "Table settings" },
   { id: "users", label: "Users", sub: "staff logins", icon: "fa-users", title: "User settings" },
   // Renamed with the access rebuild: this section holds no permissions any more, only the
