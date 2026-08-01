@@ -15,6 +15,7 @@
 import { useEffect, useState } from "react";
 import AccessTree from "@/components/admin/AccessTree";
 import AccessPerPerson from "@/components/admin/AccessPerPerson";
+import { SettingsSaveBar } from "@/components/admin/RestaurantSettings";
 
 type Rest = { id: string; name: string; slug: string; active: boolean };
 
@@ -93,6 +94,8 @@ export default function AccessPage() {
           KOT, sessions, banquet and tables cards that used to live on the restaurant-detail
           page (owner, 2026-08-01). The picker above already knows the restaurant, so nothing
           extra is fetched for it. */}
+      {/* ONE save bar for every embedded settings panel on this page. */}
+      <SettingsSaveBar />
       {rid ? (tab === "general" ? <AccessTree rid={rid} rest={rest ? { id: rest.id, slug: rest.slug, name: rest.name } : undefined} /> : <AccessPerPerson rid={rid} />) : null}
     </div>
   );

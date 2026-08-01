@@ -76,7 +76,7 @@ export type Bind =
   // manager grant said "what a manager gets", with nothing above it saying whether the thing is
   // on the premises. Stored in access_config (already JSONB, so no migration) and ABSENT MEANS
   // ON, so no restaurant changes until someone deliberately switches one off.
-  | { t: "has"; id: string }
+  | { t: "has"; id: string; def?: boolean }
   | { t: "none" };                       // nothing stored (left-to-build placeholder)
 
 export type Node = {
@@ -207,18 +207,9 @@ export const SECTIONS: Section[] = [
         id: "menu", name: "Menu", def: true, fresh: true, bind: { t: "setting", key: "menu_enabled" },
         what: "The whole guest menu. OFF means this restaurant has NO guest menu at all — no QR menu, no menu link, nothing for a diner to open. It runs on the staff panels only.",
         children: [
-          { id: "dining_sessions", name: "Dining sessions", def: false, bind: { t: "setting", key: "sessions_enabled" },
-            configurableWhenOff: true,
-            what: "The table-session system: a guest scans the table's QR, the table is opened, the party is tracked and joined. OFF means there is no “Open table” step at all — the floor switches to direct ordering, so staff punch an order straight in without opening a table first.",
-            children: [
-              // The rules that only MEAN anything while sessions are on — "the guest must be
-              // standing in the café", the phone-code check, and the café's own coordinates.
-              // They were on the restaurant-detail page, one page away from the switch that
-              // decides whether they apply at all (owner, 2026-08-01: "in dining session there
-              // was all location and stuff too — add all this in the dropdown").
-              { id: "sessions_rules", name: "Session rules & café location", bind: { t: "none" }, panel: "settings:sessions",
-                what: "Whether a guest has to be physically at the café (and inside how many metres), whether a phone code is needed to order, and the café's own coordinates." },
-            ] },
+          { id: "dining_sessions", name: "Dining session and location", def: false,
+            bind: { t: "setting", key: "sessions_enabled" }, panel: "settings:sessions", configurableWhenOff: true,
+            what: "The table-session system: a guest scans the table's QR, the table is opened, the party is tracked and joined. OFF means there is no “Open table” step at all — the floor switches to direct ordering, so staff punch an order straight in without opening a table first. The rules and the café's coordinates are inside." },
           {
             // MASTER on/off — the rebuild lost it: only the three-way "where does the rating go"
             // picker survived, so there was no way to say "this restaurant has no rating at all"
@@ -252,6 +243,24 @@ export const SECTIONS: Section[] = [
               { id: "guest_note", name: "Guest can write their own note", def: true, bind: { t: "feature", key: "guest_note" },
                 what: "The free-text “anything else?” note a guest sends to the kitchen. OFF removes it — they may still pick from your preset notes." },
             ] },
+          {
+            // TAKING THE MENU DOWN (owner, 2026-08-01). The capability already exists —
+            // settings.service_mode, /api/maintenance, the red control in the panels. What was
+            // missing is WHO may use it. Off for every restaurant until it is handed over, and
+            // when it is off the control is not on their screen at all (the standing rule: a
+            // feature that is off is absent, not greyed).
+            id: "maintenance", name: "Put menu on maintenance", bind: { t: "has", id: "maintenance", def: false },
+            what: "Lets someone take the guest menu down — a red control in their own Settings that closes the menu to diners. Off for every restaurant unless you hand it over.",
+            children: [
+              { id: "maintenance_who", name: "Who may do it", def: "owner",
+                bind: { t: "opt", id: "maintenance", side: "manager", key: "who" },
+                what: "Taking the menu down stops every guest ordering, so it is handed to as few people as possible.",
+                choices: [
+                  { value: "owner", label: "Owner only", what: "Only the owner sees the control." },
+                  { value: "owner_manager", label: "Owner and manager", what: "The manager gets it too — for a kitchen problem the owner isn't there for." },
+                ] },
+            ],
+          },
           { id: "favourites", name: "Favourites", def: true, bind: { t: "feature", key: "favorites" },
             what: "The heart button on a dish and the Favourites tab. This is also what the loyalty feature will be built on later." },
           { id: "veg", name: "Veg / non-veg", def: true, bind: { t: "feature", key: "diet_filter" },
@@ -280,13 +289,9 @@ export const SECTIONS: Section[] = [
           },
         ],
       },
-      { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false, bind: { t: "setting", key: "auto_print_kot_allowed" },
-        configurableWhenOff: true,
-        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine.",
-        children: [
-          { id: "kot_setup", name: "Printer check & sample ticket", bind: { t: "none" }, panel: "settings:kitchen",
-            what: "Print a test ticket to check the printer and the ticket layout before the kitchen relies on it." },
-        ] },
+      { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
+        bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen", configurableWhenOff: true,
+        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine. The printer check and the sample ticket are inside." },
       {
         id: "bill", name: "Bill", bind: { t: "none" },
         what: "Everything that prints on a bill. There is no on/off — a restaurant can always issue one.",
@@ -305,17 +310,17 @@ export const SECTIONS: Section[] = [
       {
         // Moved off the restaurant-detail page with the rest of it (owner, 2026-08-01). It has no
         // on/off — a restaurant always has tables — so it is a pure group, like Bill.
-        id: "tables", name: "Tables & QR codes", bind: { t: "none" },
+        id: "tables", name: "Table", bind: { t: "none" },
         what: "How many tables this restaurant has, what each one is called, how many seats it has, its QR code, and how the floor is laid out on screen.",
         children: [
           // REAL sub-options, not one merged blob (owner, 2026-08-01: "all are sub options — QR
           // and link is a whole new sub option, only expandable, it should have dropdown").
           // Each opens just the part of the tables screen it owns.
-          { id: "tables_list", name: "Tables & seats", bind: { t: "none" }, panel: "settings:tables",
-            what: "How many tables there are, what each one is called and how many people sit at it." },
-          { id: "tables_layout", name: "Floor layout", bind: { t: "none" }, panel: "settings:floor",
-            what: "How the tables are arranged on the manager's floor screen — how many to a row, and how big each tile ends up." },
-          { id: "tables_qr", name: "QR codes & links", bind: { t: "none" }, panel: "settings:qr",
+          { id: "tables_list", name: "Table name & seats", bind: { t: "none" }, panel: "settings:tables",
+            what: "Each table's name — optional, e.g. the last one as “Banquet” — and how many people can sit there." },
+          { id: "tables_layout", name: "Number of tables per row", bind: { t: "none" }, panel: "settings:floor",
+            what: "How many table boxes sit on one line in the manager's floor view, and so how big each box ends up." },
+          { id: "tables_qr", name: "Guest QR link per table", bind: { t: "none" }, panel: "settings:qr",
             what: "The permanent QR code and link for every table — the ones printed and put on the tables. Print one, or the whole sheet." },
         ],
       },
@@ -341,19 +346,19 @@ export const SECTIONS: Section[] = [
         configurableWhenOff: true,
         what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board and the 🥡 New Parcel button.",
         children: [
-          { id: "ch_website", name: "Takeaway / own website", def: true, bind: { t: "channel", key: "website" },
+          { id: "ch_website", name: "Takeaway / own website", def: true, configurableWhenOff: true, bind: { t: "channel", key: "website" },
             what: "A counter takeaway punched in by staff, and orders coming from the restaurant's own website. Needs no outside account.",
             children: [
               { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
                 what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },
             ] },
-          { id: "ch_zomato", name: "Zomato", def: false, bind: { t: "channel", key: "zomato" },
+          { id: "ch_zomato", name: "Zomato", def: false, configurableWhenOff: true, bind: { t: "channel", key: "zomato" },
             what: "Zomato orders land on the Platform board. Needs Zomato's API key — until it is entered the channel shows as “not connected”.",
             children: [
               { id: "ch_zomato_key", name: "Zomato API key", bind: { t: "creds", key: "zomato" }, placeholder: "Paste the Zomato API key",
                 what: "From the restaurant's own Zomato partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
             ] },
-          { id: "ch_swiggy", name: "Swiggy", def: false, bind: { t: "channel", key: "swiggy" },
+          { id: "ch_swiggy", name: "Swiggy", def: false, configurableWhenOff: true, bind: { t: "channel", key: "swiggy" },
             what: "Swiggy orders land on the Platform board. Needs Swiggy's API key — until it is entered the channel shows as “not connected”.",
             children: [
               { id: "ch_swiggy_key", name: "Swiggy API key", bind: { t: "creds", key: "swiggy" }, placeholder: "Paste the Swiggy API key",
@@ -653,7 +658,9 @@ export function nodeValue(n: Node, s: TreeState): any {
     // = false (no in-menu stars) while the rating area very much still exists, so reading the
     // features flag alone would show this master as OFF on a restaurant that asks every guest
     // for a Google review. Off is the one combination that shows a guest nothing.
-    case "has":      return present(s.config?.[b.id]?.on as boolean, true) !== false;
+    // Absent means ON for the money/floor rows (nothing changes until it is switched off), but a
+    // row can say otherwise — "Put menu on maintenance" ships OFF for every restaurant.
+    case "has":      return present(s.config?.[b.id]?.on as boolean, b.def !== false) !== false;
     case "ratingsMaster": {
       const stars = s.features?.ratings;
       const mode = present(s.settings?.google_review_mode as string, "off");

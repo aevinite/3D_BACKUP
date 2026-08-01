@@ -23,7 +23,12 @@ const KEYS = [
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
   "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
-  "table_count", "table_seats", "table_names", "auto_table_action",
+  "table_count", "table_seats", "table_names",
+  // auto_table_action is NOT here any more (owner, 2026-08-01: "we don't even want that option,
+  // remove that option completely, because that option is useless"). A table always clears itself
+  // once the bill is paid and every dish is served; WHICH way it cleared was a choice nobody
+  // should have had to make. The column and its default behaviour are untouched — there is simply
+  // no field, so nothing on this screen can change it.
   // Banquet bill (migs 237/239). These MUST be listed here: the Save button builds its
   // patch from the keys in this array, so a field missing from it looks editable and then
   // silently saves nothing (which is exactly what happened when the card was first added).
@@ -47,6 +52,52 @@ const hintStyle: React.CSSProperties = { fontSize: 11.5, marginTop: 3 };
  *  saves the whole settings row either way, so the same values are edited from either place. */
 export type SettingsSection = "billing" | "banquet" | "kitchen" | "sessions" | "tables" | "floor" | "qr";
 
+/**
+ * ONE SAVE BAR FOR THE WHOLE PAGE.
+ *
+ * This component used to render its own fixed-position "Unsaved changes · Discard · Save" bar.
+ * That was fine when it was mounted once on the restaurant-detail page. Access mounts it SEVEN
+ * times — billing, banquet, kitchen, sessions, tables, floor, qr — so seven bars stacked on the
+ * same spot, which is what the owner saw as "two buttons coming" and as flicker (they overlap,
+ * so the hover highlight lands on whichever won the paint).
+ *
+ * Worse than the duplicate: every instance kept its OWN draft of the SAME settings row, so two
+ * open panels could each save and silently undo the other. The registry fixes both — instances
+ * publish their dirty state and their save/discard here, ONE bar renders, and pressing Save
+ * saves every dirty panel.
+ */
+type SaveEntry = { dirty: boolean; busy: boolean; save: () => Promise<void>; discard: () => void };
+const saveRegistry = new Map<string, SaveEntry>();
+const saveListeners = new Set<() => void>();
+const publish = () => { for (const fn of saveListeners) fn(); };
+function registerSave(id: string, entry: SaveEntry) { saveRegistry.set(id, entry); publish(); }
+function unregisterSave(id: string) { saveRegistry.delete(id); publish(); }
+
+/** The single bar. Mounted once by the page; renders nothing while everything is saved. */
+export function SettingsSaveBar() {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const fn = () => tick((n) => n + 1);
+    saveListeners.add(fn);
+    return () => { saveListeners.delete(fn); };
+  }, []);
+  const dirty = [...saveRegistry.values()].filter((e) => e.dirty);
+  const busy = dirty.some((e) => e.busy);
+  if (!dirty.length) return null;
+  return (
+    <div className="adm-savebar" role="status">
+      <span className="adm-savebar-t">
+        {dirty.length > 1 ? `Unsaved changes in ${dirty.length} sections` : "Unsaved changes"}
+      </span>
+      <button className="adm-savebar-x" disabled={busy} onClick={() => dirty.forEach((e) => e.discard())}>Discard</button>
+      <button className="adm-savebar-go" disabled={busy}
+        onClick={async () => { for (const e of dirty) await e.save(); }}>
+        {busy ? "Saving…" : "Save"}
+      </button>
+    </div>
+  );
+}
+
 export default function RestaurantSettings({ restaurant, only }: { restaurant: Rest; only?: SettingsSection[] }) {
   const show = (k: SettingsSection) => !only || only.includes(k);
   const [draft, setDraft] = useState<Draft>({});
@@ -62,6 +113,14 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const [kotBusy, setKotBusy] = useState(false);
   const [qrBusy, setQrBusy] = useState<string | null>(null);
   const [showFloorPreview, setShowFloorPreview] = useState(false);
+  // The bill's logo is the restaurant's own uploaded image (Format & theme → Colours, logo &
+  // wording). Read here so the preview shows the REAL header — including the empty case, which
+  // is the whole point of the rule: no image ⇒ the bill starts with the name.
+  const [logoUrl, setLogoUrl] = useState<string>("");
+  useEffect(() => {
+    fetch(`/api/admin/restaurants/branding?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
+      .then((r) => r.json()).then((j) => setLogoUrl(String(j?.logo_url || ""))).catch(() => {});
+  }, [restaurant.id]);
 
   // Success/error notes fade on their own (errors linger a little longer to be read).
   useEffect(() => {
@@ -125,6 +184,14 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
   };
   const discard = () => { setDraft(JSON.parse(JSON.stringify(base))); setErr(null); setMsg(null); };
+
+  // Publish this panel's state to the ONE bar. Keyed by the sections it owns, so mounting the
+  // same section twice can't register twice.
+  const regId = (only || ["all"]).join(",");
+  useEffect(() => {
+    registerSave(regId, { dirty, busy, save, discard });
+    return () => unregisterSave(regId);
+  });
 
   // ── AUTO-SAVE, for discrete controls only (owner, 2026-07-30: "I change value to 8 and it
   // doesn't auto save"). Debounced so a drag or fast typing writes ONCE, not per keystroke.
@@ -202,6 +269,69 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       </body></html>`;
     const w = window.open("", "_blank", "width=340,height=560");
     if (!w) { setErr("Allow pop-ups to preview the KOT."); return; }
+    w.document.write(html); w.document.close();
+  };
+
+  // ── SEE THE BILL BEFORE ANYONE GETS ONE (owner, 2026-08-01) ────────────────
+  // Prints a made-up bill — invented customer, three invented lines — using THIS restaurant's
+  // real header, taxes and footer, so the layout can be checked without settling a real table.
+  // Every figure is computed from the fields on this form, so what is previewed is what prints.
+  const previewBill = () => {
+    const money = (n: number) => Math.round(n).toLocaleString("en-IN");
+    const lines = [
+      { t: "Paneer Tikka Masala", q: 2, p: 320 },
+      { t: "Garlic Naan", q: 4, p: 60 },
+      { t: "Masala Chai", q: 2, p: 80 },
+    ];
+    const sub = lines.reduce((a, l) => a + l.q * l.p, 0);
+    const taxRows = comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0);
+    const taxLines = taxRows.map((c) => ({ label: String(c.label), amt: (sub * Number(c.rate)) / 100, rate: Number(c.rate) }));
+    const taxTotal = taxLines.reduce((a, l) => a + l.amt, 0);
+    const total = sub + taxTotal;
+    const name = String(draft.restaurant_name || restaurant.name || "Restaurant");
+    const addr = String(draft.restaurant_address || "");
+    const phone = String(draft.restaurant_phone || "");
+    const gst = String(draft.gstin || "");
+    const foot = String(draft.bill_footer || "Thank you — please visit again");
+    const prefix = String(draft.invoice_prefix || "INV");
+    const esc = (v: string) => v.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Bill preview</title><style>
+      *{box-sizing:border-box}
+      body{font:12px/1.5 ui-monospace,Menlo,monospace;width:300px;margin:16px auto;color:#000;background:#fff}
+      .logo{display:block;max-width:120px;max-height:60px;margin:0 auto 8px;object-fit:contain}
+      h1{font-size:15px;text-align:center;margin:0 0 2px;letter-spacing:.04em}
+      .sub{text-align:center;font-size:10.5px;color:#333;margin:0 0 2px}
+      hr{border:0;border-top:1px dashed #999;margin:9px 0}
+      table{width:100%;border-collapse:collapse}
+      th{font-size:10px;text-align:left;border-bottom:1px solid #000;padding-bottom:3px}
+      td{padding:2px 0;font-size:11.5px} .c{text-align:center} .r{text-align:right}
+      .tot{display:flex;justify-content:space-between;font-size:11.5px;padding:1px 0}
+      .grand{font-weight:700;font-size:14px;border-top:1px solid #000;margin-top:4px;padding-top:5px}
+      .foot{text-align:center;margin-top:10px;font-size:11px}
+      .stamp{text-align:center;margin-top:14px;font-size:10px;color:#a00;border:1px dashed #a00;padding:5px}
+      @media print { .stamp { display:none } }
+    </style></head><body>
+      ${logoUrl ? `<img class="logo" src="${esc(logoUrl)}" onerror="this.style.display='none'">` : ""}
+      <h1>${esc(name)}</h1>
+      ${addr ? `<div class="sub">${esc(addr)}</div>` : ""}
+      ${phone ? `<div class="sub">${esc(phone)}</div>` : ""}
+      ${gst ? `<div class="sub">GSTIN: ${esc(gst)}</div>` : ""}
+      <hr>
+      <div class="sub" style="text-align:left">Bill: ${esc(prefix)}/2025-26/000042 &nbsp;·&nbsp; Table 7</div>
+      <div class="sub" style="text-align:left">Customer: Rahul Mehta &nbsp;·&nbsp; 98250 12345</div>
+      <hr>
+      <table><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr>
+        ${lines.map((l) => `<tr><td>${esc(l.t)}</td><td class="c">${l.q}</td><td class="r">${money(l.p)}</td><td class="r">${money(l.q * l.p)}</td></tr>`).join("")}
+      </table>
+      <hr>
+      <div class="tot"><span>Subtotal</span><span>${money(sub)}</span></div>
+      ${taxLines.map((l) => `<div class="tot"><span>${esc(l.label)} ${l.rate}%</span><span>${money(l.amt)}</span></div>`).join("")}
+      <div class="tot grand"><span>TOTAL</span><span>₹${money(total)}</span></div>
+      <div class="foot">${esc(foot)}</div>
+      <div class="stamp">SAMPLE — invented customer and items, your real header and taxes.<br>Not a real bill; this box never prints.</div>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=360,height=680");
+    if (!w) { setErr("Allow pop-ups to preview the bill."); return; }
     w.document.write(html); w.document.close();
   };
 
@@ -327,10 +457,20 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // Banquet bill (mig 237): the field list this restaurant is asked to fill, and a
   // live preview of the next bill number in the chosen style.
   const bqFields = cleanBanquetFields(draft.banquet_fields);
-  const bqTax = banquetTaxOf(draft);
-  const bqTaxTotal = Math.round(bqTax.reduce((a, c) => a + c.rate, 0) * 100) / 100;
+  // THE "+ ADD TAX" BUTTON DID NOTHING, and this is why (owner, 2026-08-01). The editor was
+  // driven by banquetTaxOf(), which is the PRINTING reader: it drops any row with a blank label
+  // or a zero rate, quite rightly, so a made-up tax never reaches a bill. Adding a row appends
+  // exactly that — a blank label and a blank rate — so the reader threw it away on the very next
+  // render and nothing appeared. Editing was broken the same way: the map ran over the FILTERED
+  // list, so once any row was incomplete the indexes no longer matched what was stored.
+  //
+  // The editor works on the RAW stored list; banquetTaxOf stays the reader for what actually
+  // prints. Same shape as the menu tax rows just above, which never had this problem.
+  const bqTaxRaw = (Array.isArray(draft.banquet_tax_components) ? draft.banquet_tax_components : []) as TaxComp[];
+  const bqTax = bqTaxRaw;
+  const bqTaxTotal = Math.round(banquetTaxOf(draft).reduce((a, c) => a + c.rate, 0) * 100) / 100;
   const setBqTax = (i: number, key: "label" | "rate", v: string) =>
-    set("banquet_tax_components", bqTax.map((c, j) => (j === i ? { ...c, [key]: key === "rate" ? v : v } : c)));
+    set("banquet_tax_components", bqTaxRaw.map((c, j) => (j === i ? { ...c, [key]: v } : c)));
   const bqSample = banquetBillNo(
     String(draft.banquet_bill_prefix || "BQB"),
     String(draft.banquet_bill_style || "fy"),
@@ -394,6 +534,16 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             is what builds the repeat-guest list and makes the name auto-fill next time),
             and PRINT those two lines on the paper. A restaurant can do the first without
             the second. The (i) below spells that out for whoever flips these. */}
+        {/* SEE IT BEFORE A GUEST DOES. Opens a made-up bill using this restaurant's real header,
+            taxes and footer — and its logo if one is uploaded, which is how the "image on top,
+            otherwise start with the name" rule is checked without settling a real table. */}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
+          <button className="adm-btn" onClick={previewBill}>🧾 Preview the bill</button>
+          <span className="adm-muted" style={{ fontSize: 11.5 }}>
+            {logoUrl ? "Your logo prints at the top." : "No logo uploaded — the bill starts with the name. Add one in Format & theme → Colours, logo & wording."}
+          </span>
+        </div>
+
         <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Customer on the bill</h3>
         <div style={{ display: "grid", gap: 8, maxWidth: 480 }}>
           {boolToggle("Ask for mobile + name before a bill", "bill_customer_required", custRequired)}
@@ -450,7 +600,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         <button className="adm-btn" disabled={!loadOk || busy || comps.length >= 6}
           onClick={() => set("tax_components", [...comps, { label: "", rate: "" }])}>+ Add tax</button>
         <div style={{ maxWidth: 240, marginTop: 14 }}>
-          {field("Fallback tax rate (0.05 = 5%)", "tax_rate", { type: "number", step: "any", min: 0, hint: "Used only if you remove every named tax above." })}
+          {/* "Fallback tax rate" was here. REMOVED 2026-08-01 (owner: "remove the fallback tax rate
+              from the format of bill — it is confusing, I don't get it"). It only ever applied if
+              every named tax row was deleted, which is a state no real bill wants. The column is
+              untouched, so nothing a restaurant already stores changes. */}
         </div>
       </div>
       )}
@@ -556,7 +709,8 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "8px 0" }}>
           <div style={{ fontSize: 12.5, fontWeight: 700 }}>
-            Banquet tax: <b>{bqTax.length ? `${bqTaxTotal}%` : `${compTotal}% (same as the menu)`}</b>
+            Banquet tax: <b>{bqTaxTotal > 0 ? `${bqTaxTotal}%` : `${compTotal}% (same as the menu)`}</b>
+            {bqTaxRaw.length && bqTaxTotal === 0 ? <span className="adm-muted" style={{ fontWeight: 600 }}> · fill the name and % to make it count</span> : null}
           </div>
           <button className="adm-btn" disabled={!loadOk || busy || bqTax.length >= 6}
             onClick={() => set("banquet_tax_components", [...bqTax, { label: "", rate: "" }])}>+ Add tax</button>
@@ -807,16 +961,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         </div>
       )}
 
-      {/* Floating save bar — appears the moment anything is edited, stays reachable however long the page is. */}
-      {dirty && (
-        <div style={{ position: "fixed", left: "50%", bottom: 18, transform: "translateX(-50%)", zIndex: 1002, display: "flex", gap: 10, alignItems: "center", background: "var(--card)", border: "var(--border)", borderRadius: 14, padding: "10px 16px", boxShadow: "0 10px 34px rgba(0,0,0,0.3)" }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700 }}>Unsaved changes</span>
-          <button className="adm-btn" disabled={busy} onClick={discard}>Discard</button>
-          <button className="adm-btn primary" disabled={busy} onClick={save}>
-            <i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Saving…" : "Save"}
-          </button>
-        </div>
-      )}
+      {/* The save bar is NOT drawn here any more — see SettingsSaveBar above. */}
     </>
   );
 }
