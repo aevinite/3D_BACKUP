@@ -303,3 +303,63 @@ caught it.
 milliseconds. The expensive shapes are *long ranges* and *all restaurants at once*. Any future work
 here should be judged on those two, not on a single-restaurant month.
 
+---
+
+# Why the database kept failing — the root cause (2026-08-01)
+
+Asked directly: *why is the database failing, can't you solve it?* Here is the honest chain, what was
+fixed, and the one part that costs money.
+
+## The machine is too small for its data
+
+| | |
+|---|---|
+| `shared_buffers` (what Postgres can cache) | **224 MB** |
+| `effective_cache_size` | 384 MB → a **~1 GB** machine (Supabase Micro) |
+| the database | **367 MB** before this work |
+| `max_connections` | 60 |
+
+The working set did not fit. So every large scan read from disk **and evicted the floor's hot pages**
+— that is the mechanism by which a heavy report made unrelated panel reads slow enough to cross the
+**8-second** statement wall. It is also why the instance eventually fell over when two of our own
+501-phase suites ran at once.
+
+## Fixed: a third of that memory was pure waste
+
+`realtime_events` holds ~300 live rows (breadcrumbs are inserted and pruned all day) and its indexes
+had grown to **29 MB — one of them 19.4 MB for 306 rows**. A B-tree never returns those pages by
+itself: VACUUM frees space *inside* index pages but never shrinks the index file, so a churn table's
+indexes only ever grow. **REINDEX is the only thing that reclaims them.**
+
+**Database 367 MB → 321 MB, in one pass, with nothing locked and no row touched.**
+
+- **`npm run db:maintain`** reports what can be reclaimed; `-- --apply` does it (all `CONCURRENTLY`).
+  It refuses to point at anything but the backup database. A command, not a cron — deliberately.
+- **Migration 247** makes the three hot tables vacuum sooner. At the defaults, a 400k-row table waits
+  for ~**80 000** dead rows before autovacuum fires, which is why `orders` sat **11 days** with 13 266
+  dead rows and stale planner statistics. Now ~8 000.
+
+## Tried and rejected by measurement — do not retry these
+
+| idea | why it looked right | what happened |
+|---|---|---|
+| drop `idx_orders_restaurant_created` + `idx_orders_restaurant` (21 MB) | each is a column-prefix of a larger index, so they look redundant | heatmap **1.6–9.4 s → 20–39 s**. Load-bearing. Both restored. |
+| add an effective-date index carrying the heatmap's columns, for an index-only scan | would avoid the 162 MB heap entirely | **worse** — 2.5–10.3 s → 13.5–18.9 s, and +26 MB. Dropped. |
+
+## What is still not fixed
+
+1. **The portfolio heatmap over a long range still crosses the 8 s wall** (best case is now ~1.6 s
+   after the memory reclaim, worst still 10 s+). Cheap tricks are exhausted — it needs the data
+   pre-aggregated by day-of-week **and hour**. That is a new rollup table plus a refresher, with the
+   same parity proof `scripts/verify-heatmap-parity.mjs` gives. **Not built.**
+2. **The machine.** 224 MB of cache for a 321 MB database is still too little; the reclaim bought
+   headroom, it did not create room. Two honest options, and this one is the owner's call because it
+   costs money:
+   - **Shrink the data** — 399 000 orders here are overwhelmingly demo/seed/stress-test rows. A real
+     restaurant produces a tiny fraction of that. Trimming the demo tenants' history would put the
+     whole database comfortably inside cache. (Orders can only be archived/soft-deleted, never
+     hard-deleted — that compliance rule stands.)
+   - **Pay for a bigger instance** — the direct fix for headroom.
+   - **Worth checking first:** AV live almost certainly has far fewer orders, so it may not have this
+     problem at all. Its order count should be read before assuming the client stack needs anything.
+
