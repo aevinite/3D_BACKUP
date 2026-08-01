@@ -411,3 +411,10 @@ Three separate false-failure hunts today came from MY OWN concurrent load: (1) p
 full run; (3) running verify-offline against backup while the 496-phase run was mid-flight turned
 1 real failure into 5. The suite is the ONLY thing that may touch a target while it runs.
 Before starting anything against a site: `pgrep -f verify-everything` and wait if it answers.
+
+## Snapshot BEFORE the first write, to disk — not in the test process (2026-08-01)
+A browser-driven sweep flipped all 37 Access toggles, holding its "before" snapshot only in
+memory. It could not restore byte-for-byte afterwards, and the process had already exited by the
+time that mattered. Nothing was left broken, but the state had to be reasoned about instead of
+simply restored. Any script that mutates real data writes its snapshot to a FILE before the first
+write, and restores from that file in a `finally`.
