@@ -58,6 +58,13 @@ export type Bind =
   // manager_opts. Holds any JSON value, so a string choice (dashboard range) fits too.
   | { t: "opt"; id: string; side: string; key: string }
   | { t: "limit"; id: string; side: string } // access_config[id].limit[side] — a numeric ceiling
+  // The WHOLE rating area on or off. It spans TWO stored values because the guest app already
+  // reads two: settings.features.ratings decides whether in-menu stars exist at all, and
+  // google_review_mode decides where a rating is sent. Off means BOTH are off, so nothing about
+  // rating shows a guest — which is what the owner asked for when he noticed the master switch
+  // had gone missing in the rebuild (2026-08-01). Deriving it here rather than adding a third
+  // column keeps ONE source of truth for the guest: no new gate, no new default, no drift.
+  | { t: "ratingsMaster" }
   | { t: "none" };                       // nothing stored (left-to-build placeholder)
 
 export type Node = {
@@ -75,6 +82,19 @@ export type Node = {
   unit?: string;                // for cap nodes
   options?: number[];           // for cap nodes
   link?: { href: string; label: string }; // read-only row that points at the screen which OWNS this value
+  // ── the two flags the 2026-08-01 rework added ────────────────────────────────
+  // Its dropdown OPENS while the feature is off. Rule 1 (no greyed-out ghosts) is about
+  // PERMISSIONS — a thing a role can never reach must be absent. These children are SET-UP
+  // instead: you paste a Zomato key, set the café's coordinates or lay out the banquet bill
+  // BEFORE the feature goes live, and demanding you switch it on first (so guests see it
+  // half-configured) is backwards. Owner, 2026-08-01: "you should be able to still open the
+  // dropdown without turning on the option for platforms".
+  configurableWhenOff?: boolean;
+  // This row owns a whole editor, shown inside its dropdown: the exact card that used to live on
+  // the restaurant-detail page. `settings:<id>` renders one section of RestaurantSettings,
+  // `branding` renders the branding & theme editor. Owner, 2026-08-01: "you have completely
+  // removed setting and permission from restaurant detail — everything will be here".
+  panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "branding";
 };
 
 export type Section = { id: string; name: string; blurb: string; icon: string; children: Node[] };
@@ -167,15 +187,31 @@ export const SECTIONS: Section[] = [
         what: "The whole guest menu. OFF means this restaurant has NO guest menu at all — no QR menu, no menu link, nothing for a diner to open. It runs on the staff panels only.",
         children: [
           { id: "dining_sessions", name: "Dining sessions", def: false, bind: { t: "setting", key: "sessions_enabled" },
-            what: "The table-session system: a guest scans the table's QR, the table is opened, the party is tracked and joined. OFF means there is no “Open table” step at all — the floor switches to direct ordering, so staff punch an order straight in without opening a table first." },
-          { id: "ratings", name: "Ratings", def: "off", bind: { t: "choice", key: "google_review_mode" },
-            what: "How a guest rates you after eating. Pick one.",
-            choices: [
-              { value: "off", label: "Menu rating only", what: "Guests leave a 1–5 star rating inside your own menu. Nothing goes to Google." },
-              { value: "google", label: "Google review only", what: "No in-menu stars — the guest is sent straight to your Google review page." },
-              { value: "google_after_normal", label: "Both — Google after the menu one", what: "The guest rates in the menu first, then is invited to post it on Google." },
-            ],
+            configurableWhenOff: true,
+            what: "The table-session system: a guest scans the table's QR, the table is opened, the party is tracked and joined. OFF means there is no “Open table” step at all — the floor switches to direct ordering, so staff punch an order straight in without opening a table first.",
             children: [
+              // The rules that only MEAN anything while sessions are on — "the guest must be
+              // standing in the café", the phone-code check, and the café's own coordinates.
+              // They were on the restaurant-detail page, one page away from the switch that
+              // decides whether they apply at all (owner, 2026-08-01: "in dining session there
+              // was all location and stuff too — add all this in the dropdown").
+              { id: "sessions_rules", name: "Session rules & café location", bind: { t: "none" }, panel: "settings:sessions",
+                what: "Whether a guest has to be physically at the café (and inside how many metres), whether a phone code is needed to order, and the café's own coordinates." },
+            ] },
+          {
+            // MASTER on/off — the rebuild lost it: only the three-way "where does the rating go"
+            // picker survived, so there was no way to say "this restaurant has no rating at all"
+            // (owner, 2026-08-01: "there is no toggle to on and off rating right now").
+            id: "ratings", name: "Ratings", def: true, bind: { t: "ratingsMaster" }, configurableWhenOff: true,
+            what: "The whole rating & review part of the guest menu — the star row on a dish, the “Rate dish” box and the review invite. OFF removes all of it; a guest is never asked to rate anything.",
+            children: [
+              { id: "ratings_mode", name: "Where the rating goes", def: "off", bind: { t: "choice", key: "google_review_mode" },
+                what: "Once a guest has eaten, where do you want the rating to land? Pick one.",
+                choices: [
+                  { value: "off", label: "Menu rating only", what: "Guests leave a 1–5 star rating inside your own menu. Nothing goes to Google." },
+                  { value: "google", label: "Google review only", what: "No in-menu stars — the guest is sent straight to your Google review page." },
+                  { value: "google_after_normal", label: "Both — Google after the menu one", what: "The guest rates in the menu first, then is invited to post it on Google." },
+                ] },
               // The link the Google choices send guests to. It used to live in its own card on
               // the restaurant detail page; it belongs with the choice that uses it, and only
               // one screen may own it.
@@ -200,8 +236,8 @@ export const SECTIONS: Section[] = [
           { id: "veg", name: "Veg / non-veg", def: true, bind: { t: "feature", key: "diet_filter" },
             what: "The veg / non-veg chips AND the little green-or-red veg mark on each dish. Switch it off for a pure-veg restaurant so nothing needs marking." },
           {
-            id: "format", name: "Format", bind: { t: "none" },
-            what: "How the menu looks when a guest opens it for the first time, and which languages and currencies it offers.",
+            id: "format", name: "Format & theme", bind: { t: "none" },
+            what: "How the menu looks when a guest opens it for the first time — its colours, logo and wording — and which languages and currencies it offers.",
             children: [
               { id: "menu_layout", name: "Default layout", def: "grid", bind: { t: "choice", key: "menu_default_layout" },
                 what: "What a first-time guest sees before they change anything. They can still switch it themselves.",
@@ -209,13 +245,12 @@ export const SECTIONS: Section[] = [
               { id: "menu_mode", name: "Default light / dark", def: "light", bind: { t: "choice", key: "menu_default_mode" },
                 what: "Which colour mode the menu opens in for this restaurant. The guest can still flip it.",
                 choices: [{ value: "light", label: "Light" }, { value: "dark", label: "Dark" }] },
-              // Read-only on purpose: the theme is a colour palette (bg/card/text/accent per
-              // mode) owned by the restaurant's Branding screen. A second editor here would
-              // be a second source of truth for one value — so this row SHOWS what the menu
-              // is wearing and links to the screen that owns it.
-              { id: "menu_theme", name: "Menu theme", bind: { t: "none" },
-                link: { href: "/aevinite/restaurants?section=branding", label: "Edit in Branding" },
-                what: "The restaurant's own colours — background, cards, text and accent, for both light and dark. Set on the Branding screen so there is only ever one place that owns it." },
+              // The theme USED to be a read-only row here that linked to the restaurant-detail
+              // Branding screen. That screen no longer exists (owner, 2026-08-01: everything
+              // lives on Access now), so the editor itself moved in — still the one and only
+              // place the palette, logo and wording are owned.
+              { id: "menu_theme", name: "Colours, logo & wording", bind: { t: "none" }, panel: "branding",
+                what: "The restaurant's own look: background, cards, text and accent for both light and dark, the logo image, the header wording and the greeting under it." },
               { id: "menu_languages", name: "Languages", def: ["en"], bind: { t: "list", key: "menu_languages" }, choices: MENU_LANGUAGES,
                 what: "Which languages the menu is offered in. Pick ONE and the language switcher is removed from the menu completely — pick two or more and it appears." },
               { id: "menu_currencies", name: "Currencies", def: ["INR"], bind: { t: "list", key: "menu_currencies" }, choices: MENU_CURRENCIES,
@@ -229,7 +264,8 @@ export const SECTIONS: Section[] = [
       {
         // "Platforms" (owner, 2026-07-31). The stored key stays `takeaway`: that is the mig-235
         // column name, and renaming a LABEL must never rename a column.
-        id: "takeaway", name: "Platforms", def: false, bind: { t: "module", key: "takeaway" },
+        id: "takeaway", name: "Platforms (Zomato, Swiggy, own website)", def: false, bind: { t: "module", key: "takeaway" },
+        configurableWhenOff: true,
         what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board and the 🥡 New Parcel button.",
         children: [
           { id: "ch_website", name: "Takeaway / own website", def: true, bind: { t: "channel", key: "website" },
@@ -253,9 +289,19 @@ export const SECTIONS: Section[] = [
         ],
       },
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false, bind: { t: "setting", key: "auto_print_kot_allowed" },
-        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine." },
+        configurableWhenOff: true,
+        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine.",
+        children: [
+          { id: "kot_setup", name: "Printer check & sample ticket", bind: { t: "none" }, panel: "settings:kitchen",
+            what: "Print a test ticket to check the printer and the ticket layout before the kitchen relies on it." },
+        ] },
       { id: "banquet", name: "Banquet billing", def: false, bind: { t: "module", key: "banquet" },
-        what: "Per-plate event billing that runs without a table — a wedding, a party booking. OFF removes the Banquet tab." },
+        configurableWhenOff: true,
+        what: "Per-plate event billing that runs without a table — a wedding, a party booking. OFF removes the Banquet tab.",
+        children: [
+          { id: "banquet_setup", name: "What the banquet bill asks for and how it prints", bind: { t: "none" }, panel: "settings:banquet",
+            what: "Which fields staff fill in for an event, the banquet bill's own number series, its tax rows, and the paper layout it prints on." },
+        ] },
       {
         // Named to match the Main-features card exactly — the two admin screens write the same
         // settings columns, so they must not call the module two different things.
@@ -280,8 +326,20 @@ export const SECTIONS: Section[] = [
             what: "The business name as it should appear on a tax invoice, which is often not the same as the trading name." },
           { id: "bill_address", name: "Bill address", def: "", bind: { t: "text", key: "restaurant_address" }, placeholder: "Street, city, PIN",
             what: "The address printed on the bill." },
+          { id: "bill_printed", name: "The printed bill", bind: { t: "none" }, panel: "settings:billing",
+            what: "Everything else that prints on the customer's bill: the phone number, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for." },
           { id: "bill_designer", name: "Bill design editor", leftToBuild: true, bind: { t: "none" },
             what: "Design the whole bill like a document — move the logo, change the wording, resize the totals. Not built yet; this is where it will live." },
+        ],
+      },
+      {
+        // Moved off the restaurant-detail page with the rest of it (owner, 2026-08-01). It has no
+        // on/off — a restaurant always has tables — so it is a pure group, like Bill.
+        id: "tables", name: "Tables & QR codes", bind: { t: "none" },
+        what: "How many tables this restaurant has, what each one is called, how many seats it has, its QR code, and how the floor is laid out on screen.",
+        children: [
+          { id: "tables_setup", name: "Tables, seats, QR codes & floor layout", bind: { t: "none" }, panel: "settings:tables",
+            what: "The table list itself — names, seats, per-row layout — plus each table's QR code to print, and what happens to a table left open overnight." },
         ],
       },
     ],
@@ -484,6 +542,15 @@ export function nodeValue(n: Node, s: TreeState): any {
     }
     case "opt":      return present(s.config?.[b.id]?.[`${b.side}_opts`]?.[b.key], d);
     case "limit":    return present(s.config?.[b.id]?.limit?.[b.side], d as number);
+    // ON unless BOTH halves are off. "Google review only" deliberately stores features.ratings
+    // = false (no in-menu stars) while the rating area very much still exists, so reading the
+    // features flag alone would show this master as OFF on a restaurant that asks every guest
+    // for a Google review. Off is the one combination that shows a guest nothing.
+    case "ratingsMaster": {
+      const stars = s.features?.ratings;
+      const mode = present(s.settings?.google_review_mode as string, "off");
+      return (stars === undefined ? true : stars === true) || mode === "google";
+    }
     default:         return null;
   }
 }
@@ -512,6 +579,13 @@ export function nodePatch(n: Node, v: any): TreePatch {
     case "list":     return { settings: { [b.key]: (Array.isArray(v) ? v : []).map(String) } };
     case "opt":      return { config: { [b.id]: { [`${b.side}_opts`]: { [b.key]: v } } } };
     case "limit":    return { config: { [b.id]: { limit: { [b.side]: Number(v) } } } };
+    // Both halves move together. Switching it back ON lands on "Menu rating only" — the plain
+    // default — rather than restoring whatever Google mode was set months ago, so turning a
+    // feature on can never quietly start sending guests to a third-party page.
+    case "ratingsMaster":
+      return v === true
+        ? { features: { ratings: true }, settings: { google_review_mode: "off" } }
+        : { features: { ratings: false }, settings: { google_review_mode: "off" } };
     default:         return {};
   }
 }
@@ -520,7 +594,7 @@ export function nodePatch(n: Node, v: any): TreePatch {
  *  star UI reads that key in a dozen places. "Google review only" = no in-menu stars.
  *  Written from the ONE control that owns the choice, so the two can't drift. */
 export function extraPatch(n: Node, v: any): TreePatch {
-  if (n.id !== "ratings") return {};
+  if (n.id !== "ratings_mode") return {};
   return { features: { ratings: v !== "google" } };
 }
 

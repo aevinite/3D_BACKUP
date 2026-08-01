@@ -14,12 +14,37 @@
  * nodePatch() from the same model — the screen cannot disagree with the database about
  * where a switch lives. Styling reuses the panel's existing .acc2-* language plus a small
  * .at-* set for the tree indentation. */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
   SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch,
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
 import AccessSearch from "./AccessSearch";
+import RestaurantSettings, { type SettingsSection } from "./RestaurantSettings";
+import BrandingCard from "./BrandingCard";
+
+/** The restaurant a row's embedded editor is for. Access knows it already (the picker at the
+ *  top of the page), so nothing extra is fetched to render one. */
+export type TreeRest = { id: string; slug: string; name: string };
+
+// Which restaurant the embedded editors are for. A context rather than a prop threaded through
+// SectionCard → Kids → Row → Kids: only two leaf rows in the whole tree need it, and passing it
+// down every level would put an unused argument on six signatures.
+const RestCtx = createContext<TreeRest | null>(null);
+
+/** A row that owns a whole editor renders it inside its own dropdown. These are the cards that
+ *  used to live on the restaurant-detail page; the owner moved every one of them here on
+ *  2026-08-01 ("everything will be here on access control tab, not there"), so a setting and
+ *  the switch that decides whether it applies are finally in the same place. */
+function EmbeddedPanel({ what }: { what: NonNullable<Node["panel"]> }) {
+  const rest = useContext(RestCtx);
+  // Never a silent blank: if the page hasn't named the restaurant yet, say so rather than
+  // render an empty dropdown that looks like a broken feature.
+  if (!rest) return <div className="at-panel-wait">Pick a restaurant to edit this.</div>;
+  if (what === "branding") return <div className="at-panel"><BrandingCard restaurant={rest} /></div>;
+  const section = what.slice("settings:".length) as SettingsSection;
+  return <div className="at-panel"><RestaurantSettings restaurant={rest} only={[section]} /></div>;
+}
 
 const ICON: Record<string, string> = {
   sparkles: "M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8z",
@@ -79,36 +104,55 @@ function readablePath(nodeId: string): string {
  * A name that has no file is simply skipped by the <img> onError, so a missing picture costs
  * nothing and never shows a broken image.
  */
-// A picture that already shows this setting, filed under another name. Not approximations:
-// edit_menu.png IS the Edit-menu screen and view_logs.png IS the Logs screen — the file names were
-// simply written by hand at different times. Cheaper and more accurate than re-shooting them.
-const IMAGE_ALIAS: Record<string, string> = {
-  menu: "guest-menu",
-  mgr_tab_editor: "edit_menu", own_menu: "edit_menu",
-  mgr_tab_log: "view_logs", own_logs: "view_logs",
-  payroll: "owner-staff",
+/**
+ * THE PICTURES A ROW SHOWS — an explicit list, and no guessing.
+ *
+ * This used to walk UP the tree and then fall back to a picture of the whole area, on the theory
+ * that "a shot of the right screen beats no shot at all". It doesn't: "Dining sessions" showed a
+ * photo of a pizza menu, "Guest can write their own note" showed the coffee list. A picture that
+ * isn't of the thing you are reading about is worse than none — it teaches you the wrong place to
+ * look (owner, 2026-08-01: "if there's no good photo which represents it, don't add any, and at
+ * the bottom write in the centre that there wasn't a good photo").
+ *
+ * So: a row shows a picture only when one was captured FOR IT, and several when the feature really
+ * does appear in several places — written reviews are on the menu list AND on a dish's page,
+ * favourites can be saved from the card AND the dish page, the 3D viewer has both a working and an
+ * unavailable state. Each name is a file in public/admin-help/ produced by
+ * scripts/shot-access-help.mjs; a name with no file is dropped by onError, so this list can name a
+ * shot before it has been captured without ever showing a broken image.
+ */
+const HELP_SHOTS: Record<string, string[]> = {
+  // ── the guest menu ──
+  menu: ["guest-menu"],
+  ratings: ["ratings", "reviews"],
+  ratings_mode: ["ratings", "reviews"],
+  show_reviews: ["reviews-menu", "reviews"],
+  viewer3d: ["model3d", "model3d-off"],
+  allergy_notes: ["allergies"],
+  allergy_other: ["allergy-other"],
+  guest_note: ["guest-note"],
+  favourites: ["favorites-heart", "favorites"],
+  veg: ["diet_filter"],
+  menu_languages: ["languages"],
+  menu_currencies: ["currency"],
+  // ── modules ──
+  khata: ["khata"], banquet: ["banquet"], auto_print_kot: ["auto-print-kot"], payroll: ["owner-staff"],
+  // ── panel menus ──
+  mgr_tab_editor: ["edit_menu"], own_menu: ["edit_menu"], d_own_edit_menu: ["edit_menu"], d_mgr_edit_menu: ["edit_menu"],
+  mgr_tab_log: ["view_logs"], own_logs: ["view_logs"], d_own_logs: ["view_logs"], d_mgr_logs: ["view_logs"],
+  mgr_tab_ratings: ["view_ratings"], own_ratings: ["view_ratings"], d_own_ratings: ["view_ratings"], d_mgr_ratings: ["view_ratings"],
 };
 
-function helpImages(node: Node, sectionId?: string): string[] {
-  const names = (n: Node) => {
-    const b = n.bind as { key?: string; flag?: string };
-    const raw = [n.id, b?.key, b?.flag].filter(Boolean) as string[];
-    return [...raw.flatMap((r) => [r, r.replace(/_/g, "-"), r.replace(/-/g, "_")]),
-      ...(IMAGE_ALIAS[n.id] ? [IMAGE_ALIAS[n.id]] : [])];
-  };
-  // Its OWN picture first, then its PARENT'S walking up, then the area shot. A sub-option nearly
-  // always lives on the same screen as the feature above it, so the parent's picture shows the right
-  // place — much better than jumping straight to a generic shot of the whole panel. Most rows that
-  // have no picture of their own are sub-options, and this is what gives them a useful one.
-  const chain = (NODE_PATH[node.id]?.ancestorIds || []).slice().reverse()
-    .map((id) => NODE_BY_ID[id]).filter(Boolean) as Node[];
-  const area: Record<string, string> = {
-    main: "guest-menu", apps: "manager-menu", mgrMenu: "manager-menu",
-    ownMenu: "owner-home", defaults: "manager-menu",
-  };
-  const fallback = sectionId ? area[sectionId] : undefined;
-  const all = [...names(node), ...chain.flatMap(names), ...(fallback ? [fallback] : [])];
-  return [...new Set(all)].map((n) => `/admin-help/${n}.png`);
+/** The action rows (Give a discount, Mark a bill paid…) are named after their power flag on both
+ *  the manager and the waiter side, and their screenshots were filed under that flag. One rule
+ *  covers all twenty of them, so they don't each need a line in the map above. */
+function helpImages(node: Node): string[] {
+  const explicit = HELP_SHOTS[node.id];
+  if (explicit) return explicit.map((n) => `/admin-help/${n}.png`);
+  const b = node.bind as { key?: string; flag?: string };
+  const stem = node.id.replace(/^(mgr|wtr|d_mgr|d_own)_/, "");
+  const names = [...new Set([stem, b?.flag, b?.key].filter(Boolean) as string[])];
+  return names.flatMap((n) => [`/admin-help/${n}.png`, `/admin-help/${n.replace(/_/g, "-")}.png`]);
 }
 
 /** "On by default" / "Off by default" / the default value, in words. */
@@ -123,7 +167,7 @@ function defaultLine(node: Node): string {
 }
 
 const isBoolBind = (n: Node) =>
-  ["feature", "setting", "module", "panel", "channel", "grant", "section", "tab"].includes(n.bind.t);
+  ["feature", "setting", "module", "panel", "channel", "grant", "section", "tab", "ratingsMaster"].includes(n.bind.t);
 
 /** Does this row read as "on"? Used for the parent gate and the section counter. A row with
  *  no switch of its own (a pure group, e.g. Format / Bill) is always "on" so its children show. */
@@ -134,7 +178,7 @@ function isOn(n: Node, st: TreeState): boolean {
   return true;
 }
 
-export default function AccessTree({ rid }: { rid: string }) {
+export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest }) {
   const [st, setSt] = useState<TreeState | null>(null);
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
   const [err, setErr] = useState("");
@@ -293,15 +337,17 @@ export default function AccessTree({ rid }: { rid: string }) {
         </div>
       ) : null}
 
-      <div className="acc2-main">
-        {SECTIONS.map((sec) => (
-          <SectionCard
-            key={sec.id} sec={sec} st={st} open={!!openSec[sec.id]}
-            onToggle={() => setOpenSec((s) => ({ ...s, [sec.id]: !s[sec.id] }))}
-            openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={setInfo} flashId={flashId}
-          />
-        ))}
-      </div>
+      <RestCtx.Provider value={rest ?? null}>
+        <div className="acc2-main">
+          {SECTIONS.map((sec) => (
+            <SectionCard
+              key={sec.id} sec={sec} st={st} open={!!openSec[sec.id]}
+              onToggle={() => setOpenSec((s) => ({ ...s, [sec.id]: !s[sec.id] }))}
+              openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={setInfo} flashId={flashId}
+            />
+          ))}
+        </div>
+      </RestCtx.Provider>
 
       {info ? <InfoSheet node={info} onClose={() => setInfo(null)} /> : null}
     </>
@@ -357,12 +403,27 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
   const kids = node.children || [];
   // RULE 1: children of an OFF row are removed, never greyed. A pure group (bind "none")
   // has nothing to switch, so its children always show.
-  const showKids = kids.length > 0 && isOn(node, st);
-  // Groups with a lot inside collapse; a row with 1-2 children just shows them.
-  const collapsible = showKids && kids.length > 2;
-  const expanded = collapsible ? openNode[node.id] !== false : true;
+  //
+  // `configurableWhenOff` is the deliberate exception, and it is not a hole in rule 1: those
+  // children are SET-UP, not permissions. You paste a Zomato key, set the café's coordinates or
+  // lay out the banquet bill before the feature goes live — being forced to switch it on first,
+  // so guests meet it half-configured, is backwards (owner, 2026-08-01).
+  const showKids = kids.length > 0 && (isOn(node, st) || !!node.configurableWhenOff);
+  // Everything a row can unfold: its sub-settings AND, for the cards that moved here off the
+  // restaurant-detail page, its own editor.
+  const hasBody = showKids || !!node.panel;
+  // Every feature-level row is a DROPDOWN (owner, 2026-08-01: dining sessions / allergy /
+  // banquet / auto-print / format each "should have a dropdown"). Deeper leaf groups with only a
+  // couple of options inside stay open — collapsing a pair of tick-boxes hides more than it tidies.
+  const collapsible = hasBody && (kids.length > 2 || depth <= 1 || !!node.panel);
+  // …and every dropdown starts CLOSED (his standing rule: "by default dropdown should be
+  // close"). Anything that isn't collapsible — a pair of tick-boxes under a feature — is always
+  // visible, so nothing gets hidden that had no way to be reopened. An explicit tap always wins.
+  const expanded = collapsible ? (openNode[node.id] ?? false) : true;
   // Pick-one settings that carry a description per choice read far better stacked.
   const stacked = (node.bind.t === "choice" || (node.bind.t === "opt" && !!node.choices)) && (node.choices || []).length > 0;
+  // Controls too wide to sit in the corner of the row — see the note where they render.
+  const wide = node.bind.t === "creds";
 
   return (
     <div className={`at-box d${Math.min(depth, 3)} ${flashId === node.id ? "at-flash" : ""}`} data-node={node.id}>
@@ -383,8 +444,14 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
             <a className="at-link" href={node.link.href}><Icon n="link" s={13} /> {node.link.label}</a>
           ) : null}
         </div>
-        {stacked ? null : <Control node={node} value={v} set={set} />}
+        {stacked || wide ? null : <Control node={node} value={v} set={set} />}
       </div>
+
+      {/* A control that wants the full width goes UNDERNEATH the text, not beside it. An API-key
+          box is an input + Show + Save + a "connected · ending 1234" line; as a right-hand control
+          it declared width:100% of the row, which crushed the description column to about one word
+          per line — the Zomato/Swiggy/website rows were unreadable (owner screenshot, 2026-08-01). */}
+      {wide ? <div className="at-wide"><Control node={node} value={v} set={set} /></div> : null}
 
       {/* A pick-one setting gets its choices as full-width ROWS, not a segmented control squeezed
           into the corner (owner, 2026-07-31, pointing at the Google-review picker: "see this one
@@ -392,6 +459,11 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
           never fit on the right, and the description of each choice had nowhere to go but a
           tooltip. Now each option is a row: radio, its name, and what it actually does. */}
       {stacked ? <ChoiceRows node={node} value={v} set={set} /> : null}
+
+      {/* This row IS an editor (the cards that moved off the restaurant-detail page). It sits
+          under the row's own text, inside the same box, so the switch that decides whether the
+          feature applies and the settings that configure it are read as one thing. */}
+      {node.panel && expanded ? <EmbeddedPanel what={node.panel} /> : null}
 
       {showKids && expanded ? (
         <div className="at-box-k">
@@ -431,6 +503,18 @@ function Kids({ nodes, st, depth, openNode, setOpenNode, set, onInfo, flashId }:
   let run: Node[] = [];
   const flush = () => {
     if (!run.length) return;
+    // A grid of compact boxes only pays off when there are enough of them to form a grid. With
+    // ONE or TWO — "Guest can add their own allergy" / "Guest can write their own note" — two
+    // half-width tick-boxes hide their own explanation and read as an afterthought next to the
+    // feature above (owner, 2026-08-01: "list them like actually a list, this feels cheap").
+    // Under three, each option gets a full row with its description, like every other setting.
+    if (run.length < 3) {
+      for (const n of run) {
+        out.push(<Row key={n.id} node={n} st={st} depth={depth} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />);
+      }
+      run = [];
+      return;
+    }
     out.push(
       <div className="at-grid" key={`grid-${out.length}`}>
         {run.map((n) => <Chip key={n.id} node={n} st={st} depth={depth} set={set} onInfo={onInfo} flashId={flashId} />)}
@@ -646,13 +730,12 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
     window.addEventListener("keydown", esc);
     return () => window.removeEventListener("keydown", esc);
   }, [onClose]);
-  // The picture. Candidates are tried in order and a name with no file is skipped by onError, so a
-  // setting with no screenshot yet shows the sheet without one instead of a broken image.
-  const [shot, setShot] = useState(0);
+  // The pictures. Every one that LOADS is shown; a name with no file drops out via onError. When
+  // nothing is left the sheet says so, rather than reaching for a photo of somewhere else.
+  const [broken, setBroken] = useState<Record<string, boolean>>({});
   const [more, setMore] = useState(false);
   const path = readablePath(node.id);
-  const imgs = helpImages(node, NODE_PATH[node.id]?.sectionId);
-  const src = imgs[shot];
+  const shots = helpImages(node).filter((s) => !broken[s]);
   const kids = node.children || [];
   const def = defaultLine(node);
   return (
@@ -660,14 +743,15 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
       <div className="at-sheet-b" onClick={(e) => e.stopPropagation()}>
         <h3>{node.name}</h3>
         {path ? <div className="at-sheet-path">{path}</div> : null}
-        {/* A real screenshot of the screen this setting controls, with the control ringed. The
-            owner asked for it back: "an (i) button should work like it used to — full screenshot,
-            highlight the feature". lazy + a static /public file, so an unopened sheet costs
+        {/* Real screenshots of the places this setting shows up, with the control ringed. The
+            owner asked for them back: "an (i) button should work like it used to — full
+            screenshot, highlight the feature". One feature can appear in more than one place, so
+            this shows ALL of them. lazy + static /public files, so an unopened sheet costs
             nothing. See scripts/shot-access-help.mjs to re-capture. */}
-        {src ? (
-          <img className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} loading="lazy"
-            onError={() => setShot((i) => i + 1)} />
-        ) : null}
+        {shots.map((src) => (
+          <img key={src} className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} loading="lazy"
+            onError={() => setBroken((b) => ({ ...b, [src]: true }))} />
+        ))}
         <p>{node.what}</p>
         {def ? <p className="at-sheet-def">{def}</p> : null}
         {node.choices?.length ? (
@@ -686,6 +770,9 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
           </>
         ) : null}
         {node.leftToBuild ? <p className="at-sheet-note">This one isn&apos;t built yet. The switch appears here the moment it is.</p> : null}
+        {/* Said out loud, centred at the bottom, instead of quietly borrowing a photo of something
+            else (owner, 2026-08-01). Silence here would read as "the picture failed to load". */}
+        {!shots.length ? <p className="at-sheet-noshot">There wasn&apos;t a good picture for this one.</p> : null}
         <button className="adm-btn" onClick={onClose}>Close</button>
       </div>
     </div>
@@ -739,23 +826,24 @@ function TreeStyle() {
   /* ── BOXES (owner, 2026-07-31: "make sure all have box like that, well structured") ────────
      Every setting is a box, and a setting's sub-settings are boxes INSIDE its box, so the
      nesting is visible as containment instead of an indent guide you have to trace. */
-  /* ── LEVEL COLOURS (owner, 2026-07-31: "blue, green, blue, green … according to theme") ────
-     Nesting is shown by COLOUR as well as containment, so at a glance you can tell a feature
-     from its sub-option from ITS sub-option. One variable per level and everything inherits it:
-       depth 0  master feature (Menu, Takeaway, Payroll…)      ROSE
-       depth 1  a feature inside it (Dining sessions, Ratings) GREEN
-       depth 2  its options (Add a dish, Guest's own note)     BLUE
-       depth 3  deeper still                                   GREEN
+  /* ── LEVEL COLOURS — a RAMP, not an alternation (owner, 2026-08-01) ────────────────────────
+     Nesting is shown by COLOUR as well as containment. The previous set alternated over two
+     colours, so a box could sit inside a box of its OWN colour two levels up ("blue inside blue,
+     red inside red, green inside green") and the nesting stopped reading. The owner asked for a
+     ramp that walks around the wheel instead:
 
-     The PRIMARY box is rose, not blue (owner, 2026-07-31: change the primary feature box's colour
-     to "not the actual red — like pink type, it should match the theme"). Rose-400 and not a true
-     red because true red means DANGER everywhere else in this panel (--adm-danger), and a master
-     feature being switched on is not a warning. It also stops the primary box sharing the blue of
-     its own depth-2 grandchildren, which was the thing that made the nesting hard to read. */
-  .at-box.d0, .at-chip.d0 { --lvl: #fb7185; }
-  .at-box.d1, .at-chip.d1 { --lvl: #34d399; }
-  .at-box.d2, .at-chip.d2 { --lvl: var(--accent); }
-  .at-box.d3, .at-chip.d3 { --lvl: #34d399; }
+       depth 0  master feature (Menu, Platforms, Payroll…)      BLUE   — the panel accent
+       depth 1  a feature inside it (Dining sessions, Ratings)  PURPLE
+       depth 2  its options (Add a dish, Guest's own note)      PINK   — pink leaning red, never red
+       depth 3  deeper still                                    BLUE   — only ever under a pink parent
+
+     Pink is violet-400 → pink-400, i.e. deliberately NOT --adm-danger: true red means danger
+     everywhere else in this panel and a switched-on option is not a warning. Three steps before
+     any repeat means a box never touches a box of its own colour. */
+  .at-box.d0, .at-chip.d0 { --lvl: var(--accent); }
+  .at-box.d1, .at-chip.d1 { --lvl: #a78bfa; }
+  .at-box.d2, .at-chip.d2 { --lvl: #f472b6; }
+  .at-box.d3, .at-chip.d3 { --lvl: var(--accent); }
 
   .at-box { border:1.5px solid color-mix(in srgb, var(--lvl) 30%, transparent); border-radius:14px;
     background:color-mix(in srgb, var(--lvl) 5%, color-mix(in srgb, var(--card) 78%, var(--bg))); padding:13px 14px; }
@@ -767,6 +855,24 @@ function TreeStyle() {
   .at-box-t .ds { margin-top:4px; font-size:12.5px; line-height:1.55; color:var(--muted); max-width:74ch; }
   /* The divider that separates a feature from the things inside it, tinted to its own level. */
   .at-box-k { margin-top:12px; padding-top:12px; border-top:1px solid color-mix(in srgb, var(--lvl) 22%, transparent); }
+  /* A control that needs the whole width sits under the row's text instead of beside it. */
+  .at-wide { margin-top:11px; }
+  .at-wide .at-segs.wide, .at-wide .at-chips { max-width:100%; justify-content:flex-start; }
+
+  /* ── AN EMBEDDED EDITOR (the cards that moved off the restaurant-detail page) ──────────────
+     These are whole .adm-card forms. Inside a tree row they must stop being a page of stacked
+     cards and become the CONTENTS of this row: no outer card chrome, no page margins, and the
+     row's own level colour on the divider so a big form still reads as "inside this feature". */
+  .at-panel { margin-top:12px; padding-top:12px; border-top:1px solid color-mix(in srgb, var(--lvl) 22%, transparent); }
+  .at-panel .adm-card { background:transparent; border:none; box-shadow:none; padding:0; margin:0 0 16px !important; }
+  .at-panel .adm-card:last-child { margin-bottom:0 !important; }
+  .at-panel .adm-card + .adm-card { padding-top:14px; border-top:1px dashed color-mix(in srgb, var(--lvl) 22%, transparent); }
+  .at-panel .adm-card > h2 { font-size:13.5px; font-weight:800; margin:0 0 5px; }
+  /* The first card's own heading repeats the row you just opened ("Dining sessions" inside
+     Dining sessions › Session rules). Later cards keep theirs — they're the only thing telling
+     the four Tables cards apart. */
+  .at-panel .adm-card:first-child > h2 { display:none; }
+  .at-panel-wait { margin-top:12px; font-size:12.5px; color:var(--muted); }
 
   /* Pick-one rows (the Google-review picker's shape, which the owner called aesthetic). */
   .at-opts { display:flex; flex-direction:column; gap:7px; margin-top:11px; }
@@ -842,6 +948,7 @@ function TreeStyle() {
   .at-sheet-shot { display:block; width:100%; height:auto; border-radius:11px; border:1px solid color-mix(in srgb, var(--accent) 26%, transparent);
     margin:0 0 13px; background:var(--bg); }
   .at-sheet-def { font-size:12.5px !important; font-weight:600; color:var(--text) !important; opacity:.72; margin:-6px 0 12px !important; }
+  .at-sheet-noshot { text-align:center; font-size:12px !important; font-style:italic; opacity:.7; margin:2px 0 14px !important; }
   .at-sheet-more { display:block; width:100%; text-align:left; background:color-mix(in srgb, var(--accent) 9%, transparent);
     border:1px solid color-mix(in srgb, var(--accent) 30%, transparent); color:var(--text); font-size:12.5px; font-weight:700;
     padding:9px 12px; border-radius:10px; cursor:pointer; margin:0 0 12px; }

@@ -15,14 +15,6 @@ import { useBackClose } from "@/lib/backStack";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
 
-// Render brand text in the live preview: *marked* parts use the accent colour,
-// the rest the mode's text colour — exactly how the guest menu renders it.
-function previewParts(text: string, textColor: string, accentColor: string) {
-  return splitBrandSegments(text).map((seg, i) => (
-    <span key={i} style={{ color: seg.hi ? accentColor : textColor }}>{seg.text}</span>
-  ));
-}
-const stripMarkers = (s: string) => stripBrandMarkers(s);
 
 type Restaurant = { id: string; slug: string; name: string; active: boolean; createdAt: string | null; hasSettings: boolean; ownerUserId: string | null; ownerName: string | null };
 type Owner = { id: string; name: string };
@@ -715,23 +707,12 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // A tiny toast so a failed toggle tells the admin instead of silently snapping back
   // (or, worse, getting stuck showing the wrong ON/OFF state). Mirrors the Access page.
   const [toast, setToast] = useState<string | null>(null);
-  // Overview vs ⚙ Settings tab (owner 2026-07-26): information & actions stay on
-  // Overview; everything configurable (features, review, branding, billing, KOT,
-  // sessions, tables & QR) lives together under Settings.
-  const [tab, setTab] = useState<"overview" | "settings">("overview");
-  // Which TAB you were on survives a refresh too — landing back on Overview after reloading
-  // while editing Settings is the same "lost my place" complaint (owner, 2026-07-30).
-  useEffect(() => {
-    try { if (new URLSearchParams(window.location.search).get("tab") === "settings") setTab("settings"); } catch {}
-  }, []);
-  const goTab = (t: "overview" | "settings") => {
-    setTab(t);
-    try {
-      const u = new URL(window.location.href);
-      u.searchParams.set("tab", t);
-      window.history.replaceState(window.history.state, "", u.pathname + u.search);
-    } catch {}
-  };
+  // The ⚙ Settings TAB IS GONE (owner, 2026-08-01: "you have completely removed setting and
+  // permission from restaurant detail — everything will be here on the access control tab, not
+  // there"). Branding, billing, KOT printing, dining sessions, tables & QR and the banquet bill
+  // now live inside the feature they belong to on Access & permissions. `tab` survives as a
+  // constant only so the scroll-restore key below keeps its shape.
+  const tab = "overview";
 
   // …and so does the SCROLL position ("same page and same scroll level"). Kept in
   // sessionStorage per restaurant + tab: it's per-tab-of-the-browser, dies when the tab
@@ -792,12 +773,16 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       gestures.forEach((e) => window.removeEventListener(e, giveUp));
     };
   }, [restaurant.id, tab]);
-  // ?tab=settings deep-link (owner 2026-07-28): the panels' "zones off" dropdown sends the
-  // admin here for admin-only settings (billing/KOT/sessions/table count). Post-mount, not
-  // in the initializer, so SSR and first paint stay identical (no hydration mismatch).
+  // OLD ?tab=settings links still exist in the wild — the panels' "zones off" dropdown sends the
+  // admin here for an admin-only setting (billing / KOT / sessions / table count). The tab they
+  // pointed at is gone, so forward them to where those settings actually live now instead of
+  // dropping them on Overview with no explanation.
   useEffect(() => {
-    try { if (new URLSearchParams(window.location.search).get("tab") === "settings") setTab("settings"); } catch {}
-  }, []);
+    try {
+      if (new URLSearchParams(window.location.search).get("tab") === "settings")
+        window.location.replace(`/aevinite/access?rid=${restaurant.id}&from=rest`);
+    } catch {}
+  }, [restaurant.id]);
   // Stable (useCallback) so the loaders below can list it as a dep without refetching every render.
   const flash = useCallback((m: string) => { setToast(m); setTimeout(() => setToast(null), 2200); }, []);
 
@@ -833,16 +818,18 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
       u.searchParams.delete("section");
       window.history.replaceState(history.state, "", u.pathname + u.search);
     } catch {}
-    // Sections that moved into the ⚙ Settings tab: switch the tab first, then scroll
-    // once that tab's cards have rendered (one tick later).
-    const inSettings = ["review", "main-features", "branding", "billing", "kitchen", "sessions", "tables"].includes(section);
-    if (inSettings) setTab("settings");
-    const scroll = () => {
+    // These sections are not on this page any more — they moved to Access & permissions with
+    // the rest of the settings (owner, 2026-08-01). An old ?section= link would otherwise scroll
+    // to nothing and look broken, so forward it to the screen that owns that setting now.
+    const moved = ["review", "main-features", "branding", "billing", "kitchen", "sessions", "tables"].includes(section);
+    if (moved) {
+      window.location.replace(`/aevinite/access?rid=${restaurant.id}&from=rest`);
+      return;
+    }
+    requestAnimationFrame(() => {
       const el = document.getElementById(`det-${section}`);
       if (el) el.scrollIntoView({ block: "start", behavior: "smooth" });
-    };
-    if (inSettings) setTimeout(scroll, 120);
-    else requestAnimationFrame(scroll);
+    });
   }, []);
 
   // These loaders now announce a failure (flash) instead of silently swallowing it — a failed
@@ -901,20 +888,6 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
         </div>
       </div>
 
-      {/* Overview vs ⚙ Settings (owner 2026-07-26): "normal information" stays on Overview;
-          everything changeable — features, Google review, branding, billing, KOT printing,
-          dining sessions, tables & QR — lives together under Settings. */}
-      <div className="adm-dettabs" role="tablist" aria-label="Restaurant detail tabs">
-        <button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "on" : ""} onClick={() => goTab("overview")}>
-          <i className="fas fa-gauge" aria-hidden="true" style={{ marginRight: 7 }} />Overview
-        </button>
-        <button role="tab" aria-selected={tab === "settings"} className={tab === "settings" ? "on" : ""} onClick={() => goTab("settings")}>
-          <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 7 }} />Settings
-        </button>
-      </div>
-
-      {tab === "overview" ? (
-        <>
           <RestaurantTickets restaurantId={restaurant.id} />
 
           <div id="det-status"><StatusCard restaurant={restaurant} /></div>
@@ -923,53 +896,20 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
 
           <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
 
-          {/* Panels, guest features, manager powers, tablet caps and per-person overrides ALL
-              live in the ONE Access & permissions panel (owner 2026-07-24: "merge the two
-              systems"). A single link = single source of truth, no stale duplicate toggles. */}
+          {/* EVERY setting and permission is on the one Access screen now (owner, 2026-08-01).
+              This page is identity and actions only — who owns it, how to walk in, how to bin it.
+              One link, one source of truth, no duplicate control that can disagree. */}
           <div id="det-access-link" className="adm-card" style={{ marginBottom: 14, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 220 }}>
-              <div style={{ fontWeight: 800, fontSize: 15 }}>Panels, features &amp; permissions</div>
-              <p className="hint" style={{ margin: "3px 0 0" }}>Which staff apps this restaurant has · its guest-menu features · special features (banquet, auto-print…) · manager powers · tablet capabilities · per-person overrides — all in one place.</p>
+              <div style={{ fontWeight: 800, fontSize: 15 }}>Everything you can change about this restaurant</div>
+              <p className="hint" style={{ margin: "3px 0 0" }}>Its guest-menu features · colours, logo &amp; wording · the bill · kitchen tickets · dining sessions · tables &amp; QR codes · banquet billing · what managers, owners and waiters may do · one person&apos;s exceptions — all on one screen.</p>
             </div>
             <a className="adm-btn primary" href={`/aevinite/access?rid=${restaurant.id}&from=rest`}>
-              <i className="fas fa-user-shield" style={{ marginRight: 7 }} aria-hidden="true" />Open Access &amp; permissions
+              <i className="fas fa-user-shield" style={{ marginRight: 7 }} aria-hidden="true" />Open Access / Permissions
             </a>
           </div>
 
-          <DangerCard restaurant={restaurant} onDeleted={onBack} onChanged={onChanged} />
-        </>
-      ) : (
-        <>
-          {/* Quick jump chips — scrollable on phones, so any section is one tap away. */}
-          <div className="adm-setchips" aria-label="Jump to a settings section">
-            {([
-              // "Features" and "Google review" left this page in the access rebuild (owner,
-              // 2026-07-31): the restaurant detail carries NO permissions or feature switches
-              // at all — they live in Access & permissions, so exactly one screen owns them.
-              ["det-branding", "fa-palette", "Branding"],
-              ["det-billing", "fa-file-invoice", "Billing"],
-              ["det-kitchen", "fa-print", "KOT printing"],
-              ["det-sessions", "fa-qrcode", "Sessions"],
-              ["det-tables", "fa-chair", "Tables & QR"],
-              ["det-banquet", "fa-champagne-glasses", "Banquet bill"],
-            ] as const).map(([id, icon, label]) => (
-              <button key={id} onClick={() => document.getElementById(id)?.scrollIntoView({ block: "start", behavior: "smooth" })}>
-                <i className={`fas ${icon}`} aria-hidden="true" />{label}
-              </button>
-            ))}
-          </div>
-
-          {/* NO permissions or feature switches on this page (owner, 2026-07-31). The
-              "Main features" quick card and the Google-review picker moved into Access &
-              permissions — Main features and Menu → Ratings — so a feature is never
-              switchable from two screens that can disagree with each other. */}
-          <div id="det-branding"><BrandingCard restaurant={restaurant} /></div>
-
-          {/* Billing · KOT printing · Dining sessions · Tables & QR — the four sections moved
-              from the manager panel (same fields, admin skin). */}
-          <RestaurantSettings restaurant={{ id: restaurant.id, slug: restaurant.slug, name: restaurant.name }} />
-        </>
-      )}
+      <DangerCard restaurant={restaurant} onDeleted={onBack} onChanged={onChanged} />
     </>
   );
 }
@@ -1080,173 +1020,6 @@ function DangerCard({ restaurant, onDeleted, onChanged }: { restaurant: Restaura
   );
 }
 
-// Per-restaurant brand identity: full theme palette (bg/card/text/accent) per
-// light & dark mode, via colour-picker AND hex input, with a live preview, plus
-// hero/tagline/logo-text. Writes /api/admin/restaurants/branding.
-const PALETTE_FIELDS: { key: "bg" | "card" | "text" | "accent"; label: string }[] = [
-  { key: "bg", label: "Background" }, { key: "card", label: "Card / surface" },
-  { key: "text", label: "Text" }, { key: "accent", label: "Accent" },
-];
-const HEX_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
-// <input type="color"> only accepts 6-digit hex; expand #abc → #aabbcc so a valid 3-digit
-// value doesn't make the swatch snap to black (audit 2026-07-07).
-const toColorInput = (v: string) => /^#[0-9a-fA-F]{3}$/.test(v) ? "#" + v.slice(1).split("").map((c) => c + c).join("") : v;
-
-function BrandingCard({ restaurant }: { restaurant: Restaurant }) {
-  const toast = useToast();
-  const [mode, setMode] = useState<"dark" | "light">("dark");
-  const [theme, setTheme] = useState<{ dark: Record<string, string>; light: Record<string, string> }>({ dark: {}, light: {} });
-  const [hero, setHero] = useState(""); const [tagline, setTagline] = useState(""); const [logoText, setLogoText] = useState("");
-  const [accent, setAccent] = useState("");
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [logoBusy, setLogoBusy] = useState(false); const [logoMsg, setLogoMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false); const [msg, setMsg] = useState<string | null>(null);
-  // Guard: only allow Save once the current branding actually LOADED. A failed load
-  // left every field blank; saving then wrote those blanks over the real values,
-  // wiping the restaurant's whole look (audit 2026-07-08). No successful load = no save.
-  const [brandLoaded, setBrandLoaded] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      // Announces a failure via the shared toast instead of swallowing it — a failed load left
-      // the branding fields blank with no explanation (audit 2026-07-07).
-      try {
-        const r = await fetch(`/api/admin/restaurants/branding?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok && !j.error) {
-          const t = j.theme || {};
-          setTheme({ dark: { ...(t.dark || {}) }, light: { ...(t.light || {}) } });
-          setHero(j.hero_title || ""); setTagline(j.tagline || ""); setLogoText(j.logo_text || ""); setAccent(j.accent_color || ""); setLogoUrl(j.logo_url || null);
-          setBrandLoaded(true); // load succeeded → Save is now safe (can't blank a populated restaurant)
-        } else {
-          toast("Couldn't load branding — " + (j.error || "try reopening."), "err");
-        }
-      } catch { toast("Couldn't load branding — network error.", "err"); }
-    })();
-  }, [restaurant.id, toast]);
-
-  // Logo IMAGE upload (separate from the text fields — it streams a file to Storage).
-  const uploadLogo = async (file: File) => {
-    setLogoBusy(true); setLogoMsg(null);
-    try {
-      const fd = new FormData(); fd.append("restaurant_id", restaurant.id); fd.append("file", file);
-      const r = await fetch("/api/admin/restaurants/logo", { method: "POST", body: fd });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Upload failed.");
-      setLogoUrl(d.logo_url); setLogoMsg("Logo updated — shows on the menu within ~15s.");
-    } catch (e) { setLogoMsg(e instanceof Error ? e.message : String(e)); } finally { setLogoBusy(false); }
-  };
-  const removeLogo = async () => {
-    setLogoBusy(true); setLogoMsg(null);
-    try {
-      const r = await fetch(`/api/admin/restaurants/logo?restaurant_id=${encodeURIComponent(restaurant.id)}`, { method: "DELETE" });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't remove.");
-      setLogoUrl(null); setLogoMsg("Logo removed — the menu falls back to the name.");
-    } catch (e) { setLogoMsg(e instanceof Error ? e.message : String(e)); } finally { setLogoBusy(false); }
-  };
-
-  const cur = theme[mode];
-  const setColor = (key: string, val: string) => setTheme((s) => ({ ...s, [mode]: { ...s[mode], [key]: val } }));
-  const clearColor = (key: string) => setTheme((s) => { const m = { ...s[mode] }; delete m[key]; return { ...s, [mode]: m }; });
-
-  // Preview defaults so an unset slot still renders something sensible in the swatch.
-  const pv = {
-    bg: cur.bg || (mode === "dark" ? "#1a0f09" : "#faf3e8"),
-    card: cur.card || (mode === "dark" ? "#2c1b11" : "#ffffff"),
-    text: cur.text || (mode === "dark" ? "#f3e9db" : "#3c2a1e"),
-    accent: cur.accent || accent || (mode === "dark" ? "#e3c06f" : "#d4a574"),
-  };
-  const lowContrast = (() => {
-    const lum = (hex: string) => { const h = hex.replace("#", ""); const f = h.length === 3 ? h.split("").map(c=>c+c).join("") : h; const n = parseInt(f, 16); const r=(n>>16)&255,g=(n>>8)&255,b=n&255; return (0.299*r+0.587*g+0.114*b)/255; };
-    try { return Math.abs(lum(pv.text) - lum(pv.bg)) < 0.35; } catch { return false; }
-  })();
-
-  const save = async () => {
-    if (!brandLoaded) { setMsg("Branding hasn't loaded yet — reopen this restaurant before saving (so a glitch can't blank it)."); return; }
-    for (const m of ["dark", "light"] as const)
-      for (const k of Object.keys(theme[m]))
-        if (theme[m][k] && !HEX_RE.test(theme[m][k])) { setMsg(`${m} ${k}: "${theme[m][k]}" isn't a hex colour (e.g. #1a0f09).`); return; }
-    if (accent && !HEX_RE.test(accent)) { setMsg(`Accent "${accent}" isn't a hex colour.`); return; }
-    setBusy(true); setMsg(null);
-    try {
-      const r = await fetch("/api/admin/restaurants/branding", { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restaurant_id: restaurant.id, theme, accent_color: accent || null, hero_title: hero || null, tagline: tagline || null, logo_text: logoText || null }) });
-      const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't save.");
-      setMsg("Saved — open the guest menu to see it (within ~15s).");
-    } catch (e) { setMsg(e instanceof Error ? e.message : String(e)); } finally { setBusy(false); }
-  };
-
-  const inputStyle: React.CSSProperties = { padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 };
-
-  return (
-    <div className="adm-card" style={{ marginBottom: 14 }}>
-      <h2>Branding &amp; theme</h2>
-      <p className="hint">Set <b>{restaurant.name}</b>&apos;s colours, logo text and hero — for light and dark mode. Leave a colour blank to use the sensible default. Changes show on the guest menu within ~15s.</p>
-
-      <div className="adm-togglegrid" style={{ marginBottom: 12 }}>
-        <button className={`adm-toggle ${mode === "dark" ? "on" : "off"}`} onClick={() => setMode("dark")}><span>Dark mode</span><span className="pill">{mode === "dark" ? "EDITING" : ""}</span></button>
-        <button className={`adm-toggle ${mode === "light" ? "on" : "off"}`} onClick={() => setMode("light")}><span>Light mode</span><span className="pill">{mode === "light" ? "EDITING" : ""}</span></button>
-      </div>
-
-      {/* adm-grid2 collapses to ONE column on phones — the old inline 1fr 1fr never did,
-          which crammed ~260px of fixed-width colour controls into a ~155px column at 390px. */}
-      <div className="adm-grid2" style={{ gap: 16, alignItems: "start" }}>
-        <div style={{ display: "grid", gap: 10 }}>
-          {PALETTE_FIELDS.map((f) => (
-            <div key={f.key} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <label style={{ width: 110, flex: "0 0 auto", fontSize: 13 }}>{f.label}</label>
-              <input type="color" value={toColorInput((cur[f.key] && HEX_RE.test(cur[f.key])) ? cur[f.key] : pv[f.key])} disabled={busy}
-                onChange={(e) => setColor(f.key, e.target.value)} style={{ width: 38, flex: "0 0 auto", height: 30, border: "none", background: "none", cursor: "pointer" }} />
-              <input value={cur[f.key] || ""} placeholder={pv[f.key]} disabled={busy} onChange={(e) => setColor(f.key, e.target.value.trim())} style={{ ...inputStyle, width: 110, minWidth: 0, flex: "0 1 110px", fontFamily: "ui-monospace, monospace" }} />
-              {cur[f.key] && <button className="adm-btn" disabled={busy} onClick={() => clearColor(f.key)} title="Reset to default" style={{ padding: "4px 8px" }}>↺</button>}
-            </div>
-          ))}
-        </div>
-        {/* Live preview swatch — renders the wordmark + hero with *highlight* markers:
-            marked parts use the accent, the rest the mode's text colour. */}
-        <div style={{ borderRadius: 12, overflow: "hidden", border: "var(--border)" }}>
-          <div style={{ background: pv.bg, color: pv.text, padding: 14 }}>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 8 }}>{previewParts(logoText || restaurant.name, pv.text, pv.accent)}</div>
-            <div style={{ fontSize: 11, letterSpacing: 2, color: pv.accent }}>{stripMarkers(tagline) || "WELCOME"}</div>
-            <div style={{ fontSize: 20, fontWeight: 800 }}>{previewParts(hero || "Our Menu", pv.text, pv.accent)}</div>
-            <div style={{ background: pv.card, borderRadius: 10, padding: 10, marginTop: 10 }}>
-              <div style={{ fontWeight: 700 }}>Sample Dish</div>
-              <div style={{ display: "inline-block", marginTop: 6, padding: "4px 10px", borderRadius: 999, background: pv.accent, color: pv.bg, fontSize: 12, fontWeight: 700 }}>Add</div>
-            </div>
-            <div style={{ fontSize: 11, opacity: 0.7, marginTop: 8 }}>{mode} preview</div>
-          </div>
-        </div>
-      </div>
-      {lowContrast && <p className="hint" style={{ color: "var(--adm-bad, #c0392b)", marginTop: 8 }}>⚠ Text and background look low-contrast — guests may struggle to read it.</p>}
-
-      <div style={{ display: "grid", gap: 8, marginTop: 14, paddingTop: 12, borderTop: "var(--border)" }}>
-        <p className="hint" style={{ margin: 0 }}>Tip: wrap a word in <code>*stars*</code> to colour it with your <b>accent</b> — the rest stays white (dark) / black (light). e.g. <code>Little *French* House</code>.</p>
-        {/* Logo IMAGE — shown on the opening splash AND beside the search bar. */}
-        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ width: 56, height: 56, borderRadius: 10, border: "var(--border)", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", overflow: "hidden" }}>
-            {logoUrl ? <img src={logoUrl} alt="logo" style={{ maxWidth: "100%", maxHeight: "100%" }} /> : <i className="fas fa-image adm-muted" aria-hidden="true" />}
-          </div>
-          <label className="adm-btn" style={{ cursor: logoBusy ? "default" : "pointer" }}>
-            <i className="fas fa-upload" style={{ marginRight: 6 }} aria-hidden="true" />{logoBusy ? "Uploading…" : "Upload logo image"}
-            <input type="file" accept="image/png,image/jpeg,image/webp" disabled={logoBusy} style={{ display: "none" }}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadLogo(f); e.target.value = ""; }} />
-          </label>
-          {logoUrl && <button className="adm-btn" disabled={logoBusy} onClick={removeLogo}>Remove logo</button>}
-          {logoMsg && <span className="adm-muted" style={{ fontSize: 12 }}>{logoMsg}</span>}
-        </div>
-        <p className="hint" style={{ margin: 0 }}>PNG / JPG / WEBP, up to 1 MB. Shows on the opening screen and next to the search bar.</p>
-        <label style={{ fontSize: 12 }}>Logo text (header + opening screen)<input value={logoText} maxLength={60} placeholder={restaurant.name} disabled={busy} onChange={(e) => setLogoText(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
-        <label style={{ fontSize: 12 }}>Hero title<input value={hero} maxLength={120} placeholder="Our Menu" disabled={busy} onChange={(e) => setHero(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
-        <label style={{ fontSize: 12 }}>Greeting / tagline<input value={tagline} maxLength={80} placeholder="Welcome" disabled={busy} onChange={(e) => setTagline(e.target.value)} style={{ ...inputStyle, width: "100%", marginTop: 4 }} /></label>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
-        <button className="adm-btn primary" disabled={busy || !brandLoaded} onClick={save}><i className="fas fa-check" style={{ marginRight: 7 }} aria-hidden="true" />{busy ? "Saving…" : "Save branding"}</button>
-        {!brandLoaded && <span className="adm-muted" style={{ fontSize: 12 }}>Couldn&apos;t load current branding — reopen this restaurant before saving.</span>}
-        {msg && <span className="adm-muted" style={{ fontSize: 12 }}>{msg}</span>}
-      </div>
-    </div>
-  );
-}
 
 // Owner assignment for one restaurant: pick an existing owner, or create a new one
 // (which is auto-assigned here). Writes via /api/admin/restaurants (PATCH/POST).

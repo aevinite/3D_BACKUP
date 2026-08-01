@@ -59,6 +59,20 @@ const guestJobs = [
   { id: "languages", url: M, wait: ".nav-btn", label: "Guest menu  ›  header  ›  Language picker", pick: `const b=[...document.querySelectorAll('.nav-btn')].find(x=>/Language/.test(x.getAttribute('aria-label')||''));return [b,b];` },
   { id: "currency", url: M, wait: ".nav-btn", label: "Guest menu  ›  header  ›  Currency picker", pick: `const b=[...document.querySelectorAll('.nav-btn')].find(x=>/Currency/.test(x.getAttribute('aria-label')||''));return [b,b];` },
   { id: "allergies", url: M, wait: ".filter-chip", label: "Guest menu  ›  allergy badge / filter", pick: `let el=[...document.querySelectorAll('.filter-chip')].find(c=>/allerg/i.test(c.textContent));if(!el)el=document.querySelector('.diet-badge');return [el&&(el.closest('.item-card')||el),el];` },
+  // ── added 2026-08-01: a feature that appears in more than one place needs a picture of EACH.
+  // The owner opened "Show reviews" and saw only the dish page ("it also includes the review on
+  // the menu page, not only the item detail page"); opened "3D dish viewer" and saw only the
+  // working state ("we need 3D preview not available AND view in 3D"); opened "Favourites" and
+  // asked for both places a dish can be saved from.
+  { id: "reviews-menu", url: M, wait: ".item-card", vp: [900, 700],
+    label: "Guest menu  ›  the LIST  ›  a dish's rating & review count",
+    pick: `const cards=[...document.querySelectorAll('.item-card')].filter(c=>/★/.test(c.textContent));const c=cards[0];const m=c&&c.querySelector('.dish-meta');return [c&&c.parentElement,c||m];` },
+  { id: "model3d-off", url: "/r/french-house/item/espresso?cat=coffee", wait: ".btn", vp: [780, 900],
+    label: "Guest menu  ›  dish page  ›  “3D preview not available” (no model on this dish)",
+    pick: `const b=[...document.querySelectorAll('.btn')].find(x=>/3D/i.test(x.textContent));return [b&&b.parentElement,b];` },
+  { id: "favorites-heart", url: "/r/french-house/item/cappuccino?cat=coffee", wait: ".btn", vp: [780, 900],
+    label: "Guest menu  ›  dish page  ›  the ♥ that saves a dish to Favourites",
+    pick: `const h=document.getElementById('detail-fav');return [h&&h.parentElement,h];` },
 ];
 async function runGuest() {
   for (const j of guestJobs) {

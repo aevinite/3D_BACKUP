@@ -40,7 +40,15 @@ const inputStyle: React.CSSProperties = {
 const labelStyle: React.CSSProperties = { fontSize: 12, display: "block" };
 const hintStyle: React.CSSProperties = { fontSize: 11.5, marginTop: 3 };
 
-export default function RestaurantSettings({ restaurant }: { restaurant: Rest }) {
+/** Which cards to render. Omitted = all of them (how the restaurant-detail page used it).
+ *  Access & permissions passes ONE key, because each of these sections now lives inside the
+ *  dropdown of the feature it belongs to — "Dining sessions" opens the session rules, "Banquet
+ *  billing" opens the banquet bill, and so on (owner, 2026-08-01). The component still loads and
+ *  saves the whole settings row either way, so the same values are edited from either place. */
+export type SettingsSection = "billing" | "banquet" | "kitchen" | "sessions" | "tables";
+
+export default function RestaurantSettings({ restaurant, only }: { restaurant: Rest; only?: SettingsSection[] }) {
+  const show = (k: SettingsSection) => !only || only.includes(k);
   const [draft, setDraft] = useState<Draft>({});
   const [base, setBase] = useState<Draft>({});
   const [codes, setCodes] = useState<Record<string, string>>({});
@@ -292,9 +300,12 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
         } : undefined}
         style={{ ...inputStyle, marginTop: 4 }}
       />
-      {opts.hint && <span className="adm-muted" style={hintStyle}>{opts.hint}</span>}
+      {/* Both of these are inline <span>s, so with a hint AND the auto-save note the two ran
+          together as one sentence — "Fewer = bigger tiles.Saves on its own" (spotted on the
+          moved Tables card, 2026-08-01). display:block puts each on its own line. */}
+      {opts.hint && <span className="adm-muted" style={{ ...hintStyle, display: "block" }}>{opts.hint}</span>}
       {opts.auto && (
-        <span style={{ ...hintStyle, color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
+        <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
           {autoSaved === k ? "✓ Saved" : "Saves on its own"}
         </span>
       )}
@@ -346,19 +357,12 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
 
   return (
     <>
-      {/* ═══ BILLING — same-to-same with the manager's Billing section ═══ */}
+      {/* The "Tax word on screen" card used to sit here. REMOVED 2026-08-01 (owner: "there is no
+          need for this option — it will never be changed, it will be written as Tax for all
+          times"). The column still exists and every restaurant stores NULL, which already renders
+          "Tax", so nothing on any bill moves; there is simply no longer a field to change it. */}
+      {show("billing") && (
       <div id="det-billing" className="adm-card" style={{ marginBottom: 14 }}>
-        <h2>🧾 Billing — manager bill, on screen</h2>
-        <p className="hint">
-          Bills the staff SEE in the manager panel show ONE merged tax line. Rename its word here — the
-          amount and % always come from the tax rows in the printed-bill card below (their total: <b>{compTotal}%</b>).
-        </p>
-        <div style={{ maxWidth: 260 }}>
-          {field("Tax word on screen", "tax_label", { hint: `Shows as “${taxWord} ${compTotal}%”. E.g. Tax, GST, VAT.` })}
-        </div>
-      </div>
-
-      <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🧾 Printed bill — what the customer gets</h2>
         <p className="hint">
           Everything below prints on the customer&apos;s bill exactly as typed, pre-filled with what it prints
@@ -446,18 +450,21 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           {field("Fallback tax rate (0.05 = 5%)", "tax_rate", { type: "number", step: "any", min: 0, hint: "Used only if you remove every named tax above." })}
         </div>
       </div>
+      )}
 
       {/* ═══ BANQUET BILL (mig 237) — what this restaurant is ASKED for ═══════
           Owner, 2026-07-31: "only ask for what's necessary … the restaurant will only
           get to choose what they fill." Unticking a box removes it from the manager's
           bill screen AND from the printed paper. The tax-sensitive parts are not on
           this list at all — they are filled by the server (BANQUET_LOCKED). */}
+      {show("banquet") && (
       <div id="det-banquet" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🎪 Banquet bill — what this restaurant fills in</h2>
+        {/* This card now sits inside the Banquet-billing row itself, so the old "…switched on in
+            Access & permissions" pointed at the switch directly above it (2026-08-01). */}
         <p className="hint">
-          Only shows up for a restaurant that has <b>Banquet &amp; events</b> switched on (Access &amp; permissions).
-          Tick a box and the manager is asked for it; untick it and it disappears from their screen and from the
-          bill — no empty boxes to guess at.
+          Tick a box and the manager is asked for it when they start an event; untick it and it disappears from
+          their screen and from the bill — no empty boxes to guess at.
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", margin: "0 0 12px" }}>
           {(["simple", "company", "full"] as const).map((k) => {
@@ -589,8 +596,10 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           {boolToggle("Keep the item box ruled to the bottom", "banquet_paper_fill", draft.banquet_paper_fill !== false)}
         </div>
       </div>
+      )}
 
       {/* ═══ KOT PRINTING — same-to-same with the manager's Kitchen section ═══ */}
+      {show("kitchen") && (
       <div id="det-kitchen" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🖨 KOT printing</h2>
         <p className="hint">
@@ -609,18 +618,21 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           <p className="hint" style={{ margin: "8px 0 0" }}>Opens a test ticket and the print dialog — use it to check the printer &amp; the ticket layout.</p>
         </div>
       </div>
+      )}
 
       {/* ═══ DINING SESSIONS — same-to-same with the manager's section ═══ */}
+      {show("sessions") && (
       <div id="det-sessions" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>⏱ Dining sessions</h2>
         {/* The dining-session MASTER switch moved to Access & permissions → Menu → Dining
             sessions (owner, 2026-07-31) — it decides whether the floor has an "Open table"
             step at all, which is a feature decision, not a setting. What stays here are the
             details that only matter once it is on. */}
+        {/* This card now sits INSIDE the Dining-sessions row on Access, directly under the switch
+            it talks about, so the old "go to Access → Menu → Dining sessions to turn it on" line
+            pointed at itself. It just states where things stand (owner, 2026-08-01). */}
         <p className="hint">
-          The QR/session system is switched on in{" "}
-          <a href={`/aevinite/access?rid=${restaurant.id}&from=rest`}>Access &amp; permissions → Menu → Dining sessions</a>.
-          It is currently <b>{draft.sessions_enabled === true ? "ON" : "OFF"}</b>
+          Dining sessions are currently <b>{draft.sessions_enabled === true ? "ON" : "OFF"}</b>
           {draft.sessions_enabled === true
             ? " — guests join a table and staff open it before ordering."
             : " — the floor takes orders directly, with no “Open table” step."}
@@ -640,8 +652,10 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           {field("Radius (metres)", "geo_radius_m", { type: "number", min: 20, max: 5000, step: 10 })}
         </div>
       </div>
+      )}
 
       {/* ═══ TABLES & QR — same-to-same with the manager's Tables section ═══ */}
+      {show("tables") && (
       <div id="det-tables" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Tables / seating</h2>
         <p className="hint">
@@ -703,6 +717,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           </button>
         </div>
       </div>
+      )}
 
       {showFloorPreview && (
         <FloorLayoutPreview
@@ -713,6 +728,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
         />
       )}
 
+      {show("tables") && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Table setting</h2>
         <p className="hint">
@@ -734,7 +750,9 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           ))}
         </div>
       </div>
+      )}
 
+      {show("tables") && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>🔗 Guest QR links · one per table</h2>
@@ -773,7 +791,9 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           })}
         </div>
       </div>
+      )}
 
+      {show("tables") && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Auto close / restart tables</h2>
         <p className="hint">
@@ -790,6 +810,7 @@ export default function RestaurantSettings({ restaurant }: { restaurant: Rest })
           </select>
         </label>
       </div>
+      )}
 
       {(msg || err) && (
         <div role="status" style={{ position: "fixed", left: "50%", bottom: dirty ? 76 : 20, transform: "translateX(-50%)", zIndex: 1001, background: err ? "var(--adm-danger, #e5484d)" : "var(--adm-ok, #16a34a)", color: "#fff", padding: "9px 15px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 6px 24px rgba(0,0,0,0.25)", maxWidth: "90vw" }}>

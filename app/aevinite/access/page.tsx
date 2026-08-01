@@ -89,7 +89,11 @@ export default function AccessPage() {
         </div>
       </header>
 
-      {rid ? (tab === "general" ? <AccessTree rid={rid} /> : <AccessPerPerson rid={rid} />) : null}
+      {/* `rest` is what lets a row open a whole editor inside itself — the branding, billing,
+          KOT, sessions, banquet and tables cards that used to live on the restaurant-detail
+          page (owner, 2026-08-01). The picker above already knows the restaurant, so nothing
+          extra is fetched for it. */}
+      {rid ? (tab === "general" ? <AccessTree rid={rid} rest={rest ? { id: rest.id, slug: rest.slug, name: rest.name } : undefined} /> : <AccessPerPerson rid={rid} />) : null}
     </div>
   );
 }
