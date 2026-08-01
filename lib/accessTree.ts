@@ -76,7 +76,7 @@ export type Bind =
   // manager grant said "what a manager gets", with nothing above it saying whether the thing is
   // on the premises. Stored in access_config (already JSONB, so no migration) and ABSENT MEANS
   // ON, so no restaurant changes until someone deliberately switches one off.
-  | { t: "has"; id: string }
+  | { t: "has"; id: string; def?: boolean }
   | { t: "none" };                       // nothing stored (left-to-build placeholder)
 
 export type Node = {
@@ -243,6 +243,24 @@ export const SECTIONS: Section[] = [
               { id: "guest_note", name: "Guest can write their own note", def: true, bind: { t: "feature", key: "guest_note" },
                 what: "The free-text “anything else?” note a guest sends to the kitchen. OFF removes it — they may still pick from your preset notes." },
             ] },
+          {
+            // TAKING THE MENU DOWN (owner, 2026-08-01). The capability already exists —
+            // settings.service_mode, /api/maintenance, the red control in the panels. What was
+            // missing is WHO may use it. Off for every restaurant until it is handed over, and
+            // when it is off the control is not on their screen at all (the standing rule: a
+            // feature that is off is absent, not greyed).
+            id: "maintenance", name: "Put menu on maintenance", bind: { t: "has", id: "maintenance", def: false },
+            what: "Lets someone take the guest menu down — a red control in their own Settings that closes the menu to diners. Off for every restaurant unless you hand it over.",
+            children: [
+              { id: "maintenance_who", name: "Who may do it", def: "owner",
+                bind: { t: "opt", id: "maintenance", side: "manager", key: "who" },
+                what: "Taking the menu down stops every guest ordering, so it is handed to as few people as possible.",
+                choices: [
+                  { value: "owner", label: "Owner only", what: "Only the owner sees the control." },
+                  { value: "owner_manager", label: "Owner and manager", what: "The manager gets it too — for a kitchen problem the owner isn't there for." },
+                ] },
+            ],
+          },
           { id: "favourites", name: "Favourites", def: true, bind: { t: "feature", key: "favorites" },
             what: "The heart button on a dish and the Favourites tab. This is also what the loyalty feature will be built on later." },
           { id: "veg", name: "Veg / non-veg", def: true, bind: { t: "feature", key: "diet_filter" },
@@ -640,7 +658,9 @@ export function nodeValue(n: Node, s: TreeState): any {
     // = false (no in-menu stars) while the rating area very much still exists, so reading the
     // features flag alone would show this master as OFF on a restaurant that asks every guest
     // for a Google review. Off is the one combination that shows a guest nothing.
-    case "has":      return present(s.config?.[b.id]?.on as boolean, true) !== false;
+    // Absent means ON for the money/floor rows (nothing changes until it is switched off), but a
+    // row can say otherwise — "Put menu on maintenance" ships OFF for every restaurant.
+    case "has":      return present(s.config?.[b.id]?.on as boolean, b.def !== false) !== false;
     case "ratingsMaster": {
       const stars = s.features?.ratings;
       const mode = present(s.settings?.google_review_mode as string, "off");

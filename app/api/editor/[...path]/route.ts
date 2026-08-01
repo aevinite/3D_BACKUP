@@ -653,7 +653,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         // The restaurant's own identity, so the printed bill is white-labelled to
         // THIS restaurant (its name/logo/footer) instead of the French House default.
-        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, logo_url").eq("id", rid).maybeSingle(),
       ]);
       return ok({
         items: must(items),

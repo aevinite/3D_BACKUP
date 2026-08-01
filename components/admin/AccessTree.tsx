@@ -487,8 +487,21 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
           feature applies and the settings that configure it are read as one thing. */}
       {node.panel && expanded ? <EmbeddedPanel what={node.panel} /> : null}
 
+      {/* A dropdown that is open only because its feature is OFF is READ-ONLY (owner, 2026-08-01:
+          "you could be able to see the bottom even if the feature is off… if you try to do stuff,
+          it should say you have to on the feature"). You can read what is in there — check which
+          key is stored, see how the bill is laid out — but a tap tells you what to turn on first
+          instead of silently saving into a feature nobody has. */}
       {showKids && expanded ? (
-        <div className="at-box-k">
+        <div className={`at-box-k ${isOn(node, st) ? "" : "at-locked"}`}
+          onClickCapture={isOn(node, st) ? undefined : (e) => {
+            const el = e.target as HTMLElement;
+            if (!el.closest("button, input, select, textarea, [role=switch], [role=radio]")) return;
+            e.preventDefault(); e.stopPropagation();
+            window.dispatchEvent(new CustomEvent("lfh:toast", { detail: `Turn “${node.name}” on first — these are its settings.` }));
+            const box = (e.currentTarget as HTMLElement).closest(".at-box") as HTMLElement | null;
+            if (box) { box.classList.remove("at-nudge"); void box.offsetWidth; box.classList.add("at-nudge"); }
+          }}>
           <Kids nodes={kids} st={st} depth={depth + 1} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />
         </div>
       ) : null}
@@ -1043,6 +1056,13 @@ function TreeStyle() {
      the four Tables cards apart. */
   .at-panel .adm-card:first-child > h2 { display:none; }
   .at-panel-wait { margin-top:12px; font-size:12.5px; color:var(--muted); }
+  /* Readable, not usable, while the feature above it is off. Dimmed enough to say so without
+     hiding the values — the point is being able to CHECK them before switching it on. */
+  .at-box-k.at-locked { opacity:.62; }
+  .at-box-k.at-locked::before { content:"Switch this on to change any of it"; display:block; margin:-2px 0 10px;
+    font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--lvl); }
+  .at-box.at-nudge { animation:atShake .34s ease; }
+  @keyframes atShake { 0%,100% { transform:translateX(0); } 25% { transform:translateX(-5px); } 70% { transform:translateX(5px); } }
   /* An embedded panel's own toggles were as tall as their label — "Require location (guest must
      be near the café)" wrapped to five lines and the box grew with it (owner, 2026-08-01: "the
      toggle is also very fat, vertically it is too much"). Cap the height, let the label use the

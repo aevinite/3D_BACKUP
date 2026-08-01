@@ -19,7 +19,7 @@ import { panelRestaurantId } from "@/lib/panelScope";
 export const dynamic = "force-dynamic";
 
 // Resolve the acting restaurant for a manager/admin request, or return the HTTP error to send.
-async function scope(req: NextRequest): Promise<{ rid: string } | { error: NextResponse }> {
+async function scope(req: NextRequest, forWrite = false): Promise<{ rid: string } | { error: NextResponse }> {
   const g = await requireRole(req, "manager");
   if (!g.ok) {
     // transient = auth lookup failed (DB blip) → 503 so the client retries instead of logging out.
@@ -31,6 +31,22 @@ async function scope(req: NextRequest): Promise<{ rid: string } | { error: NextR
   }
   const rid = panelRestaurantId(req, g);
   if (!rid) return { error: NextResponse.json({ error: "No restaurant in context." }, { status: 400 }) };
+
+  // WHO MAY TAKE THE MENU DOWN (owner, 2026-08-01). Taking it down stops every guest ordering,
+  // so it is handed over deliberately: Access → Menu → "Put menu on maintenance", which is OFF
+  // for every restaurant until someone switches it on, and then says whether the manager gets it
+  // as well as the owner. Enforced on the WRITE only — reading the current state is harmless and
+  // the panels need it to render their badge. The admin super-user (no staff cookie) always may.
+  if (forWrite && g.user) {
+    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+      { maintenance?: { on?: boolean; manager_opts?: { who?: string } } } | null;
+    const allowed = cfg?.maintenance?.on === true;
+    const who = cfg?.maintenance?.manager_opts?.who === "owner_manager" ? "owner_manager" : "owner";
+    const isOwner = g.user.role === "owner";
+    if (!allowed || (!isOwner && who !== "owner_manager")) {
+      return { error: NextResponse.json({ error: "Taking the menu down isn't switched on for you — ask your admin." }, { status: 403 }) };
+    }
+  }
   return { rid };
 }
 
@@ -43,7 +59,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const s = await scope(req);
+  const s = await scope(req, true);
   if ("error" in s) return s.error;
   const body = await req.json().catch(() => ({}));
   const on = body?.on === true;

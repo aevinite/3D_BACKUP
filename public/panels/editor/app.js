@@ -2228,6 +2228,19 @@ function taxLabel(settings) {
 // ONE resolver shared by printBill AND the Billing settings form, which AUTOFILLS these
 // exact values — so "what you see in the form" can never drift from "what the bill
 // prints". Returns RAW (unescaped) strings; callers escape at render.
+// THE LOGO ON THE BILL (owner, 2026-08-01: "if the image is uploaded it will add on the top; if
+// the image is not uploaded it will start with the name").
+//
+// It used to be a hardcoded littlefrenchhouse.in URL printed ONLY for restaurant #1 — the exact
+// "#1's branding leaks / is hardwired" shape the project rules warn about. Every restaurant's own
+// uploaded logo prints now (Access → Menu → Format & theme → Colours, logo & wording), and a
+// restaurant with none simply starts with its name, which is what a bill without a logo should do.
+function billLogo() {
+  const r = (state.data && state.data.restaurant) || {};
+  const u = String(r.logo_url || "").trim();
+  return /^https?:\/\//i.test(u) ? u : "";
+}
+
 function billIdentity(settings) {
   const s = settings || state.data.settings || {};
   const r = state.data.restaurant || {};
@@ -4105,7 +4118,7 @@ function printBill(t, sess, os) {
      border-bottom:2px solid #000;margin-top:7px;padding:6px 0;font-weight:700;font-size:16px;letter-spacing:.02em}
   .foot{text-align:center;font-size:11px;margin-top:11px}
 </style>
-${isDefault ? '<img class="logo" src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png" onerror="this.style.display=\'none\'"/>' : ""}
+${billLogo() ? `<img class="logo" src="${esc(billLogo())}" onerror="this.style.display='none'"/>` : ""}
 <h2>${name}</h2>
 <div class="sub">${addr ? addr + "<br/>" : ""}${phone ? "Ph " + phone : ""}${phone && gstin ? "<br/>" : ""}${gstin ? "GSTIN " + gstin : ""}</div>
 <div class="kind">Tax Invoice</div>
