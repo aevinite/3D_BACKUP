@@ -106,7 +106,7 @@ export type Node = {
   // the restaurant-detail page. `settings:<id>` renders one section of RestaurantSettings,
   // `branding` renders the branding & theme editor. Owner, 2026-08-01: "you have completely
   // removed setting and permission from restaurant detail — everything will be here".
-  panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "branding";
+  panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding";
 };
 
 export type Section = { id: string; name: string; blurb: string; icon: string; children: Node[] };
@@ -151,22 +151,19 @@ type ActionDef = {
   mgrDef: boolean; waiterDef?: "off" | "on" | "pin"; pin?: boolean; cap?: boolean;
 };
 const ACTIONS: ActionDef[] = [
-  { id: "take_orders", name: "Take a new order", flag: "take_orders", tablet: "tablet_take_orders", mgrDef: true, waiterDef: "on",
-    what: "Punching in a dine-in order. A waiter's core job; a manager can be given it too." },
-  { id: "table_tags", name: "Mark a table's type", flag: "table_tags", tablet: "tablet_table_tags", mgrDef: true, waiterDef: "on",
-    what: "Putting the VIP / Family / Owner's-guest ribbon on a table so the floor shows who's sitting there." },
+  // NOT FEATURES ANY MORE (owner, 2026-08-01). Taking an order, settling a bill, issuing the
+  // invoice, marking a table's type and moving/merging/splitting are how the floor RUNS — a
+  // restaurant that switched them off could not trade. They are permanently on for whoever's
+  // panel owns them and have no row here. managerGrantValue() answers ON for a flag with no
+  // row, so removing them from this list is the whole change: nothing to store, nothing to
+  // migrate, and no screen that can take them away by accident.
+  //   take_orders · mark_paid · print_invoice · table_tags · table_ops
   { id: "give_discounts", name: "Give a discount", flag: "give_discounts", tablet: "tablet_discount", mgrDef: true, waiterDef: "off", pin: true, cap: true,
     what: "Taking money off a bill. The cap below is the most this role may take off in one go." },
-  { id: "mark_paid", name: "Mark a bill paid (and undo)", flag: "mark_paid", tablet: "tablet_mark_paid", mgrDef: true, waiterDef: "off", pin: true,
-    what: "Closing a table as paid — and the Undo that reopens a just-paid bill. Deliberately ONE permission, so undoing is never easier than paying." },
-  { id: "print_invoice", name: "Generate bills", flag: "print_invoice", tablet: "tablet_invoice", mgrDef: true, waiterDef: "off", pin: true,
-    what: "Producing the tax invoice. It carries a legal number that can never be reused, so an invoice can be issued but not un-issued." },
-  { id: "void_bills", name: "Reopen or void a bill", flag: "void_bills", capTablet: "void_bills", mgrDef: true, waiterDef: "off", pin: true,
-    what: "Reopening a settled bill, voiding a generated one, or closing a table unpaid after a walk-out. Every use is recorded with who did it and the reason they typed." },
+  { id: "void_bills", name: "Reopen a bill", flag: "void_bills", capTablet: "void_bills", mgrDef: true, waiterDef: "off", pin: true,
+    what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it." },
   { id: "delete_bill", name: "Delete a bill", flag: "delete_bill", mgrDef: false, pin: true,
-    what: "Takes a bill off the working list. A PAID bill can never be deleted; what is removed stays in the records for tax, is restorable, and stores who did it and why." },
-  { id: "table_ops", name: "Move, merge and split tables", flag: "table_ops", tablet: "tablet_table_ops", mgrDef: true, waiterDef: "off", pin: true,
-    what: "The KOT ▾ menu: move a party to another table, merge two tables, move a ticket or one dish, split a bill, reprint a kitchen ticket." },
+    what: "Takes a bill out of the reports. The number is NOT reused — the next bill still takes the next number — and nothing is erased: the bill stays in the records and in the audit, it simply stops counting towards sales." },
   { id: "manage_staff", name: "Manage staff", flag: "manage_staff", mgrDef: false,
     what: "Adding people, changing a role, resetting a PIN. Off for managers unless you deliberately hand it over." },
   { id: "edit_settings", name: "Change restaurant settings", flag: "edit_settings", mgrDef: false,
@@ -271,8 +268,6 @@ export const SECTIONS: Section[] = [
           },
         ],
       },
-      { id: "khata", name: "Pay later (khata)", def: false, bind: { t: "module", key: "khata" },
-        what: "Parking a bill on a named regular to collect later, and the book that tracks who owes what. OFF removes the khata screens from the manager AND owner panels entirely." },
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false, bind: { t: "setting", key: "auto_print_kot_allowed" },
         configurableWhenOff: true,
         what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine.",
@@ -282,16 +277,15 @@ export const SECTIONS: Section[] = [
         ] },
       {
         id: "bill", name: "Bill", bind: { t: "none" },
-        what: "What prints on a bill. There is no on/off here — a restaurant can always issue a bill. These are the details that appear on it.",
+        what: "Everything that prints on a bill. There is no on/off — a restaurant can always issue one.",
         children: [
-          { id: "bill_gstin", name: "GSTIN", def: "", bind: { t: "text", key: "gstin" }, placeholder: "e.g. 24ABCDE1234F1Z5",
-            what: "The tax number printed on every bill. Leave it empty and bills print without one — never put a made-up number on a real bill." },
-          { id: "bill_name", name: "Legal name on the bill", def: "", bind: { t: "text", key: "restaurant_name" }, placeholder: "Registered business name",
-            what: "The business name as it should appear on a tax invoice, which is often not the same as the trading name." },
-          { id: "bill_address", name: "Bill address", def: "", bind: { t: "text", key: "restaurant_address" }, placeholder: "Street, city, PIN",
-            what: "The address printed on the bill." },
-          { id: "bill_printed", name: "The printed bill", bind: { t: "none" }, panel: "settings:billing",
-            what: "Everything else that prints on the customer's bill: the phone number, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for." },
+          // ONE form, not four boxes (owner, 2026-08-01: "here unnecessary sub-options are made,
+          // it could be merged… and it should be as format of bill"). GSTIN, the legal name and
+          // the address were three separate rows sitting on top of a fourth box holding the rest
+          // of the very same document. They are all the bill's format, so they are one screen —
+          // the same shape as Menu → Format & theme.
+          { id: "bill_format", name: "Format", bind: { t: "none" }, panel: "settings:billing",
+            what: "The whole bill as one form: GSTIN, the legal name and address, the phone, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for." },
           { id: "bill_designer", name: "Bill design editor", leftToBuild: true, bind: { t: "none" },
             what: "Design the whole bill like a document — move the logo, change the wording, resize the totals. Not built yet; this is where it will live." },
         ],
@@ -302,8 +296,15 @@ export const SECTIONS: Section[] = [
         id: "tables", name: "Tables & QR codes", bind: { t: "none" },
         what: "How many tables this restaurant has, what each one is called, how many seats it has, its QR code, and how the floor is laid out on screen.",
         children: [
-          { id: "tables_setup", name: "Tables, seats, QR codes & floor layout", bind: { t: "none" }, panel: "settings:tables",
-            what: "The table list itself — names, seats, per-row layout — plus each table's QR code to print, and what happens to a table left open overnight." },
+          // REAL sub-options, not one merged blob (owner, 2026-08-01: "all are sub options — QR
+          // and link is a whole new sub option, only expandable, it should have dropdown").
+          // Each opens just the part of the tables screen it owns.
+          { id: "tables_list", name: "Tables & seats", bind: { t: "none" }, panel: "settings:tables",
+            what: "How many tables there are, what each one is called and how many people sit at it." },
+          { id: "tables_layout", name: "Floor layout", bind: { t: "none" }, panel: "settings:floor",
+            what: "How the tables are arranged on the manager's floor screen — how many to a row, and how big each tile ends up." },
+          { id: "tables_qr", name: "QR codes & links", bind: { t: "none" }, panel: "settings:qr",
+            what: "The permanent QR code and link for every table — the ones printed and put on the tables. Print one, or the whole sheet." },
         ],
       },
     ],
@@ -319,6 +320,8 @@ export const SECTIONS: Section[] = [
     id: "extra", name: "Extra features", icon: "grid",
     blurb: "The bigger modules a restaurant takes on as well as its day-to-day running. All off by default — switch one on and its screens appear.",
     children: [
+      { id: "khata", name: "Pay later (khata)", def: false, bind: { t: "module", key: "khata" },
+        what: "Parking a bill on a named regular to collect later, and the book that tracks who owes what. OFF removes the khata screens from the manager AND owner panels entirely." },
       {
         // "Platforms" (owner, 2026-07-31). The stored key stays `takeaway`: that is the mig-235
         // column name, and renaming a LABEL must never rename a column.
@@ -392,44 +395,72 @@ export const SECTIONS: Section[] = [
   //      rather than leaving settings on screen for a menu that isn't there.
   // What a manager may do that ISN'T a menu (the money and floor actions) is one list underneath.
   {
-    id: "mgrMenu", name: "Manager's menu", icon: "users",
+    id: "mgrMenu", name: "Manager", icon: "users",
     blurb: "Which menus a manager gets, and what they may do inside each one. Switch a menu off and it is gone for a real manager — its settings go with it, and its endpoints refuse.",
     children: [
       {
-        id: "mgr_tab_editor", name: "Edit menu", def: true, fresh: true,
-        bind: { t: "menu", panel: "manager", key: "editor", grant: "edit_menu" },
-        what: "The Editor tab — dishes, categories and filters. Off removes the tab completely; the parts below say which bits of it a manager may change.",
-        children: EDIT_MENU_PARTS.map((p) => ({
-          id: `d_mgr_${p.id}`, name: p.name, what: p.what, def: p.def,
-          bind: { t: "opt", id: "edit_menu", side: "manager", key: p.id } as Bind,
-        })),
+        // "Inside Manager, there will be Manager menu. Inside Manager menu, there will be Edit
+        // menu…" (owner, 2026-08-01). The menus are a named group of their own so the section
+        // reads as the manager's PANEL — its menus, then what they may do inside it.
+        id: "mgr_menu_group", name: "Manager menu", bind: { t: "none" },
+        what: "The tabs a manager gets. Switch one off and it is gone for a real manager — its settings go with it, and its endpoints refuse.",
+        children: [
+        {
+          id: "mgr_tab_editor", name: "Edit menu", def: true, fresh: true,
+          bind: { t: "menu", panel: "manager", key: "editor", grant: "edit_menu" },
+          what: "The Editor tab — dishes, categories and filters. Off removes the tab completely; the parts below say which bits of it a manager may change.",
+          children: EDIT_MENU_PARTS.map((p) => ({
+            id: `d_mgr_${p.id}`, name: p.name, what: p.what, def: p.def,
+            bind: { t: "opt", id: "edit_menu", side: "manager", key: p.id } as Bind,
+          })),
+        },
+        { id: "mgr_tab_ratings", name: "Ratings", def: true, fresh: true,
+          bind: { t: "menu", panel: "manager", key: "ratings", grant: "view_ratings" },
+          what: "The Ratings tab, where the manager reads what guests said about the food and marks a complaint handled." },
+        { id: "mgr_tab_log", name: "Log", def: true, fresh: true,
+          bind: { t: "menu", panel: "manager", key: "log", grant: "view_logs" },
+          what: "The Log tab — the record of who did what in this restaurant. Admin-only actions never appear there." },
+        {
+          // FOURTH menu. Its reach is a setting, not a separate permission: a real manager's
+          // dashboard is clamped to TODAY by the server, and this is what widens it.
+          id: "mgr_tab_dash", name: "Dashboard", def: true, bind: { t: "grant", flag: "view_dashboard" },
+          what: "The numbers screen and the day's report.",
+          children: [
+            { id: "mgr_dash_range", name: "How far back it reaches", def: "today", bind: { t: "opt", id: "view_dashboard", side: "manager", key: "range" },
+              what: "Every restaurant starts on TODAY — a manager who can see yesterday can work out what a shift took, so it is handed over deliberately.",
+              choices: [
+                { value: "today", label: "Today only", what: "The shift they are standing in. Nothing before this morning." },
+                { value: "today_yesterday", label: "Today + yesterday", what: "Lets them compare against the day before." },
+              ] },
+          ],
+        },
+        {
+          // FIFTH menu (owner, 2026-08-01). The two things that can be done to a bill AFTER it is
+          // closed. Both are recorded in the audit — that is the point of putting them together.
+          id: "mgr_tab_bill", name: "Bill", def: true, fresh: true,
+          bind: { t: "menu", panel: "manager", key: "bills", grant: "view_bills" },
+          what: "The Bills tab. What a manager may do to a bill that is already closed lives inside it — every one of these writes to the audit.",
+          children: [
+            { id: "mgr_bill_delete", name: "Delete a bill", def: false, bind: { t: "grant", flag: "delete_bill" },
+              what: "Takes a bill out of the reports. The number is NOT reused — the next bill still takes the next one — and nothing is erased: it stays in the records and in the audit, it just stops counting towards sales." },
+            { id: "mgr_bill_reopen", name: "Reopen a bill", def: true, bind: { t: "grant", flag: "void_bills" },
+              what: "Brings a closed bill back so it can be corrected. The SAME bill reopens, and the audit records that it was reopened and what changed.",
+              children: [
+                { id: "mgr_bill_reopen_mins", name: "Only within", def: 10, bind: { t: "limit", id: "void_bills", side: "minutes" },
+                  unit: " min", options: [5, 10, 15, 30, 60],
+                  what: "How long after a bill closes it can still be reopened. After that it is settled and a correction has to be a credit note, which is the legal way round." },
+              ] },
+          ],
+        },
+        ],
       },
-      { id: "mgr_tab_ratings", name: "Ratings", def: true, fresh: true,
-        bind: { t: "menu", panel: "manager", key: "ratings", grant: "view_ratings" },
-        what: "The Ratings tab, where the manager reads what guests said about the food and marks a complaint handled." },
-      { id: "mgr_tab_log", name: "Log", def: true, fresh: true,
-        bind: { t: "menu", panel: "manager", key: "log", grant: "view_logs" },
-        what: "The Log tab — the record of who did what in this restaurant. Admin-only actions never appear there." },
       {
         // Not menus, so they can't be rows above: these are things a manager DOES, wherever they
         // stand. Kept as one list rather than scattered into the tabs they happen to appear on
         // (owner's pick, 2026-08-01).
         id: "mgr_may", name: "What a manager may do", bind: { t: "none" },
         what: "The money and floor actions, for every manager in this restaurant. One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
-        children: [
-          {
-            id: "d_mgr_dashboard", name: "Dashboard", def: true, bind: { t: "grant", flag: "view_dashboard" },
-            what: "The numbers screen and the day's report. A real manager's dashboard is clamped to TODAY by the server today; the two picks below are the settings that will change that once they are built.",
-            children: [
-              { id: "d_mgr_dash_range", name: "What the dashboard shows", leftToBuild: true, bind: { t: "none" },
-                what: "How far back a manager's dashboard reaches.",
-                choices: [{ value: "today", label: "Today only" }, { value: "today_yesterday", label: "Today + yesterday" }] },
-              { id: "d_mgr_daily_report", name: "Generate the daily report", leftToBuild: true, bind: { t: "none" },
-                what: "The button that produces the day's report. It is the SAME report, with the same design, as the owner's daily analysis — one report, two places." },
-            ],
-          },
-          ...ACTIONS.map(mgrAction),
-        ],
+        children: [...ACTIONS.map(mgrAction)],
       },
     ],
   },
@@ -443,8 +474,18 @@ export const SECTIONS: Section[] = [
         what: "The owner's own Menu page — the same dishes/categories editor, in the owner panel." },
       { id: "own_ratings", name: "Ratings", def: true, bind: { t: "section", key: "ratings" },
         what: "The owner's Ratings page — guest stars and written feedback." },
-      { id: "own_logs", name: "Logs", def: true, fresh: true, bind: { t: "section", key: "logs" },
-        what: "The owner's Log page — who did what across their restaurants." },
+      {
+        // AUDIT (owner, 2026-08-01). Not "everything that happened" — that is the log — but
+        // everything that WAS NOT MEANT TO HAPPEN and did: a bill reopened after closing, a bill
+        // taken out of the reports, a correction made after the fact. The plain log lives INSIDE
+        // it, because you go looking for the log when you are already asking "what happened here".
+        id: "own_audit", name: "Audit", def: true, fresh: true, bind: { t: "section", key: "logs" },
+        what: "Everything that was not meant to happen but did — bills reopened, bills taken out of the reports, anything corrected after the event — with who did it and why.",
+        children: [
+          { id: "own_logs", name: "Activity log", def: true, bind: { t: "section", key: "logs" },
+            what: "The full record of who did what, inside Audit — the detail behind an entry." },
+        ],
+      },
       { id: "own_manager_mode", name: "Manager mode", leftToBuild: true, bind: { t: "none" },
         what: "Lets the owner drop into their own manager panel and work the floor as a manager would. Not built yet; this is where its switch will live." },
     ],
@@ -694,7 +735,7 @@ export function managerGrantValue(flag: string, stored: unknown): boolean {
   return MANAGER_GRANT_DEFAULTS[flag];                      // nothing stored → what the screen shows
 }
 
-export const MANAGER_TAB_KEYS = ["editor", "ratings", "log"] as const;
+export const MANAGER_TAB_KEYS = ["editor", "ratings", "log", "bills"] as const;
 export type ManagerTabKey = (typeof MANAGER_TAB_KEYS)[number];
 
 export function managerTabsOff(accessConfig: unknown): ManagerTabKey[] {

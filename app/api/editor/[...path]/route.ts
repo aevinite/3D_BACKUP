@@ -141,6 +141,9 @@ async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<
 const TAB_PATHS: { tab: ManagerTabKey; test: (p: string) => boolean }[] = [
   { tab: "ratings", test: (p) => p === "ratings" || p.startsWith("ratings/") },
   { tab: "log", test: (p) => p === "oplog" || p.startsWith("oplog/") },
+  // The Bills tab (owner, 2026-08-01 — the fifth manager menu). Switching it off has to take the
+  // bill LIST away as well as the tab, or the endpoints are still reachable behind a hidden tab.
+  { tab: "bills", test: (p) => p === "bills" || p.startsWith("bills/") || p === "invoices" || p.startsWith("invoices/") },
   { tab: "editor", test: (p) => /^(items|categories|filters)(\/|$)/.test(p) },
 ];
 async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[]): Promise<NextResponse | null> {
@@ -149,8 +152,20 @@ async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[
   const hit = TAB_PATHS.find((t) => t.test(p));
   if (!hit) return null;
   const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config;
-  if (managerTabOn(cfg, hit.tab)) return null;
-  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log" };
+  // A menu row moves TWO stored values — the tab list and the manager power behind it — so the
+  // gate checks both. Checking only the tab left the power writable but unread, which is the
+  // dead-switch shape this whole rebuild exists to remove (caught by verify:access, 2026-08-01).
+  //
+  // Each flag is written out AT its managerCan call rather than looked up from a map: a map
+  // hides the flag name from anything reading this file, and "is this permission actually
+  // consulted anywhere" is a question both the guard and a person need to answer by reading.
+  const granted =
+    hit.tab === "editor"  ? await managerCan(g, rid, "edit_menu")
+    : hit.tab === "ratings" ? await managerCan(g, rid, "view_ratings")
+    : hit.tab === "log"     ? await managerCan(g, rid, "view_logs")
+    :                         await managerCan(g, rid, "view_bills");
+  if (managerTabOn(cfg, hit.tab) && granted) return null;
+  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log", bills: "the bills list" };
   return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
 
@@ -1036,10 +1051,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // wide range in the URL just returns today instead. The OWNER (their own restaurants)
       // and the admin super-user (no staff cookie) keep every range.
       const askedRange = new URL(req.url).searchParams.get("range") || "30d";
-      const range = g.user && g.user.role !== "owner" ? "today" : askedRange;
+      // A real manager is clamped to their restaurant's DASHBOARD REACH (Access → Manager →
+      // Manager menu → Dashboard). Every restaurant starts on "today"; "today + yesterday" is
+      // handed over deliberately, because someone who can see yesterday can work out what a
+      // shift took. The owner and the admin super-user keep every range. Clamping here and not
+      // only in the panel is the point — asking for a wide range in the URL still returns the
+      // allowed one. (owner, 2026-08-01)
+      let range = askedRange;
+      if (g.user && g.user.role !== "owner") {
+        const cfgDash = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+          { view_dashboard?: { manager_opts?: { range?: string } } } | null;
+        const reach = cfgDash?.view_dashboard?.manager_opts?.range === "today_yesterday" ? "today_yesterday" : "today";
+        range = reach === "today_yesterday" && askedRange === "yesterday" ? "yesterday" : "today";
+      }
       const now = new Date();
       let since: Date;
       if (range === "today") { since = new Date(businessDayStartIso()); } // 05:00 IST business day
+      // "Today + yesterday" reaches back one more business day — nothing further.
+      else if (range === "yesterday") { since = new Date(new Date(businessDayStartIso()).getTime() - 864e5); }
       else if (range === "year") { since = new Date(now.getFullYear(), now.getMonth() - 11, 1); }
       else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
 

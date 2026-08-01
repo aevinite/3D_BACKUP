@@ -951,10 +951,24 @@ function TreeStyle() {
      Pink is violet-400 → pink-400, i.e. deliberately NOT --adm-danger: true red means danger
      everywhere else in this panel and a switched-on option is not a warning. Three steps before
      any repeat means a box never touches a box of its own colour. */
-  .at-box.d0, .at-chip.d0 { --lvl: var(--accent); }
-  .at-box.d1, .at-chip.d1 { --lvl: #a78bfa; }
-  .at-box.d2, .at-chip.d2 { --lvl: #f472b6; }
-  .at-box.d3, .at-chip.d3 { --lvl: var(--accent); }
+  /* THE SECTION CARD IS LEVEL 0 (owner, 2026-08-01: "the first main menu section is also having
+     a colour — you ignored that"). It wears the accent, so a depth-0 row wearing the accent too
+     put blue immediately inside blue, which is exactly what he kept seeing. The whole ramp moves
+     down one: section BLUE → row PURPLE → its options PINK → deeper BLUE again. Three steps
+     before any repeat means no box ever touches one of its own colour. */
+  .acc2-sect { --lvl: var(--accent); }
+  .at-box.d0, .at-chip.d0 { --lvl: #a78bfa; }
+  .at-box.d1, .at-chip.d1 { --lvl: #f472b6; }
+  .at-box.d2, .at-chip.d2 { --lvl: var(--accent); }
+  .at-box.d3, .at-chip.d3 { --lvl: #a78bfa; }
+  /* Enough contrast to READ at a glance. Purple and pink at 30% over a navy card both drift
+     towards blue — which is the other half of why the nesting looked wrong even when it was
+     right. A stronger border and a warmer tint keep them apart. */
+  .at-box { border-width:1.5px; }
+  .at-box.d0 { border-color:color-mix(in srgb,#a78bfa 52%,transparent); }
+  .at-box.d1 { border-color:color-mix(in srgb,#f472b6 52%,transparent); }
+  .at-box.d2 { border-color:color-mix(in srgb,var(--accent) 52%,transparent); }
+  .at-box.d3 { border-color:color-mix(in srgb,#a78bfa 52%,transparent); }
 
   .at-box { position:relative; border:1.5px solid color-mix(in srgb, var(--lvl) 30%, transparent); border-radius:14px;
     background:color-mix(in srgb, var(--lvl) 5%, color-mix(in srgb, var(--card) 78%, var(--bg))); padding:13px 14px; }

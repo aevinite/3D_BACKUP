@@ -45,7 +45,7 @@ const hintStyle: React.CSSProperties = { fontSize: 11.5, marginTop: 3 };
  *  dropdown of the feature it belongs to — "Dining sessions" opens the session rules, "Banquet
  *  billing" opens the banquet bill, and so on (owner, 2026-08-01). The component still loads and
  *  saves the whole settings row either way, so the same values are edited from either place. */
-export type SettingsSection = "billing" | "banquet" | "kitchen" | "sessions" | "tables";
+export type SettingsSection = "billing" | "banquet" | "kitchen" | "sessions" | "tables" | "floor" | "qr";
 
 export default function RestaurantSettings({ restaurant, only }: { restaurant: Rest; only?: SettingsSection[] }) {
   const show = (k: SettingsSection) => !only || only.includes(k);
@@ -363,26 +363,29 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           "Tax", so nothing on any bill moves; there is simply no longer a field to change it. */}
       {show("billing") && (
       <div id="det-billing" className="adm-card" style={{ marginBottom: 14 }}>
-        <h2>🧾 Printed bill — what the customer gets</h2>
+        <h2>🧾 The bill, as it prints</h2>
         <p className="hint">
-          Everything below prints on the customer&apos;s bill exactly as typed, pre-filled with what it prints
-          <b> right now</b>. <b>Invoice prefix</b> + financial year build the number (e.g. <code>INV/2025-26/000042</code>) —
-          the running number itself is made by the server; nobody can edit the sequence.
+          Everything here prints on the customer&apos;s bill exactly as typed, pre-filled with what it
+          prints <b>right now</b>. <b>Invoice prefix</b> + financial year build the number
+          (e.g. <code>INV/2025-26/000042</code>) — the running number itself is made by the server;
+          nobody can edit the sequence.
         </p>
-        {/* The legal name, address and GSTIN moved to Access & permissions → Main features →
-            Bill (owner, 2026-07-31), so each of those values has exactly ONE editor. Two
-            screens writing the same field is how the pair silently drift apart. What stays
-            here is the rest of the printed bill, which is not a permission. */}
-        <p className="hint" style={{ marginTop: 0 }}>
-          <b>Legal name, address and GSTIN</b> are set in{" "}
-          <a href={`/aevinite/access?rid=${restaurant.id}&from=rest`}>Access &amp; permissions → Bill</a>{" "}
-          so there is only one place that owns them.
-        </p>
-        <div style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
-            {field("Phone", "restaurant_phone", { ph: "+91 …" })}
-            {field("Invoice prefix", "invoice_prefix")}
-          </div>
+        {/* GSTIN, the legal name and the address used to be three separate rows on the Access
+            screen sitting above this card — four boxes describing one document (owner,
+            2026-08-01: "unnecessary sub-options… it should be as format of bill"). They are
+            fields on this form now, so the bill has exactly one place that owns it. */}
+        <div className="adm-grid2" style={{ gap: 12 }}>
+          {field("Legal name on the bill", "restaurant_name", { hint: "As it should appear on a tax invoice — often not the trading name." })}
+          {field("GSTIN", "gstin", { ph: "e.g. 24ABCDE1234F1Z5", hint: "Leave it empty and bills print without one. Never put a made-up number on a real bill." })}
+        </div>
+        <div style={{ marginTop: 12 }}>
+          {field("Address on the bill", "restaurant_address", { ph: "Street, city, PIN" })}
+        </div>
+        <div className="adm-grid2" style={{ gap: 12, marginTop: 12 }}>
+          {field("Phone", "restaurant_phone", { ph: "+91 …" })}
+          {field("Invoice prefix", "invoice_prefix")}
+        </div>
+        <div style={{ marginTop: 12 }}>
           {field("Bill footer message", "bill_footer", { hint: "Printed at the very bottom of the customer's bill, e.g. “Thank you — visit again!”." })}
         </div>
 
@@ -655,7 +658,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       )}
 
       {/* ═══ TABLES & QR — same-to-same with the manager's Tables section ═══ */}
-      {show("tables") && (
+      {show("floor") && (
       <div id="det-tables" className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Tables / seating</h2>
         <p className="hint">
@@ -752,7 +755,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       </div>
       )}
 
-      {show("tables") && (
+      {show("qr") && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <h2 style={{ margin: 0 }}>🔗 Guest QR links · one per table</h2>
@@ -793,24 +796,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       </div>
       )}
 
-      {show("tables") && (
-      <div className="adm-card" style={{ marginBottom: 14 }}>
-        <h2>🪑 Auto close / restart tables</h2>
-        <p className="hint">
-          A table always clears itself once its bill is fully <b>paid</b> and every dish is <b>served</b> — staff have no
-          way to close or free a table by hand any more, so &quot;do nothing&quot; is not an option: finished tables would
-          pile up on the floor. Choose WHICH way it clears. Also visible to the manager.
-        </p>
-        <label style={{ ...labelStyle, maxWidth: 320 }}>
-          When a table is paid &amp; fully served
-          <select value={String(draft.auto_table_action) === "restart" ? "restart" : "close"} disabled={!loadOk || busy}
-            onChange={(e) => set("auto_table_action", e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
-            <option value="close">Free the table</option>
-            <option value="restart">Keep the party seated (dining sessions only)</option>
-          </select>
-        </label>
-      </div>
-      )}
+      {/* The "Auto close / restart tables" card was here. REMOVED 2026-08-01 (owner: "this
+          option is also useless, we don't need it — it will be auto set by the session").
+          The stored auto_table_action still drives the behaviour; there is simply no longer a
+          screen offering a choice nobody should have to make. */}
 
       {(msg || err) && (
         <div role="status" style={{ position: "fixed", left: "50%", bottom: dirty ? 76 : 20, transform: "translateX(-50%)", zIndex: 1001, background: err ? "var(--adm-danger, #e5484d)" : "var(--adm-ok, #16a34a)", color: "#fff", padding: "9px 15px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 6px 24px rgba(0,0,0,0.25)", maxWidth: "90vw" }}>
