@@ -2823,7 +2823,7 @@ html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in 
    dot, so the floor and the key can't disagree. */
 .ftile.ft-merged { --c: #a855f7; }
 .ldot-merged { background: #a855f7; }
-.ft-merge { margin-top: auto; display: flex; flex-direction: column; gap: 0; min-width: 0;
+.ft-merge { margin-top: clamp(2px, 2.5cqw, 5px); display: flex; flex-direction: column; gap: 0; min-width: 0;
   align-items: center; text-align: center;
   padding: clamp(3px, 3.2cqw, 7px) clamp(4px, 4cqw, 8px);
   border-radius: clamp(6px, 6.5cqw, 10px);
@@ -2860,3 +2860,8 @@ html[data-theme="light"] .ft-merge { background: color-mix(in srgb, #a855f7 20%,
 .sx-merged-list { margin: 0 0 12px 18px; padding: 0; font-size: 13px; line-height: 1.6; }
 .sx-merged-acts { display: flex; gap: 10px; flex-wrap: wrap; }
 html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%, #fff); }
+
+/* A merged CHILD shows the party's live line and then the MERGED badge; without this the badge
+   would push away from the line and the tile would look like two unrelated blocks. */
+.ft-line + .ft-merge { margin-top: clamp(2px, 2.2cqw, 4px); }
+.ftile.ft-is-merged .ft-line { margin-top: auto; }

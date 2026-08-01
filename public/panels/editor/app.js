@@ -6148,8 +6148,17 @@ function floorTileHtml(i) {
   // The child's row is the LOUDEST thing on the tile (owner, 2026-08-01: "in the seven it should be
   // written in big words, it is merge with six … it should be written in big and all those things
   // should be visible"). Big "MERGED", then the table it belongs to on its own line.
+  // The child shows the SAME live line as the table it is merged with — same party, same food, so
+  // "4/6 served" belongs on both tiles — with the MERGED wording under it.
+  const pTile = mergedTo ? tableTileState(mergedTo) : null;
+  const pCounts = pTile ? pTile.counts : null;
+  const pTot = pCounts ? pCounts.nw + pCounts.ck + pCounts.rd + pCounts.sv : 0;
+  const pStrip = pTot > 0
+    ? `<div class="ft-strip">${pCounts.nw ? `<i style="width:${(pCounts.nw / pTot) * 100}%;background:#f59e0b"></i>` : ""}${pCounts.ck ? `<i style="width:${(pCounts.ck / pTot) * 100}%;background:#4f9dff"></i>` : ""}${pCounts.rd ? `<i style="width:${(pCounts.rd / pTot) * 100}%;background:#ec4899"></i>` : ""}${pCounts.sv ? `<i style="width:${(pCounts.sv / pTot) * 100}%;background:#22c55e"></i>` : ""}</div>`
+    : "";
   const statusRow = mergedTo
-    ? `<div class="ft-merge ft-merge-child" title="This table is part of table ${esc(mergedTo)}'s party — one bill, on T${esc(mergedTo)}"><b class="ft-merge-big">MERGED</b><span class="ft-merge-with">with T${esc(mergedTo)}</span></div>`
+    ? `${pTot > 0 ? `<div class="ft-line" title="${esc(pTile.label || "")}"><span class="ft-linenum">${esc(pCounts.sv)}/${esc(pTot)} served</span>${pStrip}</div>` : ""}`
+      + `<div class="ft-merge ft-merge-child" title="This table is part of table ${esc(mergedTo)}'s party — one bill, on T${esc(mergedTo)}"><b class="ft-merge-big">MERGED</b><span class="ft-merge-with">with T${esc(mergedTo)}</span></div>`
     : cTot > 0
     ? `<div class="ft-line" title="${esc(label)}${meta ? " · " + esc(meta) : ""}"><span class="ft-linenum">${esc(servedTxt)}</span>${strip}</div>`
     // No dishes yet (free, or a party sitting with nothing ordered): there is no progress to draw,
@@ -6208,7 +6217,9 @@ function floorTileHtml(i) {
   // look — the strip/label/pay ring keep working, the tag is unmistakable on top.
   const tag = tagForTable(i);
   const tinfo = TABLE_TAG_INFO[tag];
-  return `<div class="ftile ft-${mergedTo ? "merged" : st}${mergedTo ? " ft-is-merged" : ""}${mergeKids.length ? " ft-has-merged" : ""}${pay ? " pay-" + pay : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
+  const mergedEither = !!mergedTo || mergeKids.length > 0;
+  const payShown = mergedTo && pTile ? (pTile.pay || pay) : pay;
+  return `<div class="ftile ft-${mergedEither ? "merged" : st}${mergedTo ? " ft-is-merged" : ""}${mergeKids.length ? " ft-has-merged" : ""}${payShown ? " pay-" + payShown : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
         ${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
         <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${seatTxt ? `<span class="ft-seats" title="${esc(seatTip)}"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seatTxt)}</span>` : ""}</div>
         ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
