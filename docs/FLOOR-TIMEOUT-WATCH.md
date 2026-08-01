@@ -363,3 +363,74 @@ indexes only ever grow. **REINDEX is the only thing that reclaims them.**
    - **Worth checking first:** AV live almost certainly has far fewer orders, so it may not have this
      problem at all. Its order count should be read before assuming the client stack needs anything.
 
+---
+
+# The root cause is FIXED: the demo history was 14× too big (2026-08-01)
+
+The owner's call: *"delete all test data and add last 2 months, ~3k orders per week, Sunday and rush
+hours — make it perfect and less load."* That turned out to be the actual fix for everything above.
+
+## What was wrong
+
+**399,449 orders** of invented history — ~6 months × 9 restaurants at ~400 orders/day each. No real
+restaurant produces that, and none of it was real: 338,748 carried the `demo-seed` tag and most of the
+rest were the same generator's discounted rows. It made the `orders` table **281 MB** inside a 322 MB
+database, on a machine that can only cache **224 MB**.
+
+## What it is now
+
+**`npm run demo:reset`** (plan) / **`-- --apply`** (act) — `scripts/reset-demo-history.mjs`.
+
+| | before | after |
+|---|---|---|
+| orders | **399,449** | **29,576** |
+| database | **367 MB** | **120 MB** — inside the 224 MB cache |
+| orders table | 281 MB | ~20 MB |
+
+~3,400 orders/week across all demo restaurants, the last 61 days, with **Sunday busiest** (5,348 vs
+Monday's 2,962), lunch peaking at 13:00 and dinner at 20:00, a quiet 15:00–17:00 lull, and roughly one
+day in twelve unusually busy. Real dishes, each restaurant's real tax rate, ~2.5% cancelled, ~8%
+discounted, feedback on some. Menus, settings, staff, permissions and owners are untouched, so Aangan
+still holds the factory-default permission set the QA suite reads.
+
+## The payoff — this is what all of the above was chasing
+
+| | before | after |
+|---|---|---|
+| heatmap, one restaurant, all 2026 | 5,554–13,090 ms, often **cancelled** | **24–206 ms** |
+| heatmap, ALL restaurants | 12,544–21,012 ms, **always cancelled** | **87–99 ms** |
+| floor summary, 300 tables | 13–281 ms | 14–27 ms |
+
+**So the day-of-week + hour rollup listed above as "still needed" is not needed.** The report that
+could never finish now finishes in a tenth of a second. Fixing the root removed the problem instead of
+working around it — and the machine no longer needs upgrading either.
+
+## Three bugs the checks caught in my own seed data — worth knowing about
+
+1. **Sunday's rush landed on Monday.** `new Date(midnightIST).getUTCDay()` returns the *previous*
+   day (midnight IST is 18:30 UTC the day before), so every weight was one day early. Caught by
+   plotting orders per weekday instead of trusting the code.
+2. **Session-less orders left "live" haunt their table forever.** ~10% of today's rows were seeded as
+   still-cooking with no session, and by the table-ownership rule that means they belong to the TABLE
+   for good — free tables showing "Preparing · ₹1,150 due", the exact fault the owner once hit.
+   Phase 183 caught it. Nothing is seeded live any more.
+3. **Orders dated in the FUTURE.** Today's count was scaled by how much of the day had passed, but the
+   times were still drawn from the whole 11:00–23:00 spread, so a morning run wrote dinner orders that
+   had not happened. 303 of them, and they sat on the tables the suite tests — its own order read back
+   ₹2,247 instead of ₹1,100 (phase 172).
+
+## How the deletion respected the compliance rule
+
+An issued bill can never be hard-deleted — a BEFORE DELETE trigger (mig 190) blocks it for everyone
+including the service role, because the product must be incapable of hiding a sale. **No new permanent
+purge function was added** (that would widen the very surface the rule protects). The reset uses the
+trigger's own audited, transaction-local `lfh.allow_purge` flag — the same door the 90-day restaurant
+purge uses — and refuses to point at any database but the backup one.
+
+It also **refuses to run while a test suite is live**, deletes in batches with only the *live-behaviour*
+triggers suspended per batch (one statement each, so a failure rolls the suspension back with it), and
+verifies every trigger is enabled again before writing anything.
+
+Verified after: phases 16–18, 57, 126–128 and **168–184 all pass** against the deployed site, zero
+future-dated rows, zero table-haunting rows.
+
