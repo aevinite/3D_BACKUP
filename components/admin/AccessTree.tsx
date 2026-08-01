@@ -992,11 +992,11 @@ function TreeStyle() {
      THE SECTION CARD IS LEVEL 0 (his correction: "the first main menu section is also having a
      colour — you ignored that"). It used to wear the same accent as the rows inside it, which is
      what put blue immediately inside blue however many times the row colours were changed. */
-  .acc2-sect              { --lvl:#5f47ed; }
-  .at-box.d0, .at-chip.d0 { --lvl:#8344ee; }
-  .at-box.d1, .at-chip.d1 { --lvl:#ad50c5; }
-  .at-box.d2, .at-chip.d2 { --lvl:#dd649e; }
-  .at-box.d3, .at-chip.d3 { --lvl:#5f47ed; }
+  .acc2-sect              { --lvl:#5f47ed; --prev:#dd649e; }
+  .at-box.d0, .at-chip.d0 { --lvl:#8344ee; --prev:#5f47ed; }
+  .at-box.d1, .at-chip.d1 { --lvl:#ad50c5; --prev:#8344ee; }
+  .at-box.d2, .at-chip.d2 { --lvl:#dd649e; --prev:#ad50c5; }
+  .at-box.d3, .at-chip.d3 { --lvl:#5f47ed; --prev:#dd649e; }
   /* Strong enough to READ. These hues at 30% over a navy card all drift towards the same blue,
      which is the other half of why the nesting looked wrong even where it was right. */
   .at-box { border-width:1.5px; }
@@ -1031,7 +1031,8 @@ function TreeStyle() {
     background:color-mix(in srgb, var(--lvl) 5%, color-mix(in srgb, var(--card) 78%, var(--bg))); padding:13px 14px; }
 
   .at-box + .at-box, .at-box + .at-grid, .at-grid + .at-box { margin-top:9px; }
-  .at-box:hover { border-color:color-mix(in srgb, var(--hov) 42%, transparent); }
+  /* The BORDER no longer reacts to hover — "the text colour, not other things". Two things
+     changing at once on a screen this dense read as the row being selected, not pointed at. */
   .at-box-h { display:flex; align-items:flex-start; gap:14px; }
   .at-box-t { flex:1; min-width:0; }
   .at-box-t .nm { display:flex; align-items:center; gap:7px; flex-wrap:wrap; font-size:14.5px; font-weight:750; }
@@ -1146,7 +1147,13 @@ function TreeStyle() {
   .at-chip.on .at-cnm { color:var(--text); }
   .at-tw { display:grid; place-items:center; width:20px; height:20px; margin-right:-2px; border:none; background:none; color:var(--muted); transition:transform .18s; flex:none; }
   .at-box-t.clickable { cursor:pointer; border-radius:9px; }
-  .at-box-t.clickable:hover .nm { color:var(--hov); }
+  /* HOVER STEPS BACK ONE LEVEL (owner, 2026-08-01: "purple is already the background… inside
+     purple there is pink, so if you hover on that it should change colour to purple").
+     A row hovering to its OWN colour disappears into the box it is sitting in — the highlight has
+     to be a colour that is NOT already on that box, and the level above it is the one colour
+     guaranteed to be next to it and different. Purple row → blue, pink row → purple, blue row →
+     pink. TEXT ONLY: nothing else on the row changes, which is what he asked for. */
+  .at-box-t.clickable:hover .nm { color:var(--prev); }
   .at-box-t.clickable:focus-visible { outline:2px solid var(--lvl); outline-offset:3px; }
   .at-tw.o { transform:rotate(180deg); color:var(--accent); }
   .at-tw:hover { color:var(--hov); }
