@@ -2228,6 +2228,20 @@ function billMath(orders) {
   // components carried through so the printed bill can itemise each named tax.
   return { subtotal, disc, taxable, rate, tax, total, taxComponents: tm.components };
 }
+// discPct(m): the discount as a PERCENTAGE of the pre-discount subtotal (owner, 2026-08-01: "in
+// the bill it should show how much percentage of discount you have given — and on the printed bill
+// the percentage should show too"). The app stores a discount as an AMOUNT, so the percentage is
+// derived here, in ONE place, or four surfaces would each round it their own way. Whole numbers
+// print clean ("10%"), anything else keeps one decimal ("12.5%"). Returns "" when there's nothing
+// to say, so every call site can drop it in without a guard.
+function discPct(subtotal, disc) {
+  const sub = Number(subtotal) || 0, d = Number(disc) || 0;
+  if (sub <= 0 || d <= 0) return "";
+  const pct = Math.round((d / sub) * 1000) / 10;      // one decimal, no floating dust
+  if (!pct) return "";
+  return `${pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)}%`;
+}
+
 function mergedOrderCardHtml(g) {
   const o0 = g[0];
   const tnum = (o0.table_number || "").trim();
@@ -2308,7 +2322,7 @@ function mergedOrderCardHtml(g) {
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
     <div class="ord-sub"><span>Subtotal</span><span>${inr(_m.subtotal)}</span></div>
-    ${disc > 0 ? `<div class="ord-disc">Discount<span>− ${inr(disc)}</span></div>` : ""}
+    ${disc > 0 ? `<div class="ord-disc">Discount${discPct(_m.subtotal, disc) ? ` (${discPct(_m.subtotal, disc)})` : ""}<span>− ${inr(disc)}</span></div>` : ""}
     ${_m.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
     <div class="ord-actions">${billBtns}${stage}${freeBtn}</div>
@@ -2649,7 +2663,7 @@ function openBillModal(key) {
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
         <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
+        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div>` : ""}
         ${m.tax > 0 ? `<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
         <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
       </div>
@@ -4065,7 +4079,7 @@ ${cust || custPhone ? `<div class="dash"></div>${cust ? `<div class="kv"><span>C
 <thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="totals">
   <div class="t"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-  ${m.disc > 0 ? `<div class="t"><span>Discount</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
+  ${m.disc > 0 ? `<div class="t"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
   ${taxRows}
   <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
 </div>
@@ -6071,9 +6085,15 @@ function floorTableList(baseN) {
   const out = [];
   for (let i = 1; i <= baseN; i++) out.push(i);
   const tiles = (state.summary && state.summary.tiles) || {};
+  // AN OUT-OF-RANGE TABLE ONLY EARNS A TILE IF IT HAS SOMETHING ON IT (owner, 2026-08-01: "we have
+  // only 30 tables, why are the last 2 showing"). The range is extended so a table numbered above
+  // the count can't hide its money — but a tile the server reports as FREE has no money to hide,
+  // so it was pure noise. Two junk rows from a test script (table "9343531") were enough to grow a
+  // 30-table floor to 32. Anything genuinely occupied — or asking to be let in — still appears.
   const extras = Object.keys(tiles)
     .map((k) => parseInt(k, 10))
     .filter((k) => Number.isFinite(k) && k > baseN)
+    .filter((k) => { const st = (tiles[String(k)] || {}).state; return st && st !== "free"; })
     .sort((a, b) => a - b);
   return out.concat(extras);
 }
@@ -7198,7 +7218,7 @@ function tablePanelParts(t, host = "float") {
   const sumSub = mBill.subtotal;
   const sumTax = mBill.tax;
   const sumDisc = mBill.disc;
-  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>${esc(taxLabel())}</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
+  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount${discPct(sumSub, sumDisc) ? ` (${discPct(sumSub, sumDisc)})` : ""}</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>${esc(taxLabel())}</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
 
   // The PRIMARY table-wide action: accept everything that's new, else serve everything
   // that's cooked. (Per-order Accept stays on each new card; per-dish Serve on each row.)
@@ -7371,7 +7391,7 @@ async function openBillPreview(t) {
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
         <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
+        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div>` : ""}
         ${m.tax > 0 ? `<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
         <div class="bm-trow grand"><span>${anyUnpaid ? "Total due" : "Total"}</span><span>${inr(m.total)}</span></div>
       </div>
