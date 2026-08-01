@@ -1448,6 +1448,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return ok({ range, rows, truncated });
     }
 
+    // audit (GET) — the newest removals for this restaurant, for the Audit screen. Scoped, columned
+    // and capped, like every other panel read.
+    if (p === "audit") {
+      const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
+      const rows = must(await sb.from("deletion_audit")
+        .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount")
+        .eq("restaurant_id", rid).order("at", { ascending: false }).limit(lim));
+      return ok(rows || []);
+    }
+
     return err("unknown GET endpoint", 404);
   } catch (e) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
@@ -1947,6 +1957,30 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // the power. A "delete" here is a SOFT delete (mig 188): rows are stamped, never
     // erased, so a deleted bill is retained for tax/audit and shows as a tombstone.
     // Every clear is written to the Log for accountability.
+    // ── REMOVAL AUDIT (mig 251) ──────────────────────────────────────────────────
+    // audit — record WHY something was removed, with the person who did it. The panel calls this
+    // the moment a removal succeeds, and the RPC fills in the context (bill number, KOT number,
+    // table) from the order itself rather than trusting the browser for it.
+    if (a === "audit" && !b && req.method === "POST") {
+      const { kind, reason_code, reason_note, order_id, item_id, item_title, qty, amount, table } = body || {};
+      const kinds = ["order_cancelled", "order_deleted", "dish_removed", "menu_item_deleted", "invoice_voided"];
+      if (!kinds.includes(String(kind))) return err("unknown removal kind", 400);
+      const { data, error } = await sb.rpc("lfh_record_removal", {
+        p_rid: rid, p_kind: String(kind),
+        p_reason_code: reason_code ? String(reason_code).slice(0, 40) : null,
+        p_reason_note: reason_note ? String(reason_note).slice(0, 400) : null,
+        p_actor: g.user?.username || g.user?.role || "manager",
+        p_actor_id: g.user?.id ?? null, p_actor_role: g.user?.role ?? null, p_device: dev ?? null,
+        p_order: order_id || null, p_item: item_id || null,
+        p_item_title: item_title ? String(item_title).slice(0, 200) : null,
+        p_qty: Number.isFinite(Number(qty)) ? Number(qty) : null,
+        p_amount: Number.isFinite(Number(amount)) ? Number(amount) : null,
+        p_table: table ? String(table) : null, p_meta: {},
+      });
+      if (error) throw new Error(error.message);
+      return ok({ ok: true, id: data });
+    }
+
     if (a === "orders" && b === "delete") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("delete or clear bills");
       if (!(await canDeleteBill(g, rid))) return permDenied("delete bills");
