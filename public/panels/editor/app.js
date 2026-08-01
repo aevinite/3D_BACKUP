@@ -259,6 +259,10 @@ function tapGuard(wrap) {
 // It builds a little "Are you sure?" pop-up and returns a Promise that resolves
 // to true (user clicked the confirm button) or false (cancel / Escape / click
 // outside). Calling code does: if (await confirmDialog(...)) { ...do it... }.
+// opts.html — render `message` as MARKUP instead of text. Off by default and it must stay that way:
+// every other caller passes a plain sentence, and escaping is what stops a dish name or a guest's
+// note from becoming markup on screen. The one caller that needs it (the unmerge confirm, which has
+// to lay out "what will happen" as a list) builds its HTML from esc()'d values itself.
 function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
   return new Promise((resolve) => {
     // Singleton guard: a confirm is modal, so there is never a legitimate reason to stack
@@ -287,7 +291,7 @@ function confirmDialog(message, confirmLabel = "Confirm", opts = {}) {
     wrap.innerHTML = `
       <div class="confirm-box">
         <div class="confirm-icon"><i class="fas fa-triangle-exclamation"></i></div>
-        <div class="confirm-msg">${esc(message)}</div>
+        <div class="confirm-msg">${opts.html ? message : esc(message)}</div>
         <div class="confirm-actions">
           <button class="btn confirm-cancel">Cancel</button>
           <button class="btn danger confirm-ok">${esc(confirmLabel)}</button>
@@ -5596,6 +5600,29 @@ function flipOrderItems(o, from, to) {
 // summaryTableOpen(t): is table t currently OPEN, per the slim summary? A tile is open
 // when it has a summary entry whose state is anything but 'free' or 'req' (those two mean
 // no open session). The board is no longer fetched whole, so the bulk actions read this.
+// ── MERGED TABLES (mig 249) ────────────────────────────────────────────────────────────────
+// The floor read carries the live joins (state.summary.merges: parent_table + child_table). Two
+// questions get asked all over the floor, so they live here once:
+//   mergeChildrenOf(6) -> ["7","8"]   the tables being served as part of table 6's party
+//   mergeParentOf(7)   -> "6"         the table that holds 7's bill, or null
+// Wording rule the owner set: the parent says "merged with T7", the child says "access from T6",
+// and a bill for a joined party reads "T6 + T7".
+function mergeList() { return (state.summary && Array.isArray(state.summary.merges)) ? state.summary.merges : []; }
+function mergeChildrenOf(t) {
+  return mergeList().filter((m) => String(m.parent_table) === String(t)).map((m) => String(m.child_table))
+    .sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+}
+function mergeParentOf(t) {
+  const m = mergeList().find((x) => String(x.child_table) === String(t));
+  return m ? String(m.parent_table) : null;
+}
+// "T6 + T7" for a bill or a heading — the parent first, then every table joined to it.
+function mergeGroupLabel(t) {
+  const parent = mergeParentOf(t) || String(t);
+  const kids = mergeChildrenOf(parent);
+  return kids.length ? [parent, ...kids].map((x) => `T${x}`).join(" + ") : null;
+}
+
 // IS THIS TABLE BUSY? — answered by exactly what the FLOOR SHOWS, never by the raw server state
 // (owner, 2026-08-01: "see table 30 look[s] close[d] but at back-end it say[s] it's open — only
 // table 6 is on, and you merge table it show[s] table 30 as open, why all this").
@@ -5764,7 +5791,11 @@ const ordersForTable = (t) => {
   // orders belong to a CLOSED session (stale) — the meal's over, nobody's there. Don't
   // paint the tile with them; the table is Free. (Same guard callsForTable uses, so a
   // closed table can never keep showing "Preparing"/"Served" from an old order.)
-  const sess = openSessionForTable(t);
+  // A MERGED CHILD'S PARTY IS ITS PARENT'S (mig 249). Its orders keep their own table number, but
+  // they live on the parent's session — so without this the guard below reads "no party at this
+  // table" and hides food that is on the joint bill. The server's ?table= slice resolves the same
+  // way, so client and server agree about whose orders these are.
+  const sess = openSessionForTable(t) || (mergeParentOf(t) ? openSessionForTable(mergeParentOf(t)) : null);
   if (sessionsOn && !sess) return [];
   // WHOSE ORDERS ARE THESE? (owner reports, 2026-07-30 and 2026-07-31 — two doors to one bug.)
   //
@@ -6069,8 +6100,15 @@ function floorTileHtml(i) {
   // is not [served] I don't want the option for the print thing") — he changed his mind after
   // using it, which is his call: in a real service the printed bill often goes to the table before
   // the last dish lands. Any table with something on it can be billed.
-  const dueNow = Number(((state.summary && state.summary.tiles) || {})[String(i)]?.due) || 0;
-  const canBill = cTot > 0 || dueNow > 0;
+  // THE BILL BUTTON WAITS FOR EVERY DISH AGAIN (owner, 2026-08-01: "until fully not served don't
+  // show that print option thing"). This reverses his own instruction from earlier the same day
+  // ("we can print when order being cook") — his call, and this is the newer one. What did NOT
+  // change is what the two buttons MEAN once you are in the bill: Print issues the invoice and
+  // prints it, Generate invoice only issues it.
+  // Nothing but "everything is served" opens the bill (owner, 2026-08-01: "until fully not served
+  // don't show that print option thing"). An earlier version also allowed it whenever money was
+  // owed — which is true of every unpaid table, so the gate did nothing.
+  const canBill = allServed;
   // ROW 3 — A LINE, NOT A BOX (owner, 2026-08-01: "there shouldn't be the preparation box; there
   // should be a line which shows the colour — you can see how the colour works on the top — you
   // don't need to write 'Preparing' and create that whole box. And at the end of the line there
@@ -6084,7 +6122,22 @@ function floorTileHtml(i) {
   // full — on top of line that should be written"). First pass put the count beside the line, which
   // ate about a third of the bar; now the bar is the whole tile width and "0/3 served" sits over it.
   const servedTxt = cTot > 0 ? `${counts.sv}/${cTot} served` : "";
-  const statusRow = cTot > 0
+  // A MERGED CHILD IS NOT A FREE TABLE (owner, 2026-08-01: "on the table number seven it should be
+  // completely written, merge with six … access from six"). Its party lives on the parent, so it has
+  // no session of its own and the summary calls it free — which is exactly the lie he caught. Here
+  // it wears its own state: addressed to its parent, no ＋ Take order and no bill button (both
+  // belong to the table that holds the bill), and tapping it opens its detail, where Unmerge lives.
+  const mergedTo = mergeParentOf(i);
+  const mergeKids = mergedTo ? [] : mergeChildrenOf(i);
+  // ROW 3 for a merged pair. The child's whole row is the message; the parent keeps its progress
+  // line and gains a chip naming what it carries, in the accent colour so it reads as a state and
+  // not as decoration.
+  const mergeChip = mergeKids.length
+    ? `<div class="ft-merge ft-merge-parent" title="Table ${esc(i)} is serving ${mergeKids.map((k) => "T" + k).join(" + ")} as one party — one bill">⇄ with ${mergeKids.map((k) => "T" + esc(k)).join(" ")}</div>`
+    : "";
+  const statusRow = mergedTo
+    ? `<div class="ft-merge ft-merge-child" title="This table is part of table ${esc(mergedTo)}'s party — its orders and bill are on T${esc(mergedTo)}">⇄ merged with T${esc(mergedTo)}<small>access from T${esc(mergedTo)}</small></div>`
+    : cTot > 0
     ? `<div class="ft-line" title="${esc(label)}${meta ? " · " + esc(meta) : ""}"><span class="ft-linenum">${esc(servedTxt)}</span>${strip}</div>`
     // No dishes yet (free, or a party sitting with nothing ordered): there is no progress to draw,
     // so the one word that IS information stays. A blank row here read as a broken tile.
@@ -6098,13 +6151,17 @@ function floorTileHtml(i) {
   // (XRAY_CONTROLS) and the server's own re-check apply to it unchanged.
   // A brand-new order still gets its one-tap ✓ accept: it's the fastest thing a manager does,
   // and burying it in the detail would cost a tap on every single order.
-  const isEmpty = st === "free";
-  const acts = (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
+  const isEmpty = st === "free" && !mergedTo;
+  const acts = (isEmpty || mergedTo ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
     // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
     // notification icon should have its own COLOUR"). On a green Served tile it was a green button
     // on a green tile — the one control you look for while closing a table, camouflaged.
-    + (canBill ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${i}" title="Bill — preview, print, invoice, mark paid${allServed ? "" : " (food is still cooking)"}" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-print"></i></button>` : "");
+    // The bill control reads as a control, not a glyph (owner, 2026-08-01: "if you can improve ui
+    // of that print icon more i would love that"): its own paper colour, a receipt icon with the
+    // word BILL beside it, and on a dense floor the word drops and the icon stays — the same
+    // shed-detail rule the ＋ Take order button follows.
+    + (canBill && !mergedTo ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${i}" title="Bill for ${esc(tableLabel(i))} — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-receipt ft-bill-ico" aria-hidden="true"></i><span class="ft-bill-t">Bill</span></button>` : "");
   // Seats — ALWAYS visible, top-right (owner drawing: "no. of person can sit on table").
   // ONE shared answer for "how many fit here" — see seatsForTable(): this table's own number,
   // else the floor's default, else 4.
@@ -6138,12 +6195,12 @@ function floorTileHtml(i) {
   // look — the strip/label/pay ring keep working, the tag is unmistakable on top.
   const tag = tagForTable(i);
   const tinfo = TABLE_TAG_INFO[tag];
-  return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
+  return `<div class="ftile ft-${mergedTo ? "merged" : st}${mergedTo ? " ft-is-merged" : ""}${mergeKids.length ? " ft-has-merged" : ""}${pay ? " pay-" + pay : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
         ${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
         <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${seatTxt ? `<span class="ft-seats" title="${esc(seatTip)}"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seatTxt)}</span>` : ""}</div>
         ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
         ${tinfo ? `<span class="ft-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
-        ${statusRow}
+        ${statusRow}${mergeChip}
         ${acts ? `<div class="ft-act">${acts}</div>` : ""}</div>`;
 }
 
@@ -6593,7 +6650,8 @@ function bindFloorDelegation() {
       // The permission still decides: a manager without take_orders gets the popup instead of a
       // builder they aren't allowed to use (and the server refuses it regardless).
       const ft = tile.dataset.floorTable;
-      if (tableTileState(ft).st === "free" && takeOrdersAllowed()) openTakeOrder(ft, null);
+      if (mergeParentOf(ft)) openFloatingTable(ft);          // merged child → its detail, where Unmerge is
+    else if (tableTileState(ft).st === "free" && takeOrdersAllowed()) openTakeOrder(ft, null);
       else openFloatingTable(ft);
     }
   });
@@ -6869,6 +6927,18 @@ function followShiftedTable(from, to) {
 // slim summary (accurate: guests/dishes/due), then loadSessions fills in the dish rows. A second
 // tap on an already-open table is a no-op rather than a duplicate card.
 function openFloatingTable(table) {
+  // A MERGED CHILD HOLDS NOTHING OF ITS OWN: its orders live on the parent's party. Without the
+  // parent's slice the detail (and worse, the unmerge confirm) would say "nothing was ordered at
+  // this table" about food that is on the bill. Fetch the parent too, once, before rendering.
+  const _mp = mergeParentOf(table);
+  if (_mp) {
+    // …and re-render once it lands. The detail paints instantly (that is the point of the
+    // streaming view), so a fire-and-forget fetch would leave the first paint saying "nothing was
+    // ordered at this table" about food that is on the joint bill — and the unmerge confirm reads
+    // the same list, so it would promise the wrong thing.
+    ensureTableSlice(_mp).then(() => { if (state.floatingTables.some((f) => String(f.table) === String(table))) renderEditor(); })
+      .catch(() => {});
+  }
   if (!addFloating(table)) return; // at the cap
   state.selectedTable = String(table); // marks the tile + makes it read from the full slice
   renderEditor();  // instant, summary-accurate
@@ -7371,6 +7441,31 @@ function tablePanelParts(t, host = "float") {
   //     clears itself, and a table to be emptied by hand is dealt with by cancelling the ticket.
   const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${shiftFallbackBtn}${printBtn}${endBtn}`;
 
+  // A MERGED CHILD'S DETAIL (mig 249). Its orders and bill live on the parent, so showing the usual
+  // empty sections would say "nothing here" about a table that is very much in use. Instead the
+  // whole detail is the message plus the two things you can do: jump to the table that holds the
+  // bill, or split them apart (owner: "you can only unmerge by clicking on the seven number table").
+  const mergedParent = mergeParentOf(t);
+  if (mergedParent) {
+    const kots = ordersForTable(t).filter((o) => o.status !== "cancelled" && !o.archived);
+    const money = kots.reduce((a, o) => a + (parseFloat(o.total) || 0), 0);
+    const list = kots.length
+      ? kots.map((o) => `<li>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"} · ${orderItemRows(o).reduce((a, r) => a + (parseInt(r.qty, 10) || 1), 0)} dish(es) · ${inr(parseFloat(o.total) || 0)}</li>`).join("")
+      : `<li class="muted">nothing was ordered at this table yet</li>`;
+    const mergedSec = `<div class="sx-sec sx-merged">
+      <div class="sx-sec-h">Merged</div>
+      <p class="sx-merged-lead">This table is being served as part of <b>Table ${esc(mergedParent)}</b>'s party —
+        one party, <b>one bill</b>. Everything ordered here is on <b>T${esc(mergedParent)}</b>'s bill${money > 0 ? ` (${inr(money)} of it so far)` : ""}.</p>
+      <p class="sx-merged-lead muted">Ordered at this table:</p>
+      <ul class="sx-merged-list">${list}</ul>
+      <div class="sx-merged-acts">
+        <button class="btn" data-goto-parent="${esc(mergedParent)}">→ Open Table ${esc(mergedParent)}</button>
+        <button class="btn danger" data-unmerge="${esc(t)}">⇹ Unmerge this table</button>
+      </div>
+    </div>`;
+    return { sess, os, headPill, headMeta: `part of Table ${mergedParent}'s party · one bill`,
+             kotHeadBtn: "", requestsSec: "", sessionSec: "", ordersSec: mergedSec, callsSec: "", billSec: "", foot: "" };
+  }
   return { sess, os, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
 }
 
@@ -8795,6 +8890,49 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // 🍴 Split: with the KOT ladder ON this is the REAL split-settle (several payment
   // legs, mig 176); with it off it stays the old even-share calculator — no regression.
   root.querySelectorAll("[data-split]").forEach((b) => (b.onclick = () => (tableOpsOn() ? openSplitSettle(t) : openSplitBill(parseFloat(b.dataset.split) || 0))));
+  // MERGED CHILD: jump to the table that holds the bill, or split them apart.
+  root.querySelectorAll("[data-goto-parent]").forEach((b) => (b.onclick = () => {
+    const parent = b.dataset.gotoParent;
+    closeFloatingTable(t);
+    openFloatingTable(parent);
+  }));
+  // TWO PHASES, and the FIRST one says what will actually happen (owner, 2026-08-01: "it should have
+  // two phase interface — are you sure you want to unmerge it — and in the are you sure, on the top
+  // it will be written what thing will happen, like which KOT will be transferred to seven again, or
+  // if anything doesn't transfer also note that"). Everything in this box is read from the real
+  // orders, so it can't promise something the server then does differently.
+  root.querySelectorAll("[data-unmerge]").forEach((b) => (b.onclick = async () => {
+    const child = b.dataset.unmerge;
+    const parent = mergeParentOf(child);
+    if (!parent) { toast("That table isn't merged any more.", "err"); return; }
+    const mine = ordersForTable(child).filter((o) => o.status !== "cancelled" && !o.archived);
+    const theirs = ordersForTable(parent).filter((o) => o.status !== "cancelled" && !o.archived);
+    const sum = (list) => list.reduce((a, o) => a + (parseFloat(o.total) || 0), 0);
+    const sess = openSessionForTable(parent);
+    const disc = parseFloat(sess && sess.discount) || 0;
+    const lines = [
+      mine.length
+        ? `<b>Back to Table ${esc(child)}:</b> ${mine.map((o) => "KOT #" + (o.kot_no ?? "—")).join(", ")} — ${inr(sum(mine))}`
+        : `<b>Table ${esc(child)}</b> gets nothing back — nothing was ordered at it. It simply becomes free.`,
+      theirs.length ? `<b>Stays on Table ${esc(parent)}:</b> ${theirs.map((o) => "KOT #" + (o.kot_no ?? "—")).join(", ")} — ${inr(sum(theirs))}` : "",
+      disc > 0 ? `<b>Does NOT move:</b> the ${inr(disc)} bill discount stays on Table ${esc(parent)} — it was given to the joint bill, so it cannot be split between the two tables.` : "",
+      (sess && sess.guests > 0) ? `<b>Does NOT move:</b> the guest count stays with Table ${esc(parent)} — nobody recorded which guests sat where.` : "",
+    ].filter(Boolean);
+    const ok = await confirmDialog(
+      `<div style="text-align:left"><div style="font-weight:800;margin-bottom:8px">Splitting Table ${esc(child)} from Table ${esc(parent)} will do this:</div>`
+      + `<ul style="margin:0 0 10px 18px;padding:0;line-height:1.5;font-size:13px">${lines.map((l) => `<li>${l}</li>`).join("")}</ul>`
+      + `<div>Are you sure you want to unmerge?</div></div>`,
+      "Unmerge", { html: true });
+    if (!ok) return;
+    try {
+      const r = await api("POST", `/tables/${child}/unmerge`, {});
+      if (r && r.queued) { toast("Saved — will split when the connection is back", "ok"); return; }
+      toast(`Table ${child} split from Table ${parent}` + (r && r.moved ? ` · ${r.moved} order(s) returned` : ""), "ok");
+      closeFloatingTable(child);
+      await pollTables([String(child), String(parent)]);
+    } catch (e) { toast("Couldn't unmerge: " + e.message, "err"); }
+  }));
+
   // Per-dish DELETE: confirm, then call the server, which deletes the order_item
   // AND recomputes the order's total from the survivors (lfh_delete_order_item) so
   // the bill can't keep charging for a removed dish. Reloads the live board after.
