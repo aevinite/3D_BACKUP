@@ -192,6 +192,66 @@ if (!HOOK || !touched || /public\/panels\//.test(touched)) {
   }
 }
 
+// ── 7. NO BACKTICK IN A /* … */ COMMENT IN A PANEL FILE ───────────────────────────────────
+//
+// I made the same mistake THREE times on 2026-08-01: a class name wrapped in backticks inside a
+// /* … */ comment in the panels' runtime-injected stylesheet. That stylesheet is a JS template
+// literal, so the backtick ENDS the string. Once the file then failed to parse (/manager rendered
+// EMPTY), once it parsed as valid-but-wrong JS ("ReferenceError: col is not defined", floor drew no
+// tiles), once it broke a different template two thousand lines away.
+//
+// A first attempt to detect it precisely ("a comment containing a backtick INSIDE a template
+// literal") was wrong and accused 43 innocent comments: inside a template literal `//` is ordinary
+// text, and every URL contains one, so the scan lost its place. So the rule here is deliberately
+// blunt instead of clever: in a panel script, a BLOCK comment may not contain a backtick at all.
+// Every CSS-in-template comment is a block comment, so this covers the whole failure mode with no
+// state to track and nothing to get wrong. The two pre-existing block comments that quoted code in
+// backticks were rewritten with plain quotes, so there is no exceptions list to keep in step.
+{
+  const files = [];
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p); else if (e.name.endsWith(".js")) files.push(p);
+    }
+  };
+  walk("public/panels");
+  const offenders = [];
+  for (const f of files) {
+    const src = fs.readFileSync(f, "utf8");
+    for (const m of src.matchAll(/\/\*[\s\S]*?\*\//g)) {
+      if (!m[0].includes("`")) continue;
+      const line = src.slice(0, m.index).split("\n").length;
+      offenders.push(`${f}:${line}  ${m[0].replace(/\s+/g, " ").slice(0, 70)}…`);
+    }
+  }
+  if (offenders.length === 0) ok(`${files.length} panel script(s): no backtick inside a /* … */ comment`);
+  else bad(
+    `${offenders.length} block comment(s) in a panel script contain a backtick — inside the injected stylesheet that ENDS the template literal and takes the panel down`,
+    offenders.join("\n         ") + "\n         Quote code with 'single quotes' or nothing at all.",
+  );
+}
+
+// ── 8. WHY THERE IS NO STATIC CHECK FOR THE RUNTIME SHAPE OF THAT FAULT ───────────────────
+//
+// I made that mistake twice on 2026-08-01 (a class name in backticks inside a /* … */ comment in
+// the panels' runtime-injected CSS, which is a template literal — the backtick ENDS the string).
+// The first time the rest of the file failed to parse and /manager rendered EMPTY; check 4 above
+// catches that. The second time the remainder happened to be VALID JavaScript, so it loaded and
+// then threw "ReferenceError: col is not defined" — and the floor drew no tiles.
+//
+// I tried to add a scanner for "a comment containing a backtick inside a template literal" and it
+// was WRONG: inside a template literal `//` is ordinary text (every URL contains one), so treating
+// it as a comment threw the scan out of step and it accused 43 innocent comments. A guard that
+// cries wolf is worse than no guard — it trains you to ignore it — so it is deliberately not here.
+//
+// What actually catches this class of fault is RUNTIME, and it already exists: run
+//   node scripts/verify-no-fatal-ui.mjs --base http://localhost:4937
+// against the LOCAL server before deploying (not only against the deploy afterwards). It loads
+// each panel, reads the rendered text and fails on a console error or an empty screen — which is
+// exactly what both incidents produced.
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");
