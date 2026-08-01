@@ -293,8 +293,12 @@ async function offlinePage() {
     '<div><h1 style="font-size:20px;margin:0 0 10px">Can\'t open this screen</h1>' +
     '<p style="color:#b8c5de;margin:0 0 14px">This screen hasn\'t been opened on this device yet, and it couldn\'t be loaded — either this device is offline or the app isn\'t answering.</p>' +
     '<p style="color:#86efac;margin:0">Nothing you did is lost — anything saved on this device will send itself when the connection is back.</p>' +
-    '<p style="margin:16px 0 0"><a href="" onclick="location.reload();return false" style="color:#38bdf8">Try again</a>' +
-    ' &nbsp;·&nbsp; <a href="/" style="color:#38bdf8">Go to the home screen</a></p></div></body>',
+    // The ids MATTER: offline.html carries #retry / #home, and verify:offline looks for #home to
+    // prove the page isn't a dead end. This bare fallback offered the same two ways out but with
+    // no ids, so the check read it as "the last-resort page has no way out" (2026-07-31). Same
+    // contract on both pages, or the guard can only ever see one of them.
+    '<p style="margin:16px 0 0"><a id="retry" href="" onclick="location.reload();return false" style="color:#38bdf8">Try again</a>' +
+    ' &nbsp;·&nbsp; <a id="home" href="/" style="color:#38bdf8">Go to the home screen</a></p></div></body>',
     { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } },
   );
 }

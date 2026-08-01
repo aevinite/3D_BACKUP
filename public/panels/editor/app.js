@@ -2228,6 +2228,20 @@ function billMath(orders) {
   // components carried through so the printed bill can itemise each named tax.
   return { subtotal, disc, taxable, rate, tax, total, taxComponents: tm.components };
 }
+// discPct(m): the discount as a PERCENTAGE of the pre-discount subtotal (owner, 2026-08-01: "in
+// the bill it should show how much percentage of discount you have given — and on the printed bill
+// the percentage should show too"). The app stores a discount as an AMOUNT, so the percentage is
+// derived here, in ONE place, or four surfaces would each round it their own way. Whole numbers
+// print clean ("10%"), anything else keeps one decimal ("12.5%"). Returns "" when there's nothing
+// to say, so every call site can drop it in without a guard.
+function discPct(subtotal, disc) {
+  const sub = Number(subtotal) || 0, d = Number(disc) || 0;
+  if (sub <= 0 || d <= 0) return "";
+  const pct = Math.round((d / sub) * 1000) / 10;      // one decimal, no floating dust
+  if (!pct) return "";
+  return `${pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)}%`;
+}
+
 function mergedOrderCardHtml(g) {
   const o0 = g[0];
   const tnum = (o0.table_number || "").trim();
@@ -2308,7 +2322,7 @@ function mergedOrderCardHtml(g) {
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
     <div class="ord-sub"><span>Subtotal</span><span>${inr(_m.subtotal)}</span></div>
-    ${disc > 0 ? `<div class="ord-disc">Discount<span>− ${inr(disc)}</span></div>` : ""}
+    ${disc > 0 ? `<div class="ord-disc">Discount${discPct(_m.subtotal, disc) ? ` (${discPct(_m.subtotal, disc)})` : ""}<span>− ${inr(disc)}</span></div>` : ""}
     ${_m.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
     <div class="ord-actions">${billBtns}${stage}${freeBtn}</div>
@@ -2649,7 +2663,7 @@ function openBillModal(key) {
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
         <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
+        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div>` : ""}
         ${m.tax > 0 ? `<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
         <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
       </div>
@@ -4065,7 +4079,7 @@ ${cust || custPhone ? `<div class="dash"></div>${cust ? `<div class="kv"><span>C
 <thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr></thead><tbody>${rows}</tbody></table>
 <div class="totals">
   <div class="t"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-  ${m.disc > 0 ? `<div class="t"><span>Discount</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
+  ${m.disc > 0 ? `<div class="t"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
   ${taxRows}
   <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
 </div>
@@ -4082,7 +4096,14 @@ setTimeout(function(){
     st.textContent = "@media print{@page{size:80mm " + h + "mm;margin:0}}";
     document.head.appendChild(st);
   }catch(e){}
+  // Print, then GO AWAY. This window exists to hand the bill to the printer, not to be a screen
+  // (owner, 2026-08-01: "clicking print takes me to the bill page — I should only get the print
+  // option"). onafterprint fires whether the dialog was used or dismissed, so it closes either
+  // way; the long fallback covers a browser that suppresses print dialogs entirely (an automated
+  // or kiosk build), so a stray copy of the bill can never sit there looking like the app.
+  onafterprint = function () { try { close(); } catch (e) {} };
   print();
+  setTimeout(function () { try { close(); } catch (e) {} }, 60000);
 }, 300);
 <\/script>`);
   w.document.close();
@@ -5865,7 +5886,7 @@ function tableTileState(t) {
 // summary's tiny per-restaurant calls[] list, filtered to this table) and the `done` flag.
 function tableTileStateFromSummary(t) {
   const tile = (state.summary.tiles || {})[String(t)];
-  if (!tile) return { st: "free", label: "Free", meta: "tap to open", badges: "", counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, pay: "", done: false, hasNew: false, hasCall: false, hasReq: false, hasJoin: false };
+  if (!tile) return { st: "free", label: "Free", meta: "tap to open", badges: "", guests: 0, counts: { nw: 0, ck: 0, rd: 0, sv: 0 }, pay: "", done: false, hasNew: false, hasCall: false, hasReq: false, hasJoin: false };
   const calls = (state.summary.calls || []).filter((c) => !c.resolved && (c.table_number || "").trim() === String(t));
   let badges = "";
   if (tile.reqs) badges += `<span class="ftb req">📨${tile.reqs}</span>`;
@@ -5874,6 +5895,7 @@ function tableTileStateFromSummary(t) {
   if (calls.length > 3) badges += `<span class="ftb call ftb-more">+${calls.length - 3}</span>`;
   return {
     st: tile.state, label: tile.label, meta: tile.meta, badges,
+    guests: Number(tile.members) || 0, // how many people actually sat down (sessions-on only)
     counts: tile.counts || { nw: 0, ck: 0, rd: 0, sv: 0 },
     pay: tile.pay || "",
     done: tile.state === "done" && tile.pay !== "red", // served AND paid → offer RST/CLS
@@ -5952,6 +5974,7 @@ function tableTileStateFromBoard(t) {
   if (calls.length > 3) badges += `<span class="ftb call ftb-more">+${calls.length - 3}</span>`;
   return {
     st, label, meta, badges,
+    guests: mem.filter((m) => m.approved !== false).length, // people actually seated here
     // Per-status dish counts → the tile progress bar (matches the tablet's .tstrip).
     counts: {
       nw: items.filter((i) => i.status === "received").reduce((a, i) => a + qtyOf(i), 0),
@@ -5990,7 +6013,7 @@ function tableTileStateFromBoard(t) {
 // live, so paying a table is one popup instead of a chain of confirms.
 function floorTileHtml(i) {
   const s = state.data.settings || {};
-  const { st, label, meta, badges, counts, pay, hasNew } = tableTileState(i); // everything this tile needs
+  const { st, label, meta, badges, counts, pay, hasNew, guests } = tableTileState(i); // everything this tile needs
   // Status progress bar (new→cooking→ready→served), same colours as the tablet's .tstrip.
   const cTot = counts.nw + counts.ck + counts.rd + counts.sv;
   const strip = cTot > 0 ? `<div class="ft-strip">${counts.nw ? `<i style="width:${(counts.nw / cTot) * 100}%;background:#f59e0b"></i>` : ""}${counts.ck ? `<i style="width:${(counts.ck / cTot) * 100}%;background:#4f9dff"></i>` : ""}${counts.rd ? `<i style="width:${(counts.rd / cTot) * 100}%;background:#ec4899"></i>` : ""}${counts.sv ? `<i style="width:${(counts.sv / cTot) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
@@ -6016,16 +6039,27 @@ function floorTileHtml(i) {
   // From the table_seats setting (migration 111); no entry → 4. It used to be a watermark
   // that only showed on a FREE table, which is exactly when you least need it.
   const seats = (s.table_seats || {})[String(i)] || 4;
+  // WHO IS ACTUALLY SITTING THERE (owner, 2026-08-01: "where no. of people sit on that, show").
+  // With guests seated it reads "2/4" — two of the four chairs taken; otherwise just the capacity.
+  // The seated number only exists when guest sessions are on, because that is the only time
+  // anybody tells the app how many people sat down.
+  const seatTxt = guests > 0 ? `${guests}/${seats}` : String(seats);
+  const seatTip = guests > 0 ? `${guests} seated of ${seats} seats` : `${seats} seats`;
   // Display name (mig 131): the tile badge shows the name when one is set — the
   // number stays in the tooltip (and everywhere data lives).
   const tnm = ((s.table_names || {})[String(i)] || "").trim();
+  // ONE DIGIT IS FINE, TWO IS TOO BIG (owner, 2026-08-01). The number is sized to the tile, so on
+  // a compact floor "34" filled the row and crowded the seat count. Step the face down by how many
+  // characters it actually has — a named table ("Terrace 2") steps down again.
+  const numTxt = String(tnm || i);
+  const numCls = numTxt.length >= 4 ? " ft-num-xs" : numTxt.length >= 2 ? " ft-num-sm" : "";
   // Special table type (mig 166): a corner ribbon + pill badge layered OVER the state
   // look — the strip/label/pay ring keep working, the tag is unmistakable on top.
   const tag = tagForTable(i);
   const tinfo = TABLE_TAG_INFO[tag];
   return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
         ${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
-        <div class="ft-top"><span class="ft-num" ${tnm ? `title="T${i}"` : ""}>${esc(tnm || i)}</span><span class="ft-seats" title="${esc(seats)} seats"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seats)}</span></div>
+        <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span><span class="ft-seats" title="${esc(seatTip)}"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seatTxt)}</span></div>
         ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
         ${tinfo ? `<span class="ft-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
         <div class="ft-status"><span class="ft-label">${esc(label)}</span>${meta ? `<span class="ft-meta">${esc(meta)}</span>` : ""}</div>${strip}
@@ -6051,9 +6085,15 @@ function floorTableList(baseN) {
   const out = [];
   for (let i = 1; i <= baseN; i++) out.push(i);
   const tiles = (state.summary && state.summary.tiles) || {};
+  // AN OUT-OF-RANGE TABLE ONLY EARNS A TILE IF IT HAS SOMETHING ON IT (owner, 2026-08-01: "we have
+  // only 30 tables, why are the last 2 showing"). The range is extended so a table numbered above
+  // the count can't hide its money — but a tile the server reports as FREE has no money to hide,
+  // so it was pure noise. Two junk rows from a test script (table "9343531") were enough to grow a
+  // 30-table floor to 32. Anything genuinely occupied — or asking to be let in — still appears.
   const extras = Object.keys(tiles)
     .map((k) => parseInt(k, 10))
     .filter((k) => Number.isFinite(k) && k > baseN)
+    .filter((k) => { const st = (tiles[String(k)] || {}).state; return st && st !== "free"; })
     .sort((a, b) => a - b);
   return out.concat(extras);
 }
@@ -7056,6 +7096,11 @@ function tablePanelParts(t, host = "float") {
     }
   }
 
+  // IS EVERY DISH OUT? One predicate, used by the Edit toggle, the invoice button and nothing else
+  // guessing at it separately. A cancelled ticket doesn't hold the table back; a ticket still at
+  // 'received' hasn't even been accepted, so it is certainly not served.
+  const allOut = os.length > 0 && os.every((o) => o.status === "cancelled"
+    || (o.status !== "received" && orderItemRows(o).every((r) => r.status === "served")));
   let ordersSec;
   if (!os.length) {
     ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders</div><div class="sx-empty">No orders yet.</div></div>`;
@@ -7089,7 +7134,15 @@ function tablePanelParts(t, host = "float") {
     // an unpaid bill vanishing behind a closed table. Cancelling the table's LAST live order
     // frees the table by itself (see cancelOrder). Gated by void_bills, whose own description
     // is "…or closing a table unpaid after a walk-out"; the server re-checks it.
-    const cancelBtn = (o) => `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕ Cancel</button>`;
+    //
+    // NOT ONCE THE FOOD IS OUT (owner, 2026-08-01: "after the order is served, why the option to
+    // cancel?"). A served dish was eaten — voiding it says the sale never happened, which is both
+    // untrue and the shape of thing this app must never make easy. So Cancel disappears as soon as
+    // anything on the ticket has been served; from then on a correction goes through mark-unpaid or
+    // a credit note, which keep the sale on the books. A part-served ticket counts as served: the
+    // guest has eaten something.
+    const anyServed = (o) => orderItemRows(o).some((r) => r.status === "served") || o.status === "served";
+    const cancelBtn = (o) => (anyServed(o) ? "" : `<button class="btn small danger tp-cancel-order" data-cancel-order="${esc(o.id)}" title="Void this ticket — nothing is charged for it">✕ Cancel</button>`);
     const newBlocks = newOrders.map((o) => {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
       return `<div class="tp-order tp-order-new"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "New order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}<span class="tp-newtag">new</span></div>${rows}${orderEditExtras(o)}<div class="tp-order-foot">${cancelBtn(o)}<button class="btn small primary tp-accept" data-accept="${esc(o.id)}">✓ Accept order</button></div></div>`;
@@ -7101,14 +7154,20 @@ function tablePanelParts(t, host = "float") {
       const rows = withAllergens(o).map((r) => itemRowHtml(r, editing)).join("");
       // An already-PAID ticket is not cancellable (the server refuses it too — a refund goes
       // through mark-unpaid or a credit note), so it shows no Cancel.
-      const foot = o.payment_status === "paid" ? "" : `<div class="tp-order-foot">${cancelBtn(o)}</div>`;
+      const cb = o.payment_status === "paid" ? "" : cancelBtn(o);
+      const foot = cb ? `<div class="tp-order-foot">${cb}</div>` : "";
       return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}${orderEditExtras(o)}${foot}</div>`;
     }).join("");
     const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} merged · one bill</span>` : "";
     // Edit/Done toggle: the gated entry to staff editing. The confirm fires on Edit.
-    const editToggle = editing
+    // NOT ONCE THE FOOD IS OUT (owner, 2026-08-01: "after being served, why still an edit
+    // option?"). Editing exists for a ticket being built or cooked — changing a quantity or
+    // adding a dish to a meal the guest has already eaten rewrites what happened. Allergen info
+    // is NOT lost with it: each dish keeps its own ✎ inside the bill (Bills → a bill), which is
+    // deliberately allowed at any status (owner, 2026-07-03 — "allergy can be added to all items").
+    const editToggle = allOut ? "" : (editing
       ? `<button class="btn small primary tp-edit-toggle" data-done-table="${esc(t)}">✓ Done editing</button>`
-      : `<button class="btn small tp-edit-toggle" data-edit-table="${esc(t)}">✎ Edit</button>`;
+      : `<button class="btn small tp-edit-toggle" data-edit-table="${esc(t)}">✎ Edit</button>`);
     ordersSec = `<div class="sx-sec"><div class="sx-sec-h">Orders <span class="sub">· ${os.length}</span>${mergedBadge}${editToggle}</div>${newBlocks}${mergedBlock}</div>`;
   }
 
@@ -7124,7 +7183,13 @@ function tablePanelParts(t, host = "float") {
   // The bill discount writes to the first non-cancelled order's record; the bill
   // total already nets every order's discount, so it shows correctly on the merged bill.
   const discTarget = os.find((o) => o.status !== "cancelled");
-  const discBtn = discTarget ? `<button class="btn" data-disc="${esc(discTarget.id)}" data-disc-cur="${esc(Number(discTarget.discount) || 0)}" data-disc-max="${esc(discTarget.total)}" title="Give a discount on the bill">− Discount</button>` : "";
+  // NOT ON AN ISSUED BILL (owner, 2026-08-01: "once the invoice is generated, why the option for
+  // discount? Only when you reopen the invoice you can add a discount"). An invoice is a numbered
+  // document with a total on it — changing the money behind it while it stands is exactly what a
+  // billing app must not make easy. Reopen (which voids the invoice, with a reason, on the record)
+  // brings the button back. `invoicedNow` is computed below the same way Print/Reopen use it.
+  const _inv = !!sess && sess.invoice_no != null && !sess.invoice_voided;
+  const discBtn = discTarget && !_inv ? `<button class="btn" data-disc="${esc(discTarget.id)}" data-disc-cur="${esc(Number(discTarget.discount) || 0)}" data-disc-max="${esc(discTarget.total)}" title="Give a discount on the bill">− Discount</button>` : "";
   // Split-bill helper: tells staff each guest's even share of the bill total. Doesn't change the bill
   // or payment — the manager still marks the whole bill paid once collected.
   // Split among guests = what's still DUE (exclude any order already paid), not the
@@ -7135,9 +7200,17 @@ function tablePanelParts(t, host = "float") {
   // "Generate invoice" first; Print (+ Reopen) appears only once an invoice exists. A
   // settled bill is always invoiced (markTablePaid auto-generates it), so it shows Print.
   const invoicedNow = !!sess && sess.invoice_no != null && !sess.invoice_voided;
+  // NOT WHILE FOOD IS STILL COOKING (owner, 2026-08-01: "why generate invoice when an item is
+  // still cooking — remove that"). An invoice is the finished bill; issuing one over a table that
+  // is still being cooked for means the number is wrong the moment the next dish lands, and its
+  // total is what the guest is asked to pay. So the button appears once every dish is out — the
+  // same rule as the printer on the tile.
+  // An ALREADY-issued bill keeps Print and Reopen whatever the kitchen is doing: the paper for a
+  // document that exists, and the way to void it, are both legitimate at any time.
+  // (allOut is computed once, above the Orders section — both it and the invoice button use it.)
   const printBtn = !os.length ? "" : (invoicedNow
     ? `<button class="btn" id="sxPrint">🖨 Print</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
-    : `<button class="btn" id="sxGenInv">🧾 Generate invoice</button>`);
+    : (allOut ? `<button class="btn" id="sxGenInv">🧾 Generate invoice</button>` : ""));
   // The bill now shows a full BREAKDOWN (subtotal · discount · GST · total) summed
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
   // Breakdown from billMath (same rate + discount-before-tax rule as the printed bill),
@@ -7145,7 +7218,7 @@ function tablePanelParts(t, host = "float") {
   const sumSub = mBill.subtotal;
   const sumTax = mBill.tax;
   const sumDisc = mBill.disc;
-  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>${esc(taxLabel())}</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
+  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount${discPct(sumSub, sumDisc) ? ` (${discPct(sumSub, sumDisc)})` : ""}</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>${esc(taxLabel())}</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
 
   // The PRIMARY table-wide action: accept everything that's new, else serve everything
   // that's cooked. (Per-order Accept stays on each new card; per-dish Serve on each row.)
@@ -7166,7 +7239,8 @@ function tablePanelParts(t, host = "float") {
   const endBtn = "";
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
-  const tagBtn = tagActionAllowed("table_tags") ? `<button class="btn" id="sxTag" title="Mark this table VIP / Family / Owner's guest">${TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷"} Type</button>` : "";
+  // (No 🏷 Type builder here any more — the one place to mark a table is the KOT ▾ menu, which
+  // reaches it for a free table too. Two doors to one action is how people learn neither.)
   // KOT ▾ (Table & KOT operations) lives in the detail HEADER, not this crowded bar
   // (owner, 2026-07-22 — "keep the kot option at the top"): tablePanelParts returns it
   // as kotHeadBtn and BOTH detail headers (docked + floating) render it next to Float.
@@ -7185,7 +7259,11 @@ function tablePanelParts(t, host = "float") {
   // builder was cramped). There is only the popup now, and the floor tile itself, so the
   // host test is gone.
   const takeOrderBtn = `<button class="btn primary tp-take-order" data-take-order="${esc(t)}">＋ Take order</button>`;
-  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${tagBtn}${shiftFallbackBtn}${printBtn}${os.length ? `<button class="btn" data-tp-restart="${esc(t)}">↻ Restart</button>` : ""}${endBtn}`;
+  // WHAT THE FOOTER HOLDS, and what it deliberately doesn't (owner, 2026-08-01):
+  //   · no 🏷 Type — it is in the KOT ▾ menu, and having it twice teaches nobody where it lives;
+  //   · no ↻ Restart — it belonged to the open/close family that was removed. A finished table
+  //     clears itself, and a table to be emptied by hand is dealt with by cancelling the ticket.
+  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${shiftFallbackBtn}${printBtn}${endBtn}`;
 
   return { sess, os, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
 }
@@ -7313,7 +7391,7 @@ async function openBillPreview(t) {
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
         <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount</span><span>− ${inr(m.disc)}</span></div>` : ""}
+        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div>` : ""}
         ${m.tax > 0 ? `<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
         <div class="bm-trow grand"><span>${anyUnpaid ? "Total due" : "Total"}</span><span>${inr(m.total)}</span></div>
       </div>
@@ -7776,6 +7854,21 @@ function tableOpsOn() {
   .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold) 45%, transparent);
     background: color-mix(in srgb, var(--gold) 8%, var(--panel-2)); }
   .kotm-tile:hover { border-color: var(--gold); }
+  /* THE TABLE PICKER (owner, 2026-08-01): as wide as the screen allows, as many tables per row as
+     fit, and each one wearing its own state colour + words. Same --c state variables the floor
+     tiles use (.ft-free/.ft-prep/…), so the popup and the floor can never disagree. */
+  .kotp-sheet { max-width: min(96vw, 1180px); width: min(96vw, 1180px); }
+  .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; max-height: min(66vh, 620px); overflow-y: auto; }
+  .kotp-tile { --c: #6b6253; padding: 9px 8px; text-align: center; border-color: color-mix(in srgb, var(--c) 45%, var(--line));
+    background: linear-gradient(157deg, color-mix(in srgb, var(--c) 14%, var(--panel-2)), var(--panel-2) 82%); }
+  .kotp-tile b { font-size: 16px; }
+  .kotp-tile .kotp-state { display:block; font-size:10.5px; font-weight:700; color: color-mix(in srgb, var(--c) 70%, var(--text)); margin-top:1px; }
+  .kotp-tile .kotp-meta { display:block; font-size:9.5px; color: var(--muted); line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .kotp-tile .kotp-pay { display:inline-block; margin-top:3px; font-size:9px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+    padding:1px 6px; border-radius:999px; border:1px solid currentColor; }
+  .kotp-tile .kotp-pay.unpaid { color:#ef4444; }
+  .kotp-tile .kotp-pay.paid   { color:#22c55e; }
+  html[data-theme="light"] .kotp-tile { background: linear-gradient(157deg, color-mix(in srgb, var(--c) 30%, var(--panel-2)), var(--panel-2) 84%); }
   /* Miller columns (desktop, owner 2026-07-23): panels sit SIDE BY SIDE like the Mac
      Finder's column view — the card grows a column per step, selections stay lit. */
   .kotm-colwrap { max-width: min(96vw, 1080px); width: fit-content; }
@@ -7961,17 +8054,31 @@ function openKotTablePicker() {
   document.querySelector(".kotpick-overlay")?.remove();
   const s = state.data.settings || {}; // (the sheet's styles are injected once at load)
   const n = Math.max(1, parseInt(s.table_count, 10) || 12);
+  // WIDE, AND EVERY TABLE'S STATE ON ITS FACE (owner, 2026-08-01: "we have full screen, we can
+  // select from it — and show the status of the table so it's easy to select, with all the paid /
+  // not paid / served / not served things"). The first version was a narrow two-column list: on a
+  // 30-table floor you scrolled to find a table you could already SEE behind the popup. It uses
+  // the same tableTileState the tiles use, so the words match the floor exactly.
+  let busyN = 0;
   const grid = floorTableList(n).map((i) => {
     const ts = tableTileState(i);
     const busy = ts.st !== "free";
+    if (busy) busyN++;
     const info = TABLE_TAG_INFO[tagForTable(i)];
-    const sub = [info ? info.emoji : "", busy ? ts.label : "free"].filter(Boolean).join(" ");
-    return `<button class="kotm-tile${busy ? " occ" : ""}" data-kotpick="${esc(i)}"><b>T${esc(i)}</b><small>${esc(sub)}</small></button>`;
+    // pay: red = an accepted bill still owing, green = settled. Say it in words, not just colour.
+    const money = ts.pay === "red" ? "unpaid" : ts.pay === "green" ? "paid" : "";
+    const nm = ((s.table_names || {})[String(i)] || "").trim();
+    return `<button class="kotm-tile kotp-tile ft-${esc(ts.st)}${busy ? " occ" : ""}${ts.pay ? " pay-" + esc(ts.pay) : ""}" data-kotpick="${esc(i)}" title="${esc(nm ? nm + " (T" + i + ")" : "Table " + i)}">
+      <b>${info ? info.emoji + " " : ""}T${esc(i)}</b>
+      <small class="kotp-state">${esc(busy ? ts.label : "free")}</small>
+      ${busy && ts.meta ? `<small class="kotp-meta">${esc(ts.meta)}</small>` : ""}
+      ${money ? `<small class="kotp-pay ${esc(money)}">${esc(money)}</small>` : ""}
+    </button>`;
   }).join("");
-  const wrap = el(`<div class="sx-modal-overlay kotpick-overlay"><div class="sx-modal kotm-sheet">
+  const wrap = el(`<div class="sx-modal-overlay kotpick-overlay"><div class="sx-modal kotm-sheet kotp-sheet">
     <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 Table &amp; KOT operations</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
-    <div class="kotm-bill">Which table?</div></div>
-    <div class="kotm-list"><div class="kotm-grid">${grid}</div></div></div>`);
+    <div class="kotm-bill">Which table? <span class="muted">· ${busyN} of ${floorTableList(n).length} in use</span></div></div>
+    <div class="kotm-list"><div class="kotm-grid kotp-grid">${grid}</div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
   wrap.__lfhClose = closeM;
@@ -8572,7 +8679,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // clicks inside [data-table-detail], and the legacy modal lives on document.body.
   root.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => resolveRequest(b.dataset.reqApprove, "approved")));
   root.querySelectorAll("[data-req-deny]").forEach((b) => (b.onclick = () => resolveRequest(b.dataset.reqDeny, "denied")));
-  const rst = root.querySelector("[data-tp-restart]"); if (rst) rst.onclick = () => restartTable(rst.dataset.tpRestart);
+  // (No Restart binding — the button is gone; a settled table clears itself.)
   root.querySelectorAll("[data-item-next]").forEach((b) => (b.onclick = () => itemStatus(b.dataset.itemNext, b.dataset.itemStatus)));
   root.querySelectorAll("[data-legacy-order]").forEach((b) => (b.onclick = () => legacyItemStatus(b.dataset.legacyOrder, b.dataset.legacyIdx, b.dataset.legacyStatus)));
   root.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => acceptOrder(b.dataset.accept)));
@@ -8817,6 +8924,10 @@ async function attendTableCalls(t) {
   catch (e) { floorOpsInFlight--; state.data.calls = before; state.summary = beforeSummary; await pollTables([String(t)]); toast("Failed: " + e.message, "err"); }
 }
 // RST: clear a finished table's orders off the floor but KEEP the table open for a new round.
+// restartTable: clear the round, keep the table. NO LONGER REACHED FROM THE MANAGER UI — its
+// ↻ Restart button was removed with the open/close family (owner, 2026-08-01). Kept because the
+// SERVER's auto-restart mode mirrors this exact sequence and two comments above point at it for
+// why release-then-refresh matters; the waiter tablet still has its own restart.
 async function restartTable(t) {
   await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
   const ids = ordersForTable(t).map((o) => o.id);

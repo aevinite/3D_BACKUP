@@ -2036,6 +2036,18 @@ phase("closing a table decides on a reason CODE, not on the server's wording", a
   ok(/\.reason/.test(fn), "the refusal handler never reads the server's reason code");
   const codeAt = fn.indexOf(".reason"), proseAt = fn.indexOf("owes money");
   ok(proseAt === -1 || codeAt < proseAt, "the wording is matched BEFORE the reason code — the cooking-only refusal would be missed again");
+  // AND THE PANEL THAT STILL HAS THE FLOW (2026-08-01). The checks above hold the manager panel and
+  // the server. The one that actually asks "close anyway?" is the WAITER TABLET — and it was
+  // deciding on the server's PROSE (`/close anyway/i`), the very mistake this phase exists to
+  // catch, sitting one file over while the guard watched a room the feature had left.
+  const tab = readFileSync(join(ROOT, "public/panels/tablet/app.js"), "utf8");
+  const tabAt = tab.indexOf("close anyway/i");
+  if (tabAt > -1) {
+    const around = tab.slice(Math.max(0, tabAt - 700), tabAt + 200);
+    const codeFirst = around.indexOf(".reason");
+    ok(codeFirst > -1 && codeFirst < around.indexOf("close anyway/i"),
+      "the waiter tablet decides on the server's WORDING before its reason code — a cooking-only refusal would be missed");
+  }
 });
 phase("a bill that was deleted is still counted in the day's sales", async () => {
   const src = readFileSync(join(ROOT, "app/api/owner/reports/route.ts"), "utf8");
