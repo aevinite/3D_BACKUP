@@ -1334,6 +1334,26 @@ html[data-theme="light"] .ft-status {
   background: var(--line); overflow: hidden; display: flex; }
 .ft-strip i { display: block; height: 100%; }
 
+/* ── A LINE, NOT A BOX (owner, 2026-08-01) ──────────────────────────────────────────────────
+   "There shouldn't be the preparation box. There should be a line which shows the colour — you
+   can see how the colour works on the top — you don't need to write 'Preparing' and create that
+   whole box. And at the end of the line there will be the number, like 0 out of 3 served …
+   maybe we need just 0/3 serve only, that much written, nothing more, in small."
+   So the tinted panel and the state word are gone: the tile's own colour is the state (it always
+   was — the box repeated it), and what remains is the progress line with a small count at its
+   end. `.ft-status` / `.ft-label` / `.ft-meta` above are kept for the table DETAIL views that
+   still use them; the floor tile no longer renders them. */
+.ft-line { margin-top: auto; display: flex; align-items: center; min-width: 0;
+  gap: clamp(3px, 4cqw, 7px); }
+.ft-line .ft-strip { flex: 1 1 auto; min-width: 0; margin-top: 0; }
+.ft-linenum { flex: 0 0 auto; font-size: clamp(8px, 7cqw, 10.5px); line-height: 1.1; font-weight: 700;
+  color: color-mix(in srgb, var(--c) 62%, var(--muted)); font-variant-numeric: tabular-nums;
+  white-space: nowrap; }
+/* Nothing ordered yet → no line to draw, so the one word that carries information takes the
+   whole row (and keeps the tile from looking half-rendered). */
+.ft-line-plain .ft-linenum { flex: 1 1 auto; text-align: left; overflow: hidden; text-overflow: ellipsis;
+  font-size: clamp(9px, 8.4cqw, 12px); color: color-mix(in srgb, var(--c) 70%, var(--text)); }
+
 /* Floor skeleton — shown for the brief moment between opening the Tables tab and
    the live board arriving, so tiles don't flash "Free" then pop to "Open". Same
    shimmer feel as the customer menu's loading cards, tuned to the dark editor. */
@@ -1442,6 +1462,15 @@ html[data-theme="light"] .ft-status {
 /* A new order waiting to be accepted is the one thing that should pull the eye. */
 .ft-ico-go { color: #86efac; background: color-mix(in srgb, #22c55e 16%, var(--panel-2)); border-color: color-mix(in srgb, #22c55e 42%, var(--line)); }
 .ft-ico-go:hover { background: color-mix(in srgb, #22c55e 30%, var(--panel-2)); border-color: #22c55e; color: #fff; }
+/* THE PRINTER HAS ITS OWN COLOUR (owner, 2026-08-01: "print notification icon should have its own
+   COLOUR"). Every other tile control inherits var(--c), the table's state colour — so on a green
+   Served table the bill button was a green icon in a green box on a green tile, exactly when you
+   are looking for it. It is now paper: a near-white face on ink, the one control on the floor that
+   never changes colour, so your eye finds it the same way on every table. */
+.ft-ico-bill { color: #f8fafc; background: #1f2937; border-color: #4b5563; }
+.ft-ico-bill:hover { background: #111827; border-color: #f8fafc; color: #fff; }
+html[data-theme="light"] .ft-ico-bill { color: #111827; background: #ffffff; border-color: #9ca3af; }
+html[data-theme="light"] .ft-ico-bill:hover { background: #f3f4f6; border-color: #111827; }
 /* ── SMALL TILES: DROP DETAIL, NEVER RESHAPE (owner: "small will not affect the shape of
    table, it will make text and stuff small") ────────────────────────────────────────────
    These widths are the tile's INNER width (a container query measures the content box), so
@@ -1470,6 +1499,10 @@ html[data-theme="light"] .ft-status {
   .ft-label { display: none; }
   .ft-badges { display: none; }
   .ft-status { padding: 0; background: transparent; border: 0; }
+  /* At this size "0/3 served" cannot be read anyway, so the count goes and the COLOURED LINE
+     stays — the line is the thing he asked to keep, and it still shows the mix. The plain-row
+     word (Free) keeps its place, because a tile with nothing on it would otherwise be empty. */
+  .ft-line:not(.ft-line-plain) .ft-linenum { display: none; }
 }
 /* drag-to-resize divider for the side panel: styled in ONE place further down
    ("the middle divider" block) — an earlier duplicate rule here used to fight it
@@ -2558,7 +2591,7 @@ html[data-theme="light"] .ftile.tag-guest .ft-tagbadge { background: linear-grad
 html[data-theme="light"] .ftile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb, #6d28d9 40%, transparent); }
 html[data-theme="light"] .ftile.tag-vip .ft-tagbadge { background: color-mix(in srgb, #6d28d9 18%, #fff); color: #5b21b6; border-color: #6d28d9; }
 /* keep the tile's inner content above the tint overlay */
-.ftile.ft-tag .ft-top, .ftile.ft-tag .ft-badges, .ftile.ft-tag .ft-status, .ftile.ft-tag .ft-act, .ftile.ft-tag .ft-strip { position: relative; z-index: 1; }
+.ftile.ft-tag .ft-top, .ftile.ft-tag .ft-badges, .ftile.ft-tag .ft-status, .ftile.ft-tag .ft-act, .ftile.ft-tag .ft-strip, .ftile.ft-tag .ft-line { position: relative; z-index: 1; }
 
 /* the "Mark table" popup options */
 .tag-opt { display: flex; align-items: center; gap: 12px; width: 100%; padding: 11px 12px; margin-bottom: 8px;

@@ -140,6 +140,40 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
   }
 }
 
+// ── 4. EVERY PANEL SCRIPT MUST STILL PARSE ────────────────────────────────────────────────
+//
+// The worst failure a staff panel can have is not a wrong pixel — it is a SyntaxError, because
+// the browser then runs none of the file and the panel renders NOTHING. It happened while
+// writing this very check (2026-08-01): a code comment inside the runtime-injected CSS used
+// backticks around a class name, which ended the template literal that holds the stylesheet, and
+// /manager came up blank. Nothing caught it — this guard checked HTML comments, the tap guard
+// checked handler shapes, and both were happy with a file that could not load.
+//
+// One `node --check` per panel file, ~15ms each, and it is impossible to argue with the verdict.
+{
+  const panelFiles = [];
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".js")) panelFiles.push(p);
+    }
+  };
+  walk("public/panels");
+  const broken = [];
+  for (const f of panelFiles) {
+    try { execSync(`node --check ${JSON.stringify(f)}`, { stdio: "pipe" }); }
+    catch (e) {
+      const msg = String((e.stderr || e.stdout || e.message) || "").split("\n").filter(Boolean).slice(0, 3).join(" · ");
+      broken.push(`${f}: ${msg}`);
+    }
+  }
+  if (broken.length === 0) ok(`${panelFiles.length} panel script(s) parse (a syntax error renders the panel EMPTY)`);
+  else bad(`${broken.length} panel script(s) will not load at all — the panel renders blank`, broken.join("\n         "));
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");

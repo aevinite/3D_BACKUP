@@ -2852,9 +2852,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           const clean: Record<string, number> = {};
           if (raw && typeof raw === "object" && !Array.isArray(raw)) {
             for (const [k, v] of Object.entries(raw)) {
-              const tn = parseInt(k, 10);
               const n = Math.round(Number(v));
-              if (Number.isFinite(tn) && tn >= 1 && Number.isFinite(n)) clean[String(tn)] = Math.min(Math.max(n, 1), 30);
+              if (!Number.isFinite(n)) continue;
+              const seats = Math.min(Math.max(n, 1), 30);
+              // "default" = how many people fit at a NORMAL table on this floor (owner,
+              // 2026-08-01). It lives in this same JSONB beside the per-table numbers so the
+              // floor-wide answer needs no new column in either database. Anything else must
+              // be a table number; a stray key is dropped, as before.
+              if (k === "default") { clean.default = seats; continue; }
+              const tn = parseInt(k, 10);
+              if (Number.isFinite(tn) && tn >= 1) clean[String(tn)] = seats;
             }
           }
           body.table_seats = clean;
