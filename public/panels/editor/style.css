@@ -2911,3 +2911,10 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 .ft-seats { display: inline-flex; align-items: center; gap: clamp(2px, 2cqw, 4px);
   font-size: clamp(9px, 8.5cqw, 13px); font-weight: 800; color: var(--muted);
   font-variant-numeric: tabular-nums; }
+
+/* A merged party's detail is titled with every table in it, and the unmerge sits at the very
+   bottom (owner, 2026-08-01). No table is named as "the main one" anywhere in this screen. */
+.sx-party-title { color: #c084fc; font-weight: 900; letter-spacing: -0.01em; }
+.sx-unmerge-row { display: flex; flex-wrap: wrap; gap: 8px; width: 100%;
+  margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sx-unmerge-row .btn { flex: 1 1 auto; }

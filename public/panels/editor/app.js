@@ -7197,9 +7197,15 @@ function tablePanelParts(t, host = "float") {
   // Each table's orders arrive in its OWN ?table= slice (they keep their own table number, which is
   // what makes an unmerge exact), so the parent's detail has to gather its children's slices too.
   // openFloatingTable fetches them; here they are simply concatenated, newest first.
+  // ONE PARTY, ONE LIST OF ORDERS, WHICHEVER TABLE YOU OPENED (owner, 2026-08-01: "every table will
+  // show every order"). Each table's orders arrive in its own ?table= slice — they keep their own
+  // table number, which is what makes an unmerge exact — so the detail gathers the whole party.
+  const partyHead = mergeParentOf(t) || t;                    // the table holding the bill
+  const partyAll = [String(partyHead), ...mergeChildrenOf(partyHead)];
+  const isParty = partyAll.length > 1;
   const kids = mergeChildrenOf(t);
-  const os = kids.length
-    ? [...ordersForTable(t), ...kids.flatMap((k) => ordersForTable(k))]
+  const os = isParty
+    ? partyAll.flatMap((x) => ordersForTable(x))
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
     : ordersForTable(t);
   const sess = openSessionForTable(t);
@@ -7261,7 +7267,7 @@ function tablePanelParts(t, host = "float") {
   // gates on the feature being on.
   const hdrTag = TABLE_TAG_INFO[tagForTable(t)];
   const headTagPill = hdrTag ? `<span class="tp-tagpill tag-${tagForTable(t)}">${hdrTag.emoji} ${esc(hdrTag.label)}</span>` : "";
-  const headPill = `<span class="tp-pill tp-pill-${esc(tile.st)}">● ${esc(tile.label)}</span>${headTagPill}`;
+  let headPill = `<span class="tp-pill tp-pill-${esc(tile.st)}">● ${esc(tile.label)}</span>${headTagPill}`;
   const liveRowsAll = os.filter((o) => o.status !== "cancelled").flatMap((o) => orderItemRows(o));
   // Count dishes by QUANTITY (a "2× Cappuccino" row is 2 dishes), matching both the summary
   // tile and the floor tile's "0/3 served" — so the head's numbers stay identical whether
@@ -7277,7 +7283,7 @@ function tablePanelParts(t, host = "float") {
   const guestsN = streaming ? (Number(sumTile.members) || 0) : (sess ? membersOf(sess.id).length : 0);
   const subLine = `<div class="tp-det-sub">${sess && sess.bill_no != null ? `<span>Bill <b>#${esc(sess.bill_no)}</b></span>` : ""}<span><b>${guestsN}</b> guest${guestsN === 1 ? "" : "s"}</span><span><b>${dishN}</b> dish${dishN === 1 ? "" : "es"}</span>${due > 0 ? `<span>Due <b>${inr(due)}</b></span>` : billTotal > 0 ? `<span>Total <b>${inr(billTotal)}</b></span>` : ""}</div>`;
   const progress = dishN ? `<div class="tp-prog"><div class="tp-prog-bar"><span class="pp-served" style="width:${(cServed / nItems) * 100}%"></span><span class="pp-cook" style="width:${(cCook / nItems) * 100}%"></span><span class="pp-recv" style="width:${(cRecv / nItems) * 100}%"></span></div><div class="tp-prog-leg"><span><i class="pl-served"></i>${cServed} served</span><span><i class="pl-cook"></i>${cCook} cooking</span><span><i class="pl-recv"></i>${cRecv} new</span></div></div>` : "";
-  const headMeta = subLine + progress;
+  let headMeta = subLine + progress;
 
   // STREAMING: head is accurate from summary; the actionable body (guest rows, dish rows,
   // bill breakdown, action buttons) needs the slice, so show a light shimmer line for each
@@ -7374,7 +7380,7 @@ function tablePanelParts(t, host = "float") {
       // An already-PAID ticket is not cancellable (the server refuses it too — a refund goes
       // through mark-unpaid or a credit note), so it shows no Cancel.
       const cb = o.payment_status === "paid" ? "" : cancelBtn(o);
-      const foot = cb ? `<div class="tp-order-foot">${cb}</div>` : "";
+      let foot = cb ? `<div class="tp-order-foot">${cb}</div>` : "";
       return `<div class="tp-order"><div class="tp-order-head"><span class="kot-chip">${o.kot_no != null ? "KOT #" + esc(o.kot_no) : "Order"}</span>${when(o) ? `<span class="tp-when">${when(o)}</span>` : ""}</div>${rows}${orderEditExtras(o)}${foot}</div>`;
     }).join("");
     const mergedBadge = liveOrders.length > 1 ? `<span class="sx-badge2">${liveOrders.length} merged · one bill</span>` : "";
@@ -7490,55 +7496,21 @@ function tablePanelParts(t, host = "float") {
   // empty sections would say "nothing here" about a table that is very much in use. Instead the
   // whole detail is the message plus the two things you can do: jump to the table that holds the
   // bill, or split them apart (owner: "you can only unmerge by clicking on the seven number table").
-  const mergedParent = mergeParentOf(t);
-  if (mergedParent) {
-    const kots = ordersForTable(t).filter((o) => o.status !== "cancelled" && !o.archived);
-    const money = kots.reduce((a, o) => a + (parseFloat(o.total) || 0), 0);
-    const list = kots.length
-      ? kots.map((o) => `<li>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"} · ${orderItemRows(o).reduce((a, r) => a + (parseInt(r.qty, 10) || 1), 0)} dish(es) · ${inr(parseFloat(o.total) || 0)}</li>`).join("")
-      : `<li class="muted">nothing was ordered at this table yet</li>`;
-    const mergedSec = `<div class="sx-sec sx-merged">
-      <div class="sx-sec-h">Merged</div>
-      <p class="sx-merged-lead">This table is being served as part of <b>Table ${esc(mergedParent)}</b>'s party —
-        one party, <b>one bill</b>. Everything ordered here is on <b>T${esc(mergedParent)}</b>'s bill${money > 0 ? ` (${inr(money)} of it so far)` : ""}.</p>
-      <p class="sx-merged-lead muted">Ordered at this table:</p>
-      <ul class="sx-merged-list">${list}</ul>
-      <div class="sx-merged-acts">
-        <button class="btn" data-goto-parent="${esc(mergedParent)}">→ Open Table ${esc(mergedParent)}</button>
-        <button class="btn danger" data-unmerge="${esc(t)}">⇹ Unmerge this table</button>
-      </div>
-    </div>`;
-    return { sess, os, headPill, headMeta: `part of Table ${mergedParent}'s party · one bill`,
-             kotHeadBtn: "", requestsSec: "", sessionSec: "", ordersSec: mergedSec, callsSec: "", billSec: "", foot: "" };
-  }
-  // THE PARENT'S OWN "MERGED WITH" CARD — who is in this party, what each table has run up, and an
-  // Unmerge for each of them (owner, 2026-08-01: "there will be option in the detail view if you go
-  // there, if you want to unmerge"). It sits above the orders so the first thing you read on a joined
-  // table is what it is joined to, and it works for three, four or five tables — one row each.
-  if (kids.length) {
-    const rows = kids.map((k) => {
-      const ko = ordersForTable(k).filter((o) => o.status !== "cancelled" && !o.archived);
-      const money = ko.reduce((a, o) => a + (parseFloat(o.total) || 0), 0);
-      const dishes = ko.reduce((a, o) => a + orderItemRows(o).reduce((x, r) => x + (parseInt(r.qty, 10) || 1), 0), 0);
-      return `<div class="sx-mgrow">
-        <span class="sx-mgt">T${esc(k)}</span>
-        <span class="sx-mgd">${ko.length} KOT${ko.length === 1 ? "" : "s"} · ${dishes} dish${dishes === 1 ? "" : "es"} · ${inr(money)}</span>
-        <button class="btn small" data-unmerge="${esc(k)}">⇹ Unmerge</button>
-      </div>`;
-    }).join("");
-    const mine = ordersForTable(t).filter((o) => o.status !== "cancelled" && !o.archived);
-    const mineMoney = mine.reduce((a, o) => a + (parseFloat(o.total) || 0), 0);
-    ordersSec = `<div class="sx-sec sx-merged-parent">
-      <div class="sx-sec-h">Merged party <span class="sub">· ${[String(t), ...kids].map((x) => "T" + x).join(" + ")}</span></div>
-      <p class="sx-merged-lead">These tables are served as <b>one party on one bill</b>. Everything below is on
-        <b>T${esc(t)}</b>'s bill, and it can be ordered from any of them.</p>
-      <div class="sx-mgrows">
-        <div class="sx-mgrow sx-mgrow-self"><span class="sx-mgt">T${esc(t)}</span>
-          <span class="sx-mgd">${mine.length} KOT${mine.length === 1 ? "" : "s"} · ${inr(mineMoney)}</span>
-          <span class="muted small">holds the bill</span></div>
-        ${rows}
-      </div>
-    </div>` + ordersSec;
+  // THE PARTY IS NAMED IN THE TITLE AND UNMERGED FROM THE BOTTOM (owner, 2026-08-01: "we don't want
+  // this interface … where the table name is, we will write six plus seven plus eight … and at the
+  // very bottom there will be a button to unmerge, and for that particular table it will unmerge that
+  // particular table from it"). The per-table rows card is gone: the orders list above already shows
+  // the whole party, so listing each table again was the same information twice.
+  if (isParty) {
+    headPill = `<span class="sx-party-title">${partyAll.map((x) => "T" + esc(x)).join(" + ")}</span>`;
+    headMeta = `one party · one bill${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}`;
+    // ONE button, for the table whose screen this is. Opening T7 offers "Unmerge T7"; opening the
+    // table that holds the bill offers to release each of the others, one button each, because there
+    // is nothing to detach IT from.
+    const unmergeBtns = mergeParentOf(t)
+      ? `<button class="btn danger sx-unmerge" data-unmerge="${esc(t)}">⇹ Unmerge Table ${esc(t)}</button>`
+      : mergeChildrenOf(t).map((k) => `<button class="btn danger sx-unmerge" data-unmerge="${esc(k)}">⇹ Unmerge Table ${esc(k)}</button>`).join("");
+    foot = `${foot}<div class="sx-unmerge-row">${unmergeBtns}</div>`;
   }
   return { sess, os, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
 }
