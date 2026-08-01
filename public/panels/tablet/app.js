@@ -1443,7 +1443,14 @@ function renderPanel() {
       await load();
     } catch (e) {
       await load(); // server refused — refetch so the still-open table reappears
-      if (/close anyway/i.test(String(e && e.message))) {
+      // THE REASON CODE FIRST, the wording only as a fallback (2026-08-01). This used to test the
+      // server's PROSE — the exact mistake the manager panel was fixed for: a paid-but-unserved
+      // table is refused with different words, so the text match missed it and the waiter got a
+      // dead-end error with no "close anyway" at all. lib/sessionClose.ts sends
+      // reason: 'unpaid' | 'cooking' | 'both'; the text test stays only for a stale or queued
+      // reply that predates it.
+      const why = (e && e.data && e.data.reason) || null;
+      if (why === "unpaid" || why === "cooking" || why === "both" || /close anyway/i.test(String(e && e.message))) {
         if (await confirmDialog(`${e.message}`, "Close anyway")) {
           await actGated("POST", `/sessions/${s.id}/close`, { force: true }, { message: "Enter a manager PIN to close this busy table.", toast: "Table closed" });
         }

@@ -1190,6 +1190,21 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
   font-size: clamp(9.5px, 8.3cqw, 12px); font-weight: 800; font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--c) 55%, var(--muted)); }
 .ft-seats i { font-size: clamp(9px, 8.6cqw, 12px); opacity: .8; }
+/* LIGHT MODE NEEDS MORE OF THE COLOUR (owner, 2026-08-01: "the background value is very light,
+   make it somewhat more visible — not too much — keep the gradient"). The state tint is mixed at
+   16% for the dark theme, where 16% of a colour over a near-black panel is plainly visible. Over a
+   white panel the same 16% almost vanishes, so a "Preparing" tile read as blank. Light mode gets a
+   stronger mix; the gradient shape, the direction and the dark theme are all untouched. */
+html[data-theme="light"] .ftile {
+  background: linear-gradient(157deg, color-mix(in srgb, var(--c) 32%, var(--panel)), var(--panel) 82%); }
+html[data-theme="light"] .ftile.ft-bill,
+html[data-theme="light"] .ftile.ft-waiting {
+  background: linear-gradient(157deg, color-mix(in srgb, var(--c) 58%, var(--panel)), var(--panel) 84%); }
+/* The status block sits ON that tint, so it needs a touch more of its own or it disappears into it. */
+html[data-theme="light"] .ft-status {
+  background: color-mix(in srgb, var(--c) 22%, transparent);
+  border-color: color-mix(in srgb, var(--c) 38%, transparent); }
+
 /* ── A TILE IS A SQUARE (owner, 2026-07-30) ─────────────────────────────────────────
    It used to keep a fixed min-height while the grid narrowed it, so a small tile went
    PORTRAIT — a tall thin rectangle (owner screenshots). Now the height follows the
@@ -1275,6 +1290,10 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    exactly as it always did — only small tiles change. */
 .ft-num { font-size: clamp(9px, 21cqw, 30px); font-weight: 800; line-height: 1; color: color-mix(in srgb, var(--c) 78%, var(--text));
   min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A two-digit number is twice the ink of a one-digit one, so it needs a smaller face or it
+   crowds the seat count beside it (owner, 2026-08-01). Same clamp shape, stepped down. */
+.ft-num-sm { font-size: clamp(8.5px, 17cqw, 25px); }   /* 34, 128 */
+.ft-num-xs { font-size: clamp(7.5px, 12cqw, 18px); }   /* a NAME rather than a number */
 /* The notification row (owner drawing: the boxes down the sides of the tile) — waiter calls,
    join requests, anyone waiting. Its own row under the table number so a busy table's badges
    can never push the seat count or the table's name out of the tile. */
