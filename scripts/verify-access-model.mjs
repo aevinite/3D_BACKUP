@@ -272,6 +272,12 @@ if (!deadRows) ok("no row is a switch with nothing behind it");
     } else if (kind === "limit") {
       // access_config[<perm>].limit[<side>] — lib/discountCap.ts reads exactly this.
       seen = sources.some((t) => new RegExp(`\\b${key}\\b[\\s\\S]{0,300}\\blimit\\b`).test(t));
+    } else if (kind === "tab") {
+      // A tab/section key is a word like "tables" or "log" — asking whether it appears ANYWHERE
+      // in the codebase is no evidence at all, and that is how the six manager-settings rows
+      // first passed while nothing read them (2026-08-01). Require the reader that actually
+      // governs them: the panel's own off-list helper, and a server refusal behind it.
+      seen = /managerSettingsOff|managerTabsOff|managerTabOn/.test(corpus);
     } else seen = corpus.includes(key);
     if (!seen) dead.push(`${id} (${kind}:${key})`);
   }

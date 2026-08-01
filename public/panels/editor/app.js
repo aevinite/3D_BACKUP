@@ -662,7 +662,7 @@ function renderList() {
     // Settings SECTIONS (owner, 2026-07-03): the sidebar lists the setting groups —
     // clicking one shows only that group's cards on the right (see formGeneral's
     // dispatcher). Same master-detail .list-item pattern as every other tab.
-    for (const sec of SETTINGS_SECTIONS) {
+    for (const sec of settingsSections()) {
       const li = el(`<li class="list-item${state.settingsSection === sec.id ? " active" : ""}" data-settings-section="${sec.id}">
         <div class="thumb"><i class="fas ${sec.icon}"></i></div>
         <div class="meta"><b>${sec.label}</b><small>${sec.sub}</small></div></li>`);
@@ -1815,6 +1815,14 @@ function openTableHolderPicker(i) {
 // The Settings tab is organized into sidebar sections instead of one long scroll.
 // Each section groups related cards; renderList() draws the sidebar from this same
 // array, and formGeneral() below dispatches on state.settingsSection.
+// Which Settings sections THIS restaurant's manager actually gets. The admin decides it on
+// Access → Manager → "What a manager can manage"; whoami sends the switched-off list. A hidden
+// section is not the guard on its own — the endpoints behind each one refuse too (editor route).
+function settingsSections() {
+  const off = (typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.settingsOff) || [];
+  return SETTINGS_SECTIONS.filter((x) => !off.includes(x.id));
+}
+
 const SETTINGS_SECTIONS = [
   // "General" IS GONE (owner, 2026-08-01: "this setting will be completely removed"). It held two
   // switches — service mode and the bubble effect — and both are decided on Access & permissions
@@ -4810,7 +4818,11 @@ function renderEditor() {
     : formGeneral(state.sel);
   // Settings tab: the heading follows the selected SECTION ("Table settings",
   // "Access settings", …) so you always know which group you're editing.
-  const secTitle = (SETTINGS_SECTIONS.find((x) => x.id === state.settingsSection) || SETTINGS_SECTIONS[0]).title;
+  // Landing on a section this restaurant does not have would render an empty pane, so fall back
+  // to the first one they DO have rather than to SETTINGS_SECTIONS[0], which might be switched off.
+  const visibleSecs = settingsSections();
+  if (visibleSecs.length && !visibleSecs.some((x) => x.id === state.settingsSection)) state.settingsSection = visibleSecs[0].id;
+  const secTitle = (visibleSecs.find((x) => x.id === state.settingsSection) || visibleSecs[0] || { title: "Settings" }).title;
   const title = isGeneral ? secTitle : (state.isNew ? `New ${TAB_LABEL[state.tab]}` : recLabel(state.sel));
   ed.innerHTML = `
     <div class="ed-head">

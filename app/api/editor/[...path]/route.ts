@@ -35,7 +35,7 @@ import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
-import { managerTabsOff, managerTabOn, managerGrantValue, isConfigurableGrant, type ManagerTabKey } from "@/lib/accessTree";
+import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, type ManagerTabKey } from "@/lib/accessTree";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 
@@ -502,6 +502,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // endpoints so a hidden tab can't be reached by typing a URL. The admin keeps
         // everything (admin = top power), so a switched-off tab stays inspectable.
         tabsOff: actor === "admin" ? [] : managerTabsOff(r?.access_config),
+        // Which SETTINGS sections this manager gets. The panel draws its sidebar from this; the
+        // server refuses the same list below, so hiding is never the only guard. The admin
+        // super-user keeps every section — a switched-off one stays inspectable from the console.
+        settingsOff: actor === "admin" ? [] : managerSettingsOff(r?.access_config),
         // Delete-a-bill sub-permission (default OFF) — lets the panel show the "🗑 Delete bill"
         // button only when the owner ticked it (admin/owner always true; the simulate mode
         // resolves it like a real manager: only when the owner explicitly ticked it).
@@ -2857,6 +2861,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // path is the FLOOR: table names, seats and how many sit on a row. Each is its own switch
       // under Access → Manager → What a manager can manage → The floor, and they are checked per
       // FIELD, so a manager allowed to rename a table cannot quietly change the layout too.
+      // A settings section that is switched off must REFUSE, not merely vanish from the sidebar.
+      if (a === "settings" && g.user && g.user.role === "manager") {
+        const offList = managerSettingsOff((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+        const touches = (ks: string[]) => body && typeof body === "object" && ks.some((k) => k in (body as object));
+        if (offList.includes("tables") && touches(["table_names", "table_seats", "floor_per_row", "floor_layout_mode"]))
+          return permDenied("change the tables");
+        if (offList.includes("billing") && touches(["gstin", "restaurant_name", "restaurant_address", "restaurant_phone", "invoice_prefix", "bill_footer", "tax_components"]))
+          return permDenied("change the bill");
+        if (offList.includes("sessions") && touches(["sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m"]))
+          return permDenied("change the dining-session rules");
+      }
       if (a === "settings" && g.user && g.user.role === "manager" && body && typeof body === "object") {
         const cfgFloor = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
           { table_assign?: { manager_opts?: Record<string, boolean> } } | null;

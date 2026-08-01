@@ -112,3 +112,15 @@ permission with a real gate — no decoration.
 - ☐ Remove the manager panel's **Settings** tab completely. Service mode and the bubble effect
   are on Access now; Tables moves under the manager's table management; Sections moves into the
   user profile. Nothing is left for that tab to hold.
+
+
+## ROUND 6 — owner, 2026-08-01 (late)
+
+- ☑ **"Staff logins" removed as a permission.** It is not one. Whether a manager works with staff
+  logins is simply whether the **Users** section exists for them — one row like every other.
+- ☑ **"What a manager can manage (Settings · manager panel)"** = one row per SETTINGS SECTION of
+  the manager panel: Tables · Users · Sections · Billing · Kitchen · Dining sessions. Off ⇒ gone
+  from their sidebar AND the endpoints refuse.
+- ☐ **The staff PROFILE** (another session is building it) gets **Access & permissions → What a
+  manager can manage**, reading these same keys, so one person's exceptions and the restaurant
+  default can never offer different sections. **Do not build the profile — that session owns it.**
