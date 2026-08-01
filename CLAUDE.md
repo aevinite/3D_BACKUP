@@ -941,6 +941,53 @@ to deploy** (push to `main` / merge an auto-deploying PR / trigger a Vercel buil
   `origin/main`, stage ONLY the files THIS task changed (never blind `git add -A`, never revert
   another session's uncommitted small edits); (4) deploy + verify live; (5) **release the lock**.
 
+## 🥇 BACKUP-1 IS **UPSTREAM** — everything lands there first (owner, 2026-08-01)
+
+The word for what backup-1 is: **upstream**. (Plain English: the *source of truth*; in git terms the
+*trunk*.) Everything else — AV live, backup-2 — is **downstream** of it. The rule in one line:
+
+> **Nothing may exist downstream that is not in backup-1's `main` first.**
+
+Backup-1 (`aevinite/3D_BACKUP` → 3-d-backup.vercel.app) is always the newest, most complete copy of
+this product. A change made for AV live or for backup-2 is still merged into backup-1 FIRST; the
+other stacks only ever receive what backup-1 already has. That is what stops the three stacks
+forking, and it is why backup-1 is the one place to look to answer "what is the latest?".
+
+**"First" means MERGED — not necessarily deployed.** This is the part that was missing and that the
+owner corrected on 2026-08-01. Backup-1's Vercel is on the free plan (~100 deploys/day) and a busy
+day of parallel sessions genuinely exhausts it — 142 deploys in 24h, of which 76 were PR previews
+nobody opens. When it caps, `POST /v13/deployments` answers 402 `api-deployments-free-per-day` and a
+merged fix simply cannot go out. **That does NOT block anything.** The order is:
+
+1. **Merge into backup-1 `main`** — always, without exception. This alone satisfies "backup-1 first".
+2. **Deploy backup-1** when it can. If it is capped: retry a couple of times spaced ~60–90s, then
+   STOP (see the note below) — the code is safe on main and deploys when the rolling window frees.
+3. **Meanwhile, deploy backup-2 so the owner still has a live, current site** —
+   **https://3d-backup-2.vercel.app** (separate Vercel account = its own 100/day quota, separate
+   Supabase). Put that link in the "In short" line so he can switch immediately.
+4. When backup-1's window frees, deploy it, so **backup-1 is the latest again**.
+
+**How to deploy backup-2** (its Vercel project has NO Git connection, so a push does nothing):
+upload a clean checkout of `main` — do NOT reuse the `backup_Menu_2` folder, other sessions keep
+uncommitted work there (541 changed paths on 2026-08-01):
+
+```bash
+git worktree add --detach /tmp/b2 origin/main          # a clean copy of main
+cp /Users/aevinite/Documents/Projects/backup_Menu_2/.vercel/project.json /tmp/b2/.vercel/
+cd /tmp/b2 && npx vercel deploy --prod --yes --token "$(cat .claude/.vercel2.token)"
+git worktree remove /tmp/b2                            # tidy up after
+```
+
+**Before assuming backup-2 needs schema work, CHECK.** Its database is a separate Supabase project
+(`jhhqzexl…`) whose management token is currently **expired (401)** — use `psql` instead:
+`db.jhhqzexlpzzwoqnzrgje.supabase.co`, user `postgres`, password in `backup_Menu_2/.env.local`. On
+2026-08-01 a schema diff showed **zero** missing tables and **zero** missing functions — it was
+already in step. Note a PostgREST **404 on an RPC means "no function with THAT ARGUMENT SIGNATURE"**,
+not "missing" — calling one with an empty body will fool you, as it fooled me.
+
+**Do not fix the cap by hammering it.** The waste is real and worth fixing properly (54% of the
+quota is PR previews); the owner has been shown the options and it is his call.
+
 ## Deployment (ONE target now)
 
 Single git repo → GitHub `aevinite/3D_BACKUP` (branch `main`); Vercel project
