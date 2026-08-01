@@ -35,7 +35,8 @@
     "verify:floor": "node scripts/verify-floor-share.mjs",
     "check:floor-timeouts": "node scripts/check-floor-timeouts.mjs",
     "verify:busy": "node scripts/verify-busy-server.mjs",
-    "load:ramp": "node scripts/load-ramp-orders.mjs"
+    "load:ramp": "node scripts/load-ramp-orders.mjs",
+    "db:maintain": "node scripts/db-maintain.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
