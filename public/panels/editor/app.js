@@ -1922,7 +1922,17 @@ function formGeneral(s) {
       How many tables the restaurant has. Drives the live floor map in the
       <b>Tables</b> tab — Save, then open Tables.
     </p>
-    <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
+      <div style="max-width:220px">${tf("Tables per row", "floor_per_row", s.floor_per_row ?? FLOOR_PER_ROW_DEFAULT, { type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1 })}</div>
+    </div>
+    <p style="color:var(--muted);font-size:12.5px;margin:10px 0 0;line-height:1.5">
+      <b>Tables per row</b> is how many table boxes sit on one line in the <b>Tables</b> tab — and so
+      how big each box is. Your number is honoured: the boxes shrink to fit it and drop detail as they
+      go (the seat count, then the wording) while the table number and its colour always stay. Only if
+      a box would get too small to tap — which in practice means on a phone — does the floor show
+      fewer per row. ${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}.
+    </p>
   </div>
   ${tableSeatingCardHtml(s)}
   ${tableQrLinksCardHtml(s)}
@@ -6038,13 +6048,20 @@ function floorTileHtml(i) {
   // Seats — ALWAYS visible, top-right (owner drawing: "no. of person can sit on table").
   // From the table_seats setting (migration 111); no entry → 4. It used to be a watermark
   // that only showed on a FREE table, which is exactly when you least need it.
-  const seats = (s.table_seats || {})[String(i)] || 4;
+  // NEVER INVENT A CAPACITY (owner, 2026-08-01: "on the top right it's not the amount of people can
+  // sit there"). It was defaulting to 4 for every table while settings.table_seats was completely
+  // empty — so the tile stated a fact nobody had entered. If the capacity isn't set, the corner
+  // stays empty; a seated party's own count still shows, because that one IS known.
+  const seatsSet = (s.table_seats || {})[String(i)];
+  const seats = Number(seatsSet) > 0 ? Number(seatsSet) : 0;
   // WHO IS ACTUALLY SITTING THERE (owner, 2026-08-01: "where no. of people sit on that, show").
   // With guests seated it reads "2/4" — two of the four chairs taken; otherwise just the capacity.
   // The seated number only exists when guest sessions are on, because that is the only time
   // anybody tells the app how many people sat down.
-  const seatTxt = guests > 0 ? `${guests}/${seats}` : String(seats);
-  const seatTip = guests > 0 ? `${guests} seated of ${seats} seats` : `${seats} seats`;
+  const seatTxt = guests > 0 ? (seats ? `${guests}/${seats}` : String(guests)) : (seats ? String(seats) : "");
+  const seatTip = guests > 0
+    ? (seats ? `${guests} seated of ${seats} seats` : `${guests} seated`)
+    : (seats ? `${seats} seats` : "");
   // Display name (mig 131): the tile badge shows the name when one is set — the
   // number stays in the tooltip (and everywhere data lives).
   const tnm = ((s.table_names || {})[String(i)] || "").trim();
@@ -6059,7 +6076,7 @@ function floorTileHtml(i) {
   const tinfo = TABLE_TAG_INFO[tag];
   return `<div class="ftile ft-${st}${pay ? " pay-" + pay : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
         ${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
-        <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span><span class="ft-seats" title="${esc(seatTip)}"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seatTxt)}</span></div>
+        <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${seatTxt ? `<span class="ft-seats" title="${esc(seatTip)}"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seatTxt)}</span>` : ""}</div>
         ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
         ${tinfo ? `<span class="ft-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
         <div class="ft-status"><span class="ft-label">${esc(label)}</span>${meta ? `<span class="ft-meta">${esc(meta)}</span>` : ""}</div>${strip}
@@ -6259,8 +6276,16 @@ function floorHtml() {
 
   // legend — every state + its colour. ("Bill due" was removed: payment is
   // already shown by the red/green outline, so a fill colour for it was noise.)
-  const LEG = [["free", "Free"], ["req", "Wants in"], ["seated", "Seated"], ["new", "New order"], ["prep", "Preparing"], ["ready", "Ready to serve"]];
-  const legend = `<div class="floor-legend"><span class="lgcap">inside:</span>${LEG.map(([k, v]) => `<span class="lgi"><i class="ldot ldot-${k}"></i>${v}</span>`).join("")}<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span><span class="lgcap">outline:</span><span class="lgi"><i class="lring lring-red"></i>unpaid</span><span class="lgi"><i class="lring lring-green"></i>paid</span></div>`;
+  // ONLY THE STATES THIS RESTAURANT CAN ACTUALLY BE IN (owner, 2026-08-01: "when session is not on
+  // then remove Seated because you don't know — same for New order — Wants in also — remove the pink
+  // one also"). Wants in / Seated are guest-session concepts: with sessions off nobody joins a table,
+  // so the app never knows who is sitting and those words would be promising information it doesn't
+  // have. "Ready to serve" (pink) goes with them at his request. What's left is what a sessions-off
+  // floor really shows: free, cooking, served — plus the paid/unpaid ring.
+  const sessLeg = [["free", "Free"], ["req", "Wants in"], ["seated", "Seated"], ["new", "New order"], ["prep", "Preparing"], ["ready", "Ready to serve"], ["bill", "Served"]];
+  const plainLeg = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
+  const LEG = sessionsOn ? sessLeg : plainLeg;
+  const legend = `<div class="floor-legend"><span class="lgcap">inside:</span>${LEG.map(([k, v]) => `<span class="lgi"><i class="ldot ldot-${k}"></i>${v}</span>`).join("")}${sessionsOn ? `<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span>` : ""}<span class="lgcap">outline:</span><span class="lgi"><i class="lring lring-red"></i>unpaid</span><span class="lgi"><i class="lring lring-green"></i>paid</span></div>`;
 
   // FIRST PAINT before the live board has arrived: show a shimmer skeleton sized
   // to the real table count, instead of briefly drawing every table as "Free"
@@ -7857,18 +7882,35 @@ function tableOpsOn() {
   /* THE TABLE PICKER (owner, 2026-08-01): as wide as the screen allows, as many tables per row as
      fit, and each one wearing its own state colour + words. Same --c state variables the floor
      tiles use (.ft-free/.ft-prep/…), so the popup and the floor can never disagree. */
-  .kotp-sheet { max-width: min(96vw, 1180px); width: min(96vw, 1180px); }
-  .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(108px, 1fr)); gap: 8px; max-height: min(66vh, 620px); overflow-y: auto; }
-  .kotp-tile { --c: #6b6253; padding: 9px 8px; text-align: center; border-color: color-mix(in srgb, var(--c) 45%, var(--line));
-    background: linear-gradient(157deg, color-mix(in srgb, var(--c) 14%, var(--panel-2)), var(--panel-2) 82%); }
-  .kotp-tile b { font-size: 16px; }
-  .kotp-tile .kotp-state { display:block; font-size:10.5px; font-weight:700; color: color-mix(in srgb, var(--c) 70%, var(--text)); margin-top:1px; }
-  .kotp-tile .kotp-meta { display:block; font-size:9.5px; color: var(--muted); line-height:1.3; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-  .kotp-tile .kotp-pay { display:inline-block; margin-top:3px; font-size:9px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
-    padding:1px 6px; border-radius:999px; border:1px solid currentColor; }
+  /* IT SHOULD LOOK LIKE THE FLOOR (owner, 2026-08-01: "I wanted it with colour and stuff just like
+     the table live view, and all square same … it's too wide, keep the max width, not this broad").
+     So: SQUARE tiles, the same state colours as a floor tile (the ft-* classes carry --c, and this
+     sheet inherits them), and a sheet that is a panel rather than the whole window. The placement
+     never changes with content — every tile holds the same rows whether it has one ticket or five. */
+  .kotp-sheet { max-width: min(92vw, 880px); width: min(92vw, 880px); }
+  .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 9px; max-height: min(64vh, 560px); overflow-y: auto; padding: 2px; }
+  /* NO --c HERE. This stylesheet is injected at runtime, so it lands AFTER style.css: setting --c
+     on .kotp-tile beat the .ft-prep / .ft-bill state colours the tile also carries, and every tile
+     came out the neutral grey. The ft-* class is the one source of the state colour (.ft-free
+     supplies the grey), exactly as on the floor. */
+  .kotp-tile { aspect-ratio: 1 / 1; min-height: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 1px; padding: 7px 6px; text-align: center;
+    border-radius: 14px; border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
+    background: linear-gradient(157deg, color-mix(in srgb, var(--c) 16%, var(--panel)), var(--panel) 78%);
+    transition: transform .12s ease, box-shadow .16s ease; }
+  .kotp-tile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.4); border-color: var(--gold); }
+  .kotp-tile b { font-size: 17px; font-weight: 800; color: color-mix(in srgb, var(--c) 78%, var(--text)); }
+  .kotp-tile .kotp-state { display:block; font-size:10px; font-weight:700; color: color-mix(in srgb, var(--c) 72%, var(--text)); }
+  .kotp-tile .kotp-meta { display:block; font-size:9px; color: var(--muted); line-height:1.25; max-width:100%;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .kotp-tile .kotp-pay { display:inline-block; margin-top:2px; font-size:8.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
+    padding:1px 5px; border-radius:999px; border:1px solid currentColor; }
   .kotp-tile .kotp-pay.unpaid { color:#ef4444; }
   .kotp-tile .kotp-pay.paid   { color:#22c55e; }
-  html[data-theme="light"] .kotp-tile { background: linear-gradient(157deg, color-mix(in srgb, var(--c) 30%, var(--panel-2)), var(--panel-2) 84%); }
+  /* Same light-mode lift the floor tiles get, or the colour vanishes over a white panel. */
+  html[data-theme="light"] .kotp-tile { background: linear-gradient(157deg, color-mix(in srgb, var(--c) 32%, var(--panel)), var(--panel) 82%); }
+  html[data-theme="light"] .kotp-tile.ft-bill, html[data-theme="light"] .kotp-tile.ft-waiting {
+    background: linear-gradient(157deg, color-mix(in srgb, var(--c) 58%, var(--panel)), var(--panel) 84%); }
   /* Miller columns (desktop, owner 2026-07-23): panels sit SIDE BY SIDE like the Mac
      Finder's column view — the card grows a column per step, selections stay lit. */
   .kotm-colwrap { max-width: min(96vw, 1080px); width: fit-content; }
