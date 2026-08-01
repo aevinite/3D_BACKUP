@@ -6118,7 +6118,18 @@ function floorTileHtml(i) {
   // Nothing but "everything is served" opens the bill (owner, 2026-08-01: "until fully not served
   // don't show that print option thing"). An earlier version also allowed it whenever money was
   // owed — which is true of every unpaid table, so the gate did nothing.
+  const mergedTo = mergeParentOf(i);
+  const mergeKids = mergedTo ? [] : mergeChildrenOf(i);
+  const pTile = mergedTo ? tableTileState(mergedTo) : null;
+  const pCounts = pTile ? pTile.counts : null;
+  const pTot = pCounts ? pCounts.nw + pCounts.ck + pCounts.rd + pCounts.sv : 0;
+  const pStrip = pTot > 0
+    ? `<div class="ft-strip">${pCounts.nw ? `<i style="width:${(pCounts.nw / pTot) * 100}%;background:#f59e0b"></i>` : ""}${pCounts.ck ? `<i style="width:${(pCounts.ck / pTot) * 100}%;background:#4f9dff"></i>` : ""}${pCounts.rd ? `<i style="width:${(pCounts.rd / pTot) * 100}%;background:#ec4899"></i>` : ""}${pCounts.sv ? `<i style="width:${(pCounts.sv / pTot) * 100}%;background:#22c55e"></i>` : ""}</div>`
+    : "";
   const canBill = allServed;
+  // A joined table offers the bill too, and it opens the PARTY's bill (the table that holds it) —
+  // same button, same place, no hierarchy on the floor.
+  const canBillHere = mergedTo ? (pTot > 0 && pCounts.nw === 0 && pCounts.ck === 0 && pCounts.rd === 0) : canBill;
   // ROW 3 — A LINE, NOT A BOX (owner, 2026-08-01: "there shouldn't be the preparation box; there
   // should be a line which shows the colour — you can see how the colour works on the top — you
   // don't need to write 'Preparing' and create that whole box. And at the end of the line there
@@ -6137,28 +6148,20 @@ function floorTileHtml(i) {
   // no session of its own and the summary calls it free — which is exactly the lie he caught. Here
   // it wears its own state: addressed to its parent, no ＋ Take order and no bill button (both
   // belong to the table that holds the bill), and tapping it opens its detail, where Unmerge lives.
-  const mergedTo = mergeParentOf(i);
-  const mergeKids = mergedTo ? [] : mergeChildrenOf(i);
   // ROW 3 for a merged pair. The child's whole row is the message; the parent keeps its progress
   // line and gains a chip naming what it carries, in the accent colour so it reads as a state and
   // not as decoration.
-  const mergeChip = mergeKids.length
-    ? `<div class="ft-merge ft-merge-parent" title="Table ${esc(i)} is serving ${mergeKids.map((k) => "T" + k).join(" + ")} as one party — one bill">⇄ with ${mergeKids.map((k) => "T" + esc(k)).join(" ")}</div>`
+  const mergeWith = mergedTo ? ["T" + mergedTo] : mergeKids.map((k) => "T" + k);
+  const mergeChip = mergeWith.length
+    ? `<div class="ft-merge ft-merge-parent" title="Served as one party with ${esc(mergeWith.join(" + "))} — one bill">⇄ with ${esc(mergeWith.join(" "))}</div>`
     : "";
   // The child's row is the LOUDEST thing on the tile (owner, 2026-08-01: "in the seven it should be
   // written in big words, it is merge with six … it should be written in big and all those things
   // should be visible"). Big "MERGED", then the table it belongs to on its own line.
   // The child shows the SAME live line as the table it is merged with — same party, same food, so
   // "4/6 served" belongs on both tiles — with the MERGED wording under it.
-  const pTile = mergedTo ? tableTileState(mergedTo) : null;
-  const pCounts = pTile ? pTile.counts : null;
-  const pTot = pCounts ? pCounts.nw + pCounts.ck + pCounts.rd + pCounts.sv : 0;
-  const pStrip = pTot > 0
-    ? `<div class="ft-strip">${pCounts.nw ? `<i style="width:${(pCounts.nw / pTot) * 100}%;background:#f59e0b"></i>` : ""}${pCounts.ck ? `<i style="width:${(pCounts.ck / pTot) * 100}%;background:#4f9dff"></i>` : ""}${pCounts.rd ? `<i style="width:${(pCounts.rd / pTot) * 100}%;background:#ec4899"></i>` : ""}${pCounts.sv ? `<i style="width:${(pCounts.sv / pTot) * 100}%;background:#22c55e"></i>` : ""}</div>`
-    : "";
   const statusRow = mergedTo
     ? `${pTot > 0 ? `<div class="ft-line" title="${esc(pTile.label || "")}"><span class="ft-linenum">${esc(pCounts.sv)}/${esc(pTot)} served</span>${pStrip}</div>` : ""}`
-      + `<div class="ft-merge ft-merge-child" title="This table is part of table ${esc(mergedTo)}'s party — one bill, on T${esc(mergedTo)}"><b class="ft-merge-big">MERGED</b><span class="ft-merge-with">with T${esc(mergedTo)}</span></div>`
     : cTot > 0
     ? `<div class="ft-line" title="${esc(label)}${meta ? " · " + esc(meta) : ""}"><span class="ft-linenum">${esc(servedTxt)}</span>${strip}</div>`
     // No dishes yet (free, or a party sitting with nothing ordered): there is no progress to draw,
@@ -6183,7 +6186,7 @@ function floorTileHtml(i) {
     // of that print icon more i would love that"): its own paper colour, a receipt icon with the
     // word BILL beside it, and on a dense floor the word drops and the icon stays — the same
     // shed-detail rule the ＋ Take order button follows.
-    + (canBill && !mergedTo ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${i}" title="Bill for ${esc(tableLabel(i))} — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-receipt ft-bill-ico" aria-hidden="true"></i><span class="ft-bill-t">Bill</span></button>` : "");
+    + (canBillHere ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${mergedTo || i}" title="Bill for ${esc(tableLabel(i))} — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-receipt ft-bill-ico" aria-hidden="true"></i><span class="ft-bill-t">Bill</span></button>` : "");
   // Seats — ALWAYS visible, top-right (owner drawing: "no. of person can sit on table").
   // ONE shared answer for "how many fit here" — see seatsForTable(): this table's own number,
   // else the floor's default, else 4.
@@ -6219,7 +6222,7 @@ function floorTileHtml(i) {
   const tinfo = TABLE_TAG_INFO[tag];
   const mergedEither = !!mergedTo || mergeKids.length > 0;
   const payShown = mergedTo && pTile ? (pTile.pay || pay) : pay;
-  return `<div class="ftile ft-${mergedEither ? "merged" : st}${mergedTo ? " ft-is-merged" : ""}${mergeKids.length ? " ft-has-merged" : ""}${payShown ? " pay-" + payShown : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
+  return `<div class="ftile ft-${mergedEither ? "merged" : st}${mergeKids.length ? " ft-has-merged" : ""}${payShown ? " pay-" + payShown : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
         ${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
         <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${seatTxt ? `<span class="ft-seats" title="${esc(seatTip)}"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seatTxt)}</span>` : ""}</div>
         ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
