@@ -2852,7 +2852,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Settings save is owner-only unless the owner has granted a manager the power
       // (owner role always passes managerCan). Previously this endpoint had NO gate — any
       // authenticated staff could PATCH the settings row. (2026-07-04 audit #4)
-      if (a === "settings" && !(await managerCan(g, rid, "edit_settings"))) return permDenied("change settings");
+      // "Change restaurant settings" is GONE as a permission (owner, 2026-08-01) — there is no
+      // restaurant configuration left for a manager to change from here. What remains under this
+      // path is the FLOOR: table names, seats and how many sit on a row. Each is its own switch
+      // under Access → Manager → What a manager can manage → The floor, and they are checked per
+      // FIELD, so a manager allowed to rename a table cannot quietly change the layout too.
+      if (a === "settings" && g.user && g.user.role === "manager" && body && typeof body === "object") {
+        const cfgFloor = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+          { table_assign?: { manager_opts?: Record<string, boolean> } } | null;
+        const opt = (k: string) => { const v = cfgFloor?.table_assign?.manager_opts?.[k]; return typeof v === "boolean" ? v : true; };
+        const touchesTables = "table_names" in body || "table_seats" in body;
+        const touchesLayout = "floor_per_row" in body || "floor_layout_mode" in body;
+        if (touchesTables && !opt("tables")) return permDenied("rename tables or change their seats");
+        if (touchesLayout && !opt("layout")) return permDenied("change the floor layout");
+        // Anything ELSE under settings is admin-owned now — a manager may not send it at all.
+        const allowed = new Set(["table_names", "table_seats", "floor_per_row", "floor_layout_mode"]);
+        for (const k of Object.keys(body)) {
+          if (k === "id" || k === "restaurant_id") continue;
+          if (!allowed.has(k)) return permDenied("change that setting");
+        }
+      }
       if (a === "settings" && body && typeof body === "object") {
         // settings is ONE row per restaurant (UNIQUE restaurant_id) whose PRIMARY KEY id is
         // legacy ('site' for #1, the slug for others). It must NEVER come from the client:

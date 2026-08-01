@@ -77,3 +77,38 @@ Manager menu diagnosis and the rest.
 - **37 of 37** switchable rows flip and the change reaches the SERVER (browser-driven sweep).
 - The bill form **saves**: edit → one bar → Save → the server has it → bar clears on reload.
 - No page errors anywhere in the sweep.
+
+
+---
+
+# ROUND 5 — owner, 2026-08-01 (evening)
+
+## I · What a manager may do — two rows leave it
+
+- ☐ **"Change restaurant settings"** — remove completely. Not a permission any more.
+- ☐ **"Manage staff"** — take it OUT of *What a manager may do*.
+
+## J · NEW group: "What a manager can manage"
+
+A group of its own, holding what a manager may do to STAFF and to the FLOOR. Each row is a real
+permission with a real gate — no decoration.
+
+- ☐ **Create staff logins** — and it is not only waiters: a manager can create **kitchen** and
+  **tablet** logins, and SEE them.
+- ☐ **Assign tables to a waiter** (inside the create/staff group).
+- ☐ **Reset a staff password / PIN.**
+- ☐ **Delete a staff login.**
+- ☐ *(more tablet ones will follow — build the group so adding one is a line, not a redesign.)*
+- ☐ **Floor layout** — sub-option of the manager's table management.
+- ☐ **Table setting** (names & seats) — sub-option of the same.
+
+## K · Waiter sections move into the person
+
+- ☐ *Who serves which table* is a **tablet user's own profile setting**, changeable from there —
+  not a separate Sections screen.
+
+## L · The manager's Settings tab is DELETED
+
+- ☐ Remove the manager panel's **Settings** tab completely. Service mode and the bubble effect
+  are on Access now; Tables moves under the manager's table management; Sections moves into the
+  user profile. Nothing is left for that tab to hold.

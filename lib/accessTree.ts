@@ -174,10 +174,13 @@ const ACTIONS: ActionDef[] = [
     what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it." },
   { id: "delete_bill", name: "Delete a bill", flag: "delete_bill", mgrDef: false, pin: true,
     what: "Takes a bill out of the reports. The number is NOT reused — the next bill still takes the next number — and nothing is erased: the bill stays in the records and in the audit, it simply stops counting towards sales." },
-  { id: "manage_staff", name: "Manage staff", flag: "manage_staff", mgrDef: false,
-    what: "Adding people, changing a role, resetting a PIN. Off for managers unless you deliberately hand it over." },
-  { id: "edit_settings", name: "Change restaurant settings", flag: "edit_settings", mgrDef: false,
-    what: "The restaurant's own configuration — branding, opening hours, printers, tables. Tax rates are admin-only and stay that way." },
+  // "Manage staff" LEFT this list (owner, 2026-08-01) — it is not one of the money actions, it is
+  // its own thing, and one switch covering create/reset/delete was three very different amounts of
+  // trust behind a single yes. It lives in "What a manager can manage", split up.
+  //
+  // "Change restaurant settings" is GONE entirely, not moved. There is no restaurant configuration
+  // left for a manager to change: service mode and the bubble effect are decided on Access now,
+  // the bill and the tables belong to the admin, and the floor is its own row below.
 ];
 
 // One ACTIONS row rendered for a given side.
@@ -484,8 +487,47 @@ export const SECTIONS: Section[] = [
         // stand. Kept as one list rather than scattered into the tabs they happen to appear on
         // (owner's pick, 2026-08-01).
         id: "mgr_may", name: "What a manager may do", bind: { t: "none" },
-        what: "The money and floor actions, for every manager in this restaurant. One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
+        what: "The money actions, for every manager in this restaurant. One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
         children: [...ACTIONS.map(mgrAction)],
+      },
+      {
+        // WHAT A MANAGER CAN MANAGE (owner, 2026-08-01). Separate from the money actions above,
+        // because managing PEOPLE and arranging the ROOM are a different kind of trust. Built as a
+        // group so the further tablet powers he said are coming are a line each, not a redesign.
+        id: "mgr_manage", name: "What a manager can manage", bind: { t: "none" },
+        what: "What a manager may do to the PEOPLE and to the FLOOR — as opposed to what they may do to a bill.",
+        children: [
+          {
+            id: "mgr_staff", name: "Staff logins", def: false, bind: { t: "grant", flag: "manage_staff" },
+            featureBind: { t: "has", id: "manage_staff" },
+            what: "Whether a manager can see and manage this restaurant's staff logins at all — waiter tablets AND the kitchen screen, not only tablets. Off and the whole staff area is absent for them. What they may DO in there is below.",
+            children: [
+              { id: "mgr_staff_create", name: "Create a login", def: true,
+                bind: { t: "opt", id: "manage_staff", side: "manager", key: "create" },
+                what: "Adding a new person — a waiter's tablet, a kitchen screen. A manager can only ever create roles BELOW their own, so nobody can mint another manager." },
+              { id: "mgr_staff_reset", name: "Reset a password or PIN", def: true,
+                bind: { t: "opt", id: "manage_staff", side: "manager", key: "reset_pw" },
+                what: "For the everyday “they've forgotten it again”. The old one is never shown — a new one is issued." },
+              { id: "mgr_staff_delete", name: "Remove a login", def: false,
+                bind: { t: "opt", id: "manage_staff", side: "manager", key: "delete" },
+                what: "Taking someone's access away for good. Off by default — it is the one staff action the person who did it cannot undo." },
+              { id: "mgr_staff_assign", name: "Assign tables to a waiter", def: true, bind: { t: "grant", flag: "table_assign" },
+                what: "Giving each waiter their own part of the floor; their tablet then shows only those tables. It is set on the waiter's OWN profile — their setting, not a screen of its own." },
+            ],
+          },
+          {
+            id: "mgr_floor", name: "The floor", bind: { t: "none" },
+            what: "Arranging the room itself — what the tables are called, how many sit at each, and how they lie on the manager's screen.",
+            children: [
+              { id: "mgr_floor_tables", name: "Table names & seats", def: true,
+                bind: { t: "opt", id: "table_assign", side: "manager", key: "tables" },
+                what: "Renaming a table and setting how many people sit at it. Adding or removing tables stays admin-only." },
+              { id: "mgr_floor_layout", name: "Floor layout", def: true,
+                bind: { t: "opt", id: "table_assign", side: "manager", key: "layout" },
+                what: "How many table boxes sit on one line in the floor view, and so how big each one is." },
+            ],
+          },
+        ],
       },
     ],
   },

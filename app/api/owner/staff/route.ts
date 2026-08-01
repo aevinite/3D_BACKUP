@@ -597,7 +597,24 @@ export async function PATCH(req: NextRequest) {
   // touch another manager's (or an owner's) account, in any way.
   if (!assignableFor(s.actor).includes(u.role)) return bad("You can't manage accounts at or above your own level.", 403);
 
+  // A MANAGER'S FINER STAFF POWERS (owner, 2026-08-01). "Manage staff" used to be one yes covering
+  // creating a login, resetting somebody's password and deleting them outright. Those are three
+  // very different amounts of trust, so each is its own switch now
+  // (access_config.manage_staff.manager_opts.*). The OWNER and the admin are unaffected — this
+  // only ever narrows a manager, and an unset option keeps the row's own default.
+  const mgrStaffOpt = async (key: "create" | "reset_pw" | "delete", dflt: boolean): Promise<boolean> => {
+    if (s.actor !== "manager") return true;
+    const rid = s.restaurants[0]?.id;
+    if (!rid) return false;
+    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+      { manage_staff?: { manager_opts?: Record<string, boolean> } } | null;
+    const v = cfg?.manage_staff?.manager_opts?.[key];
+    return typeof v === "boolean" ? v : dflt;
+  };
+
   if (action === "reset_password") {
+    if (!(await mgrStaffOpt("reset_pw", true)))
+      return bad("Resetting a password isn't part of your staff access.", 403);
     const password = String(body?.password || "").trim() || genPassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     if (password.length > 128) return bad("Password is too long (max 128 characters).");
