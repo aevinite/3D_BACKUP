@@ -63,24 +63,43 @@
       document.querySelector(".bcust-overlay")?.remove();
       const wrap = document.createElement("div");
       wrap.className = "sx-modal-overlay bcust-overlay";
+      // A NICER ASK (owner, 2026-08-01: "make this UI better"). It was two bare inputs stacked with
+      // a lot of dead space and a washed-out primary button, and the browser's autofill badge landed
+      // on top of the phone field. Now: an icon-led header with a one-line reason, each field in its
+      // own labelled block with the country prefix shown so the box reads as a phone box, a live
+      // digit counter that turns green at 10, room reserved for the "we know this number" line so
+      // nothing jumps, and a primary button that looks disabled when it is and solid when it is not.
       wrap.innerHTML = `
-        <div class="sx-modal bcust-modal" style="max-width:430px">
-          <div class="tbl-modal-head"><div class="tp-detail-top">
-            <h3>🧾 ${esc(o.title || "Who is this bill for?")}</h3>
-            <button class="tbl-modal-close" aria-label="Close">✕</button>
-          </div></div>
-          <div class="dish-edit-body">
-            <div class="muted small" style="margin-bottom:10px">Mobile number first — if they've eaten here before, the name fills itself in.${o.print === false ? " These details are saved but <b>won't</b> be printed on the bill." : ""}</div>
-            <label class="dish-edit-lbl" for="bcPhone">Mobile number${required ? " *" : ""}</label>
-            <input id="bcPhone" class="dish-edit-custominput bc-phone" type="tel" inputmode="numeric"
-                   autocomplete="off" maxlength="17" placeholder="10-digit mobile" style="margin-bottom:4px">
-            <div class="bc-status" style="min-height:18px;font-size:12.5px;font-weight:700;margin-bottom:6px"></div>
-            <div class="bc-matches" style="display:none;margin:-2px 0 8px"></div>
-            <label class="dish-edit-lbl" for="bcName">Name${required ? " *" : ""}</label>
-            <input id="bcName" class="dish-edit-custominput bc-name" type="text" autocomplete="off"
-                   maxlength="80" placeholder="Customer name">
+        <div class="sx-modal bcust-modal">
+          <div class="bcust-head">
+            <div class="bcust-ico" aria-hidden="true">🧾</div>
+            <div class="bcust-htxt">
+              <h3>${esc(o.title || "Who is this bill for?")}</h3>
+              <p>Mobile first — if they have eaten here before, the name fills itself in.${o.print === false ? " Saved, but <b>not printed</b> on the bill." : ""}</p>
+            </div>
+            <button class="tbl-modal-close bcust-x" aria-label="Close">✕</button>
           </div>
-          <div class="dish-edit-foot">
+          <div class="bcust-body">
+            <label class="bcust-field">
+              <span class="bcust-lbl">Mobile number${required ? ' <i class="bcust-req">required</i>' : ' <i class="bcust-opt">optional</i>'}</span>
+              <span class="bcust-inwrap">
+                <span class="bcust-prefix">+91</span>
+                <input id="bcPhone" class="bc-phone" type="tel" inputmode="numeric" autocomplete="off"
+                       maxlength="17" placeholder="98765 43210">
+                <span class="bcust-count" aria-hidden="true">0/10</span>
+              </span>
+            </label>
+            <div class="bc-status" role="status"></div>
+            <div class="bc-matches" style="display:none"></div>
+            <label class="bcust-field">
+              <span class="bcust-lbl">Name${required ? ' <i class="bcust-req">required</i>' : ' <i class="bcust-opt">optional</i>'}</span>
+              <span class="bcust-inwrap">
+                <input id="bcName" class="bc-name" type="text" autocomplete="off" maxlength="80"
+                       placeholder="Who the bill is made out to">
+              </span>
+            </label>
+          </div>
+          <div class="bcust-foot">
             <button type="button" class="btn bc-cancel">Cancel</button>
             <button type="button" class="btn primary bc-go" disabled>Generate bill</button>
           </div>
@@ -92,6 +111,13 @@
       const statusEl = wrap.querySelector(".bc-status");
       const matchEl = wrap.querySelector(".bc-matches");
       const goBtn = wrap.querySelector(".bc-go");
+      const countEl = wrap.querySelector(".bcust-count");
+      const paintCount = () => {
+        const n = String(phoneEl.value || "").replace(/\D/g, "").length;
+        if (countEl) { countEl.textContent = `${n}/10`; countEl.classList.toggle("ok", n === 10); }
+      };
+      phoneEl.addEventListener("input", paintCount);
+      paintCount();
 
       let done = false;
       // hardware BACK closes just this sheet (panel rule: every overlay is a back step)
