@@ -28,7 +28,7 @@ Working spec. **Delete this file once every line is built and verified.**
 - ☑ Add a **print preview** — prints a sample bill with made-up customer/lines so the layout can
   be seen before it is used.
 - ☑ Add a **logo/image upload**. Uploaded ⇒ prints at the top; not uploaded ⇒ starts with the name.
-- ☐ **Saving is broken** — editing the fallback tax rate does nothing and there is no visible save.
+- ☑ **Saving is broken** — editing the fallback tax rate does nothing and there is no visible save.
   Work out how save is meant to work here and make every field genuinely save.
 - ☑ **Remove "Fallback tax rate"** from the bill format — it is confusing.
 
@@ -50,8 +50,8 @@ Three sub-options, each opening its own existing card:
 
 ## F · Banquet billing
 
-- ☐ The UI is cramped and unfriendly — reorganise it properly.
-- ☐ **Add a preview** if at all possible.
+- ☑ The UI is cramped and unfriendly — reorganise it properly.
+- ☑ **Add a preview** if at all possible.
 - ☑ **The "Add tax" button does not work.** Fix it, and check every other button on that card.
 
 ## G · Saving — across the whole screen
@@ -69,3 +69,11 @@ Three sub-options, each opening its own existing card:
 
 ## Later (his words: "we'll do manager menu and all that after")
 Manager menu diagnosis and the rest.
+
+
+---
+
+## Verified 2026-08-01
+- **37 of 37** switchable rows flip and the change reaches the SERVER (browser-driven sweep).
+- The bill form **saves**: edit → one bar → Save → the server has it → bar clears on reload.
+- No page errors anywhere in the sweep.
