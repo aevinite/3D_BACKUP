@@ -443,7 +443,19 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
             <a className="at-link" href={node.link.href}><Icon n="link" s={13} /> {node.link.label}</a>
           ) : null}
         </div>
-        {stacked || wide ? null : <Control node={node} value={v} set={set} />}
+        {/* A row with BOTH halves renders the owner's two-switch control: the feature switch, and
+            — only once it is on — the default chip growing open on its right. Everything else
+            keeps its single control. */}
+        {node.featureBind ? (
+          <FeatureRow
+            on={nodeValue({ ...node, bind: node.featureBind }, st) === true}
+            setOn={(nv) => set({ ...node, bind: node.featureBind! }, nv)}
+            def={node.bind.t === "tablet" || node.bind.t === "capTablet" ? String(v) : (v === true ? "on" : "off")}
+            setDef={(nv) => set(node, node.bind.t === "tablet" || node.bind.t === "capTablet" ? nv : nv === "on")}
+            states={node.bind.t === "tablet" || node.bind.t === "capTablet" ? (node.pin ? ["off", "on", "pin"] : ["off", "on"]) : ["off", "on"]}
+            label={node.name}
+          />
+        ) : stacked || wide ? null : <Control node={node} value={v} set={set} />}
         {/* The (i) sits in the row's top-right CORNER, out of the controls' way. It used to sit
             inline after the name, which pushed a long name onto a second line and left the
             controls fighting it for width (owner, 2026-08-01). */}

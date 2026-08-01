@@ -78,8 +78,13 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
       { owner_entitlements?: Record<string, boolean> } | null;
     return e?.owner_entitlements?.[powerEntitlementKey("edit_menu")] !== false;
   }
-  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
-    { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
+  const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
+    { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: Record<string, { on?: boolean }> } | null;
+  // THE FEATURE HALF (owner, 2026-08-01). A row on the Access screen now answers two questions:
+  // does this restaurant HAVE the thing, and what does a person of that role start with. This is
+  // the first — switched off, nobody has it whatever their own default or override says, which is
+  // why it is checked before them. Absent means ON, so nothing changes until it is switched off.
+  if (r?.access_config?.[flag]?.on === false) return false;
   // The admin cap from the OLD ladder. It is still honoured for a power the Access screen still
   // offers — but a RETIRED power's cap is unreachable now (no screen writes power_*), so an old
   // stored `false` would lock a manager out forever with nothing able to undo it.

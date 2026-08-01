@@ -71,6 +71,12 @@ export type Bind =
   // had gone missing in the rebuild (2026-08-01). Deriving it here rather than adding a third
   // column keeps ONE source of truth for the guest: no new gate, no new default, no drift.
   | { t: "ratingsMaster" }
+  // access_config[id].on — DOES THIS RESTAURANT HAVE IT AT ALL, as opposed to what a person of a
+  // role starts with. The owner's two-switch row needs both and only the second existed: a
+  // manager grant said "what a manager gets", with nothing above it saying whether the thing is
+  // on the premises. Stored in access_config (already JSONB, so no migration) and ABSENT MEANS
+  // ON, so no restaurant changes until someone deliberately switches one off.
+  | { t: "has"; id: string }
   | { t: "none" };                       // nothing stored (left-to-build placeholder)
 
 export type Node = {
@@ -93,6 +99,10 @@ export type Node = {
   // (owner, 2026-08-01: "there should be two options, single and multiple; in single there
   // shouldn't be the option on top, in multiple you can toggle through them").
   singleOrMany?: boolean;
+  // The row carries TWO controls: this is the FEATURE half ("does the restaurant have it"),
+  // while `bind` stays the DEFAULT half ("what a person of that role starts with"). Rendered as
+  // the switch that slides left with the default chip growing open on its right.
+  featureBind?: Bind;
   link?: { href: string; label: string }; // read-only row that points at the screen which OWNS this value
   // ── the two flags the 2026-08-01 rework added ────────────────────────────────
   // Its dropdown OPENS while the feature is off. Rule 1 (no greyed-out ghosts) is about
@@ -173,12 +183,14 @@ const ACTIONS: ActionDef[] = [
 // One ACTIONS row rendered for a given side.
 const mgrAction = (a: ActionDef): Node => ({
   id: `mgr_${a.id}`, name: a.name, what: a.what, bind: { t: "grant", flag: a.flag }, def: a.mgrDef, pin: a.pin,
+  featureBind: { t: "has", id: a.id },
   children: a.cap ? [{ id: `mgr_${a.id}_cap`, name: "Most they can take off", what: "The biggest discount this role may apply in one go.", bind: { t: "limit", id: a.id, side: "manager" }, def: 20, unit: "%", options: [5, 10, 20, 50, 100] }] : undefined,
 });
 const waiterAction = (a: ActionDef): Node | null => {
   if (!a.tablet && !a.capTablet) return null;
   return {
     id: `wtr_${a.id}`, name: a.name, what: a.what, pin: a.pin, def: a.waiterDef || "off",
+    featureBind: { t: "has", id: a.id },
     bind: a.tablet ? { t: "tablet", key: a.tablet } : { t: "capTablet", id: a.capTablet! },
     children: a.cap ? [{ id: `wtr_${a.id}_cap`, name: "Most they can take off", what: "The biggest discount a waiter may apply in one go.", bind: { t: "limit", id: a.id, side: "waiter" }, def: 5, unit: "%", options: [5, 10, 20, 50, 100] }] : undefined,
   };
@@ -441,9 +453,9 @@ export const SECTIONS: Section[] = [
           bind: { t: "menu", panel: "manager", key: "bills", grant: "view_bills" },
           what: "The Bills tab. What a manager may do to a bill that is already closed lives inside it — every one of these writes to the audit.",
           children: [
-            { id: "mgr_bill_delete", name: "Delete a bill", def: false, bind: { t: "grant", flag: "delete_bill" },
+            { id: "mgr_bill_delete", name: "Delete a bill", def: false, bind: { t: "grant", flag: "delete_bill" }, featureBind: { t: "has", id: "delete_bill" },
               what: "Takes a bill out of the reports. The number is NOT reused — the next bill still takes the next one — and nothing is erased: it stays in the records and in the audit, it just stops counting towards sales." },
-            { id: "mgr_bill_reopen", name: "Reopen a bill", def: true, bind: { t: "grant", flag: "void_bills" },
+            { id: "mgr_bill_reopen", name: "Reopen a bill", def: true, bind: { t: "grant", flag: "void_bills" }, featureBind: { t: "has", id: "void_bills" },
               what: "Brings a closed bill back so it can be corrected. The SAME bill reopens, and the audit records that it was reopened and what changed.",
               children: [
                 { id: "mgr_bill_reopen_mins", name: "Only within", def: 10, bind: { t: "limit", id: "void_bills", side: "minutes" },
@@ -550,6 +562,7 @@ export const CREDS_KEYS = collect((b) => (b.t === "creds" ? b.key : null));
 // A "menu" row writes a grant too, so it MUST be in this list — the read/write route builds its
 // allow-list from here, and a flag missing from it is silently dropped on save (the switch would
 // move on screen and change nothing).
+export const HAS_IDS = Array.from(new Set(ALL_NODES.map((n) => (n.featureBind?.t === "has" ? n.featureBind.id : null)).filter(Boolean) as string[]));
 export const GRANT_FLAGS = collect((b) => (b.t === "grant" ? b.flag : b.t === "menu" ? b.grant : null));
 export const SECTION_ENTITLEMENTS = collect((b) => (b.t === "section" ? b.key : null));
 export const TABLET_COLS = collect((b) => (b.t === "tablet" ? b.key : null));
@@ -640,6 +653,7 @@ export function nodeValue(n: Node, s: TreeState): any {
     // = false (no in-menu stars) while the rating area very much still exists, so reading the
     // features flag alone would show this master as OFF on a restaurant that asks every guest
     // for a Google review. Off is the one combination that shows a guest nothing.
+    case "has":      return present(s.config?.[b.id]?.on as boolean, true) !== false;
     case "ratingsMaster": {
       const stars = s.features?.ratings;
       const mode = present(s.settings?.google_review_mode as string, "off");
@@ -677,6 +691,7 @@ export function nodePatch(n: Node, v: any): TreePatch {
     // Both halves move together. Switching it back ON lands on "Menu rating only" — the plain
     // default — rather than restoring whatever Google mode was set months ago, so turning a
     // feature on can never quietly start sending guests to a third-party page.
+    case "has":      return { config: { [b.id]: { on: v === true } } };
     case "ratingsMaster":
       return v === true
         ? { features: { ratings: true }, settings: { google_review_mode: "off" } }
