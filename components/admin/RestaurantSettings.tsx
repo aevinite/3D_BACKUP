@@ -335,6 +335,73 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     w.document.write(html); w.document.close();
   };
 
+  // ── SEE THE BANQUET BILL (owner, 2026-08-01: "if possible show preview also") ──────────────
+  // Uses exactly what this card is set to: the ticked fields, the number series, the banquet tax
+  // rows (or the menu's rate when none are set), and the restaurant's own header. An event is
+  // invented so the layout can be judged without booking one.
+  const previewBanquet = () => {
+    const money = (n: number) => Math.round(n).toLocaleString("en-IN");
+    const esc = (v: string) => v.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+    const plates = 120, rate = 850;
+    const sub = plates * rate;
+    const rows = banquetTaxOf(draft);
+    const lines = (rows.length ? rows : comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0)
+      .map((c) => ({ label: String(c.label), rate: Number(c.rate) })))
+      .map((c) => ({ label: c.label, rate: c.rate, amt: (sub * c.rate) / 100 }));
+    const taxTotal = lines.reduce((a, l) => a + l.amt, 0);
+    // Only the fields this restaurant actually asks for appear — that is the whole point of the
+    // tick list above, so the preview has to honour it or it teaches the wrong thing.
+    const SAMPLE: Record<string, string> = {
+      host_name: "Mehta family", host_phone: "98250 12345", event_type: "Wedding reception",
+      event_date: "14 Aug 2026", guests: String(plates), hall: "Banquet hall 1",
+      company_name: "Mehta Textiles Pvt Ltd", company_gstin: "24ABCDE1234F1Z5",
+      company_address: "12 Ring Road, Ahmedabad 380015", advance: "25,000", notes: "Jain menu for 20",
+    };
+    const shown = bqFields.map((k) => {
+      const f = BANQUET_FIELDS.find((x) => x.key === k);
+      return f && SAMPLE[k] ? `<div class="kv"><span>${esc(f.label)}</span><b>${esc(SAMPLE[k])}</b></div>` : "";
+    }).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Banquet bill preview</title><style>
+      *{box-sizing:border-box}
+      body{font:12.5px/1.6 ui-sans-serif,system-ui,sans-serif;width:520px;margin:18px auto;color:#111;background:#fff}
+      .logo{display:block;max-width:130px;max-height:64px;margin:0 auto 8px;object-fit:contain}
+      h1{font-size:19px;text-align:center;margin:0 0 2px}
+      .sub{text-align:center;font-size:11px;color:#444;margin:0}
+      .tag{text-align:center;margin:10px 0 14px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#666}
+      hr{border:0;border-top:1px solid #ccc;margin:12px 0}
+      .kv{display:flex;justify-content:space-between;gap:16px;padding:3px 0;border-bottom:1px dotted #ddd}
+      .kv span{color:#555}
+      table{width:100%;border-collapse:collapse;margin-top:10px}
+      th{text-align:left;font-size:11px;border-bottom:1.5px solid #111;padding:0 0 5px}
+      td{padding:6px 0;border-bottom:1px solid #eee} .r{text-align:right}
+      .tot{display:flex;justify-content:space-between;padding:3px 0}
+      .grand{font-weight:800;font-size:16px;border-top:2px solid #111;margin-top:6px;padding-top:7px}
+      .foot{text-align:center;margin-top:16px;font-size:11px;color:#444}
+      .stamp{text-align:center;margin-top:16px;font-size:10.5px;color:#a00;border:1px dashed #a00;padding:6px}
+      @media print { .stamp { display:none } }
+    </style></head><body>
+      ${logoUrl ? `<img class="logo" src="${esc(logoUrl)}" onerror="this.style.display='none'">` : ""}
+      <h1>${esc(String(draft.restaurant_name || restaurant.name || "Restaurant"))}</h1>
+      ${draft.restaurant_address ? `<div class="sub">${esc(String(draft.restaurant_address))}</div>` : ""}
+      ${draft.gstin ? `<div class="sub">GSTIN: ${esc(String(draft.gstin))}</div>` : ""}
+      <div class="tag">Banquet bill · ${esc(bqSample)}</div>
+      ${shown || '<div class="sub">No fields ticked — the bill would show only the totals.</div>'}
+      <table><tr><th>Description</th><th class="r">Plates</th><th class="r">Rate</th><th class="r">Amount</th></tr>
+        <tr><td>Event catering — set menu</td><td class="r">${plates}</td><td class="r">${money(rate)}</td><td class="r">${money(sub)}</td></tr>
+      </table>
+      <hr>
+      <div class="tot"><span>Subtotal</span><span>${money(sub)}</span></div>
+      ${lines.map((l) => `<div class="tot"><span>${esc(l.label)} ${l.rate}%</span><span>${money(l.amt)}</span></div>`).join("")}
+      ${lines.length ? "" : '<div class="tot"><span>Tax</span><span>not set</span></div>'}
+      <div class="tot grand"><span>TOTAL</span><span>₹${money(sub + taxTotal)}</span></div>
+      <div class="foot">${esc(String(draft.bill_footer || "Thank you"))}</div>
+      <div class="stamp">SAMPLE — invented event, your real fields, numbering and tax. Not a real bill; this box never prints.</div>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=580,height=760");
+    if (!w) { setErr("Allow pop-ups to preview the banquet bill."); return; }
+    w.document.write(html); w.document.close();
+  };
+
   // ── QR helpers ────────────────────────────────────────────────────────────
   const qrUrl = (code: string) => `${window.location.origin}/q/${code}`;
   const tableLabel = (t: number) => {
@@ -634,7 +701,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             );
           })}
         </div>
-        <div style={{ display: "grid", gap: 7 }}>
+        {/* Two columns — the tick list was one long single-file scroll of eleven rows, which is
+            most of why this card felt endless (owner, 2026-08-01: "the UI is really short… make it
+            as user-friendly as possible"). */}
+        <div className="bq-fields">
           {BANQUET_FIELDS.map((f) => {
             const on = bqFields.includes(f.key);
             return (
@@ -663,7 +733,12 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           </div>
         </details>
 
-        <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Its own bill numbers</h3>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
+          <button className="adm-btn" onClick={previewBanquet}>🎪 Preview the banquet bill</button>
+          <span className="adm-muted" style={{ fontSize: 11.5 }}>An invented event, with your fields, numbering and tax.</span>
+        </div>
+
+        <h3 className="bq-h">Its own bill numbers</h3>
         <p className="hint">
           A banquet bill never shares a number with a table bill. Set the series to continue from whatever this
           restaurant&apos;s accountant already files — <b>the starting number locks itself</b> once the first banquet bill
@@ -685,7 +760,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           Next bill prints as <b>{bqSample}</b>.
         </p>
 
-        <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Tax on a banquet bill</h3>
+        <h3 className="bq-h">Tax on a banquet bill</h3>
         <p className="hint">
           A banquet is usually taxed differently from a table: restaurant service is <b>5%</b> (CGST 2.5 + SGST 2.5)
           while a banquet / catering with food is <b>18%</b> (CGST 9 + SGST 9). Set the banquet lines here and dine-in

@@ -1056,6 +1056,16 @@ function TreeStyle() {
      the four Tables cards apart. */
   .at-panel .adm-card:first-child > h2 { display:none; }
   .at-panel-wait { margin-top:12px; font-size:12.5px; color:var(--muted); }
+  /* ── The banquet card, given some structure ────────────────────────────────────────────────
+     It was one long single-column scroll: eleven tick rows, then numbering, then tax, then paper,
+     with nothing marking where one ended and the next began. Each heading is a labelled band now
+     and the tick list runs in columns, which is most of the length gone. */
+  .at-panel .bq-h { margin:20px 0 6px !important; padding:7px 11px; border-radius:9px; font-size:12.5px; font-weight:800;
+    letter-spacing:.03em; background:color-mix(in srgb, var(--lvl) 14%, transparent);
+    border-left:3px solid var(--lvl); color:var(--text); }
+  .at-panel .bq-fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(250px,1fr)); gap:8px; }
+  .at-panel .bq-fields label { border-radius:10px !important; }
+  .at-panel details > summary { padding:7px 0; }
   /* Readable, not usable, while the feature above it is off. Dimmed enough to say so without
      hiding the values — the point is being able to CHECK them before switching it on. */
   .at-box-k.at-locked { opacity:.62; }
