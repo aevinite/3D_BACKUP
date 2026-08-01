@@ -5603,6 +5603,8 @@ function flipOrderItems(o, from, to) {
 // summaryTableOpen(t): is table t currently OPEN, per the slim summary? A tile is open
 // when it has a summary entry whose state is anything but 'free' or 'req' (those two mean
 // no open session). The board is no longer fetched whole, so the bulk actions read this.
+const CHAIR_SVG = `<svg class="ft-chair" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3.5a1 1 0 0 1 1 1V11h10V4.5a1 1 0 1 1 2 0V12a1 1 0 0 1-1 1h-1.2l.7 3.3a1 1 0 0 1-2 .4L14.8 13H9.2l-.7 3.7a1 1 0 1 1-2-.4L7.2 13H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/></svg>`;
+
 // ── MERGED TABLES (mig 249) ────────────────────────────────────────────────────────────────
 // The floor read carries the live joins (state.summary.merges: parent_table + child_table). Two
 // questions get asked all over the floor, so they live here once:
@@ -6223,7 +6225,7 @@ function floorTileHtml(i) {
   const payShown = mergedTo && pTile ? (pTile.pay || pay) : pay;
   return `<div class="ftile ft-${mergedEither ? "merged" : st}${mergeKids.length ? " ft-has-merged" : ""}${payShown ? " pay-" + payShown : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
         ${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
-        <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${seatTxt ? `<span class="ft-seats" title="${esc(seatTip)}"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seatTxt)}</span>` : ""}</div>
+        <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${seatTxt ? `<span class="ft-seats" title="${esc(seatTip)}">${CHAIR_SVG}${esc(seatTxt)}</span>` : ""}</div>
         ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
         ${tinfo ? `<span class="ft-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
         ${statusRow}${mergeChip}
