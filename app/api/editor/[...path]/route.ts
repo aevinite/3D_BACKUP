@@ -2877,11 +2877,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           { table_assign?: { manager_opts?: Record<string, boolean> } } | null;
         const opt = (k: string) => { const v = cfgFloor?.table_assign?.manager_opts?.[k]; return typeof v === "boolean" ? v : true; };
         const touchesTables = "table_names" in body || "table_seats" in body;
-        const touchesLayout = "floor_per_row" in body || "floor_layout_mode" in body;
+        // Classic vs Custom is ADMIN-ONLY and has no permission at all — a Custom plan is written
+        // by hand per restaurant, so a manager switching to it could point their floor at a plan
+        // that does not exist. Refused outright, not gated by anything switchable.
+        if ("floor_layout_mode" in body) return permDenied("change the floor layout");
+        const touchesLayout = "floor_per_row" in body;
         if (touchesTables && !opt("tables")) return permDenied("rename tables or change their seats");
         if (touchesLayout && !opt("layout")) return permDenied("change the floor layout");
         // Anything ELSE under settings is admin-owned now — a manager may not send it at all.
-        const allowed = new Set(["table_names", "table_seats", "floor_per_row", "floor_layout_mode"]);
+        const allowed = new Set(["table_names", "table_seats", "floor_per_row"]);
         for (const k of Object.keys(body)) {
           if (k === "id" || k === "restaurant_id") continue;
           if (!allowed.has(k)) return permDenied("change that setting");

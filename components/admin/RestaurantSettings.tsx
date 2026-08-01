@@ -912,19 +912,33 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           which in practice means on a phone — does the floor show fewer per row.
         </p>
         <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border-color, #333)" }}>
-          <label style={{ ...labelStyle, maxWidth: 300 }}>
-            Floor layout
+          {/* FLOOR LAYOUT IS ADMIN-ONLY, and has no permission that could hand it over (owner,
+              2026-08-01: "manager will not have access… and you can't be able to turn on the
+              access also, so no toggle is required"). The server refuses floor_layout_mode from a
+              manager outright — see the editor route's settings path.
+
+              ⏳ CUSTOM IS NOT BUILT YET. It is shown deliberately, labelled, because he asked to
+              keep it visible: "you can keep that custom toggle… for show, and write in memory and
+              in the code that we will build that later." Choosing it today would point a floor at
+              a plan that does not exist, so it is disabled rather than merely warned about — the
+              floor falls back to the classic grid and says so, but a switch that silently does
+              nothing is exactly the kind this whole screen exists to remove.
+              WHEN IT IS BUILT: a per-restaurant plan in public/panels/floor-layouts.js, then drop
+              the `disabled` here and the "not built yet" note. */}
+          <label style={{ ...labelStyle, maxWidth: 340 }}>
+            Floor layout <span className="adm-chip" style={{ marginLeft: 6, fontSize: 10 }}>admin only</span>
             <select value={String(draft.floor_layout_mode || "classic")} disabled={!loadOk || busy}
               onChange={(e) => set("floor_layout_mode", e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
               <option value="classic">Classic — tables in number order</option>
-              <option value="custom">Custom — this room&apos;s real shape</option>
+              <option value="custom" disabled>Custom — this room&apos;s real shape (not built yet)</option>
             </select>
           </label>
           <p className="hint" style={{ marginTop: 8 }}>
-            <b>Classic</b> lays the tables out in number order, {perRow} per row. <b>Custom</b> draws the room as it
-            really is — window seats, the A/C section, an aisle where the aisle is. A custom plan is written by hand per
-            restaurant in <code>public/panels/floor-layouts.js</code>; a restaurant switched to Custom before its plan
-            exists keeps showing the classic grid and says so on the floor, so this switch can never empty a floor.
+            <b>Classic</b> lays the tables out in number order, {perRow} per row — this is what every restaurant uses.
+            <br />
+            <b>Custom</b> would draw the room as it really is: window seats, the A/C section, an aisle where the aisle
+            is. <b>It isn&apos;t built yet</b>, so it is shown but not selectable — it needs a hand-drawn plan per
+            restaurant, and switching to it before that plan exists would point the floor at nothing.
           </p>
         </div>
         {/* Two previews, cheapest first. The shape strip answers "how big is a box?" at a
