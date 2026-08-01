@@ -735,8 +735,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // The 60s of slack covers an order that landed a moment before its session row existed.
         oq = oq.eq("table_number", tbl).eq("archived", false).is("deleted_at", null);
         {
+          // A MERGED TABLE'S PARTY IS ITS PARENT'S (mig 249). Its own orders carry ITS table
+          // number — that is deliberate, it is what an unmerge hands back — but they sit on the
+          // parent's session, so scoping to "an open party on THIS table" found nothing and the
+          // table's own detail reported "nothing was ordered here" about food on the joint bill.
+          const mergedParent = (await sb.from("table_merges").select("parent_table")
+            .eq("restaurant_id", rid).eq("child_table", tbl).is("ended_at", null).limit(1)).data?.[0] as { parent_table?: string } | undefined;
+          const partyTable = mergedParent?.parent_table || tbl;
           const liveSess = (await sb.from("sessions").select("id,opened_at").eq("restaurant_id", rid)
-            .eq("table_number", tbl).eq("status", "open")
+            .eq("table_number", partyTable).eq("status", "open")
             .order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string; opened_at?: string } | undefined;
           if (liveSess) {
             const since = new Date(new Date(liveSess.opened_at || 0).getTime() - 60_000).toISOString();
@@ -997,7 +1004,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
         : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
       if (error) throw new Error(error.message);
-      return ok(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] });
+      // WHICH TABLES ARE SERVED AS ONE PARTY (mig 249). A handful of rows, restaurant-scoped, live
+      // ones only — small enough to ride along with every floor read, and the floor needs it on
+      // BOTH tiles: the parent says "merged with T7", the child says "access from T6" instead of
+      // pretending to be free. Kept OUT of lfh_table_view_summary on purpose: that function is the
+      // hot shared read and every change to it has to be re-proven tile by tile.
+      const merges = (await sb.from("table_merges")
+        .select("parent_table, child_table, merged_at, merged_by")
+        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || [];
+      return ok({ ...(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] }), merges });
     }
 
     if (p === "sessions") {
@@ -2215,7 +2230,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_merge_tables", { p_session: b, p_to: to, p_rid: rid });
       if (error) throw new Error(error.message);
       if (data && (data as { ok?: boolean }).ok === false) return err(mergeErrMsg((data as { reason?: string }).reason), 409);
-      await log("editor", "table_merge", { restaurant_id: rid, detail: `T${(data as { from?: string }).from} → T${to} (one bill)`, device_id: dev });
+      // The RPC decides which table survives (the LOWER number always), so log what it actually
+      // did rather than what was asked for, and stamp WHO on the merge record — the owner wants
+      // both directions findable: "if you want to find who does it and who did it, we can able to
+      // find very quickly".
+      const md = (data || {}) as { from?: string; to?: string; parent_table?: string; child_table?: string };
+      const actor = g.user?.username || g.user?.role || "manager";
+      if (md.child_table) {
+        await sb.from("table_merges").update({ merged_by: actor, merged_by_id: g.user?.id ?? null })
+          .eq("restaurant_id", rid).eq("child_table", md.child_table).is("ended_at", null);
+      }
+      invalidateFloor(rid);
+      await log("editor", "table_merge", { restaurant_id: rid, table_number: md.parent_table ?? to,
+        detail: `T${md.child_table ?? md.from} merged into T${md.parent_table ?? to} — one party, one bill`, device_id: dev });
       return ok(data);
     }
 
@@ -2502,6 +2529,31 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso(), last_activity_at: nowIso() }).eq("id", openSess.id).select());
       await log("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
       return ok({ ok: true, count: rows.length });
+    }
+
+    // tables/:t/unmerge — separate THIS table from the party it was merged into (mig 249).
+    // Reached only from the CHILD table (owner: "you can only unmerge by clicking on the seven
+    // number table"). The RPC does the work and returns what moved, so the panel's confirm can
+    // have already told the truth before anyone tapped; the log records who split which tables.
+    if (a === "tables" && c === "unmerge") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      if (!(await managerCan(g, rid, "table_ops"))) return permDenied("merge or split tables");
+      const actor = g.user?.username || g.user?.role || "manager";
+      const { data, error } = await sb.rpc("lfh_staff_unmerge_table", { p_rid: rid, p_child: t, p_actor: actor });
+      if (error) throw new Error(error.message);
+      const r = (data || {}) as { ok?: boolean; reason?: string; parent?: string; moved?: number; kots?: string | null };
+      if (r.ok === false) {
+        // A printed bill covers both tables — it has to be voided before they can be separated.
+        return NextResponse.json({ error: r.reason === "invoiced"
+          ? "This bill has already been invoiced. Reopen (void) the invoice first, then split the tables."
+          : r.reason === "not_merged" ? "That table isn't merged with another one."
+          : "Couldn't split those tables.", reason: r.reason }, { status: 409 });
+      }
+      invalidateFloor(rid);
+      await log("manager", "table_unmerge", { restaurant_id: rid, table_number: t,
+        detail: `split from T${r.parent ?? "?"} · ${r.moved ?? 0} order(s) returned${r.kots ? ` (KOT ${r.kots})` : ""}`, device_id: dev });
+      return ok({ ok: true, ...r });
     }
 
     // ── Table types (VIP / Family / Owner's Guest) + khata — mig 166 ─────────────
