@@ -199,6 +199,18 @@ const waiterAction = (a: ActionDef): Node | null => {
   };
 };
 
+// The manager panel's own Settings sections (public/panels/editor/app.js → SETTINGS_SECTIONS).
+// This list and that one must stay the same set: a row here with no section there is a switch
+// that does nothing, and a section there with no row here is a screen nobody can take away.
+export const MANAGER_SETTINGS: { key: string; name: string; what: string }[] = [
+  { key: "tables", name: "Tables — floor & seats", what: "Renaming a table, how many people sit at it, and how the tables lie on the floor screen. Adding or removing tables stays admin-only." },
+  { key: "users", name: "Users — staff logins", what: "Seeing and managing this restaurant's staff logins — waiter tablets and the kitchen screen. A manager can only ever touch roles below their own." },
+  { key: "access", name: "Sections — who serves which table", what: "Giving each waiter their own part of the floor, so their tablet shows only those tables." },
+  { key: "billing", name: "Billing — invoice & tax", what: "The bill's own details. Most of this is admin-owned now; the section is here so it can be taken away entirely." },
+  { key: "kitchen", name: "Kitchen — KOT printing", what: "The kitchen ticket printer and its test print." },
+  { key: "sessions", name: "Dining sessions — QR & location", what: "The session rules a manager may see: whether a guest has to be at the café, the phone code, the café's coordinates." },
+];
+
 // ═════════════════════════════════════════════════════════════════════════════
 export const SECTIONS: Section[] = [
   // ─────────────────────────── A · MAIN FEATURES ────────────────────────────
@@ -491,43 +503,24 @@ export const SECTIONS: Section[] = [
         children: [...ACTIONS.map(mgrAction)],
       },
       {
-        // WHAT A MANAGER CAN MANAGE (owner, 2026-08-01). Separate from the money actions above,
-        // because managing PEOPLE and arranging the ROOM are a different kind of trust. Built as a
-        // group so the further tablet powers he said are coming are a line each, not a redesign.
-        id: "mgr_manage", name: "What a manager can manage", bind: { t: "none" },
-        what: "What a manager may do to the PEOPLE and to the FLOOR — as opposed to what they may do to a bill.",
-        children: [
-          {
-            id: "mgr_staff", name: "Staff logins", def: false, bind: { t: "grant", flag: "manage_staff" },
-            featureBind: { t: "has", id: "manage_staff" },
-            what: "Whether a manager can see and manage this restaurant's staff logins at all — waiter tablets AND the kitchen screen, not only tablets. Off and the whole staff area is absent for them. What they may DO in there is below.",
-            children: [
-              { id: "mgr_staff_create", name: "Create a login", def: true,
-                bind: { t: "opt", id: "manage_staff", side: "manager", key: "create" },
-                what: "Adding a new person — a waiter's tablet, a kitchen screen. A manager can only ever create roles BELOW their own, so nobody can mint another manager." },
-              { id: "mgr_staff_reset", name: "Reset a password or PIN", def: true,
-                bind: { t: "opt", id: "manage_staff", side: "manager", key: "reset_pw" },
-                what: "For the everyday “they've forgotten it again”. The old one is never shown — a new one is issued." },
-              { id: "mgr_staff_delete", name: "Remove a login", def: false,
-                bind: { t: "opt", id: "manage_staff", side: "manager", key: "delete" },
-                what: "Taking someone's access away for good. Off by default — it is the one staff action the person who did it cannot undo." },
-              { id: "mgr_staff_assign", name: "Assign tables to a waiter", def: true, bind: { t: "grant", flag: "table_assign" },
-                what: "Giving each waiter their own part of the floor; their tablet then shows only those tables. It is set on the waiter's OWN profile — their setting, not a screen of its own." },
-            ],
-          },
-          {
-            id: "mgr_floor", name: "The floor", bind: { t: "none" },
-            what: "Arranging the room itself — what the tables are called, how many sit at each, and how they lie on the manager's screen.",
-            children: [
-              { id: "mgr_floor_tables", name: "Table names & seats", def: true,
-                bind: { t: "opt", id: "table_assign", side: "manager", key: "tables" },
-                what: "Renaming a table and setting how many people sit at it. Adding or removing tables stays admin-only." },
-              { id: "mgr_floor_layout", name: "Floor layout", def: true,
-                bind: { t: "opt", id: "table_assign", side: "manager", key: "layout" },
-                what: "How many table boxes sit on one line in the floor view, and so how big each one is." },
-            ],
-          },
-        ],
+        // WHAT A MANAGER CAN MANAGE = the SETTINGS SECTIONS of their own panel (owner,
+        // 2026-08-01: "what manager will manage is the options that he gets in the settings").
+        //
+        // "Staff logins" was here as a permission and has been REMOVED — it is not one. Whether a
+        // manager can work with staff logins is simply whether the Users section exists for them,
+        // which is a row below like every other section. One idea, one place.
+        //
+        // Each row = one section of the manager panel's Settings screen. Off ⇒ the section is not
+        // in their sidebar, and the endpoints behind it refuse. The same list also feeds the staff
+        // PROFILE screen another session is building — its "Access & permissions → What a manager
+        // can manage" reads exactly these keys, so one person's exceptions and the restaurant's
+        // default can never offer different sections.
+        id: "mgr_manage", name: "What a manager can manage (Settings · manager panel)", bind: { t: "none" },
+        what: "Which sections a manager gets inside their own Settings screen. Switch one off and it is gone from their sidebar — and its endpoints refuse, so it is not reachable by typing a URL either.",
+        children: MANAGER_SETTINGS.map((x) => ({
+          id: `mgrset_${x.key}`, name: x.name, what: x.what, def: true, fresh: true,
+          bind: { t: "tab", panel: "mgrset", key: x.key } as Bind,
+        })),
       },
     ],
   },
@@ -805,6 +798,15 @@ export function managerGrantValue(flag: string, stored: unknown): boolean {
   if (!isConfigurableGrant(flag)) return true;              // retired → the module is the switch
   if (typeof stored === "boolean") return stored;           // the admin set it → honour it
   return MANAGER_GRANT_DEFAULTS[flag];                      // nothing stored → what the screen shows
+}
+
+/** Which SETTINGS sections this restaurant's manager panel shows. Absent = ON, so no restaurant
+ *  changes until the admin switches one off. Used by the panel (to draw its sidebar) AND by the
+ *  server (so a hidden section's endpoints refuse) — one helper, so they cannot disagree. */
+export function managerSettingsOff(accessConfig: unknown): string[] {
+  const m = (accessConfig as any)?.menus?.mgrset;
+  if (!m || typeof m !== "object") return [];
+  return MANAGER_SETTINGS.map((x) => x.key).filter((k) => m[k] === false);
 }
 
 export const MANAGER_TAB_KEYS = ["editor", "ratings", "log", "bills"] as const;
