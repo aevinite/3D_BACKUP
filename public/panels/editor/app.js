@@ -1352,10 +1352,33 @@ function tablePrintLabel(t) {
   return tableName(t) || `Table ${t}`;
 }
 
+// HOW MANY PEOPLE FIT AT A TABLE — the one function every screen asks (owner, 2026-08-01).
+// Three answers in order: this table's own number → the floor's default (one field in
+// Settings → Tables, so he sets 30 tables at once) → 4, the app's stock answer.
+// Both live in the SAME `table_seats` JSONB (migration 111) — the floor default under the
+// key "default" — deliberately, so no new column has to be added to the live database.
+// Every seat number anywhere must come through here; four screens each hard-coding `|| 4`
+// is how one of them ended up blank while the other three said 4.
+const SEATS_FALLBACK = 4;
+function seatsForTable(s, i) {
+  const map = (s && s.table_seats && typeof s.table_seats === "object") ? s.table_seats : {};
+  const own = Number(map[String(i)]);
+  if (own > 0) return own;
+  const dflt = Number(map.default);
+  return dflt > 0 ? dflt : SEATS_FALLBACK;
+}
+// The floor-wide default on its own (for the settings field that edits it).
+function floorSeatsDefault(s) {
+  const map = (s && s.table_seats && typeof s.table_seats === "object") ? s.table_seats : {};
+  const d = Number(map.default);
+  return d > 0 ? d : SEATS_FALLBACK;
+}
+
 // tableSeatingCardHtml: the "Table setting" card — how many people can sit at EACH
 // table (owner request, 2026-07-01). One small number input per table, backed by the
-// table_seats JSONB column (migration 111) keyed by table number. Falls back to 4 when
-// a table has no entry yet — matches the app-wide default read in floorTileHtml/tileHtml.
+// table_seats JSONB column (migration 111) keyed by table number. A table with no number
+// of its own inherits the floor default — same helper the tiles read, so the card can
+// never disagree with the floor.
 // Deliberately reuses the generic data-path input wiring (bindEditor already listens for
 // [data-path] changes and writes into state.sel) — no custom JS needed for this card.
 function tableSeatingCardHtml(s) {
@@ -1370,7 +1393,7 @@ function tableSeatingCardHtml(s) {
       <input type="text" maxlength="24" data-path="table_names.${i}" value="${esc(names[String(i)] ?? "")}" placeholder="Name"
         title='A display name for this table (e.g. "Banquet") — bills and QR codes keep the number'
         style="flex:1;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
-      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? 4)}" title="Seats"
+      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? floorSeatsDefault(s))}" title="Seats"
         style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
     </div>`;
   }
@@ -1378,7 +1401,8 @@ function tableSeatingCardHtml(s) {
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       Each table's <b>name</b> (optional — e.g. the last table as "Banquet"; tiles and
       table views show it, while bills &amp; QR codes keep the number) and how many
-      people can sit there (shows next to the chair icon; nothing set = 4).
+      people can sit there — shown next to the chair icon on every tile. A table you leave
+      alone uses the <b>Seats per table</b> default from the Tables card above.
     </p>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;max-height:340px;overflow-y:auto;padding-right:4px">${cells}</div>
   </div>`;
@@ -1405,7 +1429,7 @@ function tableQrLinksCardHtml(s) {
   for (let i = 1; i <= n; i++) {
     const nm = (names[String(i)] || "").trim();
     const label = nm ? `${esc(nm)} <span class="muted" style="font-weight:400">(T${i})</span>` : `T${i}`;
-    const st = seats[String(i)] ?? 4;
+    const st = seatsForTable(s, i);
     const full = `${origin}/r/${slug}/menu?table=${i}`;
     rows += `<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--panel-2);flex-wrap:wrap">
       <span style="font-weight:700;font-size:13px;min-width:78px">${label}</span>
@@ -1925,6 +1949,7 @@ function formGeneral(s) {
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
       <div style="max-width:220px">${tf("Tables per row", "floor_per_row", s.floor_per_row ?? FLOOR_PER_ROW_DEFAULT, { type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1 })}</div>
+      <div style="max-width:200px">${tf("Seats per table", "table_seats.default", floorSeatsDefault(s), { type: "number", min: 1, max: 30, step: 1 })}</div>
     </div>
     <p style="color:var(--muted);font-size:12.5px;margin:10px 0 0;line-height:1.5">
       <b>Tables per row</b> is how many table boxes sit on one line in the <b>Tables</b> tab — and so
@@ -1932,6 +1957,11 @@ function formGeneral(s) {
       go (the seat count, then the wording) while the table number and its colour always stay. Only if
       a box would get too small to tap — which in practice means on a phone — does the floor show
       fewer per row. ${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}.
+    </p>
+    <p style="color:var(--muted);font-size:12.5px;margin:8px 0 0;line-height:1.5">
+      <b>Seats per table</b> is how many people fit at a normal table here — it's the number beside
+      the chair icon on every tile. Set it once for the whole floor; any table that's different gets
+      its own number in <b>Table setting</b> below.
     </p>
   </div>
   ${tableSeatingCardHtml(s)}
@@ -6027,11 +6057,29 @@ function floorTileHtml(i) {
   // Status progress bar (new→cooking→ready→served), same colours as the tablet's .tstrip.
   const cTot = counts.nw + counts.ck + counts.rd + counts.sv;
   const strip = cTot > 0 ? `<div class="ft-strip">${counts.nw ? `<i style="width:${(counts.nw / cTot) * 100}%;background:#f59e0b"></i>` : ""}${counts.ck ? `<i style="width:${(counts.ck / cTot) * 100}%;background:#4f9dff"></i>` : ""}${counts.rd ? `<i style="width:${(counts.rd / cTot) * 100}%;background:#ec4899"></i>` : ""}${counts.sv ? `<i style="width:${(counts.sv / cTot) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
-  // Does this table have a bill to look at? Only once the FOOD IS ALL OUT (owner, 2026-07-31:
-  // "till everything is not [served] I don't want the option for the print thing"). Nothing new,
-  // nothing cooking, nothing sitting on the pass — then the meal is finished and a bill makes
-  // sense. Before that a printer button is an invitation to bill a table mid-meal.
   const allServed = cTot > 0 && counts.nw === 0 && counts.ck === 0 && counts.rd === 0;
+  // THE BILL BUTTON IS AVAILABLE WHILE THE FOOD IS STILL COOKING (owner, 2026-08-01: "we can
+  // print when order [is] being cook"). This REVERSES his 2026-07-31 instruction ("till everything
+  // is not [served] I don't want the option for the print thing") — he changed his mind after
+  // using it, which is his call: in a real service the printed bill often goes to the table before
+  // the last dish lands. Any table with something on it can be billed.
+  const dueNow = Number(((state.summary && state.summary.tiles) || {})[String(i)]?.due) || 0;
+  const canBill = cTot > 0 || dueNow > 0;
+  // ROW 3 — A LINE, NOT A BOX (owner, 2026-08-01: "there shouldn't be the preparation box; there
+  // should be a line which shows the colour — you can see how the colour works on the top — you
+  // don't need to write 'Preparing' and create that whole box. And at the end of the line there
+  // will be the number, like 0 out of 3 served … maybe we need just 0/3 serve only, that much
+  // written, nothing more, in small").
+  // So the word ("Preparing") is gone — the tile's own colour already says the state, which is
+  // exactly his point — and what's left is the progress line plus a tiny count riding at its end.
+  // The line keeps the per-state segments (amber new · blue cooking · pink on the pass · green
+  // served), so it still shows the MIX at a glance, not just a total.
+  const servedTxt = cTot > 0 ? `${counts.sv}/${cTot} served` : "";
+  const statusRow = cTot > 0
+    ? `<div class="ft-line" title="${esc(label)}${meta ? " · " + esc(meta) : ""}">${strip}<span class="ft-linenum">${esc(servedTxt)}</span></div>`
+    // No dishes yet (free, or a party sitting with nothing ordered): there is no progress to draw,
+    // so the one word that IS information stays. A blank row here read as a broken tile.
+    : `<div class="ft-line ft-line-plain" title="${esc(label)}"><span class="ft-linenum">${esc(label)}</span></div>`;
   // ROW 4 — the actions, and there are none on an EMPTY table (owner, 2026-07-31: "when the
   // table is free and you click the table directly the ordering thing should pop, no option for
   // take order — and whenever an order is going on, then we want the take order option").
@@ -6044,16 +6092,23 @@ function floorTileHtml(i) {
   const isEmpty = st === "free";
   const acts = (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
-    + (allServed ? `<button class="ft-ico" data-bill-preview="${i}" title="Bill — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-print"></i></button>` : "");
+    // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
+    // notification icon should have its own COLOUR"). On a green Served tile it was a green button
+    // on a green tile — the one control you look for while closing a table, camouflaged.
+    + (canBill ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${i}" title="Bill — preview, print, invoice, mark paid${allServed ? "" : " (food is still cooking)"}" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-print"></i></button>` : "");
   // Seats — ALWAYS visible, top-right (owner drawing: "no. of person can sit on table").
-  // From the table_seats setting (migration 111); no entry → 4. It used to be a watermark
-  // that only showed on a FREE table, which is exactly when you least need it.
-  // NEVER INVENT A CAPACITY (owner, 2026-08-01: "on the top right it's not the amount of people can
-  // sit there"). It was defaulting to 4 for every table while settings.table_seats was completely
-  // empty — so the tile stated a fact nobody had entered. If the capacity isn't set, the corner
-  // stays empty; a seated party's own count still shows, because that one IS known.
-  const seatsSet = (s.table_seats || {})[String(i)];
-  const seats = Number(seatsSet) > 0 ? Number(seatsSet) : 0;
+  // ONE shared answer for "how many fit here" — see seatsForTable(): this table's own number,
+  // else the floor's default, else 4.
+  //
+  // HISTORY, so neither half of this gets undone again (owner, 2026-08-01, twice in one evening):
+  // first he said the corner number was wrong ("it's not the amount of people can sit there"),
+  // and the truth was that nobody had ever entered a capacity, so every tile was stating a fact
+  // out of thin air. I answered by showing NOTHING — which was worse: the waiter tablet, the
+  // Table setting card and the QR card all still said 4, so only this screen went blank and the
+  // number he asked for disappeared ("i cant [see] the amout of people on tbale view"). The real
+  // answer is a capacity that IS his: a floor-wide default he can set in one field, per-table
+  // overrides on top, and every screen reading the same helper.
+  const seats = seatsForTable(s, i);
   // WHO IS ACTUALLY SITTING THERE (owner, 2026-08-01: "where no. of people sit on that, show").
   // With guests seated it reads "2/4" — two of the four chairs taken; otherwise just the capacity.
   // The seated number only exists when guest sessions are on, because that is the only time
@@ -6079,7 +6134,7 @@ function floorTileHtml(i) {
         <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${seatTxt ? `<span class="ft-seats" title="${esc(seatTip)}"><i class="fas fa-chair" aria-hidden="true"></i>${esc(seatTxt)}</span>` : ""}</div>
         ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
         ${tinfo ? `<span class="ft-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
-        <div class="ft-status"><span class="ft-label">${esc(label)}</span>${meta ? `<span class="ft-meta">${esc(meta)}</span>` : ""}</div>${strip}
+        ${statusRow}
         ${acts ? `<div class="ft-act">${acts}</div>` : ""}</div>`;
 }
 
@@ -6282,9 +6337,18 @@ function floorHtml() {
   // so the app never knows who is sitting and those words would be promising information it doesn't
   // have. "Ready to serve" (pink) goes with them at his request. What's left is what a sessions-off
   // floor really shows: free, cooking, served — plus the paid/unpaid ring.
-  const sessLeg = [["free", "Free"], ["req", "Wants in"], ["seated", "Seated"], ["new", "New order"], ["prep", "Preparing"], ["ready", "Ready to serve"], ["bill", "Served"]];
-  const plainLeg = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
-  const LEG = sessionsOn ? sessLeg : plainLeg;
+  // HE MEANT EVERYWHERE, NOT JUST SESSIONS-OFF (owner, 2026-08-01: "on the top I have told you to
+  // remove this all colour thing — you don't remove that, it's still listed. See this."). I had
+  // gated the trim on `sessions_enabled`, so on the restaurant he actually tests (French House,
+  // sessions ON) nothing changed and the seven-word strip was still there. The list is now the
+  // same three everywhere — Free, Preparing, Served — because those are the words he wants on his
+  // floor. "Called" survives only where a guest CAN call a waiter (that needs sessions), and he
+  // asked for it gone with sessions off: "whenever the session is off, also remove that called
+  // thing also".
+  // NOTE: with sessions on, a tile can still turn amber (new order) or pink (on the pass) with no
+  // legend entry to explain it. That is his call and he made it twice; the state word is still in
+  // every tile's tooltip and in the table's own detail popup.
+  const LEG = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
   const legend = `<div class="floor-legend"><span class="lgcap">inside:</span>${LEG.map(([k, v]) => `<span class="lgi"><i class="ldot ldot-${k}"></i>${v}</span>`).join("")}${sessionsOn ? `<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span>` : ""}<span class="lgcap">outline:</span><span class="lgi"><i class="lring lring-red"></i>unpaid</span><span class="lgi"><i class="lring lring-green"></i>paid</span></div>`;
 
   // FIRST PAINT before the live board has arrived: show a shimmer skeleton sized
@@ -7225,17 +7289,19 @@ function tablePanelParts(t, host = "float") {
   // "Generate invoice" first; Print (+ Reopen) appears only once an invoice exists. A
   // settled bill is always invoiced (markTablePaid auto-generates it), so it shows Print.
   const invoicedNow = !!sess && sess.invoice_no != null && !sess.invoice_voided;
-  // NOT WHILE FOOD IS STILL COOKING (owner, 2026-08-01: "why generate invoice when an item is
-  // still cooking — remove that"). An invoice is the finished bill; issuing one over a table that
-  // is still being cooked for means the number is wrong the moment the next dish lands, and its
-  // total is what the guest is asked to pay. So the button appears once every dish is out — the
-  // same rule as the printer on the tile.
-  // An ALREADY-issued bill keeps Print and Reopen whatever the kitchen is doing: the paper for a
-  // document that exists, and the way to void it, are both legitimate at any time.
-  // (allOut is computed once, above the Orders section — both it and the invoice button use it.)
+  // BILLABLE WHILE THE KITCHEN IS STILL WORKING (owner, 2026-08-01: "we can print when [the]
+  // order [is] being cook, and print means generate invoice and print, and generate invoice is
+  // just generate invoice"). This REPLACES his 2026-07-31 rule ("why generate invoice when an item
+  // is still cooking — remove that"): he changed his mind after using it, and the two buttons now
+  // mean exactly what he said —
+  //   🖨 Print          → issues the invoice if there isn't one, then prints it (one tap, one job)
+  //   🧾 Generate invoice → issues the invoice and nothing else
+  // Both are offered on any table that has orders, cooking or not. The compliance rules are
+  // untouched: an issued invoice still locks the bill (no discount until ↩ Reopen voids it, which
+  // is recorded), and nothing here can erase a sale.
   const printBtn = !os.length ? "" : (invoicedNow
     ? `<button class="btn" id="sxPrint">🖨 Print</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
-    : (allOut ? `<button class="btn" id="sxGenInv">🧾 Generate invoice</button>` : ""));
+    : `<button class="btn primary" id="sxPrint" title="Generates the invoice, then prints it">🖨 Print</button><button class="btn" id="sxGenInv" title="Only issues the invoice — no paper">🧾 Generate invoice</button>`);
   // The bill now shows a full BREAKDOWN (subtotal · discount · GST · total) summed
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
   // Breakdown from billMath (same rate + discount-before-tax rule as the printed bill),
@@ -7913,9 +7979,41 @@ function tableOpsOn() {
     background: linear-gradient(157deg, color-mix(in srgb, var(--c) 58%, var(--panel)), var(--panel) 84%); }
   /* Miller columns (desktop, owner 2026-07-23): panels sit SIDE BY SIDE like the Mac
      Finder's column view — the card grows a column per step, selections stay lit. */
-  .kotm-colwrap { max-width: min(96vw, 1080px); width: fit-content; }
+  .kotm-colwrap { max-width: min(96vw, 1280px); width: fit-content; }
   .kotm-head { display: block; }
-  .kotm-cols { display: flex; align-items: stretch; padding: 6px 8px 14px; }
+  .kotm-cols { display: flex; align-items: stretch; padding: 6px 8px 14px; max-width: 100%; overflow-x: auto; }
+  /* ── THE FIRST COLUMN NEVER SCROLLS (owner, 2026-08-01) ────────────────────────────────
+     "All should be shown at one there, so it not be scrollable — at least not for this first
+     one where all the features are listed." He also said the card itself felt small, so the
+     tiles got wider and the sheet grew rather than the text shrinking to nothing.
+     Two across × 4 rows holds the seven operations with room for an eighth if we add one;
+     no max-height and no overflow here, so nothing can hide below a fold. */
+  /* TWO classes on purpose: the generic .kotm-col rule (width 360px) is declared BELOW this
+     block in the same injected stylesheet, so a single-class selector here loses the width to it
+     and the tiles come out 165px wide with every label wrapping.
+     NOTE: this whole stylesheet is a JS template literal — never put a backtick in a comment
+     here, it ends the string and takes the entire panel down with a syntax error. */
+  .kotm-col.kotm-col-ops { width: 500px; max-height: none; overflow: visible; }
+  .kotm-ops { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 2px 0 4px; }
+  .kotm-op { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%;
+    text-align: left; padding: 12px 12px 11px; border-radius: 13px; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--text); cursor: pointer;
+    transition: border-color .14s ease, background .14s ease, transform .1s ease; }
+  .kotm-op:hover:not(:disabled) { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 7%, var(--panel-2)); }
+  .kotm-op:active:not(:disabled) { transform: scale(.985); }
+  .kotm-op:disabled { opacity: .45; cursor: default; }
+  .kotm-op.sel { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 14%, var(--panel-2)); }
+  .kotm-op .kotm-ico { width: 38px; height: 38px; border-radius: 10px; font-size: 19px; }
+  .kotm-op .kotm-txt b { font-size: 14.5px; line-height: 1.2; }
+  .kotm-op .kotm-txt small { font-size: 11.5px; line-height: 1.3; }
+  .kotm-op .kotm-off-why { margin-top: 1px; }
+  /* A phone gets one per row — two 14.5px labels side by side at 360px would truncate, and
+     truncated words are the thing this popup exists to avoid. It may scroll there; his rule was
+     about the desktop card he was looking at, and a phone screen cannot hold seven tiles. */
+  @media (max-width: 620px) {
+    .kotm-col.kotm-col-ops { width: 100%; }
+    .kotm-ops { grid-template-columns: 1fr; }
+  }
   .kotm-col { width: 360px; flex: none; padding: 6px 10px; overflow-y: auto;
     max-height: min(64vh, 560px); border-right: 1px solid var(--line);
     animation: kotmColIn .16s ease-out; }
@@ -8051,9 +8149,16 @@ function openKotColumns(t, sess) {
     const c2 = sel1 ? col2() : null;
     const c3 = col3();
     colsEl.innerHTML =
-      `<div class="kotm-col">` + OPS.map((r) => `<button class="kotm-row${sel1 === r.id ? " sel" : ""}" data-op="${r.id}" data-tip="${esc(KOT_TIPS[r.id] || "")}" ${r.on ? "" : "disabled"}>
+      // EVERY OPERATION ON ONE SCREEN — NO SCROLLING (owner, 2026-08-01: "everything should be
+      // shown at one page … there shouldn't be scrollable … at least not for this first one where
+      // all the features are listed"). As a single tall column these seven rows came to ~670px
+      // against a 560px cap, so the last two hid below the fold — on the one screen whose whole job
+      // is to show you what you can do. They're a two-across grid of tiles now: 4 rows, ~390px
+      // including the header, so all seven are visible at every window height we support.
+      // The LATER columns (which table? which KOT?) keep scrolling — a 300-table floor cannot fit.
+      `<div class="kotm-col kotm-col-ops"><div class="kotm-ops">` + OPS.map((r) => `<button class="kotm-op${sel1 === r.id ? " sel" : ""}" data-op="${r.id}" data-tip="${esc(KOT_TIPS[r.id] || "")}" ${r.on ? "" : "disabled"}>
         <span class="kotm-ico">${r.icon}</span><span class="kotm-txt"><b>${r.label}</b><small>${r.sub}</small></span>
-        ${r.on ? `<span class="kotm-chev">›</span>` : `<span class="kotm-off-why">${r.why}</span>`}</button>`).join("") + `</div>` +
+        ${r.on ? "" : `<span class="kotm-off-why">${r.why}</span>`}</button>`).join("") + `</div></div>` +
       (c2 ? `<div class="kotm-col"><div class="kotm-col-title">${c2.title}</div>${c2.html}</div>` : "") +
       (c3 ? `<div class="kotm-col"><div class="kotm-col-title">${c3.title}</div>${c3.html}</div>` : "");
     // panel 1: pick an operation (split hands over to its form — it's a form, not a drill-down)
@@ -8628,7 +8733,22 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   if (kb && sess) kb.onclick = () => openKotMenu(t, sess);
   // Print bill: a clean printable window with KOT numbers, discounts and totals.
   const pr = root.querySelector("#sxPrint");
-  if (pr) pr.onclick = () => printBill(t, sess, os);
+  // PRINT MEANS "INVOICE IT, THEN PRINT IT" (owner, 2026-08-01). On a bill that has no invoice
+  // yet this used to print an un-numbered piece of paper — a bill the books have no record of.
+  // Same sequence the bill popup's Print already used: issue → re-read the SESSION (the invoice
+  // number lives there, so printing the copy we were built from would print a blank number) →
+  // print. If issuing fails or is cancelled, generateInvoice has already said so and nothing
+  // prints, rather than paper going out that disagrees with the records.
+  if (pr) pr.onclick = async () => {
+    let ss = sess;
+    if (ss && (ss.invoice_no == null || ss.invoice_voided)) {
+      await generateInvoice(ss.id);
+      await ensureTableSlice(t, true);
+      ss = openSessionForTable(t);
+      if (!ss || ss.invoice_no == null || ss.invoice_voided) return;
+    }
+    printBill(t, ss || sess, os);
+  };
   // Invoice-first billing (owner 2026-07-24): Generate invoice / Reopen (void) buttons.
   const gi = root.querySelector("#sxGenInv");
   if (gi && sess) gi.onclick = () => generateInvoice(sess.id);

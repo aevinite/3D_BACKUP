@@ -724,10 +724,15 @@ function tileHtml(i) {
   let body = "";
   if (st.cls === "free" || st.cls === "req") {
     // Seat count (owner request, 2026-07-01 — the tablet had NO capacity info at all
-    // before) from the table_seats setting (migration 111); no entry → 4, same default
-    // the manager floor uses. Only shown on free/req tiles — occupied tiles show the
-    // guest count instead (already more useful once a party is actually seated).
-    const seats = ((state.data.settings || {}).table_seats || {})[String(i)] || 4;
+    // before) from the table_seats setting (migration 111). Same three-step answer as the
+    // manager floor's seatsForTable(): this table's own number → the floor's default
+    // (table_seats.default, one field in the manager's Settings → Tables, owner 2026-08-01)
+    // → 4. Keep the two panels reading the SAME order; when only one of them knew about the
+    // default the two screens disagreed about how many people fit at the same table.
+    // Only shown on free/req tiles — occupied tiles show the guest count instead.
+    const seatMap = (state.data.settings || {}).table_seats || {};
+    const seats = Number(seatMap[String(i)]) > 0 ? Number(seatMap[String(i)])
+      : Number(seatMap.default) > 0 ? Number(seatMap.default) : 4;
     // No "Open" chip (owner, 2026-07-31): opening a table isn't a step any more — the first
     // order starts the party — so a free tile just says how many can sit here, and tapping it
     // goes straight to the table where ＋ Take order lives.
