@@ -1126,11 +1126,11 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    restaurant breaking the layout:
 
      ideal column width = (available width − the gaps) / --per-row
-     actual minimum     = max(--ftile-floor, that ideal)
+     (the old version also took max(...) with a 44px tappability floor — removed 2026-08-01)
 
    Feed that minimum to auto-fill and the grid gives exactly --per-row columns while
    the width allows it, then quietly drops to fewer rather than shrinking a tile past
-   --ftile-floor. So "10 per row" on a phone renders 2–3 readable tiles, not 10
+   (history) it used to fall back to fewer columns on a phone — it no longer does
    slivers; no JS measures anything, and it re-flows live as the side panel is
    dragged or the window resizes. auto-fill (not auto-fit) keeps a short last row's
    tiles their normal size instead of stretching a lone tile across the whole row. */
@@ -1140,17 +1140,18 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
      ~400px of pure gap and it was the thing stopping the asked-for columns from fitting (asking
      for 30 quietly gave 25). Wide floors keep exactly the gutter they had. */
   --ftile-gap: clamp(3px, calc(84px / var(--per-row, 6)), 14px);
-  /* Narrowest a tile may ever get — mirrors TILE_MIN_PX in lib/floorLayout.ts. This is a
-     TAPPABILITY floor (44px = a finger), not a readability one: the owner's tables-per-row is
-     an instruction, so the tile shrinks to honour it and sheds detail on the way down rather
-     than the grid handing back fewer columns than he asked for. Only when a tile would stop
-     being touchable does a column come back — which in practice means only on a phone. */
-  --ftile-floor: 44px;
   display: grid;
   gap: var(--ftile-gap);
-  grid-template-columns: repeat(auto-fill, minmax(
-    max(var(--ftile-floor), (100% - (var(--per-row) - 1) * var(--ftile-gap)) / var(--per-row))
-  , 1fr));
+  /* THE NUMBER IS THE NUMBER (owner, 2026-08-01: "I want how much table can I put in a particular
+     one row — I want it, and you have to adjust according to screen size and all that shit doesn't
+     count here").
+     This used to be auto-fill with a 44px tappability minimum, so on a narrow screen the browser
+     handed back FEWER columns than he asked for — ask for 30 and get 25. Exactly --per-row columns
+     now, always, on every screen: minmax(0, 1fr) lets a tile shrink as far as the row demands and
+     the tile sheds detail on the way down (the count, then the seat number, then the wording) while
+     the table number and its state colour never go. If he sets a number too dense to tap, that is
+     his instruction and the floor obeys it — he asked for that explicitly, twice. */
+  grid-template-columns: repeat(var(--per-row), minmax(0, 1fr));
   /* Tiles are square (aspect-ratio below). Stretching them to the tallest tile in the
      row is what used to make a narrow tile go PORTRAIT, so rows align to the top and
      each tile keeps its own square height. */
@@ -1676,12 +1677,10 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   .grid.cols-2, .grid.cols-3, .grid.cols-6 { grid-template-columns: 1fr; }
   .field.span-2 { grid-column: auto; }
 
-  /* Floor tiles on a narrow screen: DON'T pin a column count here. This used to say
-     "1fr 1fr", which was fine for short rectangles but is wrong now that a tile is a
-     square — two columns on a 760px tablet would mean two 370px-tall monsters. The
-     grid formula on .ftile-grid is already width-aware, so it just needs a slightly
-     bigger floor to keep tiles thumb-sized instead of packing in as many as fit. */
-  .ftile-grid { --ftile-floor: 132px; }
+  /* No screen override for the floor grid (owner, 2026-08-01). It used to raise the tile's
+     minimum width here so a narrow screen packed fewer per row — which is exactly the
+     "adjust according to screen size" he told me not to do. The column count is his number,
+     on every screen. */
 
   /* customization-option rows: the fixed 120px price column won't fit — stack them */
   .opt-choice { grid-template-columns: 1fr; }
@@ -2539,11 +2538,9 @@ html[data-theme="light"] .khata-due{ color:#0369a1; }
   .tp-resize-handle { display: none; }
   /* The ‹/› side-panel chevron is meaningless on a phone (popup mode is forced). */
   .floor-side-toggle { display: none; }
-  /* Phone: same reasoning as the 760px block — no pinned column count now that tiles are
-     square, just a thumb-sized floor. On a 360px phone this lands on 2 columns of ~150px
-     squares; the admin's bigger "tables per row" simply can't fit and is ignored, which
-     is the whole point of the number being a target rather than a rule. */
-  .ftile-grid { --ftile-floor: 140px; gap: 10px; }
+  /* Phone keeps his column count too — only the gutter tightens, so the tiles get the width
+     back rather than the row losing a column. */
+  .ftile-grid { gap: 6px; }
   .floor-stats { grid-template-columns: repeat(3, 1fr); gap: 8px; }
 }
 

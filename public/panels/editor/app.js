@@ -1945,28 +1945,38 @@ function formGeneral(s) {
     // carries data-mgr-hide so XRAY_CONTROLS hides it for the real manager and tints it for a
     // higher role (admin/owner). The floor count itself lives in the admin RestaurantSettings.
     return `
+  <!-- FLOOR LAYOUT — the MANAGER's own card, deliberately NOT admin-only (owner, 2026-08-01:
+       "I want it in the settings of manager panel. Can't you understand?"). I had put Tables per
+       row inside the "Tables / seating" card below, which carries data-mgr-hide="table_count" —
+       so a real manager could not see it at all, which is exactly why he kept saying the option
+       wasn't there. How many tables EXIST stays admin-owned; how the floor is LAID OUT is the
+       manager's own view setting. -->
+  <div class="card"><h3>Floor layout</h3>
+    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      How your live floor is drawn in the <b>Tables</b> tab. Save, then open Tables.
+    </p>
+    <div style="display:flex;gap:14px;flex-wrap:wrap">
+      <div style="max-width:220px">${tf("Tables per row", "floor_per_row", s.floor_per_row ?? FLOOR_PER_ROW_DEFAULT, { type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1 })}</div>
+      <div style="max-width:200px">${tf("Seats per table", "table_seats.default", floorSeatsDefault(s), { type: "number", min: 1, max: 30, step: 1 })}</div>
+    </div>
+    <p style="color:var(--muted);font-size:12.5px;margin:10px 0 0;line-height:1.5">
+      <b>Tables per row</b> is exactly that — put 8 and every row has 8 boxes, on this screen and on
+      any other. The boxes shrink to fit your number and drop detail as they go (the served count,
+      then the seat number, then the wording) while the table number and its colour always stay.
+      ${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}.
+    </p>
+    <p style="color:var(--muted);font-size:12.5px;margin:8px 0 0;line-height:1.5">
+      <b>Seats per table</b> is how many people fit at a normal table here — the number beside the
+      chair on every tile. Set it once for the whole floor; a table that differs gets its own number
+      in <b>Table setting</b> below.
+    </p>
+  </div>
   <div class="card" data-mgr-hide="table_count"><h3>Tables / seating</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       How many tables the restaurant has. Drives the live floor map in the
       <b>Tables</b> tab — Save, then open Tables.
     </p>
-    <div style="display:flex;gap:14px;flex-wrap:wrap">
-      <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
-      <div style="max-width:220px">${tf("Tables per row", "floor_per_row", s.floor_per_row ?? FLOOR_PER_ROW_DEFAULT, { type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1 })}</div>
-      <div style="max-width:200px">${tf("Seats per table", "table_seats.default", floorSeatsDefault(s), { type: "number", min: 1, max: 30, step: 1 })}</div>
-    </div>
-    <p style="color:var(--muted);font-size:12.5px;margin:10px 0 0;line-height:1.5">
-      <b>Tables per row</b> is how many table boxes sit on one line in the <b>Tables</b> tab — and so
-      how big each box is. Your number is honoured: the boxes shrink to fit it and drop detail as they
-      go (the seat count, then the wording) while the table number and its colour always stay. Only if
-      a box would get too small to tap — which in practice means on a phone — does the floor show
-      fewer per row. ${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}.
-    </p>
-    <p style="color:var(--muted);font-size:12.5px;margin:8px 0 0;line-height:1.5">
-      <b>Seats per table</b> is how many people fit at a normal table here — it's the number beside
-      the chair icon on every tile. Set it once for the whole floor; any table that's different gets
-      its own number in <b>Table setting</b> below.
-    </p>
+    <div style="max-width:200px">${tf("Number of tables", "table_count", s.table_count ?? 12, { type: "number", min: 1, max: 500, step: 1 })}</div>
   </div>
   ${tableSeatingCardHtml(s)}
   ${tableQrLinksCardHtml(s)}
