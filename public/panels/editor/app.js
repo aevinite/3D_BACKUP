@@ -6144,7 +6144,13 @@ function floorTileHtml(i) {
   // ROW 3 for a merged pair. The child's whole row is the message; the parent keeps its progress
   // line and gains a chip naming what it carries, in the accent colour so it reads as a state and
   // not as decoration.
-  const mergeWith = mergedTo ? ["T" + mergedTo] : mergeKids.map((k) => "T" + k);
+  // EVERY table in the party names ALL the others (owner, 2026-08-01: "if 3 merge it will show all
+  // 3 merge" + "no hierarchy"). With 6+7+8 joined, table 7's chip reads "⇄ with T6 T8" — not just
+  // its parent — so no tile reads as subordinate to another.
+  const partyTables = mergedTo
+    ? [mergedTo, ...mergeChildrenOf(mergedTo).filter((k) => String(k) !== String(i))]
+    : mergeKids;
+  const mergeWith = partyTables.map((k) => "T" + k);
   const mergeChip = mergeWith.length
     ? `<div class="ft-merge ft-merge-parent" title="Served as one party with ${esc(mergeWith.join(" + "))} — one bill">⇄ with ${esc(mergeWith.join(" "))}</div>`
     : "";
@@ -8204,6 +8210,10 @@ function tableOpsOn() {
   .kotm-cols .kotm-col .kotm-tile { padding: 7px 4px; }
   .kotm-cols .kotm-col .kotm-tile b { font-size: 13.5px; }
   .kotm-cols .kotm-col .kotm-tile small { font-size: 9.5px; }
+  /* A joined party is one button and it wears the floor's purple, so the picker and the floor
+     agree about what "merged" looks like. Its label is wider than "T6", so it spans two cells. */
+  .kotm-tile-party { --c: #a855f7; grid-column: span 2; }
+  .kotm-tile-party b { font-size: 12.5px; letter-spacing: -0.01em; }
   .kotm-col { width: 360px; flex: none; padding: 6px 10px; overflow-y: auto;
     max-height: min(64vh, 560px); border-right: 1px solid var(--line);
     animation: kotmColIn .16s ease-out; }
@@ -8306,8 +8316,16 @@ function openKotColumns(t, sess) {
   };
 
   // Tile grids per purpose. `mark` = the currently-selected tile (kept highlighted).
-  const tiles = (list, attr, subOf) => `<div class="kotm-grid">` +
-    list.map((i) => `<button class="kotm-tile${summaryTableOpen(i) ? " occ" : ""}" data-${attr}="${i}"><b>T${i}</b><small>${subOf(i)}</small></button>`).join("") + `</div>`;
+  // A JOINED PARTY IS ONE CHOICE, NAMED AS ONE THING (owner, 2026-08-01: "if you click the eight
+  // table and go inside merge the table, then it will show six plus seven … no hierarchy").
+  // labelOf lets a picker print "T6 + T7" on the single button that stands for that whole party;
+  // the VALUE stays the table that holds the bill, which is what the server needs.
+  const partyLabel = (i) => {
+    const kids = mergeChildrenOf(i);
+    return kids.length ? ["T" + i, ...kids.map((k) => "T" + k)].join(" + ") : "T" + i;
+  };
+  const tiles = (list, attr, subOf, labelOf) => `<div class="kotm-grid">` +
+    list.map((i) => `<button class="kotm-tile${summaryTableOpen(i) ? " occ" : ""}${mergeChildrenOf(i).length ? " kotm-tile-party" : ""}" data-${attr}="${i}"><b>${esc((labelOf || partyLabel)(i))}</b><small>${subOf(i)}</small></button>`).join("") + `</div>`;
   // A "free" target must have NO party row at all — not even the invisible empty one the floor
   // draws as Free (see tableHasAnyParty). Moving a party onto it would put two sessions on one
   // table, and the second one is the kind of thing nobody notices until a bill is wrong.
@@ -8320,7 +8338,7 @@ function openKotColumns(t, sess) {
   // What panel 2 shows per operation; ops with a 3rd step mark their picks sel-able.
   const col2 = () => {
     if (sel1 === "shift") return { title: "Move to which free table?", html: freeTables().length ? tiles(freeTables(), "goshift", () => "free") : `<div class="muted" style="padding:10px">No free tables right now.</div>` };
-    if (sel1 === "merge") return { title: "Join which table's party?", html: tiles(occTables(), "gomerge", tileDue) };
+    if (sel1 === "merge") return { title: "Join which party?", html: tiles(occTables(), "gomerge", (i) => (mergeChildrenOf(i).length ? "merged party · " + tileDue(i) : tileDue(i))) };
     if (sel1 === "movekot") return { title: "Which KOT moves?", html: movable.map((o) => kotCard(o, "pickkot")).join("") };
     if (sel1 === "moveitem") {
       const groups = movable.map((o) => {
@@ -8372,7 +8390,7 @@ function openKotColumns(t, sess) {
     }));
     colsEl.querySelectorAll("[data-gomerge]").forEach((b) => (b.onclick = async () => {
       const to = b.dataset.gomerge;
-      if (!(await confirmDialog(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`, "Merge"))) return;
+      if (!(await confirmDialog(`Merge Table ${t} into ${partyLabel(to)}? They become ONE party on ONE bill${mergeChildrenOf(to).length ? " — Table " + t + " joins " + partyLabel(to) : ""}. The lowest table number holds the bill.`, "Merge"))) return;
       run("POST", `/sessions/${sess.id}/merge`, { to }, `Merged into table ${to} — one bill`, () => followShiftedTable(t, to));
     }));
     colsEl.querySelectorAll("[data-pickkot]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickkot; render(); }));
