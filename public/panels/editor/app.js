@@ -3320,8 +3320,8 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
 // AND the "Mark all paid" button in the table popup, so staff don't have to settle
 // three orders separately.
 async function markTablePaid(t, mtpOpts = {}) {
-  await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
-  const os = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  await ensurePartySlices(t); // one bill across a merged party — settle all of it, not one table
+  const os = partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
   // The two special settles (mig 166) ride the SAME payment popup as extra buttons:
   // "On the house" only on a Family/Owner's-Guest table, "Collect later" whenever khata
   // is on for this viewer. Server re-checks both regardless of what the UI offered.
@@ -5694,6 +5694,28 @@ function bindAudit() {
     const n = document.getElementById("auQ"); if (n) { n.focus(); try { n.setSelectionRange(at, at); } catch {} } };
   const r = document.getElementById("auRefresh");
   if (r) r.onclick = () => { state.audit = null; renderEditor(); loadAudit(); };
+}
+
+// Every table served as one party with t (t included), and every live order across them. Whole-party
+// actions — Serve all, Mark paid, Accept all — must use these, or they silently touch ONE table of a
+// merged bill: the reason "serve all" left the other tables unserved and "mark paid" left money owed.
+function partyTablesOf(t) {
+  const head = mergeParentOf(t) || String(t);
+  const all = [String(head), ...mergeChildrenOf(head)];
+  return all.length > 1 ? all : [String(t)];
+}
+async function ensurePartySlices(t) {
+  // FORCE, deliberately. ensureTableSlice skips a table whose detail is open, trusting the pollers
+  // to keep it fresh — but a whole-party action fires the instant a detail opens, before every
+  // member's slice has landed, and it then acts on a PARTIAL party. That is exactly what happened:
+  // "Accept all & prepare (2)" on a three-table party accepted two of the three, and the third was
+  // then stuck un-accepted so it could not be served or paid. One forced round-trip per member is
+  // cheap next to getting a bill wrong.
+  await Promise.all(partyTablesOf(t).map((x) => ensureTableSlice(x, true).catch(() => {})));
+}
+function partyOrders(t) {
+  const seen = new Set();
+  return partyTablesOf(t).flatMap((x) => ordersForTable(x)).filter((o) => (seen.has(o.id) ? false : seen.add(o.id)));
 }
 
 // ── WHY WAS THIS REMOVED? (owner, 2026-08-01, mig 251) ─────────────────────────────────────
@@ -9395,7 +9417,7 @@ async function acceptTableOrders(t) {
   // aren't in the cache (the grid renders from the slim summary). Ensure this table's slice
   // is loaded so ordersForTable(t) returns its real orders to act on. (No-op cost when it's
   // the selected table — already loaded — but cheap and correct to always refresh first.)
-  await ensureTableSlice(t);
+  await ensurePartySlices(t); // a merged party accepts as ONE bill (owner, 2026-08-01)
   // Accept every order that still has un-accepted (received) DISHES — this matches
   // the tile's "New order" cue, which is ITEM-level (anyReceived). An order can be
   // order-level "preparing" yet still carry a freshly-added dish at "received" (e.g.
@@ -9403,7 +9425,7 @@ async function acceptTableOrders(t) {
   // silently did NOTHING for those, so the tile showed "Accept" but clicking it fired
   // no request — the "Accept doesn't work" bug. The /accept endpoint flips received
   // item rows → preparing regardless of order status, so this is safe. (2026-06-26)
-  const recv = ordersForTable(t).filter((o) => o.status !== "cancelled" && orderItemRows(o).some((r) => r.status === "received"));
+  const recv = partyOrders(t).filter((o) => o.status !== "cancelled" && orderItemRows(o).some((r) => r.status === "received"));
   if (!recv.length) return;
   const snap = recv.flatMap((o) => snapReceived(o)); // for the takeback
   // OPTIMISTIC: tile flips to "Preparing" instantly, server told in background.
@@ -9426,8 +9448,8 @@ async function acceptTableOrders(t) {
 // Serve EVERY order on a table at once (the table-wide "mark all served").
 // OPTIMISTIC like accept: every dish row flips to served on screen first.
 async function serveAllOrders(t) {
-  await ensureTableSlice(t); // see acceptTableOrders: the table may not be selected
-  const orders = ordersForTable(t);
+  await ensurePartySlices(t); // a merged party's other tables are separate slices
+  const orders = partyOrders(t);
   if (!orders.length) return;
   const snap = orders.flatMap((o) => snapServable(o));
   orders.forEach((o) => { o.status = "served"; flipOrderItems(o, null, "served"); opBegin(o.id); });
