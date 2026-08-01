@@ -446,7 +446,13 @@ async function run() {
       // 2. The waiter's device drops offline and takes ANOTHER order for that table.
       await ctx.setOffline(true);
       await inPanelAsync(tab, async () => {
-        await api("POST", "/order", { table: window.__T2, items: [{ id: window.__D2, qty: 2 }], allergies: [], note: "taken while offline" });
+        // The note carries a nonce so the order is UNIQUE to this run. Byte-identical every time,
+        // it tripped the app's duplicate-order guard ("This looks identical to an order you just
+        // sent") whenever the suite ran twice against the same database inside that guard's window —
+        // and the refusal it then examined was the duplicate one, not the clash one, so the check
+        // reported "NOT a clash explanation" and proved nothing. The guard is right; the fixture was
+        // the problem. (2026-08-01)
+        await api("POST", "/order", { table: window.__T2, items: [{ id: window.__D2, qty: 2 }], allergies: [], note: "taken while offline #" + Date.now() });
         return true;
       });
       ok("a second order was taken on the offline device");

@@ -404,3 +404,10 @@ times. Cost: ~20 minutes mid-way through a full test run.
 Rule: for anything with nested parens, edit the sites individually (or not at all). If a bulk pass
 is unavoidable, parse — don't pattern-match — and re-run the file's own syntax check immediately,
 before running anything else.
+
+## NEVER run a second test against the same site while the suite is running (2026-08-01, 3rd time)
+Three separate false-failure hunts today came from MY OWN concurrent load: (1) parallel DB queries
++ the suite took the deployed site down entirely; (2) `import()`-ing the suite launched a second
+full run; (3) running verify-offline against backup while the 496-phase run was mid-flight turned
+1 real failure into 5. The suite is the ONLY thing that may touch a target while it runs.
+Before starting anything against a site: `pgrep -f verify-everything` and wait if it answers.
