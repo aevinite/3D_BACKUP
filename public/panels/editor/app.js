@@ -1957,7 +1957,6 @@ function formGeneral(s) {
     </p>
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <div style="max-width:220px">${tf("Tables per row", "floor_per_row", s.floor_per_row ?? FLOOR_PER_ROW_DEFAULT, { type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1 })}</div>
-      <div style="max-width:200px">${tf("Seats per table", "table_seats.default", floorSeatsDefault(s), { type: "number", min: 1, max: 30, step: 1 })}</div>
     </div>
     <p style="color:var(--muted);font-size:12.5px;margin:10px 0 0;line-height:1.5">
       <b>Tables per row</b> is exactly that — put 8 and every row has 8 boxes, on this screen and on
@@ -1966,9 +1965,8 @@ function formGeneral(s) {
       ${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}.
     </p>
     <p style="color:var(--muted);font-size:12.5px;margin:8px 0 0;line-height:1.5">
-      <b>Seats per table</b> is how many people fit at a normal table here — the number beside the
-      chair on every tile. Set it once for the whole floor; a table that differs gets its own number
-      in <b>Table setting</b> below.
+      How many people fit at each table is set per table in <b>Table setting</b> below — that is the
+      number beside the chair on every tile.
     </p>
   </div>
   <div class="card" data-mgr-hide="table_count"><h3>Tables / seating</h3>
@@ -5986,8 +5984,13 @@ const openSessionForTable = (t) => (state.board.sessions || []).find((s) => Stri
 // 1-2s blank-panel wait without any extra fetch. (owner report, 2026-07-02)
 function sliceLoaded(t) {
   const s = String(t);
-  return (state.board.sessions || []).some((x) => String(x.table_number) === s)
-      || (state.data.orders || []).some((o) => !o.archived && String(o.table_number) === s);
+  const has = (x) => (state.board.sessions || []).some((y) => String(y.table_number) === String(x))
+      || (state.data.orders || []).some((o) => !o.archived && String(o.table_number) === String(x));
+  // A MERGED TABLE HAS NO SESSION OF ITS OWN, so asking only about ITS table number answered "not
+  // loaded yet" forever and the detail sat on a spinner that never resolved — which is exactly the
+  // "I can't go inside the detail view of 7 and 8" he reported. Its party's slice is what matters.
+  const head = (typeof mergeParentOf === "function" && mergeParentOf(s)) || null;
+  return has(s) || (head ? has(head) : false);
 }
 // Open (unresolved) waiter calls at table t. Safety net: when dining sessions are
 // ON, a call only counts while the table is actually OPEN — so a free/closed table
@@ -7109,8 +7112,13 @@ function openFloatingTable(table) {
   // A MERGED CHILD HOLDS NOTHING OF ITS OWN: its orders live on the parent's party. Without the
   // parent's slice the detail (and worse, the unmerge confirm) would say "nothing was ordered at
   // this table" about food that is on the bill. Fetch the parent too, once, before rendering.
-  // A PARENT needs its children's slices before its detail can show their dishes.
-  for (const _k of mergeChildrenOf(table)) {
+  // OPENING ANY TABLE OF A PARTY LOADS THE WHOLE PARTY (owner: "every table will show every order").
+  // Each table's orders live in its OWN ?table= slice — they keep their own table number, which is
+  // what makes an unmerge exact — so a party's detail needs every member's slice. Fetching only the
+  // parent (from a child) left table 7 showing 3 of the party's 6 tickets.
+  const _head = mergeParentOf(table) || table;
+  const _party = [String(_head), ...mergeChildrenOf(_head)].filter((x) => String(x) !== String(table));
+  for (const _k of _party) {
     ensureTableSlice(_k).then(() => { if (state.floatingTables.some((f) => String(f.table) === String(table))) renderEditor(); }).catch(() => {});
   }
   const _mp = mergeParentOf(table);
@@ -7637,7 +7645,8 @@ function tablePanelParts(t, host = "float") {
   //   · no 🏷 Type — it is in the KOT ▾ menu, and having it twice teaches nobody where it lives;
   //   · no ↻ Restart — it belonged to the open/close family that was removed. A finished table
   //     clears itself, and a table to be emptied by hand is dealt with by cancelling the ticket.
-  const foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${shiftFallbackBtn}${printBtn}${endBtn}`;
+  // `let`, because a merged party appends its Unmerge row to this footer below.
+  let foot = `${takeOrderBtn}${primaryBtn}${payAllBtn}${discBtn}${kotOn ? "" : splitBtn}<span class="tp-foot-spacer"></span>${shiftFallbackBtn}${printBtn}${endBtn}`;
 
   // A MERGED CHILD'S DETAIL (mig 249). Its orders and bill live on the parent, so showing the usual
   // empty sections would say "nothing here" about a table that is very much in use. Instead the

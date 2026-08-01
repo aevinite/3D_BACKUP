@@ -2881,10 +2881,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // full access — only a real manager's patch is stripped.
         if (g.user && g.user.role !== "owner") {
           const MANAGER_BLOCKED_SETTINGS = [
-            // How many tables exist and how many tiles sit on a row of the floor are both
-            // ADMIN-owned (mig 226): the per-row number replaced a per-device S/M/L toggle
-            // precisely so one restaurant has one answer, not one per manager's phone.
-            "table_count", "floor_per_row", "floor_layout_mode",
+            // How many tables EXIST stays admin-owned (mig 226). How the floor is LAID OUT does
+            // not: "tables per row" is the manager's own setting (owner, 2026-08-01, said twice —
+            // "I want it in the settings of manager panel"). It was on this list, so a manager's
+            // save was silently STRIPPED here and the field snapped back to the stored value the
+            // moment the panel refreshed — which is exactly what he reported. It is still ONE
+            // number per restaurant (not per device), so the reason it was locked down no longer
+            // applies to who may set it.
+            "table_count", "floor_layout_mode",
             "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone",
             "gstin", "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
             "auto_print_kot",
