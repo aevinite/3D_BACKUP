@@ -6145,8 +6145,11 @@ function floorTileHtml(i) {
   const mergeChip = mergeKids.length
     ? `<div class="ft-merge ft-merge-parent" title="Table ${esc(i)} is serving ${mergeKids.map((k) => "T" + k).join(" + ")} as one party — one bill">⇄ with ${mergeKids.map((k) => "T" + esc(k)).join(" ")}</div>`
     : "";
+  // The child's row is the LOUDEST thing on the tile (owner, 2026-08-01: "in the seven it should be
+  // written in big words, it is merge with six … it should be written in big and all those things
+  // should be visible"). Big "MERGED", then the table it belongs to on its own line.
   const statusRow = mergedTo
-    ? `<div class="ft-merge ft-merge-child" title="This table is part of table ${esc(mergedTo)}'s party — its orders and bill are on T${esc(mergedTo)}">⇄ merged with T${esc(mergedTo)}<small>access from T${esc(mergedTo)}</small></div>`
+    ? `<div class="ft-merge ft-merge-child" title="This table is part of table ${esc(mergedTo)}'s party — one bill, on T${esc(mergedTo)}"><b class="ft-merge-big">MERGED</b><span class="ft-merge-with">with T${esc(mergedTo)}</span></div>`
     : cTot > 0
     ? `<div class="ft-line" title="${esc(label)}${meta ? " · " + esc(meta) : ""}"><span class="ft-linenum">${esc(servedTxt)}</span>${strip}</div>`
     // No dishes yet (free, or a party sitting with nothing ordered): there is no progress to draw,
@@ -6162,7 +6165,7 @@ function floorTileHtml(i) {
   // A brand-new order still gets its one-tap ✓ accept: it's the fastest thing a manager does,
   // and burying it in the detail would cost a tap on every single order.
   const isEmpty = st === "free" && !mergedTo;
-  const acts = (isEmpty || mergedTo ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
+  const acts = (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
     // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
     // notification icon should have its own COLOUR"). On a green Served tile it was a green button
@@ -6425,6 +6428,10 @@ function floorHtml() {
   // legend entry to explain it. That is his call and he made it twice; the state word is still in
   // every tile's tooltip and in the table's own detail popup.
   const LEG = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
+  // Purple = merged (owner, 2026-08-01: "the background will turn purple … there should be a purple
+  // colour tag also on the top where all the colour thing has been shown"). Only listed while
+  // something IS merged, so the strip stays as short as he asked for the rest of the time.
+  if (mergeList().length) LEG.push(["merged", "Merged"]);
   // THE BELL ONLY WHERE A GUEST CAN ACTUALLY RING IT (owner, 2026-08-01: "whenever the session is
   // off, also remove that called thing" and then "if [the] menu will [be] off then this also
   // [should] not show"). Two things have to be true: the restaurant runs guest sessions, AND the
@@ -6940,6 +6947,10 @@ function openFloatingTable(table) {
   // A MERGED CHILD HOLDS NOTHING OF ITS OWN: its orders live on the parent's party. Without the
   // parent's slice the detail (and worse, the unmerge confirm) would say "nothing was ordered at
   // this table" about food that is on the bill. Fetch the parent too, once, before rendering.
+  // A PARENT needs its children's slices before its detail can show their dishes.
+  for (const _k of mergeChildrenOf(table)) {
+    ensureTableSlice(_k).then(() => { if (state.floatingTables.some((f) => String(f.table) === String(table))) renderEditor(); }).catch(() => {});
+  }
   const _mp = mergeParentOf(table);
   if (_mp) {
     // …and re-render once it lands. The detail paints instantly (that is the point of the
@@ -7166,7 +7177,16 @@ function openDishEditModal(itemId, rerender) {
 // gets the full footer rather than silently losing a button.
 function tablePanelParts(t, host = "float") {
   const sessionsOn = !!(state.data.settings || {}).sessions_enabled;
-  const os = ordersForTable(t);
+  // A MERGED PARENT'S DETAIL SHOWS THE WHOLE PARTY (owner, 2026-08-01: "after being merge, the table
+  // six detail view should also show the dish of the seven table also, because they are merged").
+  // Each table's orders arrive in its OWN ?table= slice (they keep their own table number, which is
+  // what makes an unmerge exact), so the parent's detail has to gather its children's slices too.
+  // openFloatingTable fetches them; here they are simply concatenated, newest first.
+  const kids = mergeChildrenOf(t);
+  const os = kids.length
+    ? [...ordersForTable(t), ...kids.flatMap((k) => ordersForTable(k))]
+        .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+    : ordersForTable(t);
   const sess = openSessionForTable(t);
   const calls = callsForTable(t);
 
@@ -7475,6 +7495,35 @@ function tablePanelParts(t, host = "float") {
     </div>`;
     return { sess, os, headPill, headMeta: `part of Table ${mergedParent}'s party · one bill`,
              kotHeadBtn: "", requestsSec: "", sessionSec: "", ordersSec: mergedSec, callsSec: "", billSec: "", foot: "" };
+  }
+  // THE PARENT'S OWN "MERGED WITH" CARD — who is in this party, what each table has run up, and an
+  // Unmerge for each of them (owner, 2026-08-01: "there will be option in the detail view if you go
+  // there, if you want to unmerge"). It sits above the orders so the first thing you read on a joined
+  // table is what it is joined to, and it works for three, four or five tables — one row each.
+  if (kids.length) {
+    const rows = kids.map((k) => {
+      const ko = ordersForTable(k).filter((o) => o.status !== "cancelled" && !o.archived);
+      const money = ko.reduce((a, o) => a + (parseFloat(o.total) || 0), 0);
+      const dishes = ko.reduce((a, o) => a + orderItemRows(o).reduce((x, r) => x + (parseInt(r.qty, 10) || 1), 0), 0);
+      return `<div class="sx-mgrow">
+        <span class="sx-mgt">T${esc(k)}</span>
+        <span class="sx-mgd">${ko.length} KOT${ko.length === 1 ? "" : "s"} · ${dishes} dish${dishes === 1 ? "" : "es"} · ${inr(money)}</span>
+        <button class="btn small" data-unmerge="${esc(k)}">⇹ Unmerge</button>
+      </div>`;
+    }).join("");
+    const mine = ordersForTable(t).filter((o) => o.status !== "cancelled" && !o.archived);
+    const mineMoney = mine.reduce((a, o) => a + (parseFloat(o.total) || 0), 0);
+    ordersSec = `<div class="sx-sec sx-merged-parent">
+      <div class="sx-sec-h">Merged party <span class="sub">· ${[String(t), ...kids].map((x) => "T" + x).join(" + ")}</span></div>
+      <p class="sx-merged-lead">These tables are served as <b>one party on one bill</b>. Everything below is on
+        <b>T${esc(t)}</b>'s bill, and it can be ordered from any of them.</p>
+      <div class="sx-mgrows">
+        <div class="sx-mgrow sx-mgrow-self"><span class="sx-mgt">T${esc(t)}</span>
+          <span class="sx-mgd">${mine.length} KOT${mine.length === 1 ? "" : "s"} · ${inr(mineMoney)}</span>
+          <span class="muted small">holds the bill</span></div>
+        ${rows}
+      </div>
+    </div>` + ordersSec;
   }
   return { sess, os, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
 }
