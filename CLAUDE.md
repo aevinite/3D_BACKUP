@@ -830,9 +830,40 @@ queued not lost, delivered exactly once under its original id on recovery, a 4xx
 person, deadlines/backoff/jitter are present, and the guest's order is classed correctly (5xx and
 timeout = save it, sold-out = tell them). Proven to fail with 5 red checks when the fix is removed.
 
-⚠️ **Still true and NOT fixable in code:** the backup database is a free-tier shared-CPU instance
-with 60 connections. These changes mean a burst QUEUES and drains instead of collapsing — they do
-not add capacity. Real 800-order service needs a paid compute tier; that is the owner's call.
+### The ceiling is MEASURED now, not guessed (2026-08-01) — and it is not order volume
+
+`npm run load:ramp` (`scripts/load-ramp-orders.mjs`) fires real staff orders at the deployed
+backup site, one distinct table each, ramping and stopping at the first sign of trouble. Result:
+
+| at once | placed | wall time | p50 / p95 | `/api/health` during the burst |
+|---|---|---|---|---|
+| 10 | 10/10 | 6.6s (cold) → 1.5s warm | 1.4s / 1.5s | 200, worst 392ms |
+| 25 | 25/25 | 2.2s | 2.0s / 2.2s | 200 |
+| 50 | 50/50 | 2.2s | 1.6s / 1.7s | 200 |
+| **100** | **100/100** | **2.1s** | **1.7s / 2.1s** | **200, worst 207ms** |
+
+**100 genuinely simultaneous orders land in about two seconds on the FREE tier, and the rest of
+the site never wobbles.** So the fear that a busy restaurant collapses the app was aimed at the
+wrong thing: order volume is not the risk, a handful of unbounded analytics scans is. Don't spend
+money on compute to "handle the rush" without measuring first — re-run this ramp instead.
+
+Two rules for the ramp itself, both learned the hard way in its first run:
+- **It must not become the outage it measures.** It refuses to point anywhere but the backup
+  database, refuses to start while another heavy run holds a lock, makes ZERO logins (the admin
+  gate cookie, so no `staff_login` limit event and no ping to the owner's phone), uses the staff
+  order path (no rate-limit rule; `guest_order` is 8/table/min and would alert), and samples
+  `/api/health` throughout — the question is whether the OTHER screens kept working.
+- **Test rows are put back by CLOSING the session, never by deleting.** The first version tried to
+  delete and the database refused: an order gets a bill number on insert, so it is an ISSUED bill
+  and `lfh_block_issued_delete` blocks a hard delete (the CGST rule we built in — it was right to
+  stop me). It reported "removed 0" and left 185 rows on the floor. Closing lets the mig-232
+  trigger cancel the unpaid work with a visible ✕ and archive the rest: tables free, audit trail
+  intact, nothing erased. **Any future load/test script cleans up the same way.**
+
+⚠️ Still true: it is a free-tier shared-CPU instance with 60 connections, and these changes add no
+capacity — they mean a burst QUEUES and drains instead of collapsing. But the measured order
+ceiling is far above anything a single restaurant does, so the honest reason to buy compute would
+be many restaurants at once, not one busy night.
 
 ## Known gotchas (read before editing)
 
