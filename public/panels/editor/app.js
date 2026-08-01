@@ -4525,13 +4525,17 @@ function renderEditor() {
     return;
   }
   if (state.tab === "log") {
-    ed.innerHTML = `<div class="au-switch"><button class="btn ${state.logView === "audit" ? "" : "primary"}" data-logview="log">Activity log</button>`
-      + `<button class="btn ${state.logView === "audit" ? "primary" : ""}" data-logview="audit">🗑 Audit · removals</button></div>`
-      + (state.logView === "audit" ? auditHtml() : logHtml());
+    // Removals is the DEFAULT view: it is the one people come here to answer ("who took that off,
+    // and why?"). The activity log is the second view — everything that happened, not just removals.
+    const view = state.logView === "log" ? "log" : "audit";
+    ed.innerHTML = `<div class="au-switch">`
+      + `<button class="btn ${view === "audit" ? "primary" : ""}" data-logview="audit">🗑 Removals</button>`
+      + `<button class="btn ${view === "log" ? "primary" : ""}" data-logview="log">📜 Activity log</button></div>`
+      + (view === "audit" ? auditHtml() : logHtml());
     ed.querySelectorAll("[data-logview]").forEach((b) => (b.onclick = () => {
-      state.logView = b.dataset.logview; renderEditor(); if (state.logView === "audit") loadAudit();
+      state.logView = b.dataset.logview; renderEditor();
     }));
-    if (state.logView === "audit") { if (!state.audit) loadAudit(); bindAudit(); } else bindLog();
+    if (view === "audit") { if (!state.audit) loadAudit(); bindAudit(); } else bindLog();
     return;
   }
   if (state.tab === "features") {
@@ -5650,7 +5654,7 @@ function auditHtml() {
     const preset = REMOVAL_REASONS.find((x) => x[0] === r.reason_code);
     return [preset ? preset[1] : r.reason_code, r.reason_note].filter(Boolean).join(" — ") || "no reason recorded";
   };
-  return `<div class="ed-head"><h2>Audit · removals <span class="sub">· ${rows.length}</span></h2>
+  return `<div class="ed-head"><h2>Audit · what was removed <span class="sub">· ${rows.length}</span></h2>
       <div style="display:flex;gap:8px"><button class="btn" id="auRefresh">↻ Refresh</button></div></div>
     <p class="au-lead">Everything taken out of the system, newest first — a cancelled ticket, a deleted bill, a dish off an order or off the menu — with the reason and the person. Every role is recorded, managers included.</p>
     <input id="auQ" class="au-q" type="search" placeholder="Search a KOT, bill, table, dish, person or reason…" value="${esc(state.auditQ || "")}">
