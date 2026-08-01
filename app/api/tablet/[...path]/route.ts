@@ -997,6 +997,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Shared helper so the
       // manual + auto (lib/autoSettle) restart paths can't drift apart.
       await clearTableSignals(rid, t);
+      // ...and CLOSE the party. It used to stay open with no orders and no guests — invisible to
+      // every screen (the floor draws it Free) but "open" in the database, which is the mismatch
+      // the owner caught on table 30 (2026-08-01). One truth: the round ends, the table is free.
+      if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq("id", openSess.id).select());
       await log("table_restart", { table_number: t, detail: `${rows.length} order(s) cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }

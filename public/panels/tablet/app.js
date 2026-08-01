@@ -1287,7 +1287,11 @@ function renderPanel() {
       ${s && !kotOpsOn() ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
       ${tabletTagsOn() && tshow("tablet_table_tags") ? `<button class="btn${txray("tablet_table_tags")}" id="tagTable">${TABLE_TAG_INFO[ttagOf(t)] ? TABLE_TAG_INFO[ttagOf(t)].emoji : "🏷"} Table type</button>` : ""}
       ${s && os.length && !kotOpsOn() ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
-      ${s && os.length ? `<button class="btn" id="restartTable">↻ Restart</button>` : ""}
+      <!-- ↻ Restart REMOVED (owner, 2026-08-01). It was the last open/close-era action left in any
+           panel, and it is what created the state he caught: it archived the round, released the
+           guests and left the PARTY OPEN with nobody on it — a table the floor draws as Free while
+           the database calls it open. "If it happens then it happens for all; if not, not for all."
+           A finished table now simply frees itself when the bill is settled. -->
       ${s && os.length && tshow("tablet_discount") ? `<button class="btn${txray("tablet_discount")}" id="billDiscountBtn">${Number(s.discount) > 0 ? `− Edit bill discount (${inr(s.discount)})` : "− Discount whole bill"}</button>` : ""}
       ${s && os.length && !invoiced && tshow("tablet_invoice") ? `<button class="btn${txray("tablet_invoice")}" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
       ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
@@ -1411,19 +1415,6 @@ function renderPanel() {
   const kmb = $("#kotMenuBtn"); if (kmb && s) kmb.onclick = () => renderKotMenu(t, s);
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
-  const rsb = $("#restartTable"); if (rsb && s) rsb.onclick = async () => {
-    if (!(await confirmDialog(`Restart table ${t}? Its current orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))) return;
-    // Restart means NO ONE is sitting and the round is cleared — show that INSTANTLY.
-    // Clear this table's orders + free its seats locally so the tile never flashes the
-    // old "1 seated"/round state during the (gated) round-trip. The final load() below
-    // reconciles — and reverts this if the manager PIN is cancelled. (owner, 2026-06-20)
-    const sid = s.id;
-    state.data.orders = state.data.orders.filter((o) => String(o.table_number) !== String(t));
-    state.data.members = state.data.members.filter((m) => m.session_id !== sid);
-    renderFloor(); renderPanel();
-    await actGated("POST", `/tables/${t}/restart`, null, { message: "This table has a round going — enter a manager PIN to restart it." });
-    await load(); // reconcile (also reverts the optimistic clear if the PIN was cancelled)
-  };
   const pb = $("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
   const ub = $("#unpayBill"); if (ub) ub.onclick = () => markBillUnpaid(t);
   const tgb = $("#tagTable"); if (tgb) tgb.onclick = () => openTagSheet(t);
@@ -3694,7 +3685,7 @@ window.addEventListener("online", () => load().catch(() => {}));
 /* ════════════════════════════════════════════════════════════════════════════
    PHONE RESPONSIVE (2026-06-30): a hamburger drawer (profile + settings + logout)
    and a full-screen work panel with a top-right ✕ close. Pure UI add-on — it reads
-   the existing global `state` / `renderPanel` / `renderFloor`, so the ordering logic
+   the existing global 'state' / 'renderPanel' / 'renderFloor', so the ordering logic
    is untouched. All behaviour is gated to phone widths by CSS; desktop is unchanged.
    ════════════════════════════════════════════════════════════════════════════ */
 (function () {

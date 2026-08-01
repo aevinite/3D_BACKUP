@@ -6,7 +6,7 @@
  *       "Offline — showing saved data from 7:42 pm · 3 changes waiting to send"
  *     Staff must never have to guess whether what they're looking at is live. The
  *     service worker (public/sw.js) labels every reply it served from the device with
- *     `X-LFH-From-Cache` + `X-LFH-Cached-At`; each panel's api() hands those to
+ *     'X-LFH-From-Cache' + 'X-LFH-Cached-At'; each panel's api() hands those to
  *     noteResponse() below, so the age shown is the real age of the data.
  *
  *  2. A "Needs you" sheet: the changes that could NOT be applied when the connection

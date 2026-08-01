@@ -2467,8 +2467,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const rows = must(await q.select());
       if (openSess) must(await sb.from("session_members").update({ removed: true }).eq("session_id", openSess.id).eq("removed", false).select());
       await clearTableSignals(rid, t); // the B12 fix — no ghost waiter-call bell on the emptied table
-      const setg = (await sb.from("settings").select("sessions_enabled").eq("restaurant_id", rid).maybeSingle()).data as { sessions_enabled?: boolean } | null;
-      if (setg?.sessions_enabled && !openSess) await openTableSession(rid, String(t)); // race-tolerant (2026-07-30)
+      // NO FRESH EMPTY PARTY (owner, 2026-08-01). This line used to open a new session so the
+      // table stayed "open, waiting for guests" — a state no screen can show since open/close was
+      // removed, which is exactly how he found table 30 reading Free on the floor and open in the
+      // database. The party now ENDS with its round: the table is free, on both sides.
+      if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso(), last_activity_at: nowIso() }).eq("id", openSess.id).select());
       await log("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }

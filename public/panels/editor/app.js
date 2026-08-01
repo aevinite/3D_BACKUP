@@ -1966,32 +1966,15 @@ function formGeneral(s) {
   </div>
   ${tableSeatingCardHtml(s)}
   ${tableQrLinksCardHtml(s)}
-  <div class="card"><h3>Auto close / restart tables</h3>
-    ${!s.sessions_enabled ? `
-    <p style="color:var(--muted);font-size:13px;margin:0 0 4px;line-height:1.5">
-      <b>Always on for this restaurant.</b> Guest sessions are off, so nobody opens or closes a
-      table by hand — which means a table has to clear ITSELF, or finished tables would pile up
-      on the floor with no way to free them.
-    </p>
-    <p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">
-      As soon as a bill is fully <b>paid</b> and every dish is <b>served</b>, that table goes
-      back to <b>Free</b>, ready for the next guests. Turn guest sessions on (above) if you want
-      to choose this behaviour yourself.
-    </p>` : `
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      A table always clears itself once its bill is fully <b>paid</b> and every dish is
-      <b>served</b> — nobody closes a table by hand any more, so there's no "do nothing"
-      option. Choose WHICH way it clears: <b>free the table</b> for the next guests, or
-      <b>keep this party seated</b> (the round is filed away and they can order again on the
-      same bill number — useful for long sittings that settle as they go).
-    </p>
-    <div style="max-width:320px"><div class="field"><label>When a table is paid &amp; fully served</label>
-      <select data-path="auto_table_action">
-        <option value="close" ${s.auto_table_action !== "restart" ? "selected" : ""}>Free the table</option>
-        <option value="restart" ${s.auto_table_action === "restart" ? "selected" : ""}>Keep the party seated</option>
-      </select>
-    </div></div>`}
-  </div>`;
+  `;
+    // NOTE — there used to be an "Auto close / restart tables" card here. Removed 2026-08-01
+    // (owner: "we don't even need that auto restart and auto close and all that option"). It let a
+    // restaurant choose between freeing a settled table and KEEPING the party seated with an empty
+    // round, and that second choice is a state no screen can show since open/close was removed — it
+    // is what left table 30 reading Free on the floor while the database called it open. One
+    // behaviour now, identical on every table of every restaurant: a fully paid, fully served bill
+    // frees its table (lib/autoSettle.ts). The settings.auto_table_action column stays in the
+    // database for old rows but nothing reads it.
   }
   if (sec === "users") {
     return userSettingCardHtml();

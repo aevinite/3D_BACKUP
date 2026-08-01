@@ -191,7 +191,50 @@ if (!HOOK || !touched || /public\/panels\//.test(touched)) {
       first || out.slice(0, 200));
   }
 }
-// ── 7. WHY THERE IS NO STATIC CHECK FOR "A BACKTICK INSIDE THE INJECTED STYLESHEET" ───────
+
+// ── 7. NO BACKTICK IN A /* … */ COMMENT IN A PANEL FILE ───────────────────────────────────
+//
+// I made the same mistake THREE times on 2026-08-01: a class name wrapped in backticks inside a
+// /* … */ comment in the panels' runtime-injected stylesheet. That stylesheet is a JS template
+// literal, so the backtick ENDS the string. Once the file then failed to parse (/manager rendered
+// EMPTY), once it parsed as valid-but-wrong JS ("ReferenceError: col is not defined", floor drew no
+// tiles), once it broke a different template two thousand lines away.
+//
+// A first attempt to detect it precisely ("a comment containing a backtick INSIDE a template
+// literal") was wrong and accused 43 innocent comments: inside a template literal `//` is ordinary
+// text, and every URL contains one, so the scan lost its place. So the rule here is deliberately
+// blunt instead of clever: in a panel script, a BLOCK comment may not contain a backtick at all.
+// Every CSS-in-template comment is a block comment, so this covers the whole failure mode with no
+// state to track and nothing to get wrong. The two pre-existing block comments that quoted code in
+// backticks were rewritten with plain quotes, so there is no exceptions list to keep in step.
+{
+  const files = [];
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p); else if (e.name.endsWith(".js")) files.push(p);
+    }
+  };
+  walk("public/panels");
+  const offenders = [];
+  for (const f of files) {
+    const src = fs.readFileSync(f, "utf8");
+    for (const m of src.matchAll(/\/\*[\s\S]*?\*\//g)) {
+      if (!m[0].includes("`")) continue;
+      const line = src.slice(0, m.index).split("\n").length;
+      offenders.push(`${f}:${line}  ${m[0].replace(/\s+/g, " ").slice(0, 70)}…`);
+    }
+  }
+  if (offenders.length === 0) ok(`${files.length} panel script(s): no backtick inside a /* … */ comment`);
+  else bad(
+    `${offenders.length} block comment(s) in a panel script contain a backtick — inside the injected stylesheet that ENDS the template literal and takes the panel down`,
+    offenders.join("\n         ") + "\n         Quote code with 'single quotes' or nothing at all.",
+  );
+}
+
+// ── 8. WHY THERE IS NO STATIC CHECK FOR THE RUNTIME SHAPE OF THAT FAULT ───────────────────
 //
 // I made that mistake twice on 2026-08-01 (a class name in backticks inside a /* … */ comment in
 // the panels' runtime-injected CSS, which is a template literal — the backtick ENDS the string).
