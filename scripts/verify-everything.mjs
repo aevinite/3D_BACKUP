@@ -1974,8 +1974,29 @@ phase("closing a table decides on a reason CODE, not on the server's wording", a
   // that the code is consulted first, NOT that the fallback is gone (banning it outright flagged
   // the deliberate fallback as a regression).
   const js = readFileSync(join(ROOT, "public/panels/editor/app.js"), "utf8");
-  const fn = js.slice(js.indexOf("function closeBlockedReason"), js.indexOf("function closeBlockedReason") + 600);
-  ok(fn.length > 50, "closeBlockedReason() is gone from the manager panel");
+  const at = js.indexOf("function closeBlockedReason");
+  if (at === -1) {
+    // The manual close/free path was DELETED with the open/close step (owner, 2026-07-31: a settled
+    // table frees itself, and a walk-out is a cancelled order so the void stays on the record). This
+    // phase asserted that function existed, so it reported a deliberate product decision as a fault.
+    //
+    // The owner's RULE is "never decide close behaviour by matching the server's prose". With no
+    // close UI the things to hold are: nothing has started matching that prose again, and the server
+    // still hands out a reason CODE for whenever a close UI comes back. Written this way the guard
+    // is right whether the feature returns or stays gone — instead of naming a function.
+    // Look for the ANTI-PATTERN, not the words: a prose MATCH used as a decision. Testing for the
+    // words alone flagged two COMMENTS that explain this very rule — a guard that fails on its own
+    // documentation is one nobody keeps.
+    const decidesOnProse = /(?:test|includes|indexOf|match|search)\s*\(\s*[/"'][^)]*(?:owes money|still owes)/.test(js)
+      || /[/"'][^/"']*(?:owes money|still owes)[^/"']*[/"']\s*\.\s*test\s*\(/.test(js);
+    ok(!decidesOnProse,
+      "the manager panel matches the server's WORDING to decide about closing — the exact thing that left a paid-but-unserved table unclosable");
+    const server = readFileSync(join(ROOT, "lib/sessionClose.ts"), "utf8");
+    ok(/reason/.test(server) && /["']unpaid["']/.test(server),
+      "lib/sessionClose.ts no longer hands out a refusal reason code, so a future close UI would have only prose to read");
+    return;
+  }
+  const fn = js.slice(at, at + 600);
   ok(/\.reason/.test(fn), "the refusal handler never reads the server's reason code");
   const codeAt = fn.indexOf(".reason"), proseAt = fn.indexOf("owes money");
   ok(proseAt === -1 || codeAt < proseAt, "the wording is matched BEFORE the reason code — the cooking-only refusal would be missed again");
