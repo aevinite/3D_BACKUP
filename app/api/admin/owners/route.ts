@@ -30,6 +30,10 @@ import { resolveOwnerHomeRid, loginNameTaken, liveHoldersOfName } from "@/lib/ow
 export const dynamic = "force-dynamic";
 const RETENTION_DAYS = 90; // a binned owner is restorable for this long, then purgeable (matches restaurants)
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+// A login name needs 2 real LETTERS OR DIGITS — the same rule the staff pages already
+// use (app/api/owner/staff realCharCount). Counting raw characters let an owner be
+// created or restored as "🙂🙂" or "--", a name nobody can type at the login box.
+const realCharCount = (s: string) => (String(s).match(/[\p{L}\p{N}]/gu) || []).length;
 const ok = (d: unknown, status = 200) => NextResponse.json(d, { status });
 const bad = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -225,7 +229,7 @@ export async function POST(req: NextRequest) {
     if (mode === "rename_restored") {
       restoredDisplay = String(resolve.name ?? "").trim().slice(0, 80);
       restoredKey = normalizeLoginName(restoredDisplay);
-      if (restoredKey.length < 2) return bad("The new name must be at least 2 characters.");
+      if (realCharCount(restoredKey) < 2) return bad("The new name needs at least 2 letters or numbers.");
     }
 
     // Who would this name collide with, LIVE? Only where a name actually has to be
@@ -258,7 +262,7 @@ export async function POST(req: NextRequest) {
       if (blocker.role !== "owner") return bad("That name belongs to a restaurant's staff login — rename the returning owner instead.", 409);
       const newDisplay = String(resolve.name ?? "").trim().slice(0, 80);
       const newKey = normalizeLoginName(newDisplay);
-      if (newKey.length < 2) return bad("The new name must be at least 2 characters.");
+      if (realCharCount(newKey) < 2) return bad("The new name needs at least 2 letters or numbers.");
       if (newKey === restoredKey) return bad("Pick a DIFFERENT name for the current owner — that's the one being freed up.");
       if (await loginNameTaken(newKey)) return bad("That new name is taken too — pick another.", 409);
       const ren = await sb.from("staff_users").update({ name: newDisplay, username: newKey }).eq("id", blocker.id);
@@ -304,7 +308,7 @@ export async function POST(req: NextRequest) {
 
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
-  if (key.length < 2) return bad("Username must be at least 2 characters.");
+  if (realCharCount(key) < 2) return bad("The name needs at least 2 letters or numbers.");
   if (await loginNameTaken(key)) return bad("That username is taken — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
@@ -435,7 +439,7 @@ export async function PATCH(req: NextRequest) {
   if (action === "rename") {
     const display = String(body?.name ?? "").trim().slice(0, 80);
     const key = normalizeLoginName(display);
-    if (key.length < 2) return bad("Username must be at least 2 characters.");
+    if (realCharCount(key) < 2) return bad("The name needs at least 2 letters or numbers.");
     if (key !== owner.username && (await loginNameTaken(key))) return bad("That username is taken — pick another.", 409);
     const { error } = await sb.from("staff_users").update({ name: display, username: key }).eq("id", ownerId);
     if (error) return bad(error.message, 500);
