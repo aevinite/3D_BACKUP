@@ -222,12 +222,15 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
   // Set when the server says this name was taken while the owner sat in the bin —
   // the admin picks who keeps it, then we re-send the same restore with a resolve.
   const [clash, setClash] = useState<NameClash | null>(null);
+  // Refusals that arrive WHILE the chooser is open — shown inside it, never behind it.
+  const [clashErr, setClashErr] = useState<string | null>(null);
 
   const nameMatches = confirmName.trim().toLowerCase() === o.username.trim().toLowerCase();
 
   // resolve = undefined for the plain first attempt; the dialog re-calls with one.
   const restore = async (resolve?: Resolve) => {
-    setBusy(true); setErr(null);
+    setBusy(true); setErr(null); setClashErr(null);
+    const dialogOpen = clash !== null;
     try {
       const res = await fetch("/api/admin/owners", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -236,11 +239,27 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
       const d = await res.json();
       // A name clash isn't an error to dump on the page — it's a question. Open the
       // chooser instead, with the row un-busied so the dialog's buttons work.
-      if (res.status === 409 && d.conflict) { setClash(d.conflict as NameClash); setBusy(false); return; }
-      if (!res.ok) throw new Error(d.error || "Couldn't restore.");
-      setClash(null);
+      if (res.status === 409 && d.conflict) {
+        // A SECOND clash (the admin typed a name that's also taken) must say so — the
+        // dialog would otherwise just quietly swap in a different person's name.
+        if (dialogOpen && resolve) setClashErr(`“${resolve.name.trim()}” is taken as well — here's who has it now.`);
+        setClash(d.conflict as NameClash);
+        setBusy(false); return;
+      }
+      // A refusal while the chooser is OPEN has to be shown INSIDE it. The row's error
+      // line sits behind the overlay, so pressing the button looked like it did nothing
+      // (probe, 2026-08-01) — precisely the "a tap must never vanish" rule.
+      if (!res.ok) {
+        if (dialogOpen) { setClashErr(d.error || "Couldn't restore."); setBusy(false); return; }
+        throw new Error(d.error || "Couldn't restore.");
+      }
+      setClash(null); setClashErr(null);
       onChanged();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      if (dialogOpen) setClashErr(msg); else setErr(msg);
+      setBusy(false);
+    }
   };
 
   const purge = async () => {
@@ -257,7 +276,9 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
   };
 
   return (
-    <div style={{ border: "var(--border)", borderRadius: 12, padding: 14, background: "var(--bg)" }}>
+    // data-owner: a stable hook so a checker can act on ONE named row (verify:recycle-name
+    // used to click the last Restore button on the page, which could be a real account).
+    <div data-owner={o.username} style={{ border: "var(--border)", borderRadius: 12, padding: 14, background: "var(--bg)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
         <div style={{ flex: 1, minWidth: 200 }}>
           <div style={{ fontWeight: 700, fontSize: 15 }}>{o.name} <span className="adm-muted" style={{ fontWeight: 400, fontSize: 12.5 }}>@{o.username}</span></div>
@@ -313,8 +334,10 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
       {err && !purgeOpen && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
 
       {clash && (
-        <NameClashDialog clash={clash} busy={busy}
-          onClose={() => setClash(null)}
+        // key: a SECOND conflict is a different person, so the dialog remounts and its
+        // suggested names are rebuilt from the new pair instead of the stale first one.
+        <NameClashDialog key={clash.existing.id} clash={clash} busy={busy} error={clashErr}
+          onClose={() => { setClash(null); setClashErr(null); }}
           onResolve={(r) => restore(r)} />
       )}
     </div>
@@ -334,13 +357,14 @@ type NameClash = {
 };
 type Resolve = { mode: "rename_restored" | "rename_existing"; name: string };
 
-function NameClashDialog({ clash, busy, onClose, onResolve }: {
-  clash: NameClash; busy: boolean; onClose: () => void; onResolve: (r: Resolve) => void;
+function NameClashDialog({ clash, busy, error, onClose, onResolve }: {
+  clash: NameClash; busy: boolean; error: string | null; onClose: () => void; onResolve: (r: Resolve) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useAdminModal(ref, "owner-name-clash", onClose);
   // Prefilled suggestions so the admin can just press a button; both are editable.
-  const [restoredName, setRestoredName] = useState(`${clash.restored.name} (old)`);
+  // Suggestions are LOGIN names, so keep them plain to type — no brackets.
+  const [restoredName, setRestoredName] = useState(`${clash.restored.name} old`);
   const [existingName, setExistingName] = useState(`${clash.existing.name} 2`);
   const tooShort = (s: string) => s.trim().replace(/\s+/g, " ").length < 2;
 
@@ -369,6 +393,14 @@ function NameClashDialog({ clash, busy, onClose, onResolve }: {
           took that name. Two logins can&apos;t share one, so choose who keeps it — the other one gets
           renamed, and you can see exactly what it becomes.
         </p>
+
+        {error && (
+          <div role="alert" style={{ margin: "0 0 12px", padding: "9px 12px", borderRadius: 9, fontSize: 12.5,
+            color: "var(--adm-danger)", border: "1px solid color-mix(in srgb, var(--adm-danger) 45%, transparent)",
+            background: "color-mix(in srgb, var(--adm-danger) 12%, transparent)" }}>
+            <i className="fas fa-circle-exclamation" style={{ marginRight: 7 }} aria-hidden="true" />{error}
+          </div>
+        )}
 
         <div style={{ display: "grid", gap: 10 }}>
           <div style={{ border: "var(--border)", borderRadius: 10, padding: 12 }}>

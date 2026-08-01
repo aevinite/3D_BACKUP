@@ -6,7 +6,10 @@
 // NO login attempts at all (admin cookie only, so it can never raise a rate-limit alert
 // about the owner), each scenario uses its OWN throwaway "zz" pair so one case can't set
 // up the next, and every row it creates is deleted at the end.
-// Usage: node scripts/verify-recycle-name.mjs [--base http://localhost:4000]
+// Usage: node scripts/verify-recycle-name.mjs [--base http://localhost:4000] [--browser]
+//        --browser also drives the real chooser dialog. Both UI faults it checks for
+//        SHIPPED once: a refusal rendered behind the overlay (so the button looked
+//        dead), and the dialog portalled out of `.adm` (a white card in a dark app).
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 
@@ -95,6 +98,15 @@ try {
   await rest(`staff_users?id=eq.${noClash.liveId}`, { method: "DELETE" }); // free the name behind its back
   check("a restore with no clash still works with one press", (await restore(noClash.oldId)).status === 200);
 
+  // ── 5b. Names people can actually type ───────────────────────────────────────
+  // An owner could be created or restored as "🙂🙂" / "--" while a waiter couldn't:
+  // the owners route counted raw characters, the staff routes count letters+digits.
+  const emoji = await mkOwner("🙂🙂");
+  check("an emoji-only owner name is refused at CREATE", emoji.status === 400, `${emoji.status} ${emoji.json.error || ""}`);
+  const p3b = await pair("zzemoji");
+  check("…and at RESTORE too", (await restore(p3b.oldId, { mode: "rename_restored", name: "🙂🙂" })).status === 400);
+  check("a name with 2 real letters is still fine", (await restore(p3b.oldId, { mode: "rename_restored", name: "zz9" })).status === 200);
+
   // ── 6. A binned row is not a login, even when a live row shares its name ─────
   const p4 = await pair("zzerin");
   const live = await rest(`staff_users?username=eq.zzerin&deleted_at=is.null&select=id`);
@@ -110,6 +122,60 @@ try {
     method: "PATCH", body: JSON.stringify({ deleted_at: null }),
   });
   check("the unique index still blocks two live rows sharing a name", forced.status >= 400, `status ${forced.status}`);
+  // ── 8. The dialog itself (opt-in: needs a browser) ───────────────────────────
+  if (args.includes("--browser")) {
+    const { chromium } = await import("playwright");
+    const b = await chromium.launch();
+    const ctx = await b.newContext({ viewport: { width: 1440, height: 950 } });
+    await ctx.addCookies([{ name: "lfh_staff_auth", value: cookie.split("=")[1], url: BASE }]);
+    const page = await ctx.newPage();
+    const jsErrors = [];
+    page.on("pageerror", (e) => jsErrors.push(String(e)));
+    try {
+      const u = await pair("zzdialog");
+      await mkOwner("zztaken already");
+      await page.goto(`${BASE}/aevinite/recycle`, { waitUntil: "networkidle", timeout: 60000 });
+      // Target the row BY NAME. `.last()` once clicked whichever bin row happened to be
+      // last — with real binned owners on the page that could restore someone's actual
+      // account, and it made the guard test a different owner than it then asserted on.
+      const ourRow = page.locator('[data-owner="zzdialog"]');
+      await ourRow.waitFor({ timeout: 15000 });
+      await ourRow.getByRole("button", { name: /Restore \(suspended\)/ }).click();
+      await page.waitForTimeout(1500);
+      check("UI · the chooser opens instead of an error", await page.locator('[role="dialog"]').count() === 1);
+
+      const card = page.locator('[role="dialog"] .adm-card');
+      const box = await card.boundingBox();
+      check("UI · the whole box is on screen", !!box && box.y >= 0 && box.y + box.height <= 951, box ? `y ${Math.round(box.y)} h ${Math.round(box.height)}` : "none");
+      const skin = await page.evaluate(() => {
+        const lum = (c) => { const m = c.match(/\d+/g) || [0, 0, 0]; return (+m[0] * 299 + +m[1] * 587 + +m[2] * 114) / 1000; };
+        return Math.abs(lum(getComputedStyle(document.querySelector('[role="dialog"] .adm-card')).backgroundColor)
+                      - lum(getComputedStyle(document.querySelector(".adm")).backgroundColor));
+      });
+      check("UI · it wears the console's skin (not a white card in the dark)", skin < 90, `gap ${Math.round(skin)}`);
+
+      // The refusal must land INSIDE the dialog — this one shipped invisible.
+      await page.getByLabel("New name for the owner who currently has it").fill("zztaken already");
+      await page.getByRole("button", { name: /Rename them & restore/ }).click();
+      await page.waitForTimeout(2500);
+      const alertLoc = page.locator('[role="dialog"] [role="alert"]');
+      check("UI · a refusal is shown inside the dialog, on top", await alertLoc.count() === 1
+        && await alertLoc.evaluate((el) => { const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!el.offsetParent && (hit === el || el.contains(hit)); }));
+
+      // A second clash announces itself instead of quietly swapping in another person.
+      await page.getByLabel("New name for the owner being restored").fill("zztaken already");
+      await page.getByRole("button", { name: /Restore under this name/ }).click();
+      await page.waitForTimeout(2500);
+      check("UI · a second clash says so", /is taken as well/.test(await page.locator('[role="dialog"]').innerText()));
+
+      await page.getByLabel("New name for the owner being restored").fill("zzdialog old");
+      await page.getByRole("button", { name: /Restore under this name/ }).click();
+      await page.waitForTimeout(2500);
+      const fin = (await rest(`staff_users?id=eq.${u.oldId}&select=username,deleted_at`)).json?.[0];
+      check("UI · the admin can still finish after two refusals", fin?.deleted_at === null && fin?.username === "zzdialog old", fin?.username);
+      check("UI · no JS errors", jsErrors.length === 0, jsErrors.slice(0, 2).join(" | "));
+    } finally { await b.close(); }
+  }
 } finally {
   const del = await rest(`staff_users?username=like.zz*&role=eq.owner`, { method: "DELETE" });
   const left = await rest(`staff_users?username=like.zz*&select=id`);
