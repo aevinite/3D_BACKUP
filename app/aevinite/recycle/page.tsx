@@ -4,7 +4,9 @@
 // Two kinds live here now: deleted RESTAURANTS (mig 128) and deleted OWNERS (mig
 // 208). Each purge button stays locked (with a countdown) until the retention
 // window elapses — there is no early-purge override. Purge is irreversible.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useAdminModal } from "@/components/admin/useAdminModal";
 
 type Trashed = {
   id: string; slug: string; name: string;
@@ -217,17 +219,26 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
   const [err, setErr] = useState<string | null>(null);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
+  // Set when the server says this name was taken while the owner sat in the bin —
+  // the admin picks who keeps it, then we re-send the same restore with a resolve.
+  const [clash, setClash] = useState<NameClash | null>(null);
 
   const nameMatches = confirmName.trim().toLowerCase() === o.username.trim().toLowerCase();
 
-  const restore = async () => {
+  // resolve = undefined for the plain first attempt; the dialog re-calls with one.
+  const restore = async (resolve?: Resolve) => {
     setBusy(true); setErr(null);
     try {
       const res = await fetch("/api/admin/owners", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "restore_owner", owner_id: o.id }),
+        body: JSON.stringify({ action: "restore_owner", owner_id: o.id, ...(resolve ? { resolve } : {}) }),
       });
-      const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't restore.");
+      const d = await res.json();
+      // A name clash isn't an error to dump on the page — it's a question. Open the
+      // chooser instead, with the row un-busied so the dialog's buttons work.
+      if (res.status === 409 && d.conflict) { setClash(d.conflict as NameClash); setBusy(false); return; }
+      if (!res.ok) throw new Error(d.error || "Couldn't restore.");
+      setClash(null);
       onChanged();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   };
@@ -263,7 +274,7 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
       </div>
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 12 }}>
-        <button className="adm-btn primary" disabled={busy} onClick={restore} title="Bring the owner back, suspended (reactivate from the Owners list)">
+        <button className="adm-btn primary" disabled={busy} onClick={() => restore()} title="Bring the owner back, suspended (reactivate from the Owners list)">
           <i className="fas fa-rotate-left" style={{ marginRight: 7 }} aria-hidden="true" />Restore (suspended)
         </button>
         <span style={{ flex: 1 }} />
@@ -300,6 +311,116 @@ function OwnerBinRow({ o, onChanged }: { o: OwnerTrashed; onChanged: () => void 
         </div>
       )}
       {err && !purgeOpen && <div style={{ color: "var(--adm-danger)", fontSize: 12.5, marginTop: 8 }}>{err}</div>}
+
+      {clash && (
+        <NameClashDialog clash={clash} busy={busy}
+          onClose={() => setClash(null)}
+          onResolve={(r) => restore(r)} />
+      )}
     </div>
+  );
+}
+
+// ── The name chooser (owner, 2026-08-01) ────────────────────────────────────────
+// A binned login no longer reserves its name (mig 245), so by restore time someone
+// else may be called "rishi" too. Rather than failing — or silently renaming a real
+// person's login — the admin says which one keeps the name. Every path renames
+// somebody VISIBLY and states who; nothing happens until a button is pressed.
+type NameClash = {
+  username: string;
+  restored: { id: string; name: string; username: string };
+  existing: { id: string; name: string; username: string; role: string; active: boolean };
+  canRenameExisting: boolean;
+};
+type Resolve = { mode: "rename_restored" | "rename_existing"; name: string };
+
+function NameClashDialog({ clash, busy, onClose, onResolve }: {
+  clash: NameClash; busy: boolean; onClose: () => void; onResolve: (r: Resolve) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useAdminModal(ref, "owner-name-clash", onClose);
+  // Prefilled suggestions so the admin can just press a button; both are editable.
+  const [restoredName, setRestoredName] = useState(`${clash.restored.name} (old)`);
+  const [existingName, setExistingName] = useState(`${clash.existing.name} 2`);
+  const tooShort = (s: string) => s.trim().replace(/\s+/g, " ").length < 2;
+
+  // PORTAL, not an inline overlay. This dialog is rendered from deep inside a bin ROW,
+  // and an ancestor there establishes a containing block, so `position: fixed` anchored
+  // to the ROW instead of the screen: the box appeared level with its row and its second
+  // choice was cut off below the fold.
+  // Target `.adm`, NOT <body>: the whole admin palette (--card/--text/--border and the
+  // data-skin=dark switch) is scoped to that element, so a body portal came out as a
+  // WHITE card in the dark console. `.adm` has no transform/filter, so "fixed" still
+  // means the viewport there.
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => { setHost(document.querySelector<HTMLElement>(".adm") ?? document.body); }, []);
+  if (!host) return null;
+
+  return createPortal(
+    <>
+      <div onClick={busy ? undefined : onClose} style={{ position: "fixed", inset: 0, background: "rgba(2,6,16,0.66)", backdropFilter: "blur(2px)", zIndex: 1000 }} />
+      <div ref={ref} role="dialog" aria-modal="true" aria-labelledby="clash-title" style={{ position: "fixed", inset: 0, zIndex: 1001, display: "grid", placeItems: "center", padding: 16, pointerEvents: "none" }}>
+        <div className="adm-card" style={{ pointerEvents: "auto", width: "min(94vw, 520px)", maxHeight: "90dvh", overflowY: "auto" }}>
+        <h3 id="clash-title" style={{ margin: "0 0 6px", fontSize: 17, fontWeight: 800 }}>
+          The name “{clash.restored.name}” is taken
+        </h3>
+        <p className="adm-muted" style={{ margin: "0 0 14px", fontSize: 13, lineHeight: 1.5 }}>
+          While this owner sat in the recycle bin, <b>{clash.existing.name}</b>{clash.existing.active ? "" : " (suspended)"}{" "}
+          took that name. Two logins can&apos;t share one, so choose who keeps it — the other one gets
+          renamed, and you can see exactly what it becomes.
+        </p>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ border: "var(--border)", borderRadius: 10, padding: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 6 }}>
+              <i className="fas fa-rotate-left" style={{ marginRight: 7, opacity: 0.8 }} aria-hidden="true" />
+              Rename the one coming back
+            </div>
+            <p className="adm-muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
+              <b>{clash.existing.name}</b> keeps the name. The restored owner comes back under this one:
+            </p>
+            <input value={restoredName} onChange={(e) => setRestoredName(e.target.value)} disabled={busy}
+              aria-label="New name for the owner being restored"
+              style={{ width: "100%", padding: "8px 11px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+            <button className="adm-btn primary" style={{ marginTop: 9 }} disabled={busy || tooShort(restoredName)}
+              onClick={() => onResolve({ mode: "rename_restored", name: restoredName })}>
+              {busy ? "Restoring…" : "Restore under this name"}
+            </button>
+          </div>
+
+          {clash.canRenameExisting ? (
+            <div style={{ border: "var(--border)", borderRadius: 10, padding: 12 }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5, marginBottom: 6 }}>
+                <i className="fas fa-user-pen" style={{ marginRight: 7, opacity: 0.8 }} aria-hidden="true" />
+                Rename the current owner instead
+              </div>
+              <p className="adm-muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
+                The owner coming back keeps <b>{clash.restored.name}</b>. Today&apos;s <b>{clash.existing.name}</b> is
+                renamed to this, and signs in with the new name from then on:
+              </p>
+              <input value={existingName} onChange={(e) => setExistingName(e.target.value)} disabled={busy}
+                aria-label="New name for the owner who currently has it"
+                style={{ width: "100%", padding: "8px 11px", borderRadius: 8, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+              <button className="adm-btn" style={{ marginTop: 9 }} disabled={busy || tooShort(existingName)}
+                onClick={() => onResolve({ mode: "rename_existing", name: existingName })}>
+                {busy ? "Working…" : "Rename them & restore"}
+              </button>
+            </div>
+          ) : (
+            <p className="adm-muted" style={{ margin: 0, fontSize: 12 }}>
+              <i className="fas fa-circle-info" style={{ marginRight: 6 }} aria-hidden="true" />
+              That name belongs to a restaurant&apos;s <b>{clash.existing.role}</b> login, not an owner — rename it on
+              that restaurant&apos;s Users page if it should be freed up.
+            </p>
+          )}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+          <button className="adm-btn" disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+        </div>
+      </div>
+    </>,
+    host,
   );
 }

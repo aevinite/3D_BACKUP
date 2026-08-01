@@ -30,6 +30,7 @@
     "verify:live": "node scripts/verify-no-fatal-ui.mjs",
     "verify:clash": "node scripts/verify-clash-coverage.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
+    "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
     "verify:floor": "node scripts/verify-floor-share.mjs",
     "check:floor-timeouts": "node scripts/check-floor-timeouts.mjs"

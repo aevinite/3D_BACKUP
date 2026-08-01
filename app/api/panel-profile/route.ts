@@ -163,7 +163,7 @@ export async function POST(req: NextRequest) {
     const display = String(body.name || "").trim().slice(0, 80);
     const key = normalizeLoginName(display);
     if (!display || !key) return NextResponse.json({ error: "Your username can't be empty." }, { status: 400 });
-    const clash = (await sb.from("staff_users").select("id").eq("username", key).neq("id", u.id).limit(1)).data?.[0];
+    const clash = (await sb.from("staff_users").select("id").eq("username", key).neq("id", u.id).is("deleted_at", null).limit(1)).data?.[0];
     if (clash) return NextResponse.json({ error: "That username is already taken — please pick another." }, { status: 409 });
     patch.name = display;
     patch.username = key;
