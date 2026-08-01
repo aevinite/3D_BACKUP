@@ -1130,8 +1130,7 @@ function TreeStyle() {
     border-radius:12px; background:color-mix(in srgb, var(--card) 60%, var(--bg)); padding-right:4px; transition:border-color .15s, background .15s; }
   .at-chip.on { border-color:color-mix(in srgb, var(--lvl) 62%, transparent); background:color-mix(in srgb, var(--lvl) 14%, transparent); }
   .at-chip.on .at-cbox { background:var(--lvl); border-color:var(--lvl); }
-  .at-chip:hover { border-color:color-mix(in srgb, var(--hov) 70%, transparent); background:color-mix(in srgb, var(--hov) 13%, transparent); }
-  .at-chip:hover .at-cnm { color:var(--text); }
+  /* Text only here too — the chip used to repaint its border AND its background on hover. */
   /* The whole box is the switch: a far bigger target than a 34px toggle, which is what makes
      this reliable with a thumb on the 360px phone the owner actually uses. */
   .at-chip-hit { flex:1; min-width:0; display:flex; align-items:center; gap:9px; background:none; border:0;
@@ -1147,13 +1146,26 @@ function TreeStyle() {
   .at-chip.on .at-cnm { color:var(--text); }
   .at-tw { display:grid; place-items:center; width:20px; height:20px; margin-right:-2px; border:none; background:none; color:var(--muted); transition:transform .18s; flex:none; }
   .at-box-t.clickable { cursor:pointer; border-radius:9px; }
-  /* HOVER STEPS BACK ONE LEVEL (owner, 2026-08-01: "purple is already the background… inside
-     purple there is pink, so if you hover on that it should change colour to purple").
-     A row hovering to its OWN colour disappears into the box it is sitting in — the highlight has
-     to be a colour that is NOT already on that box, and the level above it is the one colour
-     guaranteed to be next to it and different. Purple row → blue, pink row → purple, blue row →
-     pink. TEXT ONLY: nothing else on the row changes, which is what he asked for. */
-  .at-box-t.clickable:hover .nm { color:var(--prev); }
+
+  /* ── HOVER STEPS BACK ONE LEVEL, ON EVERY ROW ─────────────────────────────────────────────
+     (owner, 2026-08-01: "purple is already the background… inside purple there is pink, so if you
+     hover on that it should change colour to purple" — then: "make sure it is for ALL".)
+
+     A row highlighting to its OWN colour disappears into the box it is sitting in. The level
+     ABOVE it is the one colour guaranteed to be adjacent and different, so that is the highlight:
+     purple row → blue, pink row → purple, blue row → pink.
+
+     TWO things this has to get right, and the first version got both wrong:
+       1. EVERY row, not just the ones that open. It was scoped to .clickable, so a row with no
+          dropdown — Ratings, Log — never highlighted at all, and neither did the compact chips
+          or the section headers.
+       2. Only the row actually under the pointer. CSS :hover matches ancestors too, so hovering a
+          child would light its parent, its grandparent and the section all at once. The
+          :not(:has(.at-box:hover)) keeps it to the innermost box the pointer is really in.
+     TEXT ONLY — nothing else on the row moves. */
+  .at-box:hover:not(:has(.at-box:hover)) > .at-box-h > .at-box-t .nm { color:var(--prev); }
+  .at-chip:hover .at-cnm { color:var(--prev); }
+  .acc2-sect .acc2-sh:hover h2 { color:var(--prev); }
   .at-box-t.clickable:focus-visible { outline:2px solid var(--lvl); outline-offset:3px; }
   .at-tw.o { transform:rotate(180deg); color:var(--accent); }
   .at-tw:hover { color:var(--hov); }
