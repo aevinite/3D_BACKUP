@@ -31,10 +31,22 @@
  */
 // BUMP THIS whenever /offline.html changes. The page is precached at install, so devices
 // keep serving the OLD copy from the old cache until new cache names force a re-precache.
-const VERSION = "v6"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason.
+const VERSION = "v7"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out.
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
+// The last-resort page gets its OWN cache, and the sign-out wipe never touches it.
+//
+// It used to live in SHELL, which IS wiped on sign-in/sign-out: the wipe deleted it and re-stored it
+// afterwards, leaving a window with no branded page at all. Go offline inside that window — and the
+// wipe fires on the way to /login, which is exactly when somebody is signing in or out — and the
+// BROWSER'S own error page appeared instead of ours, with no way back into the app. Measured against
+// the deployed site 2026-08-01 ("the last-resort page has no way out", plus a console error); the
+// comment below already recorded this bug once and the re-store was thought to have closed it.
+//
+// Separating it is safe because this page holds NO account data — it is a static branded screen.
+// Wiping it never protected anyone; it only ever created the gap.
+const FALLBACK = `lfh-fallback-${VERSION}`;
 const OFFLINE_URL = "/offline.html";
 
 // A stalled network is the WORST case for staff ("less internet" — it hangs forever and
@@ -139,7 +151,7 @@ const isDevPlumbing = (p) => p.startsWith("/_next/webpack-hmr") || p.startsWith(
 // Every wipe now re-stores it immediately.
 async function precacheOffline() {
   try {
-    const c = await caches.open(SHELL);
+    const c = await caches.open(FALLBACK);
     await c.addAll([OFFLINE_URL]);
   } catch { /* best-effort: offlinePage() still has an inline fallback */ }
 }
@@ -150,7 +162,7 @@ self.addEventListener("install", (e) => {
 
 self.addEventListener("activate", (e) => {
   e.waitUntil((async () => {
-    const keep = new Set([SHELL, ASSET, DATA]);
+    const keep = new Set([SHELL, ASSET, DATA, FALLBACK]);
     for (const k of await caches.keys()) if (k.startsWith("lfh-") && !keep.has(k)) await caches.delete(k);
     await self.clients.claim();
   })());
@@ -162,6 +174,9 @@ self.addEventListener("message", (e) => {
   if (type === "LFH_CLEAR_DATA") {
     // Logout / switched restaurant → forget every saved read so the next person on this
     // device can't see the previous account's numbers while offline.
+    // FALLBACK is deliberately NOT deleted — it holds only the static last-resort page, and
+    // deleting it is what left a device with the browser's error page mid-sign-out. precacheOffline
+    // still runs, so a device that somehow lost it gets it back.
     e.waitUntil(caches.delete(DATA).then(() => caches.delete(SHELL)).then(precacheOffline));
   } else if (type === "LFH_SW_KILL") {
     e.waitUntil((async () => {
@@ -261,7 +276,7 @@ async function cachedCopy(cacheName, key, opts, clientId) {
 // a screen that had never been opened on that device showed nothing at all.)
 async function offlinePage() {
   try {
-    const c = await caches.open(SHELL);
+    const c = await caches.open(FALLBACK);
     const hit = (await c.match(OFFLINE_URL, { ignoreVary: true })) || (await caches.match(OFFLINE_URL, { ignoreVary: true }));
     if (hit) { precacheOffline(); return hit; } // re-store in the background if it was the global match
   } catch { /* fall through */ }
