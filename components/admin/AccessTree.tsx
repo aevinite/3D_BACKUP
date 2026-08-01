@@ -437,14 +437,29 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
             {node.name}
             {node.leftToBuild ? <span className="at-tag build">Left to build</span> : null}
             {node.fresh && !node.leftToBuild ? <span className="at-tag new">New</span> : null}
-            <button className="at-i" onClick={() => onInfo(node)} aria-label={`What is ${node.name}?`}><Icon n="info" s={14} /></button>
           </div>
           <div className="ds">{node.what}</div>
           {node.link ? (
             <a className="at-link" href={node.link.href}><Icon n="link" s={13} /> {node.link.label}</a>
           ) : null}
         </div>
-        {stacked || wide ? null : <Control node={node} value={v} set={set} />}
+        {/* A row with BOTH halves renders the owner's two-switch control: the feature switch, and
+            — only once it is on — the default chip growing open on its right. Everything else
+            keeps its single control. */}
+        {node.featureBind ? (
+          <FeatureRow
+            on={nodeValue({ ...node, bind: node.featureBind }, st) === true}
+            setOn={(nv) => set({ ...node, bind: node.featureBind! }, nv)}
+            def={node.bind.t === "tablet" || node.bind.t === "capTablet" ? String(v) : (v === true ? "on" : "off")}
+            setDef={(nv) => set(node, node.bind.t === "tablet" || node.bind.t === "capTablet" ? nv : nv === "on")}
+            states={node.bind.t === "tablet" || node.bind.t === "capTablet" ? (node.pin ? ["off", "on", "pin"] : ["off", "on"]) : ["off", "on"]}
+            label={node.name}
+          />
+        ) : stacked || wide ? null : <Control node={node} value={v} set={set} />}
+        {/* The (i) sits in the row's top-right CORNER, out of the controls' way. It used to sit
+            inline after the name, which pushed a long name onto a second line and left the
+            controls fighting it for width (owner, 2026-08-01). */}
+        <button className="at-i corner" onClick={() => onInfo(node)} aria-label={`What is ${node.name}?`}><Icon n="info" s={14} /></button>
       </div>
 
       {/* A control that wants the full width goes UNDERNEATH the text, not beside it. An API-key
@@ -641,6 +656,64 @@ function Control({ node, value, set }: { node: Node; value: any; set: (n: Node, 
     );
   }
   return null;
+}
+
+/**
+ * A row's two controls, as the owner specified them (2026-08-01, design 20).
+ *
+ *   OFF → one switch, hard right, no label at all.
+ *   ON  → the switch slides LEFT and the DEFAULT chip grows open on its right, each growing
+ *         its own label. Off again → it folds away and the switch returns.
+ *
+ * The switch is pushed by the chip's WIDTH rather than animated itself, so the two cannot fall
+ * out of step however fast it is clicked — an earlier version moved both independently and they
+ * visibly disagreed.
+ *
+ * WHAT "DEFAULT" MEANS, and why the word matters: it is the setting every person of that role
+ * uses — not just new ones. Turn the default off and everyone who has no setting of their own
+ * loses it, today, including people who have worked there for years. Only someone given their
+ * own answer on the Per-person tab escapes it. The label is one word ("Default") because
+ * "Default for a new user" was both wrong and wide enough to make two-state rows a different
+ * size from three-state ones.
+ */
+const DEF_LOOK: Record<string, { g: string; t: string }> = {
+  off: { g: "✕", t: "Off" },
+  on:  { g: "✓", t: "On" },
+  pin: { g: "🔒", t: "On + PIN" },
+};
+
+function FeatureRow({ on, setOn, def, setDef, states, label }: {
+  on: boolean; setOn: (v: boolean) => void;
+  def: string; setDef: (v: string) => void;
+  states: string[]; label: string;
+}) {
+  // The chip keeps its space through the fold-away so the switch glides back instead of jumping.
+  const [closing, setClosing] = useState(false);
+  const show = on || closing;
+  const cycle = () => setDef(states[(Math.max(0, states.indexOf(def)) + 1) % states.length]);
+  const toggle = () => {
+    if (on) { setClosing(true); window.setTimeout(() => setClosing(false), 220); }
+    setOn(!on);
+  };
+  const look = DEF_LOOK[def] || DEF_LOOK.off;
+  return (
+    <div className="at-ctl">
+      <div className="at-fslot">
+        {on ? <span className="at-cap f in">Feature</span> : null}
+        <button className={`acc2-toggle ${on ? "on" : ""}`} role="switch" aria-checked={on}
+          aria-label={label} onClick={toggle}><span /></button>
+      </div>
+      {show ? (
+        <div className={`at-dslot ${on ? "grow" : "shrink"}`}>
+          <span className="at-cap d in">Default</span>
+          <button className={`at-def ${def}`} onClick={cycle}
+            aria-label={`Default for everyone in this role: ${look.t}. Click to change.`}>
+            <span className="g" aria-hidden="true">{look.g}</span>{look.t}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /** Multi-select chips. Refuses to empty the list in the UI too, so the user gets an
@@ -890,13 +963,29 @@ function TreeStyle() {
      Pink is violet-400 → pink-400, i.e. deliberately NOT --adm-danger: true red means danger
      everywhere else in this panel and a switched-on option is not a warning. Three steps before
      any repeat means a box never touches a box of its own colour. */
-  .at-box.d0, .at-chip.d0 { --lvl: var(--accent); }
-  .at-box.d1, .at-chip.d1 { --lvl: #a78bfa; }
-  .at-box.d2, .at-chip.d2 { --lvl: #f472b6; }
-  .at-box.d3, .at-chip.d3 { --lvl: var(--accent); }
+  /* THE SECTION CARD IS LEVEL 0 (owner, 2026-08-01: "the first main menu section is also having
+     a colour — you ignored that"). It wears the accent, so a depth-0 row wearing the accent too
+     put blue immediately inside blue, which is exactly what he kept seeing. The whole ramp moves
+     down one: section BLUE → row PURPLE → its options PINK → deeper BLUE again. Three steps
+     before any repeat means no box ever touches one of its own colour. */
+  .acc2-sect { --lvl: var(--accent); }
+  .at-box.d0, .at-chip.d0 { --lvl: #a78bfa; }
+  .at-box.d1, .at-chip.d1 { --lvl: #f472b6; }
+  .at-box.d2, .at-chip.d2 { --lvl: var(--accent); }
+  .at-box.d3, .at-chip.d3 { --lvl: #a78bfa; }
+  /* Enough contrast to READ at a glance. Purple and pink at 30% over a navy card both drift
+     towards blue — which is the other half of why the nesting looked wrong even when it was
+     right. A stronger border and a warmer tint keep them apart. */
+  .at-box { border-width:1.5px; }
+  .at-box.d0 { border-color:color-mix(in srgb,#a78bfa 52%,transparent); }
+  .at-box.d1 { border-color:color-mix(in srgb,#f472b6 52%,transparent); }
+  .at-box.d2 { border-color:color-mix(in srgb,var(--accent) 52%,transparent); }
+  .at-box.d3 { border-color:color-mix(in srgb,#a78bfa 52%,transparent); }
 
-  .at-box { border:1.5px solid color-mix(in srgb, var(--lvl) 30%, transparent); border-radius:14px;
+  .at-box { position:relative; border:1.5px solid color-mix(in srgb, var(--lvl) 30%, transparent); border-radius:14px;
     background:color-mix(in srgb, var(--lvl) 5%, color-mix(in srgb, var(--card) 78%, var(--bg))); padding:13px 14px; }
+  /* room for the corner (i) so a long name never runs under it */
+  .at-box > .at-box-h > .at-box-t { padding-right:22px; }
   .at-box + .at-box, .at-box + .at-grid, .at-grid + .at-box { margin-top:9px; }
   .at-box:hover { border-color:color-mix(in srgb, var(--hov) 42%, transparent); }
   .at-box-h { display:flex; align-items:flex-start; gap:14px; }
@@ -966,6 +1055,39 @@ function TreeStyle() {
   .at-tw:hover { color:var(--hov); }
   .at-i { display:grid; place-items:center; width:20px; height:20px; border:none; background:none; color:var(--muted); cursor:pointer; flex:none; }
   .at-i:hover { color:var(--hov); }
+  /* Top-right corner, out of the controls' way, and out of the name's way. */
+  .at-i.corner { position:absolute; top:9px; right:10px; opacity:.55; }
+  .at-i.corner:hover { opacity:1; }
+
+  /* ── THE ROW'S CONTROLS (owner picked design 20, 2026-08-01) ───────────────────────────────
+     While a row is OFF there is one switch, hard right, unlabelled. Turn it ON and the switch
+     slides LEFT as the DEFAULT chip grows open on its right, each growing its own label.
+     THE CHIP IS A FIXED WIDTH on purpose: "On" and "On + PIN" are different lengths, so a
+     variable-width chip shoved the switch sideways every time you changed the default — and it
+     made two-state rows a different width from three-state ones. One width, everything lines up. */
+  .at-ctl { display:flex; align-items:center; justify-content:flex-end; flex:none; }
+  .at-fslot { display:flex; flex-direction:column; align-items:center; gap:7px; }
+  .at-dslot { display:flex; flex-direction:column; align-items:flex-start; gap:7px; overflow:hidden; white-space:nowrap; }
+  .at-dslot.grow { animation:atGrow .32s cubic-bezier(.2,.8,.25,1) both; }
+  .at-dslot.shrink { animation:atShrink .22s cubic-bezier(.4,0,.7,.2) both; }
+  @keyframes atGrow   { from { opacity:0; max-width:0; padding-left:0; transform:translateX(-16px) scale(.94); }
+                        to   { opacity:1; max-width:210px; padding-left:18px; transform:none; } }
+  @keyframes atShrink { from { opacity:1; max-width:210px; padding-left:18px; transform:none; }
+                        to   { opacity:0; max-width:0; padding-left:0; transform:translateX(-16px) scale(.94); } }
+  .at-cap { font-size:9.5px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; white-space:nowrap; }
+  .at-cap.f { color:var(--accent); }
+  .at-cap.d { color:#f472b6; }
+  .at-cap.in { animation:atCapIn .3s ease-out both; }
+  @keyframes atCapIn { from { opacity:0; transform:translateY(5px); } to { opacity:1; transform:none; } }
+  /* the default chip — one size whatever it says */
+  .at-def { width:112px; display:flex; align-items:center; justify-content:center; gap:7px; height:34px;
+    border-radius:10px; border:1.6px solid; background:var(--card); font-size:11.5px; font-weight:800;
+    letter-spacing:.03em; cursor:pointer; transition:color .16s, border-color .16s, background .16s; }
+  .at-def .g { font-size:12.5px; line-height:1; }
+  .at-def.off { border-color:#ef4444; color:#ef4444; background:color-mix(in srgb,#ef4444 12%,transparent); }
+  .at-def.on  { border-color:#22c55e; color:#22c55e; background:color-mix(in srgb,#22c55e 12%,transparent); }
+  .at-def.pin { border-color:#f59e0b; color:#f59e0b; background:color-mix(in srgb,#f59e0b 12%,transparent); }
+  .at-def:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   .at-tag { font-size:9px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:2px 6px; border-radius:5px; }
   .at-tag.build { background:color-mix(in srgb,var(--adm-warn) 18%,transparent); color:var(--adm-warn); border:1px solid color-mix(in srgb,var(--adm-warn) 34%,transparent); }
   .at-tag.new { background:color-mix(in srgb,var(--accent) 16%,transparent); color:var(--accent); border:1px solid color-mix(in srgb,var(--accent) 32%,transparent); }

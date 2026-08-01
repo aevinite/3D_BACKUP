@@ -17,7 +17,7 @@ import { menuTag } from "@/lib/menuDataServer";
 import {
   SECTIONS, ALL_NODES, NODE_BY_ID, SETTINGS_COLUMNS, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
   LIST_KEYS, TEXT_KEYS, MODULE_KEYS, PANEL_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
-  TABLET_COLS, TAB_KEYS, type TreeState,
+  TABLET_COLS, TAB_KEYS, HAS_IDS, type TreeState,
 } from "@/lib/accessTree";
 
 export const dynamic = "force-dynamic";
@@ -162,6 +162,11 @@ export async function POST(req: NextRequest) {
       const incoming = obj(raw);
 
       for (const [side, vals] of Object.entries(incoming)) {
+        // config[id].on — "does this restaurant have it at all", the feature half of a row.
+        if (side === "on") {
+          if (HAS_IDS.includes(permId)) entry.on = vals === true;
+          continue;
+        }
         if (side === "tablet") {
           if (CONFIG_TABLET.has(permId) && isTri(vals)) entry.tablet = vals;
           continue;

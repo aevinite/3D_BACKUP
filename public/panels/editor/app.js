@@ -3073,7 +3073,12 @@ async function setOrderPayment(id, paid, opts = {}) {
     // end instead of once per order. For a single-order pay, the undo bar is the
     // confirmation + a few-second takeback (owner, 2026-07-22).
     if (!opts.quiet) {
-      if (paid && window.LFH_UNDO) LFH_UNDO.show({ message: "Marked paid", sub: "Tap undo to reopen this bill", icon: "💳", seconds: 5, onUndo: () => editorUndoPay([id]) });
+      // The five-second "undo" bar is GONE (owner, 2026-08-01: "there will not be undo").
+      // A table closes the moment it is paid and the party comes back as a NEW order, so the
+      // bill the bar offered to take back is no longer on the floor to take back. Correcting a
+      // settled bill is now one named, permissioned, audited thing — Access → Manager → Manager
+      // menu → Bill → Reopen a bill — instead of a toast that quietly did the same job.
+      if (paid) toast("Marked paid 💳", "ok");
       else toast(paid ? "Marked paid 💳" : "Marked unpaid", "ok");
     }
     return true;
@@ -3266,16 +3271,9 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
   if (okCount && !failCount) {
     const msg = skipped ? `Paid via ${picked.method} — ${skipped} new order still to accept` : `Marked paid via ${picked.method}`;
-    // The undo bar is the confirmation + a few-second takeback (owner, 2026-07-22). The
-    // revert goes through the SAME 30-min grace + audit-logged path as "restore to floor".
-    if (paidIds.length && window.LFH_UNDO) LFH_UNDO.show({
-      message: `Marked paid via ${picked.method}`,
-      sub: skipped ? `${skipped} new order still to accept` : "Tap undo to reopen this bill",
-      icon: "💳",
-      seconds: 5,
-      onUndo: () => editorUndoPay(paidIds),
-    });
-    else toast(msg + " 💳", "ok");
+    // Same here: no undo bar. See the note on the single-order path above — reopening a settled
+    // bill is Access → Manager → Manager menu → Bill → Reopen a bill, which is recorded.
+    toast(msg + " 💳", "ok");
   }
   else if (okCount) toast(`Paid ${okCount}, but ${failCount} couldn't be settled — check the order.`, "err");
   else toast("Couldn't settle the payment — check the order.", "err");
@@ -3286,14 +3284,9 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
 // logged) reason so no prompt interrupts the one-tap undo (owner undo bar, 2026-07-22).
 // Note: if paying auto-closed/archived the table (auto_table_action), this reverts payment
 // but the fuller un-archive stays the manual "Restore to floor" tool's job.
-async function editorUndoPay(paidIds) {
-  let n = 0;
-  for (const id of paidIds) {
-    if (await setOrderPayment(id, false, { skipConfirm: true, quiet: true, revertReason: "Undo — mis-tap (within grace)" })) n++;
-  }
-  await loadSessions();
-  toast(n ? "Payment undone" : "Couldn't undo — the 30-minute window may have passed.", n ? "ok" : "err");
-}
+// editorUndoPay() lived here. Removed with the undo bars it was the only caller of
+// (owner, 2026-08-01). The server-side revert it used is untouched — that is the audited
+// path "Reopen a bill" goes through.
 
 // markTablePaid: settle the WHOLE table in one go — mark every unpaid (non-
 // cancelled) order paid via payOrdersWithMethod. Used by the on-tile quick button
