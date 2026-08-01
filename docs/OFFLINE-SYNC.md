@@ -29,6 +29,15 @@ browser's dinosaur page, mid-service. Now a service worker keeps three per-devic
   classic "I deployed but the panel shows old code".
 - **Writes are never touched.** Non-GET goes straight to the network; the outbox owns
   offline writes. A service worker replaying a POST could double a bill.
+- **"The server can't take it right now" is treated exactly like "no internet"** (2026-08-01).
+  There used to be a story for offline and none for overloaded: a staff tap had NO timeout, so a
+  database that was up but answering nothing (measured 30-90s on 2026-07-31) hung on a spinner
+  forever, and a diner got "Order didn't go through". Now a 5xx or a timed-out write is queued on
+  the device under the SAME `X-LFH-Action-Id` and delivered on recovery — a rush becomes a slow
+  moment, not a broken app. A **4xx is the opposite** and must never be queued: that is the server
+  refusing on the merits (a clash, a closed table, a sold-out dish) and a person has to see it.
+  Retries back off with jitter so devices don't hit a struggling server in lockstep. Guarded by
+  `npm run verify:busy`.
 - **Login/auth is never cached**, and signing out (`/api/{panel,staff}-logout`) wipes the shell
   + data caches from inside the worker — a navigation, so page JS can't do it. Signing IN also
   wipes them (`LFH_CLEAR_DATA` from `app/login/LoginForm.tsx`), which covers a shared tablet

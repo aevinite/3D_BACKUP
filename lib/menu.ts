@@ -161,6 +161,22 @@ export async function callWaiter(tableNumber: string, note?: string, restaurantI
 // Order lifecycle status. The restaurant advances received -> preparing -> served.
 export type OrderStatus = "received" | "preparing" | "served" | "cancelled";
 
+// How long a diner's order waits for an answer before we treat the restaurant as "too busy
+// to take it this second" and save it on the device instead.
+const ORDER_TIMEOUT_MS = 15000;
+
+// "The restaurant couldn't take this right now" — as opposed to "the restaurant refused it"
+// (sold out, table closed, over a limit). Only the first kind may be saved and sent later; a
+// refusal has to reach the person, or they would wait for food that is never coming.
+export type BusyError = Error & { busy: true };
+export const isServerBusy = (e: unknown): e is BusyError =>
+  !!e && typeof e === "object" && (e as { busy?: boolean }).busy === true;
+function busyError(why: string): BusyError {
+  const e = new Error(`Order not sent yet: ${why}`) as BusyError;
+  e.busy = true;
+  return e;
+}
+
 // Returns the new order's id. We generate the id on the client so the guest's
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
@@ -170,13 +186,27 @@ export async function createOrder(o: OrderInput, restaurantId: string = DEFAULT_
   // and the guest taps again, the SAME actionId makes the server place it ONCE and
   // echo the original order_id back — no more double order / double charge.
   if (actionId) {
-    const res = await fetch("/api/guest/place-order", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": actionId },
-      body: JSON.stringify({ mode: "public", table: o.tableNumber || "", restaurantId, items: o.items, allergies: o.allergies }),
-    });
+    let res: Response;
+    try {
+      res = await fetch("/api/guest/place-order", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-LFH-Action-Id": actionId },
+        body: JSON.stringify({ mode: "public", table: o.tableNumber || "", restaurantId, items: o.items, allergies: o.allergies }),
+        // A DEADLINE, for the same reason the staff panels have one: an overloaded database
+        // answers nothing at all (measured 30-90s), and without this the diner watches a
+        // spinner forever with the order neither placed nor saved.
+        signal: AbortSignal.timeout(ORDER_TIMEOUT_MS),
+      });
+    } catch {
+      // Couldn't reach the restaurant (dropped, timed out). NOT a refusal — the caller saves
+      // it on the device and sends it automatically, exactly as it does when offline.
+      throw busyError("could not reach the restaurant");
+    }
     const j = (await res.json().catch(() => null)) as { ok?: boolean; reason?: string; item?: string; order_id?: string; retry?: boolean } | null;
     if (res.status === 409 && j?.retry) throw new Error("Order failed: sync_in_progress");
+    // The server is up but can't take it right now (it is busy, or its database didn't
+    // answer). Also not a refusal: same treatment as being offline.
+    if (res.status >= 500) throw busyError(j?.reason || "the restaurant's system is very busy");
     if (!res.ok || !j?.ok || !j.order_id) {
       throw new Error(`Order failed: ${j?.reason || "unknown"}${j?.item ? ` (${j.item})` : ""}`);
     }

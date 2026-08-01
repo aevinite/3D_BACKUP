@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
-import { getSettings, createOrder, type MenuItem } from "@/lib/menu";
+import { getSettings, createOrder, isServerBusy, type MenuItem } from "@/lib/menu";
 import { enqueueGuestOrder } from "@/lib/guestOutbox"; // offline: save order, send on reconnect
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
@@ -583,6 +583,25 @@ export default function CartPanel() {
       // loading and placing, say WHICH dish rather than a generic "try again" — the
       // message carries "sold_out (Title)" from createOrder (audit fix 2026-07-06).
       const msg = String((err as Error)?.message || "");
+      // THE RESTAURANT COULDN'T TAKE IT THIS SECOND (its system is swamped, or the reply never
+      // came). That is not the diner's problem and not a refusal, so do exactly what being
+      // offline does: keep the order on this device under the SAME at-most-once key and let the
+      // outbox deliver it. This is what makes a rush look like a slow moment instead of a
+      // broken menu — 800 orders in the same minute are all kept, then drained in order.
+      if (isServerBusy(err) && orderKeyRef.current) {
+        try {
+          await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note })), allergies: [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])], track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
+          window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Saved — sending your order now", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" } }));
+          orderKeyRef.current = null;
+          setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
+          window.dispatchEvent(new Event("lfh:cart-updated"));
+          window.dispatchEvent(new Event("lfh:close-all"));
+          return;
+        } catch {
+          // Saving on the device failed too (storage blocked) → fall through to the honest error
+          // below rather than pretending the order is safe somewhere.
+        }
+      }
       if (/sold_out/i.test(msg)) {
         const m = msg.match(/\(([^)]+)\)/); // the dish title in parentheses, if present
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: m ? `Sold out: ${m[1]}` : "A dish just sold out", subtitle: "please remove it to place your order", kicker: "order", variant: "error" } }));

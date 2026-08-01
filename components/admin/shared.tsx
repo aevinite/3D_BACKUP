@@ -198,13 +198,26 @@ export function useActiveAutoRefresh(fn: () => void, intervalMs = 60000, idleMs 
     };
     const evs: (keyof WindowEventMap)[] = ["pointerdown", "keydown", "scroll", "wheel", "touchstart", "pointermove"];
     evs.forEach((e) => window.addEventListener(e, bump, { passive: true, capture: true }));
-    const id = setInterval(() => {
-      if (document.hidden) return;                 // hidden tab → don't fetch
-      if (Date.now() - last > idleMs) { wasIdle = true; return; } // user walked away → stop, arm wake-on-return
-      ref.current();
-    }, intervalMs);
+    // JITTER, not a metronome. Every device that opened its screen around the same time (a
+    // shift starting, a rush) would otherwise refresh on the SAME beat forever, so the database
+    // sees synchronised spikes instead of a steady trickle — and a spike is what pushes an
+    // already-busy instance over. ±20% per tick spreads the same number of requests out. The
+    // cost is that "60s" means 48-72s, which no screen depends on (realtime does the instant
+    // updating; this is only the safety net).
+    const spread = (ms: number) => Math.round(ms * (0.8 + Math.random() * 0.4));
+    let id: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      id = setTimeout(() => {
+        if (!document.hidden) {
+          if (Date.now() - last > idleMs) { wasIdle = true; } // user walked away → stop, arm wake-on-return
+          else ref.current();
+        }
+        tick();
+      }, spread(intervalMs));
+    };
+    tick();
     return () => {
-      clearInterval(id);
+      clearTimeout(id);
       evs.forEach((e) => window.removeEventListener(e, bump, { capture: true } as EventListenerOptions));
     };
   }, [intervalMs, idleMs]);

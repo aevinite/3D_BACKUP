@@ -779,6 +779,61 @@ Guarded by **`npm run verify:floor`** (`scripts/verify-floor-share.mjs`) — sta
 proven to fail when an invalidation is removed. Run it against another checkout with
 `--repo <path>` (that is how AV live is checked without adding a file there).
 
+## 🌊 A RUSH MUST SLOW THE APP DOWN, NEVER TAKE IT DOWN (owner, 2026-08-01 — every write, every poll)
+
+The owner's question after the 2026-07-31 outage was the right one: *"hammering should not have
+done this — what if my restaurant has 800 simultaneous orders?"* Measured answers, on the backup
+database (399,617 orders, free-tier shared vCPU, PostgREST's 8s statement ceiling):
+
+- **An order is cheap: ~64-138 ms** (`lfh_staff_place_order` / `lfh_place_order`). 800 orders
+  spread over even five minutes is ~2.7/s — a few percent of one core. **Orders were never the
+  problem.**
+- **What saturates the instance is a handful of EXPENSIVE reads landing together.** The worst was
+  the snapshot cache's own "cheap" change-detector: `lfh_owner_orders_fingerprint` scanned all
+  orders — **21,591 ms and ~2.9 GB of page reads** for an all-time window. That is 2.7× the 8s
+  ceiling, so a dashboard couldn't even finish: it burned 8 full seconds of the shared CPU and
+  then FAILED, and a person's retry burned 8 more. **Mig 246** replaced it with a
+  trigger-maintained watermark (`orders_change_watermark`, one row per restaurant per business
+  day): **21,591 ms → 5 ms, 370,451 buffers → 157**, proven still to notice a change and still to
+  respect the window.
+
+Four rules came out of it. Keep all four true:
+
+1. **A change-detector may never scan the table it guards.** If a guard costs more than the query
+   it protects, it is not a guard. Maintain a counter/watermark on write and read that.
+2. **"The server can't take this right now" takes the SAME path as "no internet"** (owner's own
+   words: *"it should work like online, things just save on his device, and when internet comes
+   everything starts working"*). A 5xx or a timed-out write is NOT a rejection: the panel
+   (`public/panels/outbox.js` → `send()`) and the guest cart (`lib/menu.ts` → `createOrder` throws
+   a `busy` error, `components/CartPanel.tsx` catches it) save it on-device under the SAME
+   `X-LFH-Action-Id` and deliver it when the server recovers. **4xx is different** — a clash, a
+   closed table, a sold-out dish must reach the person, never be retried behind their back.
+3. **Every write carries a deadline, and every retry backs off with jitter.** `doFetch` had NO
+   timeout, so an overloaded server (which answers *nothing* for 30-90s) left a waiter's tap on a
+   spinner forever — not applied, not saved. And a FIXED retry beat means every device retries in
+   lockstep, which is a retry storm: `WRITE_TIMEOUT_MS` + `RETRY_BASE_MS`→`RETRY_MAX_MS` with ±25%,
+   and `useActiveAutoRefresh` spreads its 60s tick by ±20%.
+4. **Nothing may poll at a fixed fast rate while its own reads are failing.** The kitchen's
+   catch-up poll ran every 5s whenever realtime wasn't connected — and a saturated database is
+   exactly what drops realtime, so every device switched to a 5s board read at the same moment and
+   kept the database down. `LFH_RT.catchUp()` (in `public/panels/realtime.js`) keeps the 5s
+   liveness when reads succeed and doubles to a minute while they fail. Use it for any new
+   "realtime is down" poll.
+
+Also: **`npm run verify:everything` now refuses to start while another run is alive** (a pid lock
+at `.claude/verify-everything.lock`, `--force` to override). Two concurrent 501-phase runs are
+what actually took the database down — the test rig, not the product.
+
+**Guarded by `npm run verify:busy`** (`scripts/verify-busy-server.mjs`) — 14 checks against the
+REAL shipped files via a local stub (no database, no login, no load): a busy server's tap is
+queued not lost, delivered exactly once under its original id on recovery, a 4xx still reaches the
+person, deadlines/backoff/jitter are present, and the guest's order is classed correctly (5xx and
+timeout = save it, sold-out = tell them). Proven to fail with 5 red checks when the fix is removed.
+
+⚠️ **Still true and NOT fixable in code:** the backup database is a free-tier shared-CPU instance
+with 60 connections. These changes mean a burst QUEUES and drains instead of collapsing — they do
+not add capacity. Real 800-order service needs a paid compute tier; that is the owner's call.
+
 ## Known gotchas (read before editing)
 
 - **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The

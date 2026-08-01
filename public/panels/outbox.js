@@ -27,6 +27,16 @@
   let failed = [];   // status:"failed"  — server rejected on replay; needs attention
   let flushing = false;
   let retryTimer = null;
+  // How long a single write may wait for an answer before it is treated as "the server can't
+  // take this right now" and saved on the device instead. See doFetch().
+  const WRITE_TIMEOUT_MS = 15000;
+  // Re-flush pacing. It used to be a FIXED 15s, which is the shape that turns a struggling
+  // server into a dead one: every device retries on the same beat, so the load arrives in
+  // synchronised waves that never let it recover (a retry storm). Now each round waits longer
+  // than the last, and each device rolls its own jitter so they spread out.
+  const RETRY_BASE_MS = 15000;
+  const RETRY_MAX_MS = 120000;
+  let retryStep = 0;
 
   // ── tiny IndexedDB wrapper (no external lib) ────────────────────────────────
   let dbPromise = null;
@@ -137,6 +147,16 @@
       method: item.method,
       headers: headers,
       body: item.body != null ? JSON.stringify(item.body) : undefined,
+      // EVERY write gets a deadline. Without one, a database that is up but overloaded (it
+      // answers NOTHING, measured at 30-90s on 2026-07-31) left the waiter's tap hanging on a
+      // spinner forever: not applied, not saved, no trace. A timeout turns that into the path
+      // that was already safe and already tested — the action lands in the on-device queue and
+      // replays itself. 15s, not less: a route can make two or three database calls of up to 8s
+      // each, so anything shorter would queue writes that were about to succeed.
+      // Replaying after a timeout cannot double anything: the same X-LFH-Action-Id above is
+      // what withIdempotency() dedups on, and this is the same ambiguity the offline path has
+      // always had.
+      signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(WRITE_TIMEOUT_MS) : undefined,
     });
   }
 
@@ -198,6 +218,19 @@
     }
     // We got a response → behave exactly like the old api() helper.
     if (res.status === 401) { location.href = "/login"; throw new Error("login"); }
+    // THE SERVER IS UP BUT CAN'T TAKE IT (5xx) → this is not a rejection, so don't hand the
+    // person an error and drop their work. Save it and let the replay loop deliver it, which is
+    // exactly what that loop already does for the SAME statuses once an action is queued
+    // ("a transient server problem is not a rejection", below) — this closes the one hole left:
+    // the FIRST attempt used to throw instead. It is what makes a rush behave like a slow shift
+    // rather than a broken app: 800 orders arriving at once are all kept and drained in order.
+    // 4xx is deliberately NOT included: that is the server refusing on the merits (a clash, a
+    // closed table, a limit), and a person must see it rather than have it retried behind them.
+    if (res.status >= 500) {
+      await enqueue(item);
+      flush();
+      return { ok: true, queued: true, busy: true, action_id: item.id };
+    }
     const j = await res.json().catch(() => null);
     // Carry the parsed body + status on the error so callers can read server flags
     // (e.g. duplicateWarning) that a bare message string would drop.
@@ -211,6 +244,7 @@
     if (navigator.onLine === false) return;
     if (!queued.length) return;
     flushing = true;
+    let progressed = false; // did anything actually get through this round?
     try {
       while (queued.length && navigator.onLine !== false) {
         const item = queued[0];
@@ -218,7 +252,7 @@
         try { res = await doFetch(item, true); } // true = a saved change being replayed
         catch (netErr) { break; }               // still offline → stop; keep the queue for next time
         if (res.status === 401) { break; }        // not logged in → can't sync now; keep the queue
-        if (res.ok) { await removeItem(item.id); notify(); continue; } // sent (incl. server-dedup ok:true,duplicate:true)
+        if (res.ok) { progressed = true; await removeItem(item.id); notify(); continue; } // sent (incl. server-dedup ok:true,duplicate:true)
         if (res.status === 409) {
           const j = await res.json().catch(() => null);
           if (j && j.retry) break;                // server is processing this id right now → try again shortly
@@ -253,15 +287,27 @@
       notify();
       // If anything actually synced, nudge the panel to refetch true server state.
       try { window.dispatchEvent(new CustomEvent("lfh:outbox-flushed")); } catch (e) {}
-      scheduleRetry();
+      scheduleRetry(progressed);
     }
   }
 
   // While the queue is non-empty and we're online, retry periodically (covers a
   // flaky connection that comes back without firing an 'online' event).
-  function scheduleRetry() {
+  //
+  // BACKING OFF, WITH JITTER, IS THE POINT. A fixed beat means every device in the restaurant
+  // retries at the same instant: a server that is merely struggling gets hit by synchronised
+  // waves and never gets the quiet moment it needs to catch up. Each failed round now waits
+  // longer (15s, 30s, 60s… capped at 2 min) and each device rolls its own ±25%, so the load
+  // spreads out instead of pulsing. `progressed` = something actually synced, which means the
+  // server is healthy again, so go straight back to fast retries.
+  function scheduleRetry(progressed) {
     clearTimeout(retryTimer);
-    if (queued.length && navigator.onLine !== false) retryTimer = setTimeout(flush, 15000);
+    if (!queued.length || navigator.onLine === false) { retryStep = 0; return; }
+    if (progressed) retryStep = 0;
+    const base = Math.min(RETRY_BASE_MS * Math.pow(2, retryStep), RETRY_MAX_MS);
+    const wait = Math.round(base * (0.75 + Math.random() * 0.5));
+    retryStep = Math.min(retryStep + 1, 8);
+    retryTimer = setTimeout(flush, wait);
   }
 
   // ── manual controls for the "waiting to sync" UI ────────────────────────────

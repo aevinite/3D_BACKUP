@@ -1058,13 +1058,14 @@ if (window.LFH_RT) {
   // firing a full-board read every 60s forever (egress waste). realtime.js already does
   // a fresh full reload via wake() on re-show, so a hidden tab needs no backstop.
   setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 60000);
-  // If realtime NEVER actually connects (blocked/flaky WebSocket), LFH_RT.start() swallows
-  // the subscribe error and only the 60s backstop runs — a new KOT could sit unseen up to
-  // 60s (bug M9, 2026-07-05). Engage a 5s catch-up poll UNTIL a subscription lands. Gated on
-  // subscribed===0, so the instant realtime works this is a no-op and egress stays low.
-  setInterval(() => {
-    if (!document.hidden && (!window.LFH_RT.metrics || window.LFH_RT.metrics.subscribed === 0)) load().catch(() => {});
-  }, 5000);
+  // If realtime isn't connected (blocked/flaky WebSocket, or a database that dropped its
+  // realtime connection), LFH_RT.start() swallows the subscribe error and only the 60s backstop
+  // runs — a new KOT could sit unseen up to 60s (bug M9, 2026-07-05). LFH_RT.catchUp polls every
+  // 5s until the socket is live again, and — the part that matters under load — BACKS OFF while
+  // those reads are failing instead of hammering a database that is already struggling at a
+  // fixed 5s from every device at once. It is a no-op whenever realtime is working.
+  if (window.LFH_RT.catchUp) window.LFH_RT.catchUp(() => load());
+  else setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 5000);
 } else {
   setInterval(() => load().catch(() => {}), 2000); // fallback poll
 }
