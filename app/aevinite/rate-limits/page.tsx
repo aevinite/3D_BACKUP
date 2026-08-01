@@ -32,6 +32,16 @@ export default function AdminRateLimits() {
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<Record<string, { max_count: number; window_seconds: number }>>({});
   const [busy, setBusy] = useState<string>("");
+  // Each section can be folded shut; the choice is remembered on this device (pure UI, no query).
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    try { const raw = localStorage.getItem("lfh_rl_collapsed"); if (raw) setCollapsed(JSON.parse(raw)); } catch { /* ignore */ }
+  }, []);
+  const toggleSection = (id: string) => setCollapsed((p) => {
+    const next = { ...p, [id]: !p[id] };
+    try { localStorage.setItem("lfh_rl_collapsed", JSON.stringify(next)); } catch { /* ignore */ }
+    return next;
+  });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -121,6 +131,16 @@ export default function AdminRateLimits() {
   };
   const labelFor = (key: string) => rules.find((r) => r.key === key)?.label || key;
 
+  // A section heading that folds its body open/shut. `anchorId` keeps the "#hits" jump target.
+  const secHead = (id: string, inner: React.ReactNode, anchorId?: string) => (
+    <div className="rl-sec rl-sec-btn" id={anchorId} role="button" tabIndex={0} aria-expanded={!collapsed[id]}
+      onClick={() => toggleSection(id)}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleSection(id); } }}>
+      <i className={`fas fa-chevron-down rl-caret${collapsed[id] ? " closed" : ""}`} aria-hidden="true" />
+      {inner}
+    </div>
+  );
+
   return (
     <>
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -132,13 +152,15 @@ export default function AdminRateLimits() {
       </div>
 
       {/* Hits — a limit was reached */}
-      <div className="rl-sec" id="hits">
-        <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: hits.length ? "var(--adm-danger)" : "var(--muted)" }} />
-        <h2>Limits reached</h2>
-        {hits.length ? <span className="rl-chip danger">{hits.length}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12 }}>who hit a wall right now · all restaurants</span>
-      </div>
-      {loading ? <div className="adm-empty">Loading…</div> : hits.length === 0 ? (
+      {secHead("hits", (
+        <>
+          <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: hits.length ? "var(--adm-danger)" : "var(--muted)" }} />
+          <h2>Limits reached</h2>
+          {hits.length ? <span className="rl-chip danger">{hits.length}</span> : null}
+          <span className="adm-muted" style={{ fontSize: 12 }}>who hit a wall right now · all restaurants</span>
+        </>
+      ), "hits")}
+      {collapsed.hits ? null : loading ? <div className="adm-empty">Loading…</div> : hits.length === 0 ? (
         <div className="rl-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No limits reached right now.</div>
       ) : (
         <div style={{ marginBottom: 6 }}>
@@ -163,7 +185,7 @@ export default function AdminRateLimits() {
                       <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => allowHit(h)} title="This was a real customer — reset their counter so they get through now">
                         <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Allow (reset)
                       </button>
-                      <a className="adm-btn" style={{ fontSize: 12 }} href={`#rule-${h.key}`} title="Jump to this limit's setting to raise or lower it">
+                      <a className="adm-btn" style={{ fontSize: 12 }} href={`#rule-${h.key}`} title="Jump to this limit's setting to raise or lower it" onClick={() => setCollapsed((p) => (p.rules ? { ...p, rules: false } : p))}>
                         <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Change limit
                       </a>
                     </>
@@ -180,12 +202,14 @@ export default function AdminRateLimits() {
       )}
 
       {/* Rules — the limits themselves */}
-      <div className="rl-sec">
-        <i className="fas fa-sliders" aria-hidden="true" style={{ color: "var(--muted)" }} />
-        <h2>The limits</h2>
-        <span className="adm-muted" style={{ fontSize: 12 }}>change how many actions are allowed per time window</span>
-      </div>
-      {loading ? <div className="adm-empty">Loading…</div> : (
+      {secHead("rules", (
+        <>
+          <i className="fas fa-sliders" aria-hidden="true" style={{ color: "var(--muted)" }} />
+          <h2>The limits</h2>
+          <span className="adm-muted" style={{ fontSize: 12 }}>change how many actions are allowed per time window</span>
+        </>
+      ))}
+      {collapsed.rules ? null : loading ? <div className="adm-empty">Loading…</div> : (
         <div className="adm-card" style={{ marginBottom: 12 }}>
           {rules.map((r) => {
             const d = draft[r.id] || { max_count: r.max_count, window_seconds: r.window_seconds };
@@ -213,17 +237,30 @@ export default function AdminRateLimits() {
               </div>
             );
           })}
+          {/* Admin login isn't an editable limit on purpose (mig 208) — a wrong value could lock the
+              owner out. It's guarded the safe way instead: the alert + block/unblock flow on this page. */}
+          <div className="rl-rule rl-note">
+            <div style={{ flex: "1 1 220px", minWidth: 0 }}>
+              <b style={{ fontSize: 13.5 }}><i className="fas fa-user-shield" aria-hidden="true" style={{ marginRight: 7, opacity: 0.7 }} />Your admin login</b>
+              <div className="adm-muted" style={{ fontSize: 11.5 }}>Protected a safer way — not an editable number, so you can never lock yourself out.</div>
+            </div>
+            <span className="adm-muted" style={{ fontSize: 11.5, maxWidth: 300 }}>
+              Too many wrong tries → a warning shows in <b style={{ color: "var(--text)" }}>Limits reached</b> (top) with Block / Let-them-retry; blocked devices sit in <b style={{ color: "var(--text)" }}>Blocked from the admin panel</b> (bottom).
+            </span>
+          </div>
         </div>
       )}
 
       {/* Unblock requests — blocked devices asking to be let back in (just above the block list) */}
-      <div className="rl-sec">
-        <i className="fas fa-hand" aria-hidden="true" style={{ color: requests.length ? "var(--adm-accent,#e8a13c)" : "var(--muted)" }} />
-        <h2>Unblock requests</h2>
-        {requests.length ? <span className="rl-chip">{requests.length}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12 }}>blocked devices asking to be let back in</span>
-      </div>
-      {loading ? <div className="adm-empty">Loading…</div> : requests.length === 0 ? (
+      {secHead("requests", (
+        <>
+          <i className="fas fa-hand" aria-hidden="true" style={{ color: requests.length ? "var(--adm-accent,#e8a13c)" : "var(--muted)" }} />
+          <h2>Unblock requests</h2>
+          {requests.length ? <span className="rl-chip">{requests.length}</span> : null}
+          <span className="adm-muted" style={{ fontSize: 12 }}>blocked devices asking to be let back in</span>
+        </>
+      ))}
+      {collapsed.requests ? null : loading ? <div className="adm-empty">Loading…</div> : requests.length === 0 ? (
         <div className="adm-muted" style={{ fontSize: 12.5, padding: "2px 0 6px" }}>No requests right now.</div>
       ) : (
         <div className="adm-card" style={{ marginBottom: 12 }}>
@@ -249,12 +286,14 @@ export default function AdminRateLimits() {
       )}
 
       {/* Blocked devices (barred from the admin panel) — the very bottom of the page */}
-      <div className="rl-sec">
-        <i className="fas fa-ban" aria-hidden="true" style={{ color: blocked.length ? "var(--adm-danger)" : "var(--muted)" }} />
-        <h2>Blocked from the admin panel</h2>
-        {blocked.length ? <span className="rl-chip danger">{blocked.length}</span> : null}
-      </div>
-      {loading ? <div className="adm-empty">Loading…</div> : blocked.length === 0 ? (
+      {secHead("blocked", (
+        <>
+          <i className="fas fa-ban" aria-hidden="true" style={{ color: blocked.length ? "var(--adm-danger)" : "var(--muted)" }} />
+          <h2>Blocked from the admin panel</h2>
+          {blocked.length ? <span className="rl-chip danger">{blocked.length}</span> : null}
+        </>
+      ))}
+      {collapsed.blocked ? null : loading ? <div className="adm-empty">Loading…</div> : blocked.length === 0 ? (
         <div className="adm-muted" style={{ fontSize: 12.5, padding: "2px 0 6px" }}>No devices are blocked.</div>
       ) : (
         <div className="adm-card" style={{ marginBottom: 12 }}>
@@ -275,6 +314,11 @@ export default function AdminRateLimits() {
       <style>{`
         .rl-sec{display:flex;align-items:center;gap:9px;margin:22px 0 11px}
         .rl-sec h2{margin:0;font-size:16px}
+        .rl-sec-btn{cursor:pointer;user-select:none;width:100%;border-radius:8px;padding:4px 6px;margin-left:-6px;transition:background .12s}
+        .rl-sec-btn:hover{background:color-mix(in srgb,var(--text) 6%,transparent)}
+        .rl-sec-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+        .rl-caret{color:var(--muted);font-size:12px;width:12px;text-align:center;transition:transform .15s}
+        .rl-caret.closed{transform:rotate(-90deg)}
         .rl-chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--adm-accent,#e8a13c) 16%,transparent);color:var(--adm-accent,#e8a13c)}
         .rl-chip.danger{background:color-mix(in srgb,var(--adm-danger) 16%,transparent);color:var(--adm-danger)}
         .rl-clear{display:flex;align-items:center;gap:9px;padding:16px;border-radius:12px;border:1px solid color-mix(in srgb,var(--adm-ok,#4caf82) 35%,transparent);background:color-mix(in srgb,var(--adm-ok,#4caf82) 8%,var(--card));color:var(--text);font-size:13.5px}
@@ -283,6 +327,7 @@ export default function AdminRateLimits() {
         .rl-hit-bar{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--adm-danger)}
         .rl-rule{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:11px 0;border-bottom:var(--border)}
         .rl-rule:last-child{border-bottom:none}
+        .rl-note{align-items:flex-start;gap:14px;opacity:.92}
         .rl-num{width:74px;padding:6px 8px;border-radius:8px;border:var(--border);background:var(--card);color:var(--text);font-size:13px}
         .rl-toggle{display:inline-flex;align-items:center;gap:7px;border:var(--border);background:var(--card);border-radius:999px;padding:4px 10px 4px 5px;cursor:pointer;color:var(--muted);font-size:12px;font-weight:600}
         .rl-toggle .knob{width:14px;height:14px;border-radius:999px;background:var(--muted);transition:background .15s,transform .15s}
