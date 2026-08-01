@@ -225,8 +225,48 @@
     fireAll(); // initial load
   }
 
+  // ── the catch-up poll: keeps a panel live when the live socket ISN'T ─────────
+  // While realtime is connected this costs nothing. When it isn't (a blocked WebSocket on a
+  // hotel/office network, or a database that dropped its realtime connection), a panel would
+  // only refresh on its 60s backstop and a new KOT could sit unseen for a minute (bug M9) — so
+  // it polls every few seconds instead.
+  //
+  // WHAT THIS ADDS IS THE BACKING OFF, and it matters more than the polling. A saturated
+  // database is precisely the thing that drops realtime, so every device notices at the same
+  // moment and every device switched to a FIXED 5-second board read, together, indefinitely.
+  // That is an amplifier aimed at a database that is already struggling: it can't recover, so
+  // the sockets never come back, so the polling never stops. That is the shape of the
+  // 2026-07-31 outage, and it is entirely ours to prevent.
+  //
+  // So: quick (5s) while the socket is down AND the reads are getting through — the legitimate
+  // blocked-socket case, which must stay live — then doubling up to a minute for as long as
+  // they fail, and straight back to quick the moment one succeeds. Jittered, so twenty devices
+  // never poll on the same beat. `fn` MUST reject (or throw) when its read fails, or there is
+  // nothing to back off from.
+  function catchUp(fn, opts) {
+    const base = (opts && opts.baseMs) || 5000;
+    const max = (opts && opts.maxMs) || 60000;
+    let step = 0, timer = null, stopped = false;
+    const spread = (ms) => Math.round(ms * (0.8 + Math.random() * 0.4));
+    const arm = () => {
+      if (stopped) return;
+      timer = setTimeout(run, spread(Math.min(base * Math.pow(2, step), max)));
+    };
+    async function run() {
+      // Live again, hidden, or genuinely offline → nothing to catch up on. Reset the backoff so
+      // the next real gap starts responsive.
+      if (stopped) return;
+      if (document.hidden || connStatus === "online" || navigator.onLine === false) { step = 0; return arm(); }
+      try { await fn(); step = 0; }
+      catch (e) { step = Math.min(step + 1, 8); }
+      arm();
+    }
+    arm();
+    return () => { stopped = true; clearTimeout(timer); };
+  }
+
   window.LFH_RT = {
-    start, metrics,
+    start, metrics, catchUp,
     // This panel's restaurant id, once learned from /api/rt-config (empty until then).
     // Shared so errlog.js can tag client-error / tap-batch diary lines with the tenant.
     getRid: () => RT_RID,

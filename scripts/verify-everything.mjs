@@ -18,7 +18,7 @@
  */
 import { chromium } from "playwright";
 import { execFile, execFileSync } from "node:child_process";
-import { readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { loginAs, adminCookie, adminHeaders } from "./sweep/login.mjs";
@@ -72,6 +72,42 @@ const only = (() => {
   return { from: a || 1, to: b || a || 9999 };
 })();
 const skipSlow = ARGS.includes("--skip-slow");
+
+// ── ONE RUN AT A TIME (2026-08-01) ────────────────────────────────────────────────────────
+// This suite is the heaviest thing that touches the shared database — 501 phases, reports and
+// floor reads included. On 2026-07-31 TWO of them ran at once (one had been going 47 minutes)
+// and saturated the instance: unrelated queries piled up at the 8-second wait, Supabase's own
+// health API reported db=UNHEALTHY, and the deployed site stopped answering for about forty
+// minutes. Nothing was wrong with the product — the test rig took the database down, and then
+// the owner met an offline screen and thought his restaurant software had broken.
+//
+// So a second run now refuses to start while the first is alive. The lock records the pid, so a
+// crashed run (pid gone) never blocks the next one, and it is removed however this process ends.
+// `--force` exists for the one case that is legitimate: a genuinely stale lock the pid check
+// can't see (a killed container). It has to be typed on purpose.
+const LOCK = join(ROOT, ".claude", "verify-everything.lock");
+const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+if (!ARGS.includes("--force")) {
+  try {
+    const prev = JSON.parse(readFileSync(LOCK, "utf8"));
+    if (prev && prev.pid && prev.pid !== process.pid && alive(prev.pid)) {
+      const mins = Math.round((Date.now() - (prev.at || 0)) / 60000);
+      console.error(
+        `\n⛔ Another full run is already going (pid ${prev.pid}, started ${mins} min ago, base ${prev.base}).\n` +
+        `   Two at once is what took the database down on 2026-07-31 — every panel in every\n` +
+        `   restaurant went dark for ~40 minutes. Wait for it, or stop that one first.\n` +
+        `   (If you are certain it is dead: re-run with --force.)\n`);
+      process.exit(2);
+    }
+  } catch { /* no lock, or unreadable → we take it below */ }
+}
+try {
+  mkdirSync(dirname(LOCK), { recursive: true });
+  writeFileSync(LOCK, JSON.stringify({ pid: process.pid, at: Date.now(), base: BASE }, null, 1));
+  const release = () => { try { const p = JSON.parse(readFileSync(LOCK, "utf8")); if (p.pid === process.pid) rmSync(LOCK, { force: true }); } catch { /* already gone */ } };
+  process.on("exit", release);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { release(); process.exit(130); });
+} catch { /* can't write a lock → run anyway rather than block real work */ }
 
 const env = {};
 for (const l of readFileSync(join(ROOT, ".env.local"), "utf8").split("\n")) {
