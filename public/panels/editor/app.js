@@ -2040,15 +2040,7 @@ function formGeneral(s) {
         <button type="button" class="icon-btn" data-action="rmTax" data-arg="${i}" title="Remove this tax"><i class="fas fa-trash"></i></button>
       </div>`).join("");
     return `
-  <div class="card"><h3>① Manager bill — on screen</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      Bills you SEE in the manager (Live/Today/Previous cards, the bill popup, table
-      details) show ONE merged tax line. Rename its word here — the amount and % always
-      come from the tax rows in the printed-bill section below (their total: <b>${compTotal}%</b>).
-    </p>
-    <div style="max-width:260px">${tf("Tax word on screen", "tax_label", s.tax_label ?? "Tax", { hint: `Shows as “${(s.tax_label || "Tax").trim() || "Tax"} ${compTotal}%”. E.g. Tax, GST, VAT.` })}</div>
-  </div>
-  <div class="card"><h3>② Printed bill — what the customer gets</h3>
+  <div class="card"><h3>① Printed bill — what the customer gets</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       Everything below prints on the customer's bill exactly as typed, and the form is
       pre-filled with what the bill prints <b>right now</b> — change anything and Save.
