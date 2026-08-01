@@ -769,16 +769,27 @@ async function run() {
     // now" to an owner whose Wi-Fi was fine, and then waited forever. Here the device really
     // IS offline, so the device verdict is the correct one and the "it's on us" verdict is a
     // wrong answer, not a harmless one.
+    // Read the VERDICT ELEMENTS, never the whole body. body.textContent includes the text of inline
+    // <script> tags, and this page's diagnose() holds all three verdict strings in its source — so
+    // "does the page say 'this one is on us'?" was true whichever verdict was actually on screen,
+    // and this reported the app blaming the wrong side while it was blaming the right one. Confirmed
+    // by instrumenting the real page: #title "No internet right now", #why "This device is
+    // offline.", and the phrase present ONLY inside the <script>. (2026-08-01)
+    const verdictOf = async () => {
+      const t = (await fresh.locator("#title").textContent().catch(() => "")) || "";
+      const w = (await fresh.locator("#why").textContent().catch(() => "")) || "";
+      return `${t} ${w}`.trim();
+    };
     const verdict = await waitFor(async () => {
-      const t = (await fresh.locator("body").textContent().catch(() => "")) || "";
-      return /This device is offline|can't reach the internet/i.test(t) ? t : null;
+      const v = await verdictOf();
+      return /This device is offline|can't reach the internet/i.test(v) ? v : null;
     }, 10000);
     verdict
       ? ok("and it says WHY it couldn't open (this device is offline)")
-      : bad("the page never named a reason", JSON.stringify(lastResort.slice(0, 120)));
+      : bad("the page never named a reason", JSON.stringify((await verdictOf()).slice(0, 120)));
     verdict && !/this one is on us/i.test(verdict)
       ? ok("and it doesn't blame the app when the device is the one offline")
-      : bad("it blamed the wrong side");
+      : bad("it blamed the wrong side", JSON.stringify(verdict || ""));
     // A page whose only button reloads a page that can't load is a dead end.
     (await fresh.locator("#home").count()) > 0 && (await fresh.locator("#home").isVisible())
       ? ok("and it offers the way out (go to the home screen)")
