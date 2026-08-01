@@ -287,6 +287,14 @@ export const SECTIONS: Section[] = [
                 what: "Which currencies prices can be shown in. Single means prices are only ever in that one and guests get no currency button; Multiple puts the switcher on the menu." },
             ],
           },
+          {
+            // LAST sub-option of Menu (owner, 2026-08-01). It is the only guest-menu look setting
+            // that was still nowhere on this screen — it lived on the old manager Settings page.
+            // settings.bubbles_enabled, read by lib/menu.ts → bubblesEnabled; absent = ON, which is
+            // how every restaurant already behaves, so adding the row changes nothing by itself.
+            id: "bubbles", name: "Bubble effect", def: true, bind: { t: "setting", key: "bubbles_enabled" },
+            what: "The rising bubble particles drifting up the guest menu's background. OFF gives a flat, calm background instead — some restaurants want the menu to sit still.",
+          },
         ],
       },
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
@@ -434,9 +442,9 @@ export const SECTIONS: Section[] = [
         { id: "mgr_tab_ratings", name: "Ratings", def: true, fresh: true,
           bind: { t: "menu", panel: "manager", key: "ratings", grant: "view_ratings" },
           what: "The Ratings tab, where the manager reads what guests said about the food and marks a complaint handled." },
-        { id: "mgr_tab_log", name: "Log", def: true, fresh: true,
+        { id: "mgr_tab_log", name: "Audit", def: true, fresh: true,
           bind: { t: "menu", panel: "manager", key: "log", grant: "view_logs" },
-          what: "The Log tab — the record of who did what in this restaurant. Admin-only actions never appear there." },
+          what: "The Audit tab — what was removed and why, with the full activity log inside it. Admin-only actions never appear there. The stored key stays “log”, which is what the other session deliberately built against; renaming a LABEL must never rename a key." },
         {
           // FOURTH menu. Its reach is a setting, not a separate permission: a real manager's
           // dashboard is clamped to TODAY by the server, and this is what widens it.
