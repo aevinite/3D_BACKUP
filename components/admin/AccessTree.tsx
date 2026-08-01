@@ -79,16 +79,36 @@ function readablePath(nodeId: string): string {
  * A name that has no file is simply skipped by the <img> onError, so a missing picture costs
  * nothing and never shows a broken image.
  */
+// A picture that already shows this setting, filed under another name. Not approximations:
+// edit_menu.png IS the Edit-menu screen and view_logs.png IS the Logs screen — the file names were
+// simply written by hand at different times. Cheaper and more accurate than re-shooting them.
+const IMAGE_ALIAS: Record<string, string> = {
+  menu: "guest-menu",
+  mgr_tab_editor: "edit_menu", own_menu: "edit_menu",
+  mgr_tab_log: "view_logs", own_logs: "view_logs",
+  payroll: "owner-staff",
+};
+
 function helpImages(node: Node, sectionId?: string): string[] {
-  const b = node.bind as { key?: string; flag?: string };
-  const raw = [node.id, b?.key, b?.flag].filter(Boolean) as string[];
-  const spellings = raw.flatMap((r) => [r, r.replace(/_/g, "-"), r.replace(/-/g, "_")]);
+  const names = (n: Node) => {
+    const b = n.bind as { key?: string; flag?: string };
+    const raw = [n.id, b?.key, b?.flag].filter(Boolean) as string[];
+    return [...raw.flatMap((r) => [r, r.replace(/_/g, "-"), r.replace(/-/g, "_")]),
+      ...(IMAGE_ALIAS[n.id] ? [IMAGE_ALIAS[n.id]] : [])];
+  };
+  // Its OWN picture first, then its PARENT'S walking up, then the area shot. A sub-option nearly
+  // always lives on the same screen as the feature above it, so the parent's picture shows the right
+  // place — much better than jumping straight to a generic shot of the whole panel. Most rows that
+  // have no picture of their own are sub-options, and this is what gives them a useful one.
+  const chain = (NODE_PATH[node.id]?.ancestorIds || []).slice().reverse()
+    .map((id) => NODE_BY_ID[id]).filter(Boolean) as Node[];
   const area: Record<string, string> = {
     main: "guest-menu", apps: "manager-menu", mgrMenu: "manager-menu",
     ownMenu: "owner-home", defaults: "manager-menu",
   };
   const fallback = sectionId ? area[sectionId] : undefined;
-  return [...new Set([...spellings, ...(fallback ? [fallback] : [])])].map((n) => `/admin-help/${n}.png`);
+  const all = [...names(node), ...chain.flatMap(names), ...(fallback ? [fallback] : [])];
+  return [...new Set(all)].map((n) => `/admin-help/${n}.png`);
 }
 
 /** "On by default" / "Off by default" / the default value, in words. */
