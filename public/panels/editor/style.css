@@ -2918,3 +2918,58 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 .sx-unmerge-row { display: flex; flex-wrap: wrap; gap: 8px; width: 100%;
   margin-top: 10px; padding-top: 12px; border-top: 1px solid var(--line); }
 .sx-unmerge-row .btn { flex: 1 1 auto; }
+
+/* ── "WHY ARE YOU REMOVING THIS?" + the AUDIT screen (owner, 2026-08-01, mig 251) ───────────
+   The reasons are BUTTONS, not a dropdown: "by mistake" is one tap because it is the honest answer
+   most of the time, and a dropdown would make the truthful choice the slowest one. */
+.rr-modal { max-width: 520px; width: min(94vw, 520px); border-radius: 18px; overflow: hidden; }
+.rr-head { display: flex; gap: 12px; align-items: flex-start; padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--line); background: color-mix(in srgb, #ef4444 7%, var(--panel)); }
+.rr-ico { width: 40px; height: 40px; flex: none; border-radius: 12px; display: grid; place-items: center;
+  font-size: 19px; background: color-mix(in srgb, #ef4444 16%, var(--panel-2));
+  border: 1px solid color-mix(in srgb, #ef4444 38%, var(--line)); }
+.rr-htxt { flex: 1 1 auto; min-width: 0; }
+.rr-htxt h3 { margin: 0 0 3px; font-size: 18px; }
+.rr-htxt p { margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--muted); }
+.rr-body { padding: 16px 18px 4px; }
+.rr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.rr-opt { text-align: left; padding: 11px 12px; border-radius: 12px; border: 1.5px solid var(--line);
+  background: var(--panel-2); color: var(--text); cursor: pointer; line-height: 1.25;
+  transition: border-color .12s ease, background .12s ease, transform .1s ease; }
+.rr-opt b { display: block; font-size: 13.5px; font-weight: 800; }
+.rr-opt small { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
+.rr-opt:hover { border-color: var(--gold); }
+.rr-opt:active { transform: scale(.985); }
+.rr-opt.sel { border-color: var(--gold); background: color-mix(in srgb, var(--gold) 16%, var(--panel-2));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--gold) 20%, transparent); }
+.rr-notelbl { display: block; font-size: 12px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .02em; color: var(--muted); margin: 16px 0 6px; }
+.rr-note { width: 100%; box-sizing: border-box; padding: 12px; border-radius: 12px;
+  border: 1.5px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 15px; }
+.rr-note:focus { outline: 0; border-color: var(--gold); }
+.rr-foot-note { font-size: 11.5px; color: var(--muted); margin: 10px 0 0; line-height: 1.45; }
+.rr-foot { display: flex; justify-content: flex-end; gap: 10px; padding: 14px 18px 18px; }
+.rr-foot .btn { min-width: 116px; padding: 11px 18px; font-weight: 800; }
+.rr-foot .btn.danger:disabled { opacity: .45; cursor: not-allowed; }
+@media (max-width: 480px) { .rr-grid { grid-template-columns: 1fr; } .rr-foot { flex-direction: column-reverse; } .rr-foot .btn { width: 100%; } }
+
+.au-switch { display: flex; gap: 8px; margin: 0 0 14px; flex-wrap: wrap; }
+.au-lead { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 0 0 12px; max-width: 74ch; }
+.au-q { width: 100%; box-sizing: border-box; max-width: 520px; padding: 11px 13px; margin: 0 0 14px;
+  border-radius: 12px; border: 1.5px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 14px; }
+.au-q:focus { outline: 0; border-color: var(--gold); }
+.au-rows { display: flex; flex-direction: column; gap: 8px; }
+.au-row { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 12px;
+  background: var(--panel-2); border: 1px solid var(--line); }
+.au-ico { width: 30px; height: 30px; flex: none; border-radius: 9px; display: grid; place-items: center;
+  font-size: 15px; background: color-mix(in srgb, #ef4444 12%, transparent);
+  border: 1px solid color-mix(in srgb, #ef4444 30%, var(--line)); }
+.au-mid { flex: 1 1 auto; min-width: 0; }
+.au-mid b { display: block; font-size: 13.5px; }
+.au-bits { display: block; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.au-reason { display: block; font-size: 12.5px; font-weight: 700; margin-top: 2px;
+  color: color-mix(in srgb, var(--gold) 70%, var(--text)); }
+.au-who { flex: none; text-align: right; display: flex; flex-direction: column; gap: 1px; }
+.au-who b { font-size: 12.5px; }
+.au-who small { font-size: 11px; color: var(--muted); }
+@media (max-width: 560px) { .au-row { flex-wrap: wrap; } .au-who { text-align: left; flex-direction: row; gap: 8px; } }

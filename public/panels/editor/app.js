@@ -2980,8 +2980,13 @@ async function setOrderStatus(id, status) {
 // That is also the honest record — the void stays on the books with its reason, instead of
 // an unpaid bill quietly disappearing behind a closed table.
 async function cancelOrder(id) {
-  if (!(await confirmDialog("Cancel this order? It will be voided — no charge to the guest.", "Cancel order"))) return;
+  // A cancelled ticket must say WHY (mig 251). The reason ask replaces the old yes/no confirm — it
+  // is a confirmation in itself, and one tap fewer than asking twice.
+  const o0 = (state.data.orders || []).find((x) => x.id === id);
+  const reason = await askRemovalReason(`KOT #${o0 && o0.kot_no != null ? o0.kot_no : "—"}${o0 && o0.table_number ? ` · Table ${o0.table_number}` : ""} — it will be voided, no charge to the guest.`);
+  if (!reason) return;
   await setOrderStatus(id, "cancelled");
+  await recordRemoval("order_cancelled", reason, { order_id: id });
   const o = (state.data.orders || []).find((x) => x.id === id);
   const t = (o && o.table_number ? o.table_number : "").trim();
   if (!t) return;
@@ -3006,9 +3011,15 @@ async function deleteOrders(ids, all = false, opts = {}) {
   // Deleting a bill is permanent — REQUIRE a reason (owner 2026-07-23), with quick chips.
   // This prompt IS the confirmation (the callers no longer show a separate confirm dialog).
   // A programmatic caller can pass opts.reason to skip the prompt.
-  const reason = (opts.reason
-    || (await promptDialog(`Delete ${gone.length > 1 ? gone.length + " orders" : "this order"} permanently? Reason?`,
-        { confirmLabel: "Delete", placeholder: "e.g. duplicate, mis-tap", required: true, danger: true, presets: REASONS_DELETE })) || "").trim();
+  // ONE removal dialog for the whole panel (mig 251) — the same six one-tap reasons here as on a
+  // cancelled ticket or a dish taken off the menu, so the audit reads consistently and nobody has to
+  // type when "By mistake" is the truth. A programmatic caller can still pass opts.reason.
+  let rr = null;
+  if (!opts.reason) {
+    rr = await askRemovalReason(`${gone.length > 1 ? gone.length + " bills" : "This bill"} — permanent, kept in the recycle bin for 90 days.`);
+    if (!rr) return;
+  }
+  const reason = (opts.reason || [(REMOVAL_REASONS.find((x) => x[0] === rr.code) || [, rr.code])[1].replace(/^\S+\s/, ""), rr.note].filter(Boolean).join(" — ")).trim();
   if (!reason) { toast("Delete cancelled — a reason is required.", "err"); return; }
   const goneSet = new Set(gone);
   state.data.orders = before.filter((o) => !goneSet.has(o.id));
@@ -3023,6 +3034,7 @@ async function deleteOrders(ids, all = false, opts = {}) {
     else if (ids && ids.length === 1) r = await api("DELETE", "/orders/" + ids[0] + "?reason=" + encodeURIComponent(reason));
     else r = await api("POST", "/orders/delete", { ids, reason });
     const kept = r && r.kept ? r.kept : 0;
+    if (rr) for (const id of gone) await recordRemoval("order_deleted", rr, { order_id: id });
     toast(kept
       ? `Cleared ${gone.length} · kept ${kept} paid bill${kept > 1 ? "s" : ""} as records`
       : (all ? "All cleared" : "Order(s) deleted"), "ok");
@@ -4513,8 +4525,13 @@ function renderEditor() {
     return;
   }
   if (state.tab === "log") {
-    ed.innerHTML = logHtml();
-    bindLog();
+    ed.innerHTML = `<div class="au-switch"><button class="btn ${state.logView === "audit" ? "" : "primary"}" data-logview="log">Activity log</button>`
+      + `<button class="btn ${state.logView === "audit" ? "primary" : ""}" data-logview="audit">🗑 Audit · removals</button></div>`
+      + (state.logView === "audit" ? auditHtml() : logHtml());
+    ed.querySelectorAll("[data-logview]").forEach((b) => (b.onclick = () => {
+      state.logView = b.dataset.logview; renderEditor(); if (state.logView === "audit") loadAudit();
+    }));
+    if (state.logView === "audit") { if (!state.audit) loadAudit(); bindAudit(); } else bindLog();
     return;
   }
   if (state.tab === "features") {
@@ -5604,6 +5621,119 @@ function flipOrderItems(o, from, to) {
 // when it has a summary entry whose state is anything but 'free' or 'req' (those two mean
 // no open session). The board is no longer fetched whole, so the bulk actions read this.
 const CHAIR_SVG = `<svg class="ft-chair" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3.5a1 1 0 0 1 1 1V11h10V4.5a1 1 0 1 1 2 0V12a1 1 0 0 1-1 1h-1.2l.7 3.3a1 1 0 0 1-2 .4L14.8 13H9.2l-.7 3.7a1 1 0 1 1-2-.4L7.2 13H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/></svg>`;
+
+// ── AUDIT: every removal, searchable by whatever you remember ──────────────────────────────
+// He asked to be able to find one fast — "from which bill, which item was related, which KOT was
+// related … who did it". So the search box matches ALL of it at once: a KOT number, a bill number, a
+// table, a dish name, a person's username, or the reason. One flat list, newest first, no filters to
+// learn. Read is scoped + capped by the server (GET /audit).
+const AUDIT_KIND = {
+  order_cancelled: ["✕", "KOT cancelled"], order_deleted: ["🗑", "Bill deleted"],
+  dish_removed: ["🍽", "Dish removed"], menu_item_deleted: ["📕", "Menu item deleted"],
+  invoice_voided: ["↩", "Invoice voided"],
+};
+async function loadAudit() {
+  try { state.audit = await api("GET", "/audit?limit=200"); }
+  catch (e) { state.audit = { error: e.message }; }
+  if (state.tab === "log" && state.logView === "audit") renderEditor();
+}
+function auditHtml() {
+  const rows = Array.isArray(state.audit) ? state.audit : null;
+  if (!rows) return `<div class="ed-head"><h2>Audit · removals</h2></div><div class="empty">${state.audit && state.audit.error ? esc("Couldn't load: " + state.audit.error) : "Loading…"}</div>`;
+  const q = (state.auditQ || "").toLowerCase().trim();
+  const match = (r) => !q || [r.kot_no && "kot " + r.kot_no, r.kot_no, r.bill_no && "bill " + r.bill_no, r.bill_no,
+    r.table_number && "table " + r.table_number, r.item_title, r.actor, r.reason_note, r.reason_code,
+    (AUDIT_KIND[r.kind] || [])[1]].filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
+  const list = rows.filter(match);
+  const when = (t) => { const d = new Date(t); return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
+  const reasonTxt = (r) => {
+    const preset = REMOVAL_REASONS.find((x) => x[0] === r.reason_code);
+    return [preset ? preset[1] : r.reason_code, r.reason_note].filter(Boolean).join(" — ") || "no reason recorded";
+  };
+  return `<div class="ed-head"><h2>Audit · removals <span class="sub">· ${rows.length}</span></h2>
+      <div style="display:flex;gap:8px"><button class="btn" id="auRefresh">↻ Refresh</button></div></div>
+    <p class="au-lead">Everything taken out of the system, newest first — a cancelled ticket, a deleted bill, a dish off an order or off the menu — with the reason and the person. Every role is recorded, managers included.</p>
+    <input id="auQ" class="au-q" type="search" placeholder="Search a KOT, bill, table, dish, person or reason…" value="${esc(state.auditQ || "")}">
+    ${list.length ? `<div class="au-rows">${list.map((r) => {
+      const [ico, label] = AUDIT_KIND[r.kind] || ["•", r.kind];
+      const bits = [r.table_number ? "Table " + esc(r.table_number) : "", r.kot_no != null ? "KOT #" + esc(r.kot_no) : "",
+        r.bill_no != null ? "Bill #" + esc(r.bill_no) : "", r.invoice_no ? "Invoice " + esc(r.invoice_no) : "",
+        r.item_title ? esc(r.item_title) + (r.qty > 1 ? " ×" + esc(r.qty) : "") : "",
+        r.amount != null ? inr(parseFloat(r.amount) || 0) : ""].filter(Boolean).join(" · ");
+      return `<div class="au-row">
+        <span class="au-ico" title="${esc(label)}">${ico}</span>
+        <div class="au-mid"><b>${esc(label)}</b><span class="au-bits">${bits || "—"}</span>
+          <span class="au-reason">${esc(reasonTxt(r))}</span></div>
+        <div class="au-who"><b>${esc(r.actor || "—")}</b><small>${esc(r.actor_role || "")}</small><small>${esc(when(r.at))}</small></div>
+      </div>`;
+    }).join("")}</div>`
+    : `<div class="empty">${q ? "Nothing matches that." : "Nothing has been removed yet — this list fills itself as it happens."}</div>`}`;
+}
+function bindAudit() {
+  const q = document.getElementById("auQ");
+  if (q) q.oninput = () => { state.auditQ = q.value; const at = q.selectionStart; renderEditor();
+    const n = document.getElementById("auQ"); if (n) { n.focus(); try { n.setSelectionRange(at, at); } catch {} } };
+  const r = document.getElementById("auRefresh");
+  if (r) r.onclick = () => { state.audit = null; renderEditor(); loadAudit(); };
+}
+
+// ── WHY WAS THIS REMOVED? (owner, 2026-08-01, mig 251) ─────────────────────────────────────
+// "every KOT which has been deleted, every item, it's been deleted from the menu … it should ask for
+//  the reason. And there should be a quick toggle where you just click 'by mistake' … and all that
+//  record will be in the audit section … even if it is done by manager."
+// One dialog for every removal in the panel: six one-tap reasons (By mistake first, because it is by
+// far the most common and he asked for it by name), a note box for anything else, and no way to
+// proceed without choosing. Returns { code, note } or null when cancelled.
+const REMOVAL_REASONS = [
+  ["mistake", "🙃 By mistake", "Tapped the wrong thing"],
+  ["guest_changed", "🙋 Guest changed their mind", ""],
+  ["wrong_table", "⇄ Wrong table", ""],
+  ["sold_out", "🚫 Not available / sold out", ""],
+  ["kitchen_error", "👨‍🍳 Kitchen error", ""],
+  ["other", "✏️ Other reason", "Type it below"],
+];
+function askRemovalReason(what) {
+  return new Promise((resolve) => {
+    const wrap = el(`<div class="sx-modal-overlay rr-overlay"><div class="sx-modal rr-modal">
+      <div class="rr-head"><div class="rr-ico">🗑</div><div class="rr-htxt">
+        <h3>Why are you removing this?</h3><p>${esc(what || "")}</p></div>
+        <button class="tbl-modal-close rr-x" aria-label="Close">✕</button></div>
+      <div class="rr-body"><div class="rr-grid">
+        ${REMOVAL_REASONS.map(([code, label, hint]) => `<button type="button" class="rr-opt" data-code="${code}">
+          <b>${esc(label)}</b>${hint ? `<small>${esc(hint)}</small>` : ""}</button>`).join("")}
+      </div>
+      <label class="rr-notelbl" for="rrNote">Anything to add <span class="muted">(optional — required for “Other”)</span></label>
+      <input id="rrNote" class="rr-note" type="text" maxlength="200" placeholder="e.g. guest allergic, printed twice…">
+      <p class="rr-foot-note">This is recorded with your name in <b>Audit</b> — for every role, managers included.</p>
+      </div>
+      <div class="rr-foot"><button type="button" class="btn rr-cancel">Keep it</button>
+        <button type="button" class="btn danger rr-go" disabled>Remove</button></div>
+    </div></div>`);
+    document.body.appendChild(wrap);
+    const note = wrap.querySelector(".rr-note"), go = wrap.querySelector(".rr-go");
+    let code = null;
+    const sync = () => { go.disabled = !code || (code === "other" && !note.value.trim()); };
+    wrap.querySelectorAll(".rr-opt").forEach((b) => (b.onclick = () => {
+      code = b.dataset.code;
+      wrap.querySelectorAll(".rr-opt").forEach((x) => x.classList.toggle("sel", x === b));
+      sync(); if (code === "other") note.focus();
+    }));
+    note.addEventListener("input", sync);
+    const off = (typeof LFH_BACK !== "undefined" && LFH_BACK) ? LFH_BACK.layer("removal-reason", () => done(null)) : null;
+    function done(v) { if (off) off(); wrap.remove(); resolve(v); }
+    wrap.querySelector(".rr-cancel").onclick = () => done(null);
+    wrap.querySelector(".rr-x").onclick = () => done(null);
+    wrap.onclick = (e) => { if (e.target === wrap) done(null); };
+    go.onclick = () => { if (go.disabled) return; done({ code, note: note.value.trim() }); };
+    setTimeout(() => wrap.querySelector(".rr-opt").focus(), 50);
+  });
+}
+// Records it. Best-effort on purpose: the removal itself has already happened and been logged, so a
+// failure here must never look like the removal failed — but it is reported, never swallowed silently.
+async function recordRemoval(kind, reason, extra = {}) {
+  try { await api("POST", "/audit", { kind, reason_code: reason && reason.code, reason_note: reason && reason.note, ...extra }); }
+  catch (e) { toast("Removed, but the audit record failed to save: " + e.message, "err"); }
+}
 
 // ── MERGED TABLES (mig 249) ────────────────────────────────────────────────────────────────
 // The floor read carries the live joins (state.summary.merges: parent_table + child_table). Two
