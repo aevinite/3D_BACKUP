@@ -15,50 +15,17 @@
  *     instead of a switch that would save and do nothing.
  * Both live in staff_users.permissions and are written through /api/owner/staff. */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { SECTIONS, nodeValue, type Node, type TreeState } from "@/lib/accessTree";
+import { nodeValue, type TreeState } from "@/lib/accessTree";
+// The rows each role has now live in lib/staffCaps, shared with the person's PROFILE panel
+// (components/admin/StaffProfile) and with the admin write route. One list, three screens —
+// this used to be a private copy here, and a second copy would be free to drift.
+import { capsForRole, type Cap } from "@/lib/staffCaps";
 
 type Staff = { id: string; name: string | null; username: string; role: string; active?: boolean; permissions?: Record<string, string> };
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager", tablet: "Waiter", kitchen: "Kitchen" };
 const ROLE_COLOR: Record<string, string> = { owner: "#b491f0", manager: "#d4a574", tablet: "#60a5fa", kitchen: "#7ec88a" };
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, tablet: 2, kitchen: 3 };
-
-// The rows each role can be given or denied, lifted straight out of the tree so this list is
-// never a second, drifting copy.
-//
-// A MANAGER's rows moved (owner, 2026-08-01): they live in Manager's menu now — the three menu
-// rows themselves, plus everything under "What a manager may do" — while the owner and the
-// waiter still have folders in "Default set for user". This walks whichever section holds them
-// rather than naming one folder, so a row moving again can't silently empty this tab. It used to
-// name "d_manager" outright, and the moment that folder was dissolved every manager's Per-person
-// list would have rendered EMPTY with no error.
-type Cap = { node: Node; key: string; pin: boolean };
-function capsForRole(role: string): Cap[] {
-  const roots: Node[] =
-    role === "manager"
-      ? (SECTIONS.find((s) => s.id === "mgrMenu")?.children ?? [])
-      : (SECTIONS.find((s) => s.id === "defaults")?.children.find((c) => c.id === (role === "tablet" ? "d_waiter" : ""))?.children ?? []);
-
-  const out: Cap[] = [];
-  const seen = new Set<string>();
-  const walk = (nodes: Node[]) => {
-    for (const n of nodes) {
-      // A manager reads the BARE power flag (managerCan), a waiter the tablet_* column
-      // (tabletPerm) — writing an override under the wrong one is stored-but-dead.
-      if (role === "manager" && (n.bind.t === "grant" || n.bind.t === "menu")) {
-        const key = n.bind.t === "grant" ? n.bind.flag : n.bind.grant;
-        if (!seen.has(key)) { seen.add(key); out.push({ node: n, key, pin: false }); }
-      } else if (role === "tablet" && n.bind.t === "tablet") {
-        if (!seen.has(n.bind.key)) { seen.add(n.bind.key); out.push({ node: n, key: n.bind.key, pin: !!n.pin }); }
-      }
-      // Only descend through GROUPS ("What a manager may do", a menu's own parts). A row's
-      // sub-options are not separate permissions and must not become their own toggles here.
-      if (n.children?.length && n.bind.t === "none") walk(n.children);
-    }
-  };
-  walk(roots);
-  return out;
-}
 
 const OVERRIDE_STATES = (pin: boolean) =>
   pin ? ["default", "on", "pin", "off"] : ["default", "on", "off"];
@@ -164,7 +131,10 @@ const countOverrides = (u: Staff) => {
 };
 
 function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null; onSet: (u: Staff, key: string, v: string) => void }) {
-  const caps = capsForRole(person.role);
+  // Only the rows that can genuinely be set for ONE person. An owner's rows come back too
+  // (their panel's pages), but those are a restaurant setting — offering them here would be a
+  // switch that saves nothing. They are shown, read-only, on the owner's profile instead.
+  const caps = capsForRole(person.role).filter((c) => c.perPerson);
   const roleName = ROLE_LABEL[person.role] || person.role;
 
   if (!caps.length) {

@@ -14,6 +14,7 @@ import { errorHeadline } from "@/lib/errorSignature";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { CopyButton } from "@/components/admin/CopyButton";
+import StaffProfile from "@/components/admin/StaffProfile";
 
 // primaryHolder / primaryBinned describe WHO holds the primary slot when it isn't this
 // owner — so a "Co-owner" badge can name the reason instead of looking like a bug (a
@@ -555,6 +556,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
   const [showAssign, setShowAssign] = useState(false);
   const [showRename, setShowRename] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmCfg | null>(null);
   const attachable = rests.filter((r) => !owner.restaurants.some((x) => x.id === r.id));
 
@@ -643,7 +645,16 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
             · created {created ? new Date(created).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · seen {seen(owner.lastSeenAt)}
           </div>
         </div>
+        {/* An owner fills in the SAME profile as everybody else (owner, 2026-08-01) — one
+            component for every person in the product. Ownership itself (which restaurants,
+            who is primary, suspend, delete) stays on this page; the profile holds the person. */}
+        <button style={btn("#3b82f6")} onClick={() => setProfileOpen(true)}>
+          <i className="fas fa-id-card" style={{ marginRight: 7, fontSize: 11 }} aria-hidden="true" />Full profile
+        </button>
       </div>
+      {profileOpen ? (
+        <StaffProfile userId={owner.id} onClose={() => setProfileOpen(false)} onChanged={onChanged} />
+      ) : null}
 
       <div style={{ padding: 18, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
         {mErr ? <div style={{ ...card, padding: 12, borderColor: "#7f1d1d", color: "#fca5a5" }}>{mErr}</div> : null}
