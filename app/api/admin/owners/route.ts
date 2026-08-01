@@ -8,6 +8,9 @@
 //   PATCH → { owner_id, action: "attach"|"detach"|"set_primary" (+restaurant_id) |
 //             "reset_password" (+password?) | "set_active" (+active) | "rename" (+name) }
 //   POST  → also { action:"restore_owner"|"purge_owner", owner_id } for the recycle bin.
+//           restore_owner answers 409 + { conflict } when the binned name was taken
+//           while it sat in the bin; re-send with resolve:{ mode:"rename_restored"|
+//           "rename_existing", name } to say who keeps the name (mig 245).
 //   GET ?id=<owner_id>  → one owner's ACTIVITY feed (staff_actions rows that name
 //           them — their own logins/actions + admin actions done TO them).
 //   GET ?deleted=1      → the RECYCLE BIN: owners that were soft-deleted (mig 208),
@@ -22,7 +25,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName } from "@/lib/userAuth";
 import { logAction, redactMoney } from "@/lib/oplog";
-import { resolveOwnerHomeRid, loginNameTaken } from "@/lib/ownerHome";
+import { resolveOwnerHomeRid, loginNameTaken, liveHoldersOfName } from "@/lib/ownerHome";
 
 export const dynamic = "force-dynamic";
 const RETENTION_DAYS = 90; // a binned owner is restorable for this long, then purgeable (matches restaurants)
@@ -196,18 +199,82 @@ export async function POST(req: NextRequest) {
   // ── restore_owner — bring a binned owner back. They return SUSPENDED (active
   // stays false, exactly as they were before binning) so they can't silently sign
   // in; the admin flips Restore in the Owners list to reactivate. Their restaurant
-  // links were kept intact, so ownership comes straight back. Clears bin fields. ──
+  // links were kept intact, so ownership comes straight back. Clears bin fields.
+  //
+  // NAME CLASH (owner, 2026-08-01): a binned account no longer reserves its name
+  // (mig 245 + loginNameTaken), so by the time it's restored someone else may be
+  // called "rishi" too. Two live logins can't share a name, so instead of failing —
+  // or silently renaming somebody — this answers 409 with a `conflict` block and the
+  // admin picks WHO gets renamed, then re-sends with `resolve`:
+  //   resolve { mode:"rename_restored", name }  → the returning owner takes a new name
+  //   resolve { mode:"rename_existing", name }  → the live owner is renamed, freeing it
+  // Same first-save-wins spirit as the rest of the app: the person who took the name
+  // while it was free keeps it unless the admin deliberately says otherwise. ──────
   if (action === "restore_owner") {
     const ownerId = String(body?.owner_id || "");
     if (!ownerId) return bad("Missing owner_id.");
-    const o = (await sb.from("staff_users").select("id, username, name, role, deleted_at").eq("id", ownerId).limit(1)).data?.[0];
+    const o = (await sb.from("staff_users").select("id, username, name, role, deleted_at, restaurant_id").eq("id", ownerId).limit(1)).data?.[0];
     if (!o || o.role !== "owner") return bad("That user isn't an owner.", 404);
     if (!o.deleted_at) return bad("That owner isn't in the recycle bin.", 409);
-    const { error } = await sb.from("staff_users")
-      .update({ deleted_at: null, deleted_by: null, delete_reason: null }).eq("id", ownerId);
-    if (error) return bad(error.message, 500);
-    await logAction("admin", "owner_restore_from_bin", { actor: "admin", restaurant_id: null, detail: `restored owner "${o.name || o.username}" from recycle bin (still suspended) · owner ${ownerId}` });
-    return ok({ ok: true, restored: true });
+
+    const resolve = body?.resolve && typeof body.resolve === "object" ? body.resolve : null;
+    const mode = resolve ? String(resolve.mode || "") : "";
+    // The restore's OWN name — a rename_restored changes it before we look for clashes.
+    let restoredDisplay = (o.name as string) || (o.username as string);
+    let restoredKey = o.username as string;
+    if (mode === "rename_restored") {
+      restoredDisplay = String(resolve.name ?? "").trim().slice(0, 80);
+      restoredKey = normalizeLoginName(restoredDisplay);
+      if (restoredKey.length < 2) return bad("The new name must be at least 2 characters.");
+    }
+
+    // Who would this name collide with, LIVE? Only where a name actually has to be
+    // unique: the same tenant anchor (the DB rule, mig 245) or another OWNER (all
+    // owners share one home namespace, and the Owners page treats a name as a person).
+    const holders = (await liveHoldersOfName(restoredKey))
+      .filter((h) => h.id !== ownerId && (h.role === "owner" || h.restaurant_id === o.restaurant_id));
+    const blocker = holders[0] || null;
+
+    if (blocker && mode !== "rename_existing") {
+      // Nothing has changed yet — the admin decides, then re-sends.
+      return NextResponse.json({
+        error: `The name “${restoredDisplay}” now belongs to someone else — choose which one keeps it.`,
+        conflict: {
+          username: restoredKey,
+          restored: { id: o.id, name: (o.name as string) || (o.username as string), username: o.username },
+          existing: {
+            id: blocker.id, name: blocker.name || blocker.username, username: blocker.username,
+            role: blocker.role, active: blocker.active,
+          },
+          // Renaming the LIVE side from here is only offered for another owner —
+          // a restaurant's staff login isn't this page's to rename.
+          canRenameExisting: blocker.role === "owner",
+        },
+      }, { status: 409 });
+    }
+
+    if (mode === "rename_existing") {
+      if (!blocker) return bad("That name is already free — press Restore again.", 409);
+      if (blocker.role !== "owner") return bad("That name belongs to a restaurant's staff login — rename the returning owner instead.", 409);
+      const newDisplay = String(resolve.name ?? "").trim().slice(0, 80);
+      const newKey = normalizeLoginName(newDisplay);
+      if (newKey.length < 2) return bad("The new name must be at least 2 characters.");
+      if (newKey === restoredKey) return bad("Pick a DIFFERENT name for the current owner — that's the one being freed up.");
+      if (await loginNameTaken(newKey)) return bad("That new name is taken too — pick another.", 409);
+      const ren = await sb.from("staff_users").update({ name: newDisplay, username: newKey }).eq("id", blocker.id);
+      if (ren.error) return bad(ren.error.message, 500);
+      await logAction("admin", "owner_rename", { actor: "admin", restaurant_id: null, detail: `renamed owner "${blocker.name || blocker.username}" → "${newDisplay}" to free the name for a restore · owner ${blocker.id}` });
+    }
+
+    // 23505 = the unique index caught a clash we didn't (two admins at once) — say so
+    // in plain words instead of leaking the constraint name.
+    const patch: Record<string, unknown> = { deleted_at: null, deleted_by: null, delete_reason: null };
+    if (mode === "rename_restored") { patch.name = restoredDisplay; patch.username = restoredKey; }
+    const { error } = await sb.from("staff_users").update(patch).eq("id", ownerId);
+    if (error) return bad(error.code === "23505" ? "Someone just took that name — pick another." : error.message, error.code === "23505" ? 409 : 500);
+    const renamedNote = mode === "rename_restored" ? ` as "${restoredDisplay}"` : mode === "rename_existing" ? " (the other owner was renamed to free the name)" : "";
+    await logAction("admin", "owner_restore_from_bin", { actor: "admin", restaurant_id: null, detail: `restored owner "${o.name || o.username}"${renamedNote} from recycle bin (still suspended) · owner ${ownerId}` });
+    return ok({ ok: true, restored: true, name: restoredDisplay });
   }
 
   // ── purge_owner — PERMANENT, irreversible erase of a binned owner. Allowed ONLY

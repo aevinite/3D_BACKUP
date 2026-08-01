@@ -436,7 +436,8 @@ export async function POST(req: NextRequest) {
   if (!assignableFor(s.actor).includes(role)) return bad(s.actor === "manager" ? "Managers can only add kitchen or tablet logins." : "Pick a valid role (manager, kitchen, or tablet).");
   if (!s.restaurants.some((r) => r.id === rid)) return bad("That restaurant isn't yours to staff.", 403);
   // Names are unique PER restaurant (mig 091) — only clash-check within this one.
-  const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", rid).limit(1)).data?.[0];
+  // Binned rows don't count: since mig 245 a recycle-bin name is free to re-use.
+  const dup = (await sb.from("staff_users").select("id").eq("username", key).eq("restaurant_id", rid).is("deleted_at", null).limit(1)).data?.[0];
   if (dup) return bad("That username is taken at this restaurant — pick another.", 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
@@ -691,7 +692,7 @@ export async function PATCH(req: NextRequest) {
       const display = String(body.name || "").trim().slice(0, 80);
       const nkey = normalizeLoginName(display);
       if (realCharCount(nkey) < 2) return bad("Username must be at least 2 characters.");
-      const clash = (await sb.from("staff_users").select("id").eq("username", nkey).eq("restaurant_id", u.restaurant_id).neq("id", id).limit(1)).data?.[0];
+      const clash = (await sb.from("staff_users").select("id").eq("username", nkey).eq("restaurant_id", u.restaurant_id).neq("id", id).is("deleted_at", null).limit(1)).data?.[0];
       if (clash) return bad("That username is taken at this restaurant.", 409);
       patch.name = display; patch.username = nkey;
     }

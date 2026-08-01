@@ -136,7 +136,10 @@ export async function loginUser(
   // several restaurants. Fetch every active match and pick the one whose PASSWORD
   // verifies — so the login form needs no restaurant field. (The only ambiguity is
   // two restaurants sharing BOTH the same name AND password; then the first wins.)
-  const candRes = await sb.from("staff_users").select("*").eq("username", uname).eq("active", true);
+  // `deleted_at IS NULL`: a recycle-bin account is not a login. Since mig 245 a binned
+  // row's name can be re-used by a LIVE account, so without this filter a lookup could
+  // match the dead row (and its old password) instead of the real one.
+  const candRes = await sb.from("staff_users").select("*").eq("username", uname).eq("active", true).is("deleted_at", null);
   // A FAILED lookup is a server problem, not wrong credentials — don't gaslight the
   // waiter into resetting a password during a network blip (stress test 2026-07-03).
   if (candRes.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true, reason: "transient" };
@@ -330,7 +333,7 @@ export async function describeLoginTarget(username: string, restaurantId?: strin
     if (!uname) return null;
     const { data, error } = await sb.from("staff_users")
       .select("id, role, name, username, restaurant_id")
-      .eq("username", uname).eq("active", true).limit(5);
+      .eq("username", uname).eq("active", true).is("deleted_at", null).limit(5);
     if (error) return null;
     const rows = (data || []) as { id: string; role: string; name: string | null; restaurant_id: string | null }[];
     // A name nobody has is worth SAYING — it means someone is typing a name that doesn't exist

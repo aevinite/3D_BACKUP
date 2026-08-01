@@ -57,15 +57,33 @@ export async function resolveOwnerHomeRid(
 }
 
 /**
- * Is this login name already used? The unique index on `staff_users` is
- * `lower(username)` and GLOBAL (mig 054, deliberately left un-scoped by mig 082), so
- * the check has to be global too — the old per-restaurant check missed clashes with
- * other restaurants' staff and let Postgres throw a raw 23505 at the admin instead.
- * `key` is always a normalizeLoginName() result (lower-cased), and so is every stored
- * username, so an exact match is enough — and unlike ilike it can't be turned into a
- * wildcard by a `%`/`_` in the name. The unique index stays the real backstop.
+ * Is this login name already used by a LIVE account? The check is global — the old
+ * per-restaurant check missed clashes with other restaurants' staff and let Postgres
+ * throw a raw 23505 at the admin instead. `key` is always a normalizeLoginName()
+ * result (lower-cased), and so is every stored username, so an exact match is enough —
+ * and unlike ilike it can't be turned into a wildcard by a `%`/`_` in the name.
+ *
+ * RECYCLE-BIN RULE (owner, 2026-08-01): a binned account is DELETED as far as names go,
+ * so `deleted_at IS NULL` — its name is free to take. Migration 245 made the unique
+ * index partial to match, so the DB agrees instead of throwing behind our back. The
+ * name only comes up again at RESTORE time, which asks the admin who gets renamed
+ * (app/api/admin/owners → restore_owner).
  */
 export async function loginNameTaken(key: string): Promise<boolean> {
-  const dup = await sb.from("staff_users").select("id").eq("username", key).limit(1);
+  const dup = await sb.from("staff_users").select("id").eq("username", key).is("deleted_at", null).limit(1);
   return !!dup.data?.[0];
+}
+
+/**
+ * Who LIVE holds this login name (used to explain a restore clash). Returns the rows
+ * a restore would collide with, newest anchor info included so the admin can tell the
+ * accounts apart. Empty array = the name is free.
+ */
+export async function liveHoldersOfName(key: string): Promise<
+  { id: string; name: string | null; username: string; role: string; active: boolean; restaurant_id: string | null }[]
+> {
+  const q = await sb.from("staff_users")
+    .select("id, name, username, role, active, restaurant_id")
+    .eq("username", key).is("deleted_at", null).limit(10);
+  return (q.data || []) as { id: string; name: string | null; username: string; role: string; active: boolean; restaurant_id: string | null }[];
 }
