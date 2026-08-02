@@ -15,6 +15,11 @@
 //        update the instant its order lands.
 //     3. THE WINDOW MUST STAY SMALL. Widening 1.5s to 30s "for performance" would make the
 //        floor visibly stale.
+//     4. THE SHARED RESULT IS READ-ONLY. Every caller inside the window holds the SAME
+//        object, so editing it edits what the next device is handed. This one bit us for
+//        real (2026-08-02): the tablet narrowed the floor to a waiter's section IN PLACE,
+//        and for 1.5s afterwards the MANAGER's floor — and every other waiter's — came back
+//        with that one waiter's three tiles out of three hundred, the rest looking free.
 //
 //   Static checks, no server or database needed. Run against another checkout with
 //   --repo <path> (used to check AV live without adding a file to that repo).
@@ -89,13 +94,44 @@ for (const r of ROUTES) {
   }
 }
 
+// PROPERTY 4 — a restricted reader must narrow a COPY, never the shared object.
+// narrowSummary() mutates what it is given, so the value handed to it may not be the one
+// sharedFloorSummary returned. The tablet is the only narrowing caller today; if another
+// panel starts narrowing, add it here.
+{
+  const src = read("app/api/tablet/[...path]/route.ts");
+  if (!src) check("waiter route found", false);
+  else {
+    const narrowed = /narrowSummary\(\s*([A-Za-z_$][\w$]*)/.exec(src);
+    const target = narrowed ? narrowed[1] : "";
+    // What is that variable assigned from? A copy (structuredClone / a spread) is safe;
+    // the raw shared result is not.
+    const assign = target
+      ? new RegExp(`const\\s+${target}\\s*=([^;]+);`).exec(src)
+      : null;
+    const rhs = assign ? assign[1] : "";
+    const copies = /structuredClone|JSON\.parse\(JSON\.stringify|\{\s*\.\.\./.test(rhs);
+    check("waiter: the narrowed floor is a COPY, not the shared object", !!target && copies,
+      copies ? `${target} = ${rhs.trim().slice(0, 60)}` :
+        "narrowing the shared snapshot in place serves ONE waiter's section to every other device for 1.5s");
+  }
+}
+// And the helper must say so, so the next person reads it before mutating.
+{
+  const mod = read("lib/floorSummary.ts") || "";
+  check("lib/floorSummary.ts warns that its result is shared by reference",
+    /READ-ONLY|read-only|BY REFERENCE|by reference/.test(mod),
+    "the warning is the only thing standing between a future caller and the same bug");
+}
+
 const bad = results.filter((r) => !r.pass);
 console.log(`\n${results.length - bad.length}/${results.length} checks passed`);
 if (bad.length) {
   console.log("\nWhat to do:");
   console.log("  · a missing invalidateFloor(rid) → add it right after that handler resolves `rid`");
   console.log("  · a shared ?table= refetch → keep the `tbl ? …live… : …shared…` shape");
-  console.log("  · a widened window → the floor is a live screen; keep it ~1.5s\n");
+  console.log("  · a widened window → the floor is a live screen; keep it ~1.5s");
+  console.log("  · narrowing in place → `const summary = limit ? structuredClone(shared) : shared;`\n");
   process.exit(1);
 }
 console.log("✅ PASS — the shared floor read can't hand a device a stale tile\n");
