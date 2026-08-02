@@ -108,8 +108,8 @@ const SUBTABS: Record<RKey, SubTab[]> = {
   // already fetched, so switching between them is instant and costs nothing.
   daysummary: [
     { key: "summary", label: "Summary", icon: "fa-file-invoice-dollar", body: "daysummary" },
-    { key: "earnings", label: "Earnings", icon: "fa-arrow-down-to-line", body: "earnings" },
-    { key: "expenses", label: "Expenses", icon: "fa-arrow-up-from-bracket", body: "expenses" },
+    { key: "income", label: "Income", icon: "fa-arrow-down-to-line", body: "earnings" },
+    { key: "expense", label: "Expense", icon: "fa-arrow-up-from-bracket", body: "expenses" },
   ],
   sales: [
     { key: "revenue", label: "Revenue", icon: "fa-chart-line", body: "sales" },
@@ -983,11 +983,9 @@ function InHandLadder({ ih, onOpenExpenses }: { ih: InHand; onOpenExpenses: () =
       </div>
       {tips > 0 && (
         <p className="rs-note">
-          {inr(tips)} of tips also came in. It is not counted above, because tips are
-          normally the staff&apos;s money, not yours. Tell me and I&apos;ll fold it in.
+          {inr(tips)} of tips also came in — kept out of this, because tips are normally the staff&apos;s.
         </p>
       )}
-      <InHandGaps ih={ih} />
     </Panel>
   );
 }
@@ -1379,55 +1377,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     const ih = data.inHand ?? null;
     return (
       <>
-        <div className="rs-kpis">
-          {/* LEFT IN HAND leads the band (mig 252) — the number the owner opens this sheet
-              for. Only when the ladder computed; a restaurant whose payload failed still
-              gets the old band exactly as before. */}
-          {ih && (
-            <Stat label="Profit in hand" tone="good" icon="fa-wallet" big value={inr(ih.left)}
-              sub={`after GST, discount and ${inr(ih.expenses)} of costs`}
-              onClick={onOpenExpenses} title="See everything inside the costs" />
-          )}
-          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big={!ih} value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} />
-          <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
-          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`${nfmt(t.orders)} orders total`} />
-          <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
-          <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} onClick={() => onOpenReport("payments", { pay: "cancellations" })} title="Open the Cancellations report" />
-          {/* STAFF PAY OUT (mig 220) — money that LEFT on this day, so the sheet shows both
-              directions. Rendered only when the restaurant has the module (a null payload
-              keeps the tile off entirely rather than printing a meaningless ₹0). */}
-          {data.staffPay && (
-            <Stat label="Staff pay out" tone="bad" icon="fa-arrow-up-from-bracket"
-              value={inr(data.staffPay.paidOut)}
-              sub={data.staffPay.entries ? `${nfmt(data.staffPay.entries)} payment${data.staffPay.entries === 1 ? "" : "s"} to ${nfmt(data.staffPay.people)} ${data.staffPay.people === 1 ? "person" : "people"}` : "nothing paid out"}
-              onClick={() => onOpenReport("team")} title="Open the Team & pay report" />
-          )}
-          {/* INVENTORY on the day sheet (mig 227) — same treatment as staff pay: a null
-              payload (module off) keeps every tile off the sheet entirely. Three DIFFERENT
-              kinds of money, deliberately three tiles and never one total: cash out to
-              suppliers · the cost of what the kitchen used · what's still on the shelf. */}
-          {data.inventory && (
-            <>
-              <Stat label="Stock bought" tone="bad" icon="fa-truck" value={inr(data.inventory.bought)}
-                sub="cash out to suppliers" onClick={() => onOpenReport("inventory", { sub: "buy" })}
-                title="Open the Inventory & stock report" />
-              <Stat label="Ingredients used" tone="warn" icon="fa-utensils" value={inr(data.inventory.usedTheoretical)}
-                sub={data.inventory.foodCostPct != null
-                  ? `${data.inventory.foodCostPct.toFixed(1)}% of those dishes' sales${data.inventory.coveragePct < 99.5 ? ` · ${Math.round(data.inventory.coveragePct)}% of sales mapped` : ""}`
-                  : data.inventory.hasRecipes ? "no dish with a recipe sold today" : "map recipes to see this"}
-                onClick={() => onOpenReport("inventory", { sub: "usage" })} title="Open Usage & cost" />
-              <Stat label="Wasted + expenses" tone="bad" icon="fa-trash"
-                value={inr(data.inventory.wasted + data.inventory.expenses)}
-                sub={`${inr(data.inventory.wasted)} waste · ${inr(data.inventory.expenses)} other`}
-                onClick={() => onOpenReport("inventory", { sub: "waste" })} title="Open the Waste report" />
-              <Stat label="On the shelf" tone="info" icon="fa-boxes-stacked" value={inr(data.inventory.stockValue)}
-                sub={data.inventory.negativeCount ? `${nfmt(data.inventory.negativeCount)} below zero — check bills`
-                  : data.inventory.lowCount ? `${nfmt(data.inventory.lowCount)} running low` : "stock in hand"}
-                onClick={() => onOpenReport("inventory", { sub: "stock" })} title="Open On the shelf" />
-            </>
-          )}
-        </div>
+        {/* NO KPI BAND HERE (owner 2026-08-02: "there are so many boxes on the top, I don't
+            want that boxes"). Eight tiles competing with each other is exactly the
+            data-density / content-priority failure — and every number they carried is still
+            on this sheet: the money ones in the profit block, the volume ones in Order stats,
+            the rest one tap away under Income and Expense. */}
 
         <div className="rs-daysheet">
           {/* The ladder now runs all the way to "left in hand" (mig 252). The old
@@ -2163,7 +2117,7 @@ function DayExtras({ dishesDay, hourlyDay, catsDay, heatData, accent }: { dishes
               <div className="rs-lines">
                 <div className="rs-line"><span className="lbl">Best <span className="rs-dim">· {best.category}</span></span><span className="val">{inr(best.revenue)} <span className="rs-dim">· {catTotal ? Math.round((best.revenue / catTotal) * 100) : 0}%</span></span></div>
                 {worst && <div className="rs-line"><span className="lbl">Weakest <span className="rs-dim">· {worst.category}</span></span><span className="val">{inr(worst.revenue)} <span className="rs-dim">· {catTotal ? Math.round((worst.revenue / catTotal) * 100) : 0}%</span></span></div>}
-                {cats.slice(1, 5).map((c) => (
+                {cats.filter((c) => c !== best && c !== worst).slice(0, 4).map((c) => (
                   <div key={c.category} className="rs-line sub"><span className="lbl">{c.category}</span><span className="val">{inr(c.revenue)}</span></div>
                 ))}
               </div>
@@ -2193,11 +2147,10 @@ function DayExtras({ dishesDay, hourlyDay, catsDay, heatData, accent }: { dishes
           </div>
         </Panel>
       )}
-      {hours.length > 0 && (
-        <Panel title="Busy hours" hint={peak ? `peak ${hourLabel(peak.hour)}` : undefined} pad={false}>
-          <div style={{ padding: 12 }}><ToggleChart data={hourSeries} color={accent} money height={200} title="When the money came in" /></div>
-        </Panel>
-      )}
+      {/* NO second hours chart here. "Traffic through the day" above is the same data, and
+          two charts of one thing is clutter, not depth (owner 2026-08-02: "I want it fully
+          organised"). The Busy times report still has the bar/line view for anyone who
+          wants to read exact amounts per hour. */}
     </div>
     </>
   );
