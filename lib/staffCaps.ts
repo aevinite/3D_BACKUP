@@ -90,7 +90,9 @@ export function capsForRole(role: string): Cap[] {
   }
 
   if (role === "tablet") {
-    const waiter = section("defaults")?.children.find((c) => c.id === "d_waiter")?.children ?? [];
+    // The Waiter rows are their own top-level section since 2026-08-02 (the old
+    // "Default set for user" section was deleted at the owner's word).
+    const waiter = section("waiter")?.children ?? [];
     for (const n of waiter) {
       if (n.bind.t === "tablet") add({ key: n.bind.key, group: GROUP_WAITER, node: n, pin: !!n.pin, perPerson: true });
     }
