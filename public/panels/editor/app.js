@@ -6638,7 +6638,14 @@ function floorTileHtml(i) {
   // A brand-new order still gets its one-tap ✓ accept: it's the fastest thing a manager does,
   // and burying it in the detail would cost a tap on every single order.
   const isEmpty = st === "free" && !mergedTo;
-  const acts = (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
+  // ✕ CLOSE goes FIRST — the leftmost thing in the row (owner, 2026-08-02: "close button I want
+  // on the left … you don't have to write close on it, red colour and icon and that's it, it will
+  // be on left of add order"). So it is a plain red square with no label at any size: the only
+  // worded button in this row stays ＋ Take order, which must remain the BIGGEST control on every
+  // tile ("never make take order button small"). It only exists on a finished table, so on every
+  // other tile the row is unchanged.
+  const acts = (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-xmark" aria-hidden="true"></i></button>` : "")
+    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
     // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
     // notification icon should have its own COLOUR"). On a green Served tile it was a green button
@@ -6647,13 +6654,7 @@ function floorTileHtml(i) {
     // of that print icon more i would love that"): its own paper colour, a receipt icon with the
     // word BILL beside it, and on a dense floor the word drops and the icon stays — the same
     // shed-detail rule the ＋ Take order button follows.
-    + (canBillHere ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${mergedTo || i}" title="Bill for ${esc(tableLabel(i))} — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-receipt ft-bill-ico" aria-hidden="true"></i><span class="ft-bill-t">Bill</span></button>` : "")
-    // ✓ CLOSE — the last step of a table, and the only one that used to happen by itself.
-    // It sits to the RIGHT of ＋ Take order, in the same strip as the bill control, so the
-    // end of a table reads left-to-right the way it happens: order → bill → close. Its own
-    // green (not the tile's state colour) marks it as the finishing action rather than a
-    // destructive one; the word drops before the tick does on a dense floor, exactly like BILL.
-    + (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-circle-check ft-close-ico" aria-hidden="true"></i><span class="ft-close-t">Close</span></button>` : "");
+    + (canBillHere ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${mergedTo || i}" title="Bill for ${esc(tableLabel(i))} — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-receipt ft-bill-ico" aria-hidden="true"></i><span class="ft-bill-t">Bill</span></button>` : "");
   // Seats — ALWAYS visible, top-right (owner drawing: "no. of person can sit on table").
   // ONE shared answer for "how many fit here" — see seatsForTable(): this table's own number,
   // else the floor's default, else 4.

@@ -1449,7 +1449,8 @@ html[data-theme="light"] .ft-status {
    with the small square icons (accept / bill) tucked on the right. Everything is sized in
    cqw (% of the TILE's own width) so shrinking a tile shrinks the CONTROLS, and the tile
    stays the same square shape instead of the button spilling over its edge. */
-.ft-act { display: flex; align-items: stretch; gap: clamp(3px, 3.4cqw, 6px); margin-top: clamp(5px, 6cqw, 9px); }
+.ft-act { display: flex; align-items: stretch; gap: clamp(3px, 3.4cqw, 6px); margin-top: clamp(5px, 6cqw, 9px);
+  min-width: 0; overflow: hidden; }   /* a control can never cross the tile's edge, at any density */
 .ft-take { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center;
   gap: clamp(2px, 2.6cqw, 5px); cursor: pointer; font: inherit; font-weight: 700;
   font-size: clamp(9.5px, 8.6cqw, 12.5px); line-height: 1.1;
@@ -1464,9 +1465,15 @@ html[data-theme="light"] .ft-status {
 .ft-take-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Square icon buttons: the ✓ accept and the 🖨 bill. Same height as the take button so the
    row reads as one control strip. */
+/* THE ICON BUTTONS ARE A SHARE OF THE TILE, NEVER A FIXED SIZE (owner, 2026-08-02: "for all no.
+   of table in row and every screen make it properly dynamic from code"). They used to be
+   clamp(20px, …) — a 20px FLOOR — so on a dense floor two 20px squares no longer fit a tile that
+   had shrunk to 16px and the row spilled out over the neighbouring tile. The `min(…, 30cqw)` caps
+   each square at 30% of the TILE's own width, so however many tables the admin puts in a row, the
+   whole strip always fits and ＋ Take order still gets the largest share of what is left. */
 .ft-ico { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
-  cursor: pointer; font: inherit; font-size: clamp(9.5px, 8.6cqw, 12.5px);
-  width: clamp(20px, 19cqw, 30px); padding: 0;
+  cursor: pointer; font: inherit; font-size: min(clamp(9.5px, 8.6cqw, 12.5px), 13cqw);
+  width: min(clamp(20px, 19cqw, 30px), 30cqw); padding: 0;
   border-radius: clamp(6px, 6.5cqw, 10px);
   color: color-mix(in srgb, var(--c) 60%, var(--text));
   background: var(--panel-2); border: 1px solid var(--line);
@@ -1486,7 +1493,7 @@ html[data-theme="light"] .ft-status {
    with the word BILL, a soft lift on hover, and the word dropping before the icon does when the
    floor gets dense. */
 .ft-ico-bill { flex: 0 1 auto; gap: clamp(2px, 2.5cqw, 5px); padding-inline: clamp(4px, 4cqw, 9px);
-  width: auto; min-width: clamp(22px, 20cqw, 34px);
+  width: auto; min-width: min(clamp(22px, 20cqw, 34px), 32cqw); max-width: 46cqw;
   color: #0f172a; background: linear-gradient(#ffffff, #e8edf5);
   border-color: #b6c2d3; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.18); }
 .ft-ico-bill .ft-bill-ico { font-size: clamp(9px, 8.5cqw, 13px); }
@@ -1496,30 +1503,27 @@ html[data-theme="light"] .ft-status {
   box-shadow: 0 3px 8px rgba(15, 23, 42, 0.28); transform: translateY(-1px); }
 .ft-ico-bill:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2); }
 html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1f5f9); border-color: #94a3b8; }
-/* ✓ CLOSE — shown only on a finished table (everything served AND the bill paid). Like the bill
-   control it keeps its OWN colour instead of the tile's state colour, because it is the one
-   control you go looking for; green because ending a settled table is the happy last step, not a
-   destructive one. Same height and the same shed-detail behaviour as BILL, so the strip stays
-   one control row at every tile size. */
-.ft-ico-close { flex: 0 1 auto; gap: clamp(2px, 2.5cqw, 5px); padding-inline: clamp(4px, 4cqw, 9px);
-  width: auto; min-width: clamp(22px, 20cqw, 34px);
-  color: #ffffff; background: linear-gradient(#22c55e, #16a34a);
-  border-color: #15803d; box-shadow: 0 1px 2px rgba(21, 128, 61, 0.28); }
-.ft-ico-close .ft-close-ico { font-size: clamp(9px, 8.5cqw, 13px); }
-.ft-ico-close .ft-close-t { font-size: clamp(8px, 7.4cqw, 11px); font-weight: 800; letter-spacing: .02em;
-  text-transform: uppercase; }
-.ft-ico-close:hover { background: linear-gradient(#34d399, #15803d); border-color: #14532d; color: #ffffff;
-  box-shadow: 0 3px 8px rgba(21, 128, 61, 0.38); transform: translateY(-1px); }
-.ft-ico-close:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(21, 128, 61, 0.3); }
-/* THREE CONTROLS DON'T FIT, SO THE LEAST URGENT ONE SHEDS ITS WORD. A finished table is the only
-   time the row holds ＋ Take order AND the bill AND close; at the default tile size that pushed
-   CLOSE off the tile's right edge (caught on screen, not in a test). On a finished table the
-   take-order button drops to its ＋ — still the same button, same place, still tappable — and the
-   two words that matter now, BILL and CLOSE, both stay readable. Same shed-detail rule as
-   everywhere else on the tile: lose detail, never reshape. */
-.ftile.ft-finished .ft-take { flex: 0 0 auto; }
-.ftile.ft-finished .ft-take-t { display: none; }
-.ftile.ft-finished .ft-take-x { display: inline; }
+/* ✕ CLOSE — shown only on a finished table (everything served AND the bill paid), and it is the
+   FIRST thing in the row, on the left of ＋ Take order (owner, 2026-08-02: "close button I want on
+   the left … you don't have to write close on it, red colour and icon and that's it").
+   So: no label at any size, a red square exactly as wide as the ✓ accept square, and its own red
+   rather than the tile's state colour — the same reason the bill button owns its paper colour.
+   Everything is sized in cqw (a share of the TILE's own width), so it scales with the tile at any
+   tables-per-row setting and on any screen instead of being pinned to a pixel size. */
+.ft-ico-close { color: #fff; background: linear-gradient(#ef4444, #dc2626);
+  border-color: #b91c1c; box-shadow: 0 1px 2px rgba(185, 28, 28, 0.28); }
+.ft-ico-close:hover { background: linear-gradient(#f87171, #b91c1c); border-color: #7f1d1d; color: #fff;
+  box-shadow: 0 3px 8px rgba(185, 28, 28, 0.38); transform: translateY(-1px); }
+.ft-ico-close:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(185, 28, 28, 0.3); }
+/* ＋ TAKE ORDER STAYS THE BIGGEST BUTTON, ALWAYS (owner, 2026-08-02: "never make take order button
+   small, it should be the biggest one"). A finished tile is the only one that carries THREE
+   controls, and three of them at full width pushed the last one off the tile's right edge. The
+   thing that gives way is the BILL word, not the take-order word: on a finished tile the bill
+   becomes its receipt glyph alone (exactly what it already does on a dense floor), so the row is
+   [red ✕] [＋ Take order — all the remaining width] [🧾]. Take order keeps flex:1, so it grows and
+   shrinks with the tile and is always the widest control in the row. */
+.ftile.ft-finished .ft-ico-bill { min-width: min(clamp(20px, 19cqw, 30px), 30cqw); max-width: 30cqw; padding-inline: 0; }
+.ftile.ft-finished .ft-bill-t { display: none; }
 /* ── SMALL TILES: DROP DETAIL, NEVER RESHAPE (owner: "small will not affect the shape of
    table, it will make text and stuff small") ────────────────────────────────────────────
    These widths are the tile's INNER width (a container query measures the content box), so
@@ -1534,7 +1538,6 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
 }
 @container (max-width: 88px) {
   .ft-bill-t { display: none; }        /* the receipt glyph alone still reads as "bill" */
-  .ft-close-t { display: none; }       /* …and the tick alone still reads as "done with it" */
   .ft-take-t { display: none; }
   .ft-take-x { display: inline; } /* out of room for the word — the ＋ is the fallback */
   .ft-seats { display: none; }
@@ -1542,9 +1545,23 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
 /* Genuinely tiny (a deliberately dense floor): the sub-line goes, then the state WORD. What
    never goes is the table number, the state COLOUR and the progress strip — which is how a
    dense floor is read anyway: you scan for the colour, then tap. */
+/* THE ACTION ROW SHEDS BUTTONS, IT DOES NOT SHRINK THEM INTO NOTHING (2026-08-02). Measured
+   across every tables-per-row from 2 to 30 on desktop, tablet and the A35 phone: below ~76px of
+   inner width three controls cannot each stay a tappable size, and they were being squeezed to
+   2-8px and pushed out over the neighbouring tile. So the row drops the least urgent control
+   instead. Nothing is lost — tapping the tile opens its detail, where Take order, the bill and
+   ✓ Close all live in full size. */
+@container (max-width: 76px) {
+  .ftile.ft-finished .ft-ico-bill { display: none; }  /* keep ✕ close + ＋, the two that matter here */
+}
 @container (max-width: 64px) {
   .ft-meta { display: none; }
   .ft-status { padding: 2px 4px; border-radius: 5px; }
+}
+@container (max-width: 52px) {
+  /* Two buttons no longer fit either. The tile becomes what a dense floor is actually read as —
+     a number and a colour you tap — and every action lives one tap away in the detail. */
+  .ft-act { display: none; }
 }
 @container (max-width: 48px) {
   .ft-label { display: none; }
