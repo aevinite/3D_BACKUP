@@ -6032,7 +6032,14 @@ async function closeFinishedTable(t) {
     await pollTables([String(t)]); // put the tile back in step with the truth it just showed
     return;
   }
-  if (!(await confirmDialog(`Close ${tableLabel(t)}? Everything is served and the bill is paid — the table goes back to Free and the bill stays in Bills.`, "Close table"))) return;
+  // ONE TAP, NO QUESTION (owner, 2026-08-02: "close table should not have 2 step — whenever I
+  // click close button"). There is nothing to weigh up by the time this button exists: the food
+  // is all served and the money is all in, so "are you sure?" was asking staff to confirm a fact
+  // the screen had already checked. It is also the most repeated job of a service, and a confirm
+  // on it is a second tap per table, all night.
+  // Safe to make immediate because it is not destructive and it is not final: the bill is kept
+  // (it moves to Bills), nothing is deleted, and a table closed by mistake comes back through
+  // "Restore to floor". The two guards above still refuse VISIBLY if the tile was stale.
   try {
     await api("POST", `/sessions/${sess.id}/close`);
     state.selectedTable = null;
