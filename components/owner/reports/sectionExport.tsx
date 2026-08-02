@@ -29,26 +29,9 @@ const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, 
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
 type Totals = Omit<MoneyRow, "bucket">;
 type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean } | null;
-type InHandExport = {
-  itemSales: number; discounts: number; netSales: number; gst: number;
-  collected: number; yours: number; expenses: number; left: number;
-  moneyIn?: number;
-  earnings?: { parts: { key: string; orders: number; amount: number; gst: number; isSales: boolean }[]; dineIn: number; tips: number };
-  parts: {
-    manual: { amount: number; entries: number; byCategory: Record<string, number> } | null;
-    salary: { accrued: number; paid: number; people: number; excluded: number } | null;
-    stock: { used: number; wasted: number; cancelledFoodRemoved: number } | null;
-    cancelled: { mode: string; lostSales: number; orders: number; foodCost: number; charged: number };
-  };
-};
 type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; bucket?: string;
   // Team & pay carries its own shapes (mig 220/221) alongside the shared `rows`.
-  people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[];
-  // The in-hand ladder (mig 252) and the inventory sub-tab shapes (mig 227).
-  inHand?: InHandExport | null;
-  summary?: Record<string, number | null>; items?: unknown[]; vendors?: unknown[];
-  expenses?: unknown[]; waste?: unknown[]; dishes?: unknown[];
-  payments?: { method: string; revenue: number; orders: number }[] };
+  people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[] };
 
 export type SectionMeta = { label: string; kind: string };
 export type SectionCtx = {
@@ -74,57 +57,6 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
       // to the shown total — mirrors the on-screen split exactly.
       out.push({ title: `${meta.label} — tax split`, head: ["Component", "Rate %", "Collected"],
         rows: [["Total tax", data.tax.effectivePct, Math.round(t?.tax ?? 0)], ...splitTax(data.tax.components.map((x) => x.rate), Math.round(t?.tax ?? 0)).map((amt, i) => [data.tax!.components[i].label, data.tax!.components[i].rate, amt] as (string | number)[])] });
-    }
-    // The in-hand ladder (mig 252). Exported as its own small table so the printed sheet
-    // and the spreadsheet both end on the number the owner actually reads, instead of
-    // stopping at "Total collected" the way the screen used to.
-    const ih = data.inHand;
-    if (ih) {
-      const rows2: (string | number)[][] = [
-        ["Item sales", Math.round(ih.itemSales)],
-        ["Discounts given", -Math.round(ih.discounts)],
-        ["Net sales", Math.round(ih.netSales)],
-        ["GST collected", Math.round(ih.gst)],
-        ["Total collected", Math.round(ih.collected)],
-        ["GST set aside for the government", -Math.round(ih.gst)],
-        ["Your money", Math.round(ih.yours)],
-      ];
-      const pt = ih.parts;
-      if (pt.manual) rows2.push(["Costs you entered", -Math.round(pt.manual.amount)]);
-      for (const [k, v] of Object.entries(pt.manual?.byCategory || {})) rows2.push([`   ${k}`, -Math.round(Number(v))]);
-      rows2.push(["Team wages (period's share)", pt.salary ? -Math.round(pt.salary.accrued) : "not tracked"]);
-      rows2.push(["Food taken from stock", pt.stock ? -Math.round(pt.stock.used) : "not tracked"]);
-      rows2.push(["Thrown away", pt.stock ? -Math.round(pt.stock.wasted) : "not tracked"]);
-      rows2.push([`Cancelled orders (${pt.cancelled.mode === "bill" ? "charged at menu price" : "taken out of stock"})`,
-        pt.cancelled.charged ? -Math.round(pt.cancelled.charged) : 0]);
-      rows2.push(["Expenses in total", -Math.round(ih.expenses)]);
-      rows2.push(["PROFIT IN HAND", Math.round(ih.left)]);
-      rows2.push(["Lost to cancellations (not charged above)", Math.round(ih.parts.cancelled.lostSales)]);
-      out.push({ title: `${meta.label} — profit in hand`, head: ["Line", "Amount"], rows: rows2 });
-
-      // INCOME — the same parts the Income sub-report shows, so the printed statement and
-      // the spreadsheet carry the split, not just the total (owner 2026-08-02).
-      const eparts = ih.earnings?.parts ?? [];
-      if (eparts.length) {
-        const NAMES: Record<string, string> = { dinein: "Dine-in orders", parcel: "Parcel / takeaway", zomato: "Zomato", swiggy: "Swiggy", website: "Website takeaway", banquet: "Banquet", tips: "Tips (not in the total)" };
-        const inRows: (string | number)[][] = eparts.map((e) => [NAMES[e.key] ?? e.key, e.orders || "", Math.round(e.amount), Math.round(e.gst)]);
-        inRows.push(["TOTAL money in (with GST)", "", Math.round(ih.moneyIn ?? 0), Math.round(ih.gst)]);
-        out.push({ title: `${meta.label} — income, by source`, head: ["Source", "Orders", "Amount", "of which GST"], rows: inRows });
-      }
-
-      // EXPENSE — one table with every part, cancellations included (they belong here, not
-      // in a sub-report of their own — owner 2026-08-02).
-      const exRows: (string | number)[][] = [];
-      for (const [k, v] of Object.entries(pt.manual?.byCategory || {})) exRows.push([`You entered · ${k}`, Math.round(Number(v))]);
-      if (pt.manual) exRows.push(["You entered · total", Math.round(pt.manual.amount)]);
-      exRows.push(["Team wages (period's share)", pt.salary ? Math.round(pt.salary.accrued) : "not tracked"]);
-      if (pt.salary) exRows.push(["  of which actually paid out", Math.round(pt.salary.paid)]);
-      exRows.push(["Food taken from stock", pt.stock ? Math.round(pt.stock.used) : "not tracked"]);
-      exRows.push(["Thrown away", pt.stock ? Math.round(pt.stock.wasted) : "not tracked"]);
-      exRows.push([`Cancelled orders (${pt.cancelled.mode === "bill" ? "charged at menu price" : "already inside food from stock"})`, Math.round(pt.cancelled.charged)]);
-      exRows.push(["TOTAL what it cost you", Math.round(ih.expenses)]);
-      exRows.push(["Lost to cancellations (shown, not charged)", Math.round(pt.cancelled.lostSales)]);
-      out.push({ title: `${meta.label} — expense, by part`, head: ["Part", "Amount"], rows: exRows });
     }
     if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
@@ -168,46 +100,6 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
         r.daysActive, r.hours, r.orders, Math.round(r.value), r.tables, r.sittings, Math.round(r.discount),
         r.ratings, r.avgRating ?? "", Math.round(r.paid)]),
     }];
-  }
-  // Inventory & stock (mig 227). Without these the five sub-tabs fell through to the empty
-  // "—" table below and Export/Print produced a BLANK document — the same fault the two
-  // staff branches above were added to fix, left behind on the inventory tabs.
-  if (meta.kind.startsWith("inv")) {
-    const sum = data.summary as Record<string, number | null> | undefined;
-    const out: ExportTable[] = [];
-    if (sum) out.push({ title: `${title} — the money`, head: ["Line", "Amount"], rows: [
-      ["Stock on the shelf now", Math.round(Number(sum.stockValue) || 0)],
-      ["Bought in this period", Math.round(Number(sum.purchases) || 0)],
-      ["Ingredients used by dishes sold", Math.round(Number(sum.theoreticalCost) || 0)],
-      ["Food taken from stock (ledger)", Math.round(Number(sum.actualUsed) || 0)],
-      ["Thrown away", Math.round(Number(sum.wasted) || 0)],
-      ["Other expenses", Math.round(Number(sum.expenses) || 0)],
-      ["Count corrections", Math.round(Number(sum.corrections) || 0)],
-    ] });
-    const items = (data.items ?? []) as Record<string, unknown>[];
-    if (items.length) out.push({ title: `${title} — every ingredient`,
-      head: ["Ingredient", "Category", "On hand", "Unit", "Value", "Bought", "Used", "Wasted", "Corrections"],
-      rows: items.map((i) => [String(i.name), String(i.category || ""), Number(i.onHandBase) || 0, String(i.baseUom || ""),
-        Math.round(Number(i.onHandVal) || 0), Math.round(Number(i.boughtVal) || 0), Math.round(Number(i.usedVal) || 0),
-        Math.round(Number(i.wastedVal) || 0), Math.round(Number(i.adjustVal) || 0)]) });
-    const vend = (data.vendors ?? []) as Record<string, unknown>[];
-    if (vend.length) out.push({ title: `${title} — suppliers`, head: ["Supplier", "Bills", "Amount"],
-      rows: vend.map((v) => [String(v.vendor), Number(v.bills) || 0, Math.round(Number(v.amount) || 0)]) });
-    const exp = (data.expenses ?? []) as Record<string, unknown>[];
-    if (exp.length) out.push({ title: `${title} — the expense book`,
-      head: ["Date", "Category", "What", "Amount", "Recorded by", "Struck out"],
-      rows: exp.map((e) => [String(e.expense_date), String(e.category), String(e.title),
-        Math.round(Number(e.amount) || 0), String(e.created_by || ""), e.voided_at ? String(e.void_reason || "yes") : ""]) });
-    const wst = (data.waste ?? []) as Record<string, unknown>[];
-    if (wst.length) out.push({ title: `${title} — waste`, head: ["Date", "Reason", "Qty", "Value", "Struck out"],
-      rows: wst.map((w) => [String(w.waste_date), String(w.reason), Number(w.qty_base) || 0,
-        Math.round((Number(w.qty_base) || 0) * (Number(w.unit_cost_snap) || 0)), w.voided_at ? "yes" : ""]) });
-    const dsh = (data.dishes ?? []) as Record<string, unknown>[];
-    if (dsh.length) out.push({ title: `${title} — cost per dish`,
-      head: ["Dish", "Price", "Sold", "Sales", "Plate cost", "Cost total"],
-      rows: dsh.map((d) => [String(d.title), Math.round(Number(d.price) || 0), Number(d.qtySold) || 0,
-        Math.round(Number(d.revenue) || 0), Math.round(Number(d.plateCost) || 0), Math.round(Number(d.costTotal) || 0)]) });
-    return out.length ? out : [{ title, head: ["—"], rows: [] }];
   }
   return [{ title, head: ["—"], rows: [] }];
 }
@@ -264,48 +156,10 @@ export function printSection(ctx: SectionCtx) {
   w.document.close();
 }
 
-// ── THE WHATSAPP SUMMARY (owner 2026-08-02) ─────────────────────────────────
-// A whole report is useless in a chat. What travels is the ANSWER: the four lines of the
-// profit block, how the money arrived, and the one or two things worth knowing. Plain text
-// with WhatsApp's own *bold* markers, no tables (WhatsApp has no monospace alignment on
-// phones, so a "table" made of spaces arrives as a mess).
-//
-// Kept SHORT on purpose — the whole point is that it reads on a lock screen. Anything
-// longer belongs in the PDF/Excel the same menu offers.
-export function whatsappText(c: SectionCtx): string {
-  const money = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
-  const L: string[] = [];
-  L.push(`*${c.restName}*`);
-  L.push(`_${c.periodLabel}_`);
-  L.push("");
-  const ih = c.data.inHand;
-  const t = c.data.totals;
-  if (ih) {
-    L.push(`Money in (with GST)  ${money(ih.moneyIn ?? 0)}`);
-    L.push(`GST                  −${money(ih.gst)}`);
-    if (ih.discounts > 0) L.push(`Discount             −${money(ih.discounts)}`);
-    L.push(`Expenses             −${money(ih.expenses)}`);
-    L.push(`*Profit in hand      ${money(ih.left)}*`);
-    const parts = (ih.earnings?.parts ?? []).filter((p) => p.isSales && p.key !== "dinein");
-    if (parts.length) L.push("", "Also came in: " + parts.map((p) => `${p.key} ${money(p.amount)}`).join(" · "));
-  } else if (t) {
-    L.push(`Collected            ${money(t.revenue)}`);
-    L.push(`GST                  ${money(t.tax)}`);
-  }
-  const pays = (c.data.rows as { method?: string; revenue?: number }[] | undefined);
-  const settle = c.data.payments as { method: string; revenue: number }[] | undefined;
-  const src = settle && settle.length ? settle : (pays && pays[0]?.method ? pays as { method: string; revenue: number }[] : []);
-  if (src.length) L.push("", "Paid by: " + src.slice(0, 4).map((p) => `${canonPayMethod(p.method)} ${money(p.revenue)}`).join(" · "));
-  if (t && t.cancelledOrders > 0) L.push(`Cancelled: ${t.cancelledOrders} · ${money(t.cancelledValue)} lost`);
-  L.push("", "— sent from Aevidine");
-  return L.join("\n");
-}
-
-// ── the Print / CSV / Excel / WhatsApp dropdown for a section ─────────────────
+// ── the Print / CSV / Excel dropdown for a section ────────────────────────────
 // `onPrintClick` (optional) replaces the immediate print with the page's ask-first flow.
 export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx; filename: string; onPrintClick?: () => void }) {
   const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
   const ready = (ctx.data.rows?.length ?? 0) >= 0 && !!ctx.data;
   useBackClose("owner-section-export", open, () => setOpen(false));
   useEffect(() => {
@@ -318,13 +172,6 @@ export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx
   const doCsv = () => { const t = sectionTables(ctx); dl(new Blob(["﻿" + t.map((x) => [x.title, x.head.map(csvEsc).join(","), ...x.rows.map((r) => r.map(csvEsc).join(","))].join("\n")).join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`); };
   const doXls = () => { const t = sectionTables(ctx); const html = `<html><head><meta charset="utf-8"></head><body>` + t.map((x) => `<h3>${x.title}</h3><table border="1"><tr>${x.head.map((h) => `<th>${h}</th>`).join("")}</tr>${x.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`).join("<br/>") + `</body></html>`; dl(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`); };
   const doPrint = () => (onPrintClick ? onPrintClick() : printSection(ctx));
-  // wa.me with no number opens WhatsApp on "choose a chat" — which is what you want when
-  // the same summary might go to a partner, an accountant or your own Saved Messages.
-  const doWhatsApp = () => window.open(`https://wa.me/?text=${encodeURIComponent(whatsappText(ctx))}`, "_blank", "noopener");
-  const doCopy = async () => {
-    try { await navigator.clipboard.writeText(whatsappText(ctx)); setCopied(true); setTimeout(() => setCopied(false), 2200); }
-    catch { window.prompt("Copy this summary", whatsappText(ctx)); }
-  };
   return (
     <span className="rs-exp" style={{ position: "relative", display: "inline-flex" }}>
       <button className="rs-btn" onClick={() => setOpen((o) => !o)} disabled={!ready} aria-haspopup="menu" aria-expanded={open}>
@@ -332,8 +179,7 @@ export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx
       </button>
       {open && (
         <span role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 90, minWidth: 180, display: "flex", flexDirection: "column", background: "var(--card)", border: "1px solid var(--border-c)", borderRadius: 12, padding: 5, boxShadow: "0 14px 34px rgba(0,0,0,.35)" }}>
-          {([["fa-print", "Print", doPrint], ["fa-file-csv", "Download CSV", doCsv], ["fa-file-excel", "Download Excel", doXls],
-             ["fa-whatsapp", "Send on WhatsApp", doWhatsApp], ["fa-copy", copied ? "Copied!" : "Copy summary", doCopy]] as [string, string, () => void][]).map(([ic, lb, fn]) => (
+          {([["fa-print", "Print", doPrint], ["fa-file-csv", "Download CSV", doCsv], ["fa-file-excel", "Download Excel", doXls]] as [string, string, () => void][]).map(([ic, lb, fn]) => (
             <button key={lb} role="menuitem" onClick={() => { setOpen(false); fn(); }} style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", borderRadius: 8, padding: "8px 10px", font: "inherit", fontSize: 12.5, fontWeight: 700, color: "inherit", cursor: "pointer", textAlign: "left" }}>
               <i className={`fas ${ic}`} style={{ width: 16, color: "var(--accent)" }} aria-hidden /> {lb}
             </button>

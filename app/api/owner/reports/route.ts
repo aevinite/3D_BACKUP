@@ -150,233 +150,6 @@ function mergeBy<T extends Row>(rowsets: T[][], key: keyof T, numeric: (keyof T)
   return Array.from(out.values());
 }
 
-// ═══ WHAT'S LEFT IN HAND (mig 252, owner 2026-08-01) ════════════════════════
-// The day sheet used to stop at "Total collected", which is the least useful number on
-// it — most of that money isn't the owner's. This finishes the sentence:
-//
-//     Item sales − discounts = Net sales + GST = TOTAL COLLECTED
-//     − GST set aside   → the part that IS his
-//     − Expenses        → one line, opens into every part below
-//     = LEFT IN HAND
-//
-// WHAT COUNTS AS AN EXPENSE, and the one thing that deliberately doesn't:
-//   manual     the owner/manager's own entries (breakage, repairs, rent…) — always read,
-//              because the expenses book is not tied to the inventory module.
-//   salary     the day's SHARE of a monthly wage, not the payday lump (owner's choice) —
-//              only when the payroll module is on.
-//   stock      what the kitchen actually consumed + what was thrown away. NOT what was
-//              bought: buying 50kg of rice is cash leaving, not today's cost, and mig 227
-//              is explicit that purchases/consumption/stock-value must never be added
-//              together. Only when the inventory module is on.
-//   cancelled  see below — one way or the other, never both.
-//
-// THE CANCELLED-ORDER RULE (owner 2026-08-02, per restaurant, settings.cancel_cost_mode):
-//   'stock' → the food a cooked-then-cancelled order ate is ALREADY inside `used`
-//             (mig 224 keeps that deduction on purpose). So nothing extra is charged;
-//             the report only NAMES the lost sales beside the calculation.
-//   'bill'  → the whole menu price is charged as its own line, and that same food is
-//             REMOVED from `used` so the kitchen isn't billed for it twice.
-// A restaurant without the inventory module is always 'bill' — there is no stock to take
-// it from — regardless of what's stored, so switching the module on later restores the
-// owner's own choice instead of silently moving his numbers.
-//
-// EVERY PART IS null WHEN ITS MODULE IS OFF, never 0. A zero reads as "we checked and it
-// cost you nothing"; null lets the screen say "not tracked" and lets the total be honest
-// about what it could and couldn't see.
-type ExpensePart = { amount: number; entries: number; byCategory: Record<string, number> };
-type SalaryPart = { accrued: number; paid: number; people: number; excluded: number };
-type StockPart = { used: number; wasted: number; cancelledFoodRemoved: number };
-type CancelPart = { mode: "stock" | "bill" | "mixed"; lostSales: number; orders: number; foodCost: number; charged: number };
-type EarnPart = { key: string; orders: number; amount: number; gst: number; isSales: boolean };
-export type InHand = {
-  itemSales: number; discounts: number; netSales: number; gst: number;
-  collected: number; yours: number; expenses: number; left: number;
-  // Every rupee that arrived, with GST still in it — dine-in bills BEFORE the discount plus
-  // parcel/delivery/banquet. This is the number at the TOP of the owner's sheet (2026-08-02:
-  // "one total will be on the top, which was money in with GST"), and the Earnings sub-report
-  // is exactly its parts, so the two can never disagree.
-  moneyIn: number;
-  earnings: { parts: EarnPart[]; dineIn: number; tips: number };
-  parts: { manual: ExpensePart | null; salary: SalaryPart | null; stock: StockPart | null; cancelled: CancelPart };
-  series: { bucket: string; expenses: number; left: number }[] | null;
-  coverage: { restaurants: number; withPayroll: number; withInventory: number; hourlyStaffExcluded: number };
-};
-
-// Bucket key that matches what mig 252's functions return ('YYYY-MM-DD' / 'YYYY-MM'),
-// derived from lfh_owner_sales_report's timestamptz bucket. Both sides must agree or the
-// per-bucket series silently pairs the wrong day's cost with the wrong day's sales.
-function bucketKeyOf(bucketTs: unknown, grain: string): string {
-  const iso = istDateOf(String(bucketTs));
-  return grain === "month" ? iso.slice(0, 7) : iso;
-}
-
-async function buildInHand(opts: {
-  ids: string[];
-  from: string; to: string; bucket: string;
-  totals: { subtotal: number; discount: number; tax: number; revenue: number; cancelledValue: number; cancelledOrders: number; paidOrders: number };
-  rows: { bucket: unknown; revenue: number; tax: number; subtotal: number; discount: number; cancelledValue: number }[];
-}): Promise<InHand | null> {
-  const { ids, from, to, bucket, totals, rows } = opts;
-  if (!ids.length) return null;
-  const grain = bucket === "month" ? "month" : "day";
-  // Hour buckets (today/yesterday) can't carry a per-bucket cost line: an expense, a wage
-  // and a stock movement are all dated to a DAY, never to an hour. The totals are still
-  // exact — only the per-bucket series is withheld rather than invented.
-  const perBucket = bucket === "day" || bucket === "month";
-
-  const [payOn, invOn, cfg] = await Promise.all([
-    Promise.all(ids.map((id) => payrollLadder(id).then((l) => l.effective).catch(() => false))),
-    Promise.all(ids.map((id) => inventoryLadder(id).then((l) => l.effective).catch(() => false))),
-    sb.from("settings").select("restaurant_id, cancel_cost_mode").in("restaurant_id", ids),
-  ]);
-  const modeOf = new Map<string, string>();
-  for (const r of (cfg.data ?? []) as Row[]) modeOf.set(String(r.restaurant_id), String(r.cancel_cost_mode || "stock"));
-  // Inventory off ⇒ 'bill', always: there is no stock to take the loss out of.
-  const effMode = (id: string, i: number): "stock" | "bill" =>
-    invOn[i] && modeOf.get(id) === "stock" ? "stock" : "bill";
-
-  const payIds = ids.filter((_, i) => payOn[i]);
-  const invIds = ids.filter((_, i) => invOn[i]);
-  const billIds = ids.filter((id, i) => effMode(id, i) === "bill");
-  const invBillIds = ids.filter((id, i) => invOn[i] && effMode(id, i) === "bill");
-
-  const [expRes, payRes, stkRes, cxfRes, earnRes] = await Promise.all([
-    mapLimit(ids, 6, (id) => sb.rpc("lfh_expense_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: grain })),
-    mapLimit(payIds, 6, (id) => sb.rpc("lfh_staff_pay_accrual", { p_restaurant: id, p_from: from, p_to: to, p_bucket: grain })),
-    mapLimit(invIds, 6, (id) => sb.rpc("lfh_inv_cost_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: grain })),
-    // Only the 'bill'-mode restaurants need this: it exists purely to be taken back OUT
-    // of `used` for them. Asking for it anywhere else would be a wasted round-trip.
-    mapLimit(invBillIds, 6, (id) => sb.rpc("lfh_cancelled_consumption", { p_restaurant: id, p_from: from, p_to: to, p_bucket: grain })),
-    // Where the money came from, for the parts that live OUTSIDE `orders` (mig 254).
-    mapLimit(ids, 6, (id) => sb.rpc("lfh_owner_other_earnings", { p_restaurant: id, p_from: from, p_to: to })),
-  ]);
-
-  const bump = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k) || 0) + v);
-  const manualB = new Map<string, number>(), salaryB = new Map<string, number>();
-  const usedB = new Map<string, number>(), wasteB = new Map<string, number>(), cxFoodB = new Map<string, number>();
-
-  // Accumulate RAW and round once at the very end. Rounding every bucket before adding it
-  // drifts by a paisa or two across a month (caught 2026-08-02: a 29-bucket stock total came
-  // out 1p apart from the same figure summed straight from the ledger).
-  const raw = (v: unknown) => Number(v) || 0;
-  let manual = 0, manualN = 0; const byCategory: Record<string, number> = {};
-  for (const r of expRes.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[])) {
-    manual += raw(r.amount); manualN += Number(r.entries) || 0;
-    bump(manualB, String(r.bucket), raw(r.amount));
-    const cats = (r.by_category ?? {}) as Record<string, unknown>;
-    for (const [k, v] of Object.entries(cats)) byCategory[k] = (byCategory[k] || 0) + raw(v);
-  }
-  for (const k of Object.keys(byCategory)) byCategory[k] = num(byCategory[k]);
-  let accrued = 0, paidOut = 0, people = 0, excluded = 0;
-  for (const r of payRes.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[])) {
-    accrued += raw(r.accrued); paidOut += raw(r.paid);
-    people = Math.max(people, Number(r.people) || 0);
-    excluded = Math.max(excluded, Number(r.excluded) || 0);
-    bump(salaryB, String(r.bucket), raw(r.accrued));
-  }
-  let used = 0, wasted = 0;
-  for (const r of stkRes.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[])) {
-    used += raw(r.used); wasted += raw(r.wasted);
-    bump(usedB, String(r.bucket), raw(r.used)); bump(wasteB, String(r.bucket), raw(r.wasted));
-  }
-  let cancelledFood = 0;
-  for (const r of cxfRes.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[])) {
-    cancelledFood += raw(r.cost); bump(cxFoodB, String(r.bucket), raw(r.cost));
-  }
-
-  // ── Where the money came from (mig 254) ──────────────────────────────────
-  // Dine-in is the bills BEFORE the discount, with GST — the same basis the ladder's top
-  // line uses, so "Earnings" adds up to it exactly. Everything else comes from the RPC.
-  // Tips are kept OUT of the sales total: they arrived, but in an Indian restaurant they
-  // are normally the staff's, so adding them to the owner's profit would overstate it.
-  const earnMap = new Map<string, EarnPart>();
-  for (const r of earnRes.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[])) {
-    const k = String(r.source);
-    const cur = earnMap.get(k) || { key: k, orders: 0, amount: 0, gst: 0, isSales: r.is_sales !== false };
-    cur.orders += Number(r.orders) || 0; cur.amount += raw(r.amount); cur.gst += raw(r.gst);
-    earnMap.set(k, cur);
-  }
-  const dineIn = totals.subtotal + totals.tax;
-  const otherSales = [...earnMap.values()].filter((e) => e.isSales);
-  const tips = num(earnMap.get("tips")?.amount ?? 0);
-  const moneyIn = num(dineIn + otherSales.reduce((a, e) => a + e.amount, 0));
-  const gstAll = num(totals.tax + otherSales.reduce((a, e) => a + e.gst, 0));
-  const parts: EarnPart[] = [
-    { key: "dinein", orders: totals.paidOrders, amount: num(dineIn), gst: num(totals.tax), isSales: true },
-    ...[...earnMap.values()].map((e) => ({ ...e, amount: num(e.amount), gst: num(e.gst) })),
-  ].filter((e) => e.amount > 0);
-
-  // Lost sales charged to the bill, for the 'bill'-mode restaurants only. When that set is
-  // everyone (the common case) the group total already in hand is exact and costs nothing;
-  // a MIXED scope needs one extra grouped call rather than N per-restaurant ones.
-  let charged = 0;
-  const chargedB = new Map<string, number>();
-  if (billIds.length) {
-    if (billIds.length === ids.length) {
-      charged = totals.cancelledValue;
-      if (perBucket) for (const r of rows) bump(chargedB, bucketKeyOf(r.bucket, grain), num(r.cancelledValue));
-    } else {
-      const sub = await sb.rpc("lfh_owner_sales_report", { p_restaurant_id: null, p_from: from, p_to: to, p_bucket: bucket, p_ids: billIds });
-      for (const r of ((sub.data ?? []) as Row[])) {
-        charged += num(r.cancelled_value);
-        if (perBucket) bump(chargedB, bucketKeyOf(r.bucket, grain), num(r.cancelled_value));
-      }
-    }
-  }
-
-  // In 'bill' mode the same food must not be paid for twice — take it back out of `used`.
-  const usedCharged = num(used - cancelledFood);
-  const expenses = num(manual + accrued + usedCharged + wasted + charged);
-  // "Money in − GST − discount − expenses" (the owner's own four lines). With no parcel or
-  // delivery this is identical to the old subtotal − discount − expenses, so the figure the
-  // sheet showed yesterday does not move; with them it now includes that money too.
-  const yours = num(moneyIn - gstAll - totals.discount);
-
-  let series: { bucket: string; expenses: number; left: number }[] | null = null;
-  if (perBucket) {
-    // The buckets are the UNION of the sales days and the cost days, NOT just the sales
-    // days. A restaurant that was shut on Tuesday still paid Tuesday's wages: walking only
-    // the sales rows dropped that day from the chart while keeping it in the total, so the
-    // series quietly failed to add up to the number printed above it (caught 2026-08-02).
-    const salesOf = new Map<string, number>();
-    for (const r of rows) salesOf.set(bucketKeyOf(r.bucket, grain), num(r.subtotal - r.discount));
-    const keys = new Set<string>([...salesOf.keys(), ...manualB.keys(), ...salaryB.keys(), ...usedB.keys(), ...wasteB.keys(), ...chargedB.keys()]);
-    const sorted = [...keys].sort();
-    // Round every bucket except the LAST, and give the last the remainder — the same trick
-    // the CGST/SGST split uses above, for the same reason: buckets rounded independently
-    // drift a paisa or two off the total printed above the chart, and a chart that doesn't
-    // add up to its own headline is the kind of thing an owner rightly stops trusting.
-    let running = 0;
-    series = sorted.map((k, i) => {
-      const exact = (manualB.get(k) || 0) + (salaryB.get(k) || 0)
-        + ((usedB.get(k) || 0) - (cxFoodB.get(k) || 0)) + (wasteB.get(k) || 0) + (chargedB.get(k) || 0);
-      const e = i === sorted.length - 1 ? num(expenses - running) : num(exact);
-      running = num(running + e);
-      return { bucket: k, expenses: e, left: num((salesOf.get(k) || 0) - e) };
-    });
-  }
-
-  const modes = new Set(ids.map((id, i) => effMode(id, i)));
-  return {
-    itemSales: totals.subtotal, discounts: totals.discount, netSales: num(totals.subtotal - totals.discount),
-    gst: gstAll, collected: totals.revenue, yours,
-    moneyIn, earnings: { parts, dineIn: num(dineIn), tips },
-    expenses, left: num(yours - expenses),
-    parts: {
-      manual: manual || manualN ? { amount: manual, entries: manualN, byCategory } : { amount: 0, entries: 0, byCategory: {} },
-      salary: payIds.length ? { accrued, paid: paidOut, people, excluded } : null,
-      stock: invIds.length ? { used: usedCharged, wasted, cancelledFoodRemoved: cancelledFood } : null,
-      cancelled: {
-        mode: modes.size > 1 ? "mixed" : (modes.values().next().value ?? "bill"),
-        lostSales: totals.cancelledValue, orders: totals.cancelledOrders,
-        foodCost: cancelledFood, charged,
-      },
-    },
-    series,
-    coverage: { restaurants: ids.length, withPayroll: payIds.length, withInventory: invIds.length, hourlyStaffExcluded: excluded },
-  };
-}
-
 export async function GET(req: NextRequest) {
   const scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -403,8 +176,6 @@ export async function GET(req: NextRequest) {
   const ridList: (string | null)[] = rid ? [rid] : scope.all ? [null] : scope.ids;
 
   const KNOWN = new Set(["sales", "tax", "discounts", "cancellations", "daysummary", "dishes", "categories", "hourly", "payments", "byrestaurant", "staffpay", "staffperf",
-    // The day × hour traffic grid (owner 2026-08-01) — the dashboard's heatmap, in Reports.
-    "heatmap",
     // Inventory & stock (mig 227) — one type per sub-tab of the Inventory report.
     "invstock", "invpurchases", "invusage", "invwaste", "invexpenses"]);
   if (!KNOWN.has(type)) return NextResponse.json({ error: "unknown report type" }, { status: 400 });
@@ -450,14 +221,7 @@ export async function GET(req: NextRequest) {
   // being served a pre-inventory snapshot — the new day-sheet tiles and the cost line
   // would silently never appear until the snapshot happened to expire. BUMP THIS VERSION
   // WHENEVER A PAYLOAD SHAPE CHANGES, not just when the numbers change.
-  // v4 (mig 252): the money payloads gained `inHand` — same reasoning as v3, and this time
-  // the shape carries the number the owner reads FIRST, so a stale v3 row would show him a
-  // day sheet with no bottom line at all.
-  // v5 (mig 254): `inHand` gained `moneyIn` + `earnings`. Forgetting this bump CRASHED the
-  // page in testing — the stored v4 JSON has no `earnings`, the sub-report read
-  // `earnings.tips` off undefined, and the owner got "Something went wrong" instead of a
-  // report. The reader below is now defensive too, but the version is the real fix.
-  const cacheKey = `reports:v5:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
+  const cacheKey = `reports:v3:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
   // Change-detector choice. The precise ordersFingerprint SCANS its window — on a WIDE
@@ -488,27 +252,6 @@ export async function GET(req: NextRequest) {
     return [pay.count ?? 0, last?.created_at ?? "", last?.voided_at ?? "", (act as { count?: number | null }).count ?? 0].join("|");
   };
   const moneyType = type === "sales" || type === "tax" || type === "discounts" || type === "cancellations" || type === "daysummary";
-  // The two reports that now carry the in-hand ladder (mig 252) depend on THREE tables the
-  // orders fingerprint knows nothing about: a recorded expense, a recorded wage or a stock
-  // movement changes what the owner kept, but not a single order — so the snapshot would
-  // keep serving the pre-expense figure until it happened to age out. Three cheap indexed
-  // heads, folded into the orders detector. Same shape and same fail-open contract as
-  // staffFingerprint/invFingerprint: a throw here means "treat as changed", which at worst
-  // costs one extra recompute.
-  const inHandType = type === "daysummary" || type === "sales";
-  const costTablesFingerprint = async (): Promise<string> => {
-    const ids = (rid ? [rid] : scope.all ? [] : scope.ids).filter(Boolean) as string[];
-    if (!ids.length) return "0";
-    const [ex, pay, mv] = await Promise.all([
-      sb.from("expenses").select("created_at, voided_at", { count: "exact" }).in("restaurant_id", ids).order("created_at", { ascending: false }).limit(1),
-      sb.from("staff_payments").select("created_at, voided_at", { count: "exact" }).in("restaurant_id", ids).order("created_at", { ascending: false }).limit(1),
-      sb.from("inv_movements").select("id").in("restaurant_id", ids).order("id", { ascending: false }).limit(1),
-    ]);
-    const e = (ex.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
-    const p = (pay.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
-    const m = (mv.data || [])[0] as { id?: number } | undefined;
-    return [ex.count ?? 0, e?.created_at ?? "", e?.voided_at ?? "", pay.count ?? 0, p?.created_at ?? "", p?.voided_at ?? "", m?.id ?? 0].join("|");
-  };
   const wideWindow = Date.parse(to) - Date.parse(from) > 35 * DAY;
   const useMonthFp = wideWindow || (bucket === "month" && moneyType);
   // Inventory reports are driven by inv_movements / inv_purchases / expenses / recipe rows,
@@ -534,14 +277,8 @@ export async function GET(req: NextRequest) {
   try {
     const payload = await cachedOwnerPayload({
       key: cacheKey, force,
-      fingerprint: async () => (invType ? invFingerprint()
+      fingerprint: () => (invType ? invFingerprint()
         : staffType ? staffFingerprint()
-        : inHandType
-          // orders AND the three cost tables — either side moving must refresh the sheet.
-          ? (await Promise.all([
-              useMonthFp ? reportMonthFingerprint(fpIds, from, to) : ordersFingerprint(fpIds, from, to),
-              costTablesFingerprint().catch(() => "x"),
-            ])).join("~")
         : useMonthFp ? reportMonthFingerprint(fpIds, from, to) : ordersFingerprint(fpIds, from, to)),
       compute: async () => {
     // ── money reports: one bucketed summary drives sales/tax/discounts/cancellations ──
@@ -756,20 +493,7 @@ export async function GET(req: NextRequest) {
         }
       }
       } catch { inventory = null; costSeries = null; }
-
-      // ── WHAT'S LEFT IN HAND (mig 252) ───────────────────────────────────────
-      // FAIL-OPEN for the same reason the inventory block is: this is an ADD-ON to a
-      // report the owner already relies on. If a wage table or a stock RPC blips, the
-      // sales figures above must still render — `inHand` simply stays null and the sheet
-      // looks exactly as it did before this existed.
-      let inHand: InHand | null = null;
-      try {
-        if (type === "daysummary" || type === "sales") {
-          const ihIds = rid ? [rid] : scope.all ? await allRestaurantIds() : scopeIds;
-          inHand = await buildInHand({ ids: ihIds.filter(Boolean) as string[], from, to, bucket, totals, rows });
-        }
-      } catch { inHand = null; }
-      return { type, range, bucket, rows, totals, tax, payments, staffPay, inventory, costSeries, inHand, drillBucket, drillRows };
+      return { type, range, bucket, rows, totals, tax, payments, staffPay, inventory, costSeries, drillBucket, drillRows };
     }
 
     // ── breakdown reports: dishes / categories / payments / hourly ──
@@ -1022,27 +746,6 @@ export async function GET(req: NextRequest) {
           bucket: String(r.bucket), purchased: num(r.purchased), used: num(r.used), wasted: num(r.wasted),
         })),
         expenses, waste,
-      };
-    }
-
-    // ── TRAFFIC: the day × hour heatmap (owner 2026-08-01) ──────────────────
-    // The grid the owner already likes on the dashboard, brought into Reports where it
-    // belongs alongside the other busy-times views. One RPC, one payload, both metrics
-    // (orders AND revenue) so the chart's own Orders⇄Revenue toggle costs no refetch.
-    // Measured on the backup database 2026-08-01: 15 restaurants over a full year = 305ms,
-    // 30 days = 203ms — mig 241 (resolve the tax rate once, not per order row) is what
-    // made this cheap enough to put on a second screen.
-    if (type === "heatmap") {
-      const res = !rid && !scope.all
-        ? await sb.rpc("lfh_owner_heatmap", { p_restaurant_id: null, p_from: from, p_to: to, p_ids: scope.ids })
-        : await sb.rpc("lfh_owner_heatmap", { p_restaurant_id: rid, p_from: from, p_to: to });
-      if (res.error) throw res.error;
-      return {
-        type, range,
-        rows: ((res.data ?? []) as Row[]).map((r) => ({
-          dow: Number(r.dow) || 0, hr: Number(r.hr) || 0,
-          orders: Number(r.orders) || 0, revenue: num(r.revenue),
-        })),
       };
     }
 

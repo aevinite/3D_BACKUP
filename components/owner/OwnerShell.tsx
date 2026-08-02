@@ -49,11 +49,6 @@ const GROUPS: NavGroup[] = [
       // restaurant (ent key injected by the layout from inventoryLadder), same as Pay Later —
       // it appears only for restaurants the admin gave the module to (no dead section).
       { href: "/owner/inventory", label: "Inventory & expenses", icon: "fa-boxes-stacked", ent: "inventory" },
-      // Expenses (2026-08): the owner's OWN expense book — the same `expenses` rows the
-      // manager records under Inventory → 💸, but a first-class page that does NOT need the
-      // inventory module. Its own admin section key ("expenses" in OWNER_SECTION_KEYS);
-      // absent = ON, so every restaurant gets it until an admin switches it off.
-      { href: "/owner/expenses", label: "Expenses", icon: "fa-receipt", ent: "expenses" },
       { href: "/owner/issues", label: "Feedback & complaints", icon: "fa-triangle-exclamation", ent: "issues" },
     ],
   },
