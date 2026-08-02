@@ -360,11 +360,20 @@ export const SECTIONS: Section[] = [
             what: "The list of tables on the “where does it go?” step. ON with Parcel: the step shows the Parcel bar on top and every table under it. ON with Parcel off: tables only. OFF with Parcel on: no tables at all — anything built here leaves as a parcel. It cannot give more than the restaurant already has: without “Take a new order” no tables are offered whatever this says." },
           { id: "qop_parcel", name: "Parcel — send it out", def: true,
             bind: { t: "setting", key: "qop_parcel_allowed" },
-            what: "The big Parcel bar on the “where does it go?” step, and the Parcel tiles that sit under the live floor until a parcel is printed and paid. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar and no Parcel tiles. It needs Platforms (in Extra features) to be on as well — with that off there is no Parcel here however this is set." },
+            what: "The big Parcel bar on the “where does it go?” step. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar, and QO/P sends to tables only. This switch is only about the QO/P screen — the Parcel feature itself (its floor tiles, the tablet's New parcel, the parcel bill) is the “Parcel — counter takeaway” switch below, and with THAT off there is no Parcel bar here however this is set." },
           // Named so the admin isn't left to work the last case out for themselves.
           { id: "qop_both_off", name: "If BOTH of the two above are off", info: true, bind: { t: "none" },
             what: "There is nothing left for QO/P to do, so the button does not appear on the floor at all — the header keeps only the KOT menu. Nothing is greyed out and nothing errors; the feature is simply absent, which is the same rule the rest of this screen follows." },
         ] },
+      // 🥡 PARCEL — its own MAIN feature again (owner, 2026-08-02: "takeaway his whole
+      // separate thing, parcel his whole separate thing"). It sat inside "Platforms" from mig
+      // 235 to 259, which meant a restaurant with no Zomato/Swiggy account — Platforms off,
+      // quite correctly — silently lost the counter-parcel button, and only found out when
+      // the finished order was refused. Main, not Extra: handing a parcel over the counter is
+      // everyday running, not an add-on. Default ON for the same reason QO/P is (mig 259).
+      { id: "parcel", name: "Parcel — counter takeaway", def: true, fresh: true,
+        bind: { t: "module", key: "parcel" },
+        what: "A parcel your own staff punch in at the counter: no table, nothing to connect, no outside account. It is the Parcel choice on ⚡ QO/P, ☰ → New parcel on the waiter tablet, the Parcel tiles that sit under the live floor until one is printed and paid, its own parcel bill, and the parcel half of the 🛵 board. This is NOT Zomato / Swiggy / the restaurant's own website — those arrive from outside and are “Platforms” in Extra features, a completely separate switch. OFF removes every parcel surface above; the delivery side is untouched." },
       {
         id: "bill", name: "Bill", bind: { t: "none" },
         what: "Everything that prints on a bill. There is no on/off — a restaurant can always issue one.",
@@ -420,11 +429,14 @@ export const SECTIONS: Section[] = [
       {
         // "Platforms" (owner, 2026-07-31). The stored key stays `takeaway`: that is the mig-235
         // column name, and renaming a LABEL must never rename a column.
+        // It covers the DELIVERY side ONLY. The counter parcel is its own Main feature again
+        // (mig 259) — see the box at the top of lib/tableTags.ts. Do not fold them back
+        // together: switching this off must never take the counter parcel away.
         id: "takeaway", name: "Platforms (Zomato, Swiggy, own website)", def: false, bind: { t: "module", key: "takeaway" },
-                what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board, takes the Parcel choice out of the floor's ⚡ QO/P screen (it then only sends to tables), and stops Parcel tiles appearing under the live floor.",
+                what: "Orders that arrive from OUTSIDE the restaurant: the delivery apps and the restaurant's own website. Each one is switched on separately below and needs that company's key. OFF removes the delivery side of the 🛵 board. It does NOT touch parcels punched in at the counter — that is “Parcel — counter takeaway” in Main features, its own switch, and it keeps its tiles and its half of the board either way.",
         children: [
-          { id: "ch_website", name: "Takeaway / own website", def: true, bind: { t: "channel", key: "website" },
-            what: "A counter takeaway punched in by staff, and orders coming from the restaurant's own website. Needs no outside account.",
+          { id: "ch_website", name: "Own website", def: true, bind: { t: "channel", key: "website" },
+            what: "Orders coming in from the restaurant's own website. This is not the counter parcel — a parcel staff punch in themselves needs nothing here and is switched on in Main features.",
             children: [
               { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
                 what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },

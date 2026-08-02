@@ -20,7 +20,7 @@ const fail = (m) => fails.push(m);
 
 // The model itself, compiled. `npm run verify:access` bundles it first (see package.json), so
 // these are the REAL exported values — every generated row included.
-const { MANAGER_GRANT_DEFAULTS, isConfigurableGrant } = await import("../node_modules/.cache/accessTree.mjs");
+const { MANAGER_GRANT_DEFAULTS, isConfigurableGrant, MODULE_KEYS } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
 const format = read("lib/format.ts");
@@ -296,8 +296,14 @@ if (!deadRows) ok("no row is a switch with nothing behind it");
 // because the panel's own check read a column the Access screen no longer writes. A switch
 // that appears to work and does nothing is exactly what this rebuild removed, so it fails here.
 {
-  const RETIRED = ["parcel_allowed", "parcel_owner_control", "parcel_enabled",
-                   "platform_allowed", "platform_owner_control", "platform_enabled"];
+  // DERIVED from the tree, not hand-typed (2026-08-02). A prefix that the tree writes today
+  // is NOT retired — mig 259 gave the counter parcel its own switch back, and a hand-typed
+  // list said parcel_* was dead while the Access screen was writing it, failing every correct
+  // read of it. Whatever the tree no longer writes stays flagged.
+  const LEGACY_PREFIXES = ["parcel", "platform"];
+  const RETIRED = LEGACY_PREFIXES
+    .filter((p) => !MODULE_KEYS.includes(p))
+    .flatMap((p) => [`${p}_allowed`, `${p}_owner_control`, `${p}_enabled`]);
   const dirs = ["app", "lib", "components", "public/panels"];
   const files = [];
   const walk = (d) => {

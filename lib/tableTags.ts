@@ -73,11 +73,31 @@ export const tableTagsLadder = (rid: string) =>
 export const khataLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "khata_allowed", control: "khata_owner_control", enabled: "khata_enabled" });
 
-// Takeaway & delivery — ONE switch over what used to be two (parcel_* and platform_*),
-// because the owner treats counter takeaway, the restaurant's own website and the delivery
-// apps as one feature (mig 235). Which channels are live stays a separate per-restaurant
-// config (settings.platform_channels). parcelLadder/platformLadder below are aliases of it
-// so every existing call site keeps working and can never disagree with this one.
+// ╔══════════════════════════════════════════════════════════════════════════════════════╗
+// ║ PARCEL and PLATFORMS ARE TWO SEPARATE FEATURES — never merge them again (owner,       ║
+// ║ 2026-08-02, mig 259). If you are adding a gate, pick the right one:                   ║
+// ║                                                                                       ║
+// ║   PARCEL     → parcelLadder()   → settings.parcel_*                                   ║
+// ║     A counter order the restaurant's OWN staff punch in: ⚡ QO/P → Parcel on the       ║
+// ║     manager floor, ☰ → New parcel on the waiter tablet, the Parcel tiles under the    ║
+// ║     live floor, the parcel bill. No table, no outside account, no API key.            ║
+// ║     Access → MAIN features, default ON (it replaced a button every floor had).        ║
+// ║                                                                                       ║
+// ║   PLATFORMS  → platformLadder() → settings.takeaway_*                                 ║
+// ║     Orders that ARRIVE from outside: Zomato, Swiggy, the restaurant's own website.    ║
+// ║     Each channel is switched on separately (settings.platform_channels) with its own  ║
+// ║     API key. Access → EXTRA features, default OFF.                                    ║
+// ║                                                                                       ║
+// ║ They meet in exactly one place — both kinds of order live in `aggregator_orders` and  ║
+// ║ show on the 🛵 board — and that is a storage detail, not a shared switch. mig 235     ║
+// ║ briefly aliased both to takeaway_*, which meant a restaurant with no delivery apps    ║
+// ║ (Platforms off, correctly) also lost Parcel: the floor still offered it and the       ║
+// ║ server refused the finished order at the last tap.                                    ║
+// ╚══════════════════════════════════════════════════════════════════════════════════════╝
+
+// PLATFORMS — Zomato / Swiggy / the restaurant's own website (mig 209, columns renamed to
+// takeaway_* by mig 235). Which channels are live stays a separate per-restaurant config
+// (settings.platform_channels), edited under the same Access row.
 export const takeawayLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "takeaway_allowed", control: "takeaway_owner_control", enabled: "takeaway_enabled" });
 
@@ -97,11 +117,12 @@ export const tableOpsLadder = (rid: string) =>
 export const takeOrdersLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" });
 
-// Parcel / takeaway quick-order — the 🥡 New Parcel button (manager + tablet), which
-// writes a takeaway order into the Platform system. Since mig 235 this is the SAME feature
-// as the Platform board in the owner's model ("Takeaway & delivery"), so it reads the
-// takeaway_* columns; parcel_* is left in the table but no longer read.
-export const parcelLadder = takeawayLadder;
+// PARCEL — the counter takeaway staff punch in themselves (migs 197/198, its own feature
+// again since mig 259). Its OWN columns, deliberately: a restaurant that is not on Zomato
+// or Swiggy still hands parcels over the counter every day. See the box above before
+// pointing this at takeaway_* "because they're both takeaway" — they are not.
+export const parcelLadder = (rid: string) =>
+  moduleLadder(rid, { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" });
 
 // Staff profiles, salary records & the performance report (mig 220). A brand-new module:
 // every rung starts OFF, so no restaurant sees profiles or pay until the admin grants it
@@ -117,9 +138,6 @@ export const payrollLadder = (rid: string) =>
 export const inventoryLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "inventory_allowed", control: "inventory_owner_control", enabled: "inventory_enabled" });
 
-// Platform board (Zomato / Swiggy / Website takeaway) — the 🛵 Platform tab (mig 209).
-// Since mig 235 it is one half of the single "Takeaway & delivery" feature, so it reads the
-// same takeaway_* columns as parcel; platform_* is left in the table but no longer read.
-// Which channels are actually live stays a separate per-restaurant config
-// (settings.platform_channels), edited under the same Main-features row.
+// PLATFORMS again, under the name most call sites use. An alias of takeawayLadder (ONE
+// feature, two historic names) — NOT of parcelLadder, which is a different feature.
 export const platformLadder = takeawayLadder;

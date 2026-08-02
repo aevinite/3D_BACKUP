@@ -153,15 +153,17 @@ export const PERMISSIONS: Perm[] = [
   { id: "take_orders", group: "floor", kind: "ladder", power: "take_orders", tablet: "tablet_take_orders", waiter: true, ownerUse: "manager",
     module: { allowed: "take_orders_allowed", control: "take_orders_owner_control", enabled: "take_orders_enabled" }, name: "Take a new order",
     what: "Punching in a dine-in order — the ＋ Take order button on a table, and the tables half of the ⚡ QO/P quick-order screen. Waiters do this by default; you can hand it to the manager too, or pull it back. With this off, QO/P can still send a parcel (if that's on) but offers no tables." },
+  // PARCEL and PLATFORMS are two SEPARATE features and two separate module column sets
+  // (mig 259) — see the box at the top of lib/tableTags.ts. They shared takeaway_* between
+  // migs 235 and 259, and switching Platforms off took the Parcel button with it.
   { id: "parcel", group: "floor", kind: "ladder", power: "parcel", tablet: "tablet_parcel", waiter: true, ownerUse: "manager",
-    // parcel + platform are ONE feature since mig 235 ("Takeaway & delivery"), so they share
-    // the takeaway_* columns and MODULE_DEFS dedupes them into a single module.
-    module: { allowed: "takeaway_allowed", control: "takeaway_owner_control", enabled: "takeaway_enabled" }, name: "Parcel / takeaway orders",
-    what: "Punching in a quick takeaway order from the floor (no table) — the Parcel choice on the ⚡ QO/P screen, which replaced the old 🥡 New Parcel button. It shows in the Platform board as a Parcel next to Zomato/Swiggy, and sits as a Parcel tile under the live floor until it has been printed and paid. With this off, QO/P offers tables only. QO/P itself disappears when this AND \"Take a new order\" are both off, leaving just the KOT menu." },
+    module: { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" },
+    moduleLabel: "Parcel — counter takeaway", name: "Parcel orders",
+    what: "Punching in a parcel at the counter (no table) — the Parcel choice on the ⚡ QO/P screen, which replaced the old 🥡 New Parcel button, and ☰ → New parcel on the waiter tablet. It sits as a Parcel tile under the live floor until it has been printed and paid. Nothing to connect and no outside account: this is the restaurant's own counter, not Zomato/Swiggy (those are Platforms, a separate switch). With this off, QO/P offers tables only; QO/P itself disappears when this AND \"Take a new order\" are both off, leaving just the KOT menu." },
   { id: "platform", group: "floor", kind: "ladder", power: "platform", ownerUse: "manager",
     module: { allowed: "takeaway_allowed", control: "takeaway_owner_control", enabled: "takeaway_enabled" },
-    moduleLabel: "Takeaway & delivery", name: "Platform board (Zomato / Swiggy)",
-    what: "The 🛵 Platform tab — online delivery orders from Zomato / Swiggy and the restaurant's own website. Turn it off for restaurants that aren't on the delivery apps. Which channels are live (and their API keys) are set in the restaurant's Platform card. Takeaway parcels have their own separate switch and keep their board either way." },
+    moduleLabel: "Platforms (Zomato, Swiggy, own website)", name: "Platform board (Zomato / Swiggy)",
+    what: "The 🛵 board's delivery side — orders that ARRIVE from Zomato, Swiggy or the restaurant's own website. Turn it off for restaurants that aren't on the delivery apps. Which channels are live (and their API keys) are set under the same Access row. Counter parcels are a separate feature with their own switch and keep their tiles and their half of the board either way." },
   { id: "table_ops", group: "floor", kind: "ladder", power: "table_ops", tablet: "tablet_table_ops", waiter: true, ownerUse: "manager",
     module: { allowed: "table_ops_allowed", control: "table_ops_owner_control", enabled: "table_ops_enabled" }, name: "Table & ticket operations",
     what: "The KOT ▾ menu: moving parties/tickets after an order has gone to the kitchen.",
@@ -197,7 +199,7 @@ export const PERMISSIONS: Perm[] = [
   // ⚡ QO/P (mig 257). Kept in step with the Access tree's Main-features row — a switch that
   // exists in one model and not the other is exactly the drift this file warns about above.
   { id: "qop", group: "floor", kind: "switch", adminSwitch: "qop_allowed", adminOnly: true, name: "Quick order / Parcel (QO/P)",
-    what: "The floor's ⚡ QO/P quick-order screen. Admin decides whether a restaurant has it at all; what it may DO still comes from “Take a new order” and “Parcel / takeaway orders”." },
+    what: "The floor's ⚡ QO/P quick-order screen. Admin decides whether a restaurant has it at all; what it may DO still comes from “Take a new order” and “Parcel orders”." },
 
   // ───────────────────────────── BANQUET (ladder) ──────────────────────────
   // banquet carries the tablet rung too — the waiter cap (settings.tablet_banquet) has been

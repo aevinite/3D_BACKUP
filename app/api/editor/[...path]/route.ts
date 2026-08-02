@@ -1140,7 +1140,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const elapsedMs = now.getTime() - since.getTime();
       const [dishesQ, setQ, platRangeQ] = await Promise.all([
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
-        sb.from("settings").select("tax_rate,tax_components,takeaway_allowed,takeaway_owner_control,takeaway_enabled,platform_channels").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select("tax_rate,tax_components,takeaway_allowed,takeaway_owner_control,takeaway_enabled,parcel_allowed,parcel_owner_control,parcel_enabled,platform_channels").eq("restaurant_id", rid).maybeSingle(),
         sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).limit(5000),
       ]);
       // Page through EVERY order in the window. A single .limit(50000) is silently capped by
@@ -1212,10 +1212,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Which platform surfaces are live (mig 209) — so the dashboard hides dead channels for a
       // restaurant that isn't on the delivery apps. moduleLadder formula, computed from the
       // columns already fetched above (no extra query).
-      // ONE module (takeaway_*) since mig 235; the retired columns are no longer written, so
-      // reading them made the dashboard disagree with the board it was summarising.
-      const takeawayOnDash = setRow.takeaway_allowed === true && (setRow.takeaway_owner_control !== true || setRow.takeaway_enabled !== false);
-      const platOnDash = takeawayOnDash, parcelOnDash = takeawayOnDash;
+      // TWO modules again since mig 259: Platforms (takeaway_*) is the delivery side, Parcel
+      // (parcel_*) is the counter. A restaurant with no delivery apps still sells parcels, and
+      // a dashboard that hid the parcel line for them was under-reporting real money.
+      const platOnDash = setRow.takeaway_allowed === true && (setRow.takeaway_owner_control !== true || setRow.takeaway_enabled !== false);
+      const parcelOnDash = setRow.parcel_allowed === true && (setRow.parcel_owner_control !== true || setRow.parcel_enabled !== false);
       const dashChan = (setRow.platform_channels || {}) as Record<string, { on?: boolean }>;
       const channelsOn = { zomato: platOnDash && dashChan.zomato?.on === true, swiggy: platOnDash && dashChan.swiggy?.on === true, website: platOnDash && dashChan.website?.on === true, parcel: parcelOnDash };
       const catOf: Record<string, string> = Object.fromEntries(dishes.map((d: { id: string; category?: string }) => [d.id, d.category || "other"]));
@@ -1743,7 +1744,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Titles/prices are resolved SERVER-SIDE (never trust the client cart); total is the
     // item subtotal, matching how every other platform order stores `total`.
     if (a === "parcel" && path.length === 1) {
-      if (!(await parcelLadder(rid)).effective) return err("Parcel / takeaway isn't enabled for this restaurant.", 403);
+      if (!(await parcelLadder(rid)).effective) return err("Parcel orders aren't switched on for this restaurant.", 403);
       if (!(await managerCan(g, rid, "parcel"))) return permDenied("take parcel / takeaway orders");
       const { items, customer, phone, note, allergies, paid, method } = body || {};
       if (!Array.isArray(items) || !items.length) return err("items required");

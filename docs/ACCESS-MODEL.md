@@ -54,9 +54,25 @@ routes. The restaurant runs on staff panels only.
 ### A2 · Pay later (khata)
 OFF ⇒ the khata tab/entries disappear from the **manager** and **owner** panels entirely.
 
-### A3 · Takeaway & delivery  *(one row, three channels)*
-Own-website takeaway + **Zomato** + **Swiggy**. Zomato/Swiggy each need their API credentials,
-entered per channel; a channel with no credentials shows as "not connected", never as broken UI.
+### A3 · TWO SEPARATE FEATURES — **Parcel** and **Platforms** (split again, mig 259, 2026-08-02)
+
+They were ONE row ("Takeaway & delivery") between migs 235 and 259. They are not one thing,
+and merging them cost a real order: a restaurant with no delivery account has Platforms OFF,
+which silently removed the counter-parcel button — the floor still offered Parcel and the
+server refused the finished order at the last tap. Keep them apart.
+
+| | **Parcel — counter takeaway** | **Platforms (Zomato, Swiggy, own website)** |
+|---|---|---|
+| Where on the screen | **Main** features (everyday running) | **Extra** features (an add-on) |
+| Default | **ON** — it replaced a button every floor had | **OFF** — needs an account first |
+| Columns | `parcel_allowed / _owner_control / _enabled` | `takeaway_allowed / _owner_control / _enabled` |
+| Ladder | `parcelLadder()` | `platformLadder()` = `takeawayLadder()` |
+| What it is | An order the restaurant's OWN staff punch in at the counter: ⚡ QO/P → Parcel, tablet ☰ → New parcel, the Parcel tiles under the live floor, the parcel bill | Orders that ARRIVE from outside: each channel switched on separately with its own API key; a channel with no credentials reads "not connected", never broken UI |
+| Off means | No Parcel bar on QO/P, no tablet entry, no parcel tiles — and the endpoint refuses, for the admin too | No delivery side of the 🛵 board, webhooks refused — parcels are untouched |
+
+Both kinds of order are stored in `aggregator_orders` and share the 🛵 board; that is a
+storage detail, not a shared switch. The board **names itself** after what the restaurant
+has: both ⇒ "🛵 Platform", parcel only ⇒ "🥡 Parcels".
 
 ### A4 · Auto-print KOT
 ### A5 · Banquet billing

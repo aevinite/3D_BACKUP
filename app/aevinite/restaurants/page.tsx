@@ -285,8 +285,8 @@ const NR_PANELS = [
 ] as const;
 const SYS_PANELS: Record<string, boolean> = { manager: true, kitchen: true, tablet: true, owner: false };
 const NR_OWNER_SECTIONS = [["menu", "Menu"], ["reports", "Reports"], ["staff", "Staff & powers"], ["issues", "Feedback & issues"], ["ratings", "Ratings"], ["customers", "Customers"], ["settings", "Settings"]] as const;
-const NR_MGR_POWERS = [["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"], ["view_dashboard", "View dashboard"], ["void_bills", "Void / delete bills"], ["edit_settings", "Edit settings"], ["view_ratings", "View ratings"], ["table_tags", "Table types"], ["khata", "Pay Later (khata)"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT ops"], ["take_orders", "Take orders"], ["parcel", "Parcel / takeaway"], ["platform", "Platform board"]] as const;
-const NR_MODULES = [["table_tags", "Table types + Pay Later"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"], ["take_orders", "Take orders (manager)"], ["parcel", "Parcel / takeaway"], ["platform", "Platform (Zomato / Swiggy)"]] as const;
+const NR_MGR_POWERS = [["manage_staff", "Manage staff"], ["edit_menu", "Edit menu"], ["give_discounts", "Give discounts"], ["view_dashboard", "View dashboard"], ["void_bills", "Void / delete bills"], ["edit_settings", "Edit settings"], ["view_ratings", "View ratings"], ["table_tags", "Table types"], ["khata", "Pay Later (khata)"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT ops"], ["take_orders", "Take orders"], ["parcel", "Parcel orders (counter)"], ["platform", "Platform board (delivery)"]] as const;
+const NR_MODULES = [["table_tags", "Table types + Pay Later"], ["banquet", "Banquet billing"], ["table_ops", "Table & KOT operations"], ["take_orders", "Take orders (manager)"], ["parcel", "Parcel — counter takeaway"], ["platform", "Platforms (Zomato / Swiggy / own website)"]] as const;
 const NR_TABLET_CAPS = [["tablet_discount", "Discounts"], ["tablet_mark_paid", "Mark paid"], ["tablet_invoice", "Invoice"], ["tablet_banquet", "Banquet"], ["tablet_table_tags", "Table types"], ["tablet_khata", "Pay Later"], ["tablet_table_ops", "Table & KOT ops"], ["tablet_take_orders", "Take orders"], ["tablet_parcel", "Parcel"]] as const;
 const NR_MP_DEFAULT: Record<string, boolean> = { manage_staff: false, edit_menu: true, give_discounts: true, view_dashboard: true, void_bills: false, edit_settings: false, view_ratings: false, table_tags: false, khata: false, banquet: false, table_ops: false, take_orders: false, parcel: true, platform: true };
 const NR_TABLET_DEFAULT: Record<string, "off" | "on" | "pin"> = { tablet_discount: "off", tablet_mark_paid: "off", tablet_invoice: "off", tablet_banquet: "off", tablet_table_tags: "off", tablet_khata: "off", tablet_table_ops: "off", tablet_take_orders: "on", tablet_parcel: "off" };
@@ -298,7 +298,11 @@ function systemAccess(): Access {
   for (const [k] of NR_MGR_POWERS) owner["power_" + k] = true;
   const features: Record<string, boolean> = {};
   for (const [m] of NR_MODULES) { features[m + "_allowed"] = false; features[m + "_owner_control"] = false; }
-  features.takeaway_allowed = true; // Takeaway & delivery ON by default (owner 2026-07-26; one module since mig 235)
+  // PARCEL — the counter parcel — is ON for a new restaurant (owner 2026-07-26: a common
+  // counter task). PLATFORMS (takeaway_*, Zomato/Swiggy/own website) stays OFF like every
+  // other Extra feature: it needs an account and a key before it can do anything. Two
+  // separate features since mig 259 — see the box at the top of lib/tableTags.ts.
+  features.parcel_allowed = true;
   return { owner, manager: { ...NR_MP_DEFAULT }, tablet: { ...NR_TABLET_DEFAULT }, features };
 }
 // Merge a (possibly partial) saved access blob over the system defaults, so a missing key

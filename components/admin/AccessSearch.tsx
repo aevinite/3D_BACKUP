@@ -49,7 +49,11 @@ const SYNONYMS: Record<string, string> = {
   menu_languages: "language translate hindi french arabic korean german",
   menu_currencies: "currency rupee dollar euro symbol money",
   khata: "khata pay later credit udhaar tab account",
-  takeaway: "takeaway parcel delivery zomato swiggy aggregator online",
+  // Two SEPARATE features (mig 259), so two separate entries. "parcel" and "takeaway" are
+  // both typed for the counter parcel, and "delivery"/"online"/the app names for Platforms;
+  // each word is listed under the one it should actually jump to.
+  takeaway: "platforms delivery zomato swiggy aggregator online website apps",
+  parcel: "parcel takeaway counter pickup collection bag qop quick order",
   auto_print_kot: "printer print kot kitchen ticket thermal",
   banquet: "banquet event party hall per plate",
   payroll: "payroll salary wages pay advance staff profile",
