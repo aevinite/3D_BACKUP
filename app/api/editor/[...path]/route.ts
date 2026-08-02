@@ -35,7 +35,7 @@ import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
-import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, type ManagerTabKey } from "@/lib/accessTree";
+import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, type ManagerTabKey } from "@/lib/accessTree";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
@@ -147,9 +147,10 @@ async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<
 const TAB_PATHS: { tab: ManagerTabKey; test: (p: string) => boolean }[] = [
   { tab: "ratings", test: (p) => p === "ratings" || p.startsWith("ratings/") },
   { tab: "log", test: (p) => p === "oplog" || p.startsWith("oplog/") },
-  // The Bills tab (owner, 2026-08-01 — the fifth manager menu). Switching it off has to take the
-  // bill LIST away as well as the tab, or the endpoints are still reachable behind a hidden tab.
-  { tab: "bills", test: (p) => p === "bills" || p.startsWith("bills/") || p === "invoices" || p.startsWith("invoices/") },
+  // "bills" LEFT this gate (owner, 2026-08-02): the Bill menu is FIXED — every manager has it,
+  // so there is no view_bills question any more and its endpoints are plain manager endpoints.
+  // The two dangerous actions inside it (delete / reopen a bill) keep their own managerCan
+  // gates at their handlers — the TAB being fixed hands over nothing dangerous.
   { tab: "editor", test: (p) => /^(items|categories|filters)(\/|$)/.test(p) },
 ];
 async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[]): Promise<NextResponse | null> {
@@ -168,10 +169,9 @@ async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[
   const granted =
     hit.tab === "editor"  ? await managerCan(g, rid, "edit_menu")
     : hit.tab === "ratings" ? await managerCan(g, rid, "view_ratings")
-    : hit.tab === "log"     ? await managerCan(g, rid, "view_logs")
-    :                         await managerCan(g, rid, "view_bills");
+    :                         await managerCan(g, rid, "view_logs");
   if (managerTabOn(cfg, hit.tab) && granted) return null;
-  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log", bills: "the bills list" };
+  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log" };
   return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
 
@@ -2284,8 +2284,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "void-invoice") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("void bills");
       // Confirm the session belongs to THIS restaurant before voiding (RPC has no tenant param).
-      const ownsVoid = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const ownsVoid = must(await sb.from("sessions").select("id,invoice_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; invoice_at?: string | null } | null;
       if (!ownsVoid) return err("That table isn't for this restaurant.", 404);
+      // "Only within X minutes" (Access → Permission for manager → Reopen a bill; owner default
+      // 5 min, 2026-08-02). Enforced HERE for a real MANAGER — until 2026-08-02 the row saved a
+      // number nothing read, the dead-switch shape the access rebuild removes. Admin and owner
+      // are not clamped, matching every other money gate; the credit-note path below stays open
+      // because that IS the way to correct a bill once this window has passed.
+      if (g.user && g.user.role === "manager" && ownsVoid.invoice_at) {
+        const winCfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+          { void_bills?: { limit?: { minutes?: number } } } | null;
+        const stored = Number(winCfg?.void_bills?.limit?.minutes);
+        // Nothing stored → the default the Access screen shows (one rule, both sides read it).
+        const winMin = Number.isFinite(stored) && stored > 0 ? stored : Number(defOf(NODE_BY_ID["mgr_bill_reopen_mins"])) || 5;
+        if (Date.now() - new Date(ownsVoid.invoice_at).getTime() > winMin * 60_000)
+          return err(`This bill closed more than ${winMin} minutes ago, so a manager can no longer reopen it. Make a credit note instead.`, 409);
+      }
       const voidReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
       if (!voidReason) return err("A reason is required to void / reopen an invoice.", 400);
       const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: voidReason, p_actor: actorName });

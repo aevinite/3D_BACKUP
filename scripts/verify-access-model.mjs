@@ -210,6 +210,10 @@ for (let i = 0; i < idPositions.length; i++) {
   // restaurant-detail page (2026-08-01), which loads and saves through its own endpoint. Without
   // this the check reads "Theme and logo" as a dead switch when it is the whole branding
   // form.
+  // `info: true` = a row that exists only for its words (declared in the Node type) — it
+  // renders no control at all, so it cannot be a dead switch. `leftToBuild: false` used to be
+  // written here in the hope of the same effect; it never matched anything.
+  if (/info:\s*true/.test(own)) continue;
   if (/children:/.test(own) || /leftToBuild:\s*true/.test(own) || /link:\s*\{/.test(own) || /panel:\s*"/.test(own)) continue;
   fail(`"${id}" is a switch with no storage and no "left to build" label — exactly the dead control this rebuild removed`);
   deadRows++;
@@ -312,7 +316,9 @@ if (!deadRows) ok("no row is a switch with nothing behind it");
     let t = ""; try { t = readFileSync(f, "utf8"); } catch { continue; }
     for (const col of RETIRED) {
       // Only flag a READ (a comparison or a select), not a mention in a comment.
-      const re = new RegExp(`${col}\\s*(===|!==|==|:)|select\\([^)]*${col}`);
+      // (?<![a-z0-9_]) so a NEW column that merely ends with a retired name — qop_parcel_allowed
+      // contains "parcel_allowed" — can never read as the retired one (false alarm, 2026-08-02).
+      const re = new RegExp(`(?<![a-z0-9_])${col}\\s*(===|!==|==|:)|select\\([^)]*(?<![a-z0-9_])${col}`);
       if (re.test(t)) { offenders.push(`${f.replace(root + "/", "")} → ${col}`); break; }
     }
   }

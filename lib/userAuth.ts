@@ -30,7 +30,7 @@ const MAX_PASSWORD_LEN = 200;                   // oversize value can't waste PB
 // see the generic "Wrong name or password."); it's returned so the route can record
 // it in the ADMIN operation log ("who tried what was lacking"). "transient" is a
 // server/DB blip, not a real failure, and must not be logged as one.
-export type LoginFailReason = "empty" | "too_long" | "transient" | "no_such_name" | "locked" | "wrong_password";
+export type LoginFailReason = "empty" | "too_long" | "transient" | "no_such_name" | "locked" | "wrong_password" | "disabled";
 // Who/where an attempt was aimed at, for the audit log. For an unknown name we only
 // know what was typed; for a wrong password we know the real account it targeted.
 export type LoginAttempt = { username: string; role?: Role; restaurant_id?: string; actor?: string | null };
@@ -139,7 +139,12 @@ export async function loginUser(
   // `deleted_at IS NULL`: a recycle-bin account is not a login. Since mig 245 a binned
   // row's name can be re-used by a LIVE account, so without this filter a lookup could
   // match the dead row (and its old password) instead of the real one.
-  const candRes = await sb.from("staff_users").select("*").eq("username", uname).eq("active", true).is("deleted_at", null);
+  //
+  // DISABLED rows (active=false) are fetched too — not to log them in, but so a disabled
+  // person who types their RIGHT password can be told the truth instead of "wrong password"
+  // (owner, 2026-08-02: "if it is disabled, user will see he has been disabled"). Only a
+  // verified password unlocks that message, so it reveals nothing to someone guessing names.
+  const candRes = await sb.from("staff_users").select("*").eq("username", uname).is("deleted_at", null);
   // A FAILED lookup is a server problem, not wrong credentials — don't gaslight the
   // waiter into resetting a password during a network blip (stress test 2026-07-03).
   if (candRes.error) return { ok: false, error: "Can't reach the server — try again in a moment.", transient: true, reason: "transient" };
@@ -171,26 +176,42 @@ export async function loginUser(
   if (!candidates.length) {
     return { ok: false, error: "Wrong name or password.", reason: "no_such_name", attempted: { username: uname, restaurant_id: restaurantId } };
   }
-  // Honour a lockout on ANY matching row (don't let a colliding name dodge it).
+  // Only LIVE accounts can sign in; disabled rows exist here purely for the honest message below.
+  const live = candidates.filter((u) => u.active === true);
+  // Honour a lockout on ANY matching live row (don't let a colliding name dodge it).
   const now = new Date();
-  const lockedCand = candidates.find((u) => u.locked_until && new Date(u.locked_until) > now);
+  const lockedCand = live.find((u) => u.locked_until && new Date(u.locked_until) > now);
   if (lockedCand) {
     return { ok: false, error: "Too many tries — wait a minute and try again.", reason: "locked", attempted: attemptOf(lockedCand) };
   }
   let matched: any = null;
-  for (const u of candidates) {
+  for (const u of live) {
     if (await verifySecret(String(password), u.password_hash)) { matched = u; break; }
   }
   if (!matched) {
-    // Wrong password → bump the fail counter (and lock past the limit) on each match.
+    // A DISABLED account with the RIGHT password is told so plainly (owner, 2026-08-02) —
+    // a person locked out by their manager must never be left guessing at a password that
+    // is in fact correct. Checked only after every live row failed, and only on a verified
+    // password, so name-guessing still learns nothing.
     for (const u of candidates) {
+      if (u.active !== true && await verifySecret(String(password), u.password_hash)) {
+        return { ok: false, error: "This login has been disabled. Speak to your manager or owner.", reason: "disabled", attempted: attemptOf(u) };
+      }
+    }
+    if (!live.length) {
+      // The name exists only on disabled rows and the password was wrong → the same generic
+      // answer an unknown name gets (these rows were invisible here before 2026-08-02).
+      return { ok: false, error: "Wrong name or password.", reason: "no_such_name", attempted: { username: uname, restaurant_id: restaurantId } };
+    }
+    // Wrong password → bump the fail counter (and lock past the limit) on each live match.
+    for (const u of live) {
       const fc = (u.failed_count || 0) + 1;
       const patch = fc >= MAX_FAILS
         ? { failed_count: 0, locked_until: new Date(Date.now() + LOCK_MS).toISOString() }
         : { failed_count: fc };
       await sb.from("staff_users").update(patch).eq("id", u.id);
     }
-    return { ok: false, error: "Wrong name or password.", reason: "wrong_password", attempted: attemptOf(candidates[0]) };
+    return { ok: false, error: "Wrong name or password.", reason: "wrong_password", attempted: attemptOf(live[0]) };
   }
   await sb.from("staff_users")
     .update({ failed_count: 0, locked_until: null, last_seen_at: new Date().toISOString() })

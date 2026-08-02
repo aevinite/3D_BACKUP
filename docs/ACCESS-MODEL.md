@@ -68,9 +68,33 @@ GST number / legal name / bill address text fields, **plus** a **Bill design edi
 
 ---
 
-## SECTION B — MANAGER'S MENU
-Which tabs the manager panel shows. `Edit menu` (default ON) · `Ratings` · `Logs`.
-Off ⇒ the tab is gone for a real manager and the server refuses its endpoints.
+## SECTION B — MANAGER (restructured by the owner, 2026-08-02)
+Three sub-groups, in his words: *"in the manager, there will be three suboption — manager's
+menu, permission for manager, manager settings."*
+
+1. **Manager's menu** — exactly FOUR rows: `Edit menu (Editor)` · `Rating review` (renamed
+   from Ratings — label only, keys unchanged) · `Audit` (the activity log lives INSIDE it;
+   more sub-options to come) · `Dashboard`. The first three carry the TWO-CONTROL row:
+   **Feature** (`access_config.menus.manager[key]` — OFF removes the menu from EVERY
+   manager, whatever their per-person setting; the tab is gone and tabGate refuses) and
+   **Default** (`manager_permissions[flag]` — what a manager on "Default" follows, and what
+   every NEWLY CREATED manager gets, since new people are created with `permissions: {}`).
+   `Tables` · `Platform` · `Bills` · `Settings` are **FIXED** — every manager always has
+   them, so they have no row (no row = permanently on; `MANAGER_TAB_KEYS` no longer lists
+   `bills`, and a stored `menus.manager.bills=false` is ignored like every retired key).
+   **Edit menu OFF ⇒ the tab becomes the read-only "View menu" VIEWER**, never a vanished
+   tab — the manager can browse the whole menu but every edit control is locked and the
+   server refuses writes.
+2. **Permission for manager** — `Delete a bill` · `Reopen a bill` (with **Only within**,
+   default **5 min**, enforced at the void-invoice endpoint for a real manager) ·
+   `Discount a bill` (with the % cap, default **50%** for a manager, 5% for a waiter —
+   `lib/discountCap.ts` falls back to these model defaults when nothing is stored).
+3. **Manager settings (what manager can do)** — only `Tables — name & seats` · `Users —
+   staff logins` · `Sections — who serves which table`. Billing/kitchen/sessions rows were
+   removed (admin-only in the panel — dead switches). The Users rules: a manager may
+   CREATE (new logins start on Default), RESET a password and DISABLE (the person is told
+   *"This login has been disabled"* at sign-in) — a manager can **never DELETE** a login.
+Off ⇒ the row's tab/section is gone for a real manager and the server refuses its endpoints.
 
 ## SECTION C — OWNER'S MENU
 `Edit menu` · `Ratings` · `Logs` · `Manager mode` (**LEFT TO BUILD** — shown, labelled).

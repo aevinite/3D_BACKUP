@@ -89,6 +89,10 @@ export type Node = {
   choices?: Choice[];           // for bind.t === "choice" / "list"
   pin?: boolean;                // money action → the waiter row offers "On + manager PIN"
   leftToBuild?: boolean;        // shown, labelled, saves nothing yet
+  // A row that exists ONLY for its words — it stores nothing, renders no control, and is not
+  // unbuilt: it states a consequence the admin would otherwise have to work out ("if BOTH of
+  // the two above are off…"). Declared, so the dead-switch guard knows it is deliberate.
+  info?: boolean;
   fresh?: boolean;              // its gate is NEW in this rebuild (not legacy-enforced)
   placeholder?: string;         // for text nodes
   unit?: string;                // for cap nodes
@@ -163,6 +167,9 @@ const EDIT_MENU_PARTS: { id: string; name: string; what: string; def: boolean }[
 type ActionDef = {
   id: string; name: string; what: string; flag: string; tablet?: string; capTablet?: string;
   mgrDef: boolean; waiterDef?: "off" | "on" | "pin"; pin?: boolean; cap?: boolean;
+  // Reopen-a-bill's minutes window (owner default: 5 — his 2026-08-02 word for every
+  // restaurant). Rendered as the "Only within" child of the manager row.
+  mins?: number;
 };
 const ACTIONS: ActionDef[] = [
   // NOT FEATURES ANY MORE (owner, 2026-08-01). Taking an order, settling a bill, issuing the
@@ -172,12 +179,18 @@ const ACTIONS: ActionDef[] = [
   // row, so removing them from this list is the whole change: nothing to store, nothing to
   // migrate, and no screen that can take them away by accident.
   //   take_orders · mark_paid · print_invoice · table_tags · table_ops
-  { id: "give_discounts", name: "Give a discount", flag: "give_discounts", tablet: "tablet_discount", mgrDef: true, waiterDef: "off", pin: true, cap: true,
-    what: "Taking money off a bill. The cap below is the most this role may take off in one go." },
-  { id: "void_bills", name: "Reopen a bill", flag: "void_bills", capTablet: "void_bills", mgrDef: true, waiterDef: "off", pin: true,
-    what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it." },
+  //
+  // ORDER + DEFAULTS (owner, 2026-08-02): "Permission for manager: there will be delete bill,
+  // reopen bill, and discount bill… for all restaurant, reopen the bill in five minute, and
+  // discount bill percentage will be fifty percent." The minutes window lives INSIDE the
+  // reopen row and the percentage cap INSIDE the discount row — his words: "there will be a
+  // drop down for reopen bill how much minute is set… you could able to go inside and change".
   { id: "delete_bill", name: "Delete a bill", flag: "delete_bill", mgrDef: false, pin: true,
     what: "Takes a bill out of the reports. The number is NOT reused — the next bill still takes the next number — and nothing is erased: the bill stays in the records and in the audit, it simply stops counting towards sales." },
+  { id: "void_bills", name: "Reopen a bill", flag: "void_bills", capTablet: "void_bills", mgrDef: true, waiterDef: "off", pin: true, mins: 5,
+    what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it." },
+  { id: "give_discounts", name: "Discount a bill", flag: "give_discounts", tablet: "tablet_discount", mgrDef: true, waiterDef: "off", pin: true, cap: true,
+    what: "Taking money off a bill. The cap below is the most this role may take off in one go." },
   // "Manage staff" LEFT this list (owner, 2026-08-01) — it is not one of the money actions, it is
   // its own thing, and one switch covering create/reset/delete was three very different amounts of
   // trust behind a single yes. It lives in "What a manager can manage", split up.
@@ -188,11 +201,22 @@ const ACTIONS: ActionDef[] = [
 ];
 
 // One ACTIONS row rendered for a given side.
-const mgrAction = (a: ActionDef): Node => ({
-  id: `mgr_${a.id}`, name: a.name, what: a.what, bind: { t: "grant", flag: a.flag }, def: a.mgrDef, pin: a.pin,
-  featureBind: { t: "has", id: a.id },
-  children: a.cap ? [{ id: `mgr_${a.id}_cap`, name: "Most they can take off", what: "The biggest discount this role may apply in one go.", bind: { t: "limit", id: a.id, side: "manager" }, def: 20, unit: "%", options: [5, 10, 20, 50, 100] }] : undefined,
-});
+const mgrAction = (a: ActionDef): Node => {
+  const kids: Node[] = [];
+  // The discount ceiling — default 50% (owner, 2026-08-02: "discount bill percentage will be
+  // fifty percent" for every restaurant; was 20 before that word).
+  if (a.cap) kids.push({ id: `mgr_${a.id}_cap`, name: "Most they can take off", what: "The biggest discount this role may apply in one go.", bind: { t: "limit", id: a.id, side: "manager" }, def: 50, unit: "%", options: [5, 10, 20, 50, 100] });
+  // Reopen-a-bill's window — the id stays "mgr_bill_reopen_mins" from when this row lived
+  // under the Bill menu, so old deep links and the QA phases keep finding it.
+  if (a.mins) kids.push({ id: "mgr_bill_reopen_mins", name: "Only within", def: a.mins, bind: { t: "limit", id: a.id, side: "minutes" },
+    unit: " min", options: [5, 10, 15, 30, 60],
+    what: "How long after a bill closes it can still be reopened. After that it is settled and a correction has to be a credit note, which is the legal way round." });
+  return {
+    id: `mgr_${a.id}`, name: a.name, what: a.what, bind: { t: "grant", flag: a.flag }, def: a.mgrDef, pin: a.pin,
+    featureBind: { t: "has", id: a.id },
+    children: kids.length ? kids : undefined,
+  };
+};
 const waiterAction = (a: ActionDef): Node | null => {
   if (!a.tablet && !a.capTablet) return null;
   return {
@@ -204,15 +228,24 @@ const waiterAction = (a: ActionDef): Node | null => {
 };
 
 // The manager panel's own Settings sections (public/panels/editor/app.js → SETTINGS_SECTIONS).
-// This list and that one must stay the same set: a row here with no section there is a switch
-// that does nothing, and a section there with no row here is a screen nobody can take away.
+//
+// ONLY the sections a real manager can genuinely use have a row (owner, 2026-08-02: "right now
+// there are many options which are not even useful… the only option we required is table name
+// and number of people, user creation…, and who serves which table"). The billing / kitchen /
+// sessions rows were REMOVED: those sections are admin-only inside the panel (XRAY
+// admin_only_setting hides them from every real manager), so their switches governed nothing a
+// manager could ever see — the dead-switch shape the access rebuild exists to remove. A stored
+// menus.mgrset.billing/kitchen/sessions=false is ignored from now on, like every retired key.
 export const MANAGER_SETTINGS: { key: string; name: string; what: string }[] = [
-  { key: "tables", name: "Tables — floor & seats", what: "Renaming a table, how many people sit at it, and how the tables lie on the floor screen. Adding or removing tables stays admin-only." },
-  { key: "users", name: "Users — staff logins", what: "Seeing and managing this restaurant's staff logins — waiter tablets and the kitchen screen. A manager can only ever touch roles below their own." },
+  { key: "tables", name: "Tables — name & seats", what: "Renaming a table and how many people sit at it. Adding or removing tables stays admin-only." },
+  // The owner's rules for Users (2026-08-02), enforced by the editor API, not just worded here:
+  // a manager can CREATE a login (its permissions start on Default automatically — a manager
+  // never sets permissions), RESET its password, and DISABLE it (the person is told they've
+  // been disabled when they try to sign in). A manager can NEVER DELETE a login — deleting
+  // people is the admin's job, and the panels' user lists all read the same rows, so a person
+  // the admin deletes disappears everywhere at once.
+  { key: "users", name: "Users — staff logins", what: "Creating this restaurant's staff logins (new logins start on the restaurant's defaults), resetting a password, and disabling a login — a disabled person is told so when they try to sign in. Deleting a login stays admin-only. A manager can only ever touch roles below their own." },
   { key: "access", name: "Sections — who serves which table", what: "Giving each waiter their own part of the floor, so their tablet shows only those tables." },
-  { key: "billing", name: "Billing — invoice & tax", what: "The bill's own details. Most of this is admin-owned now; the section is here so it can be taken away entirely." },
-  { key: "kitchen", name: "Kitchen — KOT printing", what: "The kitchen ticket printer and its test print." },
-  { key: "sessions", name: "Dining sessions — QR & location", what: "The session rules a manager may see: whether a guest has to be at the café, the phone code, the café's coordinates." },
 ];
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -336,7 +369,7 @@ export const SECTIONS: Section[] = [
             bind: { t: "setting", key: "qop_parcel_allowed" },
             what: "The big Parcel bar on the “where does it go?” step, and the Parcel tiles that sit under the live floor until a parcel is printed and paid. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar and no Parcel tiles. It needs Platforms (in Extra features) to be on as well — with that off there is no Parcel here however this is set." },
           // Named so the admin isn't left to work the last case out for themselves.
-          { id: "qop_both_off", name: "If BOTH of the two above are off", leftToBuild: false, bind: { t: "none" },
+          { id: "qop_both_off", name: "If BOTH of the two above are off", info: true, bind: { t: "none" },
             what: "There is nothing left for QO/P to do, so the button does not appear on the floor at all — the header keeps only the KOT menu. Nothing is greyed out and nothing errors; the feature is simply absent, which is the same rule the rest of this screen follows." },
         ] },
       {
@@ -465,33 +498,78 @@ export const SECTIONS: Section[] = [
   // What a manager may do that ISN'T a menu (the money and floor actions) is one list underneath.
   {
     id: "mgrMenu", name: "Manager", icon: "users",
-    blurb: "Which menus a manager gets, and what they may do inside each one. Switch a menu off and it is gone for a real manager — its settings go with it, and its endpoints refuse.",
+    blurb: "The manager's panel: which menus they get, what they may do to money, and what they can manage in their own Settings.",
+    // ⚠️ THE OWNER'S STRUCTURE FOR THIS SECTION (owner, 2026-08-02 — he asked for his words to
+    // live here so no session ever rearranges it differently): "In the manager, there will be
+    // three suboption: manager's menu, permission for manager, manager settings."
+    //   1. MANAGER'S MENU — exactly FOUR options: Edit menu (Editor), Rating review, Audit,
+    //      Dashboard. The other panel tabs — Tables, Platform, Bills, Settings — are FIXED
+    //      ("four will be the fixed one"): every manager always has them, so they have NO row
+    //      here at all (the model's rule: no row = permanently on). Their old switches are
+    //      retired — see MANAGER_TAB_KEYS below.
+    //   2. PERMISSION FOR MANAGER — Delete a bill, Reopen a bill (with its minutes window,
+    //      default 5 min), Discount a bill (with its percentage cap, default 50%).
+    //   3. MANAGER SETTINGS ("what manager can do") — only the sections a real manager can
+    //      genuinely use: table name & seats, Users (create / reset / disable — never delete),
+    //      and who serves which table. The billing / kitchen / sessions rows were removed:
+    //      those sections are admin-only in the panel, so their switches governed nothing a
+    //      manager could see ("many options which are not even useful").
     children: [
       {
-        // "Inside Manager, there will be Manager menu. Inside Manager menu, there will be Edit
-        // menu…" (owner, 2026-08-01). The menus are a named group of their own so the section
-        // reads as the manager's PANEL — its menus, then what they may do inside it.
-        id: "mgr_menu_group", name: "Manager menu", bind: { t: "none" },
-        what: "The tabs a manager gets. Switch one off and it is gone for a real manager — its settings go with it, and its endpoints refuse.",
+        // 1 · MANAGER'S MENU (owner, 2026-08-02): "In the manager menu, there will be four
+        // option: edit menu, rating review, audit and dashboard."
+        //
+        // Every row here follows the two-control pattern he chose (FEATURE switch + DEFAULT
+        // chip) wherever a restaurant-level tab exists:
+        //   • FEATURE  (access_config.menus.manager[key]) — does this restaurant's manager
+        //     panel have the menu at all. OFF removes it from EVERY manager, whatever their
+        //     per-person setting says: the tab is gone and tabGate refuses its endpoints.
+        //   • DEFAULT  (manager_permissions[flag]) — what a manager whose per-person row says
+        //     "Default" follows. "If a new manager is created for the particular restaurant,
+        //     he will get the default" — true by construction, because every new person is
+        //     created with permissions: {} (app/api/admin/users), which means Default on
+        //     every row.
+        id: "mgr_menu_group", name: "Manager's menu", bind: { t: "none" },
+        what: "The four menus an admin decides about: Edit menu, Rating review, Audit and Dashboard. Tables, Platform, Bills and Settings are fixed — every manager always has them, so they are not listed. Each Feature switch removes its menu from all managers; each Default is what a new manager starts with.",
         children: [
         {
-          id: "mgr_tab_editor", name: "Edit menu", def: true, fresh: true,
-          bind: { t: "menu", panel: "manager", key: "editor", grant: "edit_menu" },
-          what: "The Editor tab — dishes, categories and filters. Off removes the tab completely; the parts below say which bits of it a manager may change.",
+          // "There will be a edit menu, which is in bracket name as editor. It will have sub
+          // menus, and whatever is set in sub menus will be the default one… and if edit menu
+          // is on, then only they will get the permission" (owner, 2026-08-02).
+          id: "mgr_tab_editor", name: "Edit menu (Editor)", def: true, fresh: true,
+          featureBind: { t: "tab", panel: "manager", key: "editor" },
+          bind: { t: "grant", flag: "edit_menu" },
+          what: "The Editor tab — dishes, categories and filters. The Feature switch removes it from every manager of this restaurant; Default is what a manager starts on. The parts below say which bits of it a manager may change.",
           children: EDIT_MENU_PARTS.map((p) => ({
             id: `d_mgr_${p.id}`, name: p.name, what: p.what, def: p.def,
             bind: { t: "opt", id: "edit_menu", side: "manager", key: p.id } as Bind,
           })),
         },
-        { id: "mgr_tab_ratings", name: "Ratings", def: true, fresh: true,
-          bind: { t: "menu", panel: "manager", key: "ratings", grant: "view_ratings" },
-          what: "The Ratings tab, where the manager reads what guests said about the food and marks a complaint handled." },
-        { id: "mgr_tab_log", name: "Audit", def: true, fresh: true,
-          bind: { t: "menu", panel: "manager", key: "log", grant: "view_logs" },
-          what: "The Audit tab — what was removed and why, with the full activity log inside it. Admin-only actions never appear there. The stored key stays “log”, which is what the other session deliberately built against; renaming a LABEL must never rename a key." },
+        {
+          // RENAMED from "Ratings" (owner, 2026-08-02: "it will be name as the rating review").
+          // The LABEL changed, nothing else — the stored key stays "ratings" and the grant stays
+          // view_ratings; renaming a label must never rename a key.
+          id: "mgr_tab_ratings", name: "Rating review", def: true, fresh: true,
+          featureBind: { t: "tab", panel: "manager", key: "ratings" },
+          bind: { t: "grant", flag: "view_ratings" },
+          what: "The tab where the manager reads what guests said about the food and marks a complaint handled. The Feature switch removes it from every manager; Default is what a manager starts on.",
+        },
+        {
+          // "Inside the audit, there are many options which will be created. For now we will
+          // just keep audit on and off, and it will also have default and all that stuff that
+          // we have built" (owner, 2026-08-02). So: the two-control row today, its future
+          // sub-options land as children here when he specifies them. The stored key stays
+          // "log" — renaming a LABEL must never rename a key.
+          id: "mgr_tab_log", name: "Audit", def: true, fresh: true,
+          featureBind: { t: "tab", panel: "manager", key: "log" },
+          bind: { t: "grant", flag: "view_logs" },
+          what: "The Audit tab — what was removed and why, with the full activity log inside it. Admin-only actions never appear there. The Feature switch removes it from every manager; Default is what a manager starts on.",
+        },
         {
           // FOURTH menu. Its reach is a setting, not a separate permission: a real manager's
-          // dashboard is clamped to TODAY by the server, and this is what widens it.
+          // dashboard is clamped to TODAY by the server, and this is what widens it. (No
+          // restaurant-level tab exists for the dashboard, so no Feature half here — its one
+          // switch IS the manager default.)
           id: "mgr_tab_dash", name: "Dashboard", def: true, bind: { t: "grant", flag: "view_dashboard" },
           what: "The numbers screen and the day's report.",
           children: [
@@ -503,48 +581,30 @@ export const SECTIONS: Section[] = [
               ] },
           ],
         },
-        {
-          // FIFTH menu (owner, 2026-08-01). The two things that can be done to a bill AFTER it is
-          // closed. Both are recorded in the audit — that is the point of putting them together.
-          id: "mgr_tab_bill", name: "Bill", def: true, fresh: true,
-          bind: { t: "menu", panel: "manager", key: "bills", grant: "view_bills" },
-          what: "The Bills tab. What a manager may do to a bill that is already closed lives inside it — every one of these writes to the audit.",
-          children: [
-            { id: "mgr_bill_delete", name: "Delete a bill", def: false, bind: { t: "grant", flag: "delete_bill" }, featureBind: { t: "has", id: "delete_bill" },
-              what: "Takes a bill out of the reports. The number is NOT reused — the next bill still takes the next one — and nothing is erased: it stays in the records and in the audit, it just stops counting towards sales." },
-            { id: "mgr_bill_reopen", name: "Reopen a bill", def: true, bind: { t: "grant", flag: "void_bills" }, featureBind: { t: "has", id: "void_bills" },
-              what: "Brings a closed bill back so it can be corrected. The SAME bill reopens, and the audit records that it was reopened and what changed.",
-              children: [
-                { id: "mgr_bill_reopen_mins", name: "Only within", def: 10, bind: { t: "limit", id: "void_bills", side: "minutes" },
-                  unit: " min", options: [5, 10, 15, 30, 60],
-                  what: "How long after a bill closes it can still be reopened. After that it is settled and a correction has to be a credit note, which is the legal way round." },
-              ] },
-          ],
-        },
         ],
       },
       {
-        // Not menus, so they can't be rows above: these are things a manager DOES, wherever they
-        // stand. Kept as one list rather than scattered into the tabs they happen to appear on
-        // (owner's pick, 2026-08-01).
-        id: "mgr_may", name: "What a manager may do", bind: { t: "none" },
-        what: "The money actions, for every manager in this restaurant. One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
+        // 2 · PERMISSION FOR MANAGER (owner, 2026-08-02): "there will be delete bill, reopen
+        // bill, and discount bill" — the three money actions, with their limits INSIDE them
+        // ("there will be a drop down for reopen bill how much minute… the discount one also,
+        // there will be the percentage"). His defaults for every restaurant: reopen within
+        // 5 minutes, discount up to 50% — set as the model defaults (defOf), so a restaurant
+        // that never stored a value reads exactly that.
+        id: "mgr_may", name: "Permission for manager", bind: { t: "none" },
+        what: "The money actions, for every manager in this restaurant: delete a bill, reopen a bill (and for how long), discount a bill (and up to how much). One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
         children: [...ACTIONS.map(mgrAction)],
       },
       {
-        // WHAT A MANAGER CAN MANAGE = the SETTINGS SECTIONS of their own panel (owner,
-        // 2026-08-01: "what manager will manage is the options that he gets in the settings").
+        // 3 · MANAGER SETTINGS (owner, 2026-08-02: "manager setting and in the bracket written,
+        // what manager can do"). Each row = one section of the manager panel's Settings screen.
+        // Off ⇒ the section is not in their sidebar, and the endpoints behind it refuse. The
+        // same list also feeds the staff PROFILE screen, so one person's exceptions and the
+        // restaurant's default can never offer different sections.
         //
-        // "Staff logins" was here as a permission and has been REMOVED — it is not one. Whether a
-        // manager can work with staff logins is simply whether the Users section exists for them,
-        // which is a row below like every other section. One idea, one place.
-        //
-        // Each row = one section of the manager panel's Settings screen. Off ⇒ the section is not
-        // in their sidebar, and the endpoints behind it refuse. The same list also feeds the staff
-        // PROFILE screen another session is building — its "Access & permissions → What a manager
-        // can manage" reads exactly these keys, so one person's exceptions and the restaurant's
-        // default can never offer different sections.
-        id: "mgr_manage", name: "What a manager can manage (Settings · manager panel)", bind: { t: "none" },
+        // Only the three sections a real manager can genuinely use are listed — see
+        // MANAGER_SETTINGS for why billing / kitchen / sessions left (they are admin-only in
+        // the panel; a switch over an invisible thing is a dead switch).
+        id: "mgr_manage", name: "Manager settings (what manager can do)", bind: { t: "none" },
         what: "Which sections a manager gets inside their own Settings screen. Switch one off and it is gone from their sidebar — and its endpoints refuse, so it is not reachable by typing a URL either.",
         children: MANAGER_SETTINGS.map((x) => ({
           id: `mgrset_${x.key}`, name: x.name, what: x.what, def: true, fresh: true,
@@ -645,9 +705,12 @@ export const HAS_IDS = Array.from(new Set(ALL_NODES.map((n) => (n.featureBind?.t
 export const GRANT_FLAGS = collect((b) => (b.t === "grant" ? b.flag : b.t === "menu" ? b.grant : null));
 export const SECTION_ENTITLEMENTS = collect((b) => (b.t === "section" ? b.key : null));
 export const TABLET_COLS = collect((b) => (b.t === "tablet" ? b.key : null));
-// Same for the tab half of a "menu" row.
+// Same for the tab half of a "menu" row — and for a tab carried as a row's featureBind:
+// "Edit menu" is grant-bound with its tab as the FEATURE switch (owner two-control row,
+// 2026-08-02). Collecting only n.bind would drop that tab from the route's allow-list,
+// and the Feature switch would move on screen and save nothing.
 export const TAB_KEYS: { panel: string; key: string }[] = ALL_NODES
-  .map((n) => n.bind)
+  .flatMap((n) => (n.featureBind ? [n.bind, n.featureBind] : [n.bind]))
   .filter((b): b is Extract<Bind, { t: "tab" } | { t: "menu" }> => b.t === "tab" || b.t === "menu")
   .map((b) => ({ panel: b.panel, key: b.key }));
 
@@ -840,7 +903,12 @@ export function managerSettingsOff(accessConfig: unknown): string[] {
   return MANAGER_SETTINGS.map((x) => x.key).filter((k) => m[k] === false);
 }
 
-export const MANAGER_TAB_KEYS = ["editor", "ratings", "log", "bills"] as const;
+// "bills" LEFT this list (owner, 2026-08-02): the Bill menu is FIXED — every manager has it —
+// so a stored menus.manager.bills=false is IGNORED from now on, the same way the retired
+// panel switches are. Do not re-add it: the Access screen's Bill row is the fixed one with
+// no switch, and re-listing the key here would re-hide the tab on any restaurant that
+// switched it off before 2026-08-02.
+export const MANAGER_TAB_KEYS = ["editor", "ratings", "log"] as const;
 export type ManagerTabKey = (typeof MANAGER_TAB_KEYS)[number];
 
 export function managerTabsOff(accessConfig: unknown): ManagerTabKey[] {
