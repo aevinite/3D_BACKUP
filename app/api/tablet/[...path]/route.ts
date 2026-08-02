@@ -967,6 +967,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const note = String((body && body.note) || "").slice(0, 200) || null;
       const row = must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid).select());
       await log("order_discount", { order_id: b, detail: `₹${amount}`, device_id: dev });
+      // Money off a bill is a money-lowering change wherever it is taken, so the WAITER's discount
+      // is recorded exactly like the manager's (2026-08-03 — the manager side went server-side in
+      // PR #727 and this side was left behind, so a waiter could take ₹500 off a bill and the
+      // Removals record stayed empty). Removing a discount puts money BACK, so amount 0 is not a
+      // removal — the activity log above carries that.
+      if (amount > 0) await recordRemoval({
+        rid, kind: "discount_given",
+        reason: { code: reasonFromBody(body).code, note: reasonFromBody(body).note || note },
+        user: actor ?? null, deviceId: dev, orderId: b, sessionId: cur.session_id ?? null, amount,
+        meta: { discount: amount, from: "waiter tablet", scope: "one ticket" },
+      });
       return ok(row[0] || null);
     }
 
@@ -999,6 +1010,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_staff_bill_discount", { p_session: b, p_amount: amount, p_note: note });
       if (error) throw new Error(error.message);
       await log("bill_discount", { detail: `whole bill ₹${amount} (session ${b})`, device_id: dev });
+      if (amount > 0) await recordRemoval({
+        rid, kind: "discount_given",
+        reason: { code: reasonFromBody(body).code, note: reasonFromBody(body).note || note },
+        user: actor ?? null, deviceId: dev, sessionId: b, amount,
+        meta: { discount: amount, from: "waiter tablet", scope: "whole bill" },
+      });
       return ok(data);
     }
 
@@ -1246,10 +1263,24 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "items" && c === "qty") {
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
+      // What it WAS, read before the RPC re-prices it — the Audit row says 2 → 1, not just "1".
+      // (Same shape as the manager's twin; this side recorded nothing until 2026-08-03, so a
+      //  waiter halving a quantity took money off a bill and left no trace in the Audit.)
+      const wasRow = (await sb.from("order_items").select("id, title, qty, unit_price").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; title: string | null; qty: number | null; unit_price: number | null } | null;
+      if (!wasRow) return err("That dish was already removed.", 404);
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await log("order_item_qty", { order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
+      // Lowering takes money off the bill; raising adds money and is not a removal.
+      const wasQty = Number(wasRow.qty) || 0;
+      if (qty < wasQty) await recordRemoval({
+        rid, kind: "qty_reduced", reason: reasonFromBody(body), user: actor ?? null, deviceId: dev,
+        orderId: data?.order_id ?? null, itemId: wasRow.id, itemTitle: wasRow.title, qty: wasQty - qty,
+        amount: (Number(wasRow.unit_price) || 0) * (wasQty - qty),
+        meta: { qty_before: wasQty, qty_after: qty, from: "waiter tablet" },
+      });
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -1337,12 +1368,20 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "delete") {
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — without
       // it a foreign order id could be touched from another restaurant. Scope the gate read.
-      const cur = must(await sb.from("orders").select("payment_status").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("payment_status, total, session_id, table_number").eq("id", b).eq("restaurant_id", rid).single());
       if (cur && cur.payment_status === "paid") return err("Won't delete a PAID order — mark it unpaid first.", 409);
       const reason = String(body?.reason ?? "").trim();
       const who = actor?.name || actor?.username || "staff";
       await softDeleteOrders(rid, [b], { actor: who, actorId: actor?.id ?? null, reason });
       await log("order_delete", { order_id: b, device_id: dev, detail: reason || undefined });
+      // Taking a bill out of the reports is the biggest removal there is — recorded here, from the
+      // tablet, exactly as the manager's twin records it (2026-08-03).
+      await recordRemoval({
+        rid, kind: "order_deleted", reason: reasonFromBody(body), user: actor ?? null, deviceId: dev,
+        orderId: b, sessionId: cur?.session_id ?? null,
+        tableNumber: cur?.table_number != null ? String(cur.table_number) : null,
+        amount: Number(cur?.total) || 0, meta: { from: "waiter tablet" },
+      });
       return ok({ ok: true });
     }
 
@@ -1542,6 +1581,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
       }
       await log("on_the_house", { table_number: t, device_id: dev, detail: `${unpaid.length} order(s) · ${tagRow.tag}` });
+      // Settling with no money collected is the largest money-lowering action there is — one Audit
+      // row per order, from the tablet too (2026-08-03; only the manager's twin recorded it).
+      for (const o of unpaid) {
+        await recordRemoval({
+          rid, kind: "on_the_house",
+          reason: { code: reasonFromBody(body).code, note: reasonFromBody(body).note || `On the house · ${tagRow.tag}` },
+          user: actor ?? null, deviceId: dev, orderId: o.id, tableNumber: t, amount: Number(o.subtotal) || 0,
+          meta: { table_tag: tagRow.tag, orders_on_bill: unpaid.length, from: "waiter tablet" },
+        });
+      }
       return ok({ ok: true, count: unpaid.length });
     }
 
@@ -1583,7 +1632,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ khata_at: stamp, khata_customer_id: customer!.id, archived: true, archived_at: stamp })
         .in("id", kunpaid.map((o) => o.id)).eq("restaurant_id", rid).select("id"));
       if (openSess) {
-        const closed = await closeSession(openSess.id, { force: true }, { panel: "tablet", deviceId: dev, restaurantId: rid });
+        const closed = await closeSession(openSess.id, { force: true }, { panel: "tablet", deviceId: dev, restaurantId: rid, user: actor ?? null, reason: reasonFromBody(body) });
         if (!closed.ok) return err(closed.message, closed.status);
       } else {
         await clearTableSignals(rid, t);
@@ -1637,6 +1686,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // (a refund/correction) — record it for the money-accountability trail either way.
       const reason = String((body && body.reason) || "").trim().slice(0, 120);
       await log("payment_revert", { table_number: t, device_id: dev, detail: reason ? `unpaid: ${reason}` : "undo settle (within grace)" });
+      // Un-booking collected money belongs in the Audit, not only in the activity log — the same
+      // question ("who took money off this bill, and why?") whichever panel did it. One row per
+      // order, so the trail matches the manager's twin. (2026-08-03)
+      for (const o of paid) {
+        await recordRemoval({
+          rid, kind: "payment_reverted",
+          reason: { code: reasonFromBody(body).code, note: reason || "undo settle (within the 30-minute window)" },
+          user: actor ?? null, deviceId: dev, orderId: o.id, sessionId: openSess.id, tableNumber: t,
+          meta: { was_method: o.payment_method ?? null, orders_reverted: paid.length, from: "waiter tablet" },
+        });
+      }
       // Reversing the settle reverses the visit it counted (Customer CRM, mig 212) — for THIS
       // party. Passing the session is what stops it deleting the visit of whoever is seated at
       // the table by then (mig 233).
@@ -1650,7 +1710,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "close") {
       const force = !!(body && body.force === true);
       if (force) { const g = recordPin(await closeUnpaidGate(req, body, rid, actor)); if (!g.allow) return g.resp; } // override → admin-laddered (default: manager PIN)
-      const result = await closeSession(b, { force }, { panel: "tablet", deviceId: dev, restaurantId: rid });
+      const result = await closeSession(b, { force }, { panel: "tablet", deviceId: dev, restaurantId: rid, user: actor ?? null, reason: reasonFromBody(body) });
       if (!result.ok) return err(result.message, result.status);
       return ok(result.session);
     }

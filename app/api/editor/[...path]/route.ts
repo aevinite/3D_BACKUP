@@ -2358,7 +2358,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // (blocked on unpaid OR still-cooking unless force). The manager needs no PIN —
     // they're already the manager; force=true is their "close anyway" override.
     if (a === "sessions" && c === "close") {
-      const result = await closeSession(b, { force: !!(body && body.force === true) }, { panel: "editor", deviceId: dev, restaurantId: rid });
+      const result = await closeSession(b, { force: !!(body && body.force === true) }, { panel: "editor", deviceId: dev, restaurantId: rid, user: g.user, reason: reasonFromBody(body) });
       // Carry the REASON CODE, not just the sentence. The panel used to decide whether to
       // offer "close anyway" by searching the message for the words "owes money" — so the
       // cooking-only refusal ("still has orders cooking — serve them, or close anyway")
@@ -2404,9 +2404,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "void-invoice") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("void bills");
       // Confirm the session belongs to THIS restaurant before voiding (RPC has no tenant param).
-      const ownsVoid = must(await sb.from("sessions").select("id,invoice_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
-        { id: string; invoice_at?: string | null } | null;
+      const ownsVoid = must(await sb.from("sessions").select("id,invoice_at,invoice_no,invoice_voided").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; invoice_at?: string | null; invoice_no?: string | null; invoice_voided?: boolean | null } | null;
       if (!ownsVoid) return err("That table isn't for this restaurant.", 404);
+      // THERE MUST BE A BILL TO REOPEN (2026-08-03). lfh_void_invoice deliberately no-ops when the
+      // session was never invoiced (or is already reopened) — it returns the row unchanged and
+      // writes no invoice_event. The route recorded the Audit row anyway, so a tap on a table with
+      // no bill answered "done" and put a "Bill reopened · ₹460" line in the Audit for something
+      // that never happened. An audit that invents an event is worse than no audit, and a tap that
+      // did nothing must never look like it worked. Say so instead, and record nothing.
+      if (!ownsVoid.invoice_no)
+        return err("This table's bill hasn't been generated yet, so there's nothing to reopen.", 409);
+      if (ownsVoid.invoice_voided)
+        return err("This bill is already reopened — it's open for edits right now.", 409);
       // "Only within X minutes" (Access → Permission for manager → Reopen a bill; owner default
       // 5 min, 2026-08-02). Enforced HERE for a real MANAGER — until 2026-08-02 the row saved a
       // number nothing read, the dead-switch shape the access rebuild removes. Admin and owner
@@ -2937,7 +2947,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ khata_at: stamp, khata_customer_id: customer!.id, archived: true, archived_at: stamp })
         .in("id", kunpaid.map((o) => o.id)).eq("restaurant_id", rid).select("id"));
       if (openSess) {
-        const closed = await closeSession(openSess.id, { force: true }, { panel: "editor", deviceId: dev, restaurantId: rid });
+        const closed = await closeSession(openSess.id, { force: true }, { panel: "editor", deviceId: dev, restaurantId: rid, user: g.user, reason: reasonFromBody(body) });
         if (!closed.ok) return err(closed.message, closed.status);
       } else {
         await clearTableSignals(rid, t);
