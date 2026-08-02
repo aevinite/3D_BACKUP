@@ -148,6 +148,25 @@ Default set      Owner · Waiter (the MANAGER folder moved into Manager)
 
 ---
 
+## 4b · Round 7 — owner, 2026-08-02 (shipped, PR #683, live on backup-2)
+
+- **Three names.** Menu → *Format & theme* → **Design and styling**; inside it *Colours, logo &
+  wording* → **Theme and logo**; Bill → *Format* → **Format of bill**.
+- **The sample KOT printed in TWO parts.** It had its OWN template (a centred box, no `@page`
+  rule) so the browser applied default page margins. There is now ONE template —
+  `kotTicketHtml()` in `public/panels/editor/app.js` — used by the preview AND every real print,
+  through the same hidden-iframe path. **Never write a second KOT template.**
+- **"📒 Pay Later" showed while Pay later was OFF.** Pay later stopped sharing `table_tags_*` at
+  mig 235, but both panels still read TABLE TYPES to decide whether to draw the button, so the
+  server (reading the right column) refused the tap. `khataOn()` / `tabletKhataOn()` now mirror
+  `khataLadder()`. The manager's waiter-capability list had the same bug.
+- **"Other" → Split the payment.** ₹200 UPI + ₹200 cash + …, one part per way, with a running
+  "₹600 still to cover" and an Add-a-part button that pre-fills the remainder. The arithmetic and
+  the write are **`lib/paySplit.ts`**, shared by the manager panel and the waiter tablet (which
+  gained `tables/:t/pay-split` under the same `tablet_mark_paid`). The due is recomputed on the
+  SERVER and parts that don't add up are refused, so a split can neither under- nor over-collect;
+  every part lands in `session_payments`. **Do not duplicate this into a route.**
+
 ## 5 · Still to do
 
 1. **Waiter sections move into the tablet user's own profile** (currently a Settings section).
