@@ -12103,12 +12103,11 @@ const XRAY_TABS = [
   // default), so this is non-breaking — the tab only disappears once the owner explicitly
   // switches it off; admin/owner keep it (tinted).
   { tab: "log", flag: "view_logs", label: "Activity log" },
-  // Bills LEFT this list (owner, 2026-08-02, same day it arrived): the Bill menu is now FIXED —
-  // "four will be the fixed one: table, platform, bill and setting" — so every manager always
-  // has the tab and there is no view_bills power any more (the model answers a retired flag
-  // permanently ON, and whoami no longer sends it, so an entry here would HIDE the tab for
-  // every real manager). The dangerous actions inside it (delete / reopen a bill) keep their
-  // own flags in XRAY_CONTROLS below.
+  // Bills (owner, 2026-08-02). Its DOM tab is called "orders". It was the one menu with a
+  // permission and no entry here: switch "Bill" off and the tab still sat there, and every
+  // tap inside it came back 403 from tabGate — a switched-off permission has to be GONE, not
+  // merely refused ("even if it's shown it should not work, and it shouldn't be shown").
+  { tab: "orders", flag: "view_bills", label: "Bills" },
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can

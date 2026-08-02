@@ -147,10 +147,9 @@ async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<
 const TAB_PATHS: { tab: ManagerTabKey; test: (p: string) => boolean }[] = [
   { tab: "ratings", test: (p) => p === "ratings" || p.startsWith("ratings/") },
   { tab: "log", test: (p) => p === "oplog" || p.startsWith("oplog/") },
-  // "bills" LEFT this gate (owner, 2026-08-02): the Bill menu is FIXED — every manager has it,
-  // so there is no view_bills question any more and its endpoints are plain manager endpoints.
-  // The two dangerous actions inside it (delete / reopen a bill) keep their own managerCan
-  // gates at their handlers — the TAB being fixed hands over nothing dangerous.
+  // The Bills tab (owner, 2026-08-01 — the fifth manager menu). Switching it off has to take the
+  // bill LIST away as well as the tab, or the endpoints are still reachable behind a hidden tab.
+  { tab: "bills", test: (p) => p === "bills" || p.startsWith("bills/") || p === "invoices" || p.startsWith("invoices/") },
   { tab: "editor", test: (p) => /^(items|categories|filters)(\/|$)/.test(p) },
 ];
 async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[]): Promise<NextResponse | null> {
@@ -169,9 +168,10 @@ async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[
   const granted =
     hit.tab === "editor"  ? await managerCan(g, rid, "edit_menu")
     : hit.tab === "ratings" ? await managerCan(g, rid, "view_ratings")
-    :                         await managerCan(g, rid, "view_logs");
+    : hit.tab === "log"     ? await managerCan(g, rid, "view_logs")
+    :                         await managerCan(g, rid, "view_bills");
   if (managerTabOn(cfg, hit.tab) && granted) return null;
-  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log" };
+  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log", bills: "the bills list" };
   return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
 
