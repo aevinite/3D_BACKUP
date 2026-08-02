@@ -3622,9 +3622,17 @@ const XRAY_CAPS = [
 ];
 (function injectXrayStyles() {
   const css = `
-  /* GREYED OUT (off-for-waiters) — neutral mid-grey, clearly dimmer than enabled controls,
-     never near-black; stays clickable for the admin view (owner 2026-07-28: grey, not golden). */
-  .xray-off { color: #8b919c !important; border-color: color-mix(in srgb, #6b7280 45%, transparent) !important; opacity: .55; filter: grayscale(1); }
+  /* MARKED CYAN (off for whoever this view measures against — the waiter role's default, or
+     ONE named waiter when the tab carries ?as=). Owner, 2026-08-02, replacing the earlier
+     grey: dimmed grey read as "disabled/broken" rather than "absent for them", and on a
+     tablet in daylight it was barely there. Cyan is used nowhere else in this panel, so it
+     can only mean this. The control stays fully usable — the admin isn't restricted, they
+     are being shown what someone else lacks. Both skins get a value; the DEFAULT is dark
+     (style.css overrides via html[data-theme="light"]). */
+  :root { --xray-c: #22d3ee; --xray-c-dot: #67e8f9; }
+  html[data-theme="light"] { --xray-c: #0e7490; --xray-c-dot: #0891b2; }
+  .xray-off { color: var(--xray-c) !important; border-color: color-mix(in srgb, var(--xray-c-dot) 60%, transparent) !important;
+    opacity: 1; filter: none; }
   #xrayRibbon { display: flex; align-items: center; gap: 12px; padding: 6px 14px; flex: none;
     background: color-mix(in srgb, #d97706 14%, var(--panel, #101826)); border-bottom: 1px solid color-mix(in srgb, #d97706 40%, transparent);
     font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40; }
@@ -3709,13 +3717,17 @@ function renderXrayRibbon() {
     return tperm(c.key) === "off";
   });
   const rest = (state.data.restaurant && state.data.restaurant.name) || "";
-  const sig = `${rest}|${zones.map((z) => z.key).join(",")}`; // skip identical rebuilds
+  // WHOSE tablet the cyan marks describe. A person pin no longer forces the stripped view,
+  // so this ribbon (the MARKED one) can now be showing an individual's gaps — say so, or the
+  // admin can't tell them from the waiter role's default (owner, 2026-08-02).
+  const whoName = (TABLET_WHO && TABLET_WHO.asName) || "";
+  const sig = `${rest}|${whoName}|${zones.map((z) => z.key).join(",")}`; // skip identical rebuilds
   if (rb && rb.dataset.sig === sig) return;
   if (!rb) { rb = document.createElement("div"); rb.id = "xrayRibbon"; document.body.insertBefore(rb, document.body.firstChild); }
   rb.dataset.sig = sig;
   const n = zones.length;
   rb.innerHTML =
-    `<span class="rb-tag">Admin view</span>` +
+    `<span class="rb-tag">Admin view${whoName ? ` · ${esc(whoName)}'s access` : ""}</span>` +
     // The PATH the admin walked in through — Restaurants › name › Tablet panel —
     // the owner panel's breadcrumb language (owner, 2026-07-06). This ribbon is
     // admin-only (tHigher), so the console crumb is always right here.
@@ -3723,7 +3735,7 @@ function renderXrayRibbon() {
     `<span class="rb-sep">›</span><span>${rest ? esc(rest) : "…"}</span>` +
     `<span class="rb-sep">›</span><span>Tablet panel</span></nav>` +
     `<span class="rb-spacer"></span>` +
-    `<button id="xrayZonesBtn">${n} control${n === 1 ? "" : "s"} off for waiters ▾</button>` +
+    `<button id="xrayZonesBtn">${whoName ? `${n} thing${n === 1 ? "" : "s"} ${esc(whoName)} doesn't have` : `${n} control${n === 1 ? "" : "s"} off for waiters`} ▾</button>` +
     `<button class="rb-exit" id="xrayExit">Exit view</button>`;
   document.getElementById("xrayHome").onclick = () => {
     try { window.top.location.href = "/aevinite/restaurants"; } catch { window.location.href = "/aevinite/restaurants"; }

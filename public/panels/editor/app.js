@@ -12318,20 +12318,34 @@ function xraySettingUrl(flag) {
      2026-07-29). Same trap as .field[hidden] below. Force it for every element the X-ray
      hides, whatever its own display is. */
   .list-item[hidden], .card[hidden], .tab[hidden], .subtab[hidden], [data-mgr-hide][hidden] { display: none !important; }
-  /* GREYED OUT (off-for-staff) — a neutral mid-grey cue, clearly dimmer than enabled
-     controls but never near-black; stays fully clickable for the higher role (owner
-     2026-07-28: "grey, not golden"). Generic since Phase 2: tabs AND in-tab controls. */
-  .xray-off { position: relative; color: #8b919c !important; opacity: .55; filter: grayscale(1); }
+  /* MARKED CYAN (off for whoever this view is measured against — the role's default, or
+     ONE named person when the tab carries ?as=). Owner, 2026-08-02, overriding the earlier
+     "grey, not golden": grey plus grayscale plus .55 opacity read as *disabled/broken*, and
+     on the light skin it was nearly invisible against the muted body text — so a missing
+     permission looked like a rendering fault instead of information. Cyan is used nowhere
+     else in these panels, so it can only mean "this is absent for them". The element stays
+     FULLY usable: the admin is not restricted, they are being told what someone else lacks.
+     --xray-c is the single source; both skins get a value, and the DEFAULT here is the dark
+     skin (style.css overrides with html[data-theme="light"], not the other way round — get
+     this backwards and the cue is unreadable in one of the two, which is the recurring
+     fixed-colour bug in this codebase). */
+  :root { --xray-c: #22d3ee; --xray-c-dot: #67e8f9; }                      /* dark skin (default) */
+  html[data-theme="light"] { --xray-c: #0e7490; --xray-c-dot: #0891b2; }   /* light skin: darker, for contrast on cream */
+  .xray-off { position: relative; color: var(--xray-c) !important; opacity: 1; filter: none; }
   .xray-off::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
-    background: #9aa0a6; margin-left: 6px; vertical-align: middle; }
-  /* A FILLED button (primary/gold or pay/green) greys out the same way — grayscale drains
-     the fill so it reads "not available here" at a glance, while staying clickable and
-     readable for the admin/owner looking in. */
+    background: var(--xray-c-dot); margin-left: 6px; vertical-align: middle;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--xray-c-dot) 28%, transparent); }
+  /* A FILLED button (primary/gold or pay/green) keeps its shape but takes a cyan ring +
+     cyan label, so it still reads as a button while saying "not theirs". No grayscale —
+     that was the thing that made it look dead rather than annotated. */
   .btn.primary.xray-off, .tp-take-order.xray-off, .btn.pay.xray-off, .btn.green.xray-off {
-    opacity: .6 !important; filter: grayscale(1);
-    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, #6b7280 55%, transparent); }
+    opacity: 1 !important; filter: none;
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xray-c-dot) 75%, transparent); }
+  /* The "jump to this zone" flash follows the mark colour, not the ribbon's amber — it is
+     pointing AT a cyan thing, so an amber halo made the two look unrelated. */
   .xray-pulse { animation: xrayPulse 1.1s ease-out 2; border-radius: 8px; }
-  @keyframes xrayPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(217,119,6,0); } 50% { box-shadow: 0 0 0 4px rgba(217,119,6,.55); } }
+  @keyframes xrayPulse { 0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--xray-c-dot) 0%, transparent); }
+    50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--xray-c-dot) 60%, transparent); } }
   /* Faded admin ribbon across the very top — flows above the sticky topbar. */
   #xrayRibbon { display: flex; align-items: center; gap: 12px; padding: 6px 16px;
     background: color-mix(in srgb, #d97706 12%, var(--panel, #fff)); border-bottom: 1px solid color-mix(in srgb, #d97706 40%, transparent);
@@ -12620,6 +12634,23 @@ function applyHierarchyView() {
     const btn = document.querySelector(`.tabs .tab[data-tab="${TAB_DOM[key] || key}"]`);
     if (btn) { xraySetTint(btn, false); xraySetHidden(btn, true); }
   }
+  // ...and the SAME menus, MARKED instead of removed, for the admin/owner looking in
+  // (owner, 2026-08-02). The loop above sends the list empty for the admin, so a menu this
+  // restaurant doesn't give its managers used to render completely normally in the admin
+  // view — the admin could not tell the difference between "they have Ratings" and "Ratings
+  // is switched off for them", which is the one thing this screen exists to answer. Now the
+  // tab stays fully usable (admin power is untouched) and wears the cyan mark, and it joins
+  // the ribbon's list so it can be read without hunting. Deduped against the powers loop
+  // above, which may already have marked the same button for a different reason.
+  const TAB_TINT_LABEL = { editor: "Menu editor", ratings: "Guest ratings", log: "Activity log", bills: "Bills" };
+  if (higher) for (const key of XRAY_WHO.tabsTint || []) {
+    if (key === "editor") continue;                     // flips to the read-only Viewer, never marked
+    const btn = document.querySelector(`.tabs .tab[data-tab="${TAB_DOM[key] || key}"]`);
+    if (!btn || zones.some((z) => z.el === btn)) continue;
+    xraySetHidden(btn, false);
+    xraySetTint(btn, true, `${TAB_TINT_LABEL[key] || key}: this restaurant doesn't give its managers this menu`);
+    zones.push({ tab: TAB_DOM[key] || key, flag: null, by: "by the admin", label: TAB_TINT_LABEL[key] || key, el: btn });
+  }
 
   // Nobody must be LEFT ON a tab that just got hidden (e.g. the default "items" tab with
   // edit_menu off, or a tab this restaurant doesn't have) — hop to the first visible tab.
@@ -12745,13 +12776,23 @@ function renderXrayRibbon(higher, zones) {
       `<i class="fas fa-chevron-right rb-sep"></i><span>${esc(restName) || "…"}</span>` +
       `<i class="fas fa-chevron-right rb-sep"></i><span>Manager panel</span></nav>`
     : (restName ? `<span class="rb-rest">${esc(restName)}</span>` : "");
+  // WHOSE panel is being measured. A person pin now shows the FULL panel with their gaps
+  // marked (it no longer forces the stripped view), so the name has to appear in that mode
+  // too — otherwise the admin reads "Admin view", sees cyan marks, and has no idea whether
+  // they describe this individual or the role's default. Three honest states:
+  //   marked, no person   → "Admin view"                  · marks = the role's default
+  //   marked, person      → "Admin view · Ravi's access"   · marks = that person
+  //   stripped            → "Admin view · as Ravi" / "· as real manager"
+  const tag = sim
+    ? (asName ? ` · as ${esc(asName)}` : " · as real manager")
+    : (asName ? ` · ${esc(asName)}'s access` : "");
   rb.innerHTML =
-    `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view${sim ? (asName ? ` · as ${esc(asName)}` : " · as real manager") : ""}</span>` +
+    `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view${tag}</span>` +
     crumbs +
     `<span class="rb-spacer"></span>` +
     (sim
       ? `<button id="xrayFullBtn" title="Back to the full admin view (everything visible)"><i class="fas fa-user-shield"></i> See full admin view</button>`
-      : `<button id="xrayZonesBtn">${n} zone${n === 1 ? "" : "s"} off for staff <i class="fas fa-chevron-down" style="font-size:9px"></i></button>`) +
+      : `<button id="xrayZonesBtn">${asName ? `${n} thing${n === 1 ? "" : "s"} ${esc(asName)} doesn't have` : `${n} zone${n === 1 ? "" : "s"} off for staff`} <i class="fas fa-chevron-down" style="font-size:9px"></i></button>`) +
     `<button class="rb-exit" id="xrayExit"><i class="fas fa-arrow-rotate-left"></i> Exit view</button>`;
   const xrayFullBtn = document.getElementById("xrayFullBtn");
   if (xrayFullBtn) xrayFullBtn.onclick = () => xraySetViewReal(false);
@@ -12785,16 +12826,20 @@ function toggleXrayZones(zones) {
   // real manager sees, with their real limited access. Admin-view tabs only (the pin is
   // what carries ?view=real); an owner looking into their own manager panel has no
   // simulate mode, they ARE the reference view the toggle imitates one rung down.
+  const zWho = (XRAY_WHO && XRAY_WHO.asName) || "";
   const simRow = (XRAY_WHO && XRAY_WHO.actor === "admin" && PANEL_RID)
-    ? `<div class="zsep"></div><button class="zrow zsim" id="xraySimRow" title="Reload this tab showing exactly what the real manager sees — same limited access, fully working">` +
-      `<span class="dot" style="background:#6b7280"></span>👁 See the actual manager panel</button>`
+    ? `<div class="zsep"></div><button class="zrow zsim" id="xraySimRow" title="Reload this tab showing exactly what ${zWho ? esc(zWho) : "the real manager"} sees — same limited access, fully working">` +
+      `<span class="dot" style="background:#6b7280"></span>👁 See ${zWho ? `${esc(zWho)}'s actual panel` : "the actual manager panel"}</button>`
     : "";
   // A synthetic admin-owned zone (XRAY_NEVER) reads "admin only" and, when there's no
   // switch for it (higher_only_view), carries no "⚙ change" link — there's nothing to open.
-  zp.innerHTML = `<div class="zh">Not in the manager's panel</div>` + (zones.length
+  zp.innerHTML = `<div class="zh">${zWho ? `Not in ${esc(zWho)}'s panel` : "Not in the manager's panel"}</div>` + (zones.length
     ? zones.map((z, i) => {
         const nv = XRAY_NEVER[z.flag];
-        const by = nv ? esc(nv.by) : `by ${xrayOffBy(z.flag)}`;
+        // A MENU zone (from tabsTint) has no power flag at all, so xrayOffBy() would fall
+        // through to its "owner" default and blame the wrong person — since the access
+        // rebuild only the admin sets a manager's menus. Such a zone states its own `by`.
+        const by = z.by ? esc(z.by) : nv ? esc(nv.by) : `by ${xrayOffBy(z.flag)}`;
         // Only offer "⚙ change" when there is somewhere to GO. Since the access rebuild an
         // owner has no permission screen, so xraySettingUrl() returns null for them and the
         // affordance is replaced by who to ask — never a link that lands nowhere.

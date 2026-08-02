@@ -466,11 +466,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // answer exactly as the REAL manager would be answered (restaurant-wide grants, no
       // higher-view tinting), plus simulated:true so the client keeps its ribbon (the way
       // back to the full admin view). Read-only; every write gate still sees the admin.
-      // ...and ?as=<staff id> goes one step further (owner, 2026-08-02): answer as THAT
-      // MANAGER — their own per-person overrides, not just the restaurant-wide grants.
-      // Being a person implies the real view, so the pin turns simulate on by itself.
+      // ...and ?as=<staff id> answers a DIFFERENT question (owner, 2026-08-02): not "hide
+      // what they can't do" but "mark what they can't do". The pin swaps WHOSE permissions
+      // the X-ray measures against — this individual's overrides instead of the role's
+      // restaurant-wide average — while the admin keeps seeing the whole panel.
+      // It deliberately does NOT imply the real view any more. The first cut had
+      // `!!person || view === "real"`, so opening a profile's "Visit their panel" jumped
+      // straight to the stripped panel with nothing marked, which threw away the very
+      // comparison the admin opened it for. The ribbon's toggle is the only stripper.
       const person = await viewAsPerson(req, rid, g, "manager");
-      const simulate = !g.user && (!!person || new URL(req.url).searchParams.get("view") === "real");
+      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
       const actor = g.user ? g.user.role : simulate ? "manager" : "admin"; // no staff user cookie = admin super-user
       const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
         { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: { edit_menu?: { manager_opts?: Record<string, boolean> } } } | null;
@@ -568,6 +573,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // endpoints so a hidden tab can't be reached by typing a URL. The admin keeps
         // everything (admin = top power), so a switched-off tab stays inspectable.
         tabsOff: actor === "admin" ? [] : managerTabsOff(r?.access_config),
+        // MARK, don't remove (owner, 2026-08-02). tabsOff/settingsOff answer "what must
+        // vanish"; these answer "what must be shown in cyan". They are always sent, and
+        // the panel only acts on them in a higher view — so the admin sees the complete
+        // panel with the missing pieces named, and a real manager is unaffected because
+        // for them the same rows are already gone via the lists above. Without this the
+        // admin got tabsOff:[] and therefore a panel with NOTHING marked, which reads as
+        // "this restaurant has everything" — the exact wrong answer.
+        tabsTint: managerTabsOff(r?.access_config),
+        settingsTint: managerSettingsOff(r?.access_config),
         // Which SETTINGS sections this manager gets. The panel draws its sidebar from this; the
         // server refuses the same list below, so hiding is never the only guard. The admin
         // super-user keeps every section — a switched-off one stays inspectable from the console.

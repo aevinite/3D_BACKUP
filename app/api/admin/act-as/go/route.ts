@@ -8,9 +8,15 @@
 //   uid — OPTIONAL, for EVERY panel now (owner, 2026-08-02): WHICH PERSON to look
 //   through. For to=/owner it is the "which owner?" chooser's pick, forwarded as ?as=
 //   and honored by ownerScope after re-checking membership (owner 2026-07-25). For the
-//   staff panels it is a person's "Visit their panel" button in their profile: we
-//   forward ?as= plus ?view=real so the tab opens as that person's real, limited panel
-//   rather than the full admin X-ray. Every pin is re-checked server-side on each call
+//   staff panels it is a person's "Visit their panel" button in their profile.
+//   WE DO **NOT** ADD ?view=real HERE (owner, 2026-08-02, corrected the same day). The
+//   first cut of this sent the admin straight to that person's stripped panel, on the
+//   reasoning that "being someone means seeing their real panel". The owner's rule is the
+//   opposite and it is the whole point of the admin view: from the console the admin
+//   ALWAYS sees everything, with whatever that person lacks marked in cyan and listed in
+//   the ribbon — and the top-right toggle is what strips it down to their real panel.
+//   Landing on the stripped view first hides exactly the information the admin opened
+//   the profile to get. Every pin is re-checked server-side on each call
 //   (lib/viewAsPerson) — a bad uid just falls back to the plain admin view.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
@@ -38,11 +44,10 @@ export async function GET(req: NextRequest) {
   // pinned to the restaurant even if the browser-wide cookie later changes. A chosen
   // PERSON (uid) rides along as ?as=: for the owner cockpit ownerScope re-checks that
   // they actually co-own this restaurant, and for the staff panels viewAsPerson
-  // re-checks the restaurant + role on every single call. The staff panels also get
-  // &view=real — being someone means seeing their real panel, not the admin X-ray.
-  const asPin = uid
-    ? `&as=${encodeURIComponent(uid)}${to === "/owner" ? "" : "&view=real"}`
-    : "";
+  // re-checks the restaurant + role on every single call. NO &view=real — the pin says
+  // WHOSE permissions to mark against, never that the admin should stop seeing things
+  // (see the header note). The toggle in the ribbon is the only thing that strips a panel.
+  const asPin = uid ? `&as=${encodeURIComponent(uid)}` : "";
   const res = NextResponse.redirect(new URL(`${to}?rid=${encodeURIComponent(rid)}${asPin}`, req.nextUrl.origin), 302);
   res.cookies.set(ADMIN_ACT_COOKIE, rid, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 6 });
   return res;

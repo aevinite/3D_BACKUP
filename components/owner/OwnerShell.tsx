@@ -497,11 +497,17 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
 
       {/* Hierarchy X-ray styles (same amber language as the manager panel's ribbon). */}
       <style jsx global>{`
-        /* GREYED OUT (off-for-owner) — neutral mid-grey, clearly dimmer than enabled links,
-           never near-black; stays clickable for the admin (owner 2026-07-28: grey, not golden). */
-        .adm.owx .owx-navlink.xray-off { color: #8b919c !important; opacity: .55; filter: grayscale(1); }
+        /* MARKED CYAN (off for this owner) — owner, 2026-08-02, replacing the earlier grey.
+           Dimmed grey read as "disabled/broken" instead of "absent for them", and this shell
+           renders on a light background where #8b919c at .55 opacity was almost unreadable.
+           Cyan appears nowhere else in the shell, so it can only mean "not in their menu".
+           The link stays fully clickable — the admin is not restricted here.
+           Kept in step with the same two values in the manager + waiter panels; the admin
+           shell has no dark skin, so one value is the whole story. */
+        .adm.owx .owx-navlink.xray-off { color: #0e7490 !important; opacity: 1; filter: none; }
         .adm.owx .owx-navlink.xray-off::after { content: ""; width: 6px; height: 6px; border-radius: 50%;
-          background: #9aa0a6; margin-left: 6px; display: inline-block; vertical-align: middle; }
+          background: #0891b2; margin-left: 6px; display: inline-block; vertical-align: middle;
+          box-shadow: 0 0 0 2px color-mix(in srgb, #0891b2 28%, transparent); }
         .adm.owx .xray-zbtn { color: #b45309; border-color: color-mix(in srgb, #d97706 45%, transparent); }
         .adm.owx .xray-zpop { position: absolute; top: calc(100% + 6px); right: 0; z-index: 60; min-width: 250px;
           background: var(--adm-card, #fff); border: 1px solid var(--adm-line, #ddd); border-radius: 12px; padding: 6px;

@@ -1131,9 +1131,17 @@ if (window.LFH_RT) {
       : (who === "Admin" && PANEL_RID
         ? `<button id="xraySimBtn" title="Reload this tab showing exactly what the real kitchen screen sees">👁 See actual panel</button>`
         : "");
+    // The KDS has no permission rows at all, so there is nothing to mark cyan here. SAY that,
+    // rather than leaving the admin to wonder whether the marks failed to render (owner,
+    // 2026-08-02 — every other panel shows a count next to the ribbon, and a kitchen with no
+    // count at all looked like the same feature quietly broken). When a person is pinned the
+    // line names them, because "nothing is restricted" is exactly the answer being asked for.
+    const kdsNote = sim ? "" :
+      `<span class="rb-rest" style="font-weight:600">· ${w.asName ? `${esc(w.asName)} sees the whole kitchen screen` : "nothing is restricted on this screen"}</span>`;
     rb.innerHTML =
-      `<span class="rb-tag">${who} view${sim ? (w.asName ? ` · as ${esc(w.asName)}` : " · as real kitchen") : ""}</span>` +
+      `<span class="rb-tag">${who} view${sim ? (w.asName ? ` · as ${esc(w.asName)}` : " · as real kitchen") : (w.asName ? ` · ${esc(w.asName)}'s access` : "")}</span>` +
       body +
+      kdsNote +
       `<span class="rb-spacer"></span>` +
       simBtn +
       `<button id="xrayExit">Exit view</button>`;

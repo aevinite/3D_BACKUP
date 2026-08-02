@@ -281,9 +281,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "whoami") {
       // ACTUAL-VIEW mode (owner, 2026-07-28): an admin-view tab with ?view=real is answered
       // as the REAL waiter tablet (no tinted extras); simulated keeps the client's ribbon.
-      // ...and ?as=<staff id> makes it ONE NAMED WAITER's tablet, which implies the real
-      // view (you cannot be a person and keep the admin's extras).
-      const simulate = !g.user && (!!asPerson || new URL(req.url).searchParams.get("view") === "real");
+      // ...and ?as=<staff id> names WHOSE access the marks describe — it does NOT imply the
+      // real view (owner, 2026-08-02). The admin keeps the whole tablet and sees what this
+      // waiter lacks in cyan; only the ribbon's toggle strips it to their real tablet. The
+      // first cut chained the two, so a profile visit lost the comparison it was opened for.
+      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
       const actor = g.user ? g.user.role : simulate ? "tablet" : "admin"; // no staff cookie = admin super-user
       // asName is the SERVER's confirmation of the pin — the ribbon names a person only
       // when the view really is theirs.
