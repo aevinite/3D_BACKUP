@@ -308,7 +308,15 @@ for (const r of perRest) {
       // "Preparing · ₹1,150 due". Phase 183 caught it. History is finished business; the only live
       // orders on a floor should be ones somebody actually placed.
       const live = false;
-      const discount = (!cancelled && rand() < 0.08) ? wpick([[50, 4], [75, 3], [100, 3], [150, 2], [200, 1]]) : 0;
+      // A DISCOUNT CAN NEVER BE BIGGER THAN THE BILL (clamped 2026-08-02). The flat amounts below
+      // are picked before the bill is known, and on a small ₹40 order a ₹150 "Birthday treat"
+      // produced a bill the real app cannot produce — it clamps with Math.max(0, subtotal −
+      // discount) in five places, so nothing is ever stored below zero. Unrealistic fixture data
+      // is not harmless: the integrity check for "no bill goes below zero" had to carry a
+      // hardcoded date window to skip these rows, and that window silently went stale the moment
+      // the seeder started writing right up to today. Cap it, and the check can just be true.
+      const wanted = (!cancelled && rand() < 0.08) ? wpick([[50, 4], [75, 3], [100, 3], [150, 2], [200, 1]]) : 0;
+      const discount = Math.min(wanted, Math.floor(total));
       const paid = !cancelled && !live;
       day.push({
         restaurant_id: r.id,
@@ -358,6 +366,50 @@ await sql(`VACUUM (ANALYZE) public.feedback`);
 for (const idx of ["orders_pkey", "idx_orders_analytics_covering", "idx_orders_effective_date", "idx_orders_restaurant_created", "idx_orders_created_covering", "feedback_pkey", "idx_feedback_rid_created"]) {
   try { await sql(`REINDEX INDEX CONCURRENTLY public.${idx}`); } catch { /* not fatal */ }
 }
+// ── PUT THE TICKET COUNTERS BACK WHERE THE DATA LEFT THEM ───────────────────────────────────────
+// This script deletes every daily_counters row (above) and then writes orders carrying its OWN
+// kot_no, restarting at 1 each day — which is right, that is how a real day looks. What was
+// missing is the other half: the LIVE counter then also restarts at 1 for today, so the next real
+// order taken on a demo restaurant is handed a number this script already used, and two kitchen
+// tickets in one day print the same number. That is what "86 repeated ticket numbers" in the QA
+// run actually was (found 2026-08-02) — our own fixture, not the ordering path, whose counter is
+// atomic per restaurant per business day.
+//
+// So: for every restaurant and every business day this script just wrote, set the counter to the
+// highest number it used. The next live order continues ABOVE the demo data instead of colliding
+// with it. Business day = 05:00 IST (mig 044) — the same boundary lfh_next_counter uses; getting
+// this wrong by using the UTC date would leave a collidable gap either side of 23:30 UTC.
+console.log("\nre-seeding the ticket counters so live orders continue above the demo data…");
+const [{ n: fixedDays }] = await sql(`
+  WITH per_day AS (
+    SELECT restaurant_id,
+           ((created_at AT TIME ZONE 'Asia/Kolkata') - interval '5 hours')::date AS day,
+           MAX(kot_no) AS max_kot
+      FROM orders
+     WHERE restaurant_id IN (${ids}) AND kot_no IS NOT NULL
+     GROUP BY 1, 2),
+  ins AS (
+    INSERT INTO daily_counters(key, day, n, restaurant_id)
+    SELECT 'kot', day, max_kot, restaurant_id FROM per_day
+    ON CONFLICT (key, day, restaurant_id) DO UPDATE SET n = GREATEST(daily_counters.n, EXCLUDED.n)
+    RETURNING 1)
+  SELECT count(*)::int AS n FROM ins`);
+const [{ n: fixedBills }] = await sql(`
+  WITH per_day AS (
+    SELECT restaurant_id,
+           ((created_at AT TIME ZONE 'Asia/Kolkata') - interval '5 hours')::date AS day,
+           MAX(bill_no) AS max_bill
+      FROM sessions
+     WHERE restaurant_id IN (${ids}) AND bill_no IS NOT NULL
+     GROUP BY 1, 2),
+  ins AS (
+    INSERT INTO daily_counters(key, day, n, restaurant_id)
+    SELECT 'bill', day, max_bill, restaurant_id FROM per_day
+    ON CONFLICT (key, day, restaurant_id) DO UPDATE SET n = GREATEST(daily_counters.n, EXCLUDED.n)
+    RETURNING 1)
+  SELECT count(*)::int AS n FROM ins`);
+console.log(`  ${fixedDays} ticket-day counter(s) and ${fixedBills} bill-day counter(s) set to the numbers just written`);
+
 // the daily/monthly rollups now describe orders that no longer exist
 try { await sql(`SELECT lfh_refresh_orders_daily_agg()`); } catch (e) { console.log(`  daily rollup: ${String(e.message).slice(0, 80)}`); }
 try { await sql(`SELECT lfh_refresh_orders_report_monthly_agg()`); } catch (e) { console.log(`  monthly rollup: ${String(e.message).slice(0, 80)}`); }

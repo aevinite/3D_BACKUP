@@ -186,16 +186,51 @@ try {
     const r = await sb.rpc("lfh_staff_merge_tables", { p_session: s1, p_to: TB, p_rid: RID });
     const merged = r && !r.error && r.data?.ok !== false;
     if (!merged) info(`merge RPC answered ${r?.error?.message || JSON.stringify(r?.data)} — checking the outcome anyway`);
-    const atA = await liveAt(TA), atB = await liveAt(TB);
-    const tA = await tile(TA);
+    // WHAT A MERGE MEANS SINCE MIG 249 — this scenario used to test the OLD shape and failed on
+    // the new one for three years' worth of a day (2026-08-02). Merging is no longer a one-way
+    // MOVE that empties a table: the two parties become ONE SESSION, and every order deliberately
+    // KEEPS the table_number it was ordered at, because that is what lets an unmerge put each
+    // ticket back exactly where it came from. So "is the child table empty?" is the wrong
+    // question — by table_number it never is, and asking it that way reported a bug that does
+    // not exist while proving nothing about the feature that does. On the real floor both tiles
+    // read "0/2 served ⇄ with T<other>", which is the answer the owner asked for.
+    //
+    // The right questions, and the order they matter in:
     if (merged) {
-      atA.length === 0 && tA.state === "free"
-        ? pass(`the emptied table is Free with nothing on it ("${tA.label} · ${tA.meta}")`)
-        : fail(`after the merge the emptied table still shows ${atA.length} order(s), tile "${tA.label}"`);
-      atB.length === 2 && atB.every((o) => o.session_id === atB[0].session_id)
-        ? pass("both parties' orders are on ONE session at the surviving table")
-        : fail(`the surviving table has ${atB.length} order(s) across ${new Set(atB.map((o) => o.session_id)).size} session(s)`);
-      const sB2 = await openTable(TA); await assertFresh(TA, "a new party at the emptied table", sB2);
+      const party = must(await sb.from("orders").select("id,total,session_id,table_number")
+        .eq("restaurant_id", RID).in("table_number", [TA, TB]).eq("archived", false).is("deleted_at", null).neq("status", "cancelled"));
+      const parent = r.data.parent_table, child = r.data.child_table;
+      const sessions = new Set(party.map((o) => o.session_id));
+      party.length === 2 && sessions.size === 1
+        ? pass(`both parties' food is on ONE bill (${party.length} orders, one session)`)
+        : fail(`the joined party has ${party.length} order(s) across ${sessions.size} session(s)`);
+      String(parent) === String(Math.min(Number(TA), Number(TB)))
+        ? pass(`the party is held by the LOWER table (T${parent}), the child is T${child}`)
+        : fail(`the parent is T${parent} — it must always be the lower number`);
+      const live = must(await sb.from("table_merges").select("parent_table,child_table")
+        .eq("restaurant_id", RID).eq("child_table", child).is("ended_at", null));
+      live.length === 1 && String(live[0].parent_table) === String(parent)
+        ? pass("the floor is told about the join, so both tiles can say “⇄ with T…”")
+        : fail(`the join was not recorded — the tiles would show two unrelated tables`);
+      new Set(party.map((o) => o.table_number)).size === 2
+        ? pass("each order still remembers the table it was ordered at (an unmerge stays exact)")
+        : fail("the orders were re-homed onto one table — an unmerge can no longer be exact");
+      // A SECOND PARTY MUST NOT BE SEATABLE ON A JOINED TABLE. The panel never offers it (a child
+      // tile is not a free tile), but the endpoint is the guard that counts.
+      const second = await sb.rpc("lfh_staff_open_table", { p_restaurant_id: RID, p_table: child });
+      const refused = second.error || second.data?.ok === false || second.data?.reason === "merged_child";
+      refused
+        ? pass("opening a NEW party on the joined table is refused — it belongs to the other bill")
+        : fail(`a second party was seated on T${child} while it is joined to T${parent} — an unmerge would hand them someone else's order`);
+      if (second.data?.id) { made.sessions.push(second.data.id); await sb.from("sessions").update({ status: "closed" }).eq("id", second.data.id); }
+      // …and once the party leaves, BOTH tables are clean for whoever sits next.
+      await sb.from("sessions").update({ status: "closed" }).eq("id", r.data.target_session);
+      const after = must(await sb.from("table_merges").select("id").eq("restaurant_id", RID).eq("child_table", child).is("ended_at", null));
+      after.length === 0
+        ? pass("the join ends with the party — the tables are two tables again")
+        : fail("the tables are still shown as joined after the party left");
+      const sNext = await openTable(TA); await assertFresh(TA, "the next party at the parent table", sNext);
+      const sNext2 = await openTable(TB); await assertFresh(TB, "the next party at the joined table", sNext2);
     } else fail("the merge did not go through, so its aftermath could not be checked");
     await clean(TA); await clean(TB); }
 
