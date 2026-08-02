@@ -125,9 +125,11 @@ gone; its sub-options are the page's two VIEWS — **Removals record** · **Acti
 stored at `access_config.view_logs.owner_opts.*`, ABSENT = ON, enforced at
 `/api/owner/audit` and `/api/owner/oplog`) · `Manager mode`.
 
-## SECTION D — DEFAULT SET FOR USER
-The capability set a **new person of that role** starts with. A person's own row can differ
-later (per-person overrides stay); this section only sets the starting point.
+## SECTION D — WAITER (was "Default set for user" — DELETED, owner 2026-08-02)
+"Default set for user" is gone: the manager's set lives inside Manager, the owner's rows were
+duplicates of Owner's menu, and the WAITER rows became their own top-level **Waiter** section
+(same shape as Manager). Per-person overrides still layer on top via the Per-person tab, and a
+new person of any role starts on Default for every row (permissions: {} at create).
 
 - **Manager** — Edit menu (ON) → *customisation · add new dish · edit dish info · change
   price · delete dish · mark sold out · manage categories · manage filters · **attach a 3D
