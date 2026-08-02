@@ -63,6 +63,22 @@ if (MENU_ONLY || INV_ONLY || OWNER_MODE) { try { document.documentElement.setAtt
 // Mark the body NOW (app.js loads at the end of <body>) so the very first paint already
 // has the owner skin + hidden tabs — setTab re-adds the same classes, harmlessly.
 if (OWNER_MODE) { try { document.body.classList.add("owner-mode", "skin-" + MENU_SKIN); } catch (e) {} }
+// LIVE skin sync (owner, 2026-08-02: "it will replicate the mode you are in owner").
+// The owner shell posts { type:"lfh-owner-skin", skin } on load AND whenever its
+// light/dark toggle flips, so the embedded panel follows the cockpit instantly —
+// no reload, no refetch. Same-origin only; anything else is ignored.
+if (OWNER_MODE) {
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin) return;
+    const d = e.data;
+    if (!d || d.type !== "lfh-owner-skin" || (d.skin !== "light" && d.skin !== "dark")) return;
+    try {
+      document.documentElement.setAttribute("data-theme", d.skin);
+      document.body.classList.remove("skin-light", "skin-dark");
+      document.body.classList.add("skin-" + d.skin);
+    } catch (err) {}
+  });
+}
 // Tiny localStorage helpers so a refresh keeps you exactly where you were —
 // not just the tab, but the SUB-VIEW too (Orders: live/previous/calls; Log:
 // customer/operation). Wrapped so a blocked localStorage never throws.
@@ -12363,7 +12379,26 @@ function xraySettingUrl(flag) {
   body.owner-mode .tab[data-tab="general"],
   body.owner-mode #editorSubtabs,
   body.owner-mode #themeToggle,
+  /* Staff-account chrome (profile drawer button, My-profile-&-pay): the panel runs on the
+     OWNER's login here — their identity/pay UI lives in the owner panel, not this embed.
+     maint.js also skips its whole profile init in ownermode; this is the belt to that brace. */
+  body.owner-mode #staffSettingsBtn,
+  body.owner-mode #myProfileBtn,
   body.owner-mode #xrayRibbon { display: none !important; }
+  /* Topbar wears the owner surface, not the manager's dark-gold gradient — that gradient
+     stayed dark in the light skin and is what hid the restaurant name (owner, 2026-08-02:
+     "you are not able to see aangan written"). */
+  body.owner-mode .topbar { background: var(--panel) !important; box-shadow: none !important;
+    border-bottom: 1px solid var(--line) !important; }
+  /* The theme's .brand paints its text with a background-clip gradient and then resets
+     spans to color:initial (black) — which made "· <restaurant>" black-on-dark. Plain,
+     explicit colours instead: "Manager" in the text colour, the restaurant name in the
+     emerald accent (his "diff colour"), each skin picking the shade that stays ≥4.5:1. */
+  body.owner-mode .brand { background: none !important; -webkit-background-clip: initial !important;
+    background-clip: initial !important; color: var(--text) !important; -webkit-text-fill-color: var(--text) !important; }
+  body.owner-mode .brand span { color: inherit !important; -webkit-text-fill-color: inherit !important; }
+  body.owner-mode.skin-light .brand-rest { color: #059669 !important; -webkit-text-fill-color: #059669 !important; font-weight: 700; }
+  body.owner-mode.skin-dark .brand-rest { color: #34d399 !important; -webkit-text-fill-color: #34d399 !important; font-weight: 700; }
   /* Premium finish: rounder cards + the owner panel's soft elevation on light. */
   body.menu-only .card { border-radius:16px; padding:20px 22px; margin-bottom:16px; }
   body.menu-only.skin-light .card { box-shadow:0 1px 2px rgba(16,24,40,.05), 0 14px 30px -18px rgba(20,16,50,.20); }

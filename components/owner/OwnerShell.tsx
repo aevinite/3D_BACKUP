@@ -275,6 +275,9 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
       try { localStorage.setItem("aevidine_skin", next); } catch {}
       // Persist to a cookie too so the NEXT server render starts on the right skin.
       try { document.cookie = `aevidine_skin=${next}; path=/; max-age=31536000; samesite=lax`; } catch {}
+      // Tell live listeners (Manager mode forwards this into its embedded panel so the
+      // manager floor flips skin the same instant the cockpit does — owner, 2026-08-02).
+      try { window.dispatchEvent(new CustomEvent("lfh:owner-skin", { detail: next })); } catch {}
       return next;
     });
   };
