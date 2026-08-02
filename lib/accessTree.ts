@@ -250,7 +250,7 @@ const waiterAction = (a: ActionDef): Node | null => {
 // manager could ever see — the dead-switch shape the access rebuild exists to remove. A stored
 // menus.mgrset.billing/kitchen/sessions=false is ignored from now on, like every retired key.
 export const MANAGER_SETTINGS: { key: string; name: string; what: string }[] = [
-  { key: "tables", name: "Tables — name & seats", what: "Renaming a table and how many people sit at it. Adding or removing tables stays admin-only." },
+  { key: "tables", name: "Tables — name & seats", what: "Renaming a table and how many people sit at it. Adding or removing tables — and how many tables sit on one row of the floor — stay admin-only, with no switch that can hand them over." },
   // The owner's rules for Users (2026-08-02), enforced by the editor API, not just worded here:
   // a manager can CREATE a login (its permissions start on Default automatically — a manager
   // never sets permissions), RESET its password, and DISABLE it (the person is told they've
@@ -435,7 +435,10 @@ export const SECTIONS: Section[] = [
           { id: "tables_list", name: "Table name & seats", bind: { t: "none" }, panel: "settings:tables",
             what: "How many tables the restaurant has, each table's name — optional, e.g. the last one as “Banquet” — and how many people can sit there." },
           { id: "tables_layout", name: "Number of tables per row", bind: { t: "none" }, panel: "settings:floor",
-            what: "How many table boxes sit on one line in the manager's floor view, and so how big each box ends up. Nothing else — how many tables there are is set in Table name & seats." },
+            // ADMIN-ONLY WITH NO SWITCH (owner, 2026-08-02): the manager panel's own copy of this
+            // field was removed and nothing was put in its place — there is no permission that can
+            // hand it back ("you cannot on it and off it"), which is why this row has no toggle.
+            what: "How many table boxes sit on one line in the manager's floor view, and so how big each box ends up. Only you set it — the manager panel has no such field and no switch can give it one. Nothing else here: how many tables there are is set in Table name & seats." },
           { id: "tables_qr", name: "Guest QR link per table", bind: { t: "none" }, panel: "settings:qr",
             what: "The permanent QR code and link for every table — the ones printed and put on the tables. Print one, or the whole sheet." },
         ],

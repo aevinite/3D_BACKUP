@@ -3079,7 +3079,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (a === "settings" && g.user && g.user.role === "manager") {
         const offList = managerSettingsOff((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
         const touches = (ks: string[]) => body && typeof body === "object" && ks.some((k) => k in (body as object));
-        if (offList.includes("tables") && touches(["table_names", "table_seats", "floor_per_row", "floor_layout_mode"]))
+        if (offList.includes("tables") && touches(["table_names", "table_seats"]))
           return permDenied("change the tables");
         if (offList.includes("billing") && touches(["gstin", "restaurant_name", "restaurant_address", "restaurant_phone", "invoice_prefix", "bill_footer", "tax_components"]))
           return permDenied("change the bill");
@@ -3091,15 +3091,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           { table_assign?: { manager_opts?: Record<string, boolean> } } | null;
         const opt = (k: string) => { const v = cfgFloor?.table_assign?.manager_opts?.[k]; return typeof v === "boolean" ? v : true; };
         const touchesTables = "table_names" in body || "table_seats" in body;
-        // Classic vs Custom is ADMIN-ONLY and has no permission at all — a Custom plan is written
-        // by hand per restaurant, so a manager switching to it could point their floor at a plan
-        // that does not exist. Refused outright, not gated by anything switchable.
-        if ("floor_layout_mode" in body) return permDenied("change the floor layout");
-        const touchesLayout = "floor_per_row" in body;
+        // THE WHOLE FLOOR LAYOUT IS ADMIN-ONLY, AND IT IS NOT A PERMISSION (owner, 2026-08-02:
+        // "in the manager panel there shouldn't be option of number of table per row… you cannot
+        // on it and off it, that will be only set by admin"). Both fields are refused outright:
+        //   • floor_layout_mode — Classic vs Custom; a Custom plan is written by hand per
+        //     restaurant, so a manager switching to it could point their floor at a plan that
+        //     does not exist.
+        //   • floor_per_row — how many boxes sit on a line. It briefly WAS the manager's own
+        //     setting (2026-08-01) and is his again to decide: one number, set in /aevinite.
+        // Deliberately NOT gated by a switch: there is no row for either on the Access screen, so
+        // an `opt("layout")` read would answer "true" for every restaurant and hand it straight
+        // back — the dead-switch shape the access rebuild exists to remove.
+        // The message says WHO sets it, not "your owner hasn't given you permission" — there is
+        // no permission to give, so the usual wording would send a manager to ask for a switch
+        // that does not exist.
+        if ("floor_layout_mode" in body || "floor_per_row" in body)
+          return err("How the floor is laid out — including how many tables sit on a row — is set by the admin only.", 403);
         if (touchesTables && !opt("tables")) return permDenied("rename tables or change their seats");
-        if (touchesLayout && !opt("layout")) return permDenied("change the floor layout");
         // Anything ELSE under settings is admin-owned now — a manager may not send it at all.
-        const allowed = new Set(["table_names", "table_seats", "floor_per_row"]);
+        const allowed = new Set(["table_names", "table_seats"]);
         for (const k of Object.keys(body)) {
           if (k === "id" || k === "restaurant_id") continue;
           if (!allowed.has(k)) return permDenied("change that setting");
@@ -3133,14 +3143,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // full access — only a real manager's patch is stripped.
         if (g.user && g.user.role !== "owner") {
           const MANAGER_BLOCKED_SETTINGS = [
-            // How many tables EXIST stays admin-owned (mig 226). How the floor is LAID OUT does
-            // not: "tables per row" is the manager's own setting (owner, 2026-08-01, said twice —
-            // "I want it in the settings of manager panel"). It was on this list, so a manager's
-            // save was silently STRIPPED here and the field snapped back to the stored value the
-            // moment the panel refreshed — which is exactly what he reported. It is still ONE
-            // number per restaurant (not per device), so the reason it was locked down no longer
-            // applies to who may set it.
-            "table_count", "floor_layout_mode",
+            // How many tables EXIST and how the floor is LAID OUT are both admin-owned (mig 226).
+            // "Tables per row" was briefly the manager's own setting (2026-08-01) and came back
+            // here on 2026-08-02 at the owner's word — "that will be only set by admin". A real
+            // manager is refused outright above (a stripped field would save silently and snap
+            // back on the next refresh, which is worse than being told no); this list is the
+            // second net, and it covers any non-owner role that ever reaches this handler.
+            "table_count", "floor_layout_mode", "floor_per_row",
             "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone",
             "gstin", "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
             "auto_print_kot",
