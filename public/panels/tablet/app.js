@@ -89,10 +89,16 @@ const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
 // ACTUAL-VIEW toggle (owner, 2026-07-28): ?view=real on an admin-view tab makes whoami answer
 // as the REAL waiter tablet (no tinted extras). Per-tab like ?rid, echoed on every call.
 const PANEL_VIEW_REAL = PANEL_RID && new URLSearchParams(location.search).get("view") === "real";
+// VISIT-A-PERSON'S-PANEL (owner, 2026-08-02): ?as=<staff id> on an admin-view tab —
+// opened from that waiter's profile — makes the server answer as THAT WAITER: their
+// section of the floor and their own permission overrides. Echoed on every call like
+// ?rid and ?view; re-checked server-side every time; ignored for real staff logins.
+const PANEL_AS = PANEL_RID ? (new URLSearchParams(location.search).get("as") || "") : "";
 const ridQ = (path) => {
   if (!PANEL_RID) return path;
   path += (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID);
   if (PANEL_VIEW_REAL) path += "&view=real";
+  if (PANEL_AS) path += "&as=" + encodeURIComponent(PANEL_AS);
   return path;
 };
 const api = async (method, path, body, opts) => {
@@ -3655,9 +3661,11 @@ function closeXrayZones() {
 }
 // Flip this admin-view TAB between the full admin view and the "actual tablet" view
 // (?view=real). Pure URL state — reloading with/without the param is the whole toggle.
+// Leaving the real view also drops the person pin (?as=) — going back to the full admin
+// view means the tab is nobody's tablet again, and must stop saying a name.
 function xraySetViewReal(on) {
   const u = new URL(location.href);
-  if (on) u.searchParams.set("view", "real"); else u.searchParams.delete("view");
+  if (on) u.searchParams.set("view", "real"); else { u.searchParams.delete("view"); u.searchParams.delete("as"); }
   location.replace(u.toString());
 }
 function renderXrayRibbon() {
@@ -3667,12 +3675,15 @@ function renderXrayRibbon() {
   // the only admin trace — and the way back to the full admin view.
   if (tSim()) {
     const restS = (state.data.restaurant && state.data.restaurant.name) || "";
-    const simSig = `sim|${restS}`;
+    // WHOSE tablet — set only when the server confirmed the ?as= pin, so the ribbon can
+    // never name someone whose view we aren't actually showing.
+    const asName = (TABLET_WHO && TABLET_WHO.asName) || "";
+    const simSig = `sim|${asName}|${restS}`;
     if (rb && rb.dataset.sig === simSig) return;
     if (!rb) { rb = document.createElement("div"); rb.id = "xrayRibbon"; document.body.insertBefore(rb, document.body.firstChild); }
     rb.dataset.sig = simSig;
     rb.innerHTML =
-      `<span class="rb-tag">Admin view · as real tablet</span>` +
+      `<span class="rb-tag">Admin view · ${asName ? `as ${esc(asName)}` : "as real tablet"}</span>` +
       `<nav class="rb-crumbs" aria-label="Breadcrumb"><a id="xrayHome">Restaurants</a>` +
       `<span class="rb-sep">›</span><span>${restS ? esc(restS) : "…"}</span>` +
       `<span class="rb-sep">›</span><span>Tablet panel</span></nav>` +

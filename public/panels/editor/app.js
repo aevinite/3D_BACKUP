@@ -401,11 +401,17 @@ const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
 // can see the panel as their staff do. Per-tab like ?rid, echoed on every call; ignored
 // server-side for real staff and for non-admin sessions.
 const PANEL_VIEW_REAL = PANEL_RID && new URLSearchParams(location.search).get("view") === "real";
+// VISIT-A-PERSON'S-PANEL (owner, 2026-08-02): ?as=<staff id> on an admin-view tab —
+// opened from that manager's profile — makes the server answer as THAT PERSON (their
+// menus, their own permission overrides). Echoed on every call like ?rid and ?view;
+// re-checked server-side every time (lib/viewAsPerson), and ignored for real staff.
+const PANEL_AS = PANEL_RID ? (new URLSearchParams(location.search).get("as") || "") : "";
 const ridQ = (path) => {
   if (!PANEL_RID) return path;
   const sep = () => (path.includes("?") ? "&" : "?");
   path += sep() + "rid=" + encodeURIComponent(PANEL_RID);
   if (PANEL_VIEW_REAL) path += "&view=real";
+  if (PANEL_AS) path += "&as=" + encodeURIComponent(PANEL_AS);
   return path;
 };
 
@@ -12097,11 +12103,12 @@ const XRAY_TABS = [
   // default), so this is non-breaking — the tab only disappears once the owner explicitly
   // switches it off; admin/owner keep it (tinted).
   { tab: "log", flag: "view_logs", label: "Activity log" },
-  // Bills (owner, 2026-08-02). Its DOM tab is called "orders". It was the one menu with a
-  // permission and no entry here: switch "Bill" off and the tab still sat there, and every
-  // tap inside it came back 403 from tabGate — a switched-off permission has to be GONE, not
-  // merely refused ("even if it's shown it should not work, and it shouldn't be shown").
-  { tab: "orders", flag: "view_bills", label: "Bills" },
+  // Bills LEFT this list (owner, 2026-08-02, same day it arrived): the Bill menu is now FIXED —
+  // "four will be the fixed one: table, platform, bill and setting" — so every manager always
+  // has the tab and there is no view_bills power any more (the model answers a retired flag
+  // permanently ON, and whoami no longer sends it, so an entry here would HIDE the tab for
+  // every real manager). The dangerous actions inside it (delete / reopen a bill) keep their
+  // own flags in XRAY_CONTROLS below.
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can
@@ -12545,9 +12552,12 @@ new MutationObserver(() => {
 // Flip this admin-view TAB between the full admin view and the "actual panel" view
 // (?view=real — the server then answers whoami exactly as the real manager gets it).
 // Pure URL state: reloading this iframe with/without the param is the whole toggle.
+// Leaving the real view also drops the person pin (?as=) — "see the full admin view"
+// means exactly that, and a tab still claiming to be someone while showing the admin
+// everything would be the dishonest half-state.
 function xraySetViewReal(on) {
   const u = new URL(location.href);
-  if (on) u.searchParams.set("view", "real"); else u.searchParams.delete("view");
+  if (on) u.searchParams.set("view", "real"); else { u.searchParams.delete("view"); u.searchParams.delete("as"); }
   location.replace(u.toString());
 }
 
@@ -12565,7 +12575,10 @@ function renderXrayRibbon(higher, zones) {
   const n = zones.length;
   // Skip identical rebuilds: the MutationObserver re-runs applyHierarchyView on every
   // repaint, and rewriting our own innerHTML would itself be a mutation → a loop.
-  const sig = `${who}|${sim ? "sim" : "full"}|${restName}|${zones.map((z) => z.label).join(",")}`;
+  // WHOSE panel, when the admin came in from a person's profile — the server put the
+  // name in whoami only after confirming the pin, so this label is always true.
+  const asName = (XRAY_WHO && XRAY_WHO.asName) || "";
+  const sig = `${who}|${sim ? "sim" : "full"}|${asName}|${restName}|${zones.map((z) => z.label).join(",")}`;
   if (rb.dataset.sig === sig) return;
   rb.dataset.sig = sig;
   // The ADMIN came here from the console → show the PATH (Restaurants › name ›
@@ -12578,7 +12591,7 @@ function renderXrayRibbon(higher, zones) {
       `<i class="fas fa-chevron-right rb-sep"></i><span>Manager panel</span></nav>`
     : (restName ? `<span class="rb-rest">${esc(restName)}</span>` : "");
   rb.innerHTML =
-    `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view${sim ? " · as real manager" : ""}</span>` +
+    `<span class="rb-tag"><i class="fas fa-user-shield"></i> ${who} view${sim ? (asName ? ` · as ${esc(asName)}` : " · as real manager") : ""}</span>` +
     crumbs +
     `<span class="rb-spacer"></span>` +
     (sim

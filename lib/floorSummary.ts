@@ -60,6 +60,14 @@ const inflight = new Map<string, Entry>();
  * Share one whole-floor computation between concurrent callers.
  * `key` must identify the restaurant (and anything else that changes the RESULT).
  * `compute` is the real database call; it runs at most once per window.
+ *
+ * ⚠️ THE RESULT IS SHARED BY REFERENCE — TREAT IT AS READ-ONLY.
+ * Every caller inside the window gets the SAME object, so editing it edits what the
+ * next device is handed. This is not theoretical: the tablet narrowed the floor to a
+ * waiter's section in place, and for 1.5s afterwards the manager's panel (and every
+ * other waiter's) was served that one waiter's three tiles out of three hundred, the
+ * rest of the floor looking free (found 2026-08-02). Spread it into a new object, or
+ * `structuredClone` it, before changing anything.
  */
 export async function sharedFloorSummary<T>(key: string, compute: () => Promise<T>): Promise<T> {
   const now = Date.now();

@@ -11,12 +11,15 @@
 // browser-wide, which made the first tab silently shift restaurants). panelAdminRid
 // enforces the entry rule (admin may ONLY arrive via the console's per-restaurant
 // link, never a bare hand-typed /manager) and strips ?rid= from non-admin visits.
-import { panelAdminRid } from "@/lib/panelGate";
+// ?as=<staff id> (ADMIN only): open this panel as ONE NAMED MANAGER — their menus,
+// their per-person permissions (owner, 2026-08-02, the profile's "Visit their panel").
+// Carried into the iframe by panelIframeSrc; re-checked on every API call.
+import { panelAdminRid, panelIframeSrc } from "@/lib/panelGate";
 import PanelFrame from "@/components/PanelFrame";
 
-export default async function ManagerPanel({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
-  const { rid } = await searchParams;
+export default async function ManagerPanel({ searchParams }: { searchParams: Promise<{ rid?: string; as?: string; view?: string }> }) {
+  const { rid, as, view } = await searchParams;
   const adminRid = await panelAdminRid("manager", rid);
-  const src = "/panels/editor/index.html" + (adminRid ? `?rid=${encodeURIComponent(adminRid)}` : "");
+  const src = panelIframeSrc("/panels/editor/index.html", adminRid, { as, view });
   return <PanelFrame src={src} title="Manager" />;
 }

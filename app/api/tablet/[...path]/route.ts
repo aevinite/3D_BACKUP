@@ -30,6 +30,7 @@ import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { waiterTables, allows, normTable, blockedReason, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
+import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 
 export const dynamic = "force-dynamic";
 
@@ -161,7 +162,8 @@ async function closeUnpaidGate(req: NextRequest, body: any, rid: string, user: S
 // board GETs send to the tablet client. The client's tperm() reads settings[key] to
 // show/hide the Mark-paid / Discount / Invoice buttons — resolving here means the
 // buttons follow the PER-USER truth with zero client changes (the server gate above
-// stays the real guard either way).
+// stays the real guard either way). `user` is the real waiter, or — on an admin tab
+// opened from someone's profile (?as=) — the waiter being looked through.
 function overlayUserPerms<T extends Record<string, any> | null>(settings: T, user: StaffUser | null): T {
   if (!settings || !user?.permissions) return settings;
   const out: Record<string, any> = { ...settings };
@@ -260,6 +262,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
+  // WHOSE tablet is the admin looking at? ?as=<staff id> (owner, 2026-08-02 — the
+  // profile's "Visit their panel"). Null for everyone else and for an unpinned admin
+  // tab, and it costs NOTHING when the param is absent (no DB read). It shapes what is
+  // SHOWN below — this waiter's tables and their own permission overrides — never who
+  // is writing: every write gate further down still sees the admin.
+  const asPerson = await viewAsPerson(req, rid, g, "tablet");
+  const viewer = asPerson ?? g.user;
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   try {
@@ -272,9 +281,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "whoami") {
       // ACTUAL-VIEW mode (owner, 2026-07-28): an admin-view tab with ?view=real is answered
       // as the REAL waiter tablet (no tinted extras); simulated keeps the client's ribbon.
-      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
+      // ...and ?as=<staff id> makes it ONE NAMED WAITER's tablet, which implies the real
+      // view (you cannot be a person and keep the admin's extras).
+      const simulate = !g.user && (!!asPerson || new URL(req.url).searchParams.get("view") === "real");
       const actor = g.user ? g.user.role : simulate ? "tablet" : "admin"; // no staff cookie = admin super-user
-      return ok({ actor, higherView: !g.user && !simulate, simulated: simulate });
+      // asName is the SERVER's confirmation of the pin — the ribbon names a person only
+      // when the view really is theirs.
+      return ok({ actor, higherView: !g.user && !simulate, simulated: simulate, asName: personLabel(asPerson) });
     }
 
     // customer-recognize?phone=… — repeat-customer lookup for the payment sheet
@@ -326,13 +339,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
         : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
       if (error) throw new Error(error.message);
-      const summary = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
+      const shared = data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] };
       // WAITER SECTIONS (mig 222): keep only the tables this waiter was given. `limit` is
       // null — and this is a total no-op — for the admin, for a manager/owner looking in,
       // and for every restaurant with the module off. Note the RPC applies `p_table` ONLY
       // to the tile loop: calls/requests/joiners/order_count are restaurant-wide and ride
       // along on the targeted response too, so they must be narrowed on BOTH paths.
-      const myTables = await waiterTables(g.user, rid); // resolved ONCE for this request
+      // `viewer` = the real waiter, or the one the admin is looking through (?as=) — so
+      // "visit their panel" shows THEIR section, which is the main thing a section is.
+      const myTables = await waiterTables(viewer, rid); // resolved ONCE for this request
+      // NARROW A COPY, NEVER THE SHARED OBJECT (found 2026-08-02, live bug).
+      // The whole-floor read is shared BY REFERENCE for 1.5s (lib/floorSummary), so
+      // narrowing it in place edited the snapshot every other device was about to be
+      // handed: a waiter holding tables 4–6 polled, and for the next second and a half
+      // the MANAGER's floor — and every other waiter's — came back with three tiles out
+      // of three hundred, the rest looking free. Only a restricted viewer pays for the
+      // copy; the manager/admin path (limit null) is untouched and narrowSummary is a
+      // no-op for them anyway.
+      const summary = myTables ? structuredClone(shared) : shared;
       narrowSummary(summary, myTables);
       // Targeted (?table=N): tile only — the panel keeps its cached agnostic bundle.
       if (tbl) return ok(summary);
@@ -353,7 +377,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // can't surface the menu (same server-resolution trick as overlayUserPerms).
       // Applied AFTER the per-user overlay on purpose. table_ops_tablet_allowed is the
       // synthetic client flag (like banquet_allowed): module off = no dead UI/X-ray zone.
-      const setOut = overlayUserPerms(must(settings), g.user);
+      const setOut = overlayUserPerms(must(settings), viewer);
       if (setOut) {
         const tOpsOk = tableOpsEffectiveFromRow(setOut);
         if (!tOpsOk) setOut.tablet_table_ops = "off";
@@ -427,7 +451,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const tblRaw = new URL(req.url).searchParams.get("table");
       const tbl = tblRaw !== null && /^\d{1,6}$/.test(tblRaw.trim()) ? tblRaw.trim() : null;
       // WAITER SECTIONS (mig 222). Resolved once for both branches below.
-      const limit = await waiterTables(g.user, rid);
+      const limit = await waiterTables(viewer, rid);
       if (tbl) {
         // A table outside the waiter's section answers as an EMPTY table rather than an
         // error. Deliberate: the tablet treats a failed slice fetch as "something's wrong,
@@ -466,7 +490,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
       ]);
       // Same server-side KOT-menu module resolution as /summary (canonical ladder, mig 177).
-      const setSt = overlayUserPerms(must(settings), g.user);
+      const setSt = overlayUserPerms(must(settings), viewer);
       if (setSt) {
         const tOpsOkSt = tableOpsEffectiveFromRow(setSt);
         if (!tOpsOkSt) setSt.tablet_table_ops = "off";

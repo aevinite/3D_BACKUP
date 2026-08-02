@@ -38,6 +38,7 @@ import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, type ManagerTabKey } from "@/lib/accessTree";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
+import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -146,9 +147,10 @@ async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<
 const TAB_PATHS: { tab: ManagerTabKey; test: (p: string) => boolean }[] = [
   { tab: "ratings", test: (p) => p === "ratings" || p.startsWith("ratings/") },
   { tab: "log", test: (p) => p === "oplog" || p.startsWith("oplog/") },
-  // The Bills tab (owner, 2026-08-01 — the fifth manager menu). Switching it off has to take the
-  // bill LIST away as well as the tab, or the endpoints are still reachable behind a hidden tab.
-  { tab: "bills", test: (p) => p === "bills" || p.startsWith("bills/") || p === "invoices" || p.startsWith("invoices/") },
+  // "bills" LEFT this gate (owner, 2026-08-02): the Bill menu is FIXED — every manager has it,
+  // so there is no view_bills question any more and its endpoints are plain manager endpoints.
+  // The two dangerous actions inside it (delete / reopen a bill) keep their own managerCan
+  // gates at their handlers — the TAB being fixed hands over nothing dangerous.
   { tab: "editor", test: (p) => /^(items|categories|filters)(\/|$)/.test(p) },
 ];
 async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[]): Promise<NextResponse | null> {
@@ -167,10 +169,9 @@ async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[
   const granted =
     hit.tab === "editor"  ? await managerCan(g, rid, "edit_menu")
     : hit.tab === "ratings" ? await managerCan(g, rid, "view_ratings")
-    : hit.tab === "log"     ? await managerCan(g, rid, "view_logs")
-    :                         await managerCan(g, rid, "view_bills");
+    :                         await managerCan(g, rid, "view_logs");
   if (managerTabOn(cfg, hit.tab) && granted) return null;
-  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log", bills: "the bills list" };
+  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log" };
   return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
 
@@ -447,7 +448,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // answer exactly as the REAL manager would be answered (restaurant-wide grants, no
       // higher-view tinting), plus simulated:true so the client keeps its ribbon (the way
       // back to the full admin view). Read-only; every write gate still sees the admin.
-      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
+      // ...and ?as=<staff id> goes one step further (owner, 2026-08-02): answer as THAT
+      // MANAGER — their own per-person overrides, not just the restaurant-wide grants.
+      // Being a person implies the real view, so the pin turns simulate on by itself.
+      const person = await viewAsPerson(req, rid, g, "manager");
+      const simulate = !g.user && (!!person || new URL(req.url).searchParams.get("view") === "real");
       const actor = g.user ? g.user.role : simulate ? "manager" : "admin"; // no staff user cookie = admin super-user
       const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
         { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: { edit_menu?: { manager_opts?: Record<string, boolean> } } } | null;
@@ -460,7 +465,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // The acting person's per-person overrides (mig 115) — so the manager UI hides a power
       // pulled from THIS individual, matching what managerCan enforces. Only for a real staff
       // login (admin/owner see the restaurant-wide picture; they bypass the gate anyway).
-      const myOv = (g.user && g.user.role !== "owner") ? (g.user.permissions || {}) : {};
+      // Looking through ONE manager (?as=) uses THEIR overrides — that is the whole point
+      // of the pin: the admin sees the panel this individual gets, not the role's average.
+      const myOv = person ? (person.permissions || {})
+        : (g.user && g.user.role !== "owner") ? (g.user.permissions || {}) : {};
       // EVERY grant the access model has, not just the older list. `view_bills` and
       // `delete_bill` are rows on the Access screen and are enforced by managerCan, but they
       // are not in the legacy MANAGER_POWER_FLAGS — so the panel got no answer for them and
@@ -516,6 +524,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // (In the simulate mode actor is already "manager", so this resolves false.)
         higherView: actor === "admin" || actor === "owner",
         simulated: simulate,
+        // WHOSE panel this is, when the admin came in through a person's profile. The
+        // ribbon says the name — and it says it only because the SERVER confirmed the
+        // pin, so the label can never describe a view we aren't actually showing.
+        asName: personLabel(person),
         managerPermissions: perms,
         effectivePowers,
         offByAdmin,
@@ -536,8 +548,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // The SIMULATE path has to answer the same way canDeleteBill() does, or the admin's
         // "view as a manager" mode shows a button a real manager doesn't get. It read only the
         // legacy access_config path; the Access screen's row wins there too now.
+        // A named manager's OWN answer wins here too (?as=), exactly as managerCan
+        // resolves it — otherwise the one person given/denied this row would be the one
+        // person this view got wrong.
         canDeleteBill: simulate
-          ? (typeof r?.manager_permissions?.delete_bill === "boolean"
+          ? (myOv.delete_bill === "on" || myOv.delete_bill === "pin" ? true
+            : myOv.delete_bill === "off" ? false
+            : typeof r?.manager_permissions?.delete_bill === "boolean"
               ? r.manager_permissions.delete_bill
               : (r?.access_config as { void_bills?: { manager_opts?: Record<string, boolean> } } | null)?.void_bills?.manager_opts?.delete_bill === true)
           : await canDeleteBill(g, rid),

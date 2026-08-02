@@ -15,6 +15,7 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { platformLadder, parcelLadder } from "@/lib/tableTags";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
+import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 
 export const dynamic = "force-dynamic";
 
@@ -59,9 +60,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (path.join("/") === "whoami") {
       // ACTUAL-VIEW mode (owner, 2026-07-28): ?view=real on an admin-view tab is answered
       // as the real kitchen screen; simulated keeps the client's ribbon (the way back).
-      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
+      // ?as=<staff id> (owner, 2026-08-02) names WHOSE screen this is — opened from that
+      // person's profile. The KDS has no per-person settings, so the pin only turns on
+      // the real view and puts their name on the ribbon; nothing else differs.
+      const asPerson = await viewAsPerson(req, rid, g, "kitchen");
+      const simulate = !g.user && (!!asPerson || new URL(req.url).searchParams.get("view") === "real");
       const actor = g.user ? g.user.role : simulate ? "kitchen" : "admin"; // no staff cookie = admin super-user
-      return ok({ actor, higherView: !g.user && !simulate, simulated: simulate }); // admin-only, like the tablet's
+      return ok({ actor, higherView: !g.user && !simulate, simulated: simulate, asName: personLabel(asPerson) }); // admin-only, like the tablet's
     }
 
     if (path.join("/") === "board") {

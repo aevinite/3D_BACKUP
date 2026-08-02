@@ -9,13 +9,15 @@
 // pinned to its restaurant — see app/manager/page.tsx for the full story.
 // panelAdminRid enforces the entry rule (admin only via the console's link) and
 // strips ?rid= from non-admin visits.
-import { panelAdminRid } from "@/lib/panelGate";
+// ?as=<staff id> (ADMIN only): open this tablet as ONE NAMED WAITER — their tables,
+// their per-person permissions (owner, 2026-08-02, the profile's "Visit their panel").
+import { panelAdminRid, panelIframeSrc } from "@/lib/panelGate";
 import PanelFrame from "@/components/PanelFrame";
 
-export default async function TabletPanel({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
-  const { rid } = await searchParams;
+export default async function TabletPanel({ searchParams }: { searchParams: Promise<{ rid?: string; as?: string; view?: string }> }) {
+  const { rid, as, view } = await searchParams;
   const adminRid = await panelAdminRid("tablet", rid);
-  const src = "/panels/tablet/index.html" + (adminRid ? `?rid=${encodeURIComponent(adminRid)}` : "");
+  const src = panelIframeSrc("/panels/tablet/index.html", adminRid, { as, view });
   // PanelFrame renders the iframe sized to the VISIBLE viewport AND pushes the phone's real
   // safe-area insets into it (env() doesn't resolve inside a nested iframe — see PanelFrame.tsx).
   return <PanelFrame src={src} title="Waiter tablet" />;
