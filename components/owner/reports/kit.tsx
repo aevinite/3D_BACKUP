@@ -425,6 +425,13 @@ export function ReportsStyles() {
       .rs-lostrow span { font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; color: var(--adm-bad, var(--adm-warn)); }
       .rs-lostrow em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--muted); }
       .rs-lostbox p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
+      /* "Show the full breakdown" — the long ladder is still there, just not in the way
+         (owner 2026-08-02: "don't you think this is too complicated?"). */
+      .rs-morebtn { margin-top: 10px; background: none; border: none; padding: 4px 0; cursor: pointer;
+        font: inherit; font-size: 12px; font-weight: 700; color: var(--accent); display: inline-flex; align-items: center; gap: 6px; }
+      .rs-morebtn:hover { text-decoration: underline; }
+      .rs-morebtn i { font-size: 10px; }
+      .rs-more { margin-top: 6px; padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--border-c) 80%, transparent); }
 
       .rs-paylist { display: flex; flex-direction: column; gap: 11px; }
       .rs-payrow { display: grid; grid-template-columns: 12px 1fr auto; gap: 10px; align-items: center; }

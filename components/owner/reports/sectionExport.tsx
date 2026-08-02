@@ -95,9 +95,9 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
       rows2.push([`Cancelled orders (${pt.cancelled.mode === "bill" ? "charged at menu price" : "taken out of stock"})`,
         pt.cancelled.charged ? -Math.round(pt.cancelled.charged) : 0]);
       rows2.push(["Expenses in total", -Math.round(ih.expenses)]);
-      rows2.push(["LEFT IN HAND", Math.round(ih.left)]);
+      rows2.push(["PROFIT IN HAND", Math.round(ih.left)]);
       rows2.push(["Lost to cancellations (not charged above)", Math.round(ih.parts.cancelled.lostSales)]);
-      out.push({ title: `${meta.label} — what you actually kept`, head: ["Line", "Amount"], rows: rows2 });
+      out.push({ title: `${meta.label} — profit in hand`, head: ["Line", "Amount"], rows: rows2 });
     }
     if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;

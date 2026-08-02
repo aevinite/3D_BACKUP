@@ -84,7 +84,7 @@ function billingRows(b: BillingDetails): [string, string][] {
     if (b.expenses != null && b.left != null) {
       rows.push(["= Your money — after the government's share", inr(b.gross - b.discount)]);
       rows.push(["Less : what the period cost you", "− " + inr(b.expenses)]);
-      rows.push(["= LEFT IN HAND — what you actually kept", inr(b.left)]);
+      rows.push(["= PROFIT IN HAND — what the period left you", inr(b.left)]);
     } else {
       rows.push(["= MONEY IN HAND — what you keep", inr(b.gross - b.discount)]);
     }
