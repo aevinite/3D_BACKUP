@@ -19,6 +19,7 @@ import {
   SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch,
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
+import { useToast } from "@/components/admin/toast";
 import AccessSearch from "./AccessSearch";
 import RestaurantSettings, { type SettingsSection } from "./RestaurantSettings";
 import BrandingCard from "./BrandingCard";
@@ -487,16 +488,27 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
   openNode: Record<string, boolean>; setOpenNode: (f: (s: Record<string, boolean>) => Record<string, boolean>) => void;
   set: (n: Node, v: any) => void; onInfo: (n: Node) => void; flashId?: string;
 }) {
+  // The shared admin toast — the locked-children refusal below used to dispatch an lfh:toast
+  // EVENT that nothing in the admin app listens for, so the tap only shook, wordlessly (the
+  // guest app owns that event). A refused tap must SAY why (owner's no-silent-taps rule).
+  const toast = useToast();
   const v = nodeValue(node, st);
   const kids = node.children || [];
-  // RULE 1: children of an OFF row are removed, never greyed. A pure group (bind "none")
-  // has nothing to switch, so its children always show.
-  //
-  // `configurableWhenOff` is the deliberate exception, and it is not a hole in rule 1: those
-  // children are SET-UP, not permissions. You paste a Zomato key, set the café's coordinates or
-  // lay out the banquet bill before the feature goes live — being forced to switch it on first,
-  // so guests meet it half-configured, is backwards (owner, 2026-08-01).
-  const showKids = kids.length > 0 && (isOn(node, st) || !!node.configurableWhenOff);
+  // RULE 1, AMENDED BY THE OWNER (2026-08-02): every row's dropdown opens EVEN WHEN the row
+  // is off — "even if the feature is off, you can still go in the drop-down and check
+  // everything… you will just not able to edit it because the feature is off. It will be grey
+  // out." So an OFF row's children render GREYED and read-only (the at-locked capture below:
+  // every tap refuses with a toast naming what to turn on). This replaces the old rule that
+  // removed them, and it retires `configurableWhenOff` — what used to be the exception for a
+  // few set-up rows is simply how every row behaves now. The role PANELS still remove what a
+  // role can't reach; this peek exists only here, for the admin configuring the restaurant.
+  const showKids = kids.length > 0;
+  // What decides LOCKED: the FEATURE half when the row carries two controls. A Default chip on
+  // "Off" must NOT lock the sub-settings — they are restaurant-wide, and a manager given
+  // per-person On still lives by them; only "the restaurant doesn't have this at all" locks.
+  const unlocked = node.featureBind
+    ? nodeValue({ ...node, bind: node.featureBind }, st) === true
+    : isOn(node, st);
   // Everything a row can unfold: its sub-settings AND, for the cards that moved here off the
   // restaurant-detail page, its own editor.
   const hasBody = showKids || !!node.panel;
@@ -581,12 +593,12 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
           key is stored, see how the bill is laid out — but a tap tells you what to turn on first
           instead of silently saving into a feature nobody has. */}
       {showKids && expanded ? (
-        <div className={`at-box-k ${isOn(node, st) ? "" : "at-locked"}`}
-          onClickCapture={isOn(node, st) ? undefined : (e) => {
+        <div className={`at-box-k ${unlocked ? "" : "at-locked"}`}
+          onClickCapture={unlocked ? undefined : (e) => {
             const el = e.target as HTMLElement;
             if (!el.closest("button, input, select, textarea, [role=switch], [role=radio]")) return;
             e.preventDefault(); e.stopPropagation();
-            window.dispatchEvent(new CustomEvent("lfh:toast", { detail: `Turn “${node.name}” on first — these are its settings.` }));
+            toast(`Turn “${node.name}” on first — these are its settings.`, "err");
             const box = (e.currentTarget as HTMLElement).closest(".at-box") as HTMLElement | null;
             if (box) { box.classList.remove("at-nudge"); void box.offsetWidth; box.classList.add("at-nudge"); }
           }}>
@@ -1162,7 +1174,8 @@ function TreeStyle() {
   .at-panel details > summary { padding:7px 0; }
   /* Readable, not usable, while the feature above it is off. Dimmed enough to say so without
      hiding the values — the point is being able to CHECK them before switching it on. */
-  .at-box-k.at-locked { opacity:.62; }
+  /* Greyed, not gone (owner, 2026-08-02: "it will be grey out") — readable, clearly inert. */
+  .at-box-k.at-locked { opacity:.55; filter:grayscale(.6); }
   .at-box-k.at-locked::before { content:"Switch this on to change any of it"; display:block; margin:-2px 0 10px;
     font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--lvl); }
   .at-box.at-nudge { animation:atShake .34s ease; }
