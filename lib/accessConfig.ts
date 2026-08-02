@@ -24,8 +24,10 @@ export const FEATURE_SWITCHES = [
   "banquet_allowed", "banquet_owner_control",
   "table_ops_allowed", "table_ops_owner_control",
   "take_orders_allowed", "take_orders_owner_control",
-  // Takeaway & delivery is ONE module since mig 235 (it replaced parcel_* + platform_*).
+  // TWO separate features (mig 259): Platforms (Zomato/Swiggy/own website) and the counter
+  // Parcel. One switch each — see the box at the top of lib/tableTags.ts.
   "takeaway_allowed", "takeaway_owner_control",
+  "parcel_allowed", "parcel_owner_control",
 ] as const;
 
 // The owner's grant baseline for the manager powers (restaurants.manager_permissions).

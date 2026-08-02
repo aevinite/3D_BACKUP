@@ -32,8 +32,9 @@ const effective = (s: Row) => ({
   banquet: s?.banquet_allowed === true && (s?.banquet_owner_control !== true || s?.banquet_enabled !== false),
   // kitchen route: autoPrintKot = auto_print_kot && auto_print_kot_allowed.
   auto_print_kot: s?.auto_print_kot_allowed === true && s?.auto_print_kot === true,
-  // Platform board — same moduleLadder formula (mig 209).
-  // takeaway_* since mig 235 (Takeaway & delivery is one module).
+  // Platform board — same moduleLadder formula (mig 209). takeaway_* = PLATFORMS only
+  // (Zomato / Swiggy / own website). The counter parcel is a DIFFERENT feature on parcel_*
+  // (mig 259) and is not a quick switch — it lives in Access → Main features.
   platform: s?.takeaway_allowed === true && (s?.takeaway_owner_control !== true || s?.takeaway_enabled !== false),
   // Staff profiles & pay — same moduleLadder formula (mig 220).
   payroll: s?.payroll_allowed === true && (s?.payroll_owner_control !== true || s?.payroll_enabled !== false),
@@ -45,9 +46,9 @@ const PATCH: Record<string, { on: Record<string, boolean>; off: Record<string, b
   banquet: { on: { banquet_allowed: true, banquet_enabled: true }, off: { banquet_allowed: false } },
   // ON: allow it AND turn the capability on. OFF: drop the entitlement (kitchen then won't auto-print).
   auto_print_kot: { on: { auto_print_kot_allowed: true, auto_print_kot: true }, off: { auto_print_kot_allowed: false } },
-  // Platform board — ON: allow + enabled; OFF: drop the entitlement (board hidden, webhooks refused).
-  // Writes takeaway_* since mig 235 — writing the retired platform_* columns changed a value
-  // nothing reads any more, so the switch appeared to work and did nothing.
+  // Platform board — ON: allow + enabled; OFF: drop the entitlement (delivery side of the board
+  // hidden, webhooks refused). Writes takeaway_* (mig 235's column name); it does NOT touch the
+  // counter parcel, which keeps its tiles and its half of the board (mig 259).
   platform: { on: { takeaway_allowed: true, takeaway_enabled: true }, off: { takeaway_allowed: false } },
   // Staff profiles & pay — ON: allow + enabled; OFF: drop the entitlement, which hides profiles,
   // salary records and the performance report everywhere and makes the server refuse them too.

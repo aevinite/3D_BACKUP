@@ -247,7 +247,7 @@ export async function GET(req: NextRequest) {
   const modsByRid: Record<string, Record<string, boolean>> = {};
   if (ids.length) {
     const { data: setRows } = await sb.from("settings")
-      .select("restaurant_id, banquet_allowed, banquet_owner_control, banquet_enabled, table_tags_allowed, table_tags_owner_control, table_tags_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled, take_orders_allowed, take_orders_owner_control, take_orders_enabled, takeaway_allowed, takeaway_owner_control, takeaway_enabled")
+      .select("restaurant_id, banquet_allowed, banquet_owner_control, banquet_enabled, table_tags_allowed, table_tags_owner_control, table_tags_enabled, table_ops_allowed, table_ops_owner_control, table_ops_enabled, take_orders_allowed, take_orders_owner_control, take_orders_enabled, parcel_allowed, parcel_owner_control, parcel_enabled")
       .in("restaurant_id", ids);
     const eff = (r: any, a: string, c: string, e: string) => r?.[a] === true && (r?.[c] !== true || r?.[e] !== false);
     for (const r of (setRows || []) as any[]) modsByRid[r.restaurant_id] = {
@@ -255,8 +255,10 @@ export async function GET(req: NextRequest) {
       table_tags: eff(r, "table_tags_allowed", "table_tags_owner_control", "table_tags_enabled"),
       table_ops: eff(r, "table_ops_allowed", "table_ops_owner_control", "table_ops_enabled"),
       take_orders: eff(r, "take_orders_allowed", "take_orders_owner_control", "take_orders_enabled"),
-      // ONE module (takeaway_*) since mig 235; parcel_* is no longer written.
-      parcel: eff(r, "takeaway_allowed", "takeaway_owner_control", "takeaway_enabled"),
+      // PARCEL = the counter parcel, its own module again (parcel_*, mig 259). This is the
+      // waiter cap tablet_parcel's ceiling — it must read the same columns the tablet's own
+      // gate does, or a cap shows as available on a restaurant whose server refuses it.
+      parcel: eff(r, "parcel_allowed", "parcel_owner_control", "parcel_enabled"),
     };
   }
   // ── Profiles & pay: the module state + this caller's rights, per restaurant ─────────

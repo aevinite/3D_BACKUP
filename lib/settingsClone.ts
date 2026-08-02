@@ -93,16 +93,16 @@ export function cleanClonedSettings(
   base.take_orders_allowed = true;
   base.take_orders_owner_control = false;
   base.take_orders_enabled = true;
-  // Parcel / takeaway module (migs 197-198): ON for the MANAGER by default (owner 2026-07-26 —
-  // common counter task; admin can still switch it off per restaurant), OWNER-transfer off,
-  // owner toggle neutral-ON, and the TABLET cap OFF (waiters don't get takeaway by default).
-  // Takeaway & delivery (mig 235) is the single module the server now reads. Parcel was ON
-  // for a new restaurant, and a new rung on a pre-existing feature keeps today's behaviour,
-  // so this starts on. The parcel_*/platform_* lines below are left for rollback safety.
-  base.takeaway_allowed = true;
+  // PARCEL — the counter parcel (migs 197-198, its own module again since 259). ON for a new
+  // restaurant (owner 2026-07-26 — a common counter task, and the admin can switch it off per
+  // restaurant), owner-transfer off, and the TABLET cap OFF (waiters don't get it by default).
+  // PLATFORMS (takeaway_*) is the DIFFERENT feature below — Zomato/Swiggy/own website. It is
+  // deliberately not defaulted here in the same breath: see the box at the top of
+  // lib/tableTags.ts before touching either.
+  base.takeaway_allowed = false;   // Platforms: an Extra feature, off until the admin grants it
   base.takeaway_owner_control = false;
   base.takeaway_enabled = true;
-  base.parcel_allowed = true;
+  base.parcel_allowed = true;      // Parcel: a Main feature, on — the counter always sells parcels
   base.parcel_owner_control = false;
   base.parcel_enabled = true;
   base.tablet_parcel = "off";

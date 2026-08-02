@@ -118,12 +118,12 @@ const tableOpsEffectiveFromRow = (s: Record<string, unknown> | null) =>
 // _allowed side is backfilled true, so ordering stays on unless the admin turns it off.
 const takeOrdersEffectiveFromRow = (s: Record<string, unknown> | null) =>
   !!s && s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
-// Parcel / takeaway module rung (mig 197), from an already-fetched settings row. Brand-new
-// module → _allowed defaults FALSE, so the 🥡 Parcel button stays hidden until the admin grants it.
+// PARCEL module rung (migs 197/259), from an already-fetched settings row. Its OWN columns:
+// the counter parcel is not the delivery apps — see the box at the top of lib/tableTags.ts.
+// Reading takeaway_* here (as it did between migs 235 and 259) hides the 🥡 button on every
+// restaurant that simply isn't on Zomato/Swiggy.
 const parcelEffectiveFromRow = (s: Record<string, unknown> | null) =>
-  // takeaway_* since mig 235 — parcel and the platform board are ONE module now, and the
-  // retired parcel_* columns are no longer written by the Access screen.
-  !!s && s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
+  !!s && s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
@@ -747,7 +747,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // the manager's /parcel (mig 197). Its own module + tablet cap; titles/prices resolved
     // server-side; total = item subtotal (matches every other platform order).
     if (a === "parcel" && path.length === 1) {
-      if (actor && !(await parcelLadder(rid)).effective) return err("Parcel / takeaway isn't enabled for this restaurant.", 403);
+      // The MODULE is enforced for everyone, admin included (no `actor &&` here since mig 259).
+      // X-ray reveals what a role is not GRANTED; it never conjures a feature the restaurant
+      // does not have — and the manager panel's parcel endpoint has always refused the admin
+      // too, so letting the tablet through made the same tap succeed on one panel and fail on
+      // the other. The client hides the button by the same rule, so this is the belt.
+      if (!(await parcelLadder(rid)).effective) return err("Parcel orders aren't switched on for this restaurant.", 403);
       { const g2 = recordPin(await tabletPerm("tablet_parcel", req, body, rid, actor)); if (!g2.allow) return g2.resp; }
       const { items, customer, phone, note, allergies, paid, method } = body || {};
       if (!Array.isArray(items) || !items.length) return err("items required");

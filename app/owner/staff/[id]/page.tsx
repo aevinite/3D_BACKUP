@@ -71,7 +71,7 @@ const MODE_LABEL: Record<string, string> = { cash: "Cash", upi: "UPI", bank: "Ba
 const WAITER_CAPS: [string, string][] = [
   ["tablet_mark_paid", "Mark bill paid"], ["tablet_discount", "Give discount"],
   ["tablet_invoice", "Generate invoice"], ["tablet_take_orders", "Take orders"],
-  ["tablet_parcel", "Parcel / takeaway"], ["tablet_table_ops", "Table & KOT ops"],
+  ["tablet_parcel", "Parcel orders (counter)"], ["tablet_table_ops", "Table & KOT ops"],
 ];
 const OVR_MODES: [string, string][] = [["default", "Default"], ["on", "On"], ["pin", "PIN"], ["off", "Off"]];
 type Tab = "personal" | "job" | "pay" | "access" | "perf" | "activity";

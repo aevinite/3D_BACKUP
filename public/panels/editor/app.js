@@ -1900,7 +1900,7 @@ const ACCESS_CAPS = [
   // Was MISSING here (2026-07-26): the waiter cap is server-enforced (tabletPerm) and both
   // the admin + owner screens expose it, but the MANAGER's own Access card couldn't set it
   // or a per-waiter override. Module-gated like table_ops below (no dead UI when off).
-  { key: "tablet_parcel", label: "Parcel / takeaway orders" },
+  { key: "tablet_parcel", label: "Parcel orders (counter)" },
 ];
 // The Access cards' cap list, minus modules this restaurant doesn't have.
 function accessCapsFor() {
@@ -1913,7 +1913,8 @@ function accessCapsFor() {
     if (c.key === "tablet_khata") return s.khata_allowed === true && (s.khata_owner_control !== true || s.khata_enabled !== false);
     if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
     if (c.key === "tablet_take_orders") return s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
-    if (c.key === "tablet_parcel") return s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
+    // The counter parcel is its own feature again (parcel_*, mig 259) — not Platforms.
+    if (c.key === "tablet_parcel") return s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
     return true;
   });
 }
@@ -6578,6 +6579,29 @@ function qopCanFloor(flag) {
   if (XRAY_WHO && XRAY_WHO.higherView) return true;
   return xrayGrantedForManager(flag);
 }
+// ── DOES THIS RESTAURANT HAVE THE FEATURE AT ALL? ────────────────────────────────────────
+// The module ladder, computed from the settings row the panel already holds — ONE copy of
+// the formula, because it used to be written out at four call sites and they drifted.
+// `undefined` settings (before the first load) reads as OFF, so nothing flashes on and then
+// off again for a restaurant that doesn't have it.
+//
+// TWO SEPARATE MODULES, and they are easy to mix up (mig 259 — see the box at the top of
+// lib/tableTags.ts):
+//   parcelModuleOn()   → parcel_*    the counter parcel THIS restaurant's staff punch in
+//   platformModuleOn() → takeaway_*  Zomato / Swiggy / the restaurant's own website
+//
+// NOTE THERE IS NO X-RAY OVERRIDE HERE, deliberately. Higher-view reveals what a ROLE has
+// not been granted (tinted, and the server lets the admin through); it must never reveal a
+// FEATURE the restaurant doesn't have, because the server refuses that for everyone. That
+// mismatch is exactly what let a whole parcel be typed into QO/P and then refused at the
+// last tap (owner, on Aangan, 2026-08-02).
+function moduleOn(prefix) {
+  const s = state.data.settings || {};
+  return s[prefix + "_allowed"] === true
+    && (s[prefix + "_owner_control"] !== true || s[prefix + "_enabled"] !== false);
+}
+const parcelModuleOn = () => moduleOn("parcel");
+const platformModuleOn = () => moduleOn("takeaway");
 function parcelStripHtml() {
   const list = openParcels();
   if (!list.length) return "";
@@ -7020,8 +7044,11 @@ function floorHtml() {
   // Each half still needs its underlying permission too — a sub-switch can only take away.
   const qopOn = s.qop_allowed !== false || !!(XRAY_WHO && XRAY_WHO.higherView);
   const qopTables = qopOn && s.qop_tables_allowed !== false && qopCanFloor("take_orders");
-  const qopParcel = qopOn && s.qop_parcel_allowed !== false && qopCanFloor("parcel")
-    && (state.parcelOn !== false || !!(XRAY_WHO && XRAY_WHO.higherView));
+  // The Parcel half needs the PARCEL module (parcel_*, mig 259) — not the Platforms one. It
+  // used to consult state.parcelOn, which is only set once the 🛵 board has been fetched and
+  // was left `undefined` on exactly the restaurants that don't have the board, so the panel
+  // read "on" and offered a destination the server then refused.
+  const qopParcel = qopOn && s.qop_parcel_allowed !== false && qopCanFloor("parcel") && parcelModuleOn();
   const parcelBtn =
       (qopTables && qopParcel) ? `<button class="btn primary ed-parcel-btn" data-qop="quick" title="Quick order / Parcel — build an order fast, then send it to a table or out as a parcel">⚡ QO/P</button>`
     : qopTables ? `<button class="btn primary ed-parcel-btn" data-qop="quick" title="Quick order — build an order fast and send it to a table">⚡ Quick&nbsp;order</button>`
@@ -8610,7 +8637,11 @@ function openTakeOrder(table, rerender, opts = {}) {
     // order" gets no tables however qop_tables_allowed is set.
     const st = state.data.settings || {};
     const canTable = st.qop_tables_allowed !== false && qopCan("take_orders");
-    const canParcel = st.qop_parcel_allowed !== false && qopCan("parcel") && (state.parcelOn !== false || (XRAY_WHO && XRAY_WHO.higherView));
+    // Plus the third gate, the one this screen was missing: does the restaurant HAVE the
+    // Parcel feature (parcel_*, its own module again since mig 259 — not Platforms). No
+    // x-ray exception: the server refuses a parcel on a restaurant without the module for
+    // the admin as well, so showing the bar to a higher role only builds a wall.
+    const canParcel = st.qop_parcel_allowed !== false && qopCan("parcel") && parcelModuleOn();
     const parcelBar = canParcel ? `<button class="qo-dest-parcel" data-qop-parcel="1">Parcel</button>` : "";
     const ov = el(`<div class="sx-modal-overlay qo-dest-overlay"><div class="sx-modal qo-dest-modal">
       <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Where does it go?</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
@@ -10488,12 +10519,14 @@ async function loadPlatform() {
   // (Admin/owner higher-view still polls so the X-ray board works.) Falls through if settings
   // aren't loaded yet (first call) so the initial fetch still runs.
   const s = state.data.settings;
-  if (s && !(XRAY_WHO && XRAY_WHO.higherView)) {
-    // ONE module (takeaway_*) since mig 235. Reading the retired platform_*/parcel_* columns
-    // meant the panel fetched a board the server refuses (a 403 console error on every load)
-    // and, worse, HID the tab when the admin switched Takeaway ON — the switch did nothing.
-    const takeawayEff = s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
-    const platEff = takeawayEff, parcelEff = takeawayEff;
+  if (s) {
+    // TWO modules again (mig 259): Platforms = takeaway_* (Zomato/Swiggy/website), Parcel =
+    // parcel_* (the counter). Either one alone is a reason to load the board.
+    const platEff = platformModuleOn(), parcelEff = parcelModuleOn();
+    // The two flags the rest of the panel reads are set HERE as well as from the response.
+    // Leaving them `undefined` on a restaurant with neither module — which is what the old
+    // early return did — read as "on" everywhere they were tested with `!== false`.
+    state.platformOn = platEff; state.parcelOn = parcelEff;
     if (!platEff && !parcelEff) { state.data.platform = []; updatePlatformBadge(); return; }
   }
   const seq = ++platSeq;
@@ -12097,10 +12130,13 @@ function syncBanquetTab() {
 function syncPlatformTab() {
   const btn = document.querySelector('.tabs .tab[data-tab="platform"]');
   if (!btn) return;
-  const s = state.data.settings || {};
-  // Same single module (takeaway_*) — see the note above.
-  const takeawayEff2 = s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
-  const platEff = takeawayEff2, parcelEff = takeawayEff2;
+  const platEff = platformModuleOn(), parcelEff = parcelModuleOn();
+  // The tab is NAMED after what the restaurant actually has (mig 259) — the two features are
+  // separate, so a restaurant that only takes counter parcels should not be reading "Platform"
+  // over a board of its own parcels, and one that only takes delivery shouldn't see "Parcels".
+  // The badge element inside is preserved; only the text node in front of it is rewritten.
+  const label = platEff && parcelEff ? "🛵 Platform" : parcelEff ? "🥡 Parcels" : "🛵 Platform";
+  if (btn.firstChild && btn.firstChild.nodeType === 3 && btn.firstChild.nodeValue !== label) btn.firstChild.nodeValue = label;
   const higher = !XRAY_WHO || XRAY_WHO.higherView;
   // Granted if a higher role, OR the manager has EITHER power for whichever module is on.
   const granted = higher || (platEff && xrayGrantedForManager("platform")) || (parcelEff && xrayGrantedForManager("parcel"));

@@ -3889,12 +3889,17 @@ window.addEventListener("online", () => load().catch(() => {}));
     const pcBtn = drawer.querySelector("#dwParcel");
     if (pcBtn) {
       const sset = state.data.settings || {};
-      // Takeaway & delivery is ONE module on takeaway_* since mig 235; parcel_* is no longer
-      // written, so reading it made the panel disagree with the server (403s + a hidden tab).
-      const pAllowed = sset.takeaway_allowed === true && (sset.takeaway_owner_control !== true || sset.takeaway_enabled !== false);
+      // PARCEL is its own module again (parcel_*, mig 259) — the counter parcel, NOT the
+      // delivery apps (takeaway_* = Platforms). Between migs 235 and 259 this read takeaway_*,
+      // so every restaurant that simply isn't on Zomato/Swiggy lost its 🥡 button.
+      const pAllowed = sset.parcel_allowed === true && (sset.parcel_owner_control !== true || sset.parcel_enabled !== false);
       const pOff = !pAllowed || tperm("tablet_parcel") === "off";
-      pcBtn.hidden = tHigher() ? false : pOff;
-      pcBtn.classList.toggle("xray-off", tHigher() && pOff);
+      // X-ray reveals a missing GRANT, never a missing FEATURE: with the module off the server
+      // refuses the parcel for the admin too (mig 259), so revealing the button here would only
+      // walk a higher role into a wall. Hidden for everyone when the restaurant hasn't got it;
+      // tinted, as always, when the restaurant HAS it but this waiter hasn't been given it.
+      pcBtn.hidden = pAllowed && tHigher() ? false : pOff;
+      pcBtn.classList.toggle("xray-off", pAllowed && tHigher() && pOff);
     }
     loadProfile();
     if (window.LFH_BACK && !drawerOff) drawerOff = LFH_BACK.layer("tablet-drawer", closeDrawer);

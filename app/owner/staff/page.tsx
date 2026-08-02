@@ -31,7 +31,7 @@ const WAITER_CAPS: [string, string, string | null][] = [
   ["tablet_discount", "Give discount", null],
   ["tablet_invoice", "Generate invoice", null],
   ["tablet_take_orders", "Take orders", "take_orders"],
-  ["tablet_parcel", "Parcel / takeaway", "parcel"],
+  ["tablet_parcel", "Parcel orders (counter)", "parcel"],
   ["tablet_table_ops", "Table & KOT ops", "table_ops"],
   ["tablet_table_tags", "Mark table types", "table_tags"],
   ["tablet_khata", "Khata (pay later)", "table_tags"],
