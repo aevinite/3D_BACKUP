@@ -72,6 +72,11 @@ const COMPARABLE_TABLES: Record<string, string> = {
   settings: "restaurant_id",   // one row per restaurant
   staff_users: "id",
   table_tags: "id",
+  // The expense book (mig 221 §G). Striking an entry out is a reason-carrying change two
+  // people can reach at once from two panels — the owner's Expenses page sends
+  // `void_reason: null` as what it was looking at, so the second person is told the entry
+  // was already struck out AND WHY, instead of silently replacing the first person's reason.
+  expenses: "id",
 };
 
 /**
@@ -168,6 +173,7 @@ function readable(col: string): string {
     payment_status: "the payment status",
     table_count: "the number of tables",
     allergies: "the allergens",
+    void_reason: "why this was struck out",
   };
   return map[col] || `the ${col.replace(/_/g, " ")}`;
 }

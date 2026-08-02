@@ -18,7 +18,7 @@ import { asSuffix } from "@/lib/ownerPin";
 const useIso = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
-  ToggleChart, PaymentDonut, LeaderBar,
+  ToggleChart, PaymentDonut, LeaderBar, HourStrip, Heatmap,
   canonPayMethod, PAY_COLORS,
 } from "@/components/owner/Charts";
 import {
@@ -164,8 +164,33 @@ type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: Pa
     expenses: number; stockValue: number; lowCount: number; negativeCount: number;
     foodCostPct: number | null; coveragePct: number; hasRecipes?: boolean;
   } | null;
-  costSeries?: { bucket: string; purchased: number; used: number; wasted: number }[] | null };
+  costSeries?: { bucket: string; purchased: number; used: number; wasted: number }[] | null;
+  // WHAT'S LEFT IN HAND (mig 252) — the ladder carried past "Total collected" to the one
+  // number the owner actually wants. Every `parts` entry is null when its module is off,
+  // never 0, so the sheet can say "not tracked" instead of "it cost you nothing".
+  inHand?: InHand | null;
+  // The day × hour traffic grid, when this payload is a heatmap request.
+  heat?: HeatRow[] };
+type HeatRow = { dow: number; hr: number; orders: number; revenue: number };
+type InHand = {
+  itemSales: number; discounts: number; netSales: number; gst: number;
+  collected: number; yours: number; expenses: number; left: number;
+  parts: {
+    manual: { amount: number; entries: number; byCategory: Record<string, number> } | null;
+    salary: { accrued: number; paid: number; people: number; excluded: number } | null;
+    stock: { used: number; wasted: number; cancelledFoodRemoved: number } | null;
+    cancelled: { mode: "stock" | "bill" | "mixed"; lostSales: number; orders: number; foodCost: number; charged: number };
+  };
+  series: { bucket: string; expenses: number; left: number }[] | null;
+  coverage: { restaurants: number; withPayroll: number; withInventory: number; hourlyStaffExcluded: number };
+};
 type Entry = { loading?: boolean; error?: string; data?: Payload };
+
+// Plain-English names for the expense categories the `expenses` table stores (mig 221).
+const EXPENSE_LABEL: Record<string, string> = {
+  breakage: "Breakage", repair: "Repairs", utilities: "Utilities", cleaning: "Cleaning",
+  supplies: "Supplies", rent: "Rent", transport: "Transport", misc: "Other",
+};
 
 const apiType = (kind: DataKind): string =>
   kind === "money" ? "sales" : kind === "daysummary" ? "daysummary" : kind;
@@ -371,6 +396,10 @@ export default function OwnerReports() {
   }, [backToHub]);
   const [range, setRange] = useState<Range>("30d");
   const [day, setDay] = useState<string>(istToday());          // Day summary's single date
+  // The summary sheet answers for ONE day (its original job) or for a PERIOD — the owner
+  // asked for "the full report of 30 days … same as daily, but for more days". Defaults to
+  // the single day so nobody's existing habit changes.
+  const [daySpan, setDaySpan] = useState<"day" | "period">("day");
   const [cFrom, setCFrom] = useState<string>(istToday());       // Custom range from…
   const [cTo, setCTo] = useState<string>(istToday());           // …to
   const [store, setStore] = useState<Record<string, Entry>>({});
@@ -433,7 +462,9 @@ export default function OwnerReports() {
   // single day (range=custom, from=to=day); a report on the "Custom…" range uses the
   // date pickers; everything else is the plain named range.
   const effFor = (kind: DataKind, rg: Range): { range: Range; from?: string; to?: string } =>
-    DAY_KINDS.has(kind) ? { range: "custom", from: day, to: day }
+    // A day-kind report is ONE day by default, but the owner asked (2026-08-01) for the
+    // same sheet over 30 days and more — so it can also take the ordinary period picker.
+    DAY_KINDS.has(kind) && daySpan === "day" ? { range: "custom", from: day, to: day }
     : rg === "custom" ? { range: "custom", from: cFrom, to: cTo }
     : { range: rg };
   const cacheKey = (kind: DataKind, r: string, rg: Range) => {
@@ -471,7 +502,9 @@ export default function OwnerReports() {
   // The active body (sub-tab aware) and the payload it reads. The hub reads "money".
   const bodyKey: BodyKey = sel ? bodyKeyFor(sel, sub) : "sales";
   const activeKind: DataKind = sel ? BODY_KIND[bodyKey] : "money";
-  const isDayKind = DAY_KINDS.has(activeKind);
+  const isDayKind = DAY_KINDS.has(activeKind) && daySpan === "day";
+  // True when the summary sheet is showing a PERIOD rather than a single day.
+  const summaryOverPeriod = DAY_KINDS.has(activeKind) && daySpan === "period";
   const fdate = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   const effLabel = isDayKind ? fdate(day) : range === "custom" ? `${fdate(cFrom)} – ${fdate(cTo)}` : rangeLabel(range);
   const isCustom = !isDayKind && range === "custom";
@@ -489,15 +522,28 @@ export default function OwnerReports() {
     if (isCustom && !customOk) return;                      // wait for a valid custom range
     ensure(activeKind, rid, range, effFor(activeKind, range));
     if (needMoneyToo) ensure("money", rid, range, effFor("money", range));
-    if (sel === "daysummary") { ensure("dishes", rid, "custom", dayEff); ensure("hourly", rid, "custom", dayEff); }
+    // `categories` joins dishes+hourly on the day sheet (owner 2026-08-01: "the category
+    // which was better"). One more tiny indexed RPC, snapshot-cached like the rest.
+    if (sel === "daysummary") {
+      // The dish / hour / category extras follow the SHEET's window, so the 30-day
+      // version of the sheet describes 30 days rather than quietly describing one.
+      const xe = daySpan === "day" ? dayEff : effFor("money", range);
+      const xr: Range = daySpan === "day" ? "custom" : range;
+      ensure("dishes", rid, xr, xe); ensure("hourly", rid, xr, xe); ensure("categories", rid, xr, xe);
+      // Over a period the traffic view becomes the full day x hour grid.
+      if (daySpan === "period") ensure("heatmap", rid, xr, xe);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, activeKind, rid, range, day, cFrom, cTo, ensure, needMoneyToo, sel]);
+  }, [ready, activeKind, rid, range, day, cFrom, cTo, ensure, needMoneyToo, sel, daySpan]);
 
   const entry = store[cacheKey(activeKind, rid, range)];
   const data = entry?.data;
   const moneyEntry = store[cacheKey("money", rid, range)];
-  const dishesDay = store[dayKeyFor("dishes")]?.data;
-  const hourlyDay = store[dayKeyFor("hourly")]?.data;
+  const extraKey = (kind: DataKind) => daySpan === "day" ? dayKeyFor(kind) : cacheKey(kind, rid, range);
+  const dishesDay = store[extraKey("dishes")]?.data;
+  const hourlyDay = store[extraKey("hourly")]?.data;
+  const catsDay = store[extraKey("categories")]?.data;
+  const heatData = daySpan === "period" ? store[extraKey("heatmap")]?.data : undefined;
   const restName = rid ? (rests.find((r) => r.id === rid)?.name ?? "This restaurant") : "All restaurants";
   // Charts follow the owner-panel THEME (green), not each restaurant's brand colour —
   // a brown/orange/red chart inside the green owner console read as a bug (owner 2026-07-25).
@@ -604,6 +650,15 @@ export default function OwnerReports() {
         ) : (
           <PeriodDrop value={range} onChange={setRange} />
         )}
+        {/* One day ⇄ a period, for the summary sheet only (owner 2026-08-01). */}
+        {DAY_KINDS.has(activeKind) && (
+          <div className="rs-seg rs-spanseg" role="group" aria-label="One day or a period">
+            {([["day", "One day"], ["period", "A period"]] as const).map(([k, lbl]) => (
+              <button key={k} aria-pressed={daySpan === k} className={daySpan === k ? "on" : ""}
+                onClick={() => setDaySpan(k)}>{lbl}</button>
+            ))}
+          </div>
+        )}
         {isCustom && (
           <div className="rs-custom">
             <input type="date" className="rs-date" value={cFrom} max={cTo} onChange={(e) => setCFrom(e.target.value)} aria-label="From date" />
@@ -685,7 +740,7 @@ export default function OwnerReports() {
         <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
           rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
           onOpenReport={openReport} payDetail={payDetail} onPayDetail={setPayDetail}
-          moneyData={moneyEntry?.data} dishesDay={dishesDay} hourlyDay={hourlyDay} />
+          moneyData={moneyEntry?.data} dishesDay={dishesDay} hourlyDay={hourlyDay} catsDay={catsDay} heatData={heatData} />
       )}
     </div>
   );
@@ -801,15 +856,19 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
 }
 
 // ── The report view (title + loading/error, delegates body) ───────────────────
-function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay }: {
+function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay, catsDay, heatData }: {
   sel: RKey; bodyKey: BodyKey; data?: Payload; loading?: boolean; error?: string;
   rangeText: string; accent: string; restName: string; singleRest: boolean;
   onOpenReport: OpenReport;
   payDetail: "" | "discounts" | "cancellations"; onPayDetail: (d: "" | "discounts" | "cancellations") => void;
-  moneyData?: Payload; dishesDay?: Payload; hourlyDay?: Payload;
+  moneyData?: Payload; dishesDay?: Payload; hourlyDay?: Payload; catsDay?: Payload; heatData?: Payload;
 }) {
   const meta = REPORTS[sel];
   const tone = meta.tone || "accent";
+  // The Expenses drawer behind the in-hand ladder (mig 252). Local to the view, and a
+  // back-stack layer via ReportOverlay, so hardware Back closes it instead of the report.
+  const [expensesOpen, setExpensesOpen] = useState(false);
+  const inHand = data?.inHand ?? null;
   return (
     <div className={`rs-report tone-${tone}`} id="rs-print">
       <PrintHead restName={restName} title={meta.label} period={rangeText} />
@@ -823,7 +882,14 @@ function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, res
         <div className="rs-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="rs-stat tone-accent" style={{ opacity: .5 }}><div className="rs-stat-k">Loading…</div><div className="rs-stat-v">—</div></div>)}</div>
       ) : (
         <ReportBody bk={bodyKey} data={data} accent={accent} singleRest={singleRest} onOpenReport={onOpenReport}
-          onPayDetail={onPayDetail} dishesDay={dishesDay} hourlyDay={hourlyDay} rangeText={rangeText} />
+          onPayDetail={onPayDetail} dishesDay={dishesDay} hourlyDay={hourlyDay} catsDay={catsDay} heatData={heatData} rangeText={rangeText}
+          onOpenExpenses={() => setExpensesOpen(true)} />
+      )}
+      {/* "Owner can go inside the expenses and see that all stuff" (owner 2026-08-01). */}
+      {expensesOpen && inHand && (
+        <ReportOverlay title="What this cost you" onClose={() => setExpensesOpen(false)}>
+          <ExpensesInside ih={inHand} />
+        </ReportOverlay>
       )}
       {/* Discount / cancellation DETAIL overlay opened from a Payments KPI box (owner: a
           popup, not a whole extra sub-report). Reads the money payload. */}
@@ -864,7 +930,154 @@ function EmptyCard({ text }: { text: string }) {
   return <Panel><div className="rs-empty"><i className="fas fa-inbox" aria-hidden />{text}</div></Panel>;
 }
 
-function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, dishesDay, hourlyDay, rangeText = "" }: { bk: BodyKey; data: Payload; accent: string; singleRest: boolean; onOpenReport: OpenReport; onPayDetail?: (d: "" | "discounts" | "cancellations") => void; dishesDay?: Payload; hourlyDay?: Payload; rangeText?: string }) {
+// ═══ WHAT'S LEFT IN HAND (mig 252, owner 2026-08-01) ════════════════════════
+// The sheet used to stop at "Total collected", which is the least useful line on it —
+// most of that money is the government's or the supplier's. These two components carry
+// it to the end: the ladder, and the drawer behind its Expenses line.
+//
+// NOTHING was removed from the old ladder. The first five rows are exactly what was
+// there before ("don't change what's already made carefully" — owner 2026-08-01); the
+// four new rows continue underneath it.
+function InHandLadder({ ih, taxLines, singleRest, onOpenExpenses }: {
+  ih: InHand; taxLines: { label: string; rate: number; amt: number }[]; singleRest: boolean; onOpenExpenses: () => void;
+}) {
+  return (
+    <Panel title="What you actually kept" hint="from the guest's bill to your pocket">
+      <div className="rs-lines">
+        <div className="rs-line"><span className="lbl">Item sales <span className="rs-dim">· menu prices</span></span><span className="val">{inr(ih.itemSales)}</span></div>
+        <div className="rs-line"><span className="lbl">Discounts given</span><span className="val neg">− {inr(ih.discounts)}</span></div>
+        <div className="rs-line"><span className="lbl"><b>Net sales</b> <span className="rs-dim">· GST is charged on this</span></span><span className="val"><b>{inr(ih.netSales)}</b></span></div>
+        <div className="rs-line"><span className="lbl">GST collected <span className="rs-dim">· held for the government</span></span><span className="val">+ {inr(ih.gst)}</span></div>
+        {taxLines.map((l) => <div key={l.label} className="rs-line sub"><span className="lbl">{l.label} ({l.rate}%)</span><span className="val">{inrP(l.amt)}</span></div>)}
+        <div className="rs-line total"><span className="lbl">Total collected</span><span className="val">{inr(ih.collected)}</span></div>
+
+        <div className="rs-line"><span className="lbl">GST set aside <span className="rs-dim">· never yours to keep</span></span><span className="val neg">− {inr(ih.gst)}</span></div>
+        <div className="rs-line"><span className="lbl"><b>Your money</b> <span className="rs-dim">· before what the day cost you</span></span><span className="val"><b>{inr(ih.yours)}</b></span></div>
+        <button type="button" className="rs-line rs-line-btn" onClick={onOpenExpenses}
+          title="See everything inside this — wages, food, breakages, cancellations">
+          <span className="lbl">Expenses <span className="rs-inside">what&apos;s inside <i className="fas fa-arrow-right" aria-hidden /></span></span>
+          <span className="val neg">− {inr(ih.expenses)}</span>
+        </button>
+        <div className="rs-line grand"><span className="lbl">LEFT IN HAND</span><span className="val">{inr(ih.left)}</span></div>
+      </div>
+      <p className="rs-note">
+        <b>Left in hand</b> is what stayed with you: everything guests paid, minus the {inr(ih.gst)} of GST
+        that belongs to the government, minus {inr(ih.expenses)} the day cost you.
+        {!singleRest && " Pick one restaurant to see its CGST/SGST split."}
+      </p>
+      <InHandGaps ih={ih} />
+    </Panel>
+  );
+}
+
+// The honest small print. This is the part that stops the number being a lie: if a
+// restaurant doesn't track stock, its food cost is simply NOT in the figure, and the
+// screen has to say so rather than let the owner read a flattering total as complete.
+function InHandGaps({ ih }: { ih: InHand }) {
+  const gaps: string[] = [];
+  const c = ih.coverage;
+  if (c.withInventory === 0)
+    gaps.push("Stock isn't tracked here, so the cost of the food you cooked isn't in this figure.");
+  else if (c.withInventory < c.restaurants)
+    gaps.push(`${c.withInventory} of your ${c.restaurants} restaurants track stock — food cost is only counted for those.`);
+  if (c.withPayroll === 0)
+    gaps.push("Staff pay isn't switched on here, so wages aren't in this figure.");
+  else if (c.withPayroll < c.restaurants)
+    gaps.push(`${c.withPayroll} of your ${c.restaurants} restaurants are on the pay list — wages are only counted for those.`);
+  if (c.hourlyStaffExcluded > 0)
+    gaps.push(`${c.hourlyStaffExcluded} ${c.hourlyStaffExcluded === 1 ? "person is" : "people are"} paid by the hour or shift. The app doesn't record hours yet, so their wages aren't spread across the days.`);
+  if (!gaps.length) return null;
+  return (
+    <div className="rs-gaps">
+      <b><i className="fas fa-circle-info" aria-hidden /> What this figure can&apos;t see</b>
+      <ul>{gaps.map((g) => <li key={g}>{g}</li>)}</ul>
+    </div>
+  );
+}
+
+// The drawer behind the Expenses line — "owner can go inside the expenses and see all
+// that stuff" (owner 2026-08-01).
+function ExpensesInside({ ih }: { ih: InHand }) {
+  const p = ih.parts;
+  const cats = Object.entries(p.manual?.byCategory || {}).sort((a, b) => b[1] - a[1]);
+  const mode = p.cancelled.mode;
+  return (
+    <>
+      <div className="rs-lines">
+        <div className="rs-line">
+          <span className="lbl">Costs you entered <span className="rs-dim">· {p.manual?.entries || 0} {p.manual?.entries === 1 ? "entry" : "entries"}</span></span>
+          <span className="val">{inr(p.manual?.amount || 0)}</span>
+        </div>
+        {cats.map(([k, v]) => (
+          <div key={k} className="rs-line sub"><span className="lbl">{EXPENSE_LABEL[k] || k}</span><span className="val">{inr(v)}</span></div>
+        ))}
+
+        {p.salary ? (
+          <>
+            <div className="rs-line">
+              <span className="lbl">Team wages <span className="rs-dim">· this period&apos;s share, not payday</span></span>
+              <span className="val">{inr(p.salary.accrued)}</span>
+            </div>
+            <div className="rs-line sub">
+              <span className="lbl">{p.salary.people} {p.salary.people === 1 ? "person" : "people"} on the pay list · {inr(p.salary.paid)} actually paid out in this period</span>
+              <span className="val" />
+            </div>
+          </>
+        ) : (
+          <div className="rs-line"><span className="lbl">Team wages</span><span className="val rs-off">not tracked</span></div>
+        )}
+
+        {p.stock ? (
+          <>
+            {/* Deliberately NOT called "Ingredients used" — that tile above is a different,
+                also-correct number (the recipe cost of dishes that were PAID for). This one
+                is the stock ledger: what actually left the shelf, including food cooked for
+                an order nobody paid for. Two numbers with one name is how a screen ends up
+                contradicting itself. */}
+            <div className="rs-line"><span className="lbl">Food taken from stock <span className="rs-dim">· what actually left the shelf</span></span><span className="val">{inr(p.stock.used)}</span></div>
+            <div className="rs-line"><span className="lbl">Thrown away <span className="rs-dim">· spoiled, burnt, spilled</span></span><span className="val">{inr(p.stock.wasted)}</span></div>
+          </>
+        ) : (
+          <div className="rs-line"><span className="lbl">Food taken from stock</span><span className="val rs-off">not tracked</span></div>
+        )}
+
+        <div className="rs-line">
+          <span className="lbl">
+            Cancelled orders{" "}
+            <span className="rs-dim">· {mode === "bill" ? "charged at the menu price" : mode === "mixed" ? "charged differently per restaurant" : "taken out of stock"}</span>
+          </span>
+          <span className="val">{p.cancelled.charged > 0 ? inr(p.cancelled.charged) : <span className="rs-off">counted in food from stock</span>}</span>
+        </div>
+
+        <div className="rs-line total"><span className="lbl">What the period cost you</span><span className="val">{inr(ih.expenses)}</span></div>
+      </div>
+
+      <div className="rs-lostbox">
+        <b><i className="fas fa-ban" aria-hidden /> Lost to cancellations</b>
+        <div className="rs-lostrow">
+          <span>{inr(p.cancelled.lostSales)}</span>
+          <em>{p.cancelled.orders} {p.cancelled.orders === 1 ? "order" : "orders"}</em>
+        </div>
+        <p>
+          {mode === "stock" ? (
+            <>That money was never collected, so it isn&apos;t subtracted above — subtracting it would count the
+            same loss twice. What it genuinely cost you is the food that was already cooking
+            {p.cancelled.foodCost > 0 ? <> — <b>{inr(p.cancelled.foodCost)}</b>, already inside &ldquo;Food taken from stock&rdquo;.</> : <>, which is inside &ldquo;Food taken from stock&rdquo;.</>}
+            </>
+          ) : (
+            <>You&apos;ve chosen to charge cancelled orders at their full menu price, so the whole
+            {" "}{inr(p.cancelled.charged)} is in the total above.
+            {p.cancelled.foodCost > 0 && <> The {inr(p.cancelled.foodCost)} of food those orders used has been taken back out of &ldquo;Food taken from stock&rdquo;, so it isn&apos;t paid for twice.</>}
+            {" "}You can switch this on the Inventory page.</>
+          )}
+        </p>
+      </div>
+      <InHandGaps ih={ih} />
+    </>
+  );
+}
+
+function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, dishesDay, hourlyDay, catsDay, heatData, rangeText = "", onOpenExpenses }: { bk: BodyKey; data: Payload; accent: string; singleRest: boolean; onOpenReport: OpenReport; onPayDetail?: (d: "" | "discounts" | "cancellations") => void; dishesDay?: Payload; hourlyDay?: Payload; catsDay?: Payload; heatData?: Payload; rangeText?: string; onOpenExpenses?: () => void }) {
   // ── INVENTORY & STOCK (mig 227) ─────────────────────────────────────────────
   // Five sub-tabs, one payload. Rendered before the money plumbing below because these
   // bodies read `summary`/`items`/`dishes`, not the bucketed money rows. A payload that
@@ -1062,10 +1275,19 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     const taxLines = data.tax
       ? splitTax(data.tax.components.map((c) => c.rate), Math.round(t.tax)).map((amt, i) => ({ label: data.tax!.components[i].label, rate: data.tax!.components[i].rate, amt }))
       : [];
+    const ih = data.inHand ?? null;
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} />
+          {/* LEFT IN HAND leads the band (mig 252) — the number the owner opens this sheet
+              for. Only when the ladder computed; a restaurant whose payload failed still
+              gets the old band exactly as before. */}
+          {ih && (
+            <Stat label="Left in hand" tone="good" icon="fa-wallet" big value={inr(ih.left)}
+              sub={`after GST and ${inr(ih.expenses)} of costs`}
+              onClick={onOpenExpenses} title="See everything inside the costs" />
+          )}
+          <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big={!ih} value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} />
           <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
           <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`${nfmt(t.orders)} orders total`} />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
@@ -1107,6 +1329,13 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         </div>
 
         <div className="rs-daysheet">
+          {/* The ladder now runs all the way to "left in hand" (mig 252). The old
+              "Where the money came from" panel is kept underneath as the fallback for a
+              payload where the in-hand block couldn't be built (a module read blipped) —
+              the sheet then looks exactly as it did before, never blank. */}
+          {ih ? (
+            <InHandLadder ih={ih} taxLines={taxLines} singleRest={singleRest} onOpenExpenses={() => onOpenExpenses?.()} />
+          ) : (
           <Panel title="Where the money came from" hint="from item prices to money collected">
             <div className="rs-lines">
               <div className="rs-line"><span className="lbl">Item sales <span style={{ color: "var(--muted)", fontWeight: 500 }}>· menu prices</span></span><span className="val">{inr(t.subtotal)}</span></div>
@@ -1122,7 +1351,9 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
               {!singleRest && " Pick one restaurant to see its CGST/SGST split."}
             </p>
           </Panel>
+          )}
 
+          {/* Kept exactly as it was — nothing removed from the sheet. */}
           <Panel title="Settlement" hint="how the money arrived"
             right={<button type="button" className="rs-drill" onClick={() => onOpenReport("payments")} title="Open the Payment settlement report">Full report <i className="fas fa-arrow-right" aria-hidden /></button>}>
 
@@ -1160,7 +1391,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         </div>
 
         {/* The day's DISHES + BUSY HOURS, right on the day sheet (owner 2026-07-26). */}
-        <DayExtras dishesDay={dishesDay} hourlyDay={hourlyDay} accent={accent} />
+        <DayExtras dishesDay={dishesDay} hourlyDay={hourlyDay} catsDay={catsDay} heatData={heatData} accent={accent} />
 
         {series.length > 1 && (
           <>
@@ -1786,16 +2017,65 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
 
 // ── The day's dishes + busy hours, shown inside the Day summary ───────────────
 // Reuses the same dish/hourly payloads the standalone reports use, scoped to the one day.
-function DayExtras({ dishesDay, hourlyDay, accent }: { dishesDay?: Payload; hourlyDay?: Payload; accent: string }) {
+function DayExtras({ dishesDay, hourlyDay, catsDay, heatData, accent }: { dishesDay?: Payload; hourlyDay?: Payload; catsDay?: Payload; heatData?: Payload; accent: string }) {
   const dishes = ((dishesDay?.rows ?? []) as DishRow[]).filter((d) => d.qty > 0);
   const hours = ((hourlyDay?.rows ?? []) as HourRow[]).filter((h) => h.orders > 0);
-  if (!dishes.length && !hours.length) return null;
+  const cats = ((catsDay?.rows ?? []) as CatRow[]).filter((c) => c.revenue > 0).sort((a, b) => b.revenue - a.revenue);
+  const heat = (heatData?.rows ?? []) as HeatRow[];
+  if (!dishes.length && !hours.length && !cats.length && !heat.length) return null;
   const topDishes = [...dishes].sort((a, b) => b.revenue - a.revenue).slice(0, 8);
   const dishTotal = dishes.reduce((a, d) => a + d.revenue, 0);
   const hourLabel = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
   const hourSeries = Array.from({ length: 24 }, (_, h) => ({ label: hourLabel(h), value: hours.find((x) => x.hour === h)?.revenue || 0 }));
   const peak = hours.length ? [...hours].sort((a, b) => b.revenue - a.revenue)[0] : null;
+  const catTotal = cats.reduce((a, c) => a + c.revenue, 0);
+  const best = cats[0], worst = cats.length > 1 ? cats[cats.length - 1] : null;
+  const bestDish = topDishes[0];
+  const worstDish = dishes.length > 1 ? [...dishes].sort((a, b) => a.revenue - b.revenue)[0] : null;
   return (
+    <>
+      {/* ── The day's traffic, in the heatmap's own language (owner 2026-08-01) ── */}
+      {/* One day → the 24-hour strip. A period → the full day x hour grid, which is the
+          same chart the dashboard uses and the one the owner asked to keep. */}
+      {heat.length > 0 ? (
+        <div style={{ marginTop: 14 }}>
+          <Panel title="Traffic" hint="which day and hour the business comes in">
+            <Heatmap data={heat} accent={accent} />
+          </Panel>
+        </div>
+      ) : hours.length > 0 ? (
+        <div style={{ marginTop: 14 }}>
+          <Panel title="Traffic through the day" hint={peak ? `busiest at ${hourLabel(peak.hour)}` : undefined}>
+            <HourStrip data={hours.map((h) => ({ hour: h.hour, orders: h.orders, revenue: h.revenue }))} accent={accent} />
+          </Panel>
+        </div>
+      ) : null}
+
+      {/* ── Best and worst, at a glance — dishes AND categories (owner 2026-08-01) ── */}
+      {(best || bestDish) && (
+        <div className="rs-grid two" style={{ marginTop: 14 }}>
+          {best && (
+            <Panel title="Categories" hint={`${cats.length} sold from`}>
+              <div className="rs-lines">
+                <div className="rs-line"><span className="lbl">Best <span className="rs-dim">· {best.category}</span></span><span className="val">{inr(best.revenue)} <span className="rs-dim">· {catTotal ? Math.round((best.revenue / catTotal) * 100) : 0}%</span></span></div>
+                {worst && <div className="rs-line"><span className="lbl">Weakest <span className="rs-dim">· {worst.category}</span></span><span className="val">{inr(worst.revenue)} <span className="rs-dim">· {catTotal ? Math.round((worst.revenue / catTotal) * 100) : 0}%</span></span></div>}
+                {cats.slice(1, 5).map((c) => (
+                  <div key={c.category} className="rs-line sub"><span className="lbl">{c.category}</span><span className="val">{inr(c.revenue)}</span></div>
+                ))}
+              </div>
+            </Panel>
+          )}
+          {bestDish && (
+            <Panel title="Dishes" hint={`${nfmt(dishes.length)} different sold`}>
+              <div className="rs-lines">
+                <div className="rs-line"><span className="lbl">Best seller <span className="rs-dim">· {bestDish.title}</span></span><span className="val">{inr(bestDish.revenue)} <span className="rs-dim">· {nfmt(bestDish.qty)} sold</span></span></div>
+                {worstDish && <div className="rs-line"><span className="lbl">Slowest <span className="rs-dim">· {worstDish.title}</span></span><span className="val">{inr(worstDish.revenue)} <span className="rs-dim">· {nfmt(worstDish.qty)} sold</span></span></div>}
+              </div>
+            </Panel>
+          )}
+        </div>
+      )}
+
     <div className="rs-grid two" style={{ marginTop: 14 }}>
       {topDishes.length > 0 && (
         <Panel title="Top items" hint={`${nfmt(dishes.length)} sold`} pad={false}>
@@ -1815,6 +2095,7 @@ function DayExtras({ dishesDay, hourlyDay, accent }: { dishesDay?: Payload; hour
         </Panel>
       )}
     </div>
+    </>
   );
 }
 

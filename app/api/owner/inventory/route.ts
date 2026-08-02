@@ -10,6 +10,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { inventoryLadder } from "@/lib/tableTags";
+import { entitledSubset } from "@/lib/ownerEntitlements";
+import { expectClash, clashJson } from "@/lib/clash";
 
 export const dynamic = "force-dynamic";
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
@@ -140,8 +142,48 @@ export async function GET(req: NextRequest) {
         };
       },
     });
-    return NextResponse.json(payload);
+    // Read OUTSIDE the snapshot cache. It's one indexed column, and folding it into the
+    // cached payload would mean flipping the toggle didn't show until the snapshot aged
+    // out — a switch that appears not to have worked is worse than an extra tiny read.
+    const cfg = await sb.from("settings").select("cancel_cost_mode").eq("restaurant_id", rid).maybeSingle();
+    return NextResponse.json({ ...payload, cancelCostMode: (cfg.data?.cancel_cost_mode as string) || "stock" });
   } catch (e) {
     return err(e instanceof Error ? e.message : "Couldn't load inventory.", 500);
   }
+}
+
+// ── PATCH: how a cancelled order is paid for (mig 252, owner 2026-08-02) ──────
+//   { restaurant_id, cancel_cost_mode: "stock" | "bill" }
+//
+// The owner's own words: "whenever the inventory is on, it will cut from inventory; if
+// the inventory is off, it will cut from total bill" — plus a toggle so he can choose.
+// It lives on the Inventory page because that is where he asked for it, and because the
+// choice only means anything for a restaurant that HAS stock to take the loss out of.
+//
+// Why this cannot be silently overwritten: it changes every past day's profit figure the
+// moment it flips, so two owners on two devices must not quietly clobber each other. The
+// house rule is first-save-wins with the loser TOLD — the client sends what it was
+// looking at in X-LFH-Expect and the one gate below answers.
+export async function PATCH(req: NextRequest) {
+  const scope = await ownerScope(req);
+  if (!scope) return err("Not authorised.", 401);
+  const body = await req.json().catch(() => ({}));
+  const rid = String(body?.restaurant_id || "");
+  const mode = String(body?.cancel_cost_mode || "");
+  if (!rid || (mode !== "stock" && mode !== "bill"))
+    return err("restaurant_id and cancel_cost_mode ('stock' or 'bill') are required.", 400);
+  if (!scope.all && !scope.ids.includes(rid)) return err("Not your restaurant.", 403);
+  // Same per-restaurant privacy rule the settings route applies: a REAL owner only
+  // changes a restaurant whose "settings" section the admin still grants them.
+  if (!scope.all && !scope.admin && !(await entitledSubset([rid], "settings")).length)
+    return err("The admin hasn't given you settings for this restaurant.", 403);
+  if (!(await inventoryLadder(rid)).effective)
+    return err("Inventory isn't enabled for this restaurant, so cancelled orders always come off the bill.", 403);
+
+  const clash = await expectClash(req, rid);
+  if (clash) return clashJson(clash);
+
+  const { error } = await sb.from("settings").update({ cancel_cost_mode: mode }).eq("restaurant_id", rid);
+  if (error) return err(error.message, 500);
+  return NextResponse.json({ ok: true, cancel_cost_mode: mode });
 }
