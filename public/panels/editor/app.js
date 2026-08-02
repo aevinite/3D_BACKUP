@@ -1394,8 +1394,12 @@ function accessUsersCardHtml(s) {
 function formGeneral(s) {
   const sec = state.settingsSection;
   if (sec === "tables") {
+    // "Number of tables" is ADMIN/OWNER-only (owner 2026-07-28): a real manager may set each
+    // table's NAME + seats + see its QR link, but NOT change how many tables exist. The card
+    // carries data-mgr-hide so XRAY_CONTROLS hides it for the real manager and tints it for a
+    // higher role (admin/owner). The floor count itself lives in the admin RestaurantSettings.
     return `
-  <div class="card"><h3>Tables / seating</h3>
+  <div class="card" data-mgr-hide="table_count"><h3>Tables / seating</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       How many tables the restaurant has. Drives the live floor map in the
       <b>Tables</b> tab — Save, then open Tables.
@@ -5561,25 +5565,17 @@ function floorHtml() {
   const parcelBtn = `<button class="btn primary ed-parcel-btn" data-new-parcel="1" title="Start a takeaway / parcel order — no table needed">🥡 New&nbsp;Parcel</button>`;
   const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${parcelBtn}${collapsedNow ? "" : densityBtnsHtml()}</div>${statsStrip}${legend}<div class="ftile-grid" data-density="${state.floorTileDensity || "m"}">${tiles}</div></div>`;
 
-  // side panel — everyday things FIRST (whole-floor open/close, requests, needs),
-  // rarely-touched feature switches + café location LAST (owner, 2026-06-12:
-  // "these on/off things you rarely use — keep them at the bottom").
-  const tgl = (label, key) => `<label class="fc-toggle"><input type="checkbox" data-setting="${key}" ${s[key] ? "checked" : ""}/><span class="fc-sw"></span><span>${label}</span></label>`;
+  // side panel — everyday floor work only (whole-floor open/close, requests, needs,
+  // blocked). The old "Features · rarely changed" card that used to sit at the bottom
+  // (system ON / require location / require code + café latitude-longitude-radius) was
+  // REMOVED 2026-07-29 (owner): those are restaurant-wide SETUP settings, not floor
+  // controls, and a mis-tap here could switch the whole dining-session system off
+  // mid-service. They live in exactly ONE place now — Settings → "Dining sessions"
+  // (admin-only) and the admin panel's restaurant settings. Do not re-add them here.
   // Whole-floor bulk actions — used every open/close of the day, so they live on
   // top. (Deliberately STILL not next to the header's Refresh button: a misfired
   // speed-click there once closed the whole floor. Both confirm before acting.)
   const bulkCard = sessionsOn ? `<div class="fc-card"><h3>Whole floor</h3><div class="fc-bulk"><button class="btn small" id="floorOpenAll">⬆ Open all</button><button class="btn small danger" id="floorCloseAll">⬇ Close all</button></div></div>` : "";
-  const controls = `<div class="fc-card">
-      <h3>Features <span class="sub">· rarely changed</span></h3>
-      ${tgl("System ON", "sessions_enabled")}
-      <div class="fc-sub"${sessionsOn ? "" : " hidden"}>${tgl("Require location", "require_location")}${tgl("Require code", "require_otp")}</div>
-      <h4>Café location</h4>
-      <div class="fc-geo">
-        <label class="fc-field"><span>Latitude (north–south)</span><input class="sx-input" id="fcLat" placeholder="e.g. 23.0274" value="${s.geo_lat ?? ""}"/></label>
-        <label class="fc-field"><span>Longitude (east–west)</span><input class="sx-input" id="fcLng" placeholder="e.g. 72.4726" value="${s.geo_lng ?? ""}"/></label>
-        <label class="fc-field"><span>Radius (metres)</span><input class="sx-input" id="fcRad" placeholder="e.g. 250" value="${s.geo_radius_m ?? 250}"/></label>
-      </div>
-      <button class="btn small primary" id="fcSaveGeo">Save location</button></div>`;
 
   // Pending JOINERS + open/join/access requests → the "Requests" card; active waiter
   // calls → the "Needs" card. Both are now built by SHARED module-level functions
@@ -5628,7 +5624,7 @@ function floorHtml() {
         <div class="tp-detail-foot">${foot}</div>
       </div>`;
   } else {
-    sideInner = `${acceptCard}${bulkCard}${reqCard}${needsCard}${blkCard}${controls}`;
+    sideInner = `${acceptCard}${bulkCard}${reqCard}${needsCard}${blkCard}`;
   }
   // FLOATING LAYER: every table in state.floatingTables gets its own draggable card,
   // rendered ALONGSIDE whatever the side panel is doing above — fully independent (owner,
@@ -5749,7 +5745,7 @@ function patchFloorTiles(tables) {
 // (the tiles, and the #fcReq / #fcNeeds cards). That's exactly why they MUST be delegated —
 // id-based handlers on those nodes would die the moment patchFloorTiles swaps them. The
 // id-based controls that the patch NEVER touches (Open all/Close all, the side toggle,
-// settings toggles, Save location, the Block input, the Blocked card's Unblock, the resizer,
+// the Block input, the Blocked card's Unblock, the resizer,
 // and the selected-table detail panel) stay in bindFloor and are re-wired on full renders.
 let floorDelegationBound = false;
 function bindFloorDelegation() {
@@ -5903,8 +5899,6 @@ function bindFloor() {
   // The Blocked card's Unblock buttons — that card is NEVER touched by the patch path
   // (unblock() routes through a full loadSessions()), so id-based binding is safe here.
   ed.querySelectorAll("[data-unblock]").forEach((b) => (b.onclick = () => unblock(b.dataset.unblock)));
-  ed.querySelectorAll("[data-setting]").forEach((c) => (c.onchange = () => saveSetting(c.dataset.setting, c.checked)));
-  const sg = document.getElementById("fcSaveGeo"); if (sg) sg.onclick = saveGeo;
   const add = document.getElementById("blkAdd");
   if (add) add.onclick = () => {
     const phone = (document.getElementById("blkPhone").value || "").trim();
@@ -6083,34 +6077,9 @@ function bindFloor() {
   layoutFloatingRow();
 }
 
-// Flip a session toggle (system on / require location / require code) right from the floor.
-// OPTIMISTIC: the toggle (and anything it shows/hides) reacts instantly.
-async function saveSetting(key, value) {
-  const prev = (state.data.settings || {})[key];
-  state.data.settings = { ...(state.data.settings || {}), [key]: value };
-  floorOpsInFlight++;
-  loadSessions(true);
-  try { const r = await api("POST", "/settings", { [key]: value }); if (!(r && r.queued)) state.data.settings = r; loadSessions(true); toast(r && r.queued ? "Saved (will sync)" : "Saved", "ok"); }
-  catch (e) {
-    state.data.settings = { ...(state.data.settings || {}), [key]: prev }; // undo
-    loadSessions(true);
-    toast("Failed: " + e.message, "err");
-  } finally { floorOpsInFlight--; }
-}
-// Save the café location from the side panel.
-async function saveGeo() {
-  const lat = (document.getElementById("fcLat").value || "").trim();
-  const lng = (document.getElementById("fcLng").value || "").trim();
-  const rad = (document.getElementById("fcRad").value || "").trim();
-  const patch = { geo_lat: lat === "" ? null : parseFloat(lat), geo_lng: lng === "" ? null : parseFloat(lng), geo_radius_m: rad === "" ? 250 : parseInt(rad, 10) };
-  try {
-    const r = await api("POST", "/settings", patch);
-    // Offline → outbox stub, not the row: merge the patch onto the current settings instead of
-    // overwriting with the stub (which would blank the rest of the settings until reload).
-    state.data.settings = (r && r.queued) ? { ...(state.data.settings || {}), ...patch } : r;
-    toast(r && r.queued ? "Location saved (will sync)" : "Location saved", "ok");
-  } catch (e) { toast("Failed: " + e.message, "err"); }
-}
+// (The floor's saveSetting()/saveGeo() helpers were deleted with the side panel's
+// "Features · rarely changed" card on 2026-07-29 — dining-session switches and the café
+// location are edited only in Settings → "Dining sessions" / the admin panel now.)
 
 // ---- the ONE panel that handles a table end to end ----
 // open/closeTablePanel: remember which table's big control panel is open. Opening kicks
@@ -8898,7 +8867,83 @@ window.addEventListener("resize", () => {
   }
   if (state.floatingTables.length) layoutFloatingRow();
 });
-// ---- Phone nav drawer (≤760px) ----
+// ---- Auto-fitting top nav (2026-07-29) ----
+// With Banquet + Ratings on there are NINE tabs; brand + tabs + the right-hand actions
+// then need ~1500px, so on a laptop or a narrowed window the strip used to side-scroll
+// silently and slice a tab in half ("Platf…") with the rest unreachable. A hard-coded
+// breakpoint can't solve that (the strip's width depends on how many tabs the restaurant
+// actually has), so MEASURE and pick the roomiest mode that still shows EVERY tab:
+//   nothing      → the strip fits as-is (normal desktop look)
+//   .nav-tight   → tighter pills + restaurant name hidden, and now it fits
+//   .nav-compact → it can't fit at any size → the ☰ drawer (phones always land here)
+// Each candidate is applied and re-measured in the SAME frame: the browser reflows but
+// never paints an in-between state, so there is no flicker and no guesswork.
+let navFitBusy = false;
+function syncNavFit() {
+  const bar = document.querySelector(".topbar");
+  const tabs = document.getElementById("mainTabs");
+  if (!bar || !tabs || navFitBusy) return;
+  navFitBusy = true;
+  try {
+    const body = document.body;
+    body.classList.add("nav-measuring"); // freeze bar transitions → measure settled sizes
+    const set = (tight, compact) => {
+      body.classList.toggle("nav-tight", tight);
+      body.classList.toggle("nav-compact", compact);
+      if (!compact) navDrawerSet(false); // leaving drawer mode with it open would strand the scrim
+    };
+    if (window.innerWidth <= 760) { set(false, true); return; }  // phone: always the drawer
+    // Room the bar can give the strip = its inner width minus the brand and the actions.
+    const room = () => {
+      const cs = getComputedStyle(bar);
+      const gap = parseFloat(cs.columnGap) || 0;
+      const w = (el) => (el ? el.getBoundingClientRect().width : 0);
+      return bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+        - w(bar.querySelector(".brand")) - w(bar.querySelector(".top-actions")) - gap * 2 - 4;
+    };
+    set(false, false);
+    if (tabs.scrollWidth <= room()) return;   // fits as-is
+    set(true, false);
+    if (tabs.scrollWidth <= room()) return;   // fits once tightened
+    set(false, true);                         // → drawer
+  } finally {
+    document.body.classList.remove("nav-measuring");
+    navFitBusy = false;
+  }
+}
+// Re-fit on the next frame, never straight inside an observer callback (changing layout
+// from inside a ResizeObserver is what produces the "ResizeObserver loop" console noise).
+let navFitQueued = false;
+function queueNavFit() {
+  if (navFitQueued) return;
+  navFitQueued = true;
+  requestAnimationFrame(() => { navFitQueued = false; syncNavFit(); });
+}
+{
+  const tabs = document.getElementById("mainTabs");
+  const bar = document.querySelector(".topbar");
+  // Re-fit when the bar resizes (window/iframe/sidebar) AND when the tab set itself
+  // changes — Banquet un-hides and the red badges appear only after settings/orders load.
+  // Watch the bar's CHILDREN too, not just the bar: the connection pill / Profile button
+  // are mounted by other scripts a second after boot and the bar's own box never changes,
+  // so watching only .topbar left the panel stuck in the wrong mode until the next resize.
+  const acts = bar && bar.querySelector(".top-actions");
+  if (window.ResizeObserver) {
+    const ro = new ResizeObserver(queueNavFit);
+    [bar, acts, tabs, bar && bar.querySelector(".brand")].forEach((el) => el && ro.observe(el));
+  }
+  if (acts && window.MutationObserver) new MutationObserver(queueNavFit).observe(acts, { childList: true });
+  if (tabs && window.MutationObserver) {
+    // NOT "class": setTab flips .active on every tab click and that never changes widths.
+    new MutationObserver(queueNavFit).observe(tabs, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden", "style"] });
+  }
+  window.addEventListener("resize", queueNavFit);
+  window.addEventListener("load", queueNavFit);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(queueNavFit); // the display font lands late and changes every tab's width
+  syncNavFit();
+}
+
+// ---- Nav drawer (phones, and any width where the tabs can't fit) ----
 // The ☰ button slides the .tabs nav in from the left as a drawer (CSS does the
 // showing/hiding off body.nav-open; here we just flip that class). Registered with
 // LFH_BACK so the phone's hardware BACK closes the drawer instead of leaving the
@@ -8923,8 +8968,9 @@ function navDrawerSet(open) {
   if (scrim) scrim.onclick = () => navDrawerSet(false);
   const close = document.getElementById("navClose");
   if (close) close.onclick = () => navDrawerSet(false);
-  // widen past the phone breakpoint with the drawer open → drop the class + back layer
-  window.matchMedia("(max-width: 760px)").addEventListener("change", (e) => { if (!e.matches) navDrawerSet(false); });
+  // crossing the phone breakpoint → re-decide the nav mode (syncNavFit closes an open
+  // drawer itself whenever the tabs go back into the bar)
+  window.matchMedia("(max-width: 760px)").addEventListener("change", () => syncNavFit());
 }
 // Top tabs + Editor sub-nav switch views — but first guard any unsaved edits.
 document.querySelectorAll(".tab").forEach((t) => (t.onclick = async () => { if (await confirmDiscardIfDirty()) { setTab(t.dataset.tab); navDrawerSet(false); } }));
@@ -9278,6 +9324,15 @@ const XRAY_CONTROLS = [
   { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
   { selector: '.list-item[data-settings-section="access"]', flag: "manage_staff", label: "Access settings" },
+  // ADMIN/OWNER-only settings (owner 2026-07-28): a real manager only handles per-table
+  // name + seats + QR. Billing, KOT printing, dining sessions and the table COUNT are set
+  // from the admin panel (components/admin/RestaurantSettings.tsx). "admin_only_setting" is
+  // never a real manager power, so these HIDE for the manager and stay tinted-but-usable for
+  // a higher role (admin/owner) looking in — same pattern as Users/Access above.
+  { selector: '.list-item[data-settings-section="billing"]', flag: "admin_only_setting", label: "Billing settings" },
+  { selector: '.list-item[data-settings-section="kitchen"]', flag: "admin_only_setting", label: "Kitchen settings" },
+  { selector: '.list-item[data-settings-section="sessions"]', flag: "admin_only_setting", label: "Dining sessions" },
+  { selector: '[data-mgr-hide="table_count"]', flag: "admin_only_setting", label: "Number of tables" },
 ];
 let XRAY_WHO = null;
 
@@ -9523,6 +9578,14 @@ function applyHierarchyView() {
       xraySetTint(el, true, `${entry.label}: off for staff (by the ${xrayOffBy(entry.flag)}) — you can still use it`);
       if (!counted) { zones.push({ ...entry, el }); counted = true; } // one zone per control type
     });
+  }
+  // A real manager who raced the whoami hide and parked on an admin-only settings section
+  // (billing/kitchen/dining sessions) is bounced back to General so they never sit on cards
+  // whose sidebar row is now hidden. One-shot: after the hop the condition self-clears.
+  if (!higher && state.tab === "general" && (state.settingsSection === "billing" || state.settingsSection === "kitchen" || state.settingsSection === "sessions")) {
+    state.settingsSection = "general";
+    renderList();
+    renderEditor();
   }
   // Finer edit-menu sub-limits (owner 2026-07-24): the owner can restrict a MANAGER to only
   // some menu actions. The server (menuSubAllowed) already refuses a disallowed create/delete;

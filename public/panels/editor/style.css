@@ -50,21 +50,114 @@ body {
 /* The 7 tabs can crowd a mid-width window before the phone layout kicks in;
    let them scroll sideways rather than overflow/wrap awkwardly. min-width:0
    lets the flex item actually shrink so the scroll can engage. */
-.tabs { display: flex; gap: 6px; overflow-x: auto; min-width: 0; scrollbar-width: none; }
+/* A scroll container clips BOTH axes (overflow-x:auto forces overflow-y:auto), so the
+   active tab's focus ring (outline + 2px offset), its soft gold glow and the pulsing
+   red badge were being sliced flat top/bottom/sides. Pad the scroll box so those
+   decorations have room INSIDE it, then pull the padding back with an equal negative
+   margin — the tabs sit at exactly the same x/y and the bar height is unchanged. */
+.tabs {
+  display: flex; align-items: center; gap: 6px;
+  overflow-x: auto; min-width: 0; scrollbar-width: none;
+  padding: 8px 6px; margin: -8px -6px;
+}
 .tabs::-webkit-scrollbar { display: none; }
-/* Phone-drawer parts (☰ burger, dimmed scrim, drawer header) exist in the markup at
-   every width but only DO anything ≤760px — on desktop they stay hidden and the tabs
-   render in the bar exactly as before. */
+/* Drawer parts (☰ burger, dimmed scrim, drawer header) exist in the markup at every
+   width; they only DO anything once app.js puts body in .nav-compact (see below). */
 .nav-burger, .nav-scrim, .tabs-head { display: none; }
 .tab {
   background: transparent; color: var(--muted);
   border: 1px solid transparent; border-radius: 999px;
   padding: 8px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
-  transition: .15s;
+  /* colour-only transition ON PURPOSE: a blanket `transition: .15s` also animated the
+     padding/font-size, so syncNavFit measured a pill that was still mid-resize and
+     wrongly decided the strip fit. Never widen this back to `all`. */
+  transition: background .15s, color .15s, border-color .15s, box-shadow .15s;
   flex: none; white-space: nowrap; /* keep full size + on one line so .tabs scrolls cleanly */
 }
 .tab:hover { color: var(--text); }
 .tab.active { background: var(--gold); color: #2a1d0c; }
+
+/* ── Auto-fitting top nav (2026-07-29) ───────────────────────────────────────
+   With Banquet + Ratings switched on there are NINE tabs, and brand + tabs + the
+   right-hand actions need ~1500px — so on a laptop, a tablet or a narrowed window
+   the strip silently side-scrolled and sliced a tab in half ("Platf…"), with the
+   later tabs unreachable. A fixed breakpoint can't fix that (the strip's width
+   depends on how many tabs the restaurant has), so app.js MEASURES the strip against
+   the room the bar can actually give it (syncNavFit) and picks one of three modes:
+
+     (no class)   everything fits — unchanged desktop look
+     .nav-tight   tighter pills + the restaurant name hidden = it fits again
+     .nav-compact it can't fit at any size → the ☰ drawer (phones always land here)
+
+   Nothing is ever cut, and no width is hard-coded. */
+/* while syncNavFit is trying the modes on, freeze every animation in the bar so it
+   measures FINISHED sizes, never a pill halfway through a transition */
+body.nav-measuring .topbar, body.nav-measuring .topbar * { transition: none !important; }
+body.nav-tight .brand-rest { display: none; }
+body.nav-tight .topbar { gap: 14px; }
+body.nav-tight .tab { padding: 7px 11px; font-size: 13px; }
+body.nav-tight .tab-badge { margin-left: 5px; }
+
+/* ☰ hamburger: three bars that cross into an ✕ while the drawer is open */
+body.nav-compact .nav-burger {
+  display: inline-flex; flex-direction: column; justify-content: center; align-items: center;
+  gap: 4px; flex: none;
+  width: 40px; height: 40px; min-height: 40px;      /* comfortable tap target */
+  background: transparent; border: 1px solid var(--line); border-radius: 10px;
+  cursor: pointer; padding: 0;
+}
+body.nav-compact .nav-burger span {
+  display: block; width: 18px; height: 2px; border-radius: 2px;
+  background: var(--text); transition: transform .2s ease, opacity .2s ease;
+}
+body.nav-compact.nav-open .nav-burger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+body.nav-compact.nav-open .nav-burger span:nth-child(2) { opacity: 0; }
+body.nav-compact.nav-open .nav-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+
+/* dimmed page behind the open drawer; tapping it closes. Sits inside the topbar's
+   stacking context (z 1) so the drawer (z 2) always paints above it. */
+body.nav-compact .nav-scrim {
+  display: block; position: fixed; inset: 0; z-index: 1;
+  background: rgba(0, 0, 0, .45);
+  opacity: 0; pointer-events: none; transition: opacity .22s ease;
+}
+body.nav-compact.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
+
+/* the SAME .tabs nav (badges, banquet-gating, active state all keep working)
+   restyled as a left drawer: off-screen by default, slides in on body.nav-open */
+body.nav-compact .tabs {
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 2;
+  width: min(78vw, 300px);
+  flex-direction: column; align-items: stretch; gap: 4px;
+  background: var(--panel); border-right: 1px solid var(--line);
+  box-shadow: 0 0 40px rgba(0, 0, 0, .35);
+  padding: calc(12px + var(--sat)) 12px calc(16px + var(--sab)); /* --sat/--sab: real insets even inside the iframe (env() reads 0 there) */
+  margin: 0;                                    /* cancel the in-bar ring-room negative margin (would shove the fixed drawer off-screen) */
+  overflow-y: auto; overflow-x: hidden;
+  transform: translateX(-110%); transition: transform .25s ease;
+}
+body.nav-compact.nav-open .tabs { transform: translateX(0); }
+
+/* drawer header: "Sections" + ✕ close */
+body.nav-compact .tabs-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 6px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line);
+  font-weight: 700; font-size: 14px; color: var(--muted);
+  letter-spacing: .4px; text-transform: uppercase;
+}
+body.nav-compact .tabs-head button {
+  background: transparent; border: 1px solid var(--line); border-radius: 10px;
+  width: 36px; height: 36px; font-size: 15px; color: var(--text); cursor: pointer;
+}
+body.nav-compact .tab {
+  flex: 0 0 auto; width: 100%; text-align: left;
+  padding: 12px 14px; font-size: 15px; white-space: nowrap;
+  min-height: 44px; border-radius: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tabs, .nav-scrim, .nav-burger span { transition: none; }
+}
+
 .tab-badge[hidden] { display: none; }
 .tab-badge {
   display: inline-flex; align-items: center; justify-content: center;
@@ -1136,10 +1229,6 @@ body {
 /* side control cards */
 .fc-card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px; }
 .fc-card h3 { margin: 0 0 12px; font-size: 14px; }
-.fc-card h4 { margin: 16px 0 9px; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-.fc-sub { margin-top: 10px; padding-left: 4px; display: flex; flex-direction: column; gap: 10px; }
-.fc-geo { display: flex; flex-direction: column; gap: 8px; margin-bottom: 11px; }
-.fc-geo .sx-input-sm { max-width: none; }
 .fc-toggle { display: flex; align-items: center; gap: 11px; font-size: 13px; cursor: pointer; }
 .fc-toggle input { display: none; }
 .fc-sw { width: 40px; height: 23px; border-radius: 999px; background: var(--line); position: relative; transition: .18s; flex: 0 0 auto; }
@@ -1189,9 +1278,6 @@ body {
 /* quick action button on a tile */
 .ft-quick { margin-top: 10px; }
 .ftq { width: 100%; }
-/* labelled location fields */
-.fc-field { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--muted); }
-.fc-field .sx-input { font-size: 13px; }
 /* drag-to-resize divider for the side panel: styled in ONE place further down
    ("the middle divider" block) — an earlier duplicate rule here used to fight it
    (whole strip flashed gold + changed width on hover). Only the hide-on-mobile
@@ -1268,67 +1354,7 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   }
   .brand { font-size: 18px; }
   .conn { margin-left: auto; }              /* stays top-right, on the brand's row */
-
-  /* ☰ hamburger: three bars that cross into an ✕ while the drawer is open */
-  .nav-burger {
-    display: inline-flex; flex-direction: column; justify-content: center; align-items: center;
-    gap: 4px; flex: none;
-    width: 40px; height: 40px; min-height: 40px;      /* comfortable tap target */
-    background: transparent; border: 1px solid var(--line); border-radius: 10px;
-    cursor: pointer; padding: 0;
-  }
-  .nav-burger span {
-    display: block; width: 18px; height: 2px; border-radius: 2px;
-    background: var(--text); transition: transform .2s ease, opacity .2s ease;
-  }
-  body.nav-open .nav-burger span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
-  body.nav-open .nav-burger span:nth-child(2) { opacity: 0; }
-  body.nav-open .nav-burger span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
-
-  /* dimmed page behind the open drawer; tapping it closes. Sits inside the topbar's
-     stacking context (z 1) so the drawer (z 2) always paints above it. */
-  .nav-scrim {
-    display: block; position: fixed; inset: 0; z-index: 1;
-    background: rgba(0, 0, 0, .45);
-    opacity: 0; pointer-events: none; transition: opacity .22s ease;
-  }
-  body.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
-
-  /* the SAME .tabs nav (badges, banquet-gating, active state all keep working)
-     restyled as a left drawer: off-screen by default, slides in on body.nav-open */
-  .tabs {
-    position: fixed; top: 0; left: 0; bottom: 0; z-index: 2;
-    width: min(78vw, 300px);
-    flex-direction: column; align-items: stretch; gap: 4px;
-    background: var(--panel); border-right: 1px solid var(--line);
-    box-shadow: 0 0 40px rgba(0, 0, 0, .35);
-    padding: calc(12px + var(--sat)) 12px calc(16px + var(--sab)); /* --sat/--sab: real insets even inside the iframe (env() reads 0 there) */
-    overflow-y: auto; overflow-x: hidden;
-    transform: translateX(-110%); transition: transform .25s ease;
-  }
-  body.nav-open .tabs { transform: translateX(0); }
-
-  /* drawer header: "Sections" + ✕ close */
-  .tabs-head {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 2px 6px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line);
-    font-weight: 700; font-size: 14px; color: var(--muted);
-    letter-spacing: .4px; text-transform: uppercase;
-  }
-  .tabs-head button {
-    background: transparent; border: 1px solid var(--line); border-radius: 10px;
-    width: 36px; height: 36px; font-size: 15px; color: var(--text); cursor: pointer;
-  }
-
-  .tab {
-    flex: 0 0 auto; width: 100%; text-align: left;
-    padding: 12px 14px; font-size: 15px; white-space: nowrap;
-    min-height: 44px; border-radius: 12px;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .tabs, .nav-scrim, .nav-burger span { transition: none; }
-  }
+  /* (the ☰ drawer itself is NOT phone-only any more — see the .nav-compact block) */
 
   /* --- main layout: single column, page scrolls instead of fixed panes --- */
   .layout { grid-template-columns: 1fr; height: auto; }

@@ -71,6 +71,27 @@ branch is just git's word for the code line and exists in BOTH stacks).
   and ask the owner an explicit "Should I do this on AV live? yes/no" question (use the
   ask-user-question tool), naming exactly what will change. One yes = that one action
   only, not a standing license.
+- **⛔ ASK-FIRST FOR EVERY SINGLE BIT ON AV LIVE — no change is "too small" (owner,
+  2026-07-30, ABSOLUTE — AV live now has real paying clients on it).** One pixel, one
+  word, one colour, one label, one default, one row of data counts exactly the same as a
+  new feature. There is NO minor-change exemption, NO "while I'm in there" tidy-up, NO
+  bundling an unasked extra into an approved change. **Ask BEFORE doing it, not after**,
+  using the ask-user-question tool, and the question must state:
+  1. **Which restaurant(s)/panel(s)** it lands on (name them — "Aangan's waiter panel", not "the app").
+  2. **What the client will actually SEE change**, in plain words the owner can picture
+     ("the Send button moves under the total and turns green").
+  3. **What it touches underneath** (DB rows? a migration? a deploy of the whole site?).
+  4. A plain **"do you agree — yes / no"**. Only an explicit yes proceeds.
+  **One yes = that one change only.** It does not cover the next change, a follow-up fix,
+  a "same thing on the other restaurant", or a re-deploy later. Ask again each time.
+  If mid-work I discover a second thing that needs changing on AV live: STOP, finish
+  nothing extra, and ask about that one too.
+  **The ONLY exception — the owner has already told me to:** when HE says "put/add this on
+  AV live", "push it to AV live", "fix it live", "make it live" for a specific thing, that
+  IS the permission for that thing — do it straight away, no confirmation question, just
+  report what changed. Anything he did NOT name still needs its own ask.
+  **DEV/TEST (this folder, `3-d-backup`, the demo restaurants) needs no such asking** —
+  build freely there; that's what it's for. The gate is only about AV live.
 - **Even READING AV live (data copy, health check) — announce it in chat first.** Reads
   are allowed, but say you're doing them.
 - **All building & testing happens HERE, against the dev DB, with dev keys.** Never
@@ -263,6 +284,23 @@ without being reminded.** When you add anything, wire ALL of these that apply:
      on a shift; that shipped a dup-tile bug, mig 096 + pollTables dedup fixed it).
    - **No new poll faster than the 60s backstop;** realtime channels stay keyed per restaurant
      and drop on hidden/idle. Verify in the Network tab that one change refetches ONLY that table.
+10. **WORKS WITH NO INTERNET (owner, 2026-07-30 — "this is a must thing, for every restaurant").**
+   Every new screen must OPEN and READ offline (the service worker handles this automatically for
+   any `GET /api/...` under the families in `public/sw.js` → `DATA_PATHS`; **add the family if the
+   feature uses a new one**), and every new WRITE must go through the panel's `api()` / the guest
+   outbox so it is saved on-device and replayed at-most-once. If the screen shows saved data it
+   must SAY so (the offline bar / `components/OfflineNotice.tsx`) — never present saved figures as
+   live. Full guide: `docs/OFFLINE-SYNC.md`.
+11. **NO SILENT OVERWRITES — clash-checked (owner, 2026-07-30: "it is for ALL possible options,
+   anywhere clash should not happen").** If two people on two devices can change the same thing,
+   the feature MUST decide who wins and TELL the other person. The rule everywhere is **first save
+   wins**; the loser gets a plain message naming what it says now, and their screen refreshes to
+   the truth. Wiring is one line at the call site — send what the screen was editing FROM:
+   `api("POST", path, body, { expect: { table: "<table>", id, fields: { <col>: <oldValue> } } })`
+   — the one gate in each panel route (`lib/clash.ts` → `expectClash`) does the rest. This is
+   NOT optional and NOT only for new code: **when you touch ANY feature, check it is covered and
+   add it if it isn't.** `node scripts/verify-clash-coverage.mjs` lists every staff write and
+   fails on an editable one that has no expectation — keep it green.
 
 ## Charts / graphs must be DYNAMIC — never a lonely 1-bar plot (owner, 2026-07-25)
 
@@ -516,6 +554,140 @@ do it automatically, without being asked. Reuse the existing engine, don't reinv
   never on every open or every 60s poll. Do NOT add a blind cron that recomputes every
   restaurant on a timer (wasted work on idle tenants); the lazy compute-on-view + fingerprint
   is the pattern. Pairs with the egress rules in the SaaS efficiency playbook.
+
+## 🚦 NEVER set off the app's own limits while building or testing (owner, 2026-07-29 — EVERY session)
+
+The "limit reached" alerts exist for REAL trouble in a real restaurant. Our OWN sessions were
+setting them off — a test session signing in over and over made *"limit reached"* pings land on
+the owner's phone about himself. That is pure noise, and noise is how a real alert gets ignored.
+So tripping a limit during our own work counts as a BUG in the test, not a finding:
+
+- **Sign in ONCE per session and reuse that session** (keep the cookie / the Playwright context /
+  the logged-in tab). Never put a login inside a loop, a retry, or a per-request helper.
+- **The trap that actually caused this (2026-07-29):** the "open it in Chrome so the owner can look"
+  scripts (`scripts/view-device.mjs`, `scripts/sweep/login.mjs`, any `show-*.mjs`) sign in AGAIN for
+  every browser context / role / restaurant they open. Two sessions doing that a few seconds apart
+  put six `diagm1` logins inside five minutes and pinged the owner's phone about himself. If a script
+  opens several views, **log in once and reuse that context's cookies for the rest**, and never run
+  the same show-script back-to-back in a loop.
+- **Never repeat a limited action just to "see what happens".** The limited ones are: staff/owner
+  login (5 per 5 min), manager PIN, guest orders, waiter calls, join-table, OTP requests
+  (`rate_limit_rules`, mig 205).
+- **If a test genuinely must reach the wall** (verifying the wall itself, or the alert wording):
+  do it ONCE, prefer a throwaway/unknown name over a real account, then **CLEAN UP in the same
+  turn** — delete the `rate_limit_events` + `rate_limit_counters` rows you created, reset
+  `failed_count`/`locked_until` on any account you touched — and TELL the owner in chat that a
+  test ping went to his phone.
+- **Never widen or switch off a limit rule to make a test pass**, and **never add code that
+  suppresses, filters or hides a limit event or its alert** (his no-hiding rule — silent is fine,
+  invisible is not). If a limit is genuinely too tight for real service, change the NUMBER in
+  `/aevinite` → rate limits and say so.
+- **Don't leave anything re-logging in on a timer** (watchers, polling scripts, parallel panels).
+
+**NOW ENFORCED, not just asked for (2026-07-30).** Two more of these slipped through, so the rule
+has teeth:
+
+- **Use the shared helpers, never a hand-rolled login.** `scripts/sweep/login.mjs` exports
+  `loginAs()` — which now CACHES the session, so five browser contexts cost ONE login (proven:
+  1 login row for 5 contexts, all with a working session) — and `adminCookie()`/`adminHeaders()`,
+  which present the admin gate cookie and make **zero** login requests ever.
+- **Never POST to `/api/staff-login` with JSON.** That route reads FORM data, so a JSON body sends
+  an EMPTY password: three "checks" became three wrong-password attempts and raised an
+  `admin_login` limit event about the owner's own panel. If you need admin API access from a
+  script, use `adminHeaders()` — no request, no failed-login row, no alert.
+- **A test that deliberately trips a wall must sweep up in the same run.** Deleting the test users
+  does NOT clear `rate_limit_events` / `rate_limit_counters` / `login_throttle`, and an OPEN event
+  sits in the admin's Problems list looking like a real restaurant in trouble
+  (`verify-staff-accounts.mjs` now clears its own rows).
+- **Guarded by `npm run verify:test-safety`** (`scripts/verify-test-safety.mjs`) — checks each of
+  the mistakes above, proven to fail on all three. It also runs AUTOMATICALLY as a PostToolUse hook
+  after any edit under `scripts/` or `tests/`: silent when clean, and it REFUSES the edit with an
+  explanation when a script could raise an alert. Add a check there when a new way to trip a limit
+  appears.
+
+Code: `lib/rateLimit.ts` (counter + alert), `lib/alerts.ts` (phone ping), mig 205/208/214.
+
+## 👆 A USER'S TAP MUST NEVER VANISH IN SILENCE (owner, 2026-07-30 — every panel, every dialog)
+
+A button that swallows a tap is indistinguishable from a broken button, and it leaves no trace
+to debug. This cost a real close on a live client's floor: the manager's confirm box ignores
+clicks for its first 350ms (so the tail of a double-tap can't answer a question nobody read),
+and "Close anyway" is a CHAINED dialog — it appears only when the server's refusal lands, so it
+pops up under a finger already tapping, in the same spot. A normal tap 200–300ms later was
+dropped with nothing on screen; the owner closed two tables and the third "didn't work"
+(PR #554, then the sibling paths in the follow-up).
+
+Whenever you write a dialog, overlay, or any handler that can decline a tap:
+
+- **Never `return` on a user action without a trace.** Either HOLD the action and run it when
+  you can (`tapGuard().act()` in the manager panel), or refuse it VISIBLY — a shake
+  (`.confirm-nudge` / `.cf-nudge`), a toast, a disabled state. Silent `resolve(false)` is banned.
+- **Never leave a promise unresolved.** A shared dialog element whose handlers get reassigned
+  orphans the earlier `await` forever and that action dies mid-flight (the tablet's
+  `#confirmOverlay` did this — fixed with a `confirmOpen` re-entry guard that answers the
+  second call).
+- **Any overlay wearing the shared `.confirm-overlay` class must stamp `data-closing` when it
+  closes**, or `confirmDialog()` silently answers "no" during its 200ms fade-out.
+- **Never decide UI behaviour by pattern-matching a server's prose.** Send a reason CODE and
+  branch on that (`reason: 'unpaid' | 'cooking' | 'both'` from `lib/sessionClose.ts`). The old
+  `/owes money/` text-match missed the cooking-only refusal, so a paid-but-unserved table had
+  no "close anyway" button at all.
+- **Guarded by `npm run verify:taps`** (`scripts/verify-tap-guard.mjs`) — 9 static checks, each
+  mapped to a bug that actually happened. It also runs AUTOMATICALLY as a PostToolUse hook after
+  any edit to `public/panels/*/{app.js,style.css,index.html}`: silent when clean, and it fails
+  the edit with an explanation if a check breaks. Add a check there when you add a dialog.
+
+## 🪑 A TABLE SHOWS ONLY ITS OWN PARTY (owner, 2026-07-30 — every floor, every panel)
+
+The owner tapped **Open** on a FREE table and it appeared instantly as *"Preparing · 0/5
+served · ₹1,150 due"* with three KOTs — food ordered nine days earlier by a party whose
+session was long closed. "Mark all paid" / "Generate invoice" would have billed the new
+guests for it. Two rules came out of it; keep BOTH true forever:
+
+- **Ownership is the SESSION, never the table number.** Anything that answers "which orders
+  are at this table?" must match the table's CURRENT open-session id (a session-less row —
+  banquet/legacy — still counts, so no order is ever hidden). `lfh_table_view_summary` always
+  did this; the panels' `ordersForTable` (manager) / `ordersOf` (waiter) did not, which is why
+  the tile flip-flopped between "Preparing" and "Open · waiting for guests".
+- **An order can never outlive its session.** Cleanup lives on the status change itself
+  (mig 232 extends the mig-020/146 close trigger + the delete trigger), so EVERY close —
+  the app path, a script's bare `UPDATE sessions SET status='closed'`, a hand-run SQL fix,
+  anything we write later — cancels the unpaid non-khata work (a visible ✕ record) and
+  archives the rest. Nothing is deleted: reports/Bills never filter `archived`.
+- **Guarded by `npm run verify:table-ownership`** (add `--base http://localhost:4000` for the
+  browser pass): panel source, a floor-wide data scan, the close behaviour, and a tile-by-tile
+  click sweep proving each tile and its detail describe the SAME table. `/bug-test` §5b runs it.
+
+## 🩺 A GREEN TEST SUITE IS NOT EVIDENCE THAT THE SCREEN IS RIGHT (2026-07-30 — after two faults reached the owner)
+
+Two faults reached the owner's screen on the same day, and **every check that was running passed**,
+because in both cases the source was valid and the data was fine — only what a person SAW was
+wrong:
+
+1. A `<script>` tag was inserted INSIDE an HTML comment. The comment ended early, so the manager's
+   top bar displayed *"…the pill was inserted at the far LEFT of the topbar. -->"* to every user.
+2. An orange *"Connection is struggling"* bar sat directly above the panel's own green *"Live"*
+   badge. Nothing was broken; the UI contradicted itself, from ONE slow read.
+
+The root cause of BOTH was the same, and it is the thing to guard against: **I verified my work
+with checks that could not have caught the failure** — the wrong surface (offline-only tests), the
+wrong artefact (source instead of the served file), or the wrong signal (skimming output instead of
+an exit code). So, permanently:
+
+- **`npm run verify:ui`** — static, instant, and wired into the PostToolUse hook: refuses an edit
+  that leaves an HTML comment open, strands a panel script inside a comment, or commits a
+  merge-conflict marker. Both faults above are reproduced in it as tests.
+- **`npm run verify:live -- --base <url>`** — run this against the DEPLOYED site after every
+  deploy. It reads the RENDERED text of every panel and page and fails on leaked code
+  (`-->`, `${`, `[object Object]`, `undefined`, `NaN`), on a screen that renders empty, on console
+  errors, and on **UI that contradicts itself** (an alarm bar while the badge says Live).
+- **Never derive a claim from data that doesn't support it.** A status warning must read the SAME
+  signal the existing indicator reads, expire on its own, and self-heal — one slow request is not a
+  connection verdict.
+- **For AV live, verification is READ-ONLY** (no logins, no test orders — see the rule above): fetch
+  the served files, check the panel HTML comments balance, and diff them against the backup site.
+  `node scripts/verify-avlive-offline-complete.mjs` proves a surgical release landed COMPLETELY —
+  a patcher that skips a file writes nothing and says so in one line among many.
 
 ## Known gotchas (read before editing)
 
