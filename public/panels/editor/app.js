@@ -4680,8 +4680,14 @@ function printParcelReceipt(o) {
   const items = (Array.isArray(o.items) ? o.items : []).map((i) => ({
     title: i.title, qty: i.qty, price: i.price, options: Array.isArray(i.options) ? i.options : [],
   }));
+  // THE SUBTOTAL IS THE LINES, NEVER THE STORED TOTAL (2026-08-02). Since a parcel is stored
+  // WITH its tax — subtotal + tax, like every other sale — feeding that stored figure to
+  // billMath as a subtotal would tax it a second time and print more than was charged. The
+  // lines are the pre-tax truth, so lineSum + tax reproduces the stored total exactly, and the
+  // paper and the record say the same number. The stored total is only a fallback for a legacy
+  // row whose lines carry no prices.
   const lineSum = items.reduce((a, i) => a + (parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1), 0);
-  const sub = parseFloat(o.total) > 0 ? parseFloat(o.total) : lineSum;
+  const sub = lineSum > 0 ? lineSum : (parseFloat(o.total) || 0);
   const order = {
     id: "parcel-" + (o.kot ?? o.kot_no ?? "x"), status: "served", items,
     subtotal: sub, total: sub, discount: 0, kot_no: o.kot ?? o.kot_no ?? null,

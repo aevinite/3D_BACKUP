@@ -1829,6 +1829,20 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       if (!picked.length) return err("no valid dishes", 400);
       total = Math.round(total * 100) / 100;
+      // THE RECORD MUST EQUAL THE PAPER (fixed 2026-08-02). A parcel was stored at the item
+      // subtotal with no tax, while the bill handed to the customer runs through the same
+      // billMath() a table's bill does and ADDS tax on top — so ₹250 of food was charged as
+      // ₹262.50 and recorded as ₹250. For a tax tool that is the wrong way round: the sale was
+      // understated by exactly the tax collected. A counter takeaway is a taxable sale like any
+      // other, so it is stored like any other — subtotal + tax — using the ONE tax source
+      // (lib/tax.ts), never a rate typed in here. aggregator_orders has a single `total` column
+      // and for every delivery row it already means the final amount; a parcel now agrees.
+      // The printed bill takes its subtotal from the LINES (never this stored total, or it would
+      // tax it twice), so paper and record land on the same number.
+      const parcelRate = effectiveTaxRate((await sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle()).data || {});
+      const parcelTax = Math.round(total * parcelRate * 100) / 100;
+      total = Math.round((total + parcelTax) * 100) / 100;
+
       const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
       const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const ins = await sb.rpc("lfh_platform_insert", {
