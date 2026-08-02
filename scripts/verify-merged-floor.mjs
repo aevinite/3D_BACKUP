@@ -15,10 +15,16 @@
 import { chromium } from "playwright";
 import { loginAs } from "./sweep/login.mjs";
 import fs from "node:fs";
-const B = "http://localhost:4937";
+// --base <url> so the same simulation can be pointed at a DEPLOYED site, not just the dev server
+// (owner, 2026-08-02: "diagnose everything that you have built, it is working fine or not").
+const ARG = (f, d) => { const i = process.argv.indexOf(f); return i > -1 ? process.argv[i + 1] : d; };
+const B = ARG("--base", "http://localhost:4937");
 const env = fs.readFileSync("/Users/aevinite/Documents/Projects/backup_Menu/.env.local", "utf8");
 const g = (k) => (env.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim();
-const TOK = g("SUPABASE_ACCESS_TOKEN"), REF = "wnsfcizclkbobwzcxqsf", RID = "00000000-0000-0000-0000-000000000001";
+// The database follows the site: backup-2 runs its own Supabase project, so testing that URL against
+// backup-1's database would assert on rows the site never sees. --db picks the project ref.
+const TOK = g("SUPABASE_ACCESS_TOKEN"), RID = "00000000-0000-0000-0000-000000000001";
+const REF = ARG("--db", "wnsfcizclkbobwzcxqsf");
 const q = async (sql) => { const r = await fetch(`https://api.supabase.com/v1/projects/${REF}/database/query`, {
   method: "POST", headers: { Authorization: "Bearer " + TOK, "content-type": "application/json" }, body: JSON.stringify({ query: sql }) });
   const t = await r.text(); if (!r.ok) throw new Error(t.slice(0, 160)); return JSON.parse(t); };
@@ -42,6 +48,11 @@ await q(`update sessions set status='closed',closed_at=now() where restaurant_id
 for (const t of [...PARTY, ...SOLO]) await q(`select lfh_staff_place_order('${t}','[{"id":"${dish}","qty":2}]'::jsonb,'{}',null,'${RID}',true)`);
 const sid = async (t) => (await q(`select id from sessions where restaurant_id='${RID}' and table_number='${t}' and status='open' order by created_at desc limit 1`))[0]?.id;
 for (const t of ["12", "13", "14"]) await q(`select lfh_staff_merge_tables('${await sid(t)}','11','${RID}')`);
+// Orders 2..n of a party are born 'preparing' (mig 164 auto-accept), so a fixture built by placing
+// several orders has nothing left to Accept — which looks like a missing button. Put them all back to
+// 'received' so the Accept-all step is actually exercised.
+await q(`update orders set status='received' where restaurant_id='${RID}'
+  and table_number in (${list([...PARTY, ...SOLO])}) and not archived and status<>'cancelled'`);
 let st = await snap();
 check("fixture: 4-table party merged", st.merges.sort().join() === "12,13,14", "merges " + st.merges.join());
 check("fixture: 3 separate tables open", SOLO.every((t) => st.open.includes(t)), "open " + st.open.join());
