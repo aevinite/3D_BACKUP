@@ -7008,7 +7008,7 @@ function floorHtml() {
     for (let i = 1; i <= n; i++) {
       skel += `<div class="ftile ftile-skel" aria-hidden="true"><div class="sk-num"></div><div class="sk-lbl"></div><div class="sk-meta"></div></div>`;
     }
-    const skelMain = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2></div>${legend}<div class="ftile-grid" style="--per-row:${floorPerRow()}">${skel}</div></div>`;
+    const skelMain = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view <span class="sub">· live</span></h2>${legend}</div><div class="ftile-grid" style="--per-row:${floorPerRow()}">${skel}</div></div>`;
     // The floor is the WHOLE width now — there is no right-hand panel to leave room for
     // (owner, 2026-07-31), so the skeleton is just the grid.
     return `<div class="floor-wrap floor-collapsed">${skelMain}</div>`;
@@ -7099,7 +7099,18 @@ function floorHtml() {
   // not the far left of the bar beside the title (which is where it first landed and the
   // owner sent it back). Parcels hang BELOW the room in their own strip — they are floor
   // work with no table, so they must not be mixed into the table grid (classic or custom).
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${kotBtn}${parcelBtn}</div>${statsStrip}${legend}${planNote}${gridHtml}${parcelStripHtml()}</div>`;
+  // EVERYTHING THAT ISN'T A TABLE LIVES IN THE HEADER ROW (owner, 2026-08-03: "this all stuff
+  // …should be shifted on top, beside the table live view and beside the KOT and all that
+  // option, so that we get space for the actual table view"). The three stat tiles and the
+  // colour legend used to be two full-width blocks stacked UNDER the header, costing ~90px of
+  // height before a single table was drawn — on his phone that was most of the first screen.
+  // They are the same builders (so patchFloorTiles still swaps .floor-stats in place); only
+  // where they sit changed, and .floor-head's CSS shrinks them to header-sized chips.
+  // Order across the row: title · stats · legend ——— 🧾 KOT ▾ · ⚡ QO/P. The two buttons are
+  // wrapped in ONE element on purpose: left loose in a wrapping flex row they came apart the
+  // moment the row wrapped (an iPad put both at the far LEFT of line two — the placement the
+  // owner rejected on 2026-08-02). As a pair with `margin-left:auto` they stay together, right.
+  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view <span class="sub">· live</span></h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${planNote}${gridHtml}${parcelStripHtml()}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",

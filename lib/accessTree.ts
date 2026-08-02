@@ -89,10 +89,11 @@ export type Node = {
   choices?: Choice[];           // for bind.t === "choice" / "list"
   pin?: boolean;                // money action → the waiter row offers "On + manager PIN"
   leftToBuild?: boolean;        // shown, labelled, saves nothing yet
-  // A row that exists ONLY for its words — it stores nothing, renders no control, and is not
-  // unbuilt: it states a consequence the admin would otherwise have to work out ("if BOTH of
-  // the two above are off…"). Declared, so the dead-switch guard knows it is deliberate.
-  info?: boolean;
+  // (`info?: boolean` lived here — a row that existed ONLY for its words, storing nothing and
+  //  rendering no control. It had exactly one user, "If BOTH of the two above are off", and the
+  //  owner deleted that row on 2026-08-03: an explanation is not a setting and does not get a
+  //  box on this screen. Nothing ever read the flag anyway. Explanations belong in a node's
+  //  `what`, which is what the ⓘ button opens — put them there, not in a row of their own.)
   fresh?: boolean;              // its gate is NEW in this rebuild (not legacy-enforced)
   placeholder?: string;         // for text nodes
   unit?: string;                // for cap nodes
@@ -378,16 +379,22 @@ export const SECTIONS: Section[] = [
         what: "The QO/P button on the live floor: pick a category, tap a dish, and it drops straight back to the categories so a whole order goes in fast — then it asks where the order goes. The two places it can send to are the switches below. OFF here removes the button altogether; the KOT menu beside it stays.",
         children: [
           // The two DESTINATIONS, each its own switch (owner, 2026-08-02). Every combination
-          // is spelled out on screen because the interesting cases are the half-on ones.
+          // is spelled out, but in the ⓘ — not in a row of its own.
+          //
+          // THE "IF BOTH ARE OFF" CARD IS GONE (owner, 2026-08-03: "why here written for nothing
+          // is off — it is not even permission or stuff like that, remove that shit, I already
+          // know that, no need to tell. You can add that in the i button, but here nothing needs
+          // to be there"). It was a `bind:{t:"none"}` row, so it took a whole box on the screen
+          // and could not be switched — a paragraph pretending to be a setting. What it said is
+          // true and worth keeping, so it moved into the ⓘ of BOTH switches it describes (he
+          // named "quick order and parcel"). The rule for this screen: a row exists only where
+          // there is something to change.
           { id: "qop_tables", name: "Quick order — send to a table", def: true,
             bind: { t: "setting", key: "qop_tables_allowed" },
-            what: "The list of tables on the “where does it go?” step. ON with Parcel: the step shows the Parcel bar on top and every table under it. ON with Parcel off: tables only. OFF with Parcel on: no tables at all — anything built here leaves as a parcel. It cannot give more than the restaurant already has: without “Take a new order” no tables are offered whatever this says." },
+            what: "The list of tables on the “where does it go?” step. ON with Parcel: the step shows the Parcel bar on top and every table under it. ON with Parcel off: tables only. OFF with Parcel on: no tables at all — anything built here leaves as a parcel. It cannot give more than the restaurant already has: without “Take a new order” no tables are offered whatever this says. With this AND Parcel both off there is nothing left for QO/P to do, so the button simply isn't on the floor — the header keeps only the KOT menu, nothing is greyed out and nothing errors." },
           { id: "qop_parcel", name: "Parcel — send it out", def: true,
             bind: { t: "setting", key: "qop_parcel_allowed" },
-            what: "The big Parcel bar on the “where does it go?” step. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar, and QO/P sends to tables only. This switch is only about the QO/P screen — the Parcel feature itself (its floor tiles, the tablet's New parcel, the parcel bill) is the “Parcel — counter takeaway” switch below, and with THAT off there is no Parcel bar here however this is set." },
-          // Named so the admin isn't left to work the last case out for themselves.
-          { id: "qop_both_off", name: "If BOTH of the two above are off", info: true, bind: { t: "none" },
-            what: "There is nothing left for QO/P to do, so the button does not appear on the floor at all — the header keeps only the KOT menu. Nothing is greyed out and nothing errors; the feature is simply absent, which is the same rule the rest of this screen follows." },
+            what: "The big Parcel bar on the “where does it go?” step. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar, and QO/P sends to tables only. This switch is only about which destinations the QO/P screen offers — the Parcel feature itself is permanent and has no switch to turn off. With this AND “Quick order — send to a table” both off there is nothing left for QO/P to do, so the button simply isn't on the floor — the header keeps only the KOT menu, nothing is greyed out and nothing errors." },
         ] },
       // 🥡 PARCEL — its own MAIN feature again (owner, 2026-08-02: "takeaway his whole
       // separate thing, parcel his whole separate thing"). It sat inside "Platforms" from mig

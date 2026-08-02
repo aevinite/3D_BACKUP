@@ -1087,7 +1087,12 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    it overlapped the New Parcel button. The bulk actions live only in the side panel's
    "Whole floor" card now.) The header keeps clearance for the absolute ‹ chevron so it
    never sits on the New Parcel button either. */
-.floor-collapsed .floor-main > .ed-head { padding-right: 68px; }
+/* (Was `padding-right: 68px` — clearance for the absolute ‹ side-panel chevron. That button
+   was deleted with the right-hand rail on 2026-07-31 and nothing renders it any more, so the
+   header was holding 68px open for something that cannot appear. Reclaimed 2026-08-03 when the
+   stats and legend moved INTO this row and needed the width. Grep `floor-side-toggle`: only a
+   display:none rule survives. If a floating control ever comes back here, give IT the margin
+   rather than padding the whole header again.) */
 
 /* Master-detail: the table detail shown IN the right side panel (replacing the
    floor controls when a tile is selected). It reuses all the .sx-* / .tp-order /
@@ -1911,6 +1916,74 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .fstat-l { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
 .fstat.warn .fstat-n { color: var(--gold-strong); }
 .fstat.alert .fstat-n { color: #f59e0b; }
+
+/* ---- the floor's header row: title · stats · legend ——— KOT ▾ · QO/P ----
+   Owner, 2026-08-03: the stats strip and the colour legend were two full-width blocks stacked
+   under the header, eating ~90px before a single table was drawn — on his phone that was most
+   of the first screen. They now ride IN the header, so the same three numbers and the same
+   legend cost one row instead of three. Nothing about what they SAY changed; these rules only
+   re-shape them: the stat tiles go from a 3-column grid of cards to inline number+word chips,
+   and the legend loses its own margins and shrinks a step. The h2 must give up its `flex:1`
+   or it would push everything else off to the right. */
+.floor-head { flex-wrap: wrap; row-gap: 8px; }
+.floor-head h2 { flex: 0 0 auto; }
+.floor-head .floor-stats { display: flex; flex-wrap: wrap; gap: 7px; margin: 0; }
+.floor-head .fstat { display: flex; align-items: baseline; gap: 6px; padding: 5px 11px; border-radius: 999px; }
+.floor-head .fstat-n { font-size: 15px; }
+.floor-head .fstat-l { font-size: 9.5px; margin-top: 0; }
+.floor-head .floor-legend { margin: 0; gap: 12px; font-size: 11.5px; }
+.floor-head .ldot { width: 10px; height: 10px; border-radius: 3px; }
+/* 🧾 KOT ▾ + ⚡ QO/P as ONE right-hand cluster. Left loose in a wrapping flex row they came
+   apart the moment the row wrapped — on an iPad (1194px) the legend filled line one and both
+   buttons dropped to line two at the FAR LEFT, which is exactly the placement the owner
+   rejected on 2026-08-02. As a pair with `margin-left:auto` they stay together and stay right,
+   on whichever line they land. */
+.floor-head-acts { display: flex; align-items: center; gap: 10px; flex: none; margin-left: auto; }
+/* A wrapped header would otherwise put the buttons on their own line with nothing beside them;
+   letting the legend take the whole second line keeps the buttons up on line one. */
+@media (max-width: 1180px) {
+  .floor-head .floor-legend { flex-basis: 100%; margin: 0; order: 3; }
+  .floor-head .fstat { padding: 4px 9px; }
+}
+/* PHONE: three things do NOT fit on one 360px line, and the first attempt proved it — the title
+   wrapped onto three lines and ⚡ QO/P ran off the right edge. So the row splits into three
+   honest lines instead: what this screen is + its two buttons, then the numbers, then the
+   colours. That is still far shorter than the two full-width card blocks it replaced. */
+@media (max-width: 760px) {
+  /* The `:has()` selector matches the ≤640px rule further down this file, which pins the floor
+     header to `flex-wrap:nowrap` so the old 🥡 New Parcel button stayed beside the title (owner,
+     2026-07-25). That rule wins on specificity from anywhere in the file, and with it the stats
+     and the legend could never take a line of their own — they were squeezed onto line one at
+     0px and 70px wide, off the right edge. Its INTENT still holds and is met a better way now:
+     `.floor-head-acts{margin-left:auto}` keeps the buttons beside the title on line one, and
+     hiding the decorative "· live" is what buys them the room to stay there. */
+  .floor-head, .ed-head.floor-head:has(.ed-parcel-btn) { flex-wrap: wrap; }
+  /* THE FLOOR IS A SIDEWAYS-SCROLLING CANVAS ON A PHONE, and the header was being dragged along
+     with it. Tables-per-row is the owner's number and deliberately does NOT shrink to fit a
+     screen, so a 9-per-row floor is wider than an A35 and `.editor` scrolls horizontally; the
+     header is a block in that same scroller, so it stretched to ~800px too and "To pay", "Needs
+     you" and the legend sat off the right edge until you scrolled the floor sideways. Pinning it
+     with `sticky; left:0` at one screen wide keeps the header still and readable while only the
+     TABLES scroll — which is the thing you actually want to scroll. */
+  .floor-head { row-gap: 7px; gap: 8px; position: sticky; left: 0; width: 100vw; max-width: 100vw; box-sizing: border-box; z-index: 5; }
+  /* `.ed-head.floor-head`, not `.floor-head` — the ≤900px block further down sets
+     `.ed-head h2 { flex: 1 1 100% }`, which ties on specificity and wins by coming later,
+     giving the title a whole line to itself and pushing the buttons onto a second one. */
+  .ed-head.floor-head h2 { flex: 0 1 auto; min-width: 0; font-size: 17px; white-space: nowrap; }
+  .floor-head h2 .sub { display: none; } /* the topbar's Live badge already says it */
+  .floor-head .floor-stats { order: 3; flex: 0 0 100%; flex-wrap: nowrap; overflow-x: auto; }
+  .floor-head .fstat { flex: 0 0 auto; }
+  .floor-head .floor-legend { order: 4; flex: 0 0 100%; }
+  /* KEEP THE COLUMN COUNT, KEEP THE TILE READABLE. The grid is always exactly --per-row columns
+     of `minmax(0,1fr)`, so it fits whatever it is given — and until now what it was given was the
+     HEADER's width. Pinning the header to one screen removed that stretch, which shrank a
+     9-per-row floor to 33px circles with no table number left on them, and "the table number and
+     its colour always stay" is the rule the tile is built on. So the floor keeps its own honest
+     minimum instead of inheriting one by accident: 9 columns stay 9 columns (his number is his
+     number — he said so twice), they are just tappable, and the floor scrolls sideways when his
+     number needs more room than the phone has. Phone only; desktop sizing is untouched. */
+  .ftile-grid { min-width: calc(var(--per-row, 6) * 62px); }
+}
 
 /* ---- tiles: rounder, lift on hover, a clear ring when selected ---- */
 /* NOTE: no min-height here on purpose. A fixed min-height is exactly what made a
