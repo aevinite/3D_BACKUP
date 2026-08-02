@@ -941,30 +941,55 @@ function EmptyCard({ text }: { text: string }) {
 function InHandLadder({ ih, taxLines, singleRest, onOpenExpenses }: {
   ih: InHand; taxLines: { label: string; rate: number; amt: number }[]; singleRest: boolean; onOpenExpenses: () => void;
 }) {
+  // FOUR LINES, in the owner's own words (2026-08-02): "total net profit with GST, minus GST,
+  // minus discount, minus expenses, profit in hand". The nine-row version that shipped first
+  // was correct and too complicated — he reads this sheet every day and does not want the
+  // whole journey, he wants the answer.
+  //
+  // ── THE ONE ARITHMETIC TRAP, and why the top line is what it is ────────────
+  // A discount in this app comes off BEFORE the guest pays (lib: revenue = total −
+  // discount*(1+rate)), so "total collected" is ALREADY net of it. Taking the discount off
+  // that a second time understates the profit by exactly the discount. So the ladder starts
+  // one line higher — at what the bills came to BEFORE the discount — and then his four
+  // subtractions are each real and land on the same figure the long version did.
+  //   itemSales + gst  −gst  −discount  −expenses  ==  (itemSales − discount) − expenses
+  // The old detailed rows are not gone; they moved behind "the full breakdown" below, because
+  // the CGST/SGST split is still needed for filing.
+  const [full, setFull] = useState(false);
+  const billed = ih.itemSales + ih.gst;
   return (
-    <Panel title="What you actually kept" hint="from the guest's bill to your pocket">
+    <Panel title="Profit in hand" hint="what the day actually left you">
       <div className="rs-lines">
-        <div className="rs-line"><span className="lbl">Item sales <span className="rs-dim">· menu prices</span></span><span className="val">{inr(ih.itemSales)}</span></div>
-        <div className="rs-line"><span className="lbl">Discounts given</span><span className="val neg">− {inr(ih.discounts)}</span></div>
-        <div className="rs-line"><span className="lbl"><b>Net sales</b> <span className="rs-dim">· GST is charged on this</span></span><span className="val"><b>{inr(ih.netSales)}</b></span></div>
-        <div className="rs-line"><span className="lbl">GST collected <span className="rs-dim">· held for the government</span></span><span className="val">+ {inr(ih.gst)}</span></div>
-        {taxLines.map((l) => <div key={l.label} className="rs-line sub"><span className="lbl">{l.label} ({l.rate}%)</span><span className="val">{inrP(l.amt)}</span></div>)}
-        <div className="rs-line total"><span className="lbl">Total collected</span><span className="val">{inr(ih.collected)}</span></div>
-
-        <div className="rs-line"><span className="lbl">GST set aside <span className="rs-dim">· never yours to keep</span></span><span className="val neg">− {inr(ih.gst)}</span></div>
-        <div className="rs-line"><span className="lbl"><b>Your money</b> <span className="rs-dim">· before what the day cost you</span></span><span className="val"><b>{inr(ih.yours)}</b></span></div>
+        <div className="rs-line"><span className="lbl">Earned from customers <span className="rs-dim">· with GST</span></span><span className="val">{inr(billed)}</span></div>
+        <div className="rs-line"><span className="lbl">GST <span className="rs-dim">· the government&apos;s, not yours</span></span><span className="val neg">− {inr(ih.gst)}</span></div>
+        <div className="rs-line"><span className="lbl">Discount given</span><span className="val neg">− {inr(ih.discounts)}</span></div>
         <button type="button" className="rs-line rs-line-btn" onClick={onOpenExpenses}
           title="See everything inside this — wages, food, breakages, cancellations">
           <span className="lbl">Expenses <span className="rs-inside">what&apos;s inside <i className="fas fa-arrow-right" aria-hidden /></span></span>
           <span className="val neg">− {inr(ih.expenses)}</span>
         </button>
-        <div className="rs-line grand"><span className="lbl">LEFT IN HAND</span><span className="val">{inr(ih.left)}</span></div>
+        <div className="rs-line grand"><span className="lbl">PROFIT IN HAND</span><span className="val">{inr(ih.left)}</span></div>
       </div>
-      <p className="rs-note">
-        <b>Left in hand</b> is what stayed with you: everything guests paid, minus the {inr(ih.gst)} of GST
-        that belongs to the government, minus {inr(ih.expenses)} the day cost you.
-        {!singleRest && " Pick one restaurant to see its CGST/SGST split."}
-      </p>
+
+      <button type="button" className="rs-morebtn" onClick={() => setFull((f) => !f)} aria-expanded={full}>
+        <i className={`fas fa-chevron-${full ? "up" : "down"}`} aria-hidden /> {full ? "Hide" : "Show"} the full breakdown
+      </button>
+      {full && (
+        <div className="rs-lines rs-more">
+          <div className="rs-line"><span className="lbl">Item sales <span className="rs-dim">· menu prices</span></span><span className="val">{inr(ih.itemSales)}</span></div>
+          <div className="rs-line"><span className="lbl">Discounts given</span><span className="val neg">− {inr(ih.discounts)}</span></div>
+          <div className="rs-line"><span className="lbl"><b>Net sales</b> <span className="rs-dim">· GST is charged on this</span></span><span className="val"><b>{inr(ih.netSales)}</b></span></div>
+          <div className="rs-line"><span className="lbl">GST collected</span><span className="val">+ {inr(ih.gst)}</span></div>
+          {taxLines.map((l) => <div key={l.label} className="rs-line sub"><span className="lbl">{l.label} ({l.rate}%)</span><span className="val">{inrP(l.amt)}</span></div>)}
+          <div className="rs-line total"><span className="lbl">Total collected <span className="rs-dim">· what guests actually paid</span></span><span className="val">{inr(ih.collected)}</span></div>
+          <p className="rs-note" style={{ marginTop: 10 }}>
+            The discount comes off before the guest pays, so <b>Total collected</b> ({inr(ih.collected)}) is
+            already {inr(ih.discounts)} lower than the bills above. That is why the profit sum starts at
+            {" "}{inr(billed)} — take the discount off {inr(ih.collected)} as well and you would count it twice.
+            {!singleRest && " Pick one restaurant to see its CGST/SGST split."}
+          </p>
+        </div>
+      )}
       <InHandGaps ih={ih} />
     </Panel>
   );
@@ -1283,8 +1308,8 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
               for. Only when the ladder computed; a restaurant whose payload failed still
               gets the old band exactly as before. */}
           {ih && (
-            <Stat label="Left in hand" tone="good" icon="fa-wallet" big value={inr(ih.left)}
-              sub={`after GST and ${inr(ih.expenses)} of costs`}
+            <Stat label="Profit in hand" tone="good" icon="fa-wallet" big value={inr(ih.left)}
+              sub={`after GST, discount and ${inr(ih.expenses)} of costs`}
               onClick={onOpenExpenses} title="See everything inside the costs" />
           )}
           <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big={!ih} value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} />
