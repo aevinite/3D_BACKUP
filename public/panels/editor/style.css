@@ -267,6 +267,12 @@ body.nav-compact .tab {
   padding: 10px 12px; border-radius: 10px; cursor: pointer;
   border: 1px solid transparent;
 }
+/* The author `display:flex` above BEATS the browser's own [hidden]{display:none}, so a row
+   hidden with el.hidden = true stayed on screen. applyHierarchyView() hides sidebar rows
+   exactly that way (the Users / Access settings rows), which means a real manager kept
+   SEEING rows they don't have — shown, then refused. Same trap the .toast[hidden] and
+   .tab-badge[hidden] rules already guard against. */
+.list-item[hidden] { display: none; }
 .list-item:hover { background: var(--panel); }
 .list-item.active { background: var(--panel-2); border-color: var(--gold); }
 .list-item .thumb {

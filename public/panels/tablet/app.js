@@ -2693,7 +2693,12 @@ const dishPrice = (d) => Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
 const addingDishKeys = new Set();
 const pendingAddQty = new Map(); // key -> extra qty tapped while an add was in flight (coalesced, never dropped)
 async function addDishToOrder(orderId, payload) {
-  const key = orderId + "|" + (payload && (payload.dishId || payload.id));
+  // The key includes the typed PRICE for open-price dishes. Coalescing replays the FIRST
+  // tap's payload with the summed qty, so two cans added at ₹20 then ₹50 inside one
+  // round-trip both rang up at ₹20 — the exact case ("prices can differ between two cans")
+  // the feature exists for. A different amount ⇒ a different key ⇒ its own add.
+  const key = orderId + "|" + (payload && (payload.dishId || payload.id))
+    + (payload && payload.price != null ? "|@" + payload.price : "");
   const tapQty = Math.max(1, Math.round(Number(payload && payload.qty) || 1));
   // While an add for THIS dish is in flight, don't DROP repeat taps (add mode has no visible
   // cart, so fast-tapping the same dish 3× used to land only 1 — audit 2026-07-08 round2).
@@ -2889,13 +2894,29 @@ function removeOneDish(id) {
   line.qty -= 1;
   if (line.qty <= 0) state.cart.splice(idx, 1);
 }
+// OPEN-PRICE dish (as-per-MRP / market price): ask the waiter for the price first, then carry
+// it on the line. Each tap is its own line (prices can differ between two cans), and the
+// open_price flag is what makes the server trust this typed price for this dish only.
+// ONE place, because EVERY way of adding the dish has to come through here — the tile's ✎
+// went straight to the options popup instead, which has no groups to pick for these dishes and
+// pushed a ₹0 line with no open_price marker, so the server refused the whole order.
+async function addOpenPriceDish(d) {
+  const p = await pricePrompt(d.title);
+  if (p == null) return;                       // cancelled — add nothing
+  if (state.addToOrderId) { addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1, price: p }); return; }
+  state.cart.push({ id: d.id, title: d.title, price: p, qty: 1, open_price: true });
+  updateDishBadges(); updateOrderCart(); updateViewPill();
+}
+
 function bindDishButtons() {
   // The small ✎ on each tile → the quantity/allergy popup (owner 2026-07-05). Its own
   // handler, and it stops the tile's quick-add from also firing.
-  document.querySelectorAll("[data-dishedit]").forEach((el) => (el.onclick = (e) => {
+  document.querySelectorAll("[data-dishedit]").forEach((el) => (el.onclick = async (e) => {
     e.preventDefault(); e.stopPropagation();
     const d = state.data.dishes.find((x) => x.id === el.dataset.dishedit);
-    if (d) renderDishOptions(d, null);
+    if (!d) return;
+    if (d.open_price) { await addOpenPriceDish(d); return; } // ask the price, same as a tap
+    renderDishOptions(d, null);
   }));
   document.querySelectorAll("[data-dish]").forEach((b) => (b.onclick = async (e) => {
     if (e.target.closest && e.target.closest("[data-dishedit]")) return; // ✎ handled above
@@ -2909,17 +2930,8 @@ function bindDishButtons() {
       updateDishBadges(); updateOrderCart(); updateViewPill();
       return;
     }
-    // OPEN-PRICE dish (as-per-MRP / market price): ask the waiter for the price first, then
-    // carry it on the line. Each tap is its own line (prices can differ between two cans), and
-    // the flag makes the server trust this typed price for this dish only.
-    if (d.open_price) {
-      const p = await pricePrompt(d.title);
-      if (p == null) return;                     // cancelled — add nothing
-      if (state.addToOrderId) { addDishToOrder(state.addToOrderId, { dishId: d.id, qty: 1, price: p }); return; }
-      state.cart.push({ id: d.id, title: d.title, price: p, qty: 1, open_price: true });
-      updateDishBadges(); updateOrderCart(); updateViewPill();
-      return;
-    }
+    // OPEN-PRICE dish (as-per-MRP / market price) — ask for the price, then add.
+    if (d.open_price) { await addOpenPriceDish(d); return; }
     // A sized/extra dish can't be quick-added blindly — open the popup to choose.
     if (Array.isArray(d.options) && d.options.length) { renderDishOptions(d, null); return; }
     // ADD-TO-EXISTING-ORDER mode: a plain dish is added straight away (no cart).

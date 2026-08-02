@@ -348,6 +348,8 @@ const editErrMsg = (reason?: string) =>
   : reason === "sold_out" ? "That dish is sold out — can't add it."
   : reason === "unknown_item" ? "That dish isn't on the menu."
   : reason === "empty_order" ? "Nothing to add."
+  // mig 215: an open-price dish reached the server with no price typed on the line.
+  : reason === "price_required" ? "That dish needs a price typed in before it can be added."
   // An open-price (as-per-MRP) dish carries no menu price, so the pricer refuses a line with
   // none. Without this the raw token "price_required" reached the staff toast.
   : reason === "price_required" ? "Type a price for that dish first — it's priced as-per-MRP."
@@ -1689,6 +1691,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         p_confirm_duplicate: body?.confirmDuplicate === true,
       });
       if (error) throw new Error(error.message);
+      // A REFUSAL (sold_out / unknown_item / price_required …) fell through as a SUCCESS with
+      // no order_id: the manager saw "Order sent to the kitchen" and nothing was placed — a tap
+      // that vanished in silence. Surface it as a real error so the refusal is readable.
+      if (data && (data as { ok?: boolean }).ok === false) {
+        return err(editErrMsg((data as { reason?: string }).reason), 400);
+      }
       // A manager placed this, so it's already confirmed — skip the kitchen "accept" step
       // and push it straight onto the pass as "preparing" (same as the tablet).
       const placedId = (data as any)?.order_id;
