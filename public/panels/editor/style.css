@@ -3097,10 +3097,12 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 }
 
 /* The seat badge, top-right, the way he drew it: a chair then the number, quiet grey so it never
-   competes with the table number. Inline SVG because the panels' Font Awesome has no chair glyph —
-   the old <i class="fas fa-chair"> rendered as NOTHING and the corner showed a bare number. */
-.ft-chair { width: clamp(9px, 8.5cqw, 14px); height: clamp(9px, 8.5cqw, 14px);
-  fill: currentColor; opacity: .8; flex: none; }
+   competes with the table number. The chair is Font Awesome's solid fa-chair (owner 2026-08-03,
+   picked over the old hand-drawn outline). An earlier note here said this panel's FA had no chair
+   glyph — it does: /panels/vendor/fa/webfonts/fa-solid-900 maps U+F6C0, checked in its cmap and
+   seen rendering on the floor. Sized by font-size, not width/height, because it is a glyph now. */
+.ft-chair { font-size: clamp(9px, 8.5cqw, 14px); line-height: 1;
+  color: currentColor; opacity: .8; flex: none; }
 .ft-seats { display: inline-flex; align-items: center; gap: clamp(2px, 2cqw, 4px);
   font-size: clamp(9px, 8.5cqw, 13px); font-weight: 800; color: var(--muted);
   font-variant-numeric: tabular-nums; }
