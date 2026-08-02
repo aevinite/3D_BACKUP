@@ -12,7 +12,7 @@
 //      nightly prune (lfh_prune_logs, migration 152). It only ever deletes activity-log
 //      rows (staff_actions) — never bills or customer records.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ACT_LABEL, panelChipStyle, timeAgo, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { ACT_LABEL, panelChipStyle, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { useToast } from "@/components/admin/toast";
@@ -21,6 +21,14 @@ import { adminFetch } from "@/lib/adminFetch";
 import { SkelList } from "@/components/admin/Skeleton";
 
 type Restaurant = { id: string; name: string };
+// One row of the Removals record (deletion_audit, mig 251) — what was taken out and why.
+type Removal = {
+  id: number; at: string; kind: string; reason_code: string | null; reason_note: string | null;
+  actor: string | null; actor_role: string | null; table_number: string | null;
+  bill_no: number | null; invoice_no: string | null; kot_no: number | null;
+  item_title: string | null; qty: number | null; amount: string | number | null;
+  restaurant_id: string | null; restaurant_name: string | null;
+};
 type Member = {
   id: string; name: string | null; phone: string | null; role: string;
   approved: boolean; removed: boolean; joined_at: string; restaurant_name?: string | null;
@@ -37,9 +45,28 @@ const CLEANUP_OPTS = [
   { days: 7, label: "Keep 7 days" },
 ];
 
+// The removal kinds and one-tap reasons — same wording as the manager panel's Removals
+// screen (public/panels/editor/app.js AUDIT_KIND / REMOVAL_REASONS), so the two never
+// describe the same row differently.
+const REMOVAL_KIND: Record<string, [string, string]> = {
+  order_cancelled: ["🎫", "KOT cancelled"],
+  order_deleted: ["🧾", "Bill deleted"],
+  dish_removed: ["🍽", "Dish removed from an order"],
+  menu_item_deleted: ["📕", "Menu item deleted"],
+  invoice_voided: ["↩️", "Invoice voided (reopened)"],
+};
+const REMOVAL_REASON: Record<string, string> = {
+  mistake: "By mistake",
+  guest_changed: "Guest changed their mind",
+  wrong_table: "Wrong table",
+  sold_out: "Not available / sold out",
+  kitchen_error: "Kitchen error",
+  other: "Other reason",
+};
+
 export default function AdminLogs() {
   const toast = useToast();
-  const [tab, setTab] = useState<"ops" | "cust">("ops");
+  const [tab, setTab] = useState<"aud" | "ops" | "cust">("ops");
   // "" = All restaurants; otherwise scope both tabs + the cleanup to this restaurant.
   const [rid, setRid] = useState("");
   // Everything-Log filters (Operations tab): severity + free-text search. Seed the severity
@@ -59,10 +86,12 @@ export default function AdminLogs() {
   const [restaurants, setRestaurants] = useState<Restaurant[]>([]);
   const [ops, setOps] = useState<Action[] | null>(null);
   const [cust, setCust] = useState<CustData | null>(null);
+  const [aud, setAud] = useState<Removal[] | null>(null);
   // Error flags so a failed fetch shows a retry instead of an eternal "Loading…"
   // (bug #7, 2026-07-06 — the catch used to swallow errors and never clear the sentinel).
   const [opsErr, setOpsErr] = useState(false);
   const [custErr, setCustErr] = useState(false);
+  const [audErr, setAudErr] = useState(false);
   // Log-volume count for the "getting full" banner (scoped to the current restaurant).
   const [count, setCount] = useState<number | null>(null);
   const [threshold, setThreshold] = useState(50000);
@@ -101,6 +130,11 @@ export default function AdminLogs() {
     const qs = rid ? `?restaurant_id=${rid}` : "";
     try { const j = await (await fetch(`/api/admin/custlog${qs}`, { cache: "no-store" })).json(); if (j.error) setCustErr(true); else { setCust(j); setCustErr(false); } } catch { setCustErr(true); }
   }, [rid]);
+  // The Removals record (deletion_audit) — every restaurant's audit rows, searchable.
+  const loadAud = useCallback(async () => {
+    const qs = (rid ? `&restaurant_id=${rid}` : "") + (qDebounced.trim() ? `&q=${encodeURIComponent(qDebounced.trim())}` : "");
+    try { const j = await (await fetch(`/api/admin/audit?limit=200${qs}`, { cache: "no-store" })).json(); if (j.error) setAudErr(true); else { setAud(j.removals || []); setAudErr(false); } } catch { setAudErr(true); }
+  }, [rid, qDebounced]);
   // Cheap HEAD count for the banner — no rows pulled. Refreshes when the restaurant changes.
   const loadCount = useCallback(async () => {
     const qs = rid ? `?restaurant_id=${rid}` : "";
@@ -112,9 +146,9 @@ export default function AdminLogs() {
   // search changes. No setTimeout here — the debounce lives in qDebounced above, so a
   // severity/restaurant click fetches immediately (instant filter, no laggy "both blue").
   useEffect(() => {
-    setOps(null); setCust(null);
-    if (tab === "ops") loadOps(); else loadCust();
-  }, [tab, loadOps, loadCust]);
+    setOps(null); setCust(null); setAud(null);
+    if (tab === "ops") loadOps(); else if (tab === "aud") loadAud(); else loadCust();
+  }, [tab, loadOps, loadCust, loadAud]);
   useEffect(() => { loadCount(); }, [loadCount]);
 
   const runCleanup = async () => {
@@ -166,8 +200,8 @@ export default function AdminLogs() {
 
   return (
     <>
-      <h1 className="adm-page-h">Logs</h1>
-      <p className="adm-page-sub">Everything that happens — staff actions and guests. (Change how long logs are kept in Settings.)</p>
+      <h1 className="adm-page-h">Audit &amp; logs</h1>
+      <p className="adm-page-sub">Everything, for every restaurant — what was removed and why (Audit), every staff action including errors (Operations), and the guests (Customers). (Change how long logs are kept in Settings.)</p>
 
       {/* Restaurant filter — scopes BOTH tabs to one restaurant. */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
@@ -200,6 +234,7 @@ export default function AdminLogs() {
 
       <div className="adm-tabs">
         <button className={tab === "ops" ? "active" : ""} onClick={() => setTab("ops")}>Operations</button>
+        <button className={tab === "aud" ? "active" : ""} onClick={() => setTab("aud")}>Audit · removals</button>
         <button className={tab === "cust" ? "active" : ""} onClick={() => setTab("cust")}>Customers</button>
       </div>
       {/* Severity filter + search — Operations tab only (the Everything Log view). */}
@@ -221,6 +256,18 @@ export default function AdminLogs() {
           <button className="adm-btn" onClick={() => loadOps()}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
         </div>
       )}
+      {tab === "aud" && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search a dish, person or reason…"
+            aria-label="Search the removals record"
+            style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}
+          />
+          <button className="adm-btn" onClick={() => loadAud()}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
+        </div>
+      )}
       {tab === "cust" && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
           <button className="adm-btn" onClick={() => loadCust()}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
@@ -229,6 +276,8 @@ export default function AdminLogs() {
 
       {tab === "ops"
         ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} onResolve={markResolved} />
+        : tab === "aud"
+        ? <AudTable rows={aud} err={audErr} onRetry={loadAud} scopedName={scopedName || null} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
 
       {/* Cleanup confirm — a shared modal (phone Back + Escape + focus-trap via useAdminModal). */}
@@ -342,6 +391,47 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
     </div>
     {detailRow && <LogDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
     </>
+  );
+}
+
+// The Removals record — every restaurant's deletion_audit rows, with the restaurant named
+// on each row so "All restaurants" is never ambiguous.
+function AudTable({ rows, err, onRetry, scopedName }: { rows: Removal[] | null; err: boolean; onRetry: () => void; scopedName: string | null }) {
+  const cols = "1.4fr 1fr auto";
+  if (err) return <div className="adm-empty">Couldn&rsquo;t load the removals record. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
+  if (rows === null) return <SkelList rows={6} label="Loading removals" />;
+  if (rows.length === 0) return <div className="adm-empty">Nothing has been removed {scopedName ? `at ${scopedName}` : "yet"} — this list fills itself as it happens.</div>;
+  return (
+    <div className="adm-logwrap">
+      <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>What was removed</div><div>Why · by whom</div><div>When</div></div>
+      {rows.map((r) => {
+        const [ico, label] = REMOVAL_KIND[r.kind] || ["•", r.kind];
+        const bits = [
+          r.table_number ? `Table ${r.table_number}` : "",
+          r.kot_no != null ? `KOT #${r.kot_no}` : "",
+          r.bill_no != null ? `Bill #${r.bill_no}` : "",
+          r.invoice_no ? `Invoice ${r.invoice_no}` : "",
+          r.item_title ? `${r.item_title}${(r.qty || 0) > 1 ? ` ×${r.qty}` : ""}` : "",
+          r.amount != null ? inr(parseFloat(String(r.amount)) || 0) : "",
+        ].filter(Boolean).join(" · ");
+        const reason = [r.reason_code ? REMOVAL_REASON[r.reason_code] || r.reason_code : "", r.reason_note || ""].filter(Boolean).join(" — ") || "no reason recorded";
+        return (
+          <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: cols }}>
+            <div style={{ minWidth: 0 }}>
+              <span aria-hidden="true" style={{ marginRight: 6 }}>{ico}</span>
+              <b>{label}</b>
+              {bits ? <span className="adm-muted"> · {bits}</span> : null}
+              {r.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{r.restaurant_name}</span> : null}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <span style={{ fontSize: 13 }}>{reason}</span>
+              <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1 }}>{r.actor || "—"}{r.actor_role ? ` · ${r.actor_role}` : ""}</span>
+            </div>
+            <div className="adm-when">{timeAgo(r.at)}</div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 

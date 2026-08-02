@@ -15,7 +15,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, inScope } from "@/lib/ownerScope";
-import { entitledSubset } from "@/lib/ownerEntitlements";
+import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 
 export const dynamic = "force-dynamic";
@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
   // page would still answer to anyone who typed the URL. A real owner loses restaurants whose
   // "logs" entitlement the admin switched off; the admin's own session is never gated.
   if (!scope.all && !scope.admin) {
-    const allowed = await entitledSubset(scope.ids, "logs");
+    const allowed = await logViewSubset(await entitledSubset(scope.ids, "logs"), "activity");
     if (!allowed.length)
       return NextResponse.json({ error: "The activity log isn't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
     scope = { ...scope, ids: allowed };

@@ -136,7 +136,11 @@ const state = {
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
   billSearch: "", billSearchType: "date", billSort: "new", // Bills → Today/Previous search + sort (default to Date picker)
   billHistRows: [], // server-side bills-history search results (bills older than the local 200-row window)
-  logView: lsGet("lfh_editor_logview", "customers"),  // Log left-bar: customers | operations — remembered across refresh
+  // Audit & logs left-bar: audit | operations | customers — remembered across refresh.
+  // Values stored by older builds are migrated: the retired top-toggle wrote "log" (which
+  // the renderer never understood — it fell through to the customer log); everything else
+  // unknown lands on "audit", the view people come here for ("who took that off, and why?").
+  logView: ((v) => (v === "operations" || v === "customers" || v === "audit") ? v : v === "log" ? "operations" : "audit")(lsGet("lfh_editor_logview", "audit")),
   users: { members: [], customers: [], blocklist: [] }, // Log tab data
   // "User setting" card (Settings tab): the manager's own team (tablet/kitchen/manager
   // logins), reusing the SAME /api/owner/staff the owner's "Staff & powers" page uses —
@@ -766,10 +770,13 @@ function renderList() {
     return;
   }
   if (state.tab === "log") {
-    // The Log tab's two views live in the LEFT SIDEBAR (like Orders) — not a top
-    // toggle. Clicking a row switches the main panel between the guest log and
-    // the staff operation log.
-    const v = state.logView || "customers";
+    // The Audit & logs tab's THREE views live in the LEFT SIDEBAR (like Orders) — not a
+    // top toggle (the old top toggle and this sidebar fought over one variable, and its
+    // "Activity log" button actually showed the customer log). A view the admin switched
+    // off (Access → Manager's menu → Audit & logs) has NO row here — and its endpoint
+    // refuses too, so hiding is never the only guard.
+    const parts = logPartsAllowed();
+    const v = allowedLogView();
     const mk = (key, icon, label, sub) => {
       const li = el(`<li class="list-item${v === key ? " active" : ""}" data-logview-side="${key}">
         <div class="thumb">${icon}</div>
@@ -778,14 +785,15 @@ function renderList() {
       li.onclick = () => {
         state.logView = key;
         lsSet("lfh_editor_logview", key); // remember across refresh
-        if (key === "operations") loadOplog(); // fetch (it re-renders when ready)
+        if (key === "operations" && !state.oplog) loadOplog(); // fetch (it re-renders when ready)
         renderList();   // re-highlight the chosen row
         renderEditor(); // redraw the main panel on the right
       };
       return li;
     };
-    ul.appendChild(mk("customers", '<i class="fas fa-users"></i>', "Customer log", "guests & visits"));
-    ul.appendChild(mk("operations", '<i class="fas fa-list-check"></i>', "Operation log", "staff actions"));
+    if (parts.removals) ul.appendChild(mk("audit", "🗑", "Removals", "what was removed & why"));
+    if (parts.activity) ul.appendChild(mk("operations", '<i class="fas fa-list-check"></i>', "Activity log", "staff actions"));
+    if (parts.customers) ul.appendChild(mk("customers", '<i class="fas fa-users"></i>', "Customer log", "guests & visits"));
     return;
   }
   const q = fold(state.search); // accent-insensitive
@@ -4742,17 +4750,23 @@ function renderEditor() {
     return;
   }
   if (state.tab === "log") {
-    // Removals is the DEFAULT view: it is the one people come here to answer ("who took that off,
-    // and why?"). The activity log is the second view — everything that happened, not just removals.
-    const view = state.logView === "log" ? "log" : "audit";
-    ed.innerHTML = `<div class="au-switch">`
-      + `<button class="btn ${view === "audit" ? "primary" : ""}" data-logview="audit">🗑 Removals</button>`
-      + `<button class="btn ${view === "log" ? "primary" : ""}" data-logview="log">📜 Activity log</button></div>`
-      + (view === "audit" ? auditHtml() : logHtml());
-    ed.querySelectorAll("[data-logview]").forEach((b) => (b.onclick = () => {
-      state.logView = b.dataset.logview; renderEditor();
-    }));
-    if (view === "audit") { if (!state.audit) loadAudit(); bindAudit(); } else bindLog();
+    // Audit & logs — three views, driven ENTIRELY by the left sidebar (renderList). The old
+    // top toggle is gone: it shared state.logView with the sidebar using different values,
+    // so its "Activity log" button actually rendered the customer log. A view the admin
+    // switched off falls over to the first one still allowed; with all three off the tab
+    // says so honestly instead of rendering an empty shell.
+    const view = allowedLogView();
+    if (!view) { ed.innerHTML = `<div class="empty">None of the Audit & logs views are enabled for managers here — ask the restaurant's admin.</div>`; return; }
+    if (view !== state.logView) { state.logView = view; renderList(); }
+    if (view === "audit") {
+      ed.innerHTML = auditHtml();
+      if (!state.audit) loadAudit();
+      bindAudit();
+    } else {
+      ed.innerHTML = logHtml(); // renders the customer log, or the operation log when view === "operations"
+      bindLog();
+      if (view === "operations" && !state.oplog) loadOplog();
+    }
     return;
   }
   if (state.tab === "features") {
@@ -5865,6 +5879,21 @@ async function loadAudit() {
   try { state.audit = await api("GET", "/audit?limit=200"); }
   catch (e) { state.audit = { error: e.message }; }
   if (state.tab === "log" && state.logView === "audit") renderEditor();
+}
+// Which VIEWS of the Audit & logs tab this viewer gets (whoami.logParts — the Access
+// screen's sub-options). Before whoami resolves, assume everything: the endpoints refuse
+// a forbidden read anyway, and whoami's .then repaints with the real answer.
+function logPartsAllowed() {
+  const p = (XRAY_WHO && XRAY_WHO.logParts) || {};
+  return { removals: p.removals !== false, activity: p.activity !== false, customers: p.customers !== false };
+}
+// The view to show: the remembered one when it's still allowed, else the first allowed
+// (in sidebar order), else null (all three switched off).
+function allowedLogView() {
+  const parts = logPartsAllowed();
+  const okOf = { audit: parts.removals, operations: parts.activity, customers: parts.customers };
+  if (okOf[state.logView]) return state.logView;
+  return ["audit", "operations", "customers"].find((v) => okOf[v]) || null;
 }
 function auditHtml() {
   const rows = Array.isArray(state.audit) ? state.audit : null;
@@ -10136,7 +10165,7 @@ function logHtml() {
   (u.orders || []).forEach((o) => { if (o.member_id) orderCount[o.member_id] = (orderCount[o.member_id] || 0) + 1; });
   (u.calls || []).forEach((c) => { if (c.member_id) callCount[c.member_id] = (callCount[c.member_id] || 0) + 1; });
 
-  const head = `<div class="ed-head"><h2>Log <span class="sub">· who did what</span></h2><div class="ed-head-actions">${retentionControl("custlog_retention_days")}<button class="btn" id="refreshLog">↻ Refresh</button></div></div>
+  const head = `<div class="ed-head"><h2>Customer log <span class="sub">· guests & visits</span></h2><div class="ed-head-actions">${retentionControl("custlog_retention_days")}<button class="btn" id="refreshLog">↻ Refresh</button></div></div>
     <div class="ord-note">Every guest gets an automatic ID. <b>Role</b> shows who ran the table (👑 Head) vs a joiner (🤝 Partner); <b>Did</b> shows whether they ordered or just called a waiter. Use <b>Exit</b> to remove someone, or <b>Block</b> to stop a misbehaving guest (e.g. someone who calls a waiter but isn't here). <b>Click a row</b> for full details. <span class="lg-muted">This timer clears old guest-activity records only — your bills are kept.</span></div>`;
   const rows = members.length ? members.map((m) => {
     const table = m.session ? m.session.table_number : "—"; // which table they're at
@@ -10195,7 +10224,7 @@ function pinPill(r) {
 // panel did what, where, and when). Fed by /oplog (the staff_actions table).
 function oplogHtml() {
   const rows = state.oplog || [];
-  const head = `<div class="ed-head"><h2>Operation log <span class="sub">· staff actions</span></h2><div class="ed-head-actions">${retentionControl("oplog_retention_days")}<button class="btn" id="staffWatch">🔍 Staff watch</button><button class="btn" id="refreshOplog">↻ Refresh</button></div></div>
+  const head = `<div class="ed-head"><h2>Activity log <span class="sub">· staff actions</span></h2><div class="ed-head-actions">${retentionControl("oplog_retention_days")}<button class="btn" id="staffWatch">🔍 Staff watch</button><button class="btn" id="refreshOplog">↻ Refresh</button></div></div>
     <div class="ord-note">Every staff action across the panels — which panel <b>and which device</b> did it, where, and when. Each device gets an automatic ID (shown as <b>#id</b>) until real staff login lands. <b>Click any row</b> for its full date, time and details.</div>`;
   if (!rows.length) return head + `<div class="sx-empty">No staff actions logged yet — accept/serve an order, open/close a table, etc.</div>`;
   const ACT = OP_ACTION_LABELS;
@@ -10247,8 +10276,7 @@ function bindLog() {
   // Operation log: block / unblock a staff DEVICE (tablet / kitchen screen).
   ed.querySelectorAll("[data-block-dev]").forEach((b) => (b.onclick = () => blockDevice(b.dataset.blockDev)));
   ed.querySelectorAll("[data-unblock-dev]").forEach((b) => (b.onclick = () => unblockLog(b.dataset.unblockDev)));
-  // Switch between the Customer log and the Operation log.
-  ed.querySelectorAll("[data-logview]").forEach((b) => (b.onclick = () => { state.logView = b.dataset.logview; if (state.logView === "operations") loadOplog(); else renderEditor(); }));
+  // (The old top Customer/Operation toggle is gone — the left sidebar is the one switch.)
   const ro = document.getElementById("refreshOplog"); if (ro) ro.onclick = loadOplog;
   const sw = document.getElementById("staffWatch"); if (sw) sw.onclick = openStaffRisk;
   // "Keep logs for …" dropdown (both logs) → save the new retention.
@@ -10632,10 +10660,15 @@ function setTab(tab) {
     updateTablesBadge();
   }
   if (tab === "log") {
-    loadUsers(); // customer-log data
-    // If we're restoring straight onto the Operation log (e.g. a refresh stayed
+    // Fetch only the views this manager is allowed (whoami.logParts) — a forbidden read
+    // would just 403. The customer-log data also powers the operation log's Block/Unblock
+    // column, so it loads whenever it's allowed, not only on its own view. The removals
+    // view loads lazily in renderEditor (existing pattern).
+    const parts = logPartsAllowed();
+    if (parts.customers) loadUsers(); // customer-log data
+    // If we're restoring straight onto the Activity log (e.g. a refresh stayed
     // there), fetch its data too — otherwise the table would be empty.
-    if (state.logView === "operations") loadOplog();
+    if (state.logView === "operations" && parts.activity) loadOplog();
   }
   if (tab === "platform") loadPlatform();
 }
@@ -12180,7 +12213,7 @@ const XRAY_TABS = [
   // 403-ing. view_logs is ABSENT-means-ON (whoami resolves effectivePowers.view_logs=true by
   // default), so this is non-breaking — the tab only disappears once the owner explicitly
   // switches it off; admin/owner keep it (tinted).
-  { tab: "log", flag: "view_logs", label: "Activity log" },
+  { tab: "log", flag: "view_logs", label: "Audit & logs" },
   // Bills LEFT this list (owner, 2026-08-02, same day it arrived): the Bill menu is now FIXED —
   // "four will be the fixed one: table, platform, bill and setting" — so every manager always
   // has the tab and there is no view_bills power any more (the model answers a retired flag
@@ -12845,6 +12878,9 @@ api("GET", "/whoami").then((w) => { XRAY_WHO = w;
   // 2026-07-24: "tag not showing on the tile until I open the table"). tagForTable etc.
   // depend on XRAY_WHO, so a single repaint here makes them correct on load.
   try { if (typeof renderEditor === "function") renderEditor(); } catch (e) {}
+  // The Audit & logs sidebar rows depend on whoami.logParts — repaint them too, or a
+  // switched-off view's row would sit there until the next tab change.
+  try { if (state.tab === "log") renderList(); } catch (e) {}
 }).catch(() => {});
 
 // Then load all the data, refresh the current view in place, and start live polling.

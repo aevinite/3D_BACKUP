@@ -82,6 +82,15 @@ const SYNONYMS: Record<string, string> = {
   take_orders: "order take new order kot",
   table_tags: "table type vip family guest tag mark",
   logs: "log activity history audit trail",
+  // The Audit & logs sub-views (access_config.view_logs.<side>_opts) — words people type
+  // that aren't in the row labels. Keyed by NODE ID (that's what the index reads).
+  d_mgr_log_removals: "audit removal deleted cancelled kot removed why reason trail",
+  d_mgr_log_activity: "log activity history operations staff actions trail",
+  d_mgr_log_customers: "customer guest log blocklist block visits",
+  d_own_log_removals: "audit removal deleted cancelled bill removed why reason trail",
+  d_own_log_activity: "log activity history operations staff actions trail",
+  mgr_tab_log: "audit logs removals activity",
+  own_audit: "audit logs removals activity",
 };
 
 type Entry = {
