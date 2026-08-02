@@ -82,8 +82,12 @@ export async function panelAdminRid(role: Role, rid: string | undefined): Promis
 // admin-only and all ignored server-side for a real staff session:
 //   rid   which restaurant this tab is looking at
 //   view  "real" = render as the role really gets it, not the admin X-ray
-//   as    WHICH PERSON to look through (owner, 2026-08-02 — the profile's "Visit their
-//         panel"); implies the real view, since being someone means seeing their panel
+//   as    WHICH PERSON to mark against (owner, 2026-08-02 — the profile's "Visit their
+//         panel"). It is INDEPENDENT of `view`: naming a person changes whose permissions
+//         the cyan marks describe, it does NOT strip the panel. The first cut chained the
+//         two (`view === "real" || as`) and so a profile visit opened the limited panel
+//         with nothing marked — the owner corrected that the same day: from the console
+//         the admin always sees everything, and only the ribbon's toggle strips it.
 // A malformed/unknown `as` is simply dropped by the server (lib/viewAsPerson) and the
 // tab shows the ordinary admin view — the panel only ever names a person the server
 // confirmed, so the ribbon can never claim a view it isn't showing.
@@ -94,7 +98,7 @@ export function panelIframeSrc(
   let src = `${base}?rid=${encodeURIComponent(adminRid)}`;
   const as = pins?.as;
   if (as && /^[0-9a-f-]{36}$/i.test(as)) src += `&as=${encodeURIComponent(as)}`;
-  if (pins?.view === "real" || as) src += "&view=real";
+  if (pins?.view === "real") src += "&view=real";
   return src;
 }
 

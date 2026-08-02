@@ -61,10 +61,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // ACTUAL-VIEW mode (owner, 2026-07-28): ?view=real on an admin-view tab is answered
       // as the real kitchen screen; simulated keeps the client's ribbon (the way back).
       // ?as=<staff id> (owner, 2026-08-02) names WHOSE screen this is — opened from that
-      // person's profile. The KDS has no per-person settings, so the pin only turns on
-      // the real view and puts their name on the ribbon; nothing else differs.
+      // person's profile. The KDS has no per-person settings, so the pin only puts their
+      // name on the ribbon; nothing else differs. It does NOT flip to the real view (owner,
+      // same day): the toggle is the only thing that does that, on every panel alike — and
+      // here the two views are identical anyway, which the ribbon says out loud rather than
+      // showing an empty "0 things off" list.
       const asPerson = await viewAsPerson(req, rid, g, "kitchen");
-      const simulate = !g.user && (!!asPerson || new URL(req.url).searchParams.get("view") === "real");
+      const simulate = !g.user && new URL(req.url).searchParams.get("view") === "real";
       const actor = g.user ? g.user.role : simulate ? "kitchen" : "admin"; // no staff cookie = admin super-user
       return ok({ actor, higherView: !g.user && !simulate, simulated: simulate, asName: personLabel(asPerson) }); // admin-only, like the tablet's
     }

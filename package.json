@@ -39,7 +39,8 @@
     "db:maintain": "node scripts/db-maintain.mjs",
     "demo:reset": "node scripts/reset-demo-history.mjs",
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
-    "verify:merged-floor": "node scripts/verify-merged-floor.mjs"
+    "verify:merged-floor": "node scripts/verify-merged-floor.mjs",
+    "verify:xray": "node scripts/verify-xray-marks.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
