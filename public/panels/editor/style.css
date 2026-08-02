@@ -2466,20 +2466,75 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    category's dishes. Nothing swaps sides, so staff who know Take order already know this. */
 .to-quick .to-cart { flex: 0 0 380px; }
 .to-quick .qo-sub { font-size: 13px; font-weight: 500; color: var(--muted); font-family: var(--body, inherit); }
-/* the breadcrumb bar that replaces the scroll-spy chip strip */
+/* the breadcrumb bar that replaces the scroll-spy chip strip. It also states the SIZE of
+   what you're looking at (27 categories · 312 dishes) — owner 2026-08-03. */
 .qo-drill { flex: 0 0 auto; box-sizing: border-box; min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
 .qo-back { background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 6px 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
 .qo-back:hover { border-color: var(--gold); color: var(--gold); }
-.qo-crumb { font-size: 14px; font-weight: 800; color: var(--gold); }
-/* level 1 — the category cards */
+.qo-crumb { font-size: 14px; font-weight: 800; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qo-count { margin-left: auto; flex: none; font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums;
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
+
+/* ── EVERYTHING ON ONE SCREEN (owner, 2026-08-03) ──────────────────────────────────
+   "every category… it should show in one panel, one screen, you don't have to scroll
+   down because it's quick… more than twenty five, still it should show in one panel."
+   So quick mode has NO fixed tile size. fitBrowse() in app.js measures the browse block,
+   works out the columns × rows that hold every tile, and publishes the answer as custom
+   properties on the grid: --qo-h (row height), --qo-name, --qo-sub, --qo-badge, --qo-pad,
+   --qo-img, --qo-edit. Every rule below reads those, so 8 categories and 60 categories
+   are the SAME stylesheet at two sizes — nothing here hardcodes a tile.
+   `.qo-noscroll` is set on the list only while it genuinely all fits; when the menu is so
+   long that fitting it would mean unreadable text, the class comes off and the block
+   scrolls again (an honest fallback beats 8px type in a rush). */
+.to-quick .to-list { padding-top: 9px; }
+.to-list.qo-noscroll { overflow: hidden; }
+.qo-grid.qo-fit { align-content: start; margin-bottom: 0; }
+
+/* level 1 — the category cards. Badge LEFT, text beside it: a stacked card needs badge +
+   name + count one under the other, which stops fitting past ~12 categories; side by side
+   stays readable from a 152px-tall tile down to a 46px one. */
 .qo-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-.qo-cat { --qo-c: var(--gold); position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left;
-  background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--qo-c); border-radius: 13px; padding: 15px 16px; cursor: pointer; color: var(--text); min-height: 92px; justify-content: center; }
+.qo-cat { --qo-c: var(--gold); position: relative; display: flex; flex-direction: row; align-items: center; gap: 10px; text-align: left; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--qo-c); border-radius: 13px; padding: 15px 16px; cursor: pointer; color: var(--text); min-height: 92px; justify-content: flex-start; }
 .qo-cat:hover { border-color: var(--gold); border-left-color: var(--qo-c); transform: translateY(-1px); }
-.qo-cat-ic { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px;
+.qo-cat-ic { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px;
   background: color-mix(in srgb, var(--qo-c) 22%, transparent); color: var(--qo-c); font-size: 15px; font-weight: 800; line-height: 1; }
-.qo-cat-n { font-size: 16px; font-weight: 800; }
-.qo-cat-c { font-size: 12px; color: var(--muted); }
+.qo-cat-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+/* the name may take two lines and then stops — a third line would push the count out of a
+   short tile, and the count is half of what the owner asked to see */
+.qo-cat-n { font-size: 16px; font-weight: 800; line-height: 1.14; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.qo-cat-c { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.qo-cat-c b { font-weight: 800; color: color-mix(in srgb, var(--qo-c) 70%, var(--text)); }
+.qo-cat-c i { font-style: normal; }
+
+/* the measured sizes take over the moment fitBrowse() has run */
+.qo-cats.qo-fit .qo-cat { min-height: 0; height: 100%; box-sizing: border-box; padding: var(--qo-vpad, 6px) var(--qo-pad, 14px); gap: calc(var(--qo-pad, 12px) * .72); }
+.qo-cats.qo-fit .qo-cat-ic { width: var(--qo-badge, 30px); height: var(--qo-badge, 30px); border-radius: calc(var(--qo-badge, 30px) * .3); font-size: calc(var(--qo-badge, 30px) * .5); }
+.qo-cats.qo-fit .qo-cat-n { font-size: var(--qo-name, 16px); -webkit-line-clamp: var(--qo-lines, 2); max-height: var(--qo-nameh, none); }
+.qo-cats.qo-fit .qo-cat-c { font-size: var(--qo-sub, 12px); }
+/* the tightest tier: the badge is now stealing the name's room, so the colour bar down the
+   left edge carries the category's identity on its own and the count drops to the bare number */
+.qo-cats.qo-tiny .qo-cat { border-left-width: 5px; }
+.qo-cats.qo-tiny .qo-cat-ic { display: none; }
+/* the count leaves the flow and sits in the corner, so the name keeps the tile's FULL
+   height — that is what buys a two-word category two readable lines in a 40px tile
+   instead of one line shrunk to 9px */
+.qo-cats.qo-tiny .qo-cat-c { position: absolute; top: 1px; right: 5px; opacity: .8; }
+.qo-cats.qo-tiny .qo-cat-c i { display: none; }
+.qo-cats.qo-tiny .qo-cat-n { padding-right: 13px; }
+
+/* level 2 (and search) — the dish tiles, sized by the same measurement */
+.to-grid.qo-fit .to-dish { min-height: 0; height: 100%; box-sizing: border-box; padding: 6px var(--qo-pad, 11px); gap: calc(var(--qo-pad, 10px) * .8); }
+.to-grid.qo-fit .to-dish-img { width: var(--qo-img, 62px); height: var(--qo-img, 62px); }
+.to-grid.qo-fit .to-dish-t { font-size: var(--qo-name, 13.5px); line-height: 1.16; display: -webkit-box; -webkit-line-clamp: var(--qo-lines, 2); -webkit-box-orient: vertical; overflow: hidden; max-height: var(--qo-nameh, none); }
+.to-grid.qo-fit .to-dish-p { font-size: var(--qo-sub, 12.5px); }
+.to-grid.qo-fit .to-dish-n { font-size: var(--qo-sub, 13px); }
+/* the ✎ never shrinks below a finger — it is the one BUTTON on the tile, and a tap that
+   misses it adds a dish instead of opening its allergens, which is the wrong kind of quick */
+.to-grid.qo-fit .to-dish-edit { width: var(--qo-edit, 40px); height: var(--qo-edit, 40px); min-width: 28px; min-height: 28px; border-radius: calc(var(--qo-edit, 40px) * .28); font-size: calc(var(--qo-edit, 40px) * .42); }
+.to-grid.qo-fit .to-dish-side { gap: 3px; }
+/* too narrow for a photo AND a readable name — the name wins */
+.to-grid.qo-noimg .to-dish-img { display: none; }
 /* the just-added line pulses so a tap on the far side of a wide screen still shows */
 @keyframes qoFlash { from { background: rgba(212,175,55,.30); } to { background: transparent; } }
 .qo-flash { animation: qoFlash .7s ease-out 1; border-radius: 9px; }
@@ -2502,10 +2557,40 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .qo-dest-t:hover { border-color: var(--gold); color: var(--gold); }
 .qo-dest-t.busy { border-color: rgba(239,68,68,.55); }
 .qo-dest-t.busy small { color: #f87171; }
+/* the phone-only bar that folds the order away — hidden at every other width */
+.qo-cartbtn { display: none; align-items: center; gap: 5px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted);
+  border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.qo-cartbtn b { color: var(--gold-strong); font-variant-numeric: tabular-nums; }
+.qo-cartbtn:hover { border-color: var(--gold); color: var(--text); }
+
 @media (max-width: 760px) {
-  /* Phone: one scrolling column, same stacking ＋ Take order already uses — the browse
-     block first, the order under it. */
-  .to-quick .to-cart { flex: 1 1 auto; }
+  /* ── ONE SCREEN ON A PHONE TOO (owner, 2026-08-03) ────────────────────────────────
+     Quick mode used to stack the browse block and the order into one long SCROLLING
+     column, which is the opposite of what was asked for: with the list capped so the
+     order stayed reachable, a 22-category menu could only ever be a scroll, and a taller
+     list pushed "Place order" off the bottom. Neither is acceptable, so on a phone the
+     order FOLDS: the menu block takes the whole sheet and the order becomes one bar at
+     the bottom — how many items, the running total, and Place order, all always visible.
+     Tap the "N items ▴" pill and the order slides back up over the menu.
+     Nothing is hidden, only folded: the lines, the ⚠ allergen chips and the kitchen note
+     are all one tap away, and the fit is re-measured both ways so the tiles resize to
+     whatever room is left. */
+  .to-quick { height: 92vh; max-height: 92vh; }
+  .to-quick .to-body { flex-direction: column; overflow: hidden; }
+  .to-quick .to-menu { flex: 1 1 auto; min-height: 0; border-right: none; border-bottom: 1px solid var(--line); }
+  .to-quick .to-list { max-height: none; flex: 1 1 auto; min-height: 0; }
+  .to-quick .to-cart { flex: 0 0 auto; min-width: 0; max-height: 56vh; overflow-y: auto; }
+  .to-quick:not(.qo-open) .to-cart-h,
+  .to-quick:not(.qo-open) .to-lines,
+  .to-quick:not(.qo-open) .to-extras { display: none; }
+  .to-quick .qo-cartbtn { display: inline-flex; }
+  .to-quick .to-foot { gap: 8px; }
+  .to-quick .to-search { margin: 8px 12px 6px; padding: 9px 12px; font-size: 14px; }
+  /* the count pill drops under the crumb rather than squeezing it off a 360px screen */
+  .qo-drill { flex-wrap: wrap; min-height: 0; padding: 5px 12px; gap: 6px; }
+  .qo-count { margin-left: 0; font-size: 11px; padding: 2px 8px; }
+  .qo-back { padding: 4px 10px; font-size: 12px; }
+
   .qo-cats { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
   .qo-dest-parcel { font-size: 24px; padding: 20px 14px; }
 }
