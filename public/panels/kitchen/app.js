@@ -820,37 +820,20 @@ function printKot(order, itemRows, restaurant) {
     const rows = (itemRows && itemRows.length)
       ? itemRows
       : (Array.isArray(order.items) ? order.items : []);
-    const linesHtml = rows.map((r) => {
-      const q = r.qty || 1;
-      const opts = Array.isArray(r.options) ? r.options.map((o) => (typeof o === "string" ? o : (o && o.label) || "")).filter(Boolean).join(", ") : "";
-      const rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
-      const note = r.note ? String(r.note) : "";
-      return `<div class="kl"><span class="q">${q}×</span><span class="n">${esc(r.title || "")}${opts ? ` <i>(${esc(opts)})</i>` : ""}${rem ? ` <i>— no ${esc(rem)}</i>` : ""}${note ? `<br><small>&raquo; ${esc(note)}</small>` : ""}</span></div>`;
-    }).join("");
-    const allerg = Array.isArray(order.allergies) && order.allergies.length ? `<div class="al">⚠ AVOID: ${esc(order.allergies.join(", "))}</div>` : "";
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>KOT ${esc(String(kot))}</title><style>
-      *{margin:0;padding:0;box-sizing:border-box}body{font-family:ui-monospace,monospace;width:280px;padding:8px;color:#000}
-      .h{text-align:center;font-weight:700;font-size:15px;border-bottom:2px dashed #000;padding-bottom:6px;margin-bottom:6px}
-      .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}
-      .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}
-      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}
-      /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS
-         driver chain (2026-07-21). margin:0 kills the browser header/footer junk; NO
-         @page size override (a forced short page is landscape-shaped → CUPS rotates it
-         sideways, and a mismatched size gets bottom-anchored → 20cm blank lead-in);
-         content ≤66mm CENTERED because the 80mm head only prints ~70mm, ~5mm in from
-         the left paper edge — a full-width body loses the right ~8mm of every line.
-         The cutter is driven by the QUEUE (CutMedia=EndOfJob, after the end feed). */
-      @page{margin:0}
-      @media print{body{margin:0 !important;padding:2mm 5mm 4mm !important}
-        .kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
-    </style></head><body>
-      <div class="h">${esc(rname)}<br>KITCHEN TICKET</div>
-      <div class="meta"><span>KOT #${esc(String(kot))}</span><span>${esc(tlab)}</span></div>
-      <div class="meta"><span>${esc(when)}</span></div>
-      ${linesHtml || "<div>(no items)</div>"}
-      ${allerg}
-    </body></html>`;
+    // ONE TICKET, ONE FILE. The kitchen used to carry its own hand-kept copy of this markup,
+    // which is how a ticket could look one way here and another way in the manager panel or in
+    // the admin’s sample (owner, 2026-08-02: “both should be sync”). The paper is described
+    // once, in /panels/billdoc.js; this only decides what goes on it. Nothing looks different.
+    const html = LFH_BILLDOC.kotDocHtml({
+      title: "KOT " + kot,
+      rname: rname,
+      head: "KITCHEN TICKET",
+      kot: kot,
+      tableLabel: tlab,
+      when: when,
+      lines: rows,
+      allergies: Array.isArray(order.allergies) ? order.allergies : [],
+    });
     const ifr = document.createElement("iframe");
     ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
     document.body.appendChild(ifr);

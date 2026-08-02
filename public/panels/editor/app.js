@@ -2303,29 +2303,11 @@ function billLogo() {
   return /^https?:\/\//i.test(u) ? u : "";
 }
 
+// Moved into /panels/billdoc.js so the ADMIN'S PREVIEW resolves the same name, address,
+// phone, GSTIN and footer the printer does — the preview used to invent its own fallbacks and
+// could head the page with a different restaurant than the paper (owner, 2026-08-02).
 function billIdentity(settings) {
-  const s = settings || state.data.settings || {};
-  const r = state.data.restaurant || {};
-  const isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
-  const DEFAULT_BILL = { address: "Aevidine, Ahmedabad, Gujarat 380015, India", phone: "+91 90000 00000", gstin: "24AAAAA0000A1Z5" };
-  const FOOTERS = {
-    "pizza-palace": "Grazie — a presto! 🍕",
-    "sakura-sushi": "Arigato — mata kite ne 🍣",
-    "taco-fiesta": "¡Gracias — vuelve pronto! 🌮",
-    "burger-barn": "Y'all come back now! 🍔",
-    "spice-route": "Dhanyavaad — padharo! 🍛",
-    "green-bowl": "Stay fresh — see you soon! 🥗",
-  };
-  return {
-    isDefault,
-    name: s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")),
-    address: s.restaurant_address || (isDefault ? "" : DEFAULT_BILL.address),
-    phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : DEFAULT_BILL.phone),
-    gstin: s.gstin || "", // NEVER fall back to a placeholder GSTIN — a fake tax number on a real bill is illegal. Empty prints no GSTIN line (templates handle it).
-    prefix: s.invoice_prefix || "INV",
-    footer: s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
-    taxLabel: taxLabel(s),
-  };
+  return LFH_BILLDOC.billIdentity(settings || state.data.settings || {}, state.data.restaurant || {});
 }
 function billMath(orders) {
   const live = (orders || []).filter((o) => o.status !== "cancelled");
@@ -4155,32 +4137,14 @@ function printBill(t, sess, os, opts = {}) {
   // add-ons, so base = unit − add-ons → the lines sum to subtotal). Figures are grouped
   // Indian-style (1,07,880) and every one is measured, so the money columns below can be
   // sized to THIS bill instead of a fixed guess.
-  const pn = (n) => Math.round(Number(n) || 0).toLocaleString("en-IN");
-  const widest = { qty: 3, rate: 4, amt: 3 };   // never narrower than the QTY/RATE/AMT headings
-  const measure = (k, v) => { widest[k] = Math.max(widest[k], String(v).length); };
-  const rows = live.map((o) => (Array.isArray(o.items) ? o.items : []).map((i) => {
-    const q = Number(i.qty) || 1;
-    const opts = Array.isArray(i.options) ? i.options.filter((x) => Number(x.price)) : [];
-    const addUnit = opts.reduce((a, x) => a + (Number(x.price) || 0), 0);
-    const baseUnit = (parseFloat(i.price) || 0) - addUnit;
-    measure("qty", pn(q)); measure("rate", pn(baseUnit)); measure("amt", pn(baseUnit * q));
-    let r = `<tr><td class="n">${esc(i.title)}</td><td class="c">${pn(q)}</td><td class="r">${pn(baseUnit)}</td><td class="r">${pn(baseUnit * q)}</td></tr>`;
-    for (const x of opts) {
-      measure("rate", pn(x.price)); measure("amt", pn(Number(x.price) * q));
-      r += `<tr class="ex"><td class="n" colspan="2">+ ${esc(x.label)}</td><td class="r">${pn(x.price)}</td><td class="r">${pn(Number(x.price) * q)}</td></tr>`;
-    }
-    return r;
-  }).join("")).join("");
+  // The item lines as they were ordered. Their LAYOUT — the base line, a sub-line per priced
+  // add-on, the measured money columns — belongs to the document itself (/panels/billdoc.js),
+  // so the Access → "Format of…" preview draws the very same rows.
+  const lines = live.reduce((a, o) => a.concat(Array.isArray(o.items) ? o.items : []), []);
   // White-label identity: ALL the fallback logic lives in billIdentity() (shared with
   // the Billing settings form, which autofills the same values). The French House
   // logo applies ONLY to the flagship (#1).
   const bi = billIdentity(s);
-  const isDefault = bi.isDefault;
-  const name = esc(bi.name);
-  const addr = esc(bi.address);
-  const phone = esc(bi.phone);
-  const gstin = esc(bi.gstin);
-  const footer = esc(bi.footer);
   // WHO THE BILL IS FOR. Two different things, in priority order:
   //  1. bill_cust_name / bill_cust_phone — captured at invoice time and stored on the
   //     bill itself (mig 227). Printing them is the restaurant's own switch
@@ -4189,42 +4153,51 @@ function printBill(t, sess, os, opts = {}) {
   // Blank → the line is hidden, never printed empty.
   const printCust = s.bill_customer_print !== false;
   const billCustRow = os.find((o) => (o.bill_cust_name || o.bill_cust_phone)) || {};
-  const cust = esc(printCust ? (billCustRow.bill_cust_name || (os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "")
-                             : "");
+  // Every value below is passed RAW — the shared document escapes on the way in, in one place.
+  const cust = printCust ? (billCustRow.bill_cust_name || (os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "")
+                         : "";
   // 10 digits print as "98250 12345" — easier to read back to a guest than one long run.
   const custPhoneRaw = printCust ? String(billCustRow.bill_cust_phone || "").replace(/\D/g, "") : "";
-  const custPhone = esc(custPhoneRaw.length === 10 ? custPhoneRaw.slice(0, 5) + " " + custPhoneRaw.slice(5) : custPhoneRaw);
+  const custPhone = custPhoneRaw.length === 10 ? custPhoneRaw.slice(0, 5) + " " + custPhoneRaw.slice(5) : custPhoneRaw;
   // Table on the printed bill: the restaurant's OWN name for it when it has one ("A1",
   // "Patio" — mig 131), because the guest and the waiter both know the table by that name
   // (owner 2026-07-29: "print acc to the table name … on the KOT as well as the bill").
   // No name → the old "T5". Non-numeric values (e.g. "Takeaway") are left exactly as entered.
   const tnum = (t || "").toString().trim();
-  const tableDisp = /^\d+$/.test(tnum) ? esc(tableName(tnum) || "T" + tnum) : esc(tnum || "—");
-  const invNo = sess && sess.invoice_no != null ? esc(invFmt(sess.invoice_no, sess.invoice_at)) : "";
-  const billNo = sess && sess.bill_no != null ? esc(sess.bill_no) : "";
+  const tableDisp = /^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—");
+  const invNo = sess && sess.invoice_no != null ? invFmt(sess.invoice_no, sess.invoice_at) : "";
+  const billNo = sess && sess.bill_no != null ? sess.bill_no : "";
   const now = new Date();
   const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
   // Tax rows on the printed bill: if the restaurant configured named components
   // (tax_components → m.taxComponents), itemise EACH (label · its % · its amount, amounts
   // computed from the taxable value so they sum to m.tax). Otherwise keep the historical
   // 50/50 CGST+SGST split. (owner, 2026-07-03 — customisable multi-tax on the customer bill.)
-  // The printed tax lines MUST sum EXACTLY to the tax on the total (and match the on-screen
-  // bill). inr() rounds every line to whole rupees, so rounding each component independently
-  // drifts — e.g. ₹380 @ 5% = ₹19 tax, but CGST 2.5% + SGST 2.5% each round(9.5)=₹10 → ₹20 ≠ ₹19,
-  // and the invoice then foots to ₹400 not ₹399. Fix: split the whole-rupee tax across the
-  // components, rounding every line except the LAST and giving the last the remainder — the
-  // same rule the owner GST report already uses. (audit fix 2026-07-09)
+  // LFH_BILLDOC.splitTax() is what makes those lines add up EXACTLY to the tax on the total —
+  // the reasoning is written out there, and sharing it is what stops the preview footing
+  // differently from the paper.
   const taxComps = (m.taxComponents && m.taxComponents.length)
     ? m.taxComponents
     : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
-  const taxWhole = Math.round(m.tax); // whole-rupee tax shown on the total line (INR_RATE = 1)
-  const taxRateSum = taxComps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
-  let taxRun = 0;
-  const taxRows = taxComps.map((c, i) => {
-    const amt = i === taxComps.length - 1 ? (taxWhole - taxRun) : Math.round(taxWhole * ((Number(c.rate) || 0) / taxRateSum));
-    taxRun += amt;
-    return `<div class="t"><span>${esc(c.label)} ${c.rate}%</span><span>${inr(amt)}</span></div>`;
-  }).join("");
+
+  // ONE DOCUMENT, ONE FILE. The bill's markup used to live right here, and three other screens
+  // each carried their own version of it — so the Access → "Format of…" preview showed the admin
+  // a layout no printer ever produced (owner, 2026-08-02: "whatever the manager panel prints, the
+  // preview should only be that — both should be sync"). The paper is described once now, in
+  // /panels/billdoc.js; this function only decides WHAT goes on it. Nothing about how it looks,
+  // or about how this window behaves, changed.
+  const html = LFH_BILLDOC.billDocHtml({
+    logo: billLogo(),
+    name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
+    invNo, billNo, parcel: parcelBill, tableDisp,
+    dateStr: now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    cust, custPhone,
+    lines,
+    subtotal: m.subtotal, discount: m.disc, discLabel: discPct(m.subtotal, m.disc),
+    taxable: m.taxable, total: m.total,
+    taxRows: LFH_BILLDOC.splitTax(Math.round(m.tax), taxComps),
+    autoPrint: true,
+  });
   // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands
   // the page the SAME afterprint event whether the person pressed Print or pressed Cancel —
   // there is no flag saying which — so the old "close on afterprint" also threw the bill away
@@ -4233,126 +4206,7 @@ function printBill(t, sess, os, opts = {}) {
   const w = window.open("", "lfh_bill_print", "width=380,height=680");
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
   try { w.document.open(); } catch (e) {} // reused window: start from a blank document
-  w.document.write(`<!doctype html><title>Tax Invoice — ${name}</title>
-<style>
-  /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS driver
-     chain (2026-07-21, see aangan-thermal-printer-setup memory). Three rules:
-     · @page margin:0 kills the browser's own header/footer ("about:blank", page numbers).
-     · NO @page size override — a forced size smaller/squarer than the paper gets rotated
-       or bottom-anchored by CUPS (sideways prints + 20cm blank lead-ins). The queue's
-       own short receipt paper does the pagination; Chrome never slices a text line.
-     · Content ≤66mm CENTERED: the 80mm head only prints ~70mm, offset ~5mm from the
-       left paper edge — a full-width 80mm body loses ~8mm of every line on the right. */
-  @page{margin:0}
-  @media print{body{margin:0 !important;padding:2mm 5mm !important}
-    /* a bill spanning several printer pages: print the ITEM header ONCE (browsers
-       otherwise repeat <thead> on every page — it showed up mid-bill), and never split
-       a row across a page boundary (a fragmented flex row shifted every amount one
-       line down — owner's 18:04 invoice). Validated in the offline print simulator. */
-    thead{display:table-row-group}
-    tr,.t,.g,.kv,h2,.sub{break-inside:avoid;page-break-inside:avoid}}
-  /* ── ONE INK: pure black at NORMAL weight (owner, 2026-07-30) ──────────────────
-     A thermal head can only burn a dot or not — it has no grey, so grey is faked with
-     sparse dots and light text came out broken and pale (the old #777 labels, #444
-     address, #333 totals, #555 footer, dotted #e2e2e2 rules). Everything here is #000
-     at weight 400; hierarchy comes from SIZE, small caps + letter-spacing, spacing and
-     solid rules. Bold is spent on exactly two things: the restaurant name and the TOTAL.
-     Nothing below 10.5px and no italics — both smear at 203 dpi. */
-  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  body{font-family:'Helvetica Neue',Helvetica,Arial,'Liberation Sans',sans-serif;
-       font-size:12.5px;line-height:1.44;margin:22px 30px;color:#000;font-weight:400;
-       font-variant-numeric:tabular-nums}
-  .logo{display:block;height:46px;margin:0 auto 8px;filter:grayscale(1) contrast(1.4)}
-  h2{font-size:19px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;text-align:center;margin:0 0 4px}
-  .sub{text-align:center;font-size:11px;line-height:1.5}
-  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:9px 0 8px;padding:4px 0;
-        text-align:center;font-size:11px;letter-spacing:.24em;text-transform:uppercase}
-  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:1.5px 0}
-  .kv span:first-child{font-size:11px;letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}
-  .kv b{font-weight:400;text-align:right}
-  .dash{border-top:1px solid #000;margin:8px 0}
-  /* fixed columns, sized from THIS bill's own figures (see widest{}) so a ₹1,07,880 line
-     and a long dish name can never crowd each other */
-  table{width:100%;border-collapse:collapse;margin-top:2px;table-layout:fixed}
-  th{font-size:11px;letter-spacing:.09em;text-transform:uppercase;text-align:left;font-weight:400;
-     border-bottom:1px solid #000;padding:0 0 4px}
-  th.c,td.c{text-align:center;padding-left:4px}
-  th.r,td.r{text-align:right;padding-left:7px}
-  td{font-size:12.5px;padding:5px 0;vertical-align:top;border:0}
-  td.n{padding-right:4px;word-break:break-word}
-  tr.ex td{font-size:11px;padding:0 0 5px 9px}
-  tbody tr:last-child td{padding-bottom:6px}
-  .t{display:flex;justify-content:space-between;font-size:12px;padding:2.5px 0}
-  .t.tx{border-top:1px solid #000;margin-top:4px;padding-top:5px}
-  .totals{margin-top:6px;border-top:1px solid #000;padding-top:6px}
-  .g{display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid #000;
-     border-bottom:2px solid #000;margin-top:7px;padding:6px 0;font-weight:700;font-size:16px;letter-spacing:.02em}
-  .foot{text-align:center;font-size:11px;margin-top:11px}
-  /* Screen-only toolbar. The window stays open after the print dialog closes (see the note
-     in app.js — Print and Cancel are indistinguishable to the page), so this bar is how it
-     goes away, and how a second copy is printed without rebuilding the bill. It is hidden
-     from the paper by display:none AND excluded from the page-length measurement below. */
-  .bar{position:sticky;top:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;
-       margin:-22px -30px 14px;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc}
-  .bar button{font:inherit;font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;
-              border:1px solid #b9b9c0;background:#fff;color:#000}
-  .bar button.x{background:#111;color:#fff;border-color:#111}
-  @media print{.bar{display:none !important}}
-</style>
-<div class="bar"><button onclick="printAgain()">🖨 Print again</button><button class="x" onclick="closeBill()">✕ Close</button></div>
-${billLogo() ? `<img class="logo" src="${esc(billLogo())}" onerror="this.style.display='none'"/>` : ""}
-<h2>${name}</h2>
-<div class="sub">${addr ? addr + "<br/>" : ""}${phone ? "Ph " + phone : ""}${phone && gstin ? "<br/>" : ""}${gstin ? "GSTIN " + gstin : ""}</div>
-<div class="kind">Tax Invoice</div>
-${invNo ? `<div class="kv"><span>Invoice</span><b>${invNo}</b></div>` : ""}
-${billNo !== "" ? `<div class="kv"><span>Bill no</span><b>#${billNo}</b></div>` : ""}
-${parcelBill ? `<div class="kv"><span>Parcel</span><b></b></div>` : `<div class="kv"><span>Table</span><b>${tableDisp}</b></div>`}
-<div class="kv"><span>Date</span><b>${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></div>
-${cust || custPhone ? `<div class="dash"></div>${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}${custPhone ? `<div class="kv"><span>Mobile</span><b>${custPhone}</b></div>` : ""}` : ""}
-<div class="dash"></div>
-<table>
-<colgroup><col><col style="width:calc(${widest.qty}ch + 8px)"><col style="width:calc(${widest.rate}ch + 11px)"><col style="width:calc(${widest.amt}ch + 11px)"></colgroup>
-<thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr></thead><tbody>${rows}</tbody></table>
-<div class="totals">
-  <div class="t"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-  ${m.disc > 0 ? `<div class="t"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div><div class="t tx"><span>Taxable value</span><span>${inr(m.taxable)}</span></div>` : ""}
-  ${taxRows}
-  <div class="g"><span>TOTAL</span><span>${inr(m.total)}</span></div>
-</div>
-<div class="foot">${footer}</div>
-<script>
-/* The POS-80 queue has its own default page length, so a long bill came out chopped into
-   several sheets (owner, 2026-07-30 — "it prints in four parts"). Measure the finished bill
-   and declare a page exactly that long, so the page MATCHES the roll instead of being
-   smaller/squarer than it (that older case is what CUPS rotates or bottom-anchors). */
-function measure(){
-  // The toolbar is screen-only, but scrollHeight measures the SCREEN layout — leaving it in
-  // would declare a page ~11mm longer than the bill and feed that much blank roll after every
-  // print. Hide it for the measurement, then put it back.
-  var bar = document.querySelector(".bar"), prev = bar ? bar.style.display : "";
-  if (bar) bar.style.display = "none";
-  try{
-    var mm = 96/25.4, h = Math.ceil(document.body.scrollHeight/mm) + 6;
-    var st = document.getElementById("pagesize") || document.createElement("style");
-    st.id = "pagesize";
-    st.textContent = "@media print{@page{size:80mm " + h + "mm;margin:0}}";
-    document.head.appendChild(st);
-  }catch(e){}
-  if (bar) bar.style.display = prev;
-}
-function printAgain(){ measure(); print(); }
-function closeBill(){ try{ if (opener && !opener.closed) opener.focus(); }catch(e){} try{ close(); }catch(e){} }
-// NOTHING here closes this window. Print and Cancel look identical to the page (one afterprint
-// event, no flag), so closing on that event also destroyed the bill when the person pressed
-// Cancel — the fault the owner reported on 2026-08-02. After the dialog closes the bill simply
-// stays on screen with its own ✕ Close (which also brings the panel back to the front), and the
-// next bill REUSES this window, so nothing can pile up. Esc closes it too.
-// afterprint is not used to CLOSE (it can't be trusted for that) — only to put the keyboard on
-// the ✕ Close button, so the moment the dialog goes away Enter/Space/Esc dismisses the bill.
-addEventListener("keydown", function(e){ if (e.key === "Escape") closeBill(); });
-onafterprint = function(){ try{ var b = document.querySelector(".bar .x"); if (b) b.focus(); }catch(e){} };
-setTimeout(printAgain, 300);
-<\/script>`);
+  w.document.write(html);
   w.document.close();
   try { w.focus(); } catch (e) {} // a REUSED window is already open behind the panel — bring it forward
 }
@@ -9280,33 +9134,13 @@ function openKotMenu(t, sess) {
 }
 
 // ── THE kitchen-ticket template — ONE recipe, used by every KOT print ────────────────
-// 66mm thermal, validated through the real CUPS/ESC-POS chain 2026-07-21. `@page{margin:0}`
-// plus the break-inside rules are what keep a ticket on ONE piece of paper; anything that
-// prints a KOT must come through here rather than writing its own HTML (the sample preview
-// used to, and printed in two parts — owner, 2026-08-02).
-function kotLineHtml(r) {
-  const opts = Array.isArray(r.options) ? r.options.map((x) => (typeof x === "string" ? x : (x && x.label) || "")).filter(Boolean).join(", ") : "";
-  const rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
-  return `<div class="kl"><span class="q">${r.qty || 1}×</span><span class="n">${esc(r.title || "")}${opts ? ` <i>(${esc(opts)})</i>` : ""}${rem ? ` <i>— no ${esc(rem)}</i>` : ""}${r.note ? `<br><small>&raquo; ${esc(r.note)}</small>` : ""}</span></div>`;
-}
-function kotTicketHtml(o) {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(o.title || "KOT")}</title><style>
-      *{margin:0;padding:0;box-sizing:border-box}body{font-family:ui-monospace,monospace;width:280px;padding:8px;color:#000}
-      .h{text-align:center;font-weight:700;font-size:15px;border-bottom:2px dashed #000;padding-bottom:6px;margin-bottom:6px}
-      .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}
-      .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}
-      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}
-      @page{margin:0}
-      @media print{body{margin:0 !important;padding:2mm 5mm 4mm !important}.kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
-    </style></head><body>
-      <div class="h">${esc(o.rname || "Kitchen")}<br>${esc(o.head || "KITCHEN TICKET")}</div>
-      <div class="meta"><span>KOT #${esc(String(o.kot))}</span><span>${esc(o.tableLabel || "")}</span></div>
-      <div class="meta"><span>${esc(o.when || "")}</span></div>
-      ${o.linesHtml || "<div>(no items)</div>"}
-      ${o.allergHtml || ""}
-      ${o.extraHtml || ""}
-    </body></html>`;
-}
+// The ticket is written down once, in /panels/billdoc.js, next to the bill: this panel, the
+// kitchen board and the admin's Access preview all print THAT file, so a ticket cannot look
+// one way here and another way there (owner, 2026-08-02: "both should be sync"). These two
+// lines are this panel's handle on it, kept so every existing caller reads the same.
+function kotLineHtml(r) { return LFH_BILLDOC.kotLineHtml(r); }
+function kotTicketHtml(o) { return LFH_BILLDOC.kotDocHtml(o); }
+
 // Print a ticket through a hidden iframe — no pop-up to allow, nothing left on screen.
 function printTicketHtml(html) {
   try {

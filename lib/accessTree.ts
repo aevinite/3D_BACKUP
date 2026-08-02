@@ -119,8 +119,10 @@ export type Node = {
   panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding";
   // A format screen that can SHOW its finished page: puts a "Preview / Print" button at the
   // top right of the embedded editor, opening the real bill drawn from this restaurant's
-  // settings (owner, 2026-08-02). The value picks which bill.
-  preview?: "bill" | "parcel";
+  // settings (owner, 2026-08-02). The value picks which document — and every one of them is
+  // rendered by the SAME file the panels print from (/panels/billdoc.js), so what is approved
+  // here is what a guest is handed.
+  preview?: "bill" | "parcel" | "kot";
 };
 
 export type Section = { id: string; name: string; blurb: string; icon: string; children: Node[] };
@@ -365,7 +367,8 @@ export const SECTIONS: Section[] = [
         ],
       },
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
-        bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen",         what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine. The printer check and the sample ticket are inside." },
+        bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen", preview: "kot",
+        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine. The printer check is inside, and Preview at the top right shows the ticket itself — the very same one the manager panel and the kitchen board print, not a mock-up of it." },
       // ⚡ QO/P — the floor's quick-order screen (owner, 2026-08-02). A main feature, not an
       // extra: it is how a whole order gets punched in at speed. Default ON (mig 257) because
       // it REPLACED the 🥡 New Parcel button every floor already had — shipping it off would
@@ -407,10 +410,15 @@ export const SECTIONS: Section[] = [
           // TWO formats, not one (owner, 2026-08-02): a dine-in bill and a parcel bill are
           // different pieces of paper — different width, different lines, and a parcel has no
           // table. The dine-in one is renamed so the pair reads as a pair.
+          // THE PREVIEW IS THE PRINTER'S OWN PAGE (owner, 2026-08-02: "whatever the manager
+          // panel prints, the preview should only be that — both should be sync"). It used to be
+          // a look-alike drawn by separate code, which meant a format could be approved here and
+          // come out of the printer differently. Both now render /panels/billdoc.js, the one file
+          // the manager panel prints from.
           { id: "bill_format", name: "Format of KOT bills", bind: { t: "none" }, panel: "settings:billing", preview: "bill",
-            what: "The bill for a table: GSTIN, the legal name and address, the phone, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for. Preview it at the top right to see the finished page before anyone prints one." },
+            what: "The bill for a table: GSTIN, the legal name and address, the phone, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for. Preview at the top right is the real page — exactly what the manager panel hands the printer." },
           { id: "parcel_bill_format", name: "Format of parcel bill", bind: { t: "none" }, panel: "settings:billing", preview: "parcel",
-            what: "The bill handed over with a parcel. Same restaurant details as the table bill, on the narrow counter roll and with no table on it — it says PARCEL instead. Preview it at the top right." },
+            what: "The bill handed over with a parcel. Same restaurant details as the table bill and no table on it — it says PARCEL instead. Preview at the top right is the real page the counter prints." },
           { id: "bill_designer", name: "Bill design editor", leftToBuild: true, bind: { t: "none" },
             what: "Design the whole bill like a document — move the logo, change the wording, resize the totals. Not built yet; this is where it will live." },
         ],
