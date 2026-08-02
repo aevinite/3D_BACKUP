@@ -20,9 +20,6 @@ type Payload = {
   wasteByReason: Record<string, number>;
   usage?: { usedByOrders: number; corrections: number; top: { name: string; consumedVal: number; adjustedVal: number }[] };
   cachedAt?: string;
-  // How a cancelled order is paid for (mig 252). Read outside the snapshot cache, so
-  // flipping the switch below shows immediately.
-  cancelCostMode?: "stock" | "bill";
 };
 
 const inr = (n: number) => "₹" + (Math.round(Number(n || 0) * 100) / 100).toLocaleString("en-IN");
@@ -43,8 +40,6 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
   const [data, setData] = useState<Payload | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [modeBusy, setModeBusy] = useState(false);
-  const [modeMsg, setModeMsg] = useState<string | null>(null);
 
   const load = useCallback(async (force?: boolean) => {
     setBusy(true);
@@ -57,28 +52,6 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
   }, [rid, month]);
 
   useEffect(() => { if (view === "overview") load(); }, [load, view]);
-
-  // Flip how a cancelled order is charged. First save wins: we send what THIS screen was
-  // looking at, so if someone else already changed it the server tells us instead of
-  // quietly replacing their choice (the house no-silent-overwrites rule).
-  const setCancelMode = async (mode: "stock" | "bill") => {
-    if (modeBusy || mode === (data?.cancelCostMode || "stock")) return;
-    setModeBusy(true); setModeMsg(null);
-    try {
-      const res = await fetch(`/api/owner/inventory${asSuffix()}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "X-LFH-Expect": JSON.stringify({ table: "settings", id: rid, fields: { cancel_cost_mode: data?.cancelCostMode || "stock" } }),
-        },
-        body: JSON.stringify({ restaurant_id: rid, cancel_cost_mode: mode }),
-      });
-      const j = await res.json();
-      if (!res.ok) { setModeMsg(j.message || j.error || "Couldn't change that."); }
-      else { setData((d) => (d ? { ...d, cancelCostMode: mode } : d)); setModeMsg(null); }
-    } catch (e) { setModeMsg(e instanceof Error ? e.message : String(e)); }
-    setModeBusy(false);
-  };
 
   const shiftMonth = (dir: number) => {
     const [y, m] = month.split("-").map(Number);
@@ -134,37 +107,6 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
                 <div className="adm-stat"><span className="k">Bought ({monthLabel.split(" ")[0]})</span><span className="v">{inr(s.purchases)}</span></div>
                 <div className="adm-stat"><span className="k">Wasted</span><span className="v">{inr(s.waste)}</span></div>
                 <div className="adm-stat"><span className="k">Expenses</span><span className="v">{inr(s.expenses)}</span></div>
-              </div>
-
-              {/* ── How a cancelled order is paid for (owner 2026-08-02) ──────────
-                  His rule: with stock tracked it comes out of stock; without it, off the
-                  bill. Only ONE of the two is ever charged, so the same loss can't be
-                  counted twice — the report says which underneath. */}
-              <div className="adm-card">
-                <h3>💸 When an order is cancelled, what does it cost you?</h3>
-                <p className="adm-muted" style={{ fontSize: 13, margin: "2px 0 10px" }}>
-                  This changes the “Expenses” line on your daily report and every profit figure that follows it.
-                </p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {([
-                    { k: "stock" as const, t: "Take it out of stock", d: "Only the food that was actually cooked and binned. Recommended — the sale was never collected, so charging its full price would count the loss twice." },
-                    { k: "bill" as const, t: "Take it off the bill", d: "The whole menu price of the cancelled order counts as an expense. The food it used is removed from “food taken from stock” so it isn't paid for twice." },
-                  ]).map((o) => {
-                    const on = (data.cancelCostMode || "stock") === o.k;
-                    return (
-                      <button key={o.k} className="adm-btn" onClick={() => setCancelMode(o.k)} disabled={modeBusy}
-                        style={{ flex: "1 1 260px", textAlign: "left", padding: "10px 12px", alignItems: "flex-start",
-                          borderColor: on ? "var(--ow-accent, #10b981)" : undefined,
-                          background: on ? "color-mix(in srgb, var(--ow-accent, #10b981) 14%, transparent)" : undefined }}>
-                        <span style={{ display: "block", fontWeight: 800, marginBottom: 3 }}>
-                          {on ? "● " : "○ "}{o.t}
-                        </span>
-                        <span className="adm-muted" style={{ display: "block", fontSize: 12, fontWeight: 500, whiteSpace: "normal", lineHeight: 1.45 }}>{o.d}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-                {modeMsg && <div className="adm-empty" style={{ marginTop: 8 }}>⚠️ {modeMsg}</div>}
               </div>
 
               {data.negative.length > 0 && (

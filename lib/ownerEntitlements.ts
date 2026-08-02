@@ -22,11 +22,7 @@ import { MANAGER_POWER_FLAGS } from "@/lib/accessModel";
 // power_edit_menu rung (see MANAGER_POWER_FLAGS below).
 // "logs" (2026-07-31, access rebuild) gates the owner panel's activity-log page — the
 // owner's equivalent of the manager's Log tab, which was the one panel tab never wired.
-// "expenses" (2026-08) gates the owner panel's own Expenses page — the expense book that
-// until now only existed inside the manager's Inventory tab. It is deliberately NOT tied to
-// the inventory module: money leaving the business is something every owner should be able
-// to see, so absent = ON here means every restaurant gets the page unless an admin says no.
-export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu", "logs", "expenses"] as const;
+export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu", "logs"] as const;
 export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 
 // The manager powers (mig 091). The admin's availability switch for each lives under

@@ -17,8 +17,6 @@ export type BillingDetails = {
   taxComponents: TaxComponent[];   // CGST / SGST / … amounts (configured tax lines)
   taxTotal: number | null;         // total GST collected
   net: number;                     // revenue kept (paid, net of discounts)
-  expenses?: number | null;        // what the period COST (mig 252) — null = couldn't be built
-  left?: number | null;            // what was actually kept after those costs
   cancelledOrders: number | null;
   cancelledValue: number | null;
 };
@@ -77,17 +75,7 @@ function billingRows(b: BillingDetails): [string, string][] {
     // visibly not add up. The calculation must stay self-consistent on paper.
     rows.push(["= Total collected from guests", inr(b.gross - b.discount + b.taxTotal)]);
     rows.push(["Less : GST set aside for the government", "− " + inr(b.taxTotal)]);
-    // The ladder used to STOP here, which named the wrong number "money in hand": it is
-    // what's left after the government, not after the day's costs (mig 252). When the cost
-    // side could be built we carry on to the real bottom line; when it couldn't, the
-    // statement prints exactly what it always did rather than a total it can't stand behind.
-    if (b.expenses != null && b.left != null) {
-      rows.push(["= Your money — after the government's share", inr(b.gross - b.discount)]);
-      rows.push(["Less : what the period cost you", "− " + inr(b.expenses)]);
-      rows.push(["= PROFIT IN HAND — what the period left you", inr(b.left)]);
-    } else {
-      rows.push(["= MONEY IN HAND — what you keep", inr(b.gross - b.discount)]);
-    }
+    rows.push(["= MONEY IN HAND — what you keep", inr(b.gross - b.discount)]);
     if (b.gross > 0) rows.push(["Discount rate", pct(b.discount, b.gross)]);
   } else {
     // no sales-report data for this scope — show what we do know, no fake maths

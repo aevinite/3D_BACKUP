@@ -32,9 +32,7 @@ export type RKey = "daysummary" | "sales" | "payments" | "tax" | "items" | "timi
 // the page requests that extra shape when the report opens.
 export type DataKind = "money" | "daysummary" | "payments" | "dishes" | "categories" | "hourly" | "staffpay" | "staffperf"
   // Inventory & stock (mig 227) — one kind per sub-tab, each hitting /api/owner/reports?type=inv*
-  | "invstock" | "invpurchases" | "invusage" | "invwaste" | "invexpenses"
-  // The day x hour traffic grid (mig 252) — fetched alongside the summary over a period.
-  | "heatmap";
+  | "invstock" | "invpurchases" | "invusage" | "invwaste" | "invexpenses";
 export type Tone = "accent" | "good" | "warn" | "bad" | "info";
 
 export type ReportMeta = {
@@ -392,46 +390,6 @@ export function ReportsStyles() {
       .rs-line.sub { padding-left: 14px; font-size: 12px; }
       .rs-line.sub .lbl::before { content: "└ "; opacity: .5; }
       .rs-line .neg { color: var(--adm-warn); }
-
-      /* ── What's left in hand (mig 252) ───────────────────────────────────── */
-      /* Every colour here is a token, never a literal: a hard-coded hex reads as black
-         text on one of the two skins (the lesson from the SVG label bug). */
-      .rs-dim { color: var(--muted); font-weight: 500; }
-      /* The Expenses row is a BUTTON but must sit in the ladder as just another row —
-         reset the browser's button chrome rather than fight it. */
-      .rs-line-btn { width: 100%; background: none; border: none; border-bottom: 1px dashed color-mix(in srgb, var(--border-c) 80%, transparent);
-        font: inherit; text-align: left; cursor: pointer; border-radius: 6px; }
-      .rs-line-btn:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
-      .rs-line-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-      .rs-inside { font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: .3px; margin-left: 6px; white-space: nowrap; }
-      .rs-inside i { font-size: 9px; margin-left: 3px; }
-      .rs-line.grand { margin-top: 6px; padding-top: 13px; border-top: 2px solid var(--accent); border-bottom: none; font-size: 17px; }
-      .rs-line.grand .lbl { color: var(--text); font-weight: 900; letter-spacing: .4px; }
-      .rs-line.grand .val { font-weight: 900; color: var(--accent); font-size: 20px; }
-      /* "not tracked" must not look like a zero — a zero claims we checked and it was free. */
-      .rs-off { color: var(--muted); font-weight: 600; font-style: italic; font-size: 12px; }
-      .rs-gaps { margin-top: 12px; padding: 10px 12px; border-radius: 10px; font-size: 12px;
-        background: color-mix(in srgb, var(--adm-warn) 10%, transparent);
-        border: 1px solid color-mix(in srgb, var(--adm-warn) 30%, transparent); }
-      .rs-gaps > b { display: block; margin-bottom: 5px; color: var(--text); font-size: 12px; }
-      .rs-gaps > b i { margin-right: 5px; color: var(--adm-warn); }
-      .rs-gaps ul { margin: 0; padding-left: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
-      .rs-lostbox { margin-top: 14px; padding: 12px 14px; border-radius: 12px;
-        background: color-mix(in srgb, var(--adm-bad, var(--adm-warn)) 8%, transparent);
-        border: 1px solid color-mix(in srgb, var(--adm-bad, var(--adm-warn)) 26%, transparent); }
-      .rs-lostbox > b { display: block; font-size: 12px; color: var(--text); }
-      .rs-lostbox > b i { margin-right: 6px; color: var(--adm-bad, var(--adm-warn)); }
-      .rs-lostrow { display: flex; align-items: baseline; gap: 10px; margin: 6px 0 4px; }
-      .rs-lostrow span { font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; color: var(--adm-bad, var(--adm-warn)); }
-      .rs-lostrow em { font-style: normal; font-size: 12px; font-weight: 600; color: var(--muted); }
-      .rs-lostbox p { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); }
-      /* "Show the full breakdown" — the long ladder is still there, just not in the way
-         (owner 2026-08-02: "don't you think this is too complicated?"). */
-      .rs-morebtn { margin-top: 10px; background: none; border: none; padding: 4px 0; cursor: pointer;
-        font: inherit; font-size: 12px; font-weight: 700; color: var(--accent); display: inline-flex; align-items: center; gap: 6px; }
-      .rs-morebtn:hover { text-decoration: underline; }
-      .rs-morebtn i { font-size: 10px; }
-      .rs-more { margin-top: 6px; padding-top: 8px; border-top: 1px dashed color-mix(in srgb, var(--border-c) 80%, transparent); }
 
       .rs-paylist { display: flex; flex-direction: column; gap: 11px; }
       .rs-payrow { display: grid; grid-template-columns: 12px 1fr auto; gap: 10px; align-items: center; }
