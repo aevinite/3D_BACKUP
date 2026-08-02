@@ -186,7 +186,9 @@
     var failed = box.failed.length, waiting = box.queued.length;
     if (failed) {
       return { tone: "tone-bad", title: failed === 1 ? "1 change needs you" : failed + " changes need you",
-               sub: "They couldn't be applied when the connection came back.", action: "Review" };
+               // Don't name a cause we haven't established: a change also lands here when the system
+      // kept refusing it or this device was signed out — the connection may never have gone.
+      sub: (failed === 1 ? "It couldn't be applied." : "They couldn't be applied.") + " Tap Review.", action: "Review" };
     }
     if (isOffline() || stale.seenOfflineRead) {
       var sub = stale.fromCache ? "Showing saved data from " + fmtTime(stale.at) : "Showing what's saved on this device";
@@ -208,8 +210,20 @@
                  sub: "Saved on this device since " + fmtTime(since) + " — the connection looks fine now.",
                  action: "Send now", onAction: sendNow, alt: "See" };
       }
-      return { tone: "tone-sync", title: "Sending " + waiting + (waiting === 1 ? " saved change" : " saved changes") + "…",
-               sub: "Made while you were offline. Keep this panel open until it's done.", action: "See" };
+      // AND SAY THE TRUE REASON. Even before the stuck threshold above, this line claimed
+      // "Made while you were offline" for everything in the queue — so a change parked because
+      // the system was slow, or merely queued behind an earlier one, told the owner his internet
+      // was gone while the light next to it read 462 ms. A bar that contradicts the indicator
+      // beside it is the cry-wolf fault we already fixed once, in another place.
+      // (The TITLE is left exactly as it was: the "Sending… while nothing is being sent" problem
+      // is already handled above by the stuck threshold + Send now. Only the reason changes.)
+      var offlineMade = box.queued.every(function (it) { return !it.why || it.why === "offline"; });
+      return { tone: "tone-sync",
+               title: "Sending " + waiting + (waiting === 1 ? " saved change" : " saved changes") + "…",
+               sub: offlineMade
+                 ? "Made while you were offline. Keep this panel open until it's done."
+                 : "The system hasn't confirmed them yet. Keep this panel open until it's done.",
+               action: "See" };
     }
     // ONE saved reply is NOT a crisis. A single read can be answered from this device for a
     // dull reason (a cold server taking a moment), and shouting "Connection is struggling"
@@ -309,7 +323,7 @@
     var wrap = el("div"); wrap.style.flex = "1";
     wrap.appendChild(el("h3", null, box.failed.length ? "These changes need you" : "Saved on this device"));
     wrap.appendChild(el("p", null, box.failed.length
-      ? "The connection came back, but these couldn't be applied — someone else changed the same thing, or the table moved on."
+      ? "These couldn't be applied — the system wouldn't take them, or someone else changed the same thing first."
       : "Nothing is lost. These will send themselves as soon as there's internet."));
     hd.appendChild(wrap);
     var x = el("button", "lfh-off-x", "✕"); x.type = "button";

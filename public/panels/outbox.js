@@ -49,6 +49,7 @@
   // same non-answer it becomes a person's decision instead of a spinner nobody can see.
   const AUTH_MAX_TRIES = 3;   // 401 — this device is signed out
   const BUSY_MAX_TRIES = 6;   // 409 {retry:true} — the server says it is still handling this id
+  const NET_MAX_TRIES = 6;    // the request itself never completed, while the device says it is online
   // The verifier (scripts/verify-outbox-drain.mjs) shrinks the waits so a run takes seconds
   // instead of minutes. Nothing in the app sets this.
   try {
@@ -104,7 +105,9 @@
     : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
 
   function notify() {
-    const snap = { queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length };
+    // `syncing` = a replay round is ACTUALLY in flight. The bar must not say "Sending…"
+    // purely because the count is above zero.
+    const snap = { queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length, syncing: flushing };
     listeners.forEach((fn) => { try { fn(snap); } catch (e) {} });
     // Also fire a DOM event so the connection badge / any UI can react without importing us.
     try { window.dispatchEvent(new CustomEvent("lfh:outbox-changed", { detail: snap })); } catch (e) {}
@@ -183,8 +186,14 @@
     });
   }
 
-  async function enqueue(item) {
+  // `why` = the reason this landed in the queue, kept so the bar can say something TRUE.
+  // "offline" is the only one that may say "made while you were offline"; a write parked
+  // because the system was slow, refusing, or because earlier changes were still waiting is
+  // NOT an offline change, and calling it one is how the panel told the owner he had no
+  // internet while the connection light beside it read 462 ms (2026-08-02).
+  async function enqueue(item, why) {
     item.status = "queued";
+    item.why = why || item.why || "offline";
     queued.push(item);
     await idbPut(item);
     notify();
@@ -237,20 +246,22 @@
     const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now(), expect: expect || null };
 
     // Known offline → don't even try; queue straight away.
-    if (navigator.onLine === false) { await enqueue(item); return { ok: true, queued: true, action_id: item.id }; }
+    if (navigator.onLine === false) { await enqueue(item, "offline"); return { ok: true, queued: true, action_id: item.id }; }
 
     // FIFO GUARD (#6): if earlier actions are STILL waiting to sync, this new write must
     // NOT be sent directly ahead of them — that let a fresh "Mark paid" commit before a
     // queued discount, settling the bill at the wrong amount. Append to the queue and kick
     // a flush so it replays in order behind the pending ones.
-    if (queued.length) { await enqueue(item); flush(); return { ok: true, queued: true, action_id: item.id }; }
+    if (queued.length) { await enqueue(item, "behind"); flush(); return { ok: true, queued: true, action_id: item.id }; }
 
     let res;
     try {
       res = await doFetch(item);
     } catch (netErr) {
       // Genuine network failure (offline / DNS / dropped) → save for later.
-      await enqueue(item);
+      // A timeout while the browser still believes it is online is a SLOW system, not an
+      // offline device — do not let the bar call it one.
+      await enqueue(item, navigator.onLine === false ? "offline" : "slow");
       return { ok: true, queued: true, action_id: item.id };
     }
     // We got a response → behave exactly like the old api() helper.
@@ -264,7 +275,7 @@
     // 4xx is deliberately NOT included: that is the server refusing on the merits (a clash, a
     // closed table, a limit), and a person must see it rather than have it retried behind them.
     if (res.status >= 500) {
-      await enqueue(item);
+      await enqueue(item, "busy");
       flush();
       return { ok: true, queued: true, busy: true, action_id: item.id };
     }
@@ -290,7 +301,23 @@
         const item = queued[0];
         let res;
         try { res = await doFetch(item, true); } // true = a saved change being replayed
-        catch (netErr) { break; }               // still offline → stop; keep the queue for next time
+        catch (netErr) {
+          // Genuinely offline → stop and keep the queue; that is what it is for.
+          if (navigator.onLine === false) break;
+          // ONLINE and still not getting through (each attempt timing out, a request dropped
+          // every time). This was the last path that could loop forever in silence — and a
+          // change stuck in "waiting" is the worst place for it, because the FIFO rule then
+          // diverts every later save on this device behind it and a waiting row has no
+          // buttons. Same treatment as the signed-out and still-busy cases beside it.
+          item.netTries = (item.netTries || 0) + 1;
+          if (item.netTries < NET_MAX_TRIES) { await idbPut(item); break; }
+          await moveToFailed(item, "The restaurant's system didn't answer", {
+            plain: "The system didn't answer, several times over.",
+            todo: "Check whether it already happened; if not, do it again.",
+            retryable: true,
+          });
+          notify(); continue;
+        }
         // NOT LOGGED IN. Keep the change and try again — a session can come back (the panel
         // refreshes its own login). But not forever in silence: if this device really has been
         // signed out, the person has to be told, or their work waits behind a spinner all shift.
