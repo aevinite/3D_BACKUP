@@ -310,7 +310,13 @@ export const SECTIONS: Section[] = [
             // missing is WHO may use it. Off for every restaurant until it is handed over, and
             // when it is off the control is not on their screen at all (the standing rule: a
             // feature that is off is absent, not greyed).
-            id: "maintenance", name: "Put menu on maintenance", bind: { t: "has", id: "maintenance", def: false },
+            // `def` belongs on the NODE, not only inside the bind (fixed 2026-08-02). Every tool
+            // that answers "what is this restaurant's factory default?" — the defaults script and
+            // the QA suite's per-restaurant default check — reads node.def, so a default hiding
+            // in the bind reads as `undefined` and the row is reported as drifted on every
+            // restaurant, for ever, with a fix command that cannot fix it. The bind keeps its own
+            // def because nodeValue() reads THAT when the row has never been set.
+            id: "maintenance", name: "Put menu on maintenance", def: false, bind: { t: "has", id: "maintenance", def: false },
             what: "Lets someone take the guest menu down — a red control in their own Settings that closes the menu to diners. Off for every restaurant unless you hand it over.",
             children: [
               { id: "maintenance_who", name: "Who may do it", def: "owner",
@@ -743,7 +749,15 @@ export const CREDS_KEYS = collect((b) => (b.t === "creds" ? b.key : null));
 // A "menu" row writes a grant too, so it MUST be in this list — the read/write route builds its
 // allow-list from here, and a flag missing from it is silently dropped on save (the switch would
 // move on screen and change nothing).
-export const HAS_IDS = Array.from(new Set(ALL_NODES.map((n) => (n.featureBind?.t === "has" ? n.featureBind.id : null)).filter(Boolean) as string[]));
+// BOTH places a "has" bind can live, not just featureBind (fixed 2026-08-02). A row can carry
+// its has-bind as its MAIN bind — "Put menu on maintenance" does — and that id was missing from
+// this list, so the write route dropped `config.maintenance.on` on the floor: the switch moved on
+// screen, saved nothing, and read back off for every restaurant, forever. That is precisely the
+// dead switch the access rebuild existed to abolish, hiding inside the list that is supposed to
+// prevent it. Derive from every node, whichever slot the bind sits in.
+export const HAS_IDS = Array.from(new Set(ALL_NODES.flatMap((n) =>
+  [n.featureBind?.t === "has" ? n.featureBind.id : null, n.bind?.t === "has" ? n.bind.id : null],
+).filter(Boolean) as string[]));
 export const GRANT_FLAGS = collect((b) => (b.t === "grant" ? b.flag : b.t === "menu" ? b.grant : null));
 export const SECTION_ENTITLEMENTS = collect((b) => (b.t === "section" ? b.key : null));
 export const TABLET_COLS = collect((b) => (b.t === "tablet" ? b.key : null));

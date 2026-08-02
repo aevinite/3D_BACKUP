@@ -1092,11 +1092,20 @@ phase("no discount takes a whole BILL below zero", async () => {
   // Re-reporting the seed data every run is noise; a NEW one from the live app is a real bug.
   // (I first called this "none since April" from a limit-400 sample — a truncated count is not
   //  a count. Paginated properly, they run right up to the seeding date.)
-  const SEED_END = "2026-07-20T00:00:00Z";
-  const since = SEED_END;
+  // THE DATE WINDOW IS GONE (2026-08-02). It said "only orders created after the demo history was
+  // seeded (2026-07-20)", which was true when it was written and stopped being true the moment the
+  // seeder started writing right up to today: seeded rows moved INSIDE the window and this phase
+  // reported four of them as real faults. A hardcoded date in a check is a lie with a delay on it.
+  //
+  // Told apart by what they ARE instead: a history row from reset-demo-history.mjs carries NO
+  // session (it writes bare orders, the way a banquet or a legacy row has none), while every bill
+  // the live app can discount belongs to a session — that is what a bill IS here. So a
+  // session-less row is fixture, and the seeder now also clamps its discounts to the bill, so it
+  // cannot manufacture this shape again either. A real bill going below zero still fails, loudly.
   const rows = [];
   for (const r of REST || [])
-    rows.push(...await dbGet(`orders?select=id,session_id,total,discount&restaurant_id=eq.${r.id}&created_at=gte.${since}&discount=gt.0&limit=400`));
+    rows.push(...(await dbGet(`orders?select=id,session_id,total,discount&restaurant_id=eq.${r.id}&discount=gt.0&order=created_at.desc&limit=400`))
+      .filter((o) => o.session_id));
   const bills = new Map();
   for (const r of rows) {
     const k = r.session_id || `solo:${r.id}`;
@@ -1111,7 +1120,6 @@ phase("no discount takes a whole BILL below zero", async () => {
     const sib = await dbGet(`orders?select=session_id,total&session_id=in.(${chunk.join(",")})&limit=2000`);
     for (const o of sib) { const b = bills.get(o.session_id); if (b) b.total += Number(o.total) || 0; }
   }
-  for (const r of rows) if (!r.session_id) { const b = bills.get(`solo:${r.id}`); if (b) b.total += Number(r.total) || 0; }
   const negative = [...bills.entries()].filter(([, b]) => b.disc > b.total + 0.01);
   ok(!negative.length, `${negative.length} bills discounted below zero (e.g. bill ${negative[0]?.[0]} — total ${negative[0]?.[1].total}, discount ${negative[0]?.[1].disc})`);
 });
@@ -1508,14 +1516,30 @@ for (const [label, role, pathOf] of PHONE_TARGETS) {
 // GROUP 15 · money + records, deeper
 // ════════════════════════════════════════════════════════════════════════════
 phase("every kitchen-ticket number is unique per restaurant per day", async () => {
-  const rows = await dbGet("orders?select=id,restaurant_id,kot_no,created_at&kot_no=not.is.null&order=created_at.desc&limit=3000");
+  // TWO THINGS THIS GOT WRONG, both found on 2026-08-02 when it reported 86 duplicates:
+  //
+  // 1 · THE DAY. Ticket numbers reset on the BUSINESS day — 05:00 IST (mig 044,
+  //     lfh_next_counter) — not on the UTC calendar date. A business day begins at 23:30 UTC
+  //     the evening before, so every UTC date spans two of them and any pair either side of
+  //     that line reads as a repeat when it is simply tomorrow's ticket 1.
+  // 2 · WHICH ROWS. A repeated number matters when two tickets are on the pass at once: that
+  //     is when a cook picks up the wrong one. History cannot be cleaned — an order cannot be
+  //     hard-deleted (mig 190, the compliance rule) — so counting archived and cancelled rows
+  //     makes this permanently red over residue, which is how a check gets ignored.
+  //
+  // The residue itself had a real cause and it is fixed at source: reset-demo-history.mjs
+  // deleted every daily_counters row and then wrote orders carrying its own numbering, so the
+  // LIVE counter restarted at 1 underneath the demo data and marched back up through numbers
+  // already used. It now re-seeds each day's counter to the highest number it wrote.
+  const bizDay = (iso) => new Date(new Date(iso).getTime() + 30 * 60000).toISOString().slice(0, 10); // UTC+05:30−05:00
+  const rows = await dbGet("orders?select=id,restaurant_id,kot_no,created_at,archived,status,deleted_at&kot_no=not.is.null&order=created_at.desc&limit=3000");
+  const live = rows.filter((r) => !r.archived && !r.deleted_at && r.status !== "cancelled");
   const seen = new Set(); const dup = [];
-  for (const r of rows) {
-    const day = String(r.created_at || "").slice(0, 10);
-    const k = `${r.restaurant_id}|${day}|${r.kot_no}`;
+  for (const r of live) {
+    const k = `${r.restaurant_id}|${bizDay(r.created_at)}|${r.kot_no}`;
     if (seen.has(k)) dup.push(k); else seen.add(k);
   }
-  ok(!dup.length, `${dup.length} repeated ticket numbers on the same day (e.g. ${dup[0]})`);
+  ok(!dup.length, `${dup.length} live tickets share a number on the same business day (e.g. ${dup[0]})`);
 });
 phase("no DINE-IN order sits on a table that isn't on the floor plan", async () => {
   const sets = await dbGet("settings?select=restaurant_id,table_count");
@@ -1967,9 +1991,16 @@ phase("every bill that has food on it has a bill number", async () => {
   const rows = await dbGet(`sessions?select=id,bill_no&restaurant_id=eq.${await fhId()}&status=eq.closed&bill_no=is.null&order=closed_at.desc&limit=120`);
   if (!rows.length) return ok(true);
   const ids = rows.map((r) => r.id);
-  const withFood = new Set((await dbGet(`orders?select=session_id&session_id=in.(${ids.join(",")})&limit=400`)).map((o) => o.session_id));
+  // "HAS FOOD" MEANS FOOD THAT WAS ACTUALLY SOLD. A session whose every order was CANCELLED —
+  // a walk-out, or a table closed before anything was made — sold nothing, so there is no bill
+  // and correctly no bill number; the cancelled rows stay in the record as the ✕ history the
+  // compliance rules require (mig 232). Counting them the same as real food reported two such
+  // sessions as missing bills (2026-08-02) and would go on doing so for ever, since a cancelled
+  // order can never be deleted. Same reasoning as the empty-session note above, one step deeper.
+  const orders = await dbGet(`orders?select=session_id,status,archived,deleted_at&session_id=in.(${ids.join(",")})&limit=400`);
+  const withFood = new Set(orders.filter((o) => o.status !== "cancelled" && !o.deleted_at).map((o) => o.session_id));
   const bad = rows.filter((r) => withFood.has(r.id));
-  ok(!bad.length, `${bad.length} closed sessions HAVE orders but no bill number (e.g. ${bad[0]?.id})`);
+  ok(!bad.length, `${bad.length} closed sessions sold food but have no bill number (e.g. ${bad[0]?.id})`);
 });
 phase("no two bills share a number on the same day", async () => {
   // Group by the day the number was ISSUED (created_at), not the day the table closed. A bill

@@ -20,7 +20,7 @@ const fail = (m) => fails.push(m);
 
 // The model itself, compiled. `npm run verify:access` bundles it first (see package.json), so
 // these are the REAL exported values — every generated row included.
-const { MANAGER_GRANT_DEFAULTS, isConfigurableGrant, MODULE_KEYS } = await import("../node_modules/.cache/accessTree.mjs");
+const { MANAGER_GRANT_DEFAULTS, isConfigurableGrant, MODULE_KEYS, HAS_IDS, ALL_NODES } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
 const format = read("lib/format.ts");
@@ -219,6 +219,33 @@ for (let i = 0; i < idPositions.length; i++) {
   deadRows++;
 }
 if (!deadRows) ok("no row is a switch with nothing behind it");
+
+// ── 8b · a "has" row must be in HAS_IDS, or the save silently drops it ──────
+// The write route allow-lists config[id].on from HAS_IDS. That list was built from featureBind
+// only, so "Put menu on maintenance" — whose has-bind is its MAIN bind — was missing: the switch
+// moved on screen, wrote nothing, and read back off on every restaurant. A dead switch inside the
+// list whose whole job is to prevent dead switches (2026-08-02).
+{
+  const missing = ALL_NODES
+    .filter((n) => n.bind?.t === "has" || n.featureBind?.t === "has")
+    .map((n) => ({ id: n.id, key: n.bind?.t === "has" ? n.bind.id : n.featureBind.id }))
+    .filter((x) => !HAS_IDS.includes(x.key));
+  if (missing.length) fail(`a "has" switch is not in HAS_IDS, so the write route will drop it: ${missing.map((m) => `${m.id} → config.${m.key}.on`).join(", ")}`);
+  else ok(`all ${HAS_IDS.length} "has" switches are allow-listed for saving`);
+}
+
+// ── 8c · every switch states its factory default ON THE NODE ───────────────
+// set-access-defaults and the QA suite's per-restaurant check both read node.def. A default
+// hiding inside the bind reads as `undefined`, so the row is reported as drifted on every
+// restaurant for ever — with a fix command that cannot fix it (2026-08-02, "Put menu on
+// maintenance is undefined"). Rows with no stored value of their own are exempt.
+{
+  const EXEMPT = new Set(["none", "creds", "text", "opt"]);
+  const undef = ALL_NODES.filter((n) => !n.info && !n.leftToBuild && !n.panel && !n.children
+    && n.bind && !EXEMPT.has(n.bind.t) && n.def === undefined);
+  if (undef.length) fail(`switch(es) with no factory default on the node — every defaults tool reads node.def: ${undef.map((n) => n.id).join(", ")}`);
+  else ok("every switch states its factory default where the tools read it");
+}
 
 // ── 9b · THE BIG ONE: every switch's key must be READ by code somewhere ──────
 // The original version of this guard only proved a switch's STORAGE existed. That is not
