@@ -32,6 +32,8 @@ type TaxInfo = { effectivePct: number; components: { label: string; rate: number
 type InHandExport = {
   itemSales: number; discounts: number; netSales: number; gst: number;
   collected: number; yours: number; expenses: number; left: number;
+  moneyIn?: number;
+  earnings?: { parts: { key: string; orders: number; amount: number; gst: number; isSales: boolean }[]; dineIn: number; tips: number };
   parts: {
     manual: { amount: number; entries: number; byCategory: Record<string, number> } | null;
     salary: { accrued: number; paid: number; people: number; excluded: number } | null;
@@ -45,7 +47,8 @@ type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; bucket?: stri
   // The in-hand ladder (mig 252) and the inventory sub-tab shapes (mig 227).
   inHand?: InHandExport | null;
   summary?: Record<string, number | null>; items?: unknown[]; vendors?: unknown[];
-  expenses?: unknown[]; waste?: unknown[]; dishes?: unknown[] };
+  expenses?: unknown[]; waste?: unknown[]; dishes?: unknown[];
+  payments?: { method: string; revenue: number; orders: number }[] };
 
 export type SectionMeta = { label: string; kind: string };
 export type SectionCtx = {
@@ -98,6 +101,30 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
       rows2.push(["PROFIT IN HAND", Math.round(ih.left)]);
       rows2.push(["Lost to cancellations (not charged above)", Math.round(ih.parts.cancelled.lostSales)]);
       out.push({ title: `${meta.label} — profit in hand`, head: ["Line", "Amount"], rows: rows2 });
+
+      // INCOME — the same parts the Income sub-report shows, so the printed statement and
+      // the spreadsheet carry the split, not just the total (owner 2026-08-02).
+      const eparts = ih.earnings?.parts ?? [];
+      if (eparts.length) {
+        const NAMES: Record<string, string> = { dinein: "Dine-in orders", parcel: "Parcel / takeaway", zomato: "Zomato", swiggy: "Swiggy", website: "Website takeaway", banquet: "Banquet", tips: "Tips (not in the total)" };
+        const inRows: (string | number)[][] = eparts.map((e) => [NAMES[e.key] ?? e.key, e.orders || "", Math.round(e.amount), Math.round(e.gst)]);
+        inRows.push(["TOTAL money in (with GST)", "", Math.round(ih.moneyIn ?? 0), Math.round(ih.gst)]);
+        out.push({ title: `${meta.label} — income, by source`, head: ["Source", "Orders", "Amount", "of which GST"], rows: inRows });
+      }
+
+      // EXPENSE — one table with every part, cancellations included (they belong here, not
+      // in a sub-report of their own — owner 2026-08-02).
+      const exRows: (string | number)[][] = [];
+      for (const [k, v] of Object.entries(pt.manual?.byCategory || {})) exRows.push([`You entered · ${k}`, Math.round(Number(v))]);
+      if (pt.manual) exRows.push(["You entered · total", Math.round(pt.manual.amount)]);
+      exRows.push(["Team wages (period's share)", pt.salary ? Math.round(pt.salary.accrued) : "not tracked"]);
+      if (pt.salary) exRows.push(["  of which actually paid out", Math.round(pt.salary.paid)]);
+      exRows.push(["Food taken from stock", pt.stock ? Math.round(pt.stock.used) : "not tracked"]);
+      exRows.push(["Thrown away", pt.stock ? Math.round(pt.stock.wasted) : "not tracked"]);
+      exRows.push([`Cancelled orders (${pt.cancelled.mode === "bill" ? "charged at menu price" : "already inside food from stock"})`, Math.round(pt.cancelled.charged)]);
+      exRows.push(["TOTAL what it cost you", Math.round(ih.expenses)]);
+      exRows.push(["Lost to cancellations (shown, not charged)", Math.round(pt.cancelled.lostSales)]);
+      out.push({ title: `${meta.label} — expense, by part`, head: ["Part", "Amount"], rows: exRows });
     }
     if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
@@ -237,10 +264,48 @@ export function printSection(ctx: SectionCtx) {
   w.document.close();
 }
 
-// ── the Print / CSV / Excel dropdown for a section ────────────────────────────
+// ── THE WHATSAPP SUMMARY (owner 2026-08-02) ─────────────────────────────────
+// A whole report is useless in a chat. What travels is the ANSWER: the four lines of the
+// profit block, how the money arrived, and the one or two things worth knowing. Plain text
+// with WhatsApp's own *bold* markers, no tables (WhatsApp has no monospace alignment on
+// phones, so a "table" made of spaces arrives as a mess).
+//
+// Kept SHORT on purpose — the whole point is that it reads on a lock screen. Anything
+// longer belongs in the PDF/Excel the same menu offers.
+export function whatsappText(c: SectionCtx): string {
+  const money = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
+  const L: string[] = [];
+  L.push(`*${c.restName}*`);
+  L.push(`_${c.periodLabel}_`);
+  L.push("");
+  const ih = c.data.inHand;
+  const t = c.data.totals;
+  if (ih) {
+    L.push(`Money in (with GST)  ${money(ih.moneyIn ?? 0)}`);
+    L.push(`GST                  −${money(ih.gst)}`);
+    if (ih.discounts > 0) L.push(`Discount             −${money(ih.discounts)}`);
+    L.push(`Expenses             −${money(ih.expenses)}`);
+    L.push(`*Profit in hand      ${money(ih.left)}*`);
+    const parts = (ih.earnings?.parts ?? []).filter((p) => p.isSales && p.key !== "dinein");
+    if (parts.length) L.push("", "Also came in: " + parts.map((p) => `${p.key} ${money(p.amount)}`).join(" · "));
+  } else if (t) {
+    L.push(`Collected            ${money(t.revenue)}`);
+    L.push(`GST                  ${money(t.tax)}`);
+  }
+  const pays = (c.data.rows as { method?: string; revenue?: number }[] | undefined);
+  const settle = c.data.payments as { method: string; revenue: number }[] | undefined;
+  const src = settle && settle.length ? settle : (pays && pays[0]?.method ? pays as { method: string; revenue: number }[] : []);
+  if (src.length) L.push("", "Paid by: " + src.slice(0, 4).map((p) => `${canonPayMethod(p.method)} ${money(p.revenue)}`).join(" · "));
+  if (t && t.cancelledOrders > 0) L.push(`Cancelled: ${t.cancelledOrders} · ${money(t.cancelledValue)} lost`);
+  L.push("", "— sent from Aevidine");
+  return L.join("\n");
+}
+
+// ── the Print / CSV / Excel / WhatsApp dropdown for a section ─────────────────
 // `onPrintClick` (optional) replaces the immediate print with the page's ask-first flow.
 export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx; filename: string; onPrintClick?: () => void }) {
   const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ready = (ctx.data.rows?.length ?? 0) >= 0 && !!ctx.data;
   useBackClose("owner-section-export", open, () => setOpen(false));
   useEffect(() => {
@@ -253,6 +318,13 @@ export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx
   const doCsv = () => { const t = sectionTables(ctx); dl(new Blob(["﻿" + t.map((x) => [x.title, x.head.map(csvEsc).join(","), ...x.rows.map((r) => r.map(csvEsc).join(","))].join("\n")).join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`); };
   const doXls = () => { const t = sectionTables(ctx); const html = `<html><head><meta charset="utf-8"></head><body>` + t.map((x) => `<h3>${x.title}</h3><table border="1"><tr>${x.head.map((h) => `<th>${h}</th>`).join("")}</tr>${x.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`).join("<br/>") + `</body></html>`; dl(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`); };
   const doPrint = () => (onPrintClick ? onPrintClick() : printSection(ctx));
+  // wa.me with no number opens WhatsApp on "choose a chat" — which is what you want when
+  // the same summary might go to a partner, an accountant or your own Saved Messages.
+  const doWhatsApp = () => window.open(`https://wa.me/?text=${encodeURIComponent(whatsappText(ctx))}`, "_blank", "noopener");
+  const doCopy = async () => {
+    try { await navigator.clipboard.writeText(whatsappText(ctx)); setCopied(true); setTimeout(() => setCopied(false), 2200); }
+    catch { window.prompt("Copy this summary", whatsappText(ctx)); }
+  };
   return (
     <span className="rs-exp" style={{ position: "relative", display: "inline-flex" }}>
       <button className="rs-btn" onClick={() => setOpen((o) => !o)} disabled={!ready} aria-haspopup="menu" aria-expanded={open}>
@@ -260,7 +332,8 @@ export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx
       </button>
       {open && (
         <span role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 90, minWidth: 180, display: "flex", flexDirection: "column", background: "var(--card)", border: "1px solid var(--border-c)", borderRadius: 12, padding: 5, boxShadow: "0 14px 34px rgba(0,0,0,.35)" }}>
-          {([["fa-print", "Print", doPrint], ["fa-file-csv", "Download CSV", doCsv], ["fa-file-excel", "Download Excel", doXls]] as [string, string, () => void][]).map(([ic, lb, fn]) => (
+          {([["fa-print", "Print", doPrint], ["fa-file-csv", "Download CSV", doCsv], ["fa-file-excel", "Download Excel", doXls],
+             ["fa-whatsapp", "Send on WhatsApp", doWhatsApp], ["fa-copy", copied ? "Copied!" : "Copy summary", doCopy]] as [string, string, () => void][]).map(([ic, lb, fn]) => (
             <button key={lb} role="menuitem" onClick={() => { setOpen(false); fn(); }} style={{ display: "flex", alignItems: "center", gap: 10, background: "none", border: "none", borderRadius: 8, padding: "8px 10px", font: "inherit", fontSize: 12.5, fontWeight: 700, color: "inherit", cursor: "pointer", textAlign: "left" }}>
               <i className={`fas ${ic}`} style={{ width: 16, color: "var(--accent)" }} aria-hidden /> {lb}
             </button>
