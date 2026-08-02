@@ -170,7 +170,7 @@ export default function AdminStaffOnline() {
         </div>
       )}
 
-      <style jsx>{`
+      <style href="adm-staff-online" precedence="default">{`
         .so-snap { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; color: var(--adm-warn, #d97706); background: color-mix(in srgb, var(--adm-warn, #d97706) 13%, transparent); white-space: nowrap; }
         .so-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
         .so-card { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 14px; background: var(--card); border: var(--border); position: relative; overflow: hidden; transition: transform .14s ease, box-shadow .14s ease; }

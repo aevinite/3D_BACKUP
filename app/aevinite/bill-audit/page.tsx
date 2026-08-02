@@ -7,6 +7,7 @@
 // From /api/admin/bills. Change log at /aevinite/bill-audit/changes.
 import { useCallback, useEffect, useState } from "react";
 import { useActiveAutoRefresh, timeAgo, inr } from "@/components/admin/shared";
+import { SkelList } from "@/components/admin/Skeleton";
 
 type BillState = "running" | "settled" | "khata" | "onhouse" | "cancelled" | "deleted";
 type Bill = {
@@ -199,8 +200,7 @@ export default function AdminBills() {
       </div>
 
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
-        {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div>
-          : d.bills.length === 0 ? <div className="adm-empty">No bills in this view.</div>
+        {!d ? (err ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={5} label="Loading bills" />) : d.bills.length === 0 ? <div className="adm-empty">No bills in this view.</div>
           : d.bills.map((b) => {
             const m = META[b.state];
             const isOpen = open === b.sessionId;

@@ -186,21 +186,21 @@ export default function AdminCommand() {
               </span>
               <span className="cmd-chips" title={PANEL_DEFS.map((p) => `${p.label}: ${panelOn(r, p.key) ? "on" : "off"}`).join(" · ")}>
                 {PANEL_DEFS.map((p) => (
-                  <span key={p.key} className={`pchip${panelOn(r, p.key) ? " on" : ""}`} aria-label={`${p.label} panel ${panelOn(r, p.key) ? "enabled" : "off"}`}>{p.letter}</span>
+                  <span key={p.key} className={`cmd-pchip${panelOn(r, p.key) ? " on" : ""}`} aria-label={`${p.label} panel ${panelOn(r, p.key) ? "enabled" : "off"}`}>{p.letter}</span>
                 ))}
               </span>
               <span className="cmd-open">
                 {r.active ? (
-                  <a className="obtn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" title={`Open ${r.name}'s guest menu`}>Guest</a>
+                  <a className="cmd-obtn" href={`/r/${r.slug}/menu`} target="_blank" rel="noopener" title={`Open ${r.name}'s guest menu`}>Guest</a>
                 ) : (
                   // Suspended → the guest menu is offline; show a disabled chip instead of a link
                   // to a maintenance page (matches the detail view's EnterCard guard, audit 2026-07-23).
-                  <button className="obtn" disabled title={`${r.name}'s guest menu is offline while suspended`}>Guest</button>
+                  <button className="cmd-obtn" disabled title={`${r.name}'s guest menu is offline while suspended`}>Guest</button>
                 )}
                 {PANEL_DEFS.map((p) => {
                   const multiOwner = p.key === "owner" && r.owners.length >= 2;
                   return (
-                    <button key={p.key} className="obtn" disabled={!panelOn(r, p.key) || busyRow === r.id}
+                    <button key={p.key} className="cmd-obtn" disabled={!panelOn(r, p.key) || busyRow === r.id}
                       onClick={() => { if (multiOwner) setChooser(r); else openPanel(r, p.path); }}
                       title={panelOn(r, p.key)
                         ? (multiOwner ? `${r.name} has ${r.owners.length} owners — choose whose panel to open` : `Open ${p.label} as ${r.name} (new tab, no password)`)
@@ -280,7 +280,7 @@ export default function AdminCommand() {
           }} />
       )}
 
-      <style jsx>{`
+      <style href="adm-dashboard" precedence="default">{`
         /* stat-strip styles live in globals.css now — its cells are <Link>s, which styled-jsx
            can't scope (the scoped rules never matched, so labels+values ran together). */
         /* command table */
@@ -296,14 +296,14 @@ export default function AdminCommand() {
         .cmd-pill.off { background: color-mix(in srgb, var(--adm-danger) 14%, transparent); color: var(--adm-danger); }
         /* M K T O chips: filled = enabled, hollow = off */
         .cmd-chips { display: inline-flex; gap: 4px; }
-        .pchip { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 10px; font-weight: 700; border: 1px solid var(--border-c, #1d2430); color: var(--muted); }
-        .pchip.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
+        .cmd-pchip { width: 20px; height: 20px; border-radius: 5px; display: grid; place-items: center; font-size: 10px; font-weight: 700; border: 1px solid var(--border-c, #1d2430); color: var(--muted); }
+        .cmd-pchip.on { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); color: var(--accent); }
         /* quick-open buttons */
         .cmd-open { display: inline-flex; gap: 5px; flex-wrap: wrap; padding: 6px 0; }
-        .obtn { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; border: var(--border); background: transparent; color: var(--text); font-size: 11.5px; font-weight: 600; text-decoration: none; cursor: pointer; transition: background .15s ease, border-color .15s ease; white-space: nowrap; }
-        .obtn:hover:not(:disabled) { background: var(--muted2); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
-        .obtn:disabled { opacity: .32; cursor: default; }
-        a.obtn { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
+        .cmd-obtn { display: inline-flex; align-items: center; height: 24px; padding: 0 8px; border-radius: 6px; border: var(--border); background: transparent; color: var(--text); font-size: 11.5px; font-weight: 600; text-decoration: none; cursor: pointer; transition: background .15s ease, border-color .15s ease; white-space: nowrap; }
+        .cmd-obtn:hover:not(:disabled) { background: var(--muted2); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+        .cmd-obtn:disabled { opacity: .32; cursor: default; }
+        a.cmd-obtn { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 35%, transparent); }
         /* .cmd-manage lives in globals.css now (it's a <Link>). */
         /* two-column bottom grid */
         .cmd-grid2 { display: grid; grid-template-columns: 1fr 1.4fr; gap: 12px; }
@@ -323,7 +323,7 @@ export default function AdminCommand() {
           .cmd-row.head { display: none; }
           .cmd-row > span { text-align: left !important; }
           /* Bigger tap targets for the quick-open buttons on phones (audit 2026-07-07). */
-          .obtn { min-height: 40px; padding: 0 12px; }
+          .cmd-obtn { min-height: 40px; padding: 0 12px; }
         }
       `}</style>
     </>

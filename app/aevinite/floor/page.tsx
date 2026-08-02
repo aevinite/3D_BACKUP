@@ -15,6 +15,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Dropdown from "@/components/admin/Dropdown";
 import { openRestaurantPanel } from "@/components/admin/shared";
+import { SkelList } from "@/components/admin/Skeleton";
 
 type MiniTable = { n: string; s: string; p: string; c: boolean; g?: string };
 // Special table types (mig 166): tint + emoji on the mini tile — still money-free.
@@ -487,7 +488,7 @@ export default function AdminFloor() {
                 {cancelledOpen && (
                   <div style={{ marginTop: 12 }}>
                     {cancelledLoading ? (
-                      <div className="adm-empty">Loading…</div>
+                      <SkelList rows={4} label="Loading floor" />
                     ) : cancelledErr ? (
                       <p style={{ color: "var(--adm-danger)", fontSize: 13 }}>Couldn&apos;t load: {cancelledErr}</p>
                     ) : cancelledList && cancelledList.length > 0 ? (
@@ -517,7 +518,7 @@ export default function AdminFloor() {
       </>
       )}
 
-      <style jsx>{`
+      <style href="adm-floor" precedence="default">{`
         .floor-gate { text-align: center; padding: 44px 24px; max-width: 560px; margin: 8px auto; }
         .floor-gate-ic { width: 56px; height: 56px; border-radius: 16px; margin: 0 auto 16px; display: grid; place-items: center; font-size: 24px; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
         .floor-gate h2 { font-size: 18px; font-weight: 800; margin: 0 0 8px; }

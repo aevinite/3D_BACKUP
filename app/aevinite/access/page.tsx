@@ -102,7 +102,15 @@ export default function AccessPage() {
 }
 
 function Style() {
-  return <style jsx global>{`
+  // PLAIN <style>, deliberately NOT `<style jsx global>` (owner, 2026-08-02). styled-jsx
+  // injects its CSS from JavaScript AFTER hydration, so this page shipped with none of its
+  // own styling in the HTML: every control below painted as a raw browser default — white
+  // boxes, unstyled selects, bare "Loading" text — until the bundle downloaded and ran. A
+  // plain <style> is server-rendered into the document, and it sits ABOVE the markup it
+  // styles, so the CSS is parsed before any of that markup paints. Zero unstyled frames.
+  // Do not convert this back to styled-jsx. (/aevinite/rate-limits and /repair were always
+  // plain <style> and never had the flash — that is the proof.)
+  return <style href="adm-access" precedence="default">{`
   .acc2 { max-width: 1180px; }
   .acc2-head { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin:6px 0 18px; }
   .acc2-head-r { margin-left:auto; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }

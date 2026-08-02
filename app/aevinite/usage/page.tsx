@@ -91,7 +91,7 @@ export default function AdminUsage() {
         </p>
       </div>
 
-      <style jsx>{`
+      <style href="adm-usage" precedence="default">{`
         .rev-strip { display: flex; flex-wrap: wrap; padding: 0; margin-bottom: 12px; }
         .rev-strip .cell { display: flex; flex-direction: column; gap: 3px; padding: 12px 18px; border-right: var(--border); flex: 1 1 auto; min-width: 150px; }
         .rev-strip .cell:last-child { border-right: 0; }

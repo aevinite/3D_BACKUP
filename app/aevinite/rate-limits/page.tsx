@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useToast } from "@/components/admin/toast";
 import { adminFetch } from "@/lib/adminFetch";
 import { timeAgo } from "@/components/admin/shared";
+import { SkelList } from "@/components/admin/Skeleton";
 
 type Rule = { id: string; key: string; label: string; max_count: number; window_seconds: number; enabled: boolean; updated_at: string };
 type Hit = { id: string; restaurant_id: string; restaurant_name: string | null; key: string; subject: string; subject_label: string | null; hit_count: number; max_count: number; window_seconds: number; last_at: string };
@@ -179,7 +180,7 @@ export default function AdminRateLimits() {
           <span className="adm-muted" style={{ fontSize: 12 }}>who hit a wall right now · all restaurants</span>
         </>
       ), "hits")}
-      {collapsed.hits ? null : loading ? <div className="adm-empty">Loading…</div> : hits.length === 0 ? (
+      {collapsed.hits ? null : loading ? <SkelList rows={3} label="Loading limits" /> : hits.length === 0 ? (
         <div className="rl-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No limits reached right now.</div>
       ) : (
         <div style={{ marginBottom: 6 }}>
@@ -228,7 +229,7 @@ export default function AdminRateLimits() {
           <span className="adm-muted" style={{ fontSize: 12 }}>change how many actions are allowed per time window</span>
         </>
       ))}
-      {collapsed.rules ? null : loading ? <div className="adm-empty">Loading…</div> : (
+      {collapsed.rules ? null : loading ? <SkelList rows={3} label="Loading limits" /> : (
         <div className="adm-card" style={{ marginBottom: 12 }}>
           {rules.map((r) => {
             const d = draft[r.id] || { max_count: r.max_count, window_seconds: r.window_seconds };
@@ -279,7 +280,7 @@ export default function AdminRateLimits() {
           <span className="adm-muted" style={{ fontSize: 12 }}>blocked devices asking to be let back in</span>
         </>
       ))}
-      {collapsed.requests ? null : loading ? <div className="adm-empty">Loading…</div> : requests.length === 0 ? (
+      {collapsed.requests ? null : loading ? <SkelList rows={3} label="Loading limits" /> : requests.length === 0 ? (
         <div className="adm-muted" style={{ fontSize: 12.5, padding: "2px 0 6px" }}>No requests right now.</div>
       ) : (
         <div className="adm-card" style={{ marginBottom: 12 }}>
@@ -312,7 +313,7 @@ export default function AdminRateLimits() {
           {blocked.length ? <span className="rl-chip danger">{blocked.length}</span> : null}
         </>
       ))}
-      {collapsed.blocked ? null : loading ? <div className="adm-empty">Loading…</div> : blocked.length === 0 ? (
+      {collapsed.blocked ? null : loading ? <SkelList rows={3} label="Loading limits" /> : blocked.length === 0 ? (
         <div className="adm-muted" style={{ fontSize: 12.5, padding: "2px 0 6px" }}>No devices are blocked.</div>
       ) : (
         <div className="adm-card" style={{ marginBottom: 12 }}>

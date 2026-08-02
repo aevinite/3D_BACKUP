@@ -5,6 +5,7 @@
 // view; the primary "Bills" ledger (one row per bill, by state) lives at /aevinite/bill-audit.
 import { useCallback, useEffect, useState } from "react";
 import { useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
+import { SkelList } from "@/components/admin/Skeleton";
 
 type Row = { id: string; action: string; restaurantName: string; table: string | null; actor: string; detail: string | null; at: string; risk: boolean };
 type Rest = { id: string; name: string };
@@ -90,7 +91,7 @@ export default function AdminBillChanges() {
       </div>
 
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
-        {!d ? <div className="adm-empty">{err ? "Couldn't load." : "Loading…"}</div> : d.rows.length === 0 ? (
+        {!d ? (err ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={5} label="Loading changes" />) : d.rows.length === 0 ? (
           <div className="adm-empty">No bill changes recorded in this view.</div>
         ) : (
           <div className="adm-logwrap" style={{ border: 0, overflowX: "auto" }}>

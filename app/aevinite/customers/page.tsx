@@ -12,6 +12,7 @@
 // per-restaurant spread is ONE grouped read (mig 228). A 60s backstop refresh, paused while
 // the tab is hidden.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { SkelList } from "@/components/admin/Skeleton";
 
 const IST = "Asia/Kolkata";
 
@@ -279,7 +280,7 @@ export default function AdminCustomers() {
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", backdropFilter: "blur(3px)", zIndex: 80, display: "flex", justifyContent: "flex-end" }}>
           <div onClick={(e) => e.stopPropagation()} className="adm-card"
             style={{ width: "min(460px, 100%)", height: "100%", borderRadius: 0, overflow: "auto", padding: 22 }}>
-            {!detail ? <div className="adm-empty">Loading…</div> : (
+            {!detail ? <SkelList rows={4} label="Loading customer" /> : (
               <>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                   <div>
