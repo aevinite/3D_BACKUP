@@ -1304,7 +1304,9 @@ function userSettingCardHtml() {
           </select>
           <button class="btn small" data-staff-resetpw="${esc(u.id)}">Reset password</button>
           <button class="btn small" data-staff-toggle="${esc(u.id)}" data-active="${u.active ? "1" : "0"}">${u.active ? "Disable" : "Enable"}</button>
-          <button class="btn small danger" data-staff-del="${esc(u.id)}">Remove</button>
+          ${state.staffActor === "manager"
+            ? "" /* a manager DISABLES, never deletes (owner, 2026-08-02) — the server refuses too, so no dead button */
+            : `<button class="btn small danger" data-staff-del="${esc(u.id)}">Remove</button>`}
         </div>
       </div>`).join("")
     : `<div class="sx-empty">No staff yet — add the first below.</div>`;
@@ -4752,7 +4754,7 @@ function renderEditor() {
     return;
   }
   if (state.tab === "ratings") {
-    ed.innerHTML = `<div class="ed-head"><h2>Guest ratings</h2><div style="display:flex;gap:8px"><button class="btn" id="ratingsRefresh">↻ Refresh</button></div></div><div id="ratingsBody" class="dash-body"><div class="empty">Loading ratings…</div></div>`;
+    ed.innerHTML = `<div class="ed-head"><h2>Rating review</h2><div style="display:flex;gap:8px"><button class="btn" id="ratingsRefresh">↻ Refresh</button></div></div><div id="ratingsBody" class="dash-body"><div class="empty">Loading ratings…</div></div>`;
     document.getElementById("ratingsRefresh").onclick = () => loadRatings();
     loadRatings();
     return;
@@ -10523,6 +10525,13 @@ function setTab(tab) {
     state.openSess = null;
     syncTableBackLayers();
   }
+  // ENTERING Settings refetches the team (owner, 2026-08-02: the admin deleted a user and the
+  // manager's Users list still showed them — the list was fetched ONCE per panel session, so a
+  // person removed elsewhere lingered until a full page reload). Clearing the once-flag here
+  // makes the render hook fetch fresh rows each visit; the stale list stays on screen until the
+  // real one lands (same skeleton-then-real pattern loadStaffTeam already uses), and a manager
+  // parked on another tab still pays nothing.
+  if (tab === "general" && state.tab !== "general") state.staffLoaded = false;
   state.tab = tab;
   try { localStorage.setItem("lfh_editor_tab", tab); } catch {}
   state.isNew = false;
@@ -12120,11 +12129,12 @@ const XRAY_TABS = [
   // default), so this is non-breaking — the tab only disappears once the owner explicitly
   // switches it off; admin/owner keep it (tinted).
   { tab: "log", flag: "view_logs", label: "Activity log" },
-  // Bills (owner, 2026-08-02). Its DOM tab is called "orders". It was the one menu with a
-  // permission and no entry here: switch "Bill" off and the tab still sat there, and every
-  // tap inside it came back 403 from tabGate — a switched-off permission has to be GONE, not
-  // merely refused ("even if it's shown it should not work, and it shouldn't be shown").
-  { tab: "orders", flag: "view_bills", label: "Bills" },
+  // Bills LEFT this list (owner, 2026-08-02, same day it arrived): the Bill menu is now FIXED —
+  // "four will be the fixed one: table, platform, bill and setting" — so every manager always
+  // has the tab and there is no view_bills power any more (the model answers a retired flag
+  // permanently ON, and whoami no longer sends it, so an entry here would HIDE the tab for
+  // every real manager). The dangerous actions inside it (delete / reopen a bill) keep their
+  // own flags in XRAY_CONTROLS below.
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can
@@ -12440,6 +12450,11 @@ function xraySetTint(el, on, title) {
 function menuEditAllowed() {
   if (!XRAY_WHO) return true;                       // pre-boot: assume editable
   if (XRAY_WHO.actor === "admin") return true;
+  // The Edit menu FEATURE switch (Access → Manager's menu → Edit menu, owner 2026-08-02):
+  // off means editing is removed from EVERYONE below the admin, whatever their per-person
+  // setting says — the whole tab becomes the read-only Viewer ("instead of editor, there
+  // will be shown as viewer — they should able to view the whole menu, can't edit anything").
+  if ((XRAY_WHO.tabsOff || []).includes("editor")) return false;
   if (XRAY_WHO.actor === "owner")
     return !(XRAY_WHO.offByAdmin && XRAY_WHO.offByAdmin.edit_menu === true);
   return xrayGrantedForManager("edit_menu");
@@ -12493,6 +12508,11 @@ function applyHierarchyView() {
   // looked for a tab called "bills", found nothing, and left the real one on screen.
   const TAB_DOM = { editor: "items", ratings: "ratings", log: "log", bills: "orders" };
   for (const key of XRAY_WHO.tabsOff || []) {
+    // The Edit menu FEATURE off does NOT hide the tab (owner, 2026-08-02): the tab flips to
+    // the read-only "View menu" Viewer instead — menuEditAllowed() reads tabsOff, and
+    // applyMenuReadonly() below does the renaming and the locking. Every other switched-off
+    // menu is removed outright, as before.
+    if (key === "editor") continue;
     const btn = document.querySelector(`.tabs .tab[data-tab="${TAB_DOM[key] || key}"]`);
     if (btn) { xraySetTint(btn, false); xraySetHidden(btn, true); }
   }

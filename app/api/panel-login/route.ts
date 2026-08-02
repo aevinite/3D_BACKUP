@@ -58,6 +58,9 @@ export async function POST(req: NextRequest) {
         : r.reason === "wrong_password" ? `login failed · wrong password for "${who}"`
         : r.reason === "locked" ? `login blocked · "${who}" is locked out (too many wrong tries)`
         : r.reason === "too_long" ? "login failed · oversized input rejected"
+        // A disabled person typed their RIGHT password — recorded so the owner can see the
+        // person tried, and the person themselves was told plainly (owner, 2026-08-02).
+        : r.reason === "disabled" ? `login refused · "${who}" is disabled`
         : "login failed";
       await logAction((a?.role ?? "admin"), "login_failed", {
         actor: who, device_id: dev, detail, restaurant_id: a?.restaurant_id ?? null,

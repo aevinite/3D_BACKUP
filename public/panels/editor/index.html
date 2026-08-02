@@ -41,7 +41,10 @@
       <button class="tab" data-tab="inventory" hidden>📦 Inventory</button>
       <button class="tab" data-tab="dash">Dashboard</button>
       <!-- Guest ratings (mig 140): gated by the view_ratings manager power via XRAY_TABS. -->
-      <button class="tab" data-tab="ratings">⭐ Ratings</button>
+      <!-- "Rating review", not "Ratings" (owner, 2026-08-02) — the Access screen row says the
+           same. Only the LABEL changed: the tab key, the stored menus key and the view_ratings
+           grant all keep their names (renaming a label must never rename a key). -->
+      <button class="tab" data-tab="ratings">⭐ Rating review</button>
       <button class="tab" data-tab="log">🗑 Audit</button>
       
       <button class="tab" data-tab="general">Settings</button>
@@ -140,6 +143,6 @@
   <script src="/panels/editor/inventory.js?v=6dab7654"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=2ae5c899"></script>
+  <script src="/panels/editor/app.js?v=ee39dfb0"></script>
 </body>
 </html>

@@ -42,7 +42,11 @@ try {
     p.on("pageerror", (e) => errs.push(String(e.message)));
     p.on("console", (m) => { if (m.type() === "error") errs.push("console: " + m.text().slice(0, 120)); });
 
-    await p.goto(`${BASE}/aevinite/access?restaurant_id=${rid}`, { waitUntil: "domcontentloaded" });
+    // ?rid= — the page reads q.get("rid") (app/aevinite/access/page.tsx). This used to say
+    // ?restaurant_id=, which the page IGNORES, so every run silently tested the alphabetically
+    // FIRST restaurant (Aangan, the QA control) instead of the one resolved above — and a drifted
+    // switch on Aangan read as a search bug (found 2026-08-02).
+    await p.goto(`${BASE}/aevinite/access?rid=${rid}`, { waitUntil: "domcontentloaded" });
     await sleep(6000);
     const box = p.locator('input[aria-label="Find a setting"]');
     ok("the search bar is on the page", (await box.count()) === 1);
@@ -93,7 +97,12 @@ try {
     ok("the × is what clears it", (await box.inputValue()) === "");
 
     // The sub-settings are BOXES in a grid, which is the structure the owner asked for.
-    await box.fill("allergy");
+    // Target: "Add a new dish", one of the NINE Edit-menu parts — a group that big is
+    // guaranteed a grid. "allergy" (the old target) stopped qualifying on 2026-08-01 when
+    // the owner asked that groups of FEWER THAN THREE render as full rows instead
+    // ("list them like actually a list, this feels cheap") — its two options are rows now,
+    // so the old check failed against a screen that is exactly as specified.
+    await box.fill("add a new dish");
     await sleep(450);
     await p.locator(".as-item").first().click();
     await sleep(1500);

@@ -21,6 +21,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
 import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/lib/ownerEntitlements";
+import { managerSettingsOff } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
@@ -126,13 +127,20 @@ async function scope(req: NextRequest): Promise<Scope> {
     return { ok: true, actor: "owner", actorId: u.id, restaurants: rows };
   }
   if (u?.role === "manager") {
-    const { data, error } = await sb.from("restaurants").select(cols).eq("id", u.restaurant_id).limit(1);
+    const { data, error } = await sb.from("restaurants").select(`${cols}, access_config`).eq("id", u.restaurant_id).limit(1);
     // …and a failed read here must not read as "your owner hasn't given you staff management".
     if (error) return { ok: false, resp: transient() };
-    const r = (data || [])[0] as Restaurant | undefined;
-    // The full ladder: the admin must still entitle the power (mig 133) AND the
-    // owner must have granted it — same rule as managerCan() in the editor route.
-    if (!r || mergeOwnerEntitlements(r.owner_entitlements).power_manage_staff === false || !r.manager_permissions?.manage_staff)
+    const r = (data || [])[0] as (Restaurant & { access_config?: unknown }) | undefined;
+    // THE ONE SWITCH is the Users SECTION row (Access → Manager settings → Users), read by the
+    // same helper the panel's sidebar reads. The old gate demanded a STORED
+    // manager_permissions.manage_staff === true — an ABSENT key read as NO while the Access
+    // screen showed the section ON, so on any restaurant never hand-fixed a manager opening
+    // Settings → Users was told "your owner hasn't given you staff management" (the exact
+    // absent-key bug managerGrantValue() was built to kill; manage_staff itself is RETIRED —
+    // no row offers it, so the model answers it permanently on). Found in the 2026-08-02
+    // "everything must be linked" sweep. The admin entitlement cap (mig 133) still applies.
+    if (!r || mergeOwnerEntitlements(r.owner_entitlements).power_manage_staff === false
+      || managerSettingsOff(r.access_config).includes("users"))
       return { ok: false, resp: bad("Your owner hasn't given you staff management.", 403) };
     return { ok: true, actor: "manager", actorId: u.id, restaurants: [r] };
   }
@@ -220,9 +228,16 @@ export async function GET(req: NextRequest) {
   if (ids.length) {
     // Hierarchy: a manager's list contains ONLY the roles they may manage (kitchen +
     // tablet) — they never even SEE other managers' or owners' accounts.
+    //
+    // `deleted_at IS NULL`: a login the admin put in the recycle bin must vanish from the
+    // owner's team page AND the manager panel's Users section the moment it is binned. This
+    // filter was missing, which is exactly what the owner hit (2026-08-02: "I have deleted
+    // one user, and that user is still showing in the manager panel user option") — every
+    // list that shows people must read the same rows the login door reads.
     const { data, error } = await sb.from("staff_users")
       .select(`id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions, ${PROFILE_COLS}`)
-      .in("restaurant_id", ids).in("role", assignableFor(s.actor)).order("created_at", { ascending: true }).limit(2000);
+      .in("restaurant_id", ids).in("role", assignableFor(s.actor)).is("deleted_at", null)
+      .order("created_at", { ascending: true }).limit(2000);
     if (error) return bad("Something went wrong, please try again.", 500);
     // Never ship hashes; expose only whether a PIN exists.
     staff = (data || []).map(({ pin_hash, ...u }) => ({ ...u, hasPin: !!pin_hash }));
@@ -724,6 +739,11 @@ export async function PATCH(req: NextRequest) {
 
 export async function DELETE(req: NextRequest) {
   const s = await scope(req); if (!s.ok) return s.resp;
+  // A MANAGER can never DELETE a login (owner, 2026-08-02: "it can disable the user, it
+  // can't delete the user"). Disabling is their tool — it keeps the row, the name and the
+  // audit trail, and the person is told they're disabled when they try to sign in. Refused
+  // here first so no hierarchy quirk below can ever let it through.
+  if (s.actor === "manager") return bad("Managers can disable a login, not delete it — ask the owner or admin to remove someone.", 403);
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!id) return bad("Missing staff id.");
   const ids = s.restaurants.map((r) => r.id);
