@@ -252,7 +252,40 @@ if (!HOOK || !touched || /public\/panels\//.test(touched)) {
   );
 }
 
-// ── 8. WHY THERE IS NO STATIC CHECK FOR THE RUNTIME SHAPE OF THAT FAULT ───────────────────
+// ── 8. THE EMBED'S SKIN HAS EXACTLY ONE WRITER ────────────────────────────────────────────
+//
+// Owner, 2026-08-03: "I changed the colour to white, then I go to parcel and it shifts to dark."
+// The owner panel hosts the staff panel in an iframe three times over (Manager mode, Menu,
+// Inventory) and the cockpit's light/dark toggle arrives by postMessage — so the LIVE skin can
+// differ from the `?skin=` the frame was born with. setTab() re-applied `"skin-" + MENU_SKIN`,
+// the birth value, and only ever ADDED it: the body ended up wearing skin-light AND skin-dark
+// at once, and since the two CSS blocks have equal specificity the later one (dark) won. Any
+// tab change threw the white theme away.
+//
+// The rule that fixes it is small and easy to undo by accident, so it is pinned here: every
+// skin class change goes through applyEmbedSkin(), which clears the other class first and
+// tracks CUR_SKIN. Nothing outside it may name MENU_SKIN as a class, and nothing may add a
+// skin class without removing its opposite.
+{
+  const f = "public/panels/editor/app.js";
+  if ((!HOOK || !touched || touched.endsWith("app.js")) && fs.existsSync(f)) {
+    const src = fs.readFileSync(f, "utf8");
+    const strays = [...src.matchAll(/\.add\([^)]*"skin-"\s*\+\s*MENU_SKIN/g)];
+    const adders = [...src.matchAll(/\.add\("skin-"\s*\+\s*[A-Za-z_$][\w$]*\)/g)];
+    const hasWriter = /function applyEmbedSkin\(/.test(src) && /\.remove\("skin-light",\s*"skin-dark"\)/.test(src);
+    if (strays.length) {
+      bad(`${strays.length} place(s) re-apply the BIRTH skin ("skin-" + MENU_SKIN) — that is the bug that turned the owner's white manager screen dark on every tab change`,
+        'Call applyEmbedSkin(CUR_SKIN) instead — it clears the opposite class first.');
+    } else if (!hasWriter) {
+      bad("applyEmbedSkin() (the single writer of the embed's skin classes) is gone — a skin class added without removing its opposite leaves the body wearing both, and dark wins");
+    } else if (adders.length > 1) {
+      bad(`${adders.length} places add a skin class directly — there must be exactly one (inside applyEmbedSkin)`,
+        "Route the others through applyEmbedSkin() so the opposite class is always cleared.");
+    } else ok("the owner-embed skin has exactly one writer (a tab change cannot undo light mode)");
+  }
+}
+
+// ── 9. WHY THERE IS NO STATIC CHECK FOR THE RUNTIME SHAPE OF THAT FAULT ───────────────────
 //
 // I made that mistake twice on 2026-08-01 (a class name in backticks inside a /* … */ comment in
 // the panels' runtime-injected CSS, which is a template literal — the backtick ENDS the string).

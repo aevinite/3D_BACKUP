@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useOwnerSkin, useSkinFrame } from "./useOwnerSkin";
 
 // Owner panel → Menu (2026-07-25). Hosts the SAME menu editor the manager panel uses
 // (public/panels/editor, menu-only mode) inside the owner cockpit, scoped to the picked
@@ -22,7 +23,11 @@ export default function OwnerMenuEditor({
   skin: "light" | "dark";
 }) {
   const [rid, setRid] = useState(initial);
-  const src = `/panels/editor/index.html?rid=${encodeURIComponent(rid)}&menuonly=1&skin=${skin}`;
+  // The cockpit's light/dark toggle reaches this embed LIVE (2026-08-03) — by message, so
+  // the editor never reloads mid-edit. See components/owner/useOwnerSkin.ts.
+  const liveSkin = useOwnerSkin(skin);
+  const { frame, bornSkin, onLoad } = useSkinFrame(liveSkin);
+  const src = `/panels/editor/index.html?rid=${encodeURIComponent(rid)}&menuonly=1&skin=${bornSkin}`;
   const many = restaurants.length > 1;
 
   return (
@@ -37,7 +42,7 @@ export default function OwnerMenuEditor({
           </select>
         </div>
       )}
-      <iframe key={rid} src={src} title="Menu editor" className="ome-frame" />
+      <iframe key={rid} ref={frame} src={src} title="Menu editor" className="ome-frame" onLoad={onLoad} />
       <style>{`
         /* Break out of the owner content padding / centered max-width — only on this page. */
         .adm-main:has(.ome-full){ padding:0 !important; overflow:hidden !important; }

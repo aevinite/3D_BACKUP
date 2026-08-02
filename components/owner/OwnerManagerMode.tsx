@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useBackClose } from "@/lib/backStack";
+import { useOwnerSkin, pushSkinTo } from "./useOwnerSkin";
 
 // Owner panel → Manager mode (owner, 2026-08-02). Hosts the SAME live manager panel
 // (public/panels/editor, ?ownermode=1) inside the owner cockpit. One engine per
@@ -32,25 +33,17 @@ export default function OwnerManagerMode({
   skin: "light" | "dark";
 }) {
   const [rid, setRid] = useState<string | null>(initial || null);
-  const [skin, setSkin] = useState<"light" | "dark">(initialSkin);
+  // Follow the cockpit's skin (shared with the Menu + Inventory embeds — one hook, so the
+  // three can't drift apart again). The frame is told by message; its ?skin= is only ever
+  // the value it was born with.
+  const skin = useOwnerSkin(initialSkin);
   const frame = useRef<HTMLIFrameElement>(null);
   const skinRef = useRef(skin);
   skinRef.current = skin;
   const many = restaurants.length > 1;
   const current = restaurants.find((r) => r.id === rid);
 
-  // Follow the cockpit's skin: reconcile with localStorage once (the SSR cookie can lag
-  // a toggle made on another page), then track the shell's toggle event live.
-  useEffect(() => {
-    try { const s = localStorage.getItem("aevidine_skin"); if (s === "dark" || s === "light") setSkin(s as "light" | "dark"); } catch {}
-    const onSkin = (e: Event) => { const s = (e as CustomEvent).detail; if (s === "dark" || s === "light") setSkin(s); };
-    window.addEventListener("lfh:owner-skin", onSkin);
-    return () => window.removeEventListener("lfh:owner-skin", onSkin);
-  }, []);
-
-  const pushSkin = (s: "light" | "dark") => {
-    try { frame.current?.contentWindow?.postMessage({ type: "lfh-owner-skin", skin: s }, window.location.origin); } catch {}
-  };
+  const pushSkin = (s: "light" | "dark") => pushSkinTo(frame.current, s);
   useEffect(() => { pushSkin(skin); }, [skin]);
 
   // Hardware BACK inside the floor peels back to the launcher (multi-restaurant only) —
