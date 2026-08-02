@@ -53,7 +53,13 @@ const FLOOR_PREVIEW = new URLSearchParams(location.search).get("floorpreview") =
 // tab buttons are hidden by CSS AND setTab refuses them, so a stale saved tab / deep link
 // can never boot into one. Everything else is exactly the manager panel, same live engine.
 const OWNER_MODE = new URLSearchParams(location.search).get("ownermode") === "1";
-const OWNER_HIDDEN_TABS = ["items", "categories", "filters", "ratings", "log", "general"];
+// SETTINGS IS NOT HIDDEN HERE (owner, 2026-08-02: "owner panel should also not hide setting").
+// It used to be, as "admin-owned", but that tab is where the FLOOR is configured — Tables per
+// row, table names and seats, who serves which table — so an owner running the floor from this
+// cockpit could not reach any of it. Nothing is loosened by showing it: every card inside is
+// gated exactly as it is in the real manager panel, and the server still decides what an owner
+// may write (the per-field manager gate in /api/editor only applies to role "manager").
+const OWNER_HIDDEN_TABS = ["items", "categories", "filters", "ratings", "log"];
 if (MENU_ONLY || INV_ONLY || OWNER_MODE) { try { document.documentElement.setAttribute("data-theme", MENU_SKIN); } catch (e) {} }
 // Mark the body NOW (app.js loads at the end of <body>) so the very first paint already
 // has the owner skin + hidden tabs — setTab re-adds the same classes, harmlessly.
@@ -457,6 +463,12 @@ const panelRid = () => PANEL_RID || (state && state.data && state.data.restauran
 // The device cache key for THIS restaurant's table count. Empty until we know the
 // restaurant — callers then fall back to the neutral default skeleton (no leak).
 const tableCountKey = () => { const r = panelRid(); return r ? "lfh_editor_table_count:" + r : ""; };
+// Same idea for how many tiles sit on a row. The panel now OPENS on the Tables tab, so the floor
+// is drawn BEFORE /all answers — without a remembered number the first paint used the generic
+// default and the whole grid visibly re-flowed half a second later (owner, 2026-08-02). Scoped
+// per restaurant for the same reason as the count above: never first-paint one restaurant's
+// floor using another restaurant's number on a shared device.
+const perRowKey = () => { const r = panelRid(); return r ? "lfh_editor_per_row:" + r : ""; };
 
 // api: the one helper every server call goes through. Give it the HTTP method
 // ("GET"/"POST"/"PATCH"/"DELETE"), the path (e.g. "/orders"), and optionally a
@@ -6874,9 +6886,20 @@ function floorPerRow() {
   const raw = state.floorPerRowPreview != null
     ? state.floorPerRowPreview
     : (state.data.settings || {}).floor_per_row;
+  const clamp = (v) => Math.min(Math.max(v, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
   const n = Math.round(Number(raw));
-  if (!Number.isFinite(n)) return FLOOR_PER_ROW_DEFAULT;
-  return Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
+  if (Number.isFinite(n)) {
+    const v = clamp(n);
+    // Remember the REAL number (never the preview slider's temporary one) so the next open paints
+    // the floor at the right width straight away instead of re-flowing once /all lands.
+    if (state.floorPerRowPreview == null) { const k = perRowKey(); if (k) { try { localStorage.setItem(k, String(v)); } catch {} } }
+    return v;
+  }
+  // Settings haven't arrived yet — use what this restaurant drew last time, not the generic
+  // default. Falls back to the default only on a device that has never opened this floor.
+  const k = perRowKey();
+  const cached = k ? parseInt(localStorage.getItem(k), 10) : NaN;
+  return Number.isFinite(cached) ? clamp(cached) : FLOOR_PER_ROW_DEFAULT;
 }
 
 // The admin layout-preview slider talks to this panel here. Only listened for in preview
@@ -12367,7 +12390,7 @@ function xraySettingUrl(flag) {
   body.owner-mode .tab[data-tab="items"],
   body.owner-mode .tab[data-tab="ratings"],
   body.owner-mode .tab[data-tab="log"],
-  body.owner-mode .tab[data-tab="general"],
+  /* deliberately NO rule for [data-tab="general"] — see OWNER_HIDDEN_TABS above */
   body.owner-mode #editorSubtabs,
   body.owner-mode #themeToggle,
   /* Staff-account chrome (profile drawer button, My-profile-&-pay): the panel runs on the

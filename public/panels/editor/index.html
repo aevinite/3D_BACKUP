@@ -117,14 +117,14 @@
   <script src="/panels/maint.js?v=d6f9ad32"></script>
   <script src="/panels/realtime.js?v=078e53ce"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=8a656f57"></script>
+  <script src="/panels/outbox.js?v=ad497f62"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=ace792b5"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
   <script src="/panels/swreg.js?v=e799eb96"></script>
-  <script src="/panels/offline.js?v=cef1dcd7"></script>
+  <script src="/panels/offline.js?v=16f7dd5c"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
@@ -153,6 +153,6 @@
   <script src="/panels/editor/inventory.js?v=6dab7654"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=3c302389"></script>
+  <script src="/panels/editor/app.js?v=a5849664"></script>
 </body>
 </html>
