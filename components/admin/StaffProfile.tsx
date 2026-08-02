@@ -837,8 +837,12 @@ const SaveRow = ({ busy, onSave, extra }: { busy: boolean; onSave: () => void; e
 function ProfileStyle() {
   return <style jsx global>{`
   .stp-scrim { position:fixed; inset:0; background:rgba(2,6,16,.72); backdrop-filter:blur(3px); z-index:1000; animation:stpFade .16s ease-out; }
-  .stp-wrap { position:fixed; inset:0; z-index:1001; overflow-y:auto; padding:18px 14px 40px; }
-  .stp-sheet { position:relative; width:min(1120px,100%); margin:0 auto; background:var(--card); border:var(--border);
+  /* NO padding on the scroller. The sheet's own margin gives the gap at the top, so the
+     sticky header can pin flush to the viewport: with padding here, the header pinned 18px
+     DOWN and the cards scrolled through the strip above it — a sliver of a permission row
+     floating over the page, which is what looked broken (owner, 2026-08-02). */
+  .stp-wrap { position:fixed; inset:0; z-index:1001; overflow-y:auto; padding:0; }
+  .stp-sheet { position:relative; width:min(1120px,100%); margin:18px auto 40px; background:var(--card); border:var(--border);
     border-radius:20px; box-shadow:0 30px 90px rgba(0,0,0,.55); animation:stpPop .2s cubic-bezier(.16,1,.3,1); }
   @keyframes stpFade { from { opacity:0 } to { opacity:1 } }
   @keyframes stpPop { from { opacity:0; transform:translateY(10px) scale(.985) } to { opacity:1; transform:none } }
@@ -855,8 +859,12 @@ function ProfileStyle() {
     background:color-mix(in srgb,var(--adm-danger,#f87171) 10%,transparent); }
   .stp-body { display:grid; grid-template-columns:300px 1fr; align-items:start; }
 
-  /* rail */
-  .stp-rail { padding:22px 18px; border-right:var(--border); position:sticky; top:66px; }
+  /* rail — pinned directly under the header (68px = its height), and always as tall as the
+     window so the divider runs the full height instead of stopping halfway and leaving a dead
+     patch beside the long right-hand column. It scrolls inside itself if it ever outgrows the
+     screen, so nothing in it can become unreachable. */
+  .stp-rail { padding:22px 18px; border-right:var(--border); position:sticky; top:68px;
+    min-height:calc(100dvh - 68px); max-height:calc(100dvh - 68px); overflow-y:auto; }
   .stp-photo-wrap { position:relative; width:132px; height:132px; margin:0 auto 12px; }
   .stp-photo { width:132px; height:132px; border-radius:50%; display:grid; place-items:center; font-size:42px; font-weight:800;
     color:#0b0f16; background-size:cover; background-position:center; }
@@ -977,14 +985,19 @@ function ProfileStyle() {
 
   @media (max-width:900px) {
     .stp-body { grid-template-columns:1fr; }
-    .stp-rail { position:static; border-right:0; border-bottom:var(--border); }
+    .stp-rail { position:static; border-right:0; border-bottom:var(--border);
+      min-height:0; max-height:none; overflow:visible; }
     .stp-grid, .stp-grid.three { grid-template-columns:1fr; }
     .stp-perm { flex-direction:column; }
     .stp-perm-c { align-items:flex-start; width:100%; }
     .stp-sel { width:100%; }
     .stp-tl time { width:auto; }
-    .stp-wrap { padding:0; }
-    .stp-sheet { border-radius:0; min-height:100dvh; }
+    .stp-sheet { border-radius:0; min-height:100dvh; margin:0; }
+    /* On a phone the permissions header wraps to four lines, and a centred icon then floats in
+       the middle of them. Pin it to the first line and let the text use the full width. */
+    .stp-fold { align-items:flex-start; }
+    .stp-fold .ic { margin-top:2px; }
+    .stp-fold .caret { align-self:center; }
     .stp-top { border-radius:0; }
   }
   `}</style>;
