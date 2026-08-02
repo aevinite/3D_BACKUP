@@ -418,3 +418,16 @@ memory. It could not restore byte-for-byte afterwards, and the process had alrea
 time that mattered. Nothing was left broken, but the state had to be reasoned about instead of
 simply restored. Any script that mutates real data writes its snapshot to a FILE before the first
 write, and restores from that file in a `finally`.
+
+## ALWAYS `git -C <abs-path>` — the shell's cwd can reset between calls (2026-08-01)
+A command that `cd`s to another directory (writing to the memory folder) left the shell's cwd
+reset to the SHARED folder. The next git block then ran there: it committed
+`app/aevinite/rate-limits/page.tsx` — 99 lines of ANOTHER SESSION'S uncommitted work — into a
+commit of mine, and pushed that branch as a PR. Undone with `git reset --mixed` (their files came
+back exactly as they were, unstaged), the PR closed and the branch deleted.
+
+Two rules, not one:
+- **Every git command names its repo explicitly: `git -C /abs/path …`.** Never rely on cwd.
+- **Never `git add -A` or `git add <dir>` in a shared folder.** Stage the exact files this task
+  changed, by name. The scoped `git add app/api/editor components/admin` was still wide enough to
+  sweep a stranger's file, because the scope was a DIRECTORY, not a list of files.
