@@ -340,9 +340,9 @@ export const SECTIONS: Section[] = [
           // and link is a whole new sub option, only expandable, it should have dropdown").
           // Each opens just the part of the tables screen it owns.
           { id: "tables_list", name: "Table name & seats", bind: { t: "none" }, panel: "settings:tables",
-            what: "Each table's name — optional, e.g. the last one as “Banquet” — and how many people can sit there." },
+            what: "How many tables the restaurant has, each table's name — optional, e.g. the last one as “Banquet” — and how many people can sit there." },
           { id: "tables_layout", name: "Number of tables per row", bind: { t: "none" }, panel: "settings:floor",
-            what: "How many table boxes sit on one line in the manager's floor view, and so how big each box ends up." },
+            what: "How many table boxes sit on one line in the manager's floor view, and so how big each box ends up. Nothing else — how many tables there are is set in Table name & seats." },
           { id: "tables_qr", name: "Guest QR link per table", bind: { t: "none" }, panel: "settings:qr",
             what: "The permanent QR code and link for every table — the ones printed and put on the tables. Print one, or the whole sheet." },
         ],

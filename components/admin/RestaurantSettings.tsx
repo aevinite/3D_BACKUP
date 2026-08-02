@@ -11,7 +11,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FLOOR_PER_ROW_MAX, FLOOR_PER_ROW_MIN, clampPerRow } from "@/lib/floorLayout";
 import { BANQUET_FIELDS, BANQUET_LOCKED, BANQUET_PRESETS, banquetBillNo, banquetTaxOf, cleanBanquetFields } from "@/lib/banquetFields";
-import FloorLayoutPreview from "./FloorLayoutPreview";
 
 type Rest = { id: string; slug: string; name: string };
 type TaxComp = { label: string; rate: number | string };
@@ -112,7 +111,6 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const [kot, setKot] = useState<boolean | null>(null);
   const [kotBusy, setKotBusy] = useState(false);
   const [qrBusy, setQrBusy] = useState<string | null>(null);
-  const [showFloorPreview, setShowFloorPreview] = useState(false);
   // The bill's logo is the restaurant's own uploaded image (Design and styling → Theme and
   // wording). Read here so the preview shows the REAL header — including the empty case, which
   // is the whole point of the rule: no image ⇒ the bill starts with the name.
@@ -886,101 +884,53 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       </div>
       )}
 
-      {/* ═══ TABLES & QR — same-to-same with the manager's Tables section ═══ */}
+      {/* ═══ NUMBER OF TABLES PER ROW — ONE box, nothing else ═══════════════════════
+          Owner, 2026-08-02: "we don't require this whole thing… you just only need this",
+          with a screenshot of a card holding the tables-per-row field and its explanation
+          and NOTHING else. What was here and is now gone:
+            • Number of tables — moved into Table setting below, where tables are actually
+              named and seated (adding a table belongs with the list of tables).
+            • Floor layout (Classic / Custom) — the Custom half was never built and was only
+              ever shown "for show"; a select with one selectable option is not a choice.
+              floor_layout_mode still exists as a column and the editor route still refuses it
+              from a manager, so nothing is loosened — there is simply no control.
+              WHEN CUSTOM IS BUILT: a per-restaurant plan in public/panels/floor-layouts.js,
+              then bring a real selector back here.
+            • The box-shape strip and "Preview on the real floor" — previews of a number that
+              takes effect the moment it saves. ═══════════════════════════════════════════ */}
       {show("floor") && (
       <div id="det-tables" className="adm-card" style={{ marginBottom: 14 }}>
-        <h2>🪑 Tables / seating</h2>
-        <p className="hint">
-          How many tables the restaurant has — this drives its live floor map. Admin-only: the manager can
-          rename tables and set seats, but only you can add or remove tables or hand out a table&apos;s QR.
-        </p>
-        <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-start" }}>
-          <div style={{ width: 200 }}>
-            {field("Number of tables", "table_count", { type: "number", min: 1, max: 500, step: 1 })}
-          </div>
-          <div style={{ width: 200 }}>
-            {field("Tables per row", "floor_per_row", {
-              type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1, auto: true,
-              hint: `${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}. Fewer = bigger tiles.`,
-            })}
-          </div>
+        <h2>🪑 Floor layout</h2>
+        <p className="hint">How your live floor is drawn in the <b>Tables</b> tab.</p>
+        <div style={{ width: 200 }}>
+          {field("Tables per row", "floor_per_row", {
+            type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1, auto: true,
+          })}
         </div>
         <p className="hint" style={{ marginTop: 10 }}>
-          <b>Tables per row</b>{" "}sets how many table boxes sit on one line in the manager&apos;s floor view — and so how big
-          each box is. Your number is honoured: the boxes SHRINK to fit it, dropping detail as they go (the seat count,
-          then the wording) while the table number and its colour always stay. Only if a box would get too small to tap —
-          which in practice means on a phone — does the floor show fewer per row.
+          <b>Tables per row</b> is exactly that — put {perRow} and every row has {perRow} boxes, on this screen and on
+          any other. The boxes shrink to fit your number and drop detail as they go (the served count, then the seat
+          number, then the wording) while the table number and its colour always stay. {FLOOR_PER_ROW_MIN}–{FLOOR_PER_ROW_MAX}.
         </p>
-        <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed var(--border-color, #333)" }}>
-          {/* FLOOR LAYOUT IS ADMIN-ONLY, and has no permission that could hand it over (owner,
-              2026-08-01: "manager will not have access… and you can't be able to turn on the
-              access also, so no toggle is required"). The server refuses floor_layout_mode from a
-              manager outright — see the editor route's settings path.
-
-              ⏳ CUSTOM IS NOT BUILT YET. It is shown deliberately, labelled, because he asked to
-              keep it visible: "you can keep that custom toggle… for show, and write in memory and
-              in the code that we will build that later." Choosing it today would point a floor at
-              a plan that does not exist, so it is disabled rather than merely warned about — the
-              floor falls back to the classic grid and says so, but a switch that silently does
-              nothing is exactly the kind this whole screen exists to remove.
-              WHEN IT IS BUILT: a per-restaurant plan in public/panels/floor-layouts.js, then drop
-              the `disabled` here and the "not built yet" note. */}
-          <label style={{ ...labelStyle, maxWidth: 340 }}>
-            Floor layout <span className="adm-chip" style={{ marginLeft: 6, fontSize: 10 }}>admin only</span>
-            <select value={String(draft.floor_layout_mode || "classic")} disabled={!loadOk || busy}
-              onChange={(e) => set("floor_layout_mode", e.target.value)} style={{ ...inputStyle, marginTop: 4 }}>
-              <option value="classic">Classic — tables in number order</option>
-              <option value="custom" disabled>Custom — this room&apos;s real shape (not built yet)</option>
-            </select>
-          </label>
-          <p className="hint" style={{ marginTop: 8 }}>
-            <b>Classic</b> lays the tables out in number order, {perRow} per row — this is what every restaurant uses.
-            <br />
-            <b>Custom</b> would draw the room as it really is: window seats, the A/C section, an aisle where the aisle
-            is. <b>It isn&apos;t built yet</b>, so it is shown but not selectable — it needs a hand-drawn plan per
-            restaurant, and switching to it before that plan exists would point the floor at nothing.
-          </p>
-        </div>
-        {/* Two previews, cheapest first. The shape strip answers "how big is a box?" at a
-            glance with zero loading; the button opens the REAL manager floor with a slider
-            when the admin wants to be sure before saving. */}
-        <div style={{ marginTop: 12, display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
-          <div style={{ flex: "1 1 260px", minWidth: 220, maxWidth: 420 }}>
-            <div style={{ fontSize: 11.5, marginBottom: 5, opacity: 0.75 }}>Box shape at {perRow} per row</div>
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${perRow}, 1fr)`, gap: 6 }}>
-              {Array.from({ length: perRow }, (_, i) => (
-                <div key={i} style={{
-                  aspectRatio: "1 / 1", borderRadius: 8, border: "var(--border)", background: "var(--bg)",
-                  display: "grid", placeItems: "center", fontSize: Math.max(9, Math.min(15, Math.round(90 / perRow))),
-                  fontWeight: 800, opacity: 0.85, overflow: "hidden",
-                }}>{i + 1}</div>
-              ))}
-            </div>
-          </div>
-          <button className="adm-btn" disabled={!loadOk} onClick={() => setShowFloorPreview(true)}
-            title="Open the real manager floor and slide through every option">
-            👁 Preview on the real floor
-          </button>
-        </div>
+        <p className="hint" style={{ marginTop: 8 }}>
+          How many people fit at each table is set per table in <b>Table setting</b> below — that is the number beside
+          the chair on every tile.
+        </p>
       </div>
-      )}
-
-      {showFloorPreview && (
-        <FloorLayoutPreview
-          restaurant={restaurant}
-          value={perRow}
-          onPick={(nextPerRow) => { set("floor_per_row", nextPerRow); autoSave("floor_per_row", nextPerRow); }}
-          onClose={() => setShowFloorPreview(false)}
-        />
       )}
 
       {show("tables") && (
       <div className="adm-card" style={{ marginBottom: 14 }}>
         <h2>🪑 Table setting</h2>
         <p className="hint">
-          Each table&apos;s <b>name</b> (optional — e.g. the last table as &ldquo;Banquet&rdquo;; tiles and table views show it,
-          while bills &amp; QR codes keep the number) and how many people can sit there (nothing set = 4).
+          How many tables the restaurant has, each table&apos;s <b>name</b> (optional — e.g. the last table as
+          &ldquo;Banquet&rdquo;; tiles and table views show it, while bills &amp; QR codes keep the number) and how many
+          people can sit there (nothing set = 4). Admin-only: the manager can rename tables and set seats, but only you
+          can add or remove tables.
         </p>
+        <div style={{ width: 200, marginBottom: 12 }}>
+          {field("Number of tables", "table_count", { type: "number", min: 1, max: 500, step: 1 })}
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: 8, maxHeight: 340, overflowY: "auto", paddingRight: 4 }}>
           {Array.from({ length: draftCount }, (_, i) => i + 1).map((t) => (
             <div key={t} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 10px", borderRadius: 8, background: "var(--bg)", border: "var(--border)" }}>
