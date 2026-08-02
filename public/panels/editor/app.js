@@ -10620,10 +10620,15 @@ function syncNavFit() {
   try {
     const body = document.body;
     body.classList.add("nav-measuring"); // freeze bar transitions → measure settled sizes
+    // `set` only moves classes — it must NOT touch the drawer. Every fit STARTS by trying
+    // "no class" on for size, so closing the drawer in here shut it on every re-fit above
+    // 760px: at a width that needs the drawer but isn't a phone, the ResizeObserver on
+    // .top-actions fires whenever the connection pill's text changes ("Live" → "142 ms"),
+    // and each one yanked the open drawer shut under the user's finger. The drawer is
+    // settled ONCE, below, and only when the FINAL answer is "tabs live in the bar".
     const set = (tight, compact) => {
       body.classList.toggle("nav-tight", tight);
       body.classList.toggle("nav-compact", compact);
-      if (!compact) navDrawerSet(false); // leaving drawer mode with it open would strand the scrim
     };
     if (window.innerWidth <= 760) { set(false, true); return; }  // phone: always the drawer
     // Room the bar can give the strip = its inner width minus the brand and the actions.
@@ -10644,6 +10649,9 @@ function syncNavFit() {
     set(false, true);                         // → drawer
   } finally {
     document.body.classList.remove("nav-measuring");
+    // Leaving drawer mode with the drawer open would strand the scrim over the page — so
+    // close it here, and ONLY when we actually landed out of drawer mode.
+    if (!document.body.classList.contains("nav-compact")) navDrawerSet(false);
     navFitBusy = false;
   }
 }

@@ -248,6 +248,8 @@ const editErrMsg = (reason?: string) =>
   : reason === "sold_out" ? "That dish is sold out — can't add it."
   : reason === "unknown_item" ? "That dish isn't on the menu."
   : reason === "empty_order" ? "Nothing to add."
+  // mig 215: an open-price dish reached the server with no price typed on the line.
+  : reason === "price_required" ? "That dish needs a price typed in before it can be added."
   : (reason || "Couldn't edit the order.");
 
 async function readBody(req: NextRequest): Promise<any> { try { return await req.json(); } catch { return {}; } }
@@ -689,6 +691,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // with confirmDuplicate:true), instead of returning it as a success.
       if (data && (data as { duplicateWarning?: boolean }).duplicateWarning === true) {
         return NextResponse.json({ error: (data as { error?: string }).error || "This looks identical to an order you just sent.", duplicateWarning: true }, { status: 409 });
+      }
+      // A REFUSAL (sold_out / unknown_item / price_required …) fell through as a SUCCESS with
+      // no order_id: the waiter saw "Order sent to the kitchen" and nothing was placed — a tap
+      // that vanished in silence. Surface it as a real error so the refusal is readable.
+      if (data && (data as { ok?: boolean }).ok === false) {
+        return err(editErrMsg((data as { reason?: string }).reason), 400);
       }
       // A WAITER placed this on the tablet, so it's already confirmed — skip the
       // kitchen "accept" step and push it straight onto the pass as "preparing"

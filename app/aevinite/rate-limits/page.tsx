@@ -42,6 +42,25 @@ export default function AdminRateLimits() {
     try { localStorage.setItem("lfh_rl_collapsed", JSON.stringify(next)); } catch { /* ignore */ }
     return next;
   });
+  const setSection = (id: string, shut: boolean) => setCollapsed((p) => {
+    if (!!p[id] === shut) return p;
+    const next = { ...p, [id]: shut };
+    try { localStorage.setItem("lfh_rl_collapsed", JSON.stringify(next)); } catch { /* ignore */ }
+    return next;
+  });
+  // "Change limit" jumps from a hit down to that rule's row. The href alone can't do it: when
+  // "The limits" is folded shut the target isn't in the DOM yet, and the browser resolves the
+  // hash in this same click — before React re-renders — so the page just sat there and the
+  // admin was left at the top with no idea which rule was meant. Open the section ourselves,
+  // then scroll on the frame AFTER the row actually exists.
+  const jumpToRule = (e: React.MouseEvent, key: string) => {
+    e.preventDefault();
+    setSection("rules", false);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const el = document.getElementById(`rule-${key}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }));
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -185,7 +204,7 @@ export default function AdminRateLimits() {
                       <button className="adm-btn primary" style={{ fontSize: 12 }} onClick={() => allowHit(h)} title="This was a real customer — reset their counter so they get through now">
                         <i className="fas fa-unlock" aria-hidden="true" style={{ marginRight: 6 }} />Allow (reset)
                       </button>
-                      <a className="adm-btn" style={{ fontSize: 12 }} href={`#rule-${h.key}`} title="Jump to this limit's setting to raise or lower it" onClick={() => setCollapsed((p) => (p.rules ? { ...p, rules: false } : p))}>
+                      <a className="adm-btn" style={{ fontSize: 12 }} href={`#rule-${h.key}`} title="Jump to this limit's setting to raise or lower it" onClick={(e) => jumpToRule(e, h.key)}>
                         <i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Change limit
                       </a>
                     </>

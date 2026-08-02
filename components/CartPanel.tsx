@@ -154,6 +154,26 @@ export default function CartPanel() {
     next.splice(idx, 1);
     commit(next);
   };
+  // pruneCartToMenu(): drop saved lines whose dish has left the guest menu — taken off it, or
+  // switched to "staff type the price" (open price), which the server refuses outright. Without
+  // this the WHOLE order is rejected on Send and the guest has no way to tell which line is at
+  // fault. Reads localStorage rather than the `cart` state so the async menu fetch can't act on
+  // a stale closure, only ever runs on a NON-EMPTY menu (a bad payload can't wipe a real cart),
+  // and it says what it removed instead of doing it silently.
+  const pruneCartToMenu = (items: MenuItem[]) => {
+    const live = new Set(items.map((i) => i.id));
+    let saved: CartItem[];
+    try { saved = normalize(JSON.parse(tget("lfh_cart") || "[]")); } catch { return; }
+    const kept = saved.filter((l) => live.has(l.id));
+    if (kept.length === saved.length) return; // nothing stale — the common case
+    const gone = saved.filter((l) => !live.has(l.id)).map((l) => l.title).filter(Boolean);
+    commit(kept);
+    window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+      message: gone.length === 1 ? `${gone[0]} is no longer available` : `${gone.length} items are no longer available`,
+      subtitle: "removed from your order — please ask a member of staff",
+      kicker: "menu", variant: "error",
+    } }));
+  };
 
   // The big setup effect: runs once when the panel mounts. It loads everything
   // and wires up all the "listen for app messages" handlers.
@@ -181,6 +201,7 @@ export default function CartPanel() {
           items.forEach((i) => (m[i.id] = i.allergens || []));
           setAllergenMap(m);
           setMenuItems(items);
+          if (items.length) pruneCartToMenu(items); // drop lines the menu no longer offers
         })
         .catch(() => { menuLoadedRef.current = false; }); // let a later open retry
     };
@@ -605,6 +626,10 @@ export default function CartPanel() {
       if (/sold_out/i.test(msg)) {
         const m = msg.match(/\(([^)]+)\)/); // the dish title in parentheses, if present
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: m ? `Sold out: ${m[1]}` : "A dish just sold out", subtitle: "please remove it to place your order", kicker: "order", variant: "error" } }));
+      } else if (/staff_priced_item/i.test(msg)) {
+        // mig 253: a dish in the cart is now priced by staff at order time. Say so plainly —
+        // "please try again" would be a lie, because retrying fails the same way every time.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "One dish needs a member of staff", subtitle: "its price is set when you order — please ask your server", kicker: "order", variant: "error" } }));
       } else {
         window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Order didn't go through", subtitle: "please try again", kicker: "order", variant: "error" } }));
       }

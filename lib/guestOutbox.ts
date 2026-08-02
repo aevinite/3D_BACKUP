@@ -88,6 +88,8 @@ function reasonMsg(reason?: string): string {
     case "invalid_token": return "Your table session expired.";
     case "sold_out": return "A dish sold out while you were offline.";
     case "unknown_item": return "A dish is no longer on the menu.";
+    // mig 253: the dish is priced by staff at order time, so it cannot be self-ordered.
+    case "staff_priced_item": return "A dish now needs a member of staff to price it.";
     case "empty_order": return "The order was empty.";
     default: return reason || "Couldn't send this order.";
   }

@@ -79,8 +79,13 @@
       ".lfh-conn-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:99997;width:min(86vw,288px);",
       "  display:flex;flex-direction:column;gap:12px;padding:14px;background:var(--panel,#0f1830);color:var(--text,#e7eefc);",
       "  border:1px solid var(--line,rgba(127,127,127,.28));border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.4);",
-      "  font:500 12.5px/1.35 system-ui,sans-serif;animation:lfhConnPop .16s cubic-bezier(.16,1,.3,1)}",
-      "@keyframes lfhConnPop{from{transform:translateY(-4px);opacity:0}to{transform:none;opacity:1}}",
+      "  font:500 12.5px/1.35 system-ui,sans-serif;--pop-x:0px;animation:lfhConnPop .16s cubic-bezier(.16,1,.3,1)}",
+      /* The entry animation and the on-screen clamp BOTH want the 'transform' property, and
+         a running animation outranks an inline style — so the clamp did nothing for its
+         first 160ms and the panel painted clipped off-screen, then snapped into place. The
+         keyframes carry the clamp through --pop-x, which clampPop() sets alongside the
+         inline transform that takes over once the animation finishes. */
+      "@keyframes lfhConnPop{from{transform:translate(var(--pop-x),-4px);opacity:0}to{transform:translate(var(--pop-x),0);opacity:1}}",
       ".lfh-conn-pop-hd{display:flex;align-items:center;gap:8px;font-weight:700;font-size:12.5px}",
       ".lfh-conn-pop-dot{width:9px;height:9px;border-radius:999px;flex:0 0 auto}",
       ".lfh-conn-pop-main{display:flex;align-items:center;gap:12px;padding:4px 2px}",
@@ -180,7 +185,7 @@
     badge.title = statusLine(v) + (v.ms != null ? " · " + v.ms + " ms" : "") + (extra ? " · " + extra + " to send" : "");
     badge.setAttribute("aria-label", "Connection: " + v.label + (v.ms != null ? ", " + v.ms + " milliseconds" : "") + (extra ? ", " + extra : "") + ". Tap for details.");
     badge.setAttribute("aria-expanded", pop ? "true" : "false");
-    if (pop) renderPop(v); // keep the open popover live
+    if (pop) { renderPop(v); clampPop(); } // keep the open popover live — and still on-screen
   }
 
   function renderPop(v) {
@@ -264,6 +269,27 @@
     }
   }
 
+  // Keep the popover on-screen. It's anchored right:0 to the badge, so when the badge sits
+  // near the LEFT edge (e.g. the kitchen top bar) the ~288px panel overflowed the left screen
+  // edge on phones and clipped its own text. A CSS position:fixed clamp is defeated by
+  // transformed ancestors, so measure the rendered rect and nudge it back inside the viewport.
+  // Re-run after EVERY re-render, not just on open: the popover grows when the "waiting to
+  // sync" list appears, and a one-shot clamp leaves the grown panel hanging off the edge.
+  function clampPop() {
+    if (!pop) return;
+    // Measure from the UNSHIFTED position — the live rect already includes any shift applied
+    // last time, so re-clamping on top of it would drift the panel further on every pass.
+    pop.style.setProperty("--pop-x", "0px");
+    pop.style.transform = "";
+    var r = pop.getBoundingClientRect(), pad = 8, shift = 0;
+    if (r.left < pad) shift = pad - r.left;
+    else if (r.right > window.innerWidth - pad) shift = (window.innerWidth - pad) - r.right;
+    if (!shift) return;
+    shift = Math.round(shift) + "px";
+    pop.style.setProperty("--pop-x", shift);            // carries through the entry animation
+    pop.style.transform = "translateX(" + shift + ")";  // holds once the animation ends
+  }
+
   var onDocClick = null;
   function openPop() {
     if (pop) return;
@@ -271,18 +297,7 @@
     pop.addEventListener("click", function (e) { e.stopPropagation(); });
     badge.appendChild(pop);
     renderPop(computeView());
-    // Keep the popover on-screen. It's anchored right:0 to the badge, so when the
-    // badge sits near the LEFT edge (e.g. the kitchen top bar) the ~288px panel
-    // overflowed the left screen edge on phones and clipped its own text. A CSS
-    // position:fixed clamp is defeated by transformed ancestors, so measure the
-    // rendered rect and nudge it back inside the viewport with a transform.
-    requestAnimationFrame(function () {
-      if (!pop) return;
-      var r = pop.getBoundingClientRect(), pad = 8, shift = 0;
-      if (r.left < pad) shift = pad - r.left;
-      else if (r.right > window.innerWidth - pad) shift = (window.innerWidth - pad) - r.right;
-      if (shift) pop.style.transform = "translateX(" + Math.round(shift) + "px)";
-    });
+    clampPop();
     badge.setAttribute("aria-expanded", "true");
     // click-away
     onDocClick = function () { closePop(); };
