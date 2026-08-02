@@ -22,7 +22,14 @@ type NavGroup = { label: string; quiet?: boolean; items: NavItem[] };
 const GROUPS: NavGroup[] = [
   {
     label: "Overview",
-    items: [{ href: "/owner", label: "Dashboard", icon: "fa-gauge-high", exact: true }],
+    items: [
+      { href: "/owner", label: "Dashboard", icon: "fa-gauge-high", exact: true },
+      // Manager mode (owner, 2026-08-02): the FULL live manager panel — floor, bills,
+      // ordering — embedded for owners who work their own restaurant. On this page the
+      // whole sidebar collapses to the ☰ burger at EVERY width (the "mmode" class below)
+      // so the floor gets the entire screen, exactly like the real manager panel.
+      { href: "/owner/manager", label: "Manager mode", icon: "fa-table-cells-large", ent: "manager_mode" },
+    ],
   },
   {
     label: "Business",
@@ -281,8 +288,13 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
 
   const isActive = (it: NavItem) => (it.exact ? path === it.href : path.startsWith(it.href));
 
+  // Manager mode fills the whole screen: the sidebar becomes the ☰ drawer at EVERY width
+  // (not just ≤900px) — the .mmode CSS in globals.css applies the same drawer rules the
+  // phone layout already uses, so the embedded manager floor gets the full viewport.
+  const managerMode = path.startsWith("/owner/manager");
+
   return (
-    <div className="adm owx" data-skin={skin}>
+    <div className={"adm owx" + (managerMode ? " mmode" : "")} data-skin={skin}>
       {navOpen && <div className="owx-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}
       <aside className={"owx-side" + (navOpen ? " open" : "")} id="ownerNav">
         <div className="owx-brand">

@@ -575,8 +575,10 @@ export const SECTIONS: Section[] = [
             what: "The full record of who did what, inside Audit — the detail behind an entry." },
         ],
       },
-      { id: "own_manager_mode", name: "Manager mode", leftToBuild: true, bind: { t: "none" },
-        what: "Lets the owner drop into their own manager panel and work the floor as a manager would. Not built yet; this is where its switch will live." },
+      // BUILT 2026-08-02: the switch is live. It gates the owner panel's Manager mode page
+      // (the full live manager panel embedded in the owner cockpit — floor, bills, ordering).
+      { id: "own_manager_mode", name: "Manager mode", def: true, bind: { t: "section", key: "manager_mode" },
+        what: "Lets the owner drop into their own manager panel and work the floor as a manager would — live tables, bills, taking orders. Settings, Ratings, Audit and the Menu editor stay in their own owner pages." },
     ],
   },
 
@@ -596,8 +598,8 @@ export const SECTIONS: Section[] = [
             what: "Same switch as Owner's menu → Edit menu; shown here too because this is where you'd look for it." },
           { id: "d_own_ratings", name: "Ratings", def: true, bind: { t: "section", key: "ratings" }, what: "Guest ratings and feedback." },
           { id: "d_own_logs", name: "Logs", def: true, fresh: true, bind: { t: "section", key: "logs" }, what: "The activity log." },
-          { id: "d_own_manager_mode", name: "Manager mode", leftToBuild: true, bind: { t: "none" },
-            what: "Not built yet — see Owner's menu → Manager mode." },
+          { id: "d_own_manager_mode", name: "Manager mode", def: true, bind: { t: "section", key: "manager_mode" },
+            what: "Same switch as Owner's menu → Manager mode; shown here too because this is where you'd look for it." },
         ],
       },
       {

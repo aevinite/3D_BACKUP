@@ -22,7 +22,9 @@ import { MANAGER_POWER_FLAGS } from "@/lib/accessModel";
 // power_edit_menu rung (see MANAGER_POWER_FLAGS below).
 // "logs" (2026-07-31, access rebuild) gates the owner panel's activity-log page — the
 // owner's equivalent of the manager's Log tab, which was the one panel tab never wired.
-export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu", "logs"] as const;
+// "manager_mode" (2026-08-02) gates the owner panel's Manager mode page — the full live
+// manager panel (floor/bills/platform/…) embedded in the owner cockpit. Absent = ON.
+export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu", "logs", "manager_mode"] as const;
 export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 
 // The manager powers (mig 091). The admin's availability switch for each lives under

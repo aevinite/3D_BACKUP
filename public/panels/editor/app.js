@@ -50,7 +50,19 @@ const INV_ONLY = new URLSearchParams(location.search).get("invonly") === "1";
 // chrome — except the number itself arrives by postMessage on every slider step, because
 // re-loading the iframe per step would be slow AND would refetch the whole panel each time.
 const FLOOR_PREVIEW = new URLSearchParams(location.search).get("floorpreview") === "1";
-if (MENU_ONLY || INV_ONLY) { try { document.documentElement.setAttribute("data-theme", MENU_SKIN); } catch (e) {} }
+// ?ownermode=1 (owner panel → Manager mode, 2026-08-02): the FULL manager panel — live
+// floor, Bills, Platform, Banquet, Inventory, Dashboard — embedded inside the owner
+// cockpit, wearing the owner skin. Four tabs are NOT here because the owner panel already
+// has its own richer versions: the menu editor (owner → Menu), ⭐ Ratings (owner →
+// Feedback & complaints), 🗑 Audit (owner → Activity) and Settings (admin-owned). Their
+// tab buttons are hidden by CSS AND setTab refuses them, so a stale saved tab / deep link
+// can never boot into one. Everything else is exactly the manager panel, same live engine.
+const OWNER_MODE = new URLSearchParams(location.search).get("ownermode") === "1";
+const OWNER_HIDDEN_TABS = ["items", "categories", "filters", "ratings", "log", "general"];
+if (MENU_ONLY || INV_ONLY || OWNER_MODE) { try { document.documentElement.setAttribute("data-theme", MENU_SKIN); } catch (e) {} }
+// Mark the body NOW (app.js loads at the end of <body>) so the very first paint already
+// has the owner skin + hidden tabs — setTab re-adds the same classes, harmlessly.
+if (OWNER_MODE) { try { document.body.classList.add("owner-mode", "skin-" + MENU_SKIN); } catch (e) {} }
 // Tiny localStorage helpers so a refresh keeps you exactly where you were —
 // not just the tab, but the SUB-VIEW too (Orders: live/previous/calls; Log:
 // customer/operation). Wrapped so a blocked localStorage never throws.
@@ -64,6 +76,7 @@ const state = {
   tab: FLOOR_PREVIEW ? "tables" // layout-preview embed: the live floor IS the panel
     : INV_ONLY ? "inventory" // inventory-only embed: the 📦 tab is the whole panel
     : MENU_ONLY ? (MENU_TABS.includes(savedTab) ? savedTab : "items") // menu-only: never open a non-menu tab
+    : OWNER_MODE ? (VALID_TABS.includes(savedTab) && !OWNER_HIDDEN_TABS.includes(savedTab) ? savedTab : "tables") // owner Manager mode: live floor first, never a hidden tab
     : savedTab === "sessions" ? "tables" : (VALID_TABS.includes(savedTab) ? savedTab : "items"), // "sessions" merged into "tables"
   data: { items: [], categories: [], filters: [], orders: [], calls: [], settings: { id: "site", bubbles_enabled: true, service_mode: false } },
   sel: null,      // working copy of the record being edited
@@ -10494,6 +10507,10 @@ function setTab(tab) {
   // and let .floor-preview CSS strip the chrome. Same shape as the menu-only redirect above.
   if (FLOOR_PREVIEW) { document.body.classList.add("floor-preview"); tab = "tables"; }
   if (INV_ONLY) { document.body.classList.add("menu-only", "skin-" + MENU_SKIN); if (tab !== "inventory") tab = "inventory"; }
+  // Owner "Manager mode" embed: the four tabs the owner panel already covers are
+  // unreachable — any target pointing at one (a stale saved tab, a boot fallback, a
+  // realtime handler) lands on the live floor instead.
+  if (OWNER_MODE) { document.body.classList.add("owner-mode", "skin-" + MENU_SKIN); if (OWNER_HIDDEN_TABS.includes(tab)) tab = "tables"; }
   // Leaving the Dashboard: destroy its live Chart.js instances so their detached canvases +
   // resize handlers don't linger until the next Dashboard visit.
   if (state.tab === "dash" && tab !== "dash") { dashCharts.forEach((c) => { try { c.destroy(); } catch {} }); dashCharts = []; }
@@ -12303,18 +12320,18 @@ function xraySettingUrl(flag) {
      (app/globals.css .adm) so the embed matches — violet on light, cyan-neon on dark —
      instead of the manager panel's gold. Set on <body> so it overrides both :root and
      html[data-theme] for every descendant. */
-  body.menu-only.skin-light {
+  body.menu-only.skin-light, body.owner-mode.skin-light {
     --bg:#f6f7f9; --panel:#ffffff; --panel-2:#f2f4f7; --line:#e5e8ee;
     --text:#111827; --muted:#5b6474; --gold:#059669; --gold-strong:#10b981;
   }
-  body.menu-only.skin-dark {
+  body.menu-only.skin-dark, body.owner-mode.skin-dark {
     --bg:#0a0c10; --panel:#10141b; --panel-2:#171d28; --line:#1d2430;
     --text:#e6ebf3; --muted:#9aa4b6; --gold:#10b981; --gold-strong:#34d399;
   }
   /* Kill the light theme's hardcoded cream body gradient so --bg shows through. */
-  body.menu-only { background: var(--bg) !important; }
+  body.menu-only, body.owner-mode { background: var(--bg) !important; }
   /* Dark ink only on SOLID emerald fills (primary buttons, ticked checkbox). */
-  body.menu-only .btn.primary,
+  body.menu-only .btn.primary, body.owner-mode .btn.primary,
   body.menu-only .list-item .bulk-cb.on { color:#04231a; }
   /* The active category chip has a subtle TINT bg (not a solid fill) → keep bright-green
      text + a readable fill so it never goes invisible on tap. */
@@ -12322,6 +12339,21 @@ function xraySettingUrl(flag) {
     background: color-mix(in srgb, var(--gold) 26%, var(--panel)) !important;
     color: var(--gold-strong) !important; border-color: var(--gold) !important;
   }
+  /* ── Owner "Manager mode" embed (?ownermode=1) ─────────────────────────────────
+     The WHOLE manager panel, owner-skinned, minus the four sections the owner panel
+     already has better versions of: Menu editor, ⭐ Ratings, 🗑 Audit, Settings.
+     display:none (not [hidden]) so a live repaint / the X-ray pass can never
+     resurrect a tab. The topbar STAYS (unlike menu-only) — its tabs are the mode's
+     navigation — but the panel's own theme toggle goes (the owner shell owns the
+     skin) and the Owner-view ribbon goes (the owner chrome already says where you
+     are; setTab + the server keep enforcing everything the ribbon narrated). */
+  body.owner-mode .tab[data-tab="items"],
+  body.owner-mode .tab[data-tab="ratings"],
+  body.owner-mode .tab[data-tab="log"],
+  body.owner-mode .tab[data-tab="general"],
+  body.owner-mode #editorSubtabs,
+  body.owner-mode #themeToggle,
+  body.owner-mode #xrayRibbon { display: none !important; }
   /* Premium finish: rounder cards + the owner panel's soft elevation on light. */
   body.menu-only .card { border-radius:16px; padding:20px 22px; margin-bottom:16px; }
   body.menu-only.skin-light .card { box-shadow:0 1px 2px rgba(16,24,40,.05), 0 14px 30px -18px rgba(20,16,50,.20); }

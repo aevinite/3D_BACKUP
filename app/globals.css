@@ -4318,6 +4318,20 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
    in from the left, unchanged. The burger lives in .owx-top (OwnerShell). */
 .owx-burger { display: none; }
 .owx-backdrop { display: none; }
+/* ── Manager mode (/owner/manager, 2026-08-02): the embedded live manager panel gets the
+   WHOLE screen at every width, so the sidebar is the ☰ drawer even on desktop — the same
+   rules the ≤900px block below applies, scoped to the .mmode shell class instead. */
+.adm.owx.mmode .owx-side {
+  position: fixed; top: 0; left: 0; height: 100dvh; width: min(82vw, 300px); z-index: 1002;
+  transform: translateX(-100%); transition: transform .22s ease; overflow-y: auto;
+  box-shadow: 18px 0 50px rgba(0,0,0,.55); border-right: var(--border);
+  padding-top: calc(12px + env(safe-area-inset-top, 0px)); padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+.adm.owx.mmode .owx-side.open { transform: translateX(0); }
+.adm.owx.mmode .owx-backdrop { display: block; position: fixed; inset: 0; z-index: 1001; background: rgba(2,6,16,.55); }
+.adm.owx.mmode .owx-burger { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: var(--border); background: transparent; color: var(--text); cursor: pointer; flex: 0 0 auto; }
+.adm.owx.mmode .owx-navlink { min-height: 40px; }
+.adm.owx.mmode .owx-myrest .rrow { min-height: 40px; }
 @media (max-width: 900px) {
   .owx-side {
     position: fixed; top: 0; left: 0; height: 100dvh; width: min(82vw, 300px); z-index: 1002;
