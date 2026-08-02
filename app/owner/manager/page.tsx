@@ -29,7 +29,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   // Match the owner panel's skin (OwnerShell defaults to dark when no cookie is set).
   const skin: "light" | "dark" = store.get("aevidine_skin")?.value === "light" ? "light" : "dark";
 
-  let restaurants: { id: string; name: string }[] = [];
+  let restaurants: { id: string; name: string; accentColor?: string }[] = [];
   let selected = "";
 
   if (u && u.role === "owner") {
@@ -37,22 +37,24 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
     // so the admin's "Manager mode" section switch is enforced again (entitledSubset).
     const ids = await entitledSubset(await enabledOwnedRestaurantIds(u.id), "manager_mode");
     if (ids.length) {
-      const rows = (await sb.from("restaurants").select("id, name").in("id", ids)).data || [];
-      const nameById = new Map(rows.map((r) => [r.id as string, r.name as string]));
-      restaurants = ids.map((id) => ({ id, name: nameById.get(id) || "Restaurant" }));
-      // Honour ?rid only when the owner actually owns it; else default to their first.
-      selected = qRid && ids.includes(qRid) ? qRid : ids[0];
+      const rows = (await sb.from("restaurants").select("id, name, accent_color").in("id", ids)).data || [];
+      const byId = new Map(rows.map((r) => [r.id as string, r]));
+      restaurants = ids.map((id) => ({ id, name: (byId.get(id)?.name as string) || "Restaurant", accentColor: (byId.get(id)?.accent_color as string) || undefined }));
+      // Honour ?rid only when the owner actually owns it. ONE restaurant → straight in;
+      // several → selected stays "" so the client shows the pick-a-restaurant launcher
+      // (owner, 2026-08-02: "first screen to select the restaurant").
+      selected = qRid && ids.includes(qRid) ? qRid : ids.length === 1 ? ids[0] : "";
     }
   } else if (store.get(ADMIN_ACT_COOKIE)?.value && (await tokenIsValid(store.get(AUTH_COOKIE)?.value))) {
     // Admin act-as: the one restaurant they entered from the console (the layout already
     // vetted this). The admin sees the section even when switched off — top power, X-ray.
     const rid = qRid || store.get(ADMIN_ACT_COOKIE)!.value;
-    const row = (await sb.from("restaurants").select("id, name").eq("id", rid).maybeSingle()).data as
-      { id: string; name: string } | null;
-    if (row) { restaurants = [{ id: row.id, name: row.name }]; selected = row.id; }
+    const row = (await sb.from("restaurants").select("id, name, accent_color").eq("id", rid).maybeSingle()).data as
+      { id: string; name: string; accent_color?: string } | null;
+    if (row) { restaurants = [{ id: row.id, name: row.name, accentColor: row.accent_color || undefined }]; selected = row.id; }
   }
 
-  if (!selected) {
+  if (!restaurants.length) {
     return (
       <div className="adm-page">
         <h1 className="adm-page-title">Manager mode</h1>

@@ -317,6 +317,12 @@
   }
 
   async function init() {
+    // Owner "Manager mode" embed (?ownermode=1): the panel runs on the OWNER's login, and
+    // this drawer is a STAFF-account thing (first-login name/phone capture, PIN, panel
+    // password) — the owner manages their identity in the owner panel. Worse, the forced
+    // "Finish setup" open registered a back layer at boot, so the phone's BACK button was
+    // silently swallowed once before it could return to the restaurant launcher.
+    if (new URLSearchParams(location.search).get("ownermode") === "1") return;
     let res = null;
     try { res = await fetch("/api/panel-profile", { cache: "no-store" }); } catch {}
     if (res && res.ok) {

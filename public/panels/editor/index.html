@@ -108,7 +108,7 @@
   <!-- Chart.js powers the Dashboard graphs. SELF-HOSTED (was a jsdelivr CDN link) so the
        Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
   <script src="/panels/vendor/chart.umd.min.js?v=4.4.7"></script>
-  <script src="/panels/maint.js?v=34e2db07"></script>
+  <script src="/panels/maint.js?v=d6f9ad32"></script>
   <script src="/panels/realtime.js?v=078e53ce"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=f05cc89a"></script>
@@ -143,6 +143,6 @@
   <script src="/panels/editor/inventory.js?v=6dab7654"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=ee39dfb0"></script>
+  <script src="/panels/editor/app.js?v=c47411a1"></script>
 </body>
 </html>
