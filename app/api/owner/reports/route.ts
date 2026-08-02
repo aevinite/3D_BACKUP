@@ -187,9 +187,16 @@ type ExpensePart = { amount: number; entries: number; byCategory: Record<string,
 type SalaryPart = { accrued: number; paid: number; people: number; excluded: number };
 type StockPart = { used: number; wasted: number; cancelledFoodRemoved: number };
 type CancelPart = { mode: "stock" | "bill" | "mixed"; lostSales: number; orders: number; foodCost: number; charged: number };
+type EarnPart = { key: string; orders: number; amount: number; gst: number; isSales: boolean };
 export type InHand = {
   itemSales: number; discounts: number; netSales: number; gst: number;
   collected: number; yours: number; expenses: number; left: number;
+  // Every rupee that arrived, with GST still in it — dine-in bills BEFORE the discount plus
+  // parcel/delivery/banquet. This is the number at the TOP of the owner's sheet (2026-08-02:
+  // "one total will be on the top, which was money in with GST"), and the Earnings sub-report
+  // is exactly its parts, so the two can never disagree.
+  moneyIn: number;
+  earnings: { parts: EarnPart[]; dineIn: number; tips: number };
   parts: { manual: ExpensePart | null; salary: SalaryPart | null; stock: StockPart | null; cancelled: CancelPart };
   series: { bucket: string; expenses: number; left: number }[] | null;
   coverage: { restaurants: number; withPayroll: number; withInventory: number; hourlyStaffExcluded: number };
@@ -206,7 +213,7 @@ function bucketKeyOf(bucketTs: unknown, grain: string): string {
 async function buildInHand(opts: {
   ids: string[];
   from: string; to: string; bucket: string;
-  totals: { subtotal: number; discount: number; tax: number; revenue: number; cancelledValue: number; cancelledOrders: number };
+  totals: { subtotal: number; discount: number; tax: number; revenue: number; cancelledValue: number; cancelledOrders: number; paidOrders: number };
   rows: { bucket: unknown; revenue: number; tax: number; subtotal: number; discount: number; cancelledValue: number }[];
 }): Promise<InHand | null> {
   const { ids, from, to, bucket, totals, rows } = opts;
@@ -233,13 +240,15 @@ async function buildInHand(opts: {
   const billIds = ids.filter((id, i) => effMode(id, i) === "bill");
   const invBillIds = ids.filter((id, i) => invOn[i] && effMode(id, i) === "bill");
 
-  const [expRes, payRes, stkRes, cxfRes] = await Promise.all([
+  const [expRes, payRes, stkRes, cxfRes, earnRes] = await Promise.all([
     mapLimit(ids, 6, (id) => sb.rpc("lfh_expense_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: grain })),
     mapLimit(payIds, 6, (id) => sb.rpc("lfh_staff_pay_accrual", { p_restaurant: id, p_from: from, p_to: to, p_bucket: grain })),
     mapLimit(invIds, 6, (id) => sb.rpc("lfh_inv_cost_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: grain })),
     // Only the 'bill'-mode restaurants need this: it exists purely to be taken back OUT
     // of `used` for them. Asking for it anywhere else would be a wasted round-trip.
     mapLimit(invBillIds, 6, (id) => sb.rpc("lfh_cancelled_consumption", { p_restaurant: id, p_from: from, p_to: to, p_bucket: grain })),
+    // Where the money came from, for the parts that live OUTSIDE `orders` (mig 254).
+    mapLimit(ids, 6, (id) => sb.rpc("lfh_owner_other_earnings", { p_restaurant: id, p_from: from, p_to: to })),
   ]);
 
   const bump = (m: Map<string, number>, k: string, v: number) => m.set(k, (m.get(k) || 0) + v);
@@ -275,6 +284,28 @@ async function buildInHand(opts: {
     cancelledFood += raw(r.cost); bump(cxFoodB, String(r.bucket), raw(r.cost));
   }
 
+  // ── Where the money came from (mig 254) ──────────────────────────────────
+  // Dine-in is the bills BEFORE the discount, with GST — the same basis the ladder's top
+  // line uses, so "Earnings" adds up to it exactly. Everything else comes from the RPC.
+  // Tips are kept OUT of the sales total: they arrived, but in an Indian restaurant they
+  // are normally the staff's, so adding them to the owner's profit would overstate it.
+  const earnMap = new Map<string, EarnPart>();
+  for (const r of earnRes.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[])) {
+    const k = String(r.source);
+    const cur = earnMap.get(k) || { key: k, orders: 0, amount: 0, gst: 0, isSales: r.is_sales !== false };
+    cur.orders += Number(r.orders) || 0; cur.amount += raw(r.amount); cur.gst += raw(r.gst);
+    earnMap.set(k, cur);
+  }
+  const dineIn = totals.subtotal + totals.tax;
+  const otherSales = [...earnMap.values()].filter((e) => e.isSales);
+  const tips = num(earnMap.get("tips")?.amount ?? 0);
+  const moneyIn = num(dineIn + otherSales.reduce((a, e) => a + e.amount, 0));
+  const gstAll = num(totals.tax + otherSales.reduce((a, e) => a + e.gst, 0));
+  const parts: EarnPart[] = [
+    { key: "dinein", orders: totals.paidOrders, amount: num(dineIn), gst: num(totals.tax), isSales: true },
+    ...[...earnMap.values()].map((e) => ({ ...e, amount: num(e.amount), gst: num(e.gst) })),
+  ].filter((e) => e.amount > 0);
+
   // Lost sales charged to the bill, for the 'bill'-mode restaurants only. When that set is
   // everyone (the common case) the group total already in hand is exact and costs nothing;
   // a MIXED scope needs one extra grouped call rather than N per-restaurant ones.
@@ -296,7 +327,10 @@ async function buildInHand(opts: {
   // In 'bill' mode the same food must not be paid for twice — take it back out of `used`.
   const usedCharged = num(used - cancelledFood);
   const expenses = num(manual + accrued + usedCharged + wasted + charged);
-  const yours = num(totals.subtotal - totals.discount);
+  // "Money in − GST − discount − expenses" (the owner's own four lines). With no parcel or
+  // delivery this is identical to the old subtotal − discount − expenses, so the figure the
+  // sheet showed yesterday does not move; with them it now includes that money too.
+  const yours = num(moneyIn - gstAll - totals.discount);
 
   let series: { bucket: string; expenses: number; left: number }[] | null = null;
   if (perBucket) {
@@ -324,8 +358,9 @@ async function buildInHand(opts: {
 
   const modes = new Set(ids.map((id, i) => effMode(id, i)));
   return {
-    itemSales: totals.subtotal, discounts: totals.discount, netSales: yours,
-    gst: totals.tax, collected: totals.revenue, yours,
+    itemSales: totals.subtotal, discounts: totals.discount, netSales: num(totals.subtotal - totals.discount),
+    gst: gstAll, collected: totals.revenue, yours,
+    moneyIn, earnings: { parts, dineIn: num(dineIn), tips },
     expenses, left: num(yours - expenses),
     parts: {
       manual: manual || manualN ? { amount: manual, entries: manualN, byCategory } : { amount: 0, entries: 0, byCategory: {} },
@@ -418,7 +453,11 @@ export async function GET(req: NextRequest) {
   // v4 (mig 252): the money payloads gained `inHand` — same reasoning as v3, and this time
   // the shape carries the number the owner reads FIRST, so a stale v3 row would show him a
   // day sheet with no bottom line at all.
-  const cacheKey = `reports:v4:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
+  // v5 (mig 254): `inHand` gained `moneyIn` + `earnings`. Forgetting this bump CRASHED the
+  // page in testing — the stored v4 JSON has no `earnings`, the sub-report read
+  // `earnings.tips` off undefined, and the owner got "Something went wrong" instead of a
+  // report. The reader below is now defensive too, but the version is the real fix.
+  const cacheKey = `reports:v5:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
   // Change-detector choice. The precise ordersFingerprint SCANS its window — on a WIDE
