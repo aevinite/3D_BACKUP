@@ -650,6 +650,16 @@ function tabletTagsOn() {
   const s = state.data.settings || {};
   return s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
 }
+// Is PAY LATER (khata) switched on for this restaurant? Its OWN module ladder since the
+// Access rebuild (mig 235) — it used to share table_tags_*, so the "📒 Pay Later" button
+// kept appearing in the payment popup of a restaurant that has Pay later switched OFF, and
+// the server (which reads the right column) refused the tap. Mirrors khataLadder() in
+// lib/tableTags.ts. (owner, 2026-08-02)
+function tabletKhataOn() {
+  if (tHigher()) return true;
+  const s = state.data.settings || {};
+  return s.khata_allowed === true && (s.khata_owner_control !== true || s.khata_enabled !== false);
+}
 // This table's mark ('' when none) — the slim summary carries it for every tile.
 function ttagOf(t) {
   // ADMIN X-RAY rule (owner 2026-07-23): the admin act-as view always shows the mark
@@ -2135,9 +2145,23 @@ function openPaymentMethodModal(due, label, opts = {}) {
           ${opts.khata ? `<button type="button" class="pay-method-btn" data-special="khata" style="display:flex;flex-direction:column;align-items:center;gap:6px;padding:16px 10px;min-height:64px;border-radius:12px;border:1.5px solid #0ea5e9;background:var(--bg);color:var(--text);font-size:14px;font-weight:600"><span style="font-size:22px">📒</span>Pay Later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none;margin-top:12px">
-          <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
-          <input type="text" class="pay-other-input" maxlength="60" placeholder="e.g. wallet, bank transfer" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:10px">
-          <button type="button" class="btn primary pay-other-confirm" style="width:100%">Confirm</button>
+          <div class="pay-other-pick" style="display:flex;flex-direction:column;gap:8px">
+            <button type="button" class="btn pay-other-choice" data-oc="write" style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px;border-radius:12px;line-height:1.35"><b style="font-size:14px">✎ Another way to pay</b><small style="font-size:11.5px;color:var(--muted);font-weight:400">Wallet, bank transfer, cheque — type what it was</small></button>
+            ${opts.split ? `<button type="button" class="btn pay-other-choice" data-oc="split" style="display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px;border-radius:12px;line-height:1.35"><b style="font-size:14px">⇄ Split the payment</b><small style="font-size:11.5px;color:var(--muted);font-weight:400">Part one way, part another — ₹200 UPI, ₹200 cash, and so on</small></button>` : ""}
+          </div>
+          <div class="pay-other-write" style="display:none">
+            <div style="font-size:13px;font-weight:700;margin:0 0 8px">What kind?</div>
+            <input type="text" class="pay-other-input" maxlength="60" placeholder="e.g. wallet, bank transfer" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;margin-bottom:10px">
+            <button type="button" class="btn primary pay-other-confirm" style="width:100%">Confirm</button>
+          </div>
+          <div class="pay-other-split" style="display:none">
+            <div style="font-size:13px;font-weight:700;margin:0 0 3px">How much came in each way?</div>
+            <div style="font-size:11.5px;color:var(--muted);margin:0 0 10px">Add a part for every way they paid. The parts have to add up to ${inr(due)}.</div>
+            <div class="pay-split-rows"></div>
+            <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
+            <div class="pay-split-sum" style="margin:9px 0 8px;font-size:12.5px;font-weight:700"></div>
+            <button type="button" class="btn primary pay-split-go" style="width:100%">Take payment</button>
+          </div>
         </div>
         ${opts.crm === false ? "" : `
         <div class="pay-cust" style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--line)">
@@ -2184,10 +2208,75 @@ function openPaymentMethodModal(due, label, opts = {}) {
       }
       finish(m, null);
     }));
+    // "Other" opens a choice of TWO things (owner, 2026-08-02): type another way to pay, or
+    // SPLIT the bill across ways — "₹200 from this, ₹200 from that". Split is offered only
+    // when the caller can post it (opts.split = a whole table's bill).
+    ov.querySelectorAll(".pay-other-choice").forEach((b) => (b.onclick = () => {
+      ov.querySelector(".pay-other-pick").style.display = "none";
+      if (b.dataset.oc === "write") { ov.querySelector(".pay-other-write").style.display = ""; ov.querySelector(".pay-other-input").focus(); }
+      else { ov.querySelector(".pay-other-split").style.display = ""; renderSplit(); }
+    }));
     const otherInput = ov.querySelector(".pay-other-input");
     const confirmOther = () => finish("Other", otherInput.value.trim());
     ov.querySelector(".pay-other-confirm").onclick = confirmOther;
     otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); confirmOther(); } };
+
+    // ── Split across ways to pay ────────────────────────────────────────────────────
+    // The parts must add up to the bill EXACTLY — the server recomputes the due and refuses
+    // anything else (lib/paySplit.ts), so this can neither under- nor over-collect.
+    const legs = [{ amount: "", method: "UPI", note: "" }, { amount: "", method: "Cash", note: "" }];
+    const legSum = () => Math.round(legs.reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100;
+    const legLeft = () => Math.round((due - legSum()) * 100) / 100;
+    const rowsEl = ov.querySelector(".pay-split-rows");
+    const sumEl = ov.querySelector(".pay-split-sum");
+    const inpCss = "box-sizing:border-box;padding:10px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px";
+    function renderSplit() {
+      if (!rowsEl) return;
+      rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}" style="display:grid;grid-template-columns:1fr auto 30px;gap:8px;align-items:center;margin-bottom:8px">
+          <input type="number" inputmode="decimal" min="0" step="1" class="psr-amt" value="${l.amount}" placeholder="₹ amount" style="${inpCss};width:100%">
+          <select class="psr-method" style="${inpCss};font-weight:600">${["UPI", "Cash", "Card", "Other"].map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
+          ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part" style="width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--bg);color:var(--muted);font-size:13px;cursor:pointer">✕</button>` : `<span></span>`}
+          ${l.method === "Other" ? `<input type="text" class="psr-note" maxlength="60" value="${esc(l.note || "")}" placeholder="What kind? e.g. wallet, cheque" style="${inpCss};grid-column:1 / -1;width:100%">` : ""}
+        </div>`).join("");
+      rowsEl.querySelectorAll(".pay-split-row").forEach((row) => {
+        const i = Number(row.dataset.i);
+        row.querySelector(".psr-amt").oninput = (e) => { legs[i].amount = e.target.value; refreshSplitSum(); };
+        row.querySelector(".psr-method").onchange = (e) => { legs[i].method = e.target.value; renderSplit(); };
+        const nEl = row.querySelector(".psr-note"); if (nEl) nEl.oninput = (e) => { legs[i].note = e.target.value; };
+        const dEl = row.querySelector(".psr-del"); if (dEl) dEl.onclick = () => { legs.splice(i, 1); renderSplit(); };
+      });
+      refreshSplitSum();
+    }
+    function refreshSplitSum() {
+      if (!sumEl) return;
+      const left = legLeft();
+      sumEl.textContent = left === 0 ? `✓ The parts add up to ${inr(due)}`
+        : left > 0 ? `${inr(left)} still to cover` : `${inr(-left)} more than the bill`;
+      sumEl.style.color = left === 0 ? "#16a34a" : "#e11d48";
+    }
+    const addBtn = ov.querySelector(".pay-split-add");
+    if (addBtn) addBtn.onclick = () => {
+      if (legs.length >= 12) { toast("A bill can be split into at most 12 parts."); return; }
+      const left = legLeft();
+      legs.push({ amount: left > 0 ? String(left) : "", method: "Cash", note: "" });
+      renderSplit();
+    };
+    const goBtn = ov.querySelector(".pay-split-go");
+    // Stays ENABLED and says WHY it won't go — a disabled button that swallows the tap is
+    // indistinguishable from a broken one (owner rule: never drop a tap in silence).
+    if (goBtn) goBtn.onclick = () => {
+      const left = legLeft();
+      if (legs.some((l) => !(Number(l.amount) > 0))) { toast("Every part needs an amount above zero — remove the empty one."); return; }
+      if (left !== 0) { toast(left > 0 ? `${inr(left)} of the bill is still uncovered.` : `The parts are ${inr(-left)} more than the bill.`); return; }
+      if (legs.length < 2) { toast("A split needs at least two parts."); return; }
+      resolved = true;
+      const cust = readCust();
+      close();
+      resolve({
+        method: "Split", note: null, cust,
+        splitLegs: legs.map((l) => ({ amount: Math.round(Number(l.amount) * 100) / 100, method: l.method, note: (l.note || "").trim().slice(0, 200) || null })),
+      });
+    };
 
     // Repeat-customer recognition: as the waiter types a known number, show a chip and
     // pre-fill the name. Read-only lookup (stores nothing); debounced to one call.
@@ -2225,10 +2314,22 @@ async function payBillWithMethod(t, a) {
   // side still runs under tablet_mark_paid), "Collect later" under tablet_khata.
   const opts = {
     onHouse: ["family", "guest"].includes(ttagOf(t)),
-    khata: tabletTagsOn() && tshow("tablet_khata"),
+    khata: tabletKhataOn() && tshow("tablet_khata"),
+    // A whole table's bill can be collected in parts (Other → Split the payment).
+    split: true,
   };
   const picked = await openPaymentMethodModal(a.due, `Mark bill ${a.billNo ? `#${a.billNo} ` : ""}paid for table ${t}`, opts);
   if (!picked) return;
+  // Paid in PARTS — one server call settles the whole bill and records each part
+  // (owner, 2026-08-02). actGated covers both modes: straight through when the waiter's
+  // mark-paid is 'on', and the manager-PIN round-trip when it's 'pin'.
+  if (picked.splitLegs) {
+    const how = picked.splitLegs.map((l) => `${inr(l.amount)} ${l.method}`).join(" + ");
+    await actGated("POST", `/tables/${t}/pay-split`, { splits: picked.splitLegs },
+      { message: "Enter a manager PIN to mark this bill paid.", onSuccess: () => offerPayUndo(t, { message: `Bill paid in ${picked.splitLegs.length} parts — ${how}` }) });
+    if (picked.cust) captureCustomer(t, picked.cust);
+    return;
+  }
   if (picked.special === "onhouse") {
     // actGated handles BOTH modes: direct when 'on', and the PIN round-trip when the
     // server answers "manager pin" ('pin' mode) — same as every other gated action.

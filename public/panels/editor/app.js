@@ -1871,7 +1871,9 @@ function accessCapsFor() {
   const tagsOn = s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
   return ACCESS_CAPS.filter((c) => {
     if (c.key === "tablet_banquet") return s.banquet_allowed === true && (s.banquet_owner_control !== true || s.banquet_enabled !== false);
-    if (c.key === "tablet_table_tags" || c.key === "tablet_khata") return tagsOn;
+    if (c.key === "tablet_table_tags") return tagsOn;
+    // Pay later is its own feature now (mig 235) — it must not ride table types' switch.
+    if (c.key === "tablet_khata") return s.khata_allowed === true && (s.khata_owner_control !== true || s.khata_enabled !== false);
     if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
     if (c.key === "tablet_take_orders") return s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
     if (c.key === "tablet_parcel") return s.takeaway_allowed === true && (s.takeaway_owner_control !== true || s.takeaway_enabled !== false);
@@ -3160,9 +3162,23 @@ function openPaymentMethodModal(due, label, opts = {}) {
           ${opts.khata ? `<button type="button" class="pay-method-btn pay-special-khata" data-special="khata"><span class="pmi">📒</span>Pay Later</button>` : ""}
         </div>
         <div class="pay-other-field" style="display:none">
-          <label class="dish-edit-lbl">What kind?</label>
-          <input type="text" class="dish-edit-custominput" id="payOtherInput" maxlength="60" placeholder="e.g. wallet, bank transfer">
-          <button type="button" class="btn primary pay-other-confirm">Confirm</button>
+          <div class="pay-other-pick">
+            <button type="button" class="btn pay-other-choice" data-oc="write"><b>✎ Another way to pay</b><small>Wallet, bank transfer, cheque — type what it was</small></button>
+            ${opts.split ? `<button type="button" class="btn pay-other-choice" data-oc="split"><b>⇄ Split the payment</b><small>Part one way, part another — ₹200 UPI, ₹200 cash, and so on</small></button>` : ""}
+          </div>
+          <div class="pay-other-write" style="display:none">
+            <label class="dish-edit-lbl">What kind?</label>
+            <input type="text" class="dish-edit-custominput" id="payOtherInput" maxlength="60" placeholder="e.g. wallet, bank transfer">
+            <button type="button" class="btn primary pay-other-confirm">Confirm</button>
+          </div>
+          <div class="pay-other-split" style="display:none">
+            <div class="dish-edit-lbl">How much came in each way?</div>
+            <div class="muted small" style="margin:-2px 0 8px">Add a part for every way they paid. The parts have to add up to ${inr(due)}.</div>
+            <div class="pay-split-rows"></div>
+            <button type="button" class="btn pay-split-add" style="width:100%;margin-top:2px">＋ Add another part</button>
+            <div class="pay-split-sum small" style="margin:9px 0 8px;font-weight:700"></div>
+            <button type="button" class="btn primary pay-split-go" style="width:100%">Take payment</button>
+          </div>
         </div>
         ${opts.crm === false ? "" : `
         <div class="pay-cust" style="margin-top:12px;padding-top:12px;border-top:1px dashed var(--line)">
@@ -3219,10 +3235,77 @@ function openPaymentMethodModal(due, label, opts = {}) {
     const updTotal = () => { const el2 = wrap.querySelector("#payTotal"); if (el2) el2.textContent = inr(due + (Number(tip) || 0)); };
     wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => { tip = Number(c.dataset.tipAmt) || 0; tipInput.value = tip ? String(tip) : ""; wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", x === c)); updTotal(); }));
     tipInput.oninput = () => { tip = Math.max(0, Number(tipInput.value) || 0); wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.remove("active")); updTotal(); };
+    // "Other" opens a choice of TWO things (owner, 2026-08-02): type another way to pay, or
+    // SPLIT the bill across ways — "₹200 from this, ₹200 from that". The split is offered only
+    // when the caller can post it (opts.split), i.e. a whole table's bill.
+    const otherWrap = wrap.querySelector(".pay-other-write");
+    const splitWrap = wrap.querySelector(".pay-other-split");
+    wrap.querySelectorAll(".pay-other-choice").forEach((b) => (b.onclick = () => {
+      wrap.querySelector(".pay-other-pick").style.display = "none";
+      if (b.dataset.oc === "write") { otherWrap.style.display = ""; wrap.querySelector("#payOtherInput").focus(); }
+      else { splitWrap.style.display = ""; renderSplit(); }
+    }));
     const otherInput = wrap.querySelector("#payOtherInput");
     const confirmOther = () => finish("Other", otherInput.value.trim());
     wrap.querySelector(".pay-other-confirm").onclick = confirmOther;
     otherInput.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); confirmOther(); } };
+
+    // ── Split across ways to pay ────────────────────────────────────────────────────
+    // The parts must add up to the bill EXACTLY — the server recomputes the due and refuses
+    // anything else, so this UI can neither under- nor over-collect. The tip is deliberately
+    // outside the split: it is not part of the bill.
+    const legs = [{ amount: "", method: "UPI", note: "" }, { amount: "", method: "Cash", note: "" }];
+    const legSum = () => Math.round(legs.reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100;
+    const legLeft = () => Math.round((due - legSum()) * 100) / 100;
+    const rowsEl = wrap.querySelector(".pay-split-rows");
+    const sumEl = wrap.querySelector(".pay-split-sum");
+    function renderSplit() {
+      if (!rowsEl) return;
+      rowsEl.innerHTML = legs.map((l, i) => `<div class="pay-split-row" data-i="${i}">
+          <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput psr-amt" value="${l.amount}" placeholder="₹ amount">
+          <select class="psr-method">${["UPI", "Cash", "Card", "Other"].map((m) => `<option${m === l.method ? " selected" : ""}>${m}</option>`).join("")}</select>
+          ${legs.length > 2 ? `<button type="button" class="psr-del" aria-label="Remove this part">✕</button>` : `<span class="psr-del-gap"></span>`}
+          ${l.method === "Other" ? `<input type="text" class="dish-edit-custominput psr-note" maxlength="60" value="${esc(l.note || "")}" placeholder="What kind? e.g. wallet, cheque">` : ""}
+        </div>`).join("");
+      rowsEl.querySelectorAll(".pay-split-row").forEach((row) => {
+        const i = Number(row.dataset.i);
+        row.querySelector(".psr-amt").oninput = (e) => { legs[i].amount = e.target.value; refreshSplitSum(); };
+        row.querySelector(".psr-method").onchange = (e) => { legs[i].method = e.target.value; renderSplit(); };
+        const nEl = row.querySelector(".psr-note"); if (nEl) nEl.oninput = (e) => { legs[i].note = e.target.value; };
+        const dEl = row.querySelector(".psr-del"); if (dEl) dEl.onclick = () => { legs.splice(i, 1); renderSplit(); };
+      });
+      refreshSplitSum();
+    }
+    function refreshSplitSum() {
+      if (!sumEl) return;
+      const left = legLeft();
+      sumEl.textContent = left === 0 ? `✓ The parts add up to ${inr(due)}`
+        : left > 0 ? `${inr(left)} still to cover` : `${inr(-left)} more than the bill`;
+      sumEl.style.color = left === 0 ? "var(--green)" : "var(--red)";
+    }
+    const addBtn = wrap.querySelector(".pay-split-add");
+    if (addBtn) addBtn.onclick = () => {
+      if (legs.length >= 12) { toast("A bill can be split into at most 12 parts.", "err"); return; }
+      const left = legLeft();
+      legs.push({ amount: left > 0 ? String(left) : "", method: "Cash", note: "" });
+      renderSplit();
+    };
+    const goBtn = wrap.querySelector(".pay-split-go");
+    // Stays ENABLED and says WHY it won't go — a disabled button that swallows the tap is
+    // indistinguishable from a broken one (owner rule: never drop a tap in silence).
+    if (goBtn) goBtn.onclick = () => {
+      const left = legLeft();
+      if (legs.some((l) => !(Number(l.amount) > 0))) { toast("Every part needs an amount above zero — remove the empty one.", "err"); return; }
+      if (left !== 0) { toast(left > 0 ? `${inr(left)} of the bill is still uncovered.` : `The parts are ${inr(-left)} more than the bill.`, "err"); return; }
+      if (legs.length < 2) { toast("A split needs at least two parts.", "err"); return; }
+      resolved = true;
+      const cust = readCust();
+      close();
+      resolve({
+        method: "Split", note: null, tip, cust,
+        splitLegs: legs.map((l) => ({ amount: Math.round(Number(l.amount) * 100) / 100, method: l.method, note: (l.note || "").trim().slice(0, 200) || null })),
+      });
+    };
 
     // Repeat-customer recognition: known number → chip + pre-fill name. Read-only, debounced.
     const phoneEl = wrap.querySelector(".pay-cust-phone");
@@ -3280,9 +3363,23 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   if (picked.special) return picked;
   let okCount = 0, failCount = 0;
   const paidIds = [];
-  for (const o of payable) {
-    const done = await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
-    if (done) { okCount++; paidIds.push(o.id); } else failCount++;
+  // Paid in PARTS (owner, 2026-08-02) — ₹200 UPI + ₹200 cash + … The whole bill is settled in
+  // ONE server call: it recomputes the due itself and refuses parts that don't add up, so this
+  // can never under- or over-collect. The legs land in session_payments for the money trail.
+  if (picked.splitLegs) {
+    const tnum = payable[0] && payable[0].table_number;
+    if (tnum == null) { toast("A split payment needs a table's bill.", "err"); return false; }
+    try {
+      const rs = await api("POST", `/tables/${tnum}/pay-split`, { splits: picked.splitLegs });
+      okCount = Number(rs && rs.count) || payable.length;
+      paidIds.push(...payable.map((o) => o.id));
+      await pollTables([String(tnum)]);
+    } catch (e) { toast("Couldn't take the split payment: " + e.message, "err"); return false; }
+  } else {
+    for (const o of payable) {
+      const done = await setOrderPayment(o.id, true, { skipConfirm: true, quiet: true, method: picked.method, note: picked.note });
+      if (done) { okCount++; paidIds.push(o.id); } else failCount++;
+    }
   }
   // Store the optional tip on the first order that ACTUALLY settled (a bill's tip lives on one
   // order; it's separate from the bill total, so this never affects the money math). Before this
@@ -3305,7 +3402,8 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
   }
   // Report what ACTUALLY happened — never a blanket "paid" when the server refused some.
   if (okCount && !failCount) {
-    const msg = skipped ? `Paid via ${picked.method} — ${skipped} new order still to accept` : `Marked paid via ${picked.method}`;
+    const how = picked.splitLegs ? `in ${picked.splitLegs.length} parts (${picked.splitLegs.map((l) => `${inr(l.amount)} ${l.method}`).join(" + ")})` : `via ${picked.method}`;
+    const msg = skipped ? `Paid ${how} — ${skipped} new order still to accept` : `Marked paid ${how}`;
     // Same here: no undo bar. See the note on the single-order path above — reopening a settled
     // bill is Access → Manager → Manager menu → Bill → Reopen a bill, which is recorded.
     toast(msg + " 💳", "ok");
@@ -3336,6 +3434,9 @@ async function markTablePaid(t, mtpOpts = {}) {
   const opts = {
     onHouse: ["family", "guest"].includes(tagForTable(t)) && tagActionAllowed("table_tags"),
     khata: tagActionAllowed("khata"),
+    // A whole table's bill can be paid in parts (Other → Split the payment). Single-order and
+    // khata-collect settles can't — there is no pay-split endpoint for those.
+    split: true,
   };
   const r = await payOrdersWithMethod(os, `Mark table ${t} paid`, opts);
   if (r && r.special === "khata") { await khataParkFlow(t, os); return; }
@@ -5235,29 +5336,33 @@ async function removeRecord() {
   }
 }
 
-// previewSampleKOT: open a sample kitchen ticket + the print dialog, so the owner can test
-// the printer and see the KOT layout from any device. Uses this restaurant's name (not #1's).
+// previewSampleKOT: a test print of THE REAL kitchen ticket, with made-up dishes.
+//
+// Owner, 2026-08-02: "the sample of KOT — why does it come in 2 parts? It should come in one
+// part, as the real KOT we have decided." It used to be its OWN little template (a centred
+// 280px box with its own <h2>/<hr> styling and no @page rule), so the browser applied its
+// default page margins and the ticket broke across two pieces of paper — and it could drift
+// from the real ticket at any time. There is now ONE template: kotTicketHtml() below, used by
+// this preview AND by every real print, through the same hidden-iframe print path. What the
+// owner tests is exactly what the kitchen will get.
 function previewSampleKOT() {
-  const now = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-  const rest = (billIdentity(state.data.settings).name) || "Restaurant";
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sample KOT</title>
-    <style>body{font-family:ui-monospace,monospace;max-width:280px;margin:0 auto;padding:12px;color:#000}
-    h2{text-align:center;margin:2px 0 6px;font-size:16px} .r{display:flex;justify-content:space-between;font-size:13px;margin:3px 0}
-    hr{border:0;border-top:1px dashed #000;margin:8px 0} .foot{text-align:center;font-size:12px;margin-top:10px}</style></head>
-    <body onload="setTimeout(function(){window.print()},80)">
-      <h2>KITCHEN TICKET</h2>
-      <div class="r"><span>${esc(rest)}</span><span>#SAMPLE</span></div>
-      <div class="r"><span>${esc(tablePrintLabel(5))}</span><span>${esc(now)}</span></div>
-      <hr>
-      <div class="r"><b>2×</b><span>Margherita Pizza</span></div>
-      <div class="r"><b>1×</b><span>Garlic Bread</span></div>
-      <div class="r"><b>1×</b><span>Coke — no ice</span></div>
-      <hr>
-      <div class="foot">— sample test print —</div>
-    </body></html>`;
-  const w = window.open("", "_blank", "width=340,height=560");
-  if (!w) { toast("Allow pop-ups to preview the KOT", "err"); return; }
-  w.document.write(html); w.document.close();
+  const when = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const rest = (billIdentity(state.data.settings).name) || (state.data.restaurant || {}).name || "Kitchen";
+  const lines = [
+    { qty: 2, title: "Margherita Pizza", note: "" },
+    { qty: 1, title: "Garlic Bread", note: "" },
+    { qty: 1, title: "Coke", note: "no ice" },
+  ].map((r) => kotLineHtml(r)).join("");
+  printTicketHtml(kotTicketHtml({
+    title: "Sample KOT",
+    rname: rest,
+    head: "KITCHEN TICKET · SAMPLE",
+    kot: "SAMPLE",
+    tableLabel: tablePrintLabel(5),
+    when,
+    linesHtml: lines,
+    extraHtml: `<div style="text-align:center;font-size:12px;margin-top:10px">— sample test print —</div>`,
+  }));
 }
 
 // ---------- v2 dining sessions: live board ----------
@@ -6091,13 +6196,24 @@ function tableTagsOn() {
   const s = state.data.settings || {};
   return s.table_tags_allowed === true && (s.table_tags_owner_control !== true || s.table_tags_enabled !== false);
 }
+// Is PAY LATER (khata) switched on for this restaurant? Its own module ladder — mirrors
+// khataLadder() in lib/tableTags.ts, which is what every server gate reads.
+function khataOn() {
+  const s = state.data.settings || {};
+  return s.khata_allowed === true && (s.khata_owner_control !== true || s.khata_enabled !== false);
+}
 // May the CURRENT viewer use a tag/khata action? Admin + owner always (higherView);
 // a real manager needs the owner-granted power (whoami.effectivePowers).
 function tagActionAllowed(flag) {
   // ADMIN X-RAY rule (owner 2026-07-22): the admin view always sees module buttons,
   // tinted (XRAY_CONTROLS) when off for real staff; the server lets the admin through.
   if (XRAY_WHO && XRAY_WHO.actor === "admin") return true;
-  if (!tableTagsOn()) return false;
+  // Pay later has its OWN feature switch (settings.khata_*, mig 235) — it stopped sharing
+  // table_tags_* when Access was rebuilt. This check still read table tags, so a restaurant
+  // with Pay later switched OFF was still shown the "📒 Pay Later" button in the payment
+  // popup (and the khata tab), and the server — which reads the right column — refused the
+  // tap. Same ladder as lib/tableTags.ts → khataLadder. (owner, 2026-08-02)
+  if (!(flag === "khata" ? khataOn() : tableTagsOn())) return false;
   if (XRAY_WHO && XRAY_WHO.higherView) return true;
   return xrayGrantedForManager(flag);
 }
@@ -8671,22 +8787,18 @@ function openKotMenu(t, sess) {
   }));
 }
 
-// Reprint ONE order's kitchen ticket — same 66mm thermal template the kitchen's
-// auto-print uses (validated through the real CUPS/ESC-POS chain 2026-07-21; keep the
-// two in sync if the recipe ever changes). Local print only — no network, no state.
-function printKotTicket(o) {
-  try {
-    const rname = (state.data.restaurant || {}).name || "Kitchen";
-    const kot = o.kot_no != null ? o.kot_no : "—";
-    const when = o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
-    const rows = orderItemRows(o);
-    const linesHtml = rows.map((r) => {
-      const opts = Array.isArray(r.options) ? r.options.map((x) => (typeof x === "string" ? x : (x && x.label) || "")).filter(Boolean).join(", ") : "";
-      const rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
-      return `<div class="kl"><span class="q">${r.qty || 1}×</span><span class="n">${esc(r.title || "")}${opts ? ` <i>(${esc(opts)})</i>` : ""}${rem ? ` <i>— no ${esc(rem)}</i>` : ""}${r.note ? `<br><small>&raquo; ${esc(r.note)}</small>` : ""}</span></div>`;
-    }).join("");
-    const allerg = Array.isArray(o.allergies) && o.allergies.length ? `<div class="al">⚠ AVOID: ${esc(o.allergies.join(", "))}</div>` : "";
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>KOT ${esc(String(kot))}</title><style>
+// ── THE kitchen-ticket template — ONE recipe, used by every KOT print ────────────────
+// 66mm thermal, validated through the real CUPS/ESC-POS chain 2026-07-21. `@page{margin:0}`
+// plus the break-inside rules are what keep a ticket on ONE piece of paper; anything that
+// prints a KOT must come through here rather than writing its own HTML (the sample preview
+// used to, and printed in two parts — owner, 2026-08-02).
+function kotLineHtml(r) {
+  const opts = Array.isArray(r.options) ? r.options.map((x) => (typeof x === "string" ? x : (x && x.label) || "")).filter(Boolean).join(", ") : "";
+  const rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
+  return `<div class="kl"><span class="q">${r.qty || 1}×</span><span class="n">${esc(r.title || "")}${opts ? ` <i>(${esc(opts)})</i>` : ""}${rem ? ` <i>— no ${esc(rem)}</i>` : ""}${r.note ? `<br><small>&raquo; ${esc(r.note)}</small>` : ""}</span></div>`;
+}
+function kotTicketHtml(o) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${esc(o.title || "KOT")}</title><style>
       *{margin:0;padding:0;box-sizing:border-box}body{font-family:ui-monospace,monospace;width:280px;padding:8px;color:#000}
       .h{text-align:center;font-weight:700;font-size:15px;border-bottom:2px dashed #000;padding-bottom:6px;margin-bottom:6px}
       .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}
@@ -8695,12 +8807,17 @@ function printKotTicket(o) {
       @page{margin:0}
       @media print{body{margin:0 !important;padding:2mm 5mm 4mm !important}.kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}
     </style></head><body>
-      <div class="h">${esc(rname)}<br>KITCHEN TICKET · REPRINT</div>
-      <div class="meta"><span>KOT #${esc(String(kot))}</span><span>${esc(tablePrintLabel(o.table_number))}</span></div>
-      <div class="meta"><span>${esc(when)}</span></div>
-      ${linesHtml || "<div>(no items)</div>"}
-      ${allerg}
+      <div class="h">${esc(o.rname || "Kitchen")}<br>${esc(o.head || "KITCHEN TICKET")}</div>
+      <div class="meta"><span>KOT #${esc(String(o.kot))}</span><span>${esc(o.tableLabel || "")}</span></div>
+      <div class="meta"><span>${esc(o.when || "")}</span></div>
+      ${o.linesHtml || "<div>(no items)</div>"}
+      ${o.allergHtml || ""}
+      ${o.extraHtml || ""}
     </body></html>`;
+}
+// Print a ticket through a hidden iframe — no pop-up to allow, nothing left on screen.
+function printTicketHtml(html) {
+  try {
     const ifr = document.createElement("iframe");
     ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
     document.body.appendChild(ifr);
@@ -8718,6 +8835,22 @@ function printKotTicket(o) {
       try { w.focus(); w.print(); } catch (e) {}
       setTimeout(cleanup, 60000);
     }, 250);
+  } catch (e) { /* printing must NEVER break the panel */ }
+}
+// Reprint ONE order's kitchen ticket.
+function printKotTicket(o) {
+  try {
+    const allerg = Array.isArray(o.allergies) && o.allergies.length ? `<div class="al">⚠ AVOID: ${esc(o.allergies.join(", "))}</div>` : "";
+    printTicketHtml(kotTicketHtml({
+      title: `KOT ${o.kot_no != null ? o.kot_no : "—"}`,
+      rname: (state.data.restaurant || {}).name || "Kitchen",
+      head: "KITCHEN TICKET · REPRINT",
+      kot: o.kot_no != null ? o.kot_no : "—",
+      tableLabel: tablePrintLabel(o.table_number),
+      when: o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+      linesHtml: orderItemRows(o).map(kotLineHtml).join(""),
+      allergHtml: allerg,
+    }));
   } catch (e) { /* printing must NEVER break the panel */ }
 }
 function openReprintKotPicker(t) {
@@ -11556,6 +11689,11 @@ const XRAY_TABS = [
   // default), so this is non-breaking — the tab only disappears once the owner explicitly
   // switches it off; admin/owner keep it (tinted).
   { tab: "log", flag: "view_logs", label: "Activity log" },
+  // Bills (owner, 2026-08-02). Its DOM tab is called "orders". It was the one menu with a
+  // permission and no entry here: switch "Bill" off and the tab still sat there, and every
+  // tap inside it came back 403 from tabGate — a switched-off permission has to be GONE, not
+  // merely refused ("even if it's shown it should not work, and it shouldn't be shown").
+  { tab: "orders", flag: "view_bills", label: "Bills" },
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can
@@ -11897,7 +12035,10 @@ function applyHierarchyView() {
   // what the rebuild removed. The server sends an empty list for the admin, and refuses these
   // tabs' endpoints for everyone else (tabGate in the editor API), so hiding is never the only
   // guard. Model keys → DOM tab names: the menu editor's tab is called "items".
-  const TAB_DOM = { editor: "items", ratings: "ratings", log: "log" };
+  // Model key → the DOM tab's name. The Bills menu's key is "bills" but its button is
+  // data-tab="orders"; with that line missing, switching the menu off for the restaurant
+  // looked for a tab called "bills", found nothing, and left the real one on screen.
+  const TAB_DOM = { editor: "items", ratings: "ratings", log: "log", bills: "orders" };
   for (const key of XRAY_WHO.tabsOff || []) {
     const btn = document.querySelector(`.tabs .tab[data-tab="${TAB_DOM[key] || key}"]`);
     if (btn) { xraySetTint(btn, false); xraySetHidden(btn, true); }
