@@ -4508,7 +4508,7 @@ function openParcelTile(id) {
     const b = e.currentTarget; b.disabled = true;
     // Print FIRST, then record it: a printer that never opened must not leave a stamp
     // saying paper went out.
-    try { printParcelReceipt({ kot: o.kot_no, items, total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method }); }
+    try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items, total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method }); }
     catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
     try { await api("POST", `/platform/${o.id}/printed`, {}); toast("Bill printed ✓", "ok"); closeP(); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
@@ -4552,7 +4552,24 @@ function printParcelReceipt(o) {
   const who = String(o.customer || o.customer_name || "").trim();
   const realName = who && !/^parcel$/i.test(who) ? who : "";
   if (realName) order.customer_name = realName;
-  const sessLike = { customer_name: realName || null, bill_no: null, invoice_no: null };
+  // The mobile too, when one was taken — a table bill prints it, and the owner's rule for the
+  // parcel bill is that the ONLY difference is the table line (2026-08-02). It rides the same
+  // bill_cust_phone field a table bill uses, so the restaurant's "print the customer's details"
+  // switch governs both of them in one place.
+  const phone = String(o.phone || o.customer_phone || "").replace(/\D/g, "");
+  if (phone) order.bill_cust_phone = phone;
+  // THE NUMBERS ARE THE SAME SERIES AS A TABLE'S (mig 261, owner 2026-08-02: "make sure it is
+  // continuing — parcel or any kind of Zomato, Swiggy, everywhere it will continue the invoice
+  // number and the bill number, to keep the track"). They used to be hardcoded null here, so a
+  // parcel receipt went out with no Invoice line and no Bill no while a table bill carried both.
+  // They now come off the order row, stamped when it was created from the very counters a
+  // dine-in session draws on, so a day's paper reads as one run of numbers.
+  const sessLike = {
+    customer_name: realName || null,
+    bill_no: o.bill_no != null ? o.bill_no : null,
+    invoice_no: o.invoice_no != null ? o.invoice_no : null,
+    invoice_at: o.invoice_at || o.created_at || null,
+  };
   printBill(null, sessLike, [order], { parcel: true });
 }
 
@@ -8607,7 +8624,7 @@ function openTakeOrder(table, rerender, opts = {}) {
         if (r && r.queued) { toast("Saved ✓ — the parcel will send when you're back online.", "ok"); close(); return; }
         toast(r && r.kot_no != null ? `Parcel sent! Ticket #${r.kot_no}${payNow ? " · paid" : " · pay on pickup"}` : "Parcel sent to the kitchen", "ok");
         // "Pay now & print" → a customer receipt for the counter printer (pay-on-pickup doesn't).
-        if (payNow) { try { printParcelReceipt({ kot: r && r.kot_no, items: cart.map((c) => ({ title: c.title, qty: c.qty, price: c.price })), total: cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0), customer: custName, method: "cash", paid: true }); } catch {} }
+        if (payNow) { try { printParcelReceipt({ kot: r && r.kot_no, phone: custPhone, bill_no: r && r.bill_no, invoice_no: r && r.invoice_no, invoice_at: r && r.invoice_at, created_at: r && r.created_at, items: cart.map((c) => ({ title: c.title, qty: c.qty, price: c.price })), total: cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0), customer: custName, method: "cash", paid: true }); } catch {} }
         close();
         try { loadPlatform(); } catch {}
         if (rerender) rerender();
@@ -10384,7 +10401,7 @@ function bindPlatform() {
     const o = (state.data.platform || []).find((x) => String(x.id) === String(id));
     if (!o) { toast("That order is no longer on the board", "err"); return; }
     b.disabled = true;
-    try { printParcelReceipt({ kot: o.kot_no, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method }); }
+    try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method }); }
     catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
     try { await api("POST", `/platform/${id}/printed`, {}); toast("Bill printed ✓", "ok"); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
