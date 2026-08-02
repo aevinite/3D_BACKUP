@@ -8399,34 +8399,44 @@ function openTakeOrder(table, rerender, opts = {}) {
   };
   // A quick-mode CATEGORY card: name, how many dishes are in it, and the category's own
   // colour down the left edge. Tapping it drills into that category's dishes.
+  // Badge on the LEFT, text beside it — the shape that survives being shrunk. A stacked
+  // card needs badge + two lines of name + a count stacked vertically, which stops fitting
+  // the moment there are more than ~12 categories; side-by-side keeps the same card
+  // readable from a 150px-tall tile down to a 46px one (see fitBrowse below).
   const catCard = (s) => {
     // Deliberately NOT the category's Font-Awesome icon: this panel doesn't load Font
     // Awesome, so those classes render as empty □ boxes. The initial in the category's
     // own colour always draws, and reads at a glance from across a counter.
     const ic = esc((s.name || "?").trim().charAt(0).toUpperCase() || "?");
+    const n = s.items.length;
     return `<button class="qo-cat" data-qocat="${esc(s.slug)}"${s.color ? ` style="--qo-c:${esc(s.color)}"` : ""}>
       <span class="qo-cat-ic">${ic}</span>
-      <span class="qo-cat-n">${esc(s.name)}</span>
-      <span class="qo-cat-c">${s.items.length} dish${s.items.length === 1 ? "" : "es"}</span>
+      <span class="qo-cat-tx">
+        <span class="qo-cat-n">${esc(s.name)}</span>
+        <span class="qo-cat-c"><b>${n}</b><i> dish${n === 1 ? "" : "es"}</i></span>
+      </span>
     </button>`;
   };
   const listHtml = () => {
     const ql = q.trim().toLowerCase();
+    // `qo-grid` marks a grid that fitBrowse() is allowed to size to the space it has;
+    // it is only ever added in quick mode (the two scroll-spy modes keep scrolling).
+    const fitCls = quick ? " qo-grid" : "";
     if (ql) { // searching → one flat grid of matches, no headers
       const list = dishes.filter((d) => (d.title || "").toLowerCase().includes(ql));
-      return list.length ? `<div class="to-grid">${list.map(dishTile).join("")}</div>` : `<div class="muted" style="padding:16px">No dishes match "${esc(q)}".</div>`;
+      return list.length ? `<div class="to-grid${fitCls}">${list.map(dishTile).join("")}</div>` : `<div class="muted" style="padding:16px">No dishes match "${esc(q)}".</div>`;
     }
     // ⚡ QUICK — two levels, never both at once. Level 1 is the category cards; level 2 is
     // one category's dishes. Adding a dish drops straight back to level 1, which is what
     // makes "category, dish, category, dish" fast without a scroll in between.
     if (quick) {
       if (!qoCat) return sections.length
-        ? `<div class="qo-cats">${sections.map(catCard).join("")}</div>`
+        ? `<div class="qo-cats qo-grid">${sections.map(catCard).join("")}</div>`
         : `<div class="muted" style="padding:16px">No dishes on the menu yet.</div>`;
       const s = sections.find((x) => x.slug === qoCat);
       if (!s) return `<div class="muted" style="padding:16px">That category is gone.</div>`;
       return s.items.length
-        ? `<div class="to-grid">${s.items.map(dishTile).join("")}</div>`
+        ? `<div class="to-grid qo-grid">${s.items.map(dishTile).join("")}</div>`
         : `<div class="muted" style="padding:16px">Nothing in ${esc(s.name)} right now.</div>`;
     }
     // not searching → every category shown, in order, each its own scroll-spy section
@@ -8434,11 +8444,25 @@ function openTakeOrder(table, rerender, opts = {}) {
   };
   // Quick mode's breadcrumb bar, in place of the scroll-spy chip strip: where you are,
   // and the way back out of a category.
+  // The bar also carries the COUNT of what you're looking at (owner, 2026-08-03: "every
+  // category, how many items are there, how many categories are there"), so the size of
+  // the menu is a fact on screen rather than something you work out by counting tiles.
   const drillHtml = () => {
     const ql = q.trim();
-    const here = ql ? `Search · “${esc(ql)}”` : qoCat ? esc((sections.find((x) => x.slug === qoCat) || {}).name || "") : "All categories";
+    const nDish = dishes.length;
+    let here, sub;
+    if (ql) {
+      const m = dishes.filter((d) => (d.title || "").toLowerCase().includes(ql.toLowerCase())).length;
+      here = `Search · “${esc(ql)}”`; sub = `${m} match${m === 1 ? "" : "es"}`;
+    } else if (qoCat) {
+      const s = sections.find((x) => x.slug === qoCat) || { name: "", items: [] };
+      here = esc(s.name); sub = `${s.items.length} dish${s.items.length === 1 ? "" : "es"}`;
+    } else {
+      here = "All categories";
+      sub = `${sections.length} categor${sections.length === 1 ? "y" : "ies"} · ${nDish} dish${nDish === 1 ? "" : "es"}`;
+    }
     const back = (qoCat || ql) ? `<button class="qo-back" type="button">‹ Categories</button>` : "";
-    return `${back}<span class="qo-crumb">${here}</span>`;
+    return `${back}<span class="qo-crumb">${here}</span><span class="qo-count">${sub}</span>`;
   };
   const catChips = () => sections.map((s, i) => `<button class="to-cat ${i === 0 ? "on" : ""}" data-jump="${esc(s.slug)}">${esc(s.name)}</button>`).join("");
   const algChips = (set, kind, id) => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${set.has(a.slug) ? "on" : ""}" data-alg="${a.slug}" data-kind="${kind}"${id ? ` data-line="${esc(id)}"` : ""}>${esc(a.label)}</span>`).join("");
@@ -8487,7 +8511,7 @@ function openTakeOrder(table, rerender, opts = {}) {
         <div class="to-foot">
           <div class="to-total">${parcel ? "" : "≈ "}<b>${estTotal()}</b></div>
           ${quick
-            ? `<button class="btn primary to-send qo-place" ${cart.length ? "" : "disabled"}>Place order →</button>`
+            ? `<button class="qo-cartbtn" type="button" aria-expanded="false" title="Show / hide the order you're building"><b class="qo-cartn">0</b> <span class="qo-cartl">items</span> <span class="qo-cartcar" aria-hidden="true">▴</span></button><button class="btn primary to-send qo-place" ${cart.length ? "" : "disabled"}>Place order →</button>`
             : parcel
             ? `<div class="to-pay"><button class="btn green to-send" data-pay="now" ${cart.length ? "" : "disabled"}>Pay now &amp; print</button><button class="btn primary to-send" data-pay="later" ${cart.length ? "" : "disabled"}>Pay on pickup</button></div>`
             : `<button class="btn primary to-send" ${cart.length ? "" : "disabled"}>Send to kitchen</button>`}
@@ -8497,7 +8521,12 @@ function openTakeOrder(table, rerender, opts = {}) {
   </div></div>`);
   document.body.appendChild(wrap);
 
-  const close = () => wrap.remove();
+  // Whatever this modal starts, this modal ends — quick mode watches the window and the
+  // browse block for size changes, and a live observer on a removed node outlives every
+  // order taken after it. Every close path goes through here (✕, backdrop, back button,
+  // a sent order), so there is one place to hang that tidy-up.
+  const onClose = [];
+  const close = () => { while (onClose.length) { try { onClose.pop()(); } catch {} } wrap.remove(); };
   wrap.__lfhClose = close;
 
   const listEl = wrap.querySelector(".to-list");
@@ -8511,8 +8540,160 @@ function openTakeOrder(table, rerender, opts = {}) {
     const ph = wrap.querySelector(".to-cust-phone"); if (ph) ph.oninput = (e) => { custPhone = e.target.value; };
   }
 
-  const paintCart = () => { linesEl.innerHTML = cartLines(); bindCart(); totalEl.textContent = estTotal(); sendBtns.forEach((b) => (b.disabled = !cart.length)); };
-  const paintList = () => { listEl.innerHTML = listHtml(); if (drillEl) { drillEl.innerHTML = drillHtml(); bindDrill(); } bindList(); syncSpy(); };
+  const paintCart = () => {
+    linesEl.innerHTML = cartLines(); bindCart(); totalEl.textContent = estTotal();
+    sendBtns.forEach((b) => (b.disabled = !cart.length));
+    // Quick mode's phone bar states what's in the order while the list itself is folded away.
+    const cn = wrap.querySelector(".qo-cartn");
+    if (cn) {
+      const qty = cart.reduce((s, c) => s + c.qty, 0);
+      cn.textContent = String(qty);
+      const lbl = wrap.querySelector(".qo-cartl"); if (lbl) lbl.textContent = qty === 1 ? "item" : "items";
+    }
+  };
+
+  // ── ⚡ QO/P: THE WHOLE MENU ON ONE SCREEN, WHATEVER SIZE IT IS ──────────────────
+  // (owner, 2026-08-03: "every category… it should show in one panel, one screen, you
+  //  don't have to scroll down because it's quick… more than twenty five, still it
+  //  should show in one panel".)
+  //
+  // A quick order is only quick if the thing you're aiming at is ALREADY on screen — a
+  // scroll is a search, and searching is what the search box is for. So quick mode does
+  // not use a fixed tile size at all: it measures the block it actually has and works
+  // out the columns × rows that put ALL of them in it, then sizes every tile (and its
+  // text, badge, photo) to match. 8 categories get big cards; 27 get medium ones; 60 get
+  // small ones — same one screen, no scrollbar.
+  //
+  // The honest floor: below a readable tile it STOPS shrinking and lets the block scroll
+  // again. A wall of 8px text nobody can read in a rush would be worse than a scroll —
+  // this is the one case where "one screen" gives way.
+  const FIT = {
+    // ratio = the tile shape each kind wants (w/h). A category is a badge + a short name,
+    // so it likes a squarish card; a dish is photo + name + price + ✎, so it likes a wide row.
+    // The phone floor is genuinely lower, not a scaled guess: a phone is held ~30cm away,
+    // not read across a counter, and the badge/photo drop out down there — so the tile only
+    // has to hold two lines of name and a count.
+    cat:  { minW: 100, maxW: 300, minH: 46, maxH: 152, ratio: 1.55, pMinW: 66, pMaxW: 180, pMinH: 40 },
+    dish: { minW: 140, maxW: 330, minH: 54, maxH: 126, ratio: 2.35, pMinW: 132, pMaxW: 210, pMinH: 46 },
+  };
+  const GAP = 8;
+  let fitting = false;
+  function fitBrowse() {
+    if (!quick || fitting) return;
+    // Set BEFORE measuring: on a phone the category level is allowed a taller block than
+    // the dish level (choosing a category is the step where the order list matters least),
+    // and that rule changes the very height this function is about to read.
+    listEl.classList.toggle("qo-lvl-cats", !qoCat && !q.trim());
+    const grid = listEl.querySelector(".qo-grid");
+    if (!grid) { listEl.classList.remove("qo-noscroll"); return; }
+    const n = grid.children.length;
+    if (!n) return;
+    const phone = window.innerWidth <= 760;
+    const kind = grid.classList.contains("qo-cats") ? "cat" : "dish";
+    const c = FIT[kind];
+    const minW = phone ? c.pMinW : c.minW;
+    const maxW = phone ? c.pMaxW : c.maxW;
+    const minH = phone ? c.pMinH : c.minH;
+
+    fitting = true;
+    try {
+      const cs = getComputedStyle(listEl);
+      const availW = listEl.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+      const availH = listEl.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+      if (!(availW > 60) || !(availH > 60)) return; // not laid out yet — the observer will call back
+
+      // First guess: give every tile an equal share of the box, shaped the way this kind
+      // wants it (w = √(area × ratio)), then cap it so a 4-category menu doesn't become
+      // four wall-sized banners.
+      const share = (availW * availH) / n;
+      let cols = Math.round(availW / Math.min(maxW, Math.max(minW, Math.sqrt(share * c.ratio))));
+      const maxCols = Math.max(1, Math.min(n, Math.floor((availW + GAP) / (minW + GAP))));
+      cols = Math.max(1, Math.min(cols, maxCols));
+      // The shape to fall back to if this menu turns out not to fit at all. It is worked out
+      // from the tile size that READS well, not from the number of tiles — for a count that
+      // can't fit, "an equal share of the box each" is a share too small to read.
+      const roomy = Math.max(1, Math.min(maxCols, Math.round(availW / Math.min(maxW, minW * 1.6))));
+      let rows = Math.ceil(n / cols);
+      let h = (availH - (rows - 1) * GAP) / rows;
+      // Too squashed? MORE per row means FEWER rows, which makes every tile taller.
+      while (h < minH && cols < maxCols) { cols++; rows = Math.ceil(n / cols); h = (availH - (rows - 1) * GAP) / rows; }
+      const fits = h >= minH;
+      // It genuinely does not fit (60 categories on a 360px phone is not a thing that fits).
+      // Then GO BACK to the comfortable shape and let the block scroll — squeezing to the
+      // narrowest columns AND scrolling anyway is the worst of both: you'd be scrolling
+      // through tiles you can't read either.
+      if (!fits) cols = roomy;
+      h = Math.min(Math.max(h, minH), c.maxH);
+      const w = (availW - (cols - 1) * GAP) / cols;
+
+      // Everything the tile draws scales off these two numbers, so one measurement styles
+      // the whole grid — no per-tile work, no layout thrash.
+      const name = Math.max(11, Math.min(kind === "cat" ? 17 : 15, Math.min(h * 0.30, w * 0.098)));
+      const sub = Math.max(9.5, Math.min(13, name * 0.76));
+      const badge = Math.max(0, Math.min(46, Math.min(h - 14, w * 0.26)));
+      // How many lines the name may take, and how tall its box may get — both worked out
+      // from the room actually left once the padding and the count line have had theirs,
+      // rather than guessed at 2. The line budget is measured against the SMALLEST font a
+      // name is ever allowed to shrink to, so a long name has somewhere to go (unclip()
+      // below only shrinks the ones that need it); the box height is the hard stop that
+      // keeps a 3-line name from spilling out of its own tile.
+      // At the tightest tier the dish count stops being a line under the name and becomes a
+      // small number in the tile's corner (see .qo-tiny in the stylesheet) — so it costs the
+      // name no height, and a 40px tile can still give a two-word category two full lines
+      // instead of squeezing it onto one and shrinking it to 9px.
+      const tiny = h < 58 || w < 128;
+      const vpad = Math.min(6, h * 0.08);
+      const room = Math.max(14, h - vpad * 2 - (tiny ? 0 : sub * 1.25));
+      const lines = Math.max(1, Math.min(3, Math.floor(room / (9.8 * 1.16))));
+      grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+      // FLOOR, never round: rounding 42.75 up to 43 across 8 rows is 2px more than the block
+      // has, and 2px of overflow is a scrollbar — the exact thing this whole function exists
+      // to remove. Losing a fraction of a pixel per row costs nothing.
+      grid.style.gridAutoRows = `${Math.floor(h)}px`;
+      grid.style.gap = `${GAP}px`;
+      grid.style.setProperty("--qo-h", `${Math.round(h)}px`);
+      grid.style.setProperty("--qo-name", `${name.toFixed(1)}px`);
+      grid.style.setProperty("--qo-sub", `${sub.toFixed(1)}px`);
+      grid.style.setProperty("--qo-badge", `${Math.round(badge)}px`);
+      grid.style.setProperty("--qo-pad", `${Math.round(Math.max(5, Math.min(16, h * 0.13)))}px`);
+      grid.style.setProperty("--qo-vpad", `${vpad.toFixed(1)}px`);
+      grid.style.setProperty("--qo-edit", `${Math.round(Math.max(28, Math.min(42, h * 0.55)))}px`);
+      grid.style.setProperty("--qo-img", `${Math.round(Math.max(0, Math.min(64, h - 14)))}px`);
+      grid.style.setProperty("--qo-lines", String(lines));
+      grid.style.setProperty("--qo-nameh", `${Math.floor(room)}px`);
+      grid.classList.add("qo-fit");
+      // Under these the badge / photo stops being a help and starts stealing the name's
+      // room, so it goes and the colour bar carries the identity on its own.
+      grid.classList.toggle("qo-tiny", tiny);
+      grid.classList.toggle("qo-noimg", kind === "dish" && (h < 62 || w < 190));
+      listEl.classList.toggle("qo-noscroll", fits);
+      unclip(grid);
+    } finally { fitting = false; }
+  }
+  // ONE font size for the whole grid can't know that "Sizzling Brownie" is twice the width
+  // of "Dal". A name that still doesn't fit its tile gets its OWN slightly smaller size
+  // until it does — because a category cut to "Tandoor Start…" is exactly the tile a person
+  // has to stop and think about, which is the opposite of quick. Batched: every tile is
+  // MEASURED, then every tile is WRITTEN, so the browser lays out ≤3 times, not once per tile.
+  function unclip(grid) {
+    const els = [...grid.querySelectorAll(".qo-cat-n, .to-dish-t")];
+    if (!els.length) return;
+    els.forEach((e) => (e.style.fontSize = ""));
+    for (let pass = 0; pass < 3; pass++) {
+      const over = els.filter((e) => e.scrollHeight > e.clientHeight + 1);
+      if (!over.length) return;
+      over.forEach((e) => {
+        const cur = parseFloat(e.style.fontSize || getComputedStyle(e).fontSize) || 13;
+        if (cur > 9.6) e.style.fontSize = Math.max(9.5, cur * 0.87).toFixed(1) + "px";
+      });
+    }
+  }
+
+  const paintList = () => {
+    listEl.innerHTML = listHtml();
+    if (drillEl) { drillEl.innerHTML = drillHtml(); bindDrill(); }
+    bindList(); syncSpy(); fitBrowse();
+  };
 
   // Quick mode's two navigation controls: a category card drills in, "‹ Categories"
   // comes back out (and clears a search, since a search is the other way to leave the
@@ -8611,6 +8792,29 @@ function openTakeOrder(table, rerender, opts = {}) {
   listEl.addEventListener("scroll", () => { window.requestAnimationFrame(syncSpy); }, { passive: true });
 
   bindList(); bindCart();
+  // Quick mode's grid is sized from a MEASUREMENT, so it has to be re-measured whenever
+  // the block it lives in changes size: the modal is laid out one frame after it is added
+  // to the page, the window can be resized, and a phone rotating changes everything.
+  if (quick) {
+    requestAnimationFrame(fitBrowse);           // first real measurement, after layout settles
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => fitBrowse()) : null;
+    if (ro) ro.observe(listEl);
+    const onWin = () => fitBrowse();
+    window.addEventListener("resize", onWin);
+    window.addEventListener("orientationchange", onWin);
+    onClose.push(() => { try { ro && ro.disconnect(); } catch {} window.removeEventListener("resize", onWin); window.removeEventListener("orientationchange", onWin); });
+    // The phone's order bar: folded away, the menu owns the screen; tapped, the order
+    // slides up over it. Place order and the running total never move either way, so the
+    // one button that finishes the job is always under the thumb.
+    const cartBtn = wrap.querySelector(".qo-cartbtn");
+    const modalEl = wrap.querySelector(".to-modal");
+    if (cartBtn && modalEl) cartBtn.onclick = () => {
+      const open = modalEl.classList.toggle("qo-open");
+      cartBtn.setAttribute("aria-expanded", open ? "true" : "false");
+      const car = cartBtn.querySelector(".qo-cartcar"); if (car) car.textContent = open ? "▾" : "▴";
+      fitBrowse(); // the browse block just changed size — re-fit to what's left
+    };
+  }
   const search = wrap.querySelector(".to-search");
   search.oninput = () => { q = search.value; paintList(); };
   wrap.querySelector(".to-note").oninput = (e) => { orderNote = e.target.value; };
