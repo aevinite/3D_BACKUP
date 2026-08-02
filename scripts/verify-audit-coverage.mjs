@@ -30,7 +30,7 @@ if (HOOK) {
     const j = JSON.parse(readFileSync(0, "utf8") || "{}");
     touched = (j.tool_input && (j.tool_input.file_path || j.tool_input.path)) || null;
   } catch { /* unreadable input → run everything, better than skipping */ }
-  const RELEVANT = /(app\/api\/(editor|tablet)\/|lib\/removalAudit\.ts|public\/panels\/editor\/app\.js|app\/aevinite\/logs\/page\.tsx|app\/owner\/activity\/page\.tsx)/;
+  const RELEVANT = /(app\/api\/(editor|tablet)\/|app\/api\/admin\/bills\/|lib\/(removalAudit|sessionClose)\.ts|public\/panels\/editor\/app\.js|app\/aevinite\/logs\/page\.tsx|app\/owner\/activity\/page\.tsx)/;
   if (touched && !RELEVANT.test(touched)) process.exit(0);
 }
 
@@ -40,6 +40,8 @@ const lib = read("lib/removalAudit.ts");
 const panel = read("public/panels/editor/app.js");
 const adminPage = read("app/aevinite/logs/page.tsx");
 const ownerPage = read("app/owner/activity/page.tsx");
+const closeLib = read("lib/sessionClose.ts");
+const adminBills = read("app/api/admin/bills/route.ts");
 
 // ── 1 · the recorder is SERVER-side, and the panel no longer writes records ───
 if (!lib.includes("lfh_record_removal")) fail("lib/removalAudit.ts no longer calls lfh_record_removal — nothing would be recorded");
@@ -75,6 +77,47 @@ for (const [kind, label] of [["payment_reverted", "reverting a payment"], ["orde
   if (new RegExp(`kind:\\s*"${kind}"`).test(editor)) ok(`${label} records "${kind}"`);
   else fail(`${label} does NOT record "${kind}" — the change would leave no Audit row`);
 }
+
+// ── 2b · THE WAITER TABLET LOWERS MONEY TOO (2026-08-03) ─────────────────────
+// PR #727 moved recording server-side but only finished the manager's half: the tablet recorded a
+// removed dish and nothing else, so a waiter could discount a bill, halve a quantity, delete a
+// bill, settle on the house or un-mark a payment and the Removals record stayed empty. Each of
+// these is the waiter twin of a manager path already checked above.
+const TABLET_MUST = [
+  ['a === "items" && c === "qty"', "qty_reduced", "a waiter lowering a dish's quantity"],
+  ['a === "orders" && c === "discount"', "discount_given", "a waiter discounting one ticket"],
+  ['a === "sessions" && c === "bill-discount"', "discount_given", "a waiter discounting the whole bill"],
+  ['a === "orders" && c === "delete"', "order_deleted", "a waiter deleting a bill"],
+  ['a === "tables" && c === "on-the-house"', "on_the_house", "a waiter settling on the house"],
+  ['a === "tables" && c === "unpay"', "payment_reverted", "a waiter un-marking a bill as paid"],
+];
+for (const [marker, kind, label] of TABLET_MUST) {
+  const at = tablet.indexOf(marker);
+  if (at < 0) { fail(`could not find the tablet handler for ${label} (looked for \`${marker}\`) — if it moved, update this guard`); continue; }
+  const block = tablet.slice(at, at + 6000);
+  if (new RegExp(`recordRemoval\\([\\s\\S]{0,400}?kind:\\s*"${kind}"`).test(block)) ok(`${label} records "${kind}" (tablet)`);
+  else fail(`${label} does NOT record "${kind}" in the tablet route — money would come off a bill with no Audit row`);
+}
+
+// ── 2c · a bill that was never generated cannot be "reopened" ────────────────
+// lfh_void_invoice no-ops when there is no invoice, but the route recorded anyway: tapping Reopen
+// on a table with no bill answered "done" and wrote "Bill reopened · ₹460" for an event that never
+// happened (found 2026-08-03 by driving it on Aangan). An audit that invents an event is worse
+// than no audit, and a tap that changed nothing must never look like it worked.
+if (/hasn't been generated yet, so there's nothing to reopen/.test(editor)) ok("reopening a bill that was never generated is refused, not recorded");
+else fail("void-invoice no longer refuses a session with no invoice — a phantom \"Bill reopened\" row would be written for a tap that did nothing");
+
+// ── 2d · closing a table on an unpaid bill is a write-off, and is recorded ───
+// The single largest money-lowering event in the product: "close anyway" cancels every unpaid
+// order. It lived only in the activity log, where nobody looking at "what was removed" finds it.
+if (/recordRemoval\([\s\S]{0,600}?kind:\s*"order_cancelled"/.test(closeLib) && /closed_unpaid:\s*true/.test(closeLib))
+  ok("closing a table with an unpaid bill records the write-off in the Audit");
+else fail("closeSession no longer records the unpaid orders it cancels — a walk-out would leave no Audit row");
+
+// ── 2e · the admin's own bill ledger records what it deletes ─────────────────
+if (/recordRemoval\([\s\S]{0,400}?kind:\s*"order_deleted"/.test(adminBills))
+  ok("the admin bill ledger records a deleted bill in the Audit");
+else fail("the admin bill ledger deletes bills without an Audit row — the admin must be recorded exactly like everyone else");
 
 // ── 3 · every kind the recorder can write has a LABEL in all three panels ────
 const kinds = [...lib.matchAll(/^\s*\|\s*"([a-z_]+)"/gm)].map((m) => m[1]);

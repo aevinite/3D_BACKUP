@@ -9,6 +9,8 @@
 // ARCHIVE everything else as the bill record. Every write is error-checked.
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction } from "@/lib/oplog";
+import { recordRemoval } from "@/lib/removalAudit";
+import type { StaffUser } from "@/lib/userAuth";
 
 const nowIso = () => new Date().toISOString();
 const must = (r: { error: { message: string } | null; data: unknown }) => {
@@ -61,7 +63,15 @@ export function closeBlock(orders: OrderLite[], force: boolean):
 export async function closeSession(
   sessionId: string,
   opts: { force?: boolean },
-  ctx: { panel: "editor" | "tablet" | "admin"; deviceId?: string | null; restaurantId?: string | null },
+  ctx: {
+    panel: "editor" | "tablet" | "admin";
+    deviceId?: string | null;
+    restaurantId?: string | null;
+    /** Who closed it — so the Audit row for a written-off bill names a person, not "someone". */
+    user?: StaffUser | null;
+    /** Why, when the panel asked (the "close anyway" dialog). */
+    reason?: { code?: string | null; note?: string | null };
+  },
 ): Promise<CloseResult> {
   const force = opts.force === true;
 
@@ -88,7 +98,7 @@ export async function closeSession(
   // would find nothing and this compliance log ("closed with N unpaid order(s), ₹X owed")
   // would silently stop recording walk-outs. Scoped to THIS session, never the bare table
   // number, which could hit a different party that later sat at the same table.
-  const owedRows = must(await sb.from("orders").select("total,discount,subtotal,tax")
+  const owedRows = must(await sb.from("orders").select("id,total,discount,subtotal,tax,khata_at")
     .eq("session_id", sessionId).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid"));
 
   const row = must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso() }).eq("id", sessionId).select());
@@ -104,6 +114,26 @@ export async function closeSession(
         return s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate);
       }, 0);
       await logAction(ctx.panel, "close_unpaid", { restaurant_id: sess.restaurant_id ?? undefined, table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${Math.round(owed * 100) / 100} owed`, device_id: ctx.deviceId ?? undefined });
+      // …AND into the Audit (2026-08-03). Closing a table that still owes money writes the bill
+      // OFF — the orders below are cancelled, so the money never becomes a sale. That is the
+      // single largest money-lowering event in the product and it lived only in the activity log,
+      // where nobody looking at "what was removed and why" would ever find it. One row per order
+      // that is actually cancelled (khata is money to collect later, not a write-off).
+      for (const o of owedRows as { id: string; total: number | null; khata_at: string | null }[]) {
+        if (o.khata_at) continue;
+        await recordRemoval({
+          rid: sess.restaurant_id,
+          kind: "order_cancelled",
+          reason: {
+            code: ctx.reason?.code ?? null,
+            note: ctx.reason?.note || "Table closed while the bill was still unpaid (walk-out / written off)",
+          },
+          user: ctx.user ?? null, deviceId: ctx.deviceId ?? null,
+          orderId: o.id, sessionId, tableNumber: sess.table_number != null ? String(sess.table_number) : null,
+          amount: Number(o.total) || 0,
+          meta: { closed_unpaid: true, orders_on_bill: owedRows.length, owed: Math.round(owed * 100) / 100, panel: ctx.panel },
+        });
+      }
     }
     // Force-closing a table that still owes money is a walk-out / write-off: CANCEL every
     // unpaid order on the bill — not just the un-served ones — so the whole bill shows as

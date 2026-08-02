@@ -17,6 +17,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import { softDeleteOrders, restoreOrders } from "@/lib/softDelete";
+import { recordRemoval } from "@/lib/removalAudit";
 import { rollUpBill, type BillSession, type BillOrder, type BillState } from "@/lib/billLedger";
 
 export const dynamic = "force-dynamic";
@@ -126,9 +127,21 @@ export async function POST(req: NextRequest) {
 
   if (action === "delete") {
     const reason = String(body?.reason || "").trim().slice(0, 200);
-    const orderRows = (await sb.from("orders").select("id").eq("session_id", sessionId).is("deleted_at", null)).data as { id: string }[] | null;
+    const orderRows = (await sb.from("orders").select("id, total").eq("session_id", sessionId).is("deleted_at", null)).data as { id: string; total: number | null }[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
+    // …and into the Audit, the one place a person looks for "what was removed and why". The
+    // admin's own bill ledger deleted bills with only an activity-log line, so the biggest
+    // removal available anywhere in the product was missing from the Removals record
+    // (2026-08-03). One row per order, same shape the panels write.
+    for (const o of orderRows || []) {
+      await recordRemoval({
+        rid, kind: "order_deleted", reason: { note: reason || null }, user: null,
+        orderId: o.id, sessionId, tableNumber: sess.table_number != null ? String(sess.table_number) : null,
+        amount: Number(o.total) || 0,
+        meta: { from: "admin bill ledger", orders_on_bill: (orderRows || []).length },
+      });
+    }
     // A session with no orders won't be reached by softDeleteOrders — tombstone it directly.
     if (!ids.length) {
       await sb.from("sessions").update({ deleted_at: new Date().toISOString(), deleted_by: "Admin", delete_reason: reason || null }).eq("id", sessionId).is("deleted_at", null);
