@@ -22,7 +22,7 @@ import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { rateAllowed } from "@/lib/rateLimit";
 import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
-import { refusalMessage, refusalStatus } from "@/lib/dbRefusal";
+import { refusalMessage, refusalStatus, worthLogging } from "@/lib/dbRefusal";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
@@ -530,7 +530,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {
-    logError("tablet", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
+    if (worthLogging(e)) logError("tablet", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
     return err(refusalMessage(e), refusalStatus(e));
   }
 }
@@ -1685,7 +1685,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // error from a since-deleted row) — don't leak the internal message to the waiter's toast;
     // log it server-side and return a generic 500. (NB2)
     console.error("[tablet POST]", e instanceof Error ? e.message : e);
-    logError("tablet", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
+    if (worthLogging(e)) logError("tablet", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
     return err("Something went wrong — try again.", 500);
   }
 }

@@ -73,3 +73,63 @@ test("the stored line reads as a sentence and fits the column", () => {
   assert.ok(detail.startsWith("GET summary — the server replied"), detail.slice(0, 60));
   assert.ok(detail.length < 500, "a whole page is still being stored");
 });
+
+// ── "IT ISN'T THERE ANY MORE" IS NOT A CRASH (2026-08-03) ─────────────────────────────────────
+// From the admin error board on 2026-08-02: "POST orders/<id>/accept — Cannot coerce the result
+// to a single JSON object". A tap landed on an order that no longer existed, so the .single()
+// lookup matched nothing, PostgREST said PGRST116 — and the route turned that into a 500. Three
+// things were wrong at once: a developer's sentence reached a waiter mid-service; a red crash row
+// went onto the board next to the real faults; and 5xx means "the server is struggling, keep the
+// tap and retry it", so a tap that could NEVER succeed was queued and retried behind their back.
+// (Exactly the fault lib/dbRefusal.ts was written for — see migration 260 — one class wider.)
+import { isMissingRow, refusalStatus, refusalMessage, worthLogging, isDataRefusal } from "../lib/dbRefusal.ts";
+
+/** What supabase-js hands back for a .single() that matched nothing, as `must()` rethrows it. */
+const noRow = () => Object.assign(new Error("Cannot coerce the result to a single JSON object"), {
+  code: "PGRST116", details: "The result contains 0 rows", hint: null,
+});
+/** The SAME code for the opposite problem: a duplicate row that should not exist. */
+const twoRows = () => Object.assign(new Error("Cannot coerce the result to a single JSON object"), {
+  code: "PGRST116", details: "Results contain 2 rows, application/vnd.pgrst.object+json requires 1 row", hint: null,
+});
+/** A genuine server failure — the case that must keep every bit of its old behaviour. */
+const serverDown = () => Object.assign(new Error("canceling statement due to statement timeout"), {
+  code: "57014", details: null,
+});
+
+test("a row that is gone is a 404, not a 500 — so the tap is never retried behind their back", () => {
+  assert.equal(refusalStatus(noRow()), 404);
+  assert.ok(refusalStatus(noRow()) < 500, "5xx would send it to the offline queue forever");
+  assert.equal(isMissingRow(noRow()), true);
+});
+
+test("what the waiter reads is a sentence, not PostgREST", () => {
+  const msg = refusalMessage(noRow());
+  assert.ok(!/coerce|JSON|PGRST/i.test(msg), msg);
+  assert.match(msg, /not there any more/i);
+});
+
+test("an ordinary race is not written to the error board", () => {
+  assert.equal(worthLogging(noRow()), false);
+});
+
+test("MORE than one row is a real fault and keeps its 500 and its red row", () => {
+  // Same PGRST116 code, opposite meaning: a duplicate that should not exist.
+  assert.equal(isMissingRow(twoRows()), false);
+  assert.equal(refusalStatus(twoRows()), 500);
+  assert.equal(worthLogging(twoRows()), true);
+});
+
+test("a struggling server still behaves exactly as before — 500, logged, retried", () => {
+  assert.equal(refusalStatus(serverDown()), 500);
+  assert.equal(worthLogging(serverDown()), true);
+  assert.equal(isDataRefusal(serverDown()), false);
+  assert.equal(refusalMessage(serverDown()), "canceling statement due to statement timeout");
+});
+
+test("the value-refusal cases mig 260 fixed are untouched", () => {
+  const check = Object.assign(new Error('new row for relation "settings" violates check constraint "settings_floor_per_row_range"'), { code: "23514" });
+  assert.equal(refusalStatus(check), 400);
+  assert.equal(worthLogging(check), true, "a constraint the code outgrew must stay visible");
+  assert.match(refusalMessage(check), /between 2 and 30/);
+});
