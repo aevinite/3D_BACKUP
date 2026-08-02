@@ -451,6 +451,23 @@ Use the right skill the moment the task fits — don't ask permission.
 When a deferred tool is needed (e.g. `TaskCreate`, MCP browser tools), load it
 via `ToolSearch` BEFORE planning around it.
 
+## 🙋 I AM NOT THE TEST SUBJECT — drive it yourself BEFORE handing it over (owner, 2026-08-02)
+
+The owner opened a preview, went looking for a new button, and it was not there — it had been
+built into the wrong header. He had to be the one to find that. That is the failure: **not the
+mistake, but shipping it to him unchecked.** So, for every hand-over, without being asked:
+
+- **Do the exact thing you are about to tell him to do, first.** If the sentence is "tap a table,
+  then tap ⚡ QO/P", then tap a table and tap ⚡ QO/P — in the running app, headlessly, and assert
+  the button EXISTS and OPENS. A flow you never walked is a flow you are asking him to test.
+- **Confirm the change is where HE will look, not where you put it.** When he names a place in his
+  own words ("the KOT in the table live view"), SCREENSHOT that place and read it before building,
+  and again after. Two different headers can both plausibly match a description — the screenshot
+  decides which, not the guess that is quicker.
+- **Never hand over on "the code says so."** Same rule as the green-suite lesson above: assert the
+  RENDERED thing (`count() > 0`, visible text, `offsetParent`), not that the source contains it.
+- **If a check would have caught it, that check was owed before the hand-over, not after.**
+
 ## "Check phone view" / "check tablet view" — open a LIVE Chrome (owner shortcut, 2026-07-08)
 
 ONLY when the owner explicitly says something like **"check phone / phone view / view on

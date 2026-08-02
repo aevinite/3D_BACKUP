@@ -874,7 +874,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // these, and select("*") pulled the heavy `payload` (full webhook body) + growing
       // `status_history` on every 60s/2s poll for nothing (egress). updated_at is only used
       // in the server-side filter below, so it doesn't need selecting. Scoped to the live sources.
-      const rows = sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,created_at,customer_name,paid").eq("restaurant_id", rid)
+      // printed_at rides along (mig 256) so the floor's Parcel tiles know when a parcel is
+      // finished — the tile stays until it is BOTH printed and paid.
+      // payment_method too (one short string): the card's 🖨 Print bill prints the customer's
+      // receipt straight from these rows, and a receipt that can't say how it was paid is wrong.
+      const rows = sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,created_at,customer_name,paid,printed_at,payment_method").eq("restaurant_id", rid)
         .in("source", sources)
         .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
         .order("created_at", { ascending: false }).limit(200);
@@ -1887,6 +1891,24 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (up.error) throw new Error(up.error.message);
       await log("manager", "parcel_collect", { restaurant_id: rid, detail: `₹${owns.total ?? 0} · ${method}`, device_id: dev });
       return ok({ ok: true, id: b, paid: true });
+    }
+
+    // platform/:id/printed — record that this order's customer bill went to the printer
+    // (mig 256). Together with `paid` this is what decides when a Parcel tile leaves the
+    // live floor, so it has to be on the ORDER, not on the device that printed it.
+    // Deliberately NOT reversible from here: this is a record that paper was produced.
+    if (a === "platform" && c === "printed") {
+      const owns = must(await sb.from("aggregator_orders").select("id,source,printed_at").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { source?: string; printed_at?: string | null } | null;
+      if (!owns) return err("That order isn't for this restaurant.", 404);
+      if (!(await platformOrParcelCan(g, rid, owns.source))) return permDenied("print this order");
+      // Already stamped → answer ok without moving the time, so a reprint doesn't rewrite
+      // when the first bill was produced.
+      if (owns.printed_at) return ok({ ok: true, id: b, printed_at: owns.printed_at });
+      const at = new Date().toISOString();
+      const up = await sb.from("aggregator_orders").update({ printed_at: at }).eq("id", b).eq("restaurant_id", rid);
+      if (up.error) throw new Error(up.error.message);
+      await log("manager", "parcel_print", { restaurant_id: rid, device_id: dev });
+      return ok({ ok: true, id: b, printed_at: at });
     }
 
     // platform/toggles — flip "kitchen can accept" / "show in bills"

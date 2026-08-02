@@ -4093,7 +4093,11 @@ new MutationObserver(() => {
 // T-prefixed table number print when their data is present.
 // The printable TAX INVOICE — "Classic" B&W design (thermal/mono printer). All
 // money via billMath (discount BEFORE tax). Restaurant identity from settings.
-function printBill(t, sess, os) {
+function printBill(t, sess, os, opts = {}) {
+  // A PARCEL prints THIS document, not a layout of its own (owner, 2026-08-02: "the bill
+  // format should be exactly like a KOT bill — just the top changes"). The only difference
+  // is the one header line: it reads "Parcel", with nothing where a table number would go.
+  const parcelBill = !!opts.parcel;
   const s = state.data.settings || {};
   const m = billMath(os);
   const live = os.filter((o) => o.status !== "cancelled");
@@ -4235,7 +4239,7 @@ ${billLogo() ? `<img class="logo" src="${esc(billLogo())}" onerror="this.style.d
 <div class="kind">Tax Invoice</div>
 ${invNo ? `<div class="kv"><span>Invoice</span><b>${invNo}</b></div>` : ""}
 ${billNo !== "" ? `<div class="kv"><span>Bill no</span><b>#${billNo}</b></div>` : ""}
-<div class="kv"><span>Table</span><b>${tableDisp}</b></div>
+${parcelBill ? `<div class="kv"><span>Parcel</span><b></b></div>` : `<div class="kv"><span>Table</span><b>${tableDisp}</b></div>`}
 <div class="kv"><span>Date</span><b>${now.toLocaleDateString()} ${now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</b></div>
 ${cust || custPhone ? `<div class="dash"></div>${cust ? `<div class="kv"><span>Customer</span><b>${cust}</b></div>` : ""}${custPhone ? `<div class="kv"><span>Mobile</span><b>${custPhone}</b></div>` : ""}` : ""}
 <div class="dash"></div>
@@ -4534,36 +4538,83 @@ ${row("Voided today", z.invoicesVoided)}
 // A small CUSTOMER receipt for a parcel — same thermal recipe as the Z-report/bill
 // (≤66mm centred, no browser header/footer). Printed on "Pay now & print".
 // o = { kot, items:[{title,qty,price}], total, customer, method, paid }.
+// Tapping a Parcel tile on the floor. It is the parcel's whole remaining job in one
+// place: what is in it, print the bill, take the money. The tile leaves the floor by
+// itself once both are done — there is no "close" button to forget, and no way to make
+// the tile go away without the sale being recorded (see the billing compliance rules).
+function openParcelTile(id) {
+  const o = todaysParcels().find((x) => String(x.id) === String(id));
+  if (!o) { toast("That parcel is no longer open", "err"); return; }
+  document.querySelector(".pc-overlay")?.remove();
+  const items = Array.isArray(o.items) ? o.items : [];
+  const lines = items.length
+    ? items.map((it) => `<div class="pc-ln"><span>${esc(it.qty)}× ${esc(it.title)}</span><span>${platMoney((Number(it.price) || 0) * (parseInt(it.qty, 10) || 1))}</span></div>`).join("")
+    : `<div class="muted" style="padding:8px 0">No items recorded.</div>`;
+  const done = (on, yes, no) => `<span class="pc-state ${on ? "on" : ""}">${on ? "✓ " + yes : no}</span>`;
+  const wrap = el(`<div class="sx-modal-overlay pc-overlay"><div class="sx-modal pc-modal">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🥡 Parcel ${esc(o.parcel_no)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="pc-body">
+      <div class="pc-cust">${esc(o.customer_name || "No name given")}${o.kot_no != null ? ` · ticket #${esc(o.kot_no)}` : ""}</div>
+      <div class="pc-lines">${lines}</div>
+      <div class="pc-tot"><span>Total</span><b>${platMoney(o.total)}</b></div>
+      <div class="pc-states">${done(!!o.printed_at, "Printed", "Not printed yet")}${done(!!o.paid, "Paid", "Not paid yet")}</div>
+      <div class="pc-acts">
+        <button class="btn" id="pcPrint">🖨 Print bill</button>
+        <button class="btn green" id="pcPay" ${o.paid ? "disabled" : ""}>💰 ${o.paid ? "Already paid" : "Mark paid"}</button>
+      </div>
+      <div class="pc-note">This parcel stays on the floor until it has been printed <b>and</b> paid.</div>
+    </div>
+  </div></div>`);
+  document.body.appendChild(wrap);
+  const closeP = () => wrap.remove();
+  wrap.__lfhClose = closeP;
+  wrap.querySelector(".tbl-modal-close").onclick = closeP;
+  wrap.onclick = (e) => { if (e.target === wrap) closeP(); };
+
+  wrap.querySelector("#pcPrint").onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    // Print FIRST, then record it: a printer that never opened must not leave a stamp
+    // saying paper went out.
+    try { printParcelReceipt({ kot: o.kot_no, items, total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method }); }
+    catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
+    try { await api("POST", `/platform/${o.id}/printed`, {}); toast("Bill printed ✓", "ok"); closeP(); await loadPlatform(); }
+    catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
+  };
+  wrap.querySelector("#pcPay").onclick = async (e) => {
+    const b = e.currentTarget; b.disabled = true;
+    try { await api("POST", `/platform/${o.id}/pay`, { method: "cash" }); toast("Collected ✓", "ok"); closeP(); await loadPlatform(); }
+    catch (err) { b.disabled = false; toast("Couldn't collect: " + ((err && err.message) || err), "err"); }
+  };
+}
+
 function printParcelReceipt(o) {
-  const set = state.data.settings || {};
-  const name = set.restaurant_name || "Restaurant";
-  const w = window.open("", "_blank", "width=380,height=680");
-  if (!w) { toast("Allow popups to print the receipt", "err"); return; }
-  const lines = (o.items || []).map((it) =>
-    `<div class="ln"><span>${esc(it.qty)}× ${esc(it.title)}</span><span>${inr((Number(it.price) || 0) * it.qty)}</span></div>`).join("");
-  w.document.write(`<!doctype html><title>Parcel receipt${o.kot != null ? " #" + esc(o.kot) : ""}</title>
-<style>
-  @page{margin:0}
-  @media print{body{margin:0 !important;padding:2mm 5mm !important}.ln,.grand{break-inside:avoid}}
-  body{font-family:ui-monospace,'IBM Plex Mono',Consolas,monospace;font-size:12px;margin:20px;color:#111}
-  h2{font-family:Georgia,serif;font-size:18px;margin:0;text-align:center}
-  .sub{text-align:center;color:#444;font-size:10.5px;margin:3px 0 10px}
-  .tag{text-align:center;font-weight:700;letter-spacing:.1em;border-top:1px solid #111;border-bottom:1px solid #111;padding:4px 0;margin:8px 0}
-  .ln{display:flex;justify-content:space-between;padding:3px 0;font-variant-numeric:tabular-nums}
-  .grand{display:flex;justify-content:space-between;border-top:2px solid #111;margin-top:8px;padding-top:8px;font-weight:700;font-size:15px}
-  .paid{text-align:center;margin-top:8px;font-weight:700}
-  .foot{text-align:center;color:#777;font-size:9px;margin-top:12px}
-</style>
-<h2>${esc(name)}</h2>
-<div class="sub">${set.gstin ? "GSTIN " + esc(set.gstin) + "<br/>" : ""}${esc(new Date().toLocaleString([], { dateStyle: "medium", timeStyle: "short" }))}</div>
-<div class="tag">🥡 PARCEL / TAKEAWAY${o.kot != null ? " · #" + esc(o.kot) : ""}</div>
-${o.customer ? `<div class="sub" style="margin:6px 0">${esc(o.customer)}</div>` : ""}
-${lines}
-<div class="grand"><span>TOTAL</span><span>${inr(o.total || 0)}</span></div>
-<div class="paid">${o.paid ? "PAID · " + esc(String(o.method || "cash").toUpperCase()) : "PAY ON PICKUP"}</div>
-<div class="foot">Thank you!</div>
-<script>setTimeout(()=>print(),300)<\/script>`);
-  w.document.close();
+  // ONE bill document for the whole restaurant (owner, 2026-08-02). This used to render a
+  // second, narrower receipt of its own — a separate layout that had already drifted from the
+  // real bill (no GSTIN block, no tax lines, its own fonts). A parcel now prints the SAME
+  // printBill() document a table prints; the only difference is its top line, which reads
+  // "Parcel" with nothing where the table number goes.
+  //
+  // The parcel row is reshaped into the order shape printBill expects. billMath adds up
+  // `subtotal` (NOT `total`) across the orders it is given — passing only `total` printed a
+  // bill of ₹0 under real ₹250 of food, which is the worst kind of wrong paper. So subtotal
+  // is set explicitly: the stored total when there is one, else the lines added up.
+  const items = (Array.isArray(o.items) ? o.items : []).map((i) => ({
+    title: i.title, qty: i.qty, price: i.price, options: Array.isArray(i.options) ? i.options : [],
+  }));
+  const lineSum = items.reduce((a, i) => a + (parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1), 0);
+  const sub = parseFloat(o.total) > 0 ? parseFloat(o.total) : lineSum;
+  const order = {
+    id: "parcel-" + (o.kot ?? o.kot_no ?? "x"), status: "served", items,
+    subtotal: sub, total: sub, discount: 0, kot_no: o.kot ?? o.kot_no ?? null,
+    created_at: o.created_at || new Date().toISOString(),
+  };
+  // Only a REAL customer name goes on the Customer line. The parcel row's name is "Parcel"
+  // when nobody gave one, and printing that read as a customer called Parcel.
+  const who = String(o.customer || o.customer_name || "").trim();
+  const realName = who && !/^parcel$/i.test(who) ? who : "";
+  if (realName) order.customer_name = realName;
+  const sessLike = { customer_name: realName || null, bill_no: null, invoice_no: null };
+  printBill(null, sessLike, [order], { parcel: true });
 }
 
 // ---------- Features tab: per-restaurant on/off switches ----------
@@ -6397,6 +6448,53 @@ function tableTileStateFromBoard(t) {
 // "Take order" is on EVERY tile (sessions off means there is no seat-them-first step), and
 // the small printer opens the bill preview — where Print / Generate invoice / Mark paid
 // live, so paying a table is one popup instead of a chain of confirms.
+// ── PARCEL TILES on the live floor (owner, 2026-08-02) ─────────────────────────────
+// A parcel has no table, but it is still a live job the floor has to finish, so it gets
+// its own tile in a strip at the very bottom — and it stays there until it has been BOTH
+// printed and paid. Nothing extra is fetched for this: the Platform board's rows are
+// already in memory (loadPlatform), so the strip costs zero additional reads.
+//
+// The NUMBER is the parcel's place among TODAY's parcels, counted over every one of them
+// including cancelled and handed-over rows (a sale is never deleted here — see the billing
+// compliance rules). That is what keeps "Parcel 3" called Parcel 3 for the rest of the day
+// whatever happens to Parcel 2.
+function todaysParcels() {
+  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  return (state.data.platform || [])
+    .filter((o) => o.source === "parcel" && o.created_at && new Date(o.created_at) >= dayStart)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .map((o, i) => ({ ...o, parcel_no: i + 1 }));
+}
+// Still on the floor = not cancelled, and not yet BOTH printed and paid.
+function openParcels() {
+  return todaysParcels().filter((o) => o.status !== "cancelled" && !(o.paid === true && !!o.printed_at));
+}
+function parcelTileHtml(o) {
+  const n = (Array.isArray(o.items) ? o.items : []).reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0);
+  // Two small marks say exactly what is still owed on this parcel, in the same order the
+  // owner described the job: print it, then take the money.
+  const marks = `<span class="pctile-mark ${o.printed_at ? "on" : ""}" title="${o.printed_at ? "Bill printed" : "Not printed yet"}">🖨</span>`
+    + `<span class="pctile-mark ${o.paid ? "on" : ""}" title="${o.paid ? "Paid" : "Not paid yet"}">💰</span>`;
+  return `<button class="ftile pctile" data-parcel-tile="${esc(o.id)}" title="Parcel ${esc(o.parcel_no)} — tap to print or take payment">
+    <span class="pctile-n">Parcel ${esc(o.parcel_no)}</span>
+    <span class="pctile-meta">${n} item${n === 1 ? "" : "s"} · ${platMoney(o.total)}</span>
+    <span class="pctile-marks">${marks}</span>
+  </button>`;
+}
+// What the CURRENT viewer may do, for the floor's own gating. Same rule the order builder
+// uses: an admin/owner looking in sees everything (tinted where it's off for the staff
+// below); a real manager gets what the ladder grants.
+function qopCanFloor(flag) {
+  if (XRAY_WHO && XRAY_WHO.higherView) return true;
+  return xrayGrantedForManager(flag);
+}
+function parcelStripHtml() {
+  const list = openParcels();
+  if (!list.length) return "";
+  return `<div class="pcstrip"><div class="pcstrip-h">🥡 Parcels <span class="sub">· stay here until printed &amp; paid</span></div>
+    <div class="ftile-grid pcstrip-grid" style="--per-row:${floorPerRow()}">${list.map(parcelTileHtml).join("")}</div></div>`;
+}
+
 function floorTileHtml(i) {
   const s = state.data.settings || {};
   const { st, label, meta, badges, counts, pay, hasNew, guests } = tableTileState(i); // everything this tile needs
@@ -6787,14 +6885,39 @@ function floorHtml() {
   // Stats strip — the whole floor's health at a glance (Occupied / To pay / Needs you).
   // Built by the shared floorStatsHtml() so the patch path can refresh it identically.
   const statsStrip = floorStatsHtml();
-  // General "New Parcel" (takeaway) button — sits at the top of the floor, not tied to
-  // any table. Opens the take-order picker in parcel mode → a takeaway Platform order
-  // (owner, 2026-07-25). Gated by the **parcel** x-ray (XRAY_CONTROLS → [data-new-parcel])
-  // + the matching server gate managerCan(…, "parcel") — NOT take_orders, which this comment
-  // used to claim and which made a reviewer read it as a door/room mismatch. Verified
-  // 2026-07-29: a manager with parcel granted but take_orders absent sees 🥡 New Parcel and
-  // no per-table "+ Take order", which is exactly right.
-  const parcelBtn = `<button class="btn primary ed-parcel-btn" data-new-parcel="1" title="Start a takeaway / parcel order — no table needed">🥡 New&nbsp;Parcel</button>`;
+  // ⚡ QO/P (Quick order / Parcel) — the general order button at the top of the floor, not
+  // tied to any table. REPLACES the old 🥡 New Parcel button that sat here (owner,
+  // 2026-08-02): it does the same job and more — build the order fast by drilling category
+  // → dish → category, then choose at the END whether it goes to a table or out as a
+  // Parcel. New Parcel is not kept alongside it; that would be two doors to one action,
+  // which is how people learn neither (the same reason 🏷 Type lives only in the KOT menu).
+  //
+  // GATE: take_orders (XRAY_CONTROLS → [data-qop]) + the matching server gate, because the
+  // button can now place a DINE-IN order too. The Parcel destination inside it keeps its own
+  // `parcel` gate — the picker hides that bar when the takeaway module isn't live — so a
+  // manager can no longer reach parcels through a door that skips the parcel permission.
+  // The admin's own switch for this screen (mig 257, Access → Main features). It is the
+  // outermost gate: off = the restaurant simply doesn't have QO/P and the button isn't
+  // rendered at all, leaving 🧾 KOT ▾ on its own. Unset/true = has it, and then the two
+  // permissions below decide what it can DO. Admin/owner looking in still see it (the
+  // standing x-ray rule) so they can tell it apart from a permission they forgot to grant.
+  // THE BUTTON CHANGES IDENTITY WITH THE TWO SUB-SWITCHES (owner, 2026-08-02). It is never a
+  // QO/P button with half of itself missing — it becomes whichever thing the restaurant
+  // actually has, named for that thing:
+  //   both on   → ⚡ QO/P        · the quick screen, ending in "table or Parcel?"
+  //   tables on → Quick order    · the SAME quick screen, with no Parcel at the end
+  //   parcel on → 🥡 New Parcel  · the original parcel builder, a different screen entirely
+  //   both off  → nothing        · the header keeps only 🧾 KOT ▾
+  // Each half still needs its underlying permission too — a sub-switch can only take away.
+  const qopOn = s.qop_allowed !== false || !!(XRAY_WHO && XRAY_WHO.higherView);
+  const qopTables = qopOn && s.qop_tables_allowed !== false && qopCanFloor("take_orders");
+  const qopParcel = qopOn && s.qop_parcel_allowed !== false && qopCanFloor("parcel")
+    && (state.parcelOn !== false || !!(XRAY_WHO && XRAY_WHO.higherView));
+  const parcelBtn =
+      (qopTables && qopParcel) ? `<button class="btn primary ed-parcel-btn" data-qop="quick" title="Quick order / Parcel — build an order fast, then send it to a table or out as a parcel">⚡ QO/P</button>`
+    : qopTables ? `<button class="btn primary ed-parcel-btn" data-qop="quick" title="Quick order — build an order fast and send it to a table">⚡ Quick&nbsp;order</button>`
+    : qopParcel ? `<button class="btn primary ed-parcel-btn" data-qop="parcel" title="Start a takeaway / parcel order — no table needed">🥡 New&nbsp;Parcel</button>`
+    : "";
   // NOTE: the 👥 "Who serves what" button used to sit here. It moved to Settings → Access
   // (owner, 2026-07-30) — that is now its ONE home. The reason it was ever on the floor was
   // that Settings is gated by `edit_settings`, so a manager with only `table_assign` had no
@@ -6826,7 +6949,14 @@ function floorHtml() {
   const planNote = (s.floor_layout_mode === "custom" && !plan)
     ? `<div class="floor-plan-note">Custom layout is on for this restaurant, but no floor plan has been written for it yet — showing the classic grid. The plan lives in <b>public/panels/floor-layouts.js</b>.</div>`
     : "";
-  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${kotBtn}${parcelBtn}</div>${statsStrip}${legend}${planNote}${gridHtml}</div>`;
+  // Parcels hang BELOW the room, in their own strip — they are floor work with no table,
+  // so they must not be mixed into the table grid (classic or custom).
+  // Header order (owner, 2026-08-02): the two buttons stay TOGETHER in the right-hand
+  // cluster — 🧾 KOT ▾ immediately to the LEFT of ⚡ QO/P. "Left" here means left OF QO/P,
+  // not the far left of the bar beside the title (which is where it first landed and the
+  // owner sent it back). Parcels hang BELOW the room in their own strip — they are floor
+  // work with no table, so they must not be mixed into the table grid (classic or custom).
+  const main = `<div class="floor-main"><div class="ed-head"><h2>Table view <span class="sub">· live</span></h2>${kotBtn}${parcelBtn}</div>${statsStrip}${legend}${planNote}${gridHtml}${parcelStripHtml()}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",
@@ -7076,7 +7206,12 @@ function bindFloor() {
   // Bulk open/close for the whole floor (both confirm before acting).
   // New Parcel → the take-order dish picker in PARCEL mode (no table → a takeaway
   // order in the Platform system). Gated by the take_orders x-ray (below) + server.
-  ed.querySelectorAll("[data-new-parcel]").forEach((b) => (b.onclick = () => openTakeOrder(null, null, { parcel: true })));
+  // ⚡ QO/P — the quick order builder. It takes NO table: the destination (a table, or
+  // Parcel) is chosen at the very end, inside the builder.
+  // "parcel" → the original parcel builder (a different screen); "quick" → the drill-down.
+  ed.querySelectorAll("[data-qop]").forEach((b) => (b.onclick = () =>
+    openTakeOrder(null, null, b.dataset.qop === "parcel" ? { parcel: true } : { quick: true })));
+  ed.querySelectorAll("[data-parcel-tile]").forEach((b) => (b.onclick = () => openParcelTile(b.dataset.parcelTile)));
   // Waiter sections (migs 222-225) — same editor as Settings → Tables, reachable from the floor.
   { const sb = ed.querySelector("#floorSections"); if (sb) sb.onclick = () => openSectionsModal(); }
   // (No Open all / Close all bindings — the buttons no longer exist; see bulkCard.)
@@ -8018,16 +8153,31 @@ function localizeCat(name, slug) {
   if (name && typeof name === "object") return name.en || Object.values(name).find((v) => v) || slug;
   return name || slug;
 }
+// QUICK mode (⚡ QO/P, owner 2026-08-02) is a THIRD mode of this same builder, not a
+// second builder. The cart rules underneath are subtle — a dish carrying an allergy or
+// note is its own line, an open-price line keys on its typed amount, two lines that
+// match after an edit merge back — and the last time an order screen was written twice
+// the open-price rule reached one of them a day late. So quick mode changes only two
+// things: HOW you browse (drill down category → dish → back to categories, instead of
+// one long scroll-spy list) and WHEN the destination is chosen (at the end, from a
+// picker whose top option is Parcel, instead of being fixed before you start).
 function openTakeOrder(table, rerender, opts = {}) {
-  const parcel = !!opts.parcel;          // parcel mode = a no-table TAKEAWAY order (Platform system)
+  const quick = !!opts.quick;             // ⚡ QO/P — destination asked LAST
+  // `parcel` is settled up-front for the 🥡 New Parcel button, but in quick mode it is
+  // only known once the manager picks a destination — hence `let`, not `const`.
+  let parcel = !!opts.parcel;            // parcel mode = a no-table order (Platform system)
+  let destTable = table;                  // the table this order lands on (quick mode fills it in last)
+  let qoCat = null;                       // quick mode: the category being browsed (null = the category list)
   let custName = "", custPhone = "";      // parcel-only optional customer fields
   document.querySelector(".to-overlay")?.remove();
   const dishes = (state.data.items || []).filter((d) => !(d.tags || []).includes("sold-out"));
   const cats = (state.data.categories || []).filter((c) => dishes.some((d) => d.category === c.slug));
   // Dishes with an unknown/empty category still need a home so "all shown" holds.
   const uncategorised = dishes.filter((d) => !cats.some((c) => c.slug === d.category));
-  const sections = cats.map((c) => ({ slug: c.slug, name: localizeCat(c.name, c.slug), items: dishes.filter((d) => d.category === c.slug) }))
-    .concat(uncategorised.length ? [{ slug: "_other", name: "Other", items: uncategorised }] : []);
+  // icon/colour ride along so quick mode's category cards can wear the same identity the
+  // guest menu gives each category (a wall of identical grey cards is slower to aim at).
+  const sections = cats.map((c) => ({ slug: c.slug, name: localizeCat(c.name, c.slug), icon: c.icon || "", color: c.color || "", items: dishes.filter((d) => d.category === c.slug) }))
+    .concat(uncategorised.length ? [{ slug: "_other", name: "Other", icon: "", color: "", items: uncategorised }] : []);
 
   // A cart line is one VARIANT of a dish: the same dish with different allergens/notes
   // is a SEPARATE line (like the tablet). Each line has a stable uid so edits never
@@ -8086,14 +8236,48 @@ function openTakeOrder(table, rerender, opts = {}) {
     // printing a misleading ₹0.
     return `<div class="to-dish ${n ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${d.open_price ? "Set price" : inr(parseFloat(d.price) || 0)}</span></span><span class="to-dish-side">${n ? `<b class="to-dish-n">×${n}</b>` : ""}<button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button></span></div>`;
   };
+  // A quick-mode CATEGORY card: name, how many dishes are in it, and the category's own
+  // colour down the left edge. Tapping it drills into that category's dishes.
+  const catCard = (s) => {
+    // Deliberately NOT the category's Font-Awesome icon: this panel doesn't load Font
+    // Awesome, so those classes render as empty □ boxes. The initial in the category's
+    // own colour always draws, and reads at a glance from across a counter.
+    const ic = esc((s.name || "?").trim().charAt(0).toUpperCase() || "?");
+    return `<button class="qo-cat" data-qocat="${esc(s.slug)}"${s.color ? ` style="--qo-c:${esc(s.color)}"` : ""}>
+      <span class="qo-cat-ic">${ic}</span>
+      <span class="qo-cat-n">${esc(s.name)}</span>
+      <span class="qo-cat-c">${s.items.length} dish${s.items.length === 1 ? "" : "es"}</span>
+    </button>`;
+  };
   const listHtml = () => {
     const ql = q.trim().toLowerCase();
     if (ql) { // searching → one flat grid of matches, no headers
       const list = dishes.filter((d) => (d.title || "").toLowerCase().includes(ql));
       return list.length ? `<div class="to-grid">${list.map(dishTile).join("")}</div>` : `<div class="muted" style="padding:16px">No dishes match "${esc(q)}".</div>`;
     }
+    // ⚡ QUICK — two levels, never both at once. Level 1 is the category cards; level 2 is
+    // one category's dishes. Adding a dish drops straight back to level 1, which is what
+    // makes "category, dish, category, dish" fast without a scroll in between.
+    if (quick) {
+      if (!qoCat) return sections.length
+        ? `<div class="qo-cats">${sections.map(catCard).join("")}</div>`
+        : `<div class="muted" style="padding:16px">No dishes on the menu yet.</div>`;
+      const s = sections.find((x) => x.slug === qoCat);
+      if (!s) return `<div class="muted" style="padding:16px">That category is gone.</div>`;
+      return s.items.length
+        ? `<div class="to-grid">${s.items.map(dishTile).join("")}</div>`
+        : `<div class="muted" style="padding:16px">Nothing in ${esc(s.name)} right now.</div>`;
+    }
     // not searching → every category shown, in order, each its own scroll-spy section
     return sections.map((s) => `<section class="to-sec" data-sec="${esc(s.slug)}"><h4 class="to-sec-h">${esc(s.name)}</h4><div class="to-grid">${s.items.map(dishTile).join("")}</div></section>`).join("");
+  };
+  // Quick mode's breadcrumb bar, in place of the scroll-spy chip strip: where you are,
+  // and the way back out of a category.
+  const drillHtml = () => {
+    const ql = q.trim();
+    const here = ql ? `Search · “${esc(ql)}”` : qoCat ? esc((sections.find((x) => x.slug === qoCat) || {}).name || "") : "All categories";
+    const back = (qoCat || ql) ? `<button class="qo-back" type="button">‹ Categories</button>` : "";
+    return `${back}<span class="qo-crumb">${here}</span>`;
   };
   const catChips = () => sections.map((s, i) => `<button class="to-cat ${i === 0 ? "on" : ""}" data-jump="${esc(s.slug)}">${esc(s.name)}</button>`).join("");
   const algChips = (set, kind, id) => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${set.has(a.slug) ? "on" : ""}" data-alg="${a.slug}" data-kind="${kind}"${id ? ` data-line="${esc(id)}"` : ""}>${esc(a.label)}</span>`).join("");
@@ -8120,12 +8304,15 @@ function openTakeOrder(table, rerender, opts = {}) {
   // Platform order (Zomato/Swiggy rows carry no tax line); dine-in keeps the tax-inclusive quote.
   const estTotal = () => { const sub = cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0); if (parcel) return inr(sub); const rate = (taxModel(state.data.settings) || {}).rate || 0; return inr(sub + Math.round(sub * rate * 100) / 100); };
 
-  const wrap = el(`<div class="sx-modal-overlay to-overlay"><div class="sx-modal to-modal">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${parcel ? "🥡 New Parcel" : `＋ Take order · Table ${esc(table)}`}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div>${parcel ? `<div class="to-cust"><input class="to-cust-name" maxlength="120" placeholder="Customer name (optional)"><input class="to-cust-phone" maxlength="20" inputmode="tel" placeholder="Phone (optional)"></div>` : ""}</div>
+  const headTitle = quick ? "⚡ QO/P <span class=\"qo-sub\">· quick order / parcel</span>"
+    : parcel ? "🥡 New Parcel"
+    : `＋ Take order · Table ${esc(table)}`;
+  const wrap = el(`<div class="sx-modal-overlay to-overlay"><div class="sx-modal to-modal${quick ? " to-quick" : ""}">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${headTitle}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div>${parcel ? `<div class="to-cust"><input class="to-cust-name" maxlength="120" placeholder="Customer name (optional)"><input class="to-cust-phone" maxlength="20" inputmode="tel" placeholder="Phone (optional)"></div>` : ""}</div>
     <div class="to-body">
       <div class="to-menu">
         <input type="search" class="to-search" placeholder="🔎 Search dishes…">
-        <div class="to-cats">${catChips()}</div>
+        ${quick ? `<div class="qo-drill">${drillHtml()}</div>` : `<div class="to-cats">${catChips()}</div>`}
         <div class="to-list">${listHtml()}</div>
       </div>
       <div class="to-cart">
@@ -8138,7 +8325,9 @@ function openTakeOrder(table, rerender, opts = {}) {
         </div>
         <div class="to-foot">
           <div class="to-total">${parcel ? "" : "≈ "}<b>${estTotal()}</b></div>
-          ${parcel
+          ${quick
+            ? `<button class="btn primary to-send qo-place" ${cart.length ? "" : "disabled"}>Place order →</button>`
+            : parcel
             ? `<div class="to-pay"><button class="btn green to-send" data-pay="now" ${cart.length ? "" : "disabled"}>Pay now &amp; print</button><button class="btn primary to-send" data-pay="later" ${cart.length ? "" : "disabled"}>Pay on pickup</button></div>`
             : `<button class="btn primary to-send" ${cart.length ? "" : "disabled"}>Send to kitchen</button>`}
         </div>
@@ -8152,7 +8341,8 @@ function openTakeOrder(table, rerender, opts = {}) {
 
   const listEl = wrap.querySelector(".to-list");
   const linesEl = wrap.querySelector(".to-lines");
-  const catsEl = wrap.querySelector(".to-cats");
+  const catsEl = wrap.querySelector(".to-cats");   // null in quick mode — it has a drill bar instead
+  const drillEl = wrap.querySelector(".qo-drill");  // null in the two scroll-spy modes
   const totalEl = wrap.querySelector(".to-total b");
   const sendBtns = [...wrap.querySelectorAll(".to-send")]; // parcel has TWO (pay now / pay later); dine-in has one
   if (parcel) {
@@ -8161,13 +8351,41 @@ function openTakeOrder(table, rerender, opts = {}) {
   }
 
   const paintCart = () => { linesEl.innerHTML = cartLines(); bindCart(); totalEl.textContent = estTotal(); sendBtns.forEach((b) => (b.disabled = !cart.length)); };
-  const paintList = () => { listEl.innerHTML = listHtml(); bindList(); syncSpy(); };
+  const paintList = () => { listEl.innerHTML = listHtml(); if (drillEl) { drillEl.innerHTML = drillHtml(); bindDrill(); } bindList(); syncSpy(); };
 
+  // Quick mode's two navigation controls: a category card drills in, "‹ Categories"
+  // comes back out (and clears a search, since a search is the other way to leave the
+  // category list).
+  function bindDrill() {
+    if (!drillEl) return;
+    const back = drillEl.querySelector(".qo-back");
+    if (back) back.onclick = () => { qoCat = null; if (q) { q = ""; const s = wrap.querySelector(".to-search"); if (s) s.value = ""; } paintList(); };
+  }
   function bindList() {
     // ✎ on a tile — set this dish's allergens/note (edits the plain line, creating it first).
     listEl.querySelectorAll("[data-tile-edit]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openTileEdit(b.dataset.tileEdit); }));
+    // Quick mode: a category card opens that category's dishes.
+    listEl.querySelectorAll("[data-qocat]").forEach((b) => (b.onclick = () => { qoCat = b.dataset.qocat; paintList(); listEl.scrollTop = 0; }));
     // Whole tile is a tap-to-add target (ignore a click that landed on the ✎).
-    listEl.querySelectorAll(".to-dish").forEach((t) => (t.onclick = async (e) => { if (e.target.closest("[data-tile-edit]")) return; if (!(await addOneAsync(t.dataset.dish))) return; paintList(); paintCart(); }));
+    // In quick mode adding a dish also steps BACK to the category list — that return trip
+    // is the whole point of the mode (owner: "category item, category item, very fast").
+    // A search stays put instead: you searched to add several matches, not to leave.
+    listEl.querySelectorAll(".to-dish").forEach((t) => (t.onclick = async (e) => {
+      if (e.target.closest("[data-tile-edit]")) return;
+      if (!(await addOneAsync(t.dataset.dish))) return;
+      if (quick && qoCat && !q.trim()) qoCat = null;
+      paintList(); paintCart(); flashCart();
+    }));
+  }
+  // A dish added from the far side of a wide screen is easy to miss, so the order list
+  // pulses and scrolls to the line that just changed — the tap always leaves a mark.
+  function flashCart() {
+    const last = linesEl.querySelector(".to-line:last-child");
+    if (!last) return;
+    last.classList.remove("qo-flash");
+    void last.offsetWidth; // restart the animation even on the same element
+    last.classList.add("qo-flash");
+    try { last.scrollIntoView({ block: "nearest" }); } catch {}
   }
   // Per-dish allergen + note popup opened from a dish tile's ✎ — mirrors the tablet's
   // per-item editor. Edits the PLAIN line (adds it first if needed); giving it an
@@ -8217,7 +8435,7 @@ function openTakeOrder(table, rerender, opts = {}) {
   const jumpTo = (slug) => { const sec = listEl.querySelector(`.to-sec[data-sec="${CSS.escape(slug)}"]`); if (sec) listEl.scrollTo({ top: sec.offsetTop - listEl.offsetTop - 4, behavior: "smooth" }); };
   const syncSpy = () => {
     const secs = [...listEl.querySelectorAll(".to-sec")];
-    if (!secs.length) return; // searching (flat list) — no spy
+    if (!secs.length || !catsEl) return; // searching (flat list), or quick mode — no spy
     const top = listEl.scrollTop + 8;
     let active = secs[0].dataset.sec;
     for (const s of secs) { if (s.offsetTop - listEl.offsetTop <= top) active = s.dataset.sec; }
@@ -8228,7 +8446,7 @@ function openTakeOrder(table, rerender, opts = {}) {
       if (on) { const cr = catsEl.getBoundingClientRect(), br = b.getBoundingClientRect(); catsEl.scrollBy({ left: (br.left + br.width / 2) - (cr.left + cr.width / 2), behavior: "smooth" }); }
     });
   };
-  catsEl.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => jumpTo(b.dataset.jump)));
+  if (catsEl) catsEl.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => jumpTo(b.dataset.jump)));
   listEl.addEventListener("scroll", () => { window.requestAnimationFrame(syncSpy); }, { passive: true });
 
   bindList(); bindCart();
@@ -8241,6 +8459,64 @@ function openTakeOrder(table, rerender, opts = {}) {
   }));
   wrap.querySelector(".tbl-modal-close").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
+
+  // What THIS viewer may actually do with a quick order. An admin or owner looking in
+  // gets both halves (the standing x-ray rule: a higher role sees every feature, tinted
+  // where it's off for the staff below); a real manager gets exactly what the ladder
+  // grants — module allowed by the admin, kept on by the owner, granted to them.
+  const qopCan = (flag) => (XRAY_WHO && XRAY_WHO.higherView ? true : xrayGrantedForManager(flag));
+
+  // ── QUICK mode, step 2: WHERE does this order go? ──────────────────────────────
+  // Parcel first, as one wide bar across the top — it is the destination with no table
+  // at all, so it does not belong in a grid of tables (owner, 2026-08-02). Under it,
+  // every table, marked free or busy. A busy table joins that table's existing bill,
+  // exactly as ＋ Take order on that table would.
+  function openDestPicker() {
+    dedupe();
+    if (!cart.length) { toast("Add at least one dish first", "err"); return; }
+    document.querySelector(".qo-dest-overlay")?.remove();
+    const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+    const tiles = [];
+    for (let i = 1; i <= n; i++) {
+      const busy = summaryTableOpen(i);
+      tiles.push(`<button class="qo-dest-t${busy ? " busy" : ""}" data-qodest="${i}"><b>${esc(tableLabel(i))}</b><small>${busy ? "joins bill" : "free"}</small></button>`);
+    }
+    // EACH destination re-checks its OWN permission here (owner, 2026-08-02). QO/P is one
+    // door onto two features, so a manager given only one of them must be offered only that
+    // one: parcel-only staff get the Parcel bar with no table grid, dine-in-only staff get
+    // the tables with no Parcel bar. Checked in JS rather than left to the x-ray observer
+    // because this picker lives on document.body — outside the panel the observer watches —
+    // so the tint/hide pass never reaches it.
+    // TWO gates per destination, and BOTH must pass (mig 258):
+    //   · the admin's sub-switch under QO/P in Access — "may this screen send there at all";
+    //   · the underlying permission — "may this person do that anywhere".
+    // The sub-switch can only ever take away, never grant: a restaurant without "Take a new
+    // order" gets no tables however qop_tables_allowed is set.
+    const st = state.data.settings || {};
+    const canTable = st.qop_tables_allowed !== false && qopCan("take_orders");
+    const canParcel = st.qop_parcel_allowed !== false && qopCan("parcel") && (state.parcelOn !== false || (XRAY_WHO && XRAY_WHO.higherView));
+    const parcelBar = canParcel ? `<button class="qo-dest-parcel" data-qop-parcel="1">Parcel</button>` : "";
+    const ov = el(`<div class="sx-modal-overlay qo-dest-overlay"><div class="sx-modal qo-dest-modal">
+      <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Where does it go?</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+      <div class="qo-dest-body">
+        ${parcelBar}
+        ${canTable
+          ? `<div class="qo-dest-lbl">${parcelBar ? "…or send it to a table" : "Send it to a table"}</div><div class="qo-dest-grid">${tiles.join("")}</div>`
+          : `<div class="qo-dest-lbl">Table orders aren't part of your access — this order goes out as a parcel.</div>`}
+      </div>
+    </div></div>`);
+    document.body.appendChild(ov);
+    const closeDest = () => ov.remove();
+    ov.__lfhClose = closeDest;
+    ov.querySelector(".tbl-modal-close").onclick = closeDest;
+    ov.onclick = (e) => { if (e.target === ov) closeDest(); };
+    // Parcel → the same /parcel path the 🥡 button uses, always PAY ON PICKUP: the order
+    // now lives as a Parcel tile on the floor until it has been printed AND paid, which is
+    // the whole reason the tile exists.
+    const pb = ov.querySelector("[data-qop-parcel]");
+    if (pb) pb.onclick = () => { closeDest(); parcel = true; send(false, "later"); };
+    ov.querySelectorAll("[data-qodest]").forEach((b) => (b.onclick = () => { closeDest(); parcel = false; destTable = b.dataset.qodest; send(false, null); }));
+  }
 
   async function send(confirmDuplicate = false, payMode = null) {
     dedupe();
@@ -8257,7 +8533,9 @@ function openTakeOrder(table, rerender, opts = {}) {
     // ── Parcel: a no-table TAKEAWAY order → /parcel (lands in the Platform board). ──
     if (parcel) {
       const payNow = payMode === "now";
-      if (!(await confirmDialog(payNow ? "Take payment now and send this parcel to the kitchen?" : "Send this parcel to the kitchen (pay on pickup)?", payNow ? "Pay & send" : "Send"))) return;
+      // Quick mode already asked the real question ("where does it go?") and was answered
+      // with Parcel — asking again would be the second dialog on one decision.
+      if (!quick && !(await confirmDialog(payNow ? "Take payment now and send this parcel to the kitchen?" : "Send this parcel to the kitchen (pay on pickup)?", payNow ? "Pay & send" : "Send"))) return;
       sendBtns.forEach((b) => (b.disabled = true));
       try {
         const r = await api("POST", "/parcel", { items, allergies, note: orderNote || null, customer: custName || null, phone: custPhone || null, paid: payNow, method: payNow ? "cash" : null });
@@ -8283,7 +8561,7 @@ function openTakeOrder(table, rerender, opts = {}) {
     // the order can be cancelled from the table.
     sendBtns.forEach((b) => (b.disabled = true));
     try {
-      const r = await api("POST", "/order", { table: String(table), items, allergies, note: orderNote || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
+      const r = await api("POST", "/order", { table: String(destTable), items, allergies, note: orderNote || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
       if (r && r.queued) { toast("Saved ✓ — it'll send to the kitchen when you're back online.", "ok"); close(); await loadSessions(); if (rerender) rerender(); return; }
       // The pricer can REFUSE an order (sold out / off the menu / an open-price line with no
       // price) and still answer 200 with {ok:false}. Say so honestly and KEEP the cart open so
@@ -8319,9 +8597,12 @@ function openTakeOrder(table, rerender, opts = {}) {
       toast("Couldn't send: " + e.message, "err");
     }
   }
-  sendBtns.forEach((b) => (b.onclick = () => send(false, b.dataset.pay || null)));
+  // Quick mode's one button doesn't send — it asks WHERE first, and the picker sends.
+  sendBtns.forEach((b) => (b.onclick = () => (quick ? openDestPicker() : send(false, b.dataset.pay || null))));
+  bindDrill();
   syncSpy();
-  search.focus();
+  // Quick mode leads with the category cards, so don't raise a keyboard over them.
+  if (!quick) search.focus();
 }
 
 // Shift-table PICKER — mirrors the tablet's nice modal (was a bare prompt() here):
@@ -9967,11 +10248,22 @@ function platCardHtml(o) {
   const showPay = o.source === "parcel" || o.source === "takeaway";
   const paidPill = showPay ? (o.paid ? `<span class="plat-paid">PAID</span>` : `<span class="plat-unpaid">UNPAID</span>`) : "";
   const collect = (showPay && !o.paid) ? `<button class="btn ghost plat-collect" data-plat-pay="${esc(o.id)}" title="Take payment for this order">💰 Collect</button>` : "";
-  return `<div class="plat-card ${m.cls}">
+  // 🖨 Print bill straight off the card, in EVERY column including Handed over (owner,
+  // 2026-08-02). A parcel is handed to a customer who wants their bill, and that can be
+  // asked for before it's ready, at the counter, or a minute after it left — so the button
+  // is on the card itself, not only inside the detail. Parcels only: a Zomato/Swiggy order
+  // is billed by the platform, so printing one here would produce a bill nobody should give out.
+  const printBtn = o.source === "parcel" ? `<button class="btn ghost plat-print" data-plat-print="${esc(o.id)}" title="Print this parcel's bill">🖨 Print bill</button>` : "";
+  // The whole card opens the parcel's detail (owner, same day) — the SAME popup the floor's
+  // Parcel tile opens, so there is one parcel detail, not two that can drift apart. The
+  // buttons inside stop the click bubbling, so tapping one never also opens the detail.
+  const isParcel = o.source === "parcel";
+  const openAttrs = isParcel ? ` data-plat-open="${esc(o.id)}" role="button" tabindex="0" title="Open this parcel"` : "";
+  return `<div class="plat-card ${m.cls}${isParcel ? " plat-card-open" : ""}"${openAttrs}>
     <div class="plat-ch"><span class="plat-badge ${m.cls}">${esc(m.label)}</span><span class="plat-kot">#${esc(o.kot_no ?? "—")}</span>${paidPill}<span class="plat-age">${esc(platAge(o.created_at))}</span></div>
     <div class="plat-cust">${esc(o.customer_name || "—")}</div>
     <div class="plat-items">${lines || '<span class="plat-empty">no items</span>'}</div>
-    <div class="plat-cf"><span class="plat-tot">${platMoney(o.total)}</span><span class="plat-acts">${collect}${action}</span></div>
+    <div class="plat-cf"><span class="plat-tot">${platMoney(o.total)}</span><span class="plat-acts">${printBtn}${collect}${action}</span></div>
   </div>`;
 }
 function platformHtml() {
@@ -10032,6 +10324,24 @@ function bindPlatform() {
       catch (err) { toast("Failed: " + err.message, "err"); }
     });
   }
+  // Open a parcel's detail from its card — the same popup the floor's Parcel tile opens.
+  document.querySelectorAll("[data-plat-open]").forEach((c) => (c.onclick = (e) => {
+    if (e.target.closest("button")) return;   // a tap on Print / Collect / Mark ready is not "open"
+    openParcelTile(c.dataset.platOpen);
+  }));
+  // 🖨 Print bill on the card itself, in every column. Prints first, then records it — a
+  // printer that never opened must not leave a stamp saying paper went out.
+  document.querySelectorAll("[data-plat-print]").forEach((b) => b.onclick = async (e) => {
+    e.stopPropagation();
+    const id = b.dataset.platPrint;
+    const o = (state.data.platform || []).find((x) => String(x.id) === String(id));
+    if (!o) { toast("That order is no longer on the board", "err"); return; }
+    b.disabled = true;
+    try { printParcelReceipt({ kot: o.kot_no, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method }); }
+    catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
+    try { await api("POST", `/platform/${id}/printed`, {}); toast("Bill printed ✓", "ok"); await loadPlatform(); }
+    catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
+  });
   document.querySelectorAll("[data-plat-act]").forEach((b) => b.onclick = async () => {
     b.disabled = true;
     try { await api("POST", `/platform/${b.dataset.platId}/status`, { status: b.dataset.platAct }); await loadPlatform(); }
@@ -10052,6 +10362,7 @@ function updatePlatformBadge() {
   if (b) { b.textContent = live; b.hidden = live === 0; }
 }
 let platSeq = 0; // own latest-wins guard so platform loads never cancel the board loaders
+let parcelStripSig = ""; // last painted set of open parcels — see loadPlatform
 async function loadPlatform() {
   // Skip the poll entirely when BOTH the platform and parcel modules are off for this
   // restaurant (mig 209) — no board to show, and hitting GET /platform would 403 every tick.
@@ -10076,7 +10387,14 @@ async function loadPlatform() {
     state.platformOn = res.platform_on;             // is the platform module effective
     state.parcelOn = res.parcel_on;                 // is the parcel module effective
     updatePlatformBadge();
-    if (state.tab === "platform") renderEditor();
+    // The live floor now carries a Parcel tile per open parcel, so a change to THAT set has
+    // to repaint the Tables tab as well — otherwise a parcel just taken (or just printed /
+    // just paid) wouldn't show up until something else forced a render. Compared by a small
+    // signature so an unchanged poll still repaints nothing.
+    const sig = openParcels().map((p) => `${p.id}:${p.status}:${p.paid ? 1 : 0}:${p.printed_at ? 1 : 0}`).join("|");
+    const parcelsChanged = sig !== parcelStripSig;
+    parcelStripSig = sig;
+    if (state.tab === "platform" || (state.tab === "tables" && parcelsChanged)) renderEditor();
   } catch { /* keep last good board */ }
 }
 
@@ -11709,7 +12027,14 @@ const XRAY_TABS = [
 // tinted for a higher role. The server enforces each flag regardless (managerCan).
 const XRAY_CONTROLS = [
   { selector: "[data-take-order]", flag: "take_orders", label: "Take orders" },
-  { selector: "[data-new-parcel]", flag: "parcel", label: "New parcel" },
+  // ⚡ QO/P replaced 🥡 New Parcel on the floor (2026-08-02). It is ONE door onto TWO
+  // existing features — "Take a new order" and "Parcel / takeaway" — so it opens on
+  // EITHER ("a|b" = any one of these grants it). Owner's rule, same day: with BOTH of
+  // them off the button must not exist at all, leaving 🧾 KOT ▾ alone in the header —
+  // which is exactly what this gate does, since neither power is granted. The two
+  // destinations inside the builder each re-check their own power (openDestPicker), so
+  // arriving through this door can never hand anyone the half they weren't given.
+  { selector: "[data-qop]", flag: "take_orders|parcel", label: "Take orders / Parcel" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
   { selector: "[data-cancel-order]", flag: "void_bills", label: "Void / reopen bills" },

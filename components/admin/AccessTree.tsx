@@ -36,14 +36,34 @@ const RestCtx = createContext<TreeRest | null>(null);
  *  used to live on the restaurant-detail page; the owner moved every one of them here on
  *  2026-08-01 ("everything will be here on access control tab, not there"), so a setting and
  *  the switch that decides whether it applies are finally in the same place. */
-function EmbeddedPanel({ what }: { what: NonNullable<Node["panel"]> }) {
+function EmbeddedPanel({ what, preview }: { what: NonNullable<Node["panel"]>; preview?: Node["preview"] }) {
   const rest = useContext(RestCtx);
   // Never a silent blank: if the page hasn't named the restaurant yet, say so rather than
   // render an empty dropdown that looks like a broken feature.
   if (!rest) return <div className="at-panel-wait">Pick a restaurant to edit this.</div>;
   if (what === "branding") return <div className="at-panel"><BrandingCard restaurant={rest} /></div>;
   const section = what.slice("settings:".length) as SettingsSection;
-  return <div className="at-panel"><RestaurantSettings restaurant={rest} only={[section]} /></div>;
+  // A format screen answers "what will this look like?" only if you can SEE it (owner,
+  // 2026-08-02). The button sits top-right of the editor and opens the finished page in its
+  // own window, drawn from THIS restaurant's settings and deliberately carrying an add-on, a
+  // note, a discount and an allergy line so the busiest version of the layout is visible.
+  // That window can print, so it also serves as the real printer test.
+  return (
+    <div className="at-panel">
+      {preview ? (
+        <div className="at-panel-top">
+          <button
+            type="button"
+            className="at-preview-btn"
+            onClick={() => window.open(`/api/admin/restaurants/bill-preview?rid=${encodeURIComponent(rest.id)}&mode=${preview}`, "_blank", "width=560,height=860")}
+          >
+            👁 Preview / Print
+          </button>
+        </div>
+      ) : null}
+      <RestaurantSettings restaurant={rest} only={[section]} />
+    </div>
+  );
 }
 
 const ICON: Record<string, string> = {
@@ -553,7 +573,7 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
       {/* This row IS an editor (the cards that moved off the restaurant-detail page). It sits
           under the row's own text, inside the same box, so the switch that decides whether the
           feature applies and the settings that configure it are read as one thing. */}
-      {node.panel && expanded ? <EmbeddedPanel what={node.panel} /> : null}
+      {node.panel && expanded ? <EmbeddedPanel what={node.panel} preview={node.preview} /> : null}
 
       {/* A dropdown that is open only because its feature is OFF is READ-ONLY (owner, 2026-08-01:
           "you could be able to see the bottom even if the feature is off… if you try to do stuff,
@@ -1125,6 +1145,11 @@ function TreeStyle() {
      the four Tables cards apart. */
   .at-panel .adm-card:first-child > h2 { display:none; }
   .at-panel-wait { margin-top:12px; font-size:12.5px; color:var(--muted); }
+  /* "Preview / Print" on a format screen — top right of the editor, above its first card. */
+  .at-panel-top { display:flex; justify-content:flex-end; margin:10px 0 -4px; }
+  .at-preview-btn { font:inherit; font-size:12.5px; font-weight:700; padding:7px 14px; border-radius:9px; cursor:pointer;
+    background:rgba(99,102,241,.16); border:1px solid rgba(129,140,248,.55); color:#c7d2fe; }
+  .at-preview-btn:hover { background:rgba(99,102,241,.28); border-color:#818cf8; color:#e0e7ff; }
   /* ── The banquet card, given some structure ────────────────────────────────────────────────
      It was one long single-column scroll: eleven tick rows, then numbering, then tax, then paper,
      with nothing marking where one ended and the next began. Each heading is a labelled band now

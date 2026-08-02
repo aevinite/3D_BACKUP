@@ -17,6 +17,7 @@
 //   --slug   restaurant slug for the guest menu (default french-house).
 //   --route  optional explicit path override (e.g. /menu).
 import { chromium } from "playwright";
+import { loginAs, DIAG_LOGINS } from "./sweep/login.mjs";
 
 const args = Object.fromEntries(
   process.argv.slice(2).join(" ").split("--").filter(Boolean)
@@ -26,14 +27,12 @@ const device = args.device === "tablet" ? "tablet" : "phone";
 const role = args.role || "guest";
 const slug = args.slug || "french-house";
 
-const BASE = "http://localhost:4000";
-// French-House diag logins (see test-staff-logins memory). Swap for other restaurants.
-const LOGIN = {
-  tablet:  { user: "diagt1",       pass: "diag-t1-2026",      route: "/tablet"  },
-  manager: { user: "diagm1",       pass: "diag-mgr-2026",     route: "/manager" },
-  kitchen: { user: "diagkitchen",  pass: "diag-kitchen-2026", route: "/kitchen" },
-  owner:   { user: "diago1",       pass: "diag-o1-2026",      route: "/owner"   },
-};
+// --base lets this point at a second dev server (a preview on another port) instead of
+// the everyday :4000. The diag logins themselves live in ONE place now — scripts/sweep/
+// login.mjs — whose loginAs() caches the session on disk, so opening several of these
+// windows costs ONE sign-in rather than one each (staff login is rate-limited to 5 per
+// 5 minutes, and reaching that wall pings the owner's phone about himself).
+const BASE = (typeof args.base === "string" && args.base) || "http://localhost:4000";
 
 const VP = device === "tablet"
   ? { width: 1194, height: 834, dpr: 2 }   // iPad-ish landscape
@@ -55,14 +54,9 @@ let route = args.route || `/r/${slug}/menu?table=5`;
 if (role !== "guest") {
   // Log in as the real role FIRST — an admin cookie shows the admin console +
   // orange "ADMIN VIEW" bar instead of the true staff view.
-  const l = LOGIN[role];
-  if (!l) { console.error("unknown role:", role); process.exit(1); }
-  const res = await ctx.request.post(`${BASE}/api/panel-login`, {
-    headers: { "content-type": "application/json" },
-    data: { username: l.user, password: l.pass },
-  });
-  console.log(`LOGIN ${role}:`, res.status());
-  route = args.route || l.route;
+  if (!DIAG_LOGINS[role]) { console.error("unknown role:", role); process.exit(1); }
+  const panelRoute = await loginAs(ctx, role, BASE);
+  route = args.route || panelRoute;
 }
 
 const page = await ctx.newPage();
