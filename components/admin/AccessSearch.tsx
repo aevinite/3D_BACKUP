@@ -32,7 +32,10 @@ import { SECTIONS, type Node, type Section } from "@/lib/accessTree";
 const SYNONYMS: Record<string, string> = {
   menu: "guest menu qr diner",
   own_manager_mode: "manager mode live floor tables take order owner panel work the floor",
-  d_own_manager_mode: "manager mode live floor tables take order owner panel work the floor",
+  own_access: "access staff powers team logins permissions staff and powers",
+  own_logs_signins: "sign in login log who signed in failed tries",
+  own_logs_service: "service log orders tables bills parcels staff actions",
+  own_logs_staff_changes: "staff change log permission enable disable",
   dining_sessions: "open table seat party session",
   ratings: "google review stars feedback rating",
   google_review_url: "google link review url",

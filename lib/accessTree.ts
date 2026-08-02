@@ -636,33 +636,62 @@ export const SECTIONS: Section[] = [
     ],
   },
 
-  // ─────────────────────────── C · OWNER'S MENU ─────────────────────────────
+  // ─────────────────────────── C · OWNER ─────────────────────────────────────
+  // Restructured 2026-08-02 (owner: "instead of owner's menu, there will be just written
+  // Owner; inside that, owner's menu; inside that, five options"). The section is the
+  // person; their MENU is the first group inside it — more owner settings join later.
   {
-    id: "ownMenu", name: "Owner's menu", icon: "crown",
-    blurb: "Which pages exist in this restaurant's owner panel.",
+    id: "ownMenu", name: "Owner", icon: "crown",
+    blurb: "Everything about this restaurant's owner. Their menu lives here; more owner settings will join it later.",
     children: [
-      { id: "own_menu", name: "Edit menu", def: true, bind: { t: "section", key: "menu" },
-        what: "The owner's own Menu page — the same dishes/categories editor, in the owner panel." },
-      { id: "own_ratings", name: "Ratings", def: true, bind: { t: "section", key: "ratings" },
-        what: "The owner's Ratings page — guest stars and written feedback." },
       {
-        // AUDIT & LOGS (owner, 2026-08-01; renamed + given sub-options 2026-08-02: "name will
-        // be changed from audit to audit and logs… and if there is a log separately, you have
-        // to remove it"). The old child here ("Activity log") was that separate log row — it
-        // bound the SAME owner_entitlements.logs switch twice, so it is gone; the children now
-        // are the REAL sub-options saying which views the owner's page shows. The stored
-        // section key stays "logs" — renaming a LABEL must never rename a key.
-        id: "own_audit", name: "Audit & logs", def: true, fresh: true, bind: { t: "section", key: "logs" },
-        what: "The owner's Audit & logs page — what was removed and why, plus the full activity log. The parts below say which of its views this restaurant's owners get.",
-        children: LOG_PARTS.filter((p) => !p.mgrOnly).map((p) => ({
-          id: `d_own_log_${p.id}`, name: p.name, what: p.what, def: true,
-          bind: { t: "opt", id: "view_logs", side: "owner", key: p.id } as Bind,
-        })),
+        id: "own_menu_group", name: "Owner's menu", bind: { t: "none" },
+        what: "Which pages exist in this restaurant's owner panel.",
+        children: [
+          // ACCESS (owner, 2026-08-02): his word for the Staff & powers page — where the
+          // owner creates staff logins and decides what each person may do. The "staff"
+          // section key existed and was ENFORCED (nav + /api/owner/staff both read it)
+          // but had no switch anywhere — the exact stored-but-unswitchable shape the
+          // access rebuild removes. Now it has its one switch, here.
+          { id: "own_access", name: "Access", def: true, bind: { t: "section", key: "staff" },
+            what: "The owner's Staff & powers page — create staff logins and set what each person may do." },
+          { id: "own_menu", name: "Edit menu", def: true, bind: { t: "section", key: "menu" },
+            what: "The owner's own Menu page — the same dishes/categories editor, in the owner panel." },
+          // Renamed from "Ratings" (owner, 2026-08-02: "rating review").
+          { id: "own_ratings", name: "Rating review", def: true, bind: { t: "section", key: "ratings" },
+            what: "The owner's Rating review page — guest stars and written feedback." },
+          {
+            // AUDIT & LOGS (owner, 2026-08-01; renamed + given sub-options 2026-08-02: "name will
+            // be changed from audit to audit and logs… and if there is a log separately, you have
+            // to remove it"). The old duplicate "Activity log" child bound the SAME
+            // owner_entitlements.logs switch twice, so it is gone. TWO KINDS of children now,
+            // merged from the two 2026-08-02 asks:
+            //   • WHICH VIEWS the owner's page shows (LOG_PARTS → view_logs.owner_opts)
+            //   • WHICH ROW KINDS the Activity view lists (logs_* section keys, read by
+            //     /api/owner/oplog). Visibility only — nothing stops being RECORDED; the
+            //     money/bill audit trail is never switchable (docs/COMPLIANCE-GUARDRAILS.md).
+            // The stored section key stays "logs" — renaming a LABEL must never rename a key.
+            id: "own_audit", name: "Audit & logs", def: true, fresh: true, bind: { t: "section", key: "logs" },
+            what: "The owner's Audit & logs page — what was removed and why, plus the full activity log. The parts below say which of its views, and which kinds of activity rows, this restaurant's owners get.",
+            children: [
+              ...LOG_PARTS.filter((p) => !p.mgrOnly).map((p) => ({
+                id: `d_own_log_${p.id}`, name: p.name, what: p.what, def: true,
+                bind: { t: "opt", id: "view_logs", side: "owner", key: p.id } as Bind,
+              })),
+              { id: "own_logs_signins", name: "Sign-ins", def: true, fresh: true, bind: { t: "section", key: "logs_signins" },
+                what: "Who signed in to the panels, and failed tries. Off = these rows leave the owner's Activity view (still recorded underneath)." },
+              { id: "own_logs_service", name: "Service actions", def: true, fresh: true, bind: { t: "section", key: "logs_service" },
+                what: "Everything staff did during service — orders, tables, bills, parcels. Off = hidden from the owner's Activity view (still recorded underneath)." },
+              { id: "own_logs_staff_changes", name: "Staff changes", def: true, fresh: true, bind: { t: "section", key: "logs_staff_changes" },
+                what: "Staff switched on or off and permission changes. Off = hidden from the owner's Activity view (still recorded underneath)." },
+            ],
+          },
+          // BUILT 2026-08-02: the switch is live. It gates the owner panel's Manager mode page
+          // (the full live manager panel embedded in the owner cockpit — floor, bills, ordering).
+          { id: "own_manager_mode", name: "Manager mode", def: true, bind: { t: "section", key: "manager_mode" },
+            what: "Lets the owner drop into their own manager panel and work the floor as a manager would — live tables, bills, taking orders. Settings, Rating review, Audit & logs and the Menu editor stay in their own owner pages." },
+        ],
       },
-      // BUILT 2026-08-02: the switch is live. It gates the owner panel's Manager mode page
-      // (the full live manager panel embedded in the owner cockpit — floor, bills, ordering).
-      { id: "own_manager_mode", name: "Manager mode", def: true, bind: { t: "section", key: "manager_mode" },
-        what: "Lets the owner drop into their own manager panel and work the floor as a manager would — live tables, bills, taking orders. Settings, Ratings, Audit and the Menu editor stay in their own owner pages." },
     ],
   },
 

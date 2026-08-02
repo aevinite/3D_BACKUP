@@ -15,8 +15,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, inScope } from "@/lib/ownerScope";
-import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
+import { entitledSubset, logViewSubset, mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
+
+// Which VISIBILITY switch (Access → Owner → Owner's menu → Audit and log) a log row rides.
+// These filter what the owner's page SHOWS — never what gets recorded (the money/bill audit
+// trail is not switchable, docs/COMPLIANCE-GUARDRAILS.md). Absent key = ON, so nothing
+// changes for a restaurant until the admin switches a kind off.
+function logKindKey(action: string): "logs_signins" | "logs_staff_changes" | "logs_service" {
+  if (action === "login" || action === "login_failed") return "logs_signins";
+  if (action.startsWith("staff_") || action.startsWith("user_")) return "logs_staff_changes";
+  return "logs_service";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -82,15 +92,27 @@ export async function GET(req: NextRequest) {
 
   const r = await q;
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
-  const rows = r.data ?? [];
+  let rows = r.data ?? [];
 
   // Stamp each row with its restaurant NAME so a multi-restaurant owner can tell them apart
-  // (one batched lookup, no N+1). Single-restaurant owners simply ignore it.
+  // (one batched lookup, no N+1). Single-restaurant owners simply ignore it. The same lookup
+  // now carries owner_entitlements for the per-kind visibility switches below — still one read.
   const ids = Array.from(new Set(rows.map((a) => a.restaurant_id).filter(Boolean))) as string[];
   const nameById = new Map<string, string>();
+  const entsById = new Map<string, Record<string, boolean>>();
   if (ids.length) {
-    const rest = await sb.from("restaurants").select("id, name").in("id", ids);
-    for (const x of rest.data ?? []) nameById.set(x.id, x.name);
+    const rest = await sb.from("restaurants").select("id, name, owner_entitlements").in("id", ids);
+    for (const x of rest.data ?? []) { nameById.set(x.id, x.name); entsById.set(x.id, mergeOwnerEntitlements(x.owner_entitlements)); }
+  }
+  // Per-kind VISIBILITY (owner, 2026-08-02): a kind the admin switched off for a restaurant
+  // leaves the owner's view. Rows are ≤200 here, so this JS pass costs nothing. The ADMIN's
+  // own session is never filtered (X-ray: the admin always sees the full record).
+  if (!scope.admin) {
+    rows = rows.filter((a) => {
+      if (!a.restaurant_id) return true;
+      const ents = entsById.get(a.restaurant_id);
+      return !ents || ents[logKindKey(String(a.action || ""))] !== false;
+    });
   }
   const actions = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null }));
   // Actions the ADMIN performed from a panel view carry actor_id='admin:view' (2026-07-28).
