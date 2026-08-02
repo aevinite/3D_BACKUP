@@ -38,6 +38,10 @@ const REMOVAL_KIND: Record<string, [string, string]> = {
   dish_removed: ["🍽", "Dish removed from an order"],
   menu_item_deleted: ["📕", "Menu item deleted"],
   invoice_voided: ["↩️", "Invoice voided (reopened)"],
+  qty_reduced: ["➖", "Quantity reduced"],
+  discount_given: ["％", "Discount given"],
+  payment_reverted: ["↺", "Payment reverted"],
+  on_the_house: ["🎁", "On the house"],
 };
 const REMOVAL_REASON: Record<string, string> = {
   mistake: "By mistake",

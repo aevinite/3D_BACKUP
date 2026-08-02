@@ -3038,7 +3038,10 @@ async function restoreBill(orders) {
 // OPTIMISTIC: the screen flips INSTANTLY and the server is told in the
 // background; if the server refuses, we roll back and explain. This is what
 // makes 20 clicks in a row feel real-time instead of 20 waits.
-async function setOrderStatus(id, status) {
+// `reason` (from askRemovalReason) rides ALONG with the change so the SERVER can write the audit
+// row itself — it used to be a second POST /audit from here, which meant any caller that forgot
+// recorded nothing (2026-08-02).
+async function setOrderStatus(id, status, reason) {
   const o = (state.data.orders || []).find((x) => x.id === id);
   const prev = o ? o.status : null;
   if (o) o.status = status;        // flip the screen NOW
@@ -3046,7 +3049,7 @@ async function setOrderStatus(id, status) {
   renderEditor();
   renderTablePanel();
   try {
-    await api("PATCH", "/orders/" + id, { status }); // sync in the background
+    await api("PATCH", "/orders/" + id, { status, ...(reason ? { reason_code: reason.code, reason_note: reason.note } : {}) }); // sync in the background
     toast("Order updated → " + status, "ok");
   } catch (e) {
     if (o && prev !== null) o.status = prev;         // server said no -> undo
@@ -3071,8 +3074,8 @@ async function cancelOrder(id) {
   const o0 = (state.data.orders || []).find((x) => x.id === id);
   const reason = await askRemovalReason(`KOT #${o0 && o0.kot_no != null ? o0.kot_no : "—"}${o0 && o0.table_number ? ` · Table ${o0.table_number}` : ""} — it will be voided, no charge to the guest.`);
   if (!reason) return;
-  await setOrderStatus(id, "cancelled");
-  await recordRemoval("order_cancelled", reason, { order_id: id });
+  // The reason travels WITH the cancel; the server writes the audit row (see setOrderStatus).
+  await setOrderStatus(id, "cancelled", reason);
   const o = (state.data.orders || []).find((x) => x.id === id);
   const t = (o && o.table_number ? o.table_number : "").trim();
   if (!t) return;
@@ -3116,11 +3119,13 @@ async function deleteOrders(ids, all = false, opts = {}) {
   renderEditor();
   try {
     let r;
-    if (all) r = await api("POST", "/orders/delete", { all: true, reason });
-    else if (ids && ids.length === 1) r = await api("DELETE", "/orders/" + ids[0] + "?reason=" + encodeURIComponent(reason));
-    else r = await api("POST", "/orders/delete", { ids, reason });
+    // reason_code rides along so the SERVER writes the audit row itself (it used to be a
+    // separate POST /audit from here, once per bill — see lib/removalAudit.ts).
+    const rc = rr && rr.code ? `&reason_code=${encodeURIComponent(rr.code)}` : "";
+    if (all) r = await api("POST", "/orders/delete", { all: true, reason, reason_code: rr && rr.code });
+    else if (ids && ids.length === 1) r = await api("DELETE", "/orders/" + ids[0] + "?reason=" + encodeURIComponent(reason) + rc);
+    else r = await api("POST", "/orders/delete", { ids, reason, reason_code: rr && rr.code });
     const kept = r && r.kept ? r.kept : 0;
-    if (rr) for (const id of gone) await recordRemoval("order_deleted", rr, { order_id: id });
     toast(kept
       ? `Cleared ${gone.length} · kept ${kept} paid bill${kept > 1 ? "s" : ""} as records`
       : (all ? "All cleared" : "Order(s) deleted"), "ok");
@@ -5806,10 +5811,15 @@ const CHAIR_SVG = `<svg class="ft-chair" viewBox="0 0 24 24" aria-hidden="true" 
 // related … who did it". So the search box matches ALL of it at once: a KOT number, a bill number, a
 // table, a dish name, a person's username, or the reason. One flat list, newest first, no filters to
 // learn. Read is scoped + capped by the server (GET /audit).
+// Keep in step with REMOVAL_KIND in app/aevinite/logs/page.tsx + app/owner/activity/page.tsx and
+// with RemovalKind in lib/removalAudit.ts — a kind with no label here renders as its raw key.
+// Guarded by npm run verify:audit.
 const AUDIT_KIND = {
   order_cancelled: ["✕", "KOT cancelled"], order_deleted: ["🗑", "Bill deleted"],
   dish_removed: ["🍽", "Dish removed"], menu_item_deleted: ["📕", "Menu item deleted"],
   invoice_voided: ["↩", "Invoice voided"],
+  qty_reduced: ["➖", "Quantity reduced"], discount_given: ["％", "Discount given"],
+  payment_reverted: ["↺", "Payment reverted"], on_the_house: ["🎁", "On the house"],
 };
 async function loadAudit() {
   try { state.audit = await api("GET", "/audit?limit=200"); }
@@ -5944,12 +5954,13 @@ function askRemovalReason(what) {
     setTimeout(() => wrap.querySelector(".rr-opt").focus(), 50);
   });
 }
-// Records it. Best-effort on purpose: the removal itself has already happened and been logged, so a
-// failure here must never look like the removal failed — but it is reported, never swallowed silently.
-async function recordRemoval(kind, reason, extra = {}) {
-  try { await api("POST", "/audit", { kind, reason_code: reason && reason.code, reason_note: reason && reason.note, ...extra }); }
-  catch (e) { toast("Removed, but the audit record failed to save: " + e.message, "err"); }
-}
+// THE PANEL NO LONGER RECORDS REMOVALS ITSELF (2026-08-02). It used to POST /audit after each
+// action, which is why only the two kinds this file remembered were ever written — a dish coming
+// off an order, a reopened bill and a deleted menu item recorded nothing, and the waiter panel
+// recorded nothing at all. The reason from askRemovalReason now travels WITH the action
+// (reason_code / reason_note in the body or query), and the SERVER writes the row inside the
+// endpoint that makes the change: see lib/removalAudit.ts. Do not reintroduce a client-side
+// recorder — a record that depends on a panel remembering is not a record.
 
 // ── MERGED TABLES (mig 249) ────────────────────────────────────────────────────────────────
 // The floor read carries the live joins (state.summary.merges: parent_table + child_table). Two
@@ -9714,9 +9725,14 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // the bill can't keep charging for a removed dish. Reloads the live board after.
   root.querySelectorAll("[data-item-del]").forEach((b) => (b.onclick = async () => {
     const name = b.dataset.itemName || "this dish";
-    if (!(await confirmDialog(`Remove “${name}” from the order? The bill total updates automatically.`, "Remove dish"))) return;
+    // A dish coming off a live order takes money off the bill, so it asks WHY — the same six
+    // one-tap reasons as a cancelled ticket or a deleted bill (owner, 2026-08-02: "delete a
+    // particular item … all that record will be in the audit section"). The reason ask IS the
+    // confirmation, so it replaces the old yes/no box rather than adding a second question.
+    const reason = await askRemovalReason(`“${name}” — it comes off the order and the bill total updates.`);
+    if (!reason) return;
     try {
-      const r = await api("POST", `/items/${b.dataset.itemDel}/delete`);
+      const r = await api("POST", `/items/${b.dataset.itemDel}/delete`, { reason_code: reason.code, reason_note: reason.note });
       await loadSessions();
       if (rerender) rerender();
       toast(r && r.order_cancelled ? "Dish removed — order now empty, cancelled" : "Dish removed — bill updated", "ok");
@@ -12168,7 +12184,11 @@ const XRAY_CONTROLS = [
   { selector: "[data-qop]", flag: "take_orders|parcel", label: "Take orders / Parcel" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
-  { selector: "[data-cancel-order]", flag: "void_bills", label: "Void / reopen bills" },
+  // "✕ Cancel" on a ticket is NOT listed here any more (2026-08-02): cancelling a ticket is how a
+  // kitchen mistake and a walk-out are cleared, it is not one of the owner's three money rows, and
+  // hiding it behind void_bills (now OFF by default) left a manager unable to correct the floor.
+  // The endpoint is ungated to match, and every cancel writes an Audit row — see the PATCH
+  // /orders/:id handler. Do not re-add it without giving cancel its own row on the Access screen.
   { selector: "#sxKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: "#floorKot", flag: "table_ops", label: "Table & KOT operations" },
   { selector: '.list-item[data-settings-section="users"]', flag: "manage_staff", label: "User settings" },
