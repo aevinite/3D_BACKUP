@@ -4225,8 +4225,14 @@ function printBill(t, sess, os, opts = {}) {
     taxRun += amt;
     return `<div class="t"><span>${esc(c.label)} ${c.rate}%</span><span>${inr(amt)}</span></div>`;
   }).join("");
-  const w = window.open("", "_blank", "width=380,height=680");
+  // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands
+  // the page the SAME afterprint event whether the person pressed Print or pressed Cancel —
+  // there is no flag saying which — so the old "close on afterprint" also threw the bill away
+  // on Cancel, which is the bug he reported. The window now closes only from its own ✕ Close
+  // button, and a NAMED target means the next bill reuses this window instead of piling up.
+  const w = window.open("", "lfh_bill_print", "width=380,height=680");
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
+  try { w.document.open(); } catch (e) {} // reused window: start from a blank document
   w.document.write(`<!doctype html><title>Tax Invoice — ${name}</title>
 <style>
   /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS driver
@@ -4282,7 +4288,18 @@ function printBill(t, sess, os, opts = {}) {
   .g{display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid #000;
      border-bottom:2px solid #000;margin-top:7px;padding:6px 0;font-weight:700;font-size:16px;letter-spacing:.02em}
   .foot{text-align:center;font-size:11px;margin-top:11px}
+  /* Screen-only toolbar. The window stays open after the print dialog closes (see the note
+     in app.js — Print and Cancel are indistinguishable to the page), so this bar is how it
+     goes away, and how a second copy is printed without rebuilding the bill. It is hidden
+     from the paper by display:none AND excluded from the page-length measurement below. */
+  .bar{position:sticky;top:0;z-index:9;display:flex;gap:8px;justify-content:flex-end;
+       margin:-22px -30px 14px;padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc}
+  .bar button{font:inherit;font-size:13px;padding:7px 13px;border-radius:8px;cursor:pointer;
+              border:1px solid #b9b9c0;background:#fff;color:#000}
+  .bar button.x{background:#111;color:#fff;border-color:#111}
+  @media print{.bar{display:none !important}}
 </style>
+<div class="bar"><button onclick="printAgain()">🖨 Print again</button><button class="x" onclick="closeBill()">✕ Close</button></div>
 ${billLogo() ? `<img class="logo" src="${esc(billLogo())}" onerror="this.style.display='none'"/>` : ""}
 <h2>${name}</h2>
 <div class="sub">${addr ? addr + "<br/>" : ""}${phone ? "Ph " + phone : ""}${phone && gstin ? "<br/>" : ""}${gstin ? "GSTIN " + gstin : ""}</div>
@@ -4308,24 +4325,36 @@ ${cust || custPhone ? `<div class="dash"></div>${cust ? `<div class="kv"><span>C
    several sheets (owner, 2026-07-30 — "it prints in four parts"). Measure the finished bill
    and declare a page exactly that long, so the page MATCHES the roll instead of being
    smaller/squarer than it (that older case is what CUPS rotates or bottom-anchors). */
-setTimeout(function(){
+function measure(){
+  // The toolbar is screen-only, but scrollHeight measures the SCREEN layout — leaving it in
+  // would declare a page ~11mm longer than the bill and feed that much blank roll after every
+  // print. Hide it for the measurement, then put it back.
+  var bar = document.querySelector(".bar"), prev = bar ? bar.style.display : "";
+  if (bar) bar.style.display = "none";
   try{
     var mm = 96/25.4, h = Math.ceil(document.body.scrollHeight/mm) + 6;
-    var st = document.createElement("style");
+    var st = document.getElementById("pagesize") || document.createElement("style");
+    st.id = "pagesize";
     st.textContent = "@media print{@page{size:80mm " + h + "mm;margin:0}}";
     document.head.appendChild(st);
   }catch(e){}
-  // Print, then GO AWAY. This window exists to hand the bill to the printer, not to be a screen
-  // (owner, 2026-08-01: "clicking print takes me to the bill page — I should only get the print
-  // option"). onafterprint fires whether the dialog was used or dismissed, so it closes either
-  // way; the long fallback covers a browser that suppresses print dialogs entirely (an automated
-  // or kiosk build), so a stray copy of the bill can never sit there looking like the app.
-  onafterprint = function () { try { close(); } catch (e) {} };
-  print();
-  setTimeout(function () { try { close(); } catch (e) {} }, 60000);
-}, 300);
+  if (bar) bar.style.display = prev;
+}
+function printAgain(){ measure(); print(); }
+function closeBill(){ try{ if (opener && !opener.closed) opener.focus(); }catch(e){} try{ close(); }catch(e){} }
+// NOTHING here closes this window. Print and Cancel look identical to the page (one afterprint
+// event, no flag), so closing on that event also destroyed the bill when the person pressed
+// Cancel — the fault the owner reported on 2026-08-02. After the dialog closes the bill simply
+// stays on screen with its own ✕ Close (which also brings the panel back to the front), and the
+// next bill REUSES this window, so nothing can pile up. Esc closes it too.
+// afterprint is not used to CLOSE (it can't be trusted for that) — only to put the keyboard on
+// the ✕ Close button, so the moment the dialog goes away Enter/Space/Esc dismisses the bill.
+addEventListener("keydown", function(e){ if (e.key === "Escape") closeBill(); });
+onafterprint = function(){ try{ var b = document.querySelector(".bar .x"); if (b) b.focus(); }catch(e){} };
+setTimeout(printAgain, 300);
 <\/script>`);
   w.document.close();
+  try { w.focus(); } catch (e) {} // a REUSED window is already open behind the panel — bring it forward
 }
 
 // Manager PERFORMANCE REPORT — a designed, downloadable (print / Save-as-PDF)
