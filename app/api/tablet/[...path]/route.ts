@@ -21,6 +21,7 @@ import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { rateAllowed } from "@/lib/rateLimit";
 import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
+import { refusalMessage, refusalStatus } from "@/lib/dbRefusal";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
@@ -218,7 +219,12 @@ const stampEdited = async (orderId?: string | null, rid?: string) => {
   try { let q = sb.from("orders").update({ edited_at: nowIso() }).eq("id", orderId); if (rid) q = q.eq("restaurant_id", rid); await q; } catch {}
 };
 
-const must = (r: any) => { if (r.error) throw new Error(r.error.message); return r.data; };
+// Keep the SQLSTATE on the thrown error: lib/dbRefusal reads it to tell a refused VALUE (400,
+// the person must see it) from the server failing to answer (500, saved and retried).
+const must = (r: any) => {
+  if (r.error) { const e: any = new Error(r.error.message); e.code = r.error.code; e.details = r.error.details; throw e; }
+  return r.data;
+};
  
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
@@ -524,7 +530,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return err("unknown GET endpoint", 404);
   } catch (e) {
     logError("tablet", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(refusalMessage(e), refusalStatus(e));
   }
 }
 

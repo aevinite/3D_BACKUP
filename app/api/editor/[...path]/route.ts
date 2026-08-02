@@ -31,6 +31,7 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
+import { refusalMessage, refusalStatus } from "@/lib/dbRefusal";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
@@ -299,7 +300,7 @@ const stampEdited = async (orderId?: string | null, rid?: string) => {
 // into a clean 500 (mirrors the editor server's `must`).
 
 const must = (r: any) => {
-  if (r.error) throw new Error(r.error.message);
+  if (r.error) { const e: any = new Error(r.error.message); e.code = r.error.code; e.details = r.error.details; throw e; } // keep the SQLSTATE: lib/dbRefusal reads it to tell "bad value" (400) from "server trouble" (500)
   return r.data;
 };
 
@@ -1565,7 +1566,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
     logError("manager", "route_error", e, { restaurant_id: rid, detail: `GET ${p || "/"}` });
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(refusalMessage(e), refusalStatus(e));
   }
 }
 
@@ -3310,7 +3311,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
     logError("manager", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(refusalMessage(e), refusalStatus(e));
   }
 }
 
@@ -3455,7 +3456,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
     logError("manager", "route_error", e, { restaurant_id: rid, detail: `PATCH ${path.join("/") || "/"}` });
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(refusalMessage(e), refusalStatus(e));
   }
 }
 
@@ -3558,6 +3559,6 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
     logError("manager", "route_error", e, { restaurant_id: rid, detail: `DELETE ${path.join("/") || "/"}` });
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(refusalMessage(e), refusalStatus(e));
   }
 }

@@ -15,6 +15,7 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { platformLadder, parcelLadder } from "@/lib/tableTags";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
+import { refusalMessage, refusalStatus } from "@/lib/dbRefusal";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +37,12 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 
 const nowIso = () => new Date().toISOString();
  
-const must = (r: any) => { if (r.error) throw new Error(r.error.message); return r.data; };
+// Keep the SQLSTATE on the thrown error: lib/dbRefusal reads it to tell a refused VALUE (400,
+// the person must see it) from the server failing to answer (500, saved and retried).
+const must = (r: any) => {
+  if (r.error) { const e: any = new Error(r.error.message); e.code = r.error.code; e.details = r.error.details; throw e; }
+  return r.data;
+};
  
 const ok = (d: any, status = 200) => NextResponse.json(d, { status });
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
@@ -137,7 +143,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return err("unknown GET endpoint", 404);
   } catch (e) {
     logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(refusalMessage(e), refusalStatus(e));
   }
 }
 
@@ -300,6 +306,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     return err("unknown POST endpoint", 404);
   } catch (e) {
     logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
-    return err(e instanceof Error ? e.message : String(e), 500);
+    return err(refusalMessage(e), refusalStatus(e));
   }
 }

@@ -117,7 +117,7 @@ async function postMovement(p: {
     p_unit_cost: p.unitCost ?? null, p_reason: p.reason ?? null,
     p_ref_type: p.refType ?? null, p_ref_id: p.refId ?? null, p_created_by: p.by ?? null,
   });
-  if (r.error) throw new Error(r.error.message);
+  if (r.error) { const e: any = new Error(r.error.message); e.code = r.error.code; e.details = r.error.details; throw e; } // keep the SQLSTATE: lib/dbRefusal reads it to tell "bad value" (400) from "server trouble" (500)
   return (r.data as number | null) ?? null;
 }
 

@@ -34,9 +34,32 @@
   // server into a dead one: every device retries on the same beat, so the load arrives in
   // synchronised waves that never let it recover (a retry storm). Now each round waits longer
   // than the last, and each device rolls its own jitter so they spread out.
-  const RETRY_BASE_MS = 15000;
-  const RETRY_MAX_MS = 120000;
+  // The FIRST re-try is quick, because by far the commonest reason a write fails is one dropped
+  // request on a connection that is otherwise fine — making that wait 15s just to try again is
+  // what makes a panel feel stuck. Everything after it backs off as before.
+  let RETRY_FIRST_MS = 5000;
+  let RETRY_BASE_MS = 15000;
+  let RETRY_MAX_MS = 120000;
+  // Don't flush more than this often just because the person keeps switching tabs.
+  let WAKE_MIN_GAP_MS = 4000;
   let retryStep = 0;
+  let lastWakeAt = 0;
+  let paused = false; // test-only; see __pause below
+  // A saved change may not sit in a silent retry loop forever. After this many rounds of the
+  // same non-answer it becomes a person's decision instead of a spinner nobody can see.
+  const AUTH_MAX_TRIES = 3;   // 401 — this device is signed out
+  const BUSY_MAX_TRIES = 6;   // 409 {retry:true} — the server says it is still handling this id
+  // The verifier (scripts/verify-outbox-drain.mjs) shrinks the waits so a run takes seconds
+  // instead of minutes. Nothing in the app sets this.
+  try {
+    var P = window.LFH_TEST_PACING;
+    if (P) {
+      if (P.first) RETRY_FIRST_MS = P.first;
+      if (P.base) RETRY_BASE_MS = P.base;
+      if (P.max) RETRY_MAX_MS = P.max;
+      if (P.wake) WAKE_MIN_GAP_MS = P.wake;
+    }
+  } catch (e) { /* no window (unlikely) → shipped timings */ }
 
   // ── tiny IndexedDB wrapper (no external lib) ────────────────────────────────
   let dbPromise = null;
@@ -165,6 +188,20 @@
     queued.push(item);
     await idbPut(item);
     notify();
+    // NEVER leave saved work with nothing to send it. This one line is the whole of the
+    // 2026-08-02 fault: a write that died mid-flight was saved here and then simply waited,
+    // because the only wake-ups were the browser's 'online' event and realtime reconnecting —
+    // and neither of those happens when the connection never actually dropped. The owner
+    // watched "Sending 3 saved changes…" on a healthy connection while nothing was being sent.
+    ensureRetry();
+  }
+
+  // There is a timer pending for whatever is in the queue — or there is about to be.
+  function ensureRetry() {
+    if (flushing) return;            // the running flush will schedule the next round itself
+    if (retryTimer) return;          // already covered
+    if (!queued.length) return;
+    scheduleRetry();
   }
 
   async function removeItem(id) {
@@ -241,8 +278,11 @@
   // ── flush: replay the queue in order when we're back online ─────────────────
   async function flush() {
     if (flushing) return;
-    if (navigator.onLine === false) return;
-    if (!queued.length) return;
+    if (!queued.length) { clearTimeout(retryTimer); retryTimer = null; retryStep = 0; return; }
+    // Reported offline → don't try, but LEAVE A TIMER BEHIND. This used to return bare, and a
+    // retry that happened to land during a one-second blip killed the last timer the queue had:
+    // from then on nothing sent, however good the connection became.
+    if (navigator.onLine === false) { scheduleRetry(false); return; }
     flushing = true;
     let progressed = false; // did anything actually get through this round?
     try {
@@ -251,11 +291,35 @@
         let res;
         try { res = await doFetch(item, true); } // true = a saved change being replayed
         catch (netErr) { break; }               // still offline → stop; keep the queue for next time
-        if (res.status === 401) { break; }        // not logged in → can't sync now; keep the queue
+        // NOT LOGGED IN. Keep the change and try again — a session can come back (the panel
+        // refreshes its own login). But not forever in silence: if this device really has been
+        // signed out, the person has to be told, or their work waits behind a spinner all shift.
+        if (res.status === 401) {
+          item.authTries = (item.authTries || 0) + 1;
+          if (item.authTries < AUTH_MAX_TRIES) { await idbPut(item); break; }
+          await moveToFailed(item, "This device is signed out", {
+            plain: "This device was signed out, so this couldn't be sent.",
+            todo: "Sign in on this device, then tap Try again.",
+            retryable: true,
+          });
+          notify(); continue;
+        }
         if (res.ok) { progressed = true; await removeItem(item.id); notify(); continue; } // sent (incl. server-dedup ok:true,duplicate:true)
         if (res.status === 409) {
           const j = await res.json().catch(() => null);
-          if (j && j.retry) break;                // server is processing this id right now → try again shortly
+          if (j && j.retry) {
+            // The server says it is handling this id right now. That normally clears in
+            // seconds (a stale claim is taken over after 30s — lib/idempotency.ts), so if it
+            // keeps saying it, something is wrong and a person should hear about it.
+            item.busyTries = (item.busyTries || 0) + 1;
+            if (item.busyTries < BUSY_MAX_TRIES) { await idbPut(item); break; }
+            await moveToFailed(item, "The system is still working on this one", {
+              plain: "The system says it is still busy with this change.",
+              todo: "Check whether it already happened; if not, do it again.",
+              retryable: true,
+            });
+            notify(); continue;
+          }
           // A CLASH: while this device was offline, the same thing moved on (the table
           // was closed/billed, or another device changed exactly what this was changing).
           // The server refuses rather than overwrite it, and tells us how to say so.
@@ -301,13 +365,37 @@
   // spreads out instead of pulsing. `progressed` = something actually synced, which means the
   // server is healthy again, so go straight back to fast retries.
   function scheduleRetry(progressed) {
-    clearTimeout(retryTimer);
-    if (!queued.length || navigator.onLine === false) { retryStep = 0; return; }
+    clearTimeout(retryTimer); retryTimer = null;
+    if (paused) return;                                  // test-only: hold the automatic retry
+    if (!queued.length) { retryStep = 0; return; }
     if (progressed) retryStep = 0;
-    const base = Math.min(RETRY_BASE_MS * Math.pow(2, retryStep), RETRY_MAX_MS);
+    // A TIMER IS SCHEDULED EVEN WHEN THE BROWSER SAYS WE ARE OFFLINE. It used to return here,
+    // which meant the queue's last timer was thrown away the moment a retry coincided with a
+    // blip, leaving the 'online' event as the only way back — and that event does not fire when
+    // the browser never noticed a problem in the first place (a Wi-Fi that stays "connected"
+    // with a dead uplink, a lid reopened, one request the server hung up on). While genuinely
+    // offline this costs nothing: flush() sees navigator.onLine === false and returns without
+    // touching the network, and the backoff below settles it to a two-minute heartbeat.
+    const base = retryStep === 0
+      ? RETRY_FIRST_MS                                                            // quick first go
+      : Math.min(RETRY_BASE_MS * Math.pow(2, retryStep - 1), RETRY_MAX_MS);       // then 15s, 30s, 60s…
     const wait = Math.round(base * (0.75 + Math.random() * 0.5));
     retryStep = Math.min(retryStep + 1, 8);
     retryTimer = setTimeout(flush, wait);
+  }
+
+  // ── wake-ups ────────────────────────────────────────────────────────────────
+  // Anything that means "a person is looking at this panel again" or "the connection just
+  // changed" is a reason to try now instead of waiting out the backoff. Throttled, and it does
+  // nothing at all when the queue is empty — a normal shift pays nothing for this.
+  function wake(force) {
+    if (!queued.length) return;
+    if (navigator.onLine === false) return;
+    const now = Date.now();
+    if (!force && now - lastWakeAt < WAKE_MIN_GAP_MS) return;
+    lastWakeAt = now;
+    retryStep = 0; // a fresh signal → go back to fast retries
+    flush();
   }
 
   // ── manual controls for the "waiting to sync" UI ────────────────────────────
@@ -340,9 +428,13 @@
     queued = all.filter((x) => x.status !== "failed").sort((a, b) => a.at - b.at);
     failed = all.filter((x) => x.status === "failed");
     notify();
-    // Flush now (if online) and whenever the connection returns.
-    window.addEventListener("online", flush);
-    if (window.LFH_RT && window.LFH_RT.onStatus) window.LFH_RT.onStatus((s) => { if (s === "online") flush(); });
+    // Flush now (if online), whenever the connection returns, and whenever the person comes
+    // back to this panel. The last two matter because the first two can BOTH stay silent while
+    // the connection quietly recovers — that is the 2026-08-02 fault.
+    window.addEventListener("online", () => wake(true));
+    if (window.LFH_RT && window.LFH_RT.onStatus) window.LFH_RT.onStatus((s) => { if (s === "online") wake(true); });
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) wake(); });
+    window.addEventListener("focus", () => wake());
     if (navigator.onLine !== false) flush();
     scheduleRetry();
   }
@@ -374,6 +466,15 @@
     getSnapshot: () => ({ queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length }),
     pendingCount: () => queued.length,
     failedCount: () => failed.length,
+    // WHEN the oldest thing still waiting was done (ms since epoch, 0 = nothing waiting).
+    // The bar uses it to stop saying "Sending…" about work that has plainly stopped moving.
+    waitingSince: () => queued.reduce((a, it) => (a && a < it.at ? a : it.at), 0),
+    isFlushing: () => flushing,
+    // TEST-ONLY (scripts/verify-outbox-drain.mjs): hold the automatic retry so a check can
+    // prove that a specific signal — coming back to the tab, tapping Send now — is what
+    // delivered the change. Nothing in the app calls these.
+    __pause: () => { paused = true; clearTimeout(retryTimer); retryTimer = null; },
+    __resume: () => { paused = false; ensureRetry(); },
     onChange: (cb) => { listeners.add(cb); try { cb(window.LFH_OUTBOX.getSnapshot()); } catch (e) {} return () => listeners.delete(cb); },
   };
 
