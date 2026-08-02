@@ -36,7 +36,7 @@ import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
-import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, type ManagerTabKey } from "@/lib/accessTree";
+import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, type ManagerTabKey } from "@/lib/accessTree";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 
@@ -205,6 +205,15 @@ async function canDeleteBill(g: { user: StaffUser | null }, rid: string): Promis
   // The row wins when it has been set; otherwise the legacy value still decides, so a restaurant
   // configured under the old screen keeps exactly what it had. Absent everywhere → OFF, which is
   // deliberate: deleting a bill is the most destructive money action there is.
+  // THIS PERSON's own setting wins over the restaurant's, exactly as managerCan() resolves it.
+  // It was missing here, so the profile could show "Delete a bill · On" for one manager and the
+  // server would still refuse them — a switch that saves and is never read, which is the bug
+  // class this model exists to prevent (found 2026-08-02 while proving "off means gone AND
+  // refused"). The admin's own caps are still checked by the managerCan("void_bills") call that
+  // must run before this one, so an override can't climb above them.
+  const ov = u.permissions?.delete_bill;
+  if (ov === "on" || ov === "pin") return true;
+  if (ov === "off") return false;
   const r = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; access_config?: { void_bills?: { manager_opts?: Record<string, boolean> } } } | null;
   const row = r?.manager_permissions?.delete_bill;
@@ -451,16 +460,29 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // pulled from THIS individual, matching what managerCan enforces. Only for a real staff
       // login (admin/owner see the restaurant-wide picture; they bypass the gate anyway).
       const myOv = (g.user && g.user.role !== "owner") ? (g.user.permissions || {}) : {};
-      for (const flag of MANAGER_POWER_FLAGS) {
+      // EVERY grant the access model has, not just the older list. `view_bills` and
+      // `delete_bill` are rows on the Access screen and are enforced by managerCan, but they
+      // are not in the legacy MANAGER_POWER_FLAGS — so the panel got no answer for them and
+      // treated them as "no power", which is how the Bills tab could be shown while the
+      // server refused its data (found 2026-08-02 while checking the owner's rule that a
+      // switched-off permission must be INVISIBLE as well as refused).
+      const flags = Array.from(new Set([...MANAGER_POWER_FLAGS, ...GRANT_FLAGS]));
+      const cfgOn = (r?.access_config || {}) as Record<string, { on?: boolean }>;
+      for (const flag of flags) {
+        // The same four rungs managerCan() applies, in the same order, so what the panel
+        // SHOWS and what the server ALLOWS can never disagree:
+        //   1. the feature half — does the restaurant have the thing at all
+        //   2. the admin cap on a configurable grant
+        //   3. this person's own override
+        //   4. otherwise the restaurant's grant (managerGrantValue = the one rule)
         const entitled = ents[powerEntitlementKey(flag)] !== false;
-        // absentOn flags (view_logs) keep the power unless someone EXPLICITLY switched it
-        // off — matching canViewLogs, so the X-ray never hides a log the server allows.
-        let granted = ABSENT_ON_POWERS.has(flag) ? perms[flag] !== false : perms[flag] === true;
+        const hasFeature = cfgOn[flag]?.on !== false;
+        let granted = managerGrantValue(flag, perms[flag]);
         const ov = myOv[flag];
         if (ov === "on" || ov === "pin") granted = true;
         else if (ov === "off") granted = false;
-        effectivePowers[flag] = entitled && granted;
-        offByAdmin[flag] = !entitled;
+        effectivePowers[flag] = hasFeature && entitled && granted;
+        offByAdmin[flag] = !entitled || !hasFeature;
       }
       // Feature-module rung (canonical ladder): a capability whose MODULE is off for this
       // restaurant renders nothing anywhere in the panel — the power flags above are the

@@ -11689,6 +11689,11 @@ const XRAY_TABS = [
   // default), so this is non-breaking — the tab only disappears once the owner explicitly
   // switches it off; admin/owner keep it (tinted).
   { tab: "log", flag: "view_logs", label: "Activity log" },
+  // Bills (owner, 2026-08-02). Its DOM tab is called "orders". It was the one menu with a
+  // permission and no entry here: switch "Bill" off and the tab still sat there, and every
+  // tap inside it came back 403 from tabGate — a switched-off permission has to be GONE, not
+  // merely refused ("even if it's shown it should not work, and it shouldn't be shown").
+  { tab: "orders", flag: "view_bills", label: "Bills" },
 ];
 // Phase 2 (the ladder, 2026-07-06): permission-gated CONTROLS inside tabs. Matched by
 // CSS selector on every repaint (MutationObserver below), so a live-poll re-render can
@@ -12030,7 +12035,10 @@ function applyHierarchyView() {
   // what the rebuild removed. The server sends an empty list for the admin, and refuses these
   // tabs' endpoints for everyone else (tabGate in the editor API), so hiding is never the only
   // guard. Model keys → DOM tab names: the menu editor's tab is called "items".
-  const TAB_DOM = { editor: "items", ratings: "ratings", log: "log" };
+  // Model key → the DOM tab's name. The Bills menu's key is "bills" but its button is
+  // data-tab="orders"; with that line missing, switching the menu off for the restaurant
+  // looked for a tab called "bills", found nothing, and left the real one on screen.
+  const TAB_DOM = { editor: "items", ratings: "ratings", log: "log", bills: "orders" };
   for (const key of XRAY_WHO.tabsOff || []) {
     const btn = document.querySelector(`.tabs .tab[data-tab="${TAB_DOM[key] || key}"]`);
     if (btn) { xraySetTint(btn, false); xraySetHidden(btn, true); }

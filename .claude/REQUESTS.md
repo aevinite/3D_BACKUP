@@ -1072,3 +1072,34 @@ find anything just instantly fix it… till every error is not solved."*
 - [ ] **Open follow-up:** a per-OWNER permission override would need enforcement threaded
   through the owner routes (owner_entitlements is per restaurant today). Not built — the rows
   are honest read-only until he asks for it.
+
+### 2026-08-02 — "off must be INVISIBLE as well as refused" (his check on the profile work)
+
+Owner: *"making a permission off should not show that permission in the manager, and even if it's
+shown it should not work because from admin it's off"* — then: *"not work by that I mean not show
+the option to use it and they can't do that also."* Three real faults found and fixed:
+
+- [x] **The Bills tab ignored its own switch.** Its DOM tab is `orders`, but the panel's model→DOM
+  map only knew `editor/ratings/log` — so switching the **Bill** menu off for a restaurant hid
+  nothing. Added `bills → orders`.
+- [x] **The Bills tab had no permission entry at all**, so a person whose `view_bills` was Off still
+  saw the tab and got 403s inside it. Added it to `XRAY_TABS`.
+- [x] **The panel had no answer for the newer permissions.** `whoami` built `effectivePowers` from
+  the LEGACY flag list, which has no `view_bills` / `delete_bill`. It now walks every grant in the
+  model and resolves it with the SAME four rungs `managerCan()` uses (feature half → admin cap →
+  this person → `managerGrantValue`), so what the screen shows and what the server allows cannot
+  disagree.
+- [x] **`canDeleteBill()` never read the per-person switch** — the profile could say
+  "Delete a bill · On" for one manager and the server would still refuse. Now the person's own
+  value wins, exactly as `managerCan` resolves it (the admin cap above it is unchanged).
+- [x] **Proved in the running app, as the real staff login** (one sign-in, nothing destructive —
+  every action probe uses an id that cannot exist, so a 403 proves the gate fires before any work):
+  ratings · logs · dashboard · bills · reopen-a-bill · delete-a-bill · edit-menu · discount — each
+  one ON = tab present + not refused, OFF for that person = **tab gone AND the server refuses**.
+  Waiter panel: the tri-state handed to the tablet follows the person (button drawn/hidden), and
+  `tabletPerm` reads their override first.
+- [ ] **ONE ROW TO DECIDE (needs his yes).** *Change restaurant settings* (`edit_settings`) no
+  longer gates anything on the server: since 2026-08-01 a manager may only send table names/seats/
+  layout, each with its own switch, and everything else under settings is refused outright. So the
+  row only hides cards — a switch with nothing behind it, which his own rule forbids. Recommend
+  **deleting the row** from Access → Manager. Not touched: it is his screen.
