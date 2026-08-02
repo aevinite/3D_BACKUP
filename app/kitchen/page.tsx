@@ -9,12 +9,15 @@
 // pinned to its restaurant — see app/manager/page.tsx for the full story.
 // panelAdminRid enforces the entry rule (admin only via the console's link) and
 // strips ?rid= from non-admin visits.
-import { panelAdminRid } from "@/lib/panelGate";
+// ?as=<staff id> (ADMIN only): open this screen as ONE NAMED KITCHEN LOGIN (owner,
+// 2026-08-02, the profile's "Visit their panel"). The KDS has no per-person settings,
+// so this shows the real kitchen view and names whose screen it is.
+import { panelAdminRid, panelIframeSrc } from "@/lib/panelGate";
 import PanelFrame from "@/components/PanelFrame";
 
-export default async function KitchenPanel({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
-  const { rid } = await searchParams;
+export default async function KitchenPanel({ searchParams }: { searchParams: Promise<{ rid?: string; as?: string; view?: string }> }) {
+  const { rid, as, view } = await searchParams;
   const adminRid = await panelAdminRid("kitchen", rid);
-  const src = "/panels/kitchen/index.html" + (adminRid ? `?rid=${encodeURIComponent(adminRid)}` : "");
+  const src = panelIframeSrc("/panels/kitchen/index.html", adminRid, { as, view });
   return <PanelFrame src={src} title="Kitchen — live orders" />;
 }

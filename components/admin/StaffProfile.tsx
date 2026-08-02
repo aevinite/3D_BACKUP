@@ -26,6 +26,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
+import { openRestaurantPanel } from "@/components/admin/shared";
 import { useScrollMemory } from "@/components/admin/useOverlayParam";
 import type { TreeState } from "@/lib/accessTree";
 import {
@@ -59,6 +60,10 @@ const EMP_LABEL: Record<string, string> = { full_time: "Full time", part_time: "
 const PAY_LABEL: Record<string, string> = { monthly: "Monthly", daily: "Daily", hourly: "Hourly", per_shift: "Per shift" };
 const DAY_LABEL: Record<string, string> = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
 const STATE_LABEL: Record<string, string> = { on: "On", off: "Off", pin: "On + manager PIN" };
+// Which panel each person signs into — for the rail's "Visit their panel" button. The
+// route is /manager (the folder is still called editor internally; users never see it).
+const PANEL_PATH: Record<string, string> = { manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
+const PANEL_WORD: Record<string, string> = { manager: "manager panel", kitchen: "kitchen screen", tablet: "waiter tablet" };
 
 const money = (n: number | string | null | undefined) =>
   n === null || n === undefined || n === "" ? "—" : "₹" + Number(n).toLocaleString("en-IN");
@@ -255,6 +260,13 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
     try { await patch({ action: "set_active", active: !p.active }); flash(p.active ? "Login disabled" : "Login enabled"); reload(); onChanged?.(); }
     catch (e: any) { flash(e.message); }
   }
+  // Opens in a new tab, SYNCHRONOUSLY on the click (openRestaurantPanel) so the browser
+  // doesn't treat it as a popup. A blocked popup returns null — say so rather than let
+  // the tap vanish (the owner's "a tap must never disappear in silence" rule).
+  async function visitPanel() {
+    const w = await openRestaurantPanel(p.restaurant_id, PANEL_PATH[p.role] || "/manager", p.id);
+    if (!w) flash("Your browser blocked the new tab — allow pop-ups for this site.");
+  }
 
   return (
     <div className="stp-qa">
@@ -293,8 +305,22 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
         </>
       ) : null}
 
+      {/* VISIT THEIR PANEL (owner, 2026-08-02) — open the panel this person signs into,
+          as THEM: a waiter's own tables and their own switches, a manager's own menus.
+          Two things it fixes over the old plain link:
+            • it goes through /api/admin/act-as/go, which SETS the view-as restaurant on
+              the way — the bare /manager?rid=… link bounced back to the console whenever
+              this browser hadn't entered a restaurant yet (lib/panelGate requires it);
+            • it carries ?as=<their id>, so the panel renders their view instead of the
+              admin X-ray. Writes are still the admin's — nothing is ever recorded as them.
+          Owners are left out on purpose: an owner can hold several restaurants, and their
+          row's restaurant_id is the #1 home namespace, not "the one they run" — the Owners
+          roster asks WHICH restaurant first and links from there. */}
       {d.restaurant && p.role !== "owner" ? (
-        <a className="stp-btn" href={`/${p.role === "tablet" ? "tablet" : p.role}?rid=${p.restaurant_id}`} target="_blank" rel="noreferrer">👁 Open their panel</a>
+        <button className="stp-btn" onClick={visitPanel}
+          title={`Open ${d.restaurant.name}'s ${PANEL_WORD[p.role] || "panel"} exactly as ${p.name || p.username} sees it`}>
+          👁 Visit their panel
+        </button>
       ) : null}
       <a className="stp-btn" href={`/aevinite/access?restaurant=${p.restaurant_id}`}>🔑 Access &amp; permissions</a>
       <button className="stp-btn" onClick={toggleActive}>{p.active ? "⏸ Disable this login" : "▶ Enable this login"}</button>

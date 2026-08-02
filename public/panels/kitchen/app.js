@@ -31,10 +31,15 @@ const PANEL_RID = new URLSearchParams(location.search).get("rid") || "";
 // ACTUAL-VIEW toggle (owner, 2026-07-28): ?view=real on an admin-view tab makes whoami
 // answer as the real kitchen screen. Per-tab like ?rid, echoed on every call.
 const PANEL_VIEW_REAL = PANEL_RID && new URLSearchParams(location.search).get("view") === "real";
+// VISIT-A-PERSON'S-PANEL (owner, 2026-08-02): ?as=<staff id> on an admin-view tab —
+// opened from that kitchen login's profile. The KDS has no per-person settings, so this
+// only names whose screen it is (and implies the real view). Re-checked server-side.
+const PANEL_AS = PANEL_RID ? (new URLSearchParams(location.search).get("as") || "") : "";
 const ridQ = (path) => {
   if (!PANEL_RID) return path;
   path += (path.includes("?") ? "&" : "?") + "rid=" + encodeURIComponent(PANEL_RID);
   if (PANEL_VIEW_REAL) path += "&view=real";
+  if (PANEL_AS) path += "&as=" + encodeURIComponent(PANEL_AS);
   return path;
 };
 const api = async (method, path, body) => {
@@ -1099,9 +1104,11 @@ if (window.LFH_RT) {
 
   // Flip this admin-view TAB between the full admin view and the "actual kitchen" view
   // (?view=real). Pure URL state — reloading with/without the param is the whole toggle.
+  // Leaving the real view also drops the person pin (?as=) — the full admin view is
+  // nobody's screen, so it must stop carrying a name.
   const setViewReal = (on) => {
     const u = new URL(location.href);
-    if (on) u.searchParams.set("view", "real"); else u.searchParams.delete("view");
+    if (on) u.searchParams.set("view", "real"); else { u.searchParams.delete("view"); u.searchParams.delete("as"); }
     location.replace(u.toString());
   };
   api("GET", "/whoami").then((w) => {
@@ -1125,7 +1132,7 @@ if (window.LFH_RT) {
         ? `<button id="xraySimBtn" title="Reload this tab showing exactly what the real kitchen screen sees">👁 See actual panel</button>`
         : "");
     rb.innerHTML =
-      `<span class="rb-tag">${who} view${sim ? " · as real kitchen" : ""}</span>` +
+      `<span class="rb-tag">${who} view${sim ? (w.asName ? ` · as ${esc(w.asName)}` : " · as real kitchen") : ""}</span>` +
       body +
       `<span class="rb-spacer"></span>` +
       simBtn +
