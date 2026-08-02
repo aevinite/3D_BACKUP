@@ -31,6 +31,8 @@ import { SECTIONS, type Node, type Section } from "@/lib/accessTree";
  *  deliberate — every entry here is a word the owner or a client has used for the thing. */
 const SYNONYMS: Record<string, string> = {
   menu: "guest menu qr diner",
+  own_manager_mode: "manager mode live floor tables take order owner panel work the floor",
+  d_own_manager_mode: "manager mode live floor tables take order owner panel work the floor",
   dining_sessions: "open table seat party session",
   ratings: "google review stars feedback rating",
   google_review_url: "google link review url",
