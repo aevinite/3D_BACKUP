@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=1540f7fe" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=4d0e325f" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -80,7 +80,19 @@
       <!-- Category filter chips (Dishes tab only): tap a category to see just its
            dishes. Built by renderCatFilter() in app.js; hidden on other tabs. -->
       <div id="catFilter" class="cat-filter" hidden></div>
-      <ul id="list" class="list"></ul>
+      <!-- Skeleton rows show INSTANTLY on open and are replaced by the first renderList()
+           (app.js writes list.innerHTML, which clears them). Without these the sidebar was a
+           blank white column until /all came back — the same "half-built screen" the admin
+           panel's unstyled flash was. Styled from style.css, which is a real <link>, so the
+           placeholder itself can never appear unstyled. -->
+      <ul id="list" class="list">
+        <li class="list-item lrow-skel"><span class="sk-thumb"></span><span class="sk-txt"><span class="sk-line"></span><span class="sk-line sub"></span></span></li>
+        <li class="list-item lrow-skel"><span class="sk-thumb"></span><span class="sk-txt"><span class="sk-line"></span><span class="sk-line sub"></span></span></li>
+        <li class="list-item lrow-skel"><span class="sk-thumb"></span><span class="sk-txt"><span class="sk-line"></span><span class="sk-line sub"></span></span></li>
+        <li class="list-item lrow-skel"><span class="sk-thumb"></span><span class="sk-txt"><span class="sk-line"></span><span class="sk-line sub"></span></span></li>
+        <li class="list-item lrow-skel"><span class="sk-thumb"></span><span class="sk-txt"><span class="sk-line"></span><span class="sk-line sub"></span></span></li>
+        <li class="list-item lrow-skel"><span class="sk-thumb"></span><span class="sk-txt"><span class="sk-line"></span><span class="sk-line sub"></span></span></li>
+      </ul>
       <div class="sidebar-resizer" id="sidebarResizer" title="Drag to resize"></div>
     </aside>
 

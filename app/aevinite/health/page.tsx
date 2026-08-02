@@ -7,6 +7,7 @@
 // itself become a load source.
 import { useCallback, useEffect, useState } from "react";
 import { timeAgo, useActiveAutoRefresh } from "@/components/admin/shared";
+import { SkelList } from "@/components/admin/Skeleton";
 
 type Health = {
   dbOk: boolean;
@@ -182,7 +183,7 @@ export default function AdminHealth() {
         </div>
       )}
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
-        {!pd ? <div className="adm-empty">{pErr ? "Couldn't load." : "Loading…"}</div> : pd.rows.length === 0 ? (
+        {!pd ? (pErr ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={4} label="Loading" />) : pd.rows.length === 0 ? (
           <div className="adm-empty">No restaurants yet.</div>
         ) : (
           // Horizontal scroll on narrow screens (the 5-col grid is ~560px min).

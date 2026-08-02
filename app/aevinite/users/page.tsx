@@ -11,6 +11,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { CopyButton } from "@/components/admin/CopyButton";
 import StaffProfile from "@/components/admin/StaffProfile";
 import { useOverlayParam } from "@/components/admin/useOverlayParam";
+import { SkelList, SkelLine } from "@/components/admin/Skeleton";
 
 type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
@@ -239,8 +240,10 @@ export default function AdminUsers() {
       ) : null}
 
       {/* Count + grouped results (browse by restaurant) */}
-      <div className="usp-count">{loading ? "Loading…" : filtered ? `${visible.length} of ${users.length} shown` : `${users.length} ${users.length === 1 ? "person" : "people"}`}</div>
-      {loading ? null : users.length === 0 ? (
+      <div className="usp-count">{loading ? <SkelLine w={92} size="sm" /> : filtered ? `${visible.length} of ${users.length} shown` : `${users.length} ${users.length === 1 ? "person" : "people"}`}</div>
+      {/* Loading shows the SHAPE of the list (avatar + name + meta + role pill), so when the
+          real rows land nothing moves — it was a bare "Loading…" line that then jumped. */}
+      {loading ? <SkelList rows={6} label="Loading users" /> : users.length === 0 ? (
         <div className="usp-empty">No users yet — add your first one with “+ Add user”.</div>
       ) : visible.length === 0 ? (
         <div className="usp-empty">No one matches. Try a different search, or clear the filters.</div>
@@ -281,7 +284,15 @@ export default function AdminUsers() {
 // Spotlight look for the list view (owner 2026-07-24): electric-blue accent + a search-first
 // hero + grouped result rows. Scoped to .usp so the rest of the admin keeps its own accent.
 function UsersStyle() {
-  return <style jsx global>{`
+  // PLAIN <style>, deliberately NOT `<style jsx global>` (owner, 2026-08-02). styled-jsx
+  // injects its CSS from JavaScript AFTER hydration, so this page shipped with none of its
+  // own styling in the HTML: every control below painted as a raw browser default — white
+  // boxes, unstyled selects, bare "Loading" text — until the bundle downloaded and ran. A
+  // plain <style> is server-rendered into the document, and it sits ABOVE the markup it
+  // styles, so the CSS is parsed before any of that markup paints. Zero unstyled frames.
+  // Do not convert this back to styled-jsx. (/aevinite/rate-limits and /repair were always
+  // plain <style> and never had the flash — that is the proof.)
+  return <style href="adm-users" precedence="default">{`
   .usp { --ub:#3b82f6; --ub2:#60a5fa; max-width:1100px; }
   .usp-banner { border-radius:14px; padding:14px 16px; margin-bottom:14px; border:var(--border); background:var(--card); }
   .usp-banner.err { border-color:#7f1d1d; color:#fca5a5; }

@@ -4459,3 +4459,53 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   border-radius: 999px; padding: 7px 13px;
 }
 .adm-setchips button:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+
+/* ══ SKELETON LOADING KIT (owner, 2026-08-02) ═══════════════════════════════════════
+   Why these rules live HERE and not in a page's own <style>: globals.css is imported by
+   the root layout, so Next ships it as a real <link> in <head> — the browser will not
+   paint until it has parsed it. A skeleton defined in a page-injected stylesheet would
+   itself flash unstyled for the moments before its JavaScript runs, which is the exact
+   fault this kit exists to remove. Never move these into a component.
+
+   Shapes only — every piece reuses the adm-shimmer keyframe already defined above.
+   Use them for the gap between "the screen exists" and "its data has arrived". */
+.skel { position: relative; overflow: hidden; border-radius: 8px; background: color-mix(in srgb, var(--text) 9%, transparent); }
+.skel::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 11%, transparent), transparent);
+  animation: adm-shimmer 1.35s infinite;
+}
+/* Stagger each row a little so the sweep reads as one wave down the list, not a strobe. */
+.skel-stack > *:nth-child(2) .skel::after { animation-delay: .09s; }
+.skel-stack > *:nth-child(3) .skel::after { animation-delay: .18s; }
+.skel-stack > *:nth-child(4) .skel::after { animation-delay: .27s; }
+.skel-stack > *:nth-child(5) .skel::after { animation-delay: .36s; }
+.skel-stack > *:nth-child(n+6) .skel::after { animation-delay: .45s; }
+
+.skel-line { height: 11px; }                      /* a line of body text */
+.skel-line.lg { height: 15px; border-radius: 7px; }
+.skel-line.sm { height: 9px; border-radius: 5px; }
+.skel-av { width: 40px; height: 40px; border-radius: 11px; flex: none; }   /* avatar / thumb */
+.skel-chip { height: 34px; border-radius: 10px; flex: none; }
+.skel-btn { height: 38px; border-radius: 10px; flex: none; }
+
+/* One list row, shaped like the real .usp-row / .adm-row: avatar + two text lines + a pill. */
+.skel-row {
+  display: flex; align-items: center; gap: 13px;
+  padding: 11px 14px; margin-bottom: 8px; border-radius: 12px;
+  background: var(--card); border: 1px solid var(--border);
+}
+.skel-row .txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.skel-card { background: var(--card); border: var(--border); border-radius: 14px; padding: 18px; }
+.skel-toolbar { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 14px; }
+
+/* A skeleton is decorative — never announce the placeholder text to a screen reader; the
+   live region that replaces it does the announcing. */
+.skel-wrap { }
+@media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
+/* Visually hidden but read aloud — used by the skeletons so a screen reader hears
+   "Loading users" once instead of reading a wall of empty placeholder boxes. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}

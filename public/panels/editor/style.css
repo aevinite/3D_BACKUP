@@ -3011,3 +3011,32 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 .au-who b { font-size: 12.5px; }
 .au-who small { font-size: 11px; color: var(--muted); }
 @media (max-width: 560px) { .au-row { flex-wrap: wrap; } .au-who { text-align: left; flex-direction: row; gap: 8px; } }
+
+/* Sidebar list skeleton (owner, 2026-08-02) — the dish/bill list used to be a blank white
+   column between opening the panel and /all returning. These rows sit in index.html so they
+   are on screen at first paint; the first renderList() overwrites the <ul> and they vanish.
+   Same shape as a real .list-item, so nothing moves when the real rows arrive. */
+.lrow-skel { pointer-events: none; cursor: default; gap: 12px; }
+.lrow-skel:hover { background: none; transform: none; }
+.lrow-skel .sk-thumb, .lrow-skel .sk-line {
+  position: relative; overflow: hidden; border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 9%, transparent);
+}
+.lrow-skel .sk-thumb { width: 38px; height: 38px; border-radius: 9px; flex: 0 0 auto; }
+.lrow-skel .sk-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.lrow-skel .sk-line { height: 12px; width: 68%; }
+.lrow-skel .sk-line.sub { height: 9px; width: 40%; }
+.lrow-skel .sk-thumb::after, .lrow-skel .sk-line::after {
+  content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--text) 12%, transparent), transparent);
+  animation: lrow-shimmer 1.35s infinite;
+}
+.lrow-skel:nth-child(2) .sk-line::after { animation-delay: .09s; }
+.lrow-skel:nth-child(3) .sk-line::after { animation-delay: .18s; }
+.lrow-skel:nth-child(4) .sk-line::after { animation-delay: .27s; }
+.lrow-skel:nth-child(5) .sk-line::after { animation-delay: .36s; }
+.lrow-skel:nth-child(6) .sk-line::after { animation-delay: .45s; }
+@keyframes lrow-shimmer { 100% { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) {
+  .lrow-skel .sk-thumb::after, .lrow-skel .sk-line::after { animation: none; }
+}

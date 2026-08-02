@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useActiveAutoRefresh } from "@/components/admin/shared";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { useToast } from "@/components/admin/toast";
+import { SkelList } from "@/components/admin/Skeleton";
 
 type Row = {
   id: string; name: string; slug: string; active: boolean;
@@ -80,7 +81,7 @@ export default function AdminBilling() {
         </div>
 
         {rows === null ? (
-          <div className="adm-empty">Loading…</div>
+          <SkelList rows={4} label="Loading" />
         ) : filtered.length === 0 ? (
           <div className="adm-empty">No restaurants match &ldquo;{q}&rdquo;.</div>
         ) : (
@@ -275,7 +276,7 @@ function BillingEditor({ row, onClose, onChanged }: { row: Row; onClose: () => v
             <div style={{ borderTop: "var(--border)", paddingTop: 16 }}>
               <h2 style={{ margin: "0 0 10px", fontSize: 13.5, fontWeight: 800 }}>Payment history</h2>
               {payments === null ? (
-                <div className="adm-empty">Loading…</div>
+                <SkelList rows={4} label="Loading" />
               ) : payments.length === 0 ? (
                 <div className="adm-empty">No payments recorded yet.</div>
               ) : (

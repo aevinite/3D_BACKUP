@@ -235,7 +235,7 @@ export default function AdminOwners() {
           onCreated={(id) => { setShowCreate(false); load().then(() => setSelId(id)); }} />
       )}
 
-      <style jsx>{`
+      <style href="adm-owners-1" precedence="default">{`
         .own-page { display: flex; flex-direction: column; overflow-x: hidden; }
         .own-head { flex: none; }
         /* minmax(0,1fr), not 1fr: a bare 1fr track has an implicit min of min-content,
@@ -823,7 +823,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
         <DeleteForeverModal owner={owner} busy={busy} onClose={() => setShowDelete(false)} onConfirm={doDelete} />
       )}
 
-      <style jsx>{`
+      <style href="adm-owners-2" precedence="default">{`
         .own-back { display: none; }
         @media (max-width: 860px) {
           .own-back { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; border: var(--border); background: var(--bg); color: var(--text); cursor: pointer; flex: none; }

@@ -18,6 +18,7 @@ import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
+import { SkelList } from "@/components/admin/Skeleton";
 
 type Restaurant = { id: string; name: string };
 type Member = {
@@ -249,7 +250,7 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
   // Which row's full detail popup is open (every row is clickable → the organized detail card).
   const [detailRow, setDetailRow] = useState<Action | null>(null);
   if (err) return <div className="adm-empty">Couldn&rsquo;t load the operations log. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
-  if (rows === null) return <div className="adm-empty">Loading…</div>;
+  if (rows === null) return <SkelList rows={6} label="Loading log" />;
   if (rows.length === 0) return <div className="adm-empty">No staff actions {scopedName ? `for ${scopedName}` : "yet"}.</div>;
   return (
     <>
@@ -346,7 +347,7 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
 
 function CustTable({ data, err, onRetry }: { data: CustData | null; err: boolean; onRetry: () => void }) {
   if (err) return <div className="adm-empty">Couldn&rsquo;t load the customer log. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
-  if (data === null) return <div className="adm-empty">Loading…</div>;
+  if (data === null) return <SkelList rows={6} label="Loading log" />;
   const { members, blocklist, orders, calls } = data;
   // Roll up each member's order count + call count. (No ₹ spend here — the admin
   // panel shows no earnings anywhere, owner 2026-07-03.)
