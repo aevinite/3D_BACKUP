@@ -60,24 +60,49 @@ const OWNER_MODE = new URLSearchParams(location.search).get("ownermode") === "1"
 // gated exactly as it is in the real manager panel, and the server still decides what an owner
 // may write (the per-field manager gate in /api/editor only applies to role "manager").
 const OWNER_HIDDEN_TABS = ["items", "categories", "filters", "ratings", "log"];
-if (MENU_ONLY || INV_ONLY || OWNER_MODE) { try { document.documentElement.setAttribute("data-theme", MENU_SKIN); } catch (e) {} }
+// THE LIVE SKIN — never read `MENU_SKIN` again after boot (owner, 2026-08-03).
+// `MENU_SKIN` is frozen at whatever ?skin= the iframe was CREATED with. The skin can then
+// move under it (the cockpit's light/dark toggle arrives by postMessage, no reload), so any
+// later code that re-applied "skin-" + MENU_SKIN put the ORIGINAL skin class back — and
+// because it only ADDED, the body ended up wearing skin-light AND skin-dark at once. Equal
+// specificity means the later rule wins, which is the dark block: switch to white, open
+// Platform/Parcel (or any tab), and the panel snapped back to dark. One writer now owns
+// every skin surface — the <html> attribute and the pair of body classes — and it always
+// clears the other class first.
+let CUR_SKIN = MENU_SKIN;
+function applyEmbedSkin(s) {
+  CUR_SKIN = s === "dark" ? "dark" : "light";
+  try {
+    // Only write data-theme when it actually changes: an identical setAttribute still fires
+    // a MutationRecord, and the Dashboard listens on that attribute to redraw its charts.
+    if (document.documentElement.getAttribute("data-theme") !== CUR_SKIN) {
+      document.documentElement.setAttribute("data-theme", CUR_SKIN);
+    }
+    const cl = document.body.classList;
+    if (!cl.contains("skin-" + CUR_SKIN) || cl.contains(CUR_SKIN === "dark" ? "skin-light" : "skin-dark")) {
+      cl.remove("skin-light", "skin-dark");
+      cl.add("skin-" + CUR_SKIN);
+    }
+  } catch (e) {}
+}
 // Mark the body NOW (app.js loads at the end of <body>) so the very first paint already
-// has the owner skin + hidden tabs — setTab re-adds the same classes, harmlessly.
-if (OWNER_MODE) { try { document.body.classList.add("owner-mode", "skin-" + MENU_SKIN); } catch (e) {} }
+// has the owner skin + hidden tabs.
+if (MENU_ONLY || INV_ONLY || OWNER_MODE) {
+  try { if (OWNER_MODE) document.body.classList.add("owner-mode"); } catch (e) {}
+  applyEmbedSkin(MENU_SKIN);
+}
 // LIVE skin sync (owner, 2026-08-02: "it will replicate the mode you are in owner").
 // The owner shell posts { type:"lfh-owner-skin", skin } on load AND whenever its
 // light/dark toggle flips, so the embedded panel follows the cockpit instantly —
-// no reload, no refetch. Same-origin only; anything else is ignored.
-if (OWNER_MODE) {
+// no reload, no refetch. Same-origin only; anything else is ignored. Wired for ALL
+// three embeds (Manager mode, Menu, Inventory) — a toggle in the cockpit has to reach
+// every panel it hosts, not just the one that happened to be built with it.
+if (MENU_ONLY || INV_ONLY || OWNER_MODE) {
   window.addEventListener("message", (e) => {
     if (e.origin !== location.origin) return;
     const d = e.data;
     if (!d || d.type !== "lfh-owner-skin" || (d.skin !== "light" && d.skin !== "dark")) return;
-    try {
-      document.documentElement.setAttribute("data-theme", d.skin);
-      document.body.classList.remove("skin-light", "skin-dark");
-      document.body.classList.add("skin-" + d.skin);
-    } catch (err) {}
+    applyEmbedSkin(d.skin);
   });
 }
 // Tiny localStorage helpers so a refresh keeps you exactly where you were —
@@ -10519,15 +10544,18 @@ async function loadPlatform() {
 function setTab(tab) {
   // Menu-only embed: the only reachable tabs are the menu ones — redirect any other target
   // (boot fallbacks, realtime handlers) to Dishes, and mark the body so the CSS hides the rest.
-  if (MENU_ONLY) { document.body.classList.add("menu-only", "skin-" + MENU_SKIN); if (!MENU_TABS.includes(tab)) tab = "items"; }
+  // NB: always `applyEmbedSkin(CUR_SKIN)`, never "skin-" + MENU_SKIN — see the note at the
+  // top. MENU_SKIN is the skin this iframe was BORN with; CUR_SKIN is the one the cockpit
+  // is wearing right now.
+  if (MENU_ONLY) { document.body.classList.add("menu-only"); applyEmbedSkin(CUR_SKIN); if (!MENU_TABS.includes(tab)) tab = "items"; }
   // Layout-preview embed (mig 226): the admin is only looking at tile SIZE, so pin the floor
   // and let .floor-preview CSS strip the chrome. Same shape as the menu-only redirect above.
   if (FLOOR_PREVIEW) { document.body.classList.add("floor-preview"); tab = "tables"; }
-  if (INV_ONLY) { document.body.classList.add("menu-only", "skin-" + MENU_SKIN); if (tab !== "inventory") tab = "inventory"; }
+  if (INV_ONLY) { document.body.classList.add("menu-only"); applyEmbedSkin(CUR_SKIN); if (tab !== "inventory") tab = "inventory"; }
   // Owner "Manager mode" embed: the four tabs the owner panel already covers are
   // unreachable — any target pointing at one (a stale saved tab, a boot fallback, a
   // realtime handler) lands on the live floor instead.
-  if (OWNER_MODE) { document.body.classList.add("owner-mode", "skin-" + MENU_SKIN); if (OWNER_HIDDEN_TABS.includes(tab)) tab = "tables"; }
+  if (OWNER_MODE) { document.body.classList.add("owner-mode"); applyEmbedSkin(CUR_SKIN); if (OWNER_HIDDEN_TABS.includes(tab)) tab = "tables"; }
   // Leaving the Dashboard: destroy its live Chart.js instances so their detached canvases +
   // resize handlers don't linger until the next Dashboard visit.
   if (state.tab === "dash" && tab !== "dash") { dashCharts.forEach((c) => { try { c.destroy(); } catch {} }); dashCharts = []; }
