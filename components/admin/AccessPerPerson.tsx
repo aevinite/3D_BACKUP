@@ -19,7 +19,7 @@ import { nodeValue, type TreeState } from "@/lib/accessTree";
 // The rows each role has now live in lib/staffCaps, shared with the person's PROFILE panel
 // (components/admin/StaffProfile) and with the admin write route. One list, three screens —
 // this used to be a private copy here, and a second copy would be free to drift.
-import { capsForRole, type Cap } from "@/lib/staffCaps";
+import { capGroupsForRole, capVisible } from "@/lib/staffCaps";
 
 type Staff = { id: string; name: string | null; username: string; role: string; active?: boolean; permissions?: Record<string, string> };
 
@@ -131,13 +131,21 @@ const countOverrides = (u: Staff) => {
 };
 
 function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null; onSet: (u: Staff, key: string, v: string) => void }) {
-  // Only the rows that can genuinely be set for ONE person. An owner's rows come back too
-  // (their panel's pages), but those are a restaurant setting — offering them here would be a
-  // switch that saves nothing. They are shown, read-only, on the owner's profile instead.
-  const caps = capsForRole(person.role).filter((c) => c.perPerson);
+  // THE SAME STRUCTURE AS ACCESS → MANAGER (owner, 2026-08-02: "inside permission, there will
+  // be the same thing — manager menu, permission for manager and manager setting"). The groups
+  // and rows come from the one tree, so a row added to the Manager section appears here by
+  // itself — and a row whose FEATURE is off for this restaurant is NOT shown at all ("if the
+  // feature is closed, it should not even be seen there"): a per-person dropdown for a thing
+  // the restaurant doesn't have would be a dead switch wearing a person's name.
+  // Restaurant-wide rows (the mgrset sections, an owner's pages) show read-only — the truth,
+  // never a control that saves nothing.
+  const groups = capGroupsForRole(person.role)
+    .map((g) => ({ ...g, caps: g.caps.filter((c) => capVisible(c, st)) }))
+    .filter((g) => g.caps.length);
+  const editable = groups.some((g) => g.caps.some((c) => c.perPerson));
   const roleName = ROLE_LABEL[person.role] || person.role;
 
-  if (!caps.length) {
+  if (!editable) {
     // Owners and kitchen staff have no per-person enforcement path, so we say that plainly
     // rather than render switches that would save and never be read.
     return (
@@ -166,31 +174,45 @@ function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null
         Anything you set below applies to this one person and takes effect on their very next tap; no re-login.
       </p>
 
-      {caps.map(({ node, key, pin }) => {
-        const roleDefault = st ? nodeValue(node, st) : undefined;
-        const cur = person.permissions?.[key];
-        const value = cur === "on" || cur === "off" || cur === "pin" ? cur : "default";
-        const defaultReads = roleDefault === undefined ? "" : typeof roleDefault === "string"
-          ? (STATE_LABEL[roleDefault] || String(roleDefault))
-          : roleDefault ? "On" : "Off";
-        return (
-          <div key={key} className="app-cap">
-            <div className="app-cap-b">
-              <div className="nm">{node.name}</div>
-              <div className="ds">{node.what}</div>
-            </div>
-            <div className="app-segs" role="radiogroup" aria-label={node.name}>
-              {OVERRIDE_STATES(pin).map((s) => (
-                <button key={s} role="radio" aria-checked={value === s}
-                  className={`${value === s ? "on" : ""} ${s === "default" ? "def" : ""}`}
-                  onClick={() => onSet(person, key, s)}>
-                  {s === "default" && defaultReads ? `Default · ${defaultReads}` : STATE_LABEL[s]}
-                </button>
-              ))}
-            </div>
-          </div>
-        );
-      })}
+      {groups.map((g) => (
+        <div key={g.group}>
+          <div className="app-grp-h">{g.group}</div>
+          {g.caps.map(({ node, key, pin, perPerson }) => {
+            const roleDefault = st ? nodeValue(node, st) : undefined;
+            const cur = person.permissions?.[key];
+            const value = cur === "on" || cur === "off" || cur === "pin" ? cur : "default";
+            const defaultReads = roleDefault === undefined ? "" : typeof roleDefault === "string"
+              ? (STATE_LABEL[roleDefault] || String(roleDefault))
+              : roleDefault ? "On" : "Off";
+            return (
+              <div key={key} className="app-cap">
+                <div className="app-cap-b">
+                  <div className="nm">{node.name}</div>
+                  <div className="ds">{node.what}</div>
+                </div>
+                {perPerson ? (
+                  <div className="app-segs" role="radiogroup" aria-label={node.name}>
+                    {OVERRIDE_STATES(pin).map((s) => (
+                      <button key={s} role="radio" aria-checked={value === s}
+                        className={`${value === s ? "on" : ""} ${s === "default" ? "def" : ""}`}
+                        onClick={() => onSet(person, key, s)}>
+                        {s === "default" && defaultReads ? `Default · ${defaultReads}` : STATE_LABEL[s]}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  /* Restaurant-wide row (a Manager-settings section): the truth, read-only —
+                     a per-person dropdown here would save a key nothing reads. */
+                  <div className="app-fixed">
+                    <span className={`chip ${roleDefault === false ? "off" : "on"}`}>{roleDefault === false ? "Off" : "On"}</span>
+                    <span className="hint">set for the restaurant</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }
@@ -217,6 +239,12 @@ function PerPersonStyle() {
   .app-phead h2 { margin:0; font-size:16.5px; font-weight:800; }
   .app-phead p { margin:2px 0 0; font-size:12.5px; color:var(--muted); }
   .app-note { font-size:12.5px; color:var(--muted); line-height:1.6; margin:0 0 14px; padding:10px 12px; border-radius:10px; background:var(--bg); border:var(--border); }
+  .app-grp-h { font-size:11px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); margin:16px 2px 7px; }
+  .app-fixed { display:flex; align-items:center; gap:8px; flex:none; }
+  .app-fixed .chip { font-size:11px; font-weight:800; padding:4px 10px; border-radius:8px; }
+  .app-fixed .chip.on { color:#22c55e; background:color-mix(in srgb,#22c55e 14%,transparent); }
+  .app-fixed .chip.off { color:#ef4444; background:color-mix(in srgb,#ef4444 14%,transparent); }
+  .app-fixed .hint { font-size:11px; color:var(--muted); }
   .app-cap { display:flex; align-items:flex-start; gap:14px; padding:11px 12px; border-radius:11px; background:var(--bg); margin-bottom:7px; }
   .app-cap-b { flex:1; min-width:0; }
   .app-cap .nm { font-size:14px; font-weight:700; }

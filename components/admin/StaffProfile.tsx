@@ -30,8 +30,8 @@ import { openRestaurantPanel } from "@/components/admin/shared";
 import { useScrollMemory } from "@/components/admin/useOverlayParam";
 import type { TreeState } from "@/lib/accessTree";
 import {
-  capGroupsForRole, capStates, effectiveCap, roleDefault, countOverrides,
-  GROUP_MANAGE, type Cap, type CapValue,
+  capGroupsForRole, capStates, capVisible, effectiveCap, roleDefault, countOverrides,
+  type Cap, type CapValue,
 } from "@/lib/staffCaps";
 import {
   completeness, EMPLOYMENT_TYPES, PAY_TYPES, PAY_MODES, PAY_KINDS, WEEK_DAYS,
@@ -331,7 +331,15 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
 // ── ② PERMISSIONS — the dropdown block ───────────────────────────────────────
 function Permissions({ d, tree, patch, reload, flash }: Kit & { tree: TreeState | null }) {
   const p = d.person;
-  const groups = useMemo(() => capGroupsForRole(p.role), [p.role]);
+  // Only the rows this RESTAURANT can offer (owner, 2026-08-02): a row whose FEATURE is off is
+  // not shown at all — "it should not even be seen there" — and a group emptied that way folds
+  // away with it. The groups themselves are the Access screen's own three, same names.
+  const groups = useMemo(
+    () => capGroupsForRole(p.role)
+      .map((g) => ({ ...g, caps: g.caps.filter((c) => capVisible(c, tree)) }))
+      .filter((g) => g.caps.length),
+    [p.role, tree],
+  );
   const [open, setOpen] = useState(false);
   const [perms, setPerms] = useState<Record<string, string>>(p.permissions || {});
   useEffect(() => { setPerms(p.permissions || {}); }, [p.permissions]);
@@ -388,7 +396,10 @@ function Permissions({ d, tree, patch, reload, flash }: Kit & { tree: TreeState 
           {groups.map((g) => (
             <div className="stp-permgrp" key={g.group}>
               <div className="stp-permgrp-h">
-                <b>{g.group === GROUP_MANAGE ? `What ${shortName(p.name || p.username)} may manage` : g.group}</b>
+                {/* The group name is the Access screen's own (owner, 2026-08-02) — the old
+                    per-person rewording ("What Ravi may manage") made the two screens read as
+                    different systems when they are one. */}
+                <b>{g.group}</b>
                 <i>{g.caps.length} {g.caps.length === 1 ? "setting" : "settings"}</i>
               </div>
               {g.caps.map((cap) => (
