@@ -5789,7 +5789,11 @@ function flipOrderItems(o, from, to) {
 // summaryTableOpen(t): is table t currently OPEN, per the slim summary? A tile is open
 // when it has a summary entry whose state is anything but 'free' or 'req' (those two mean
 // no open session). The board is no longer fetched whole, so the bulk actions read this.
-const CHAIR_SVG = `<svg class="ft-chair" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3.5a1 1 0 0 1 1 1V11h10V4.5a1 1 0 1 1 2 0V12a1 1 0 0 1-1 1h-1.2l.7 3.3a1 1 0 0 1-2 .4L14.8 13H9.2l-.7 3.7a1 1 0 1 1-2-.4L7.2 13H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/></svg>`;
+// The seat count's chair (top-right of every floor tile) is Font Awesome's solid `fa-chair`
+// — the same glyph the single-restaurant reference app uses, chosen by the owner 2026-08-03
+// over the old hand-drawn outline. FA is already loaded by this panel (/panels/vendor/fa),
+// so it costs no extra request; .ft-chair sizes it by font-size and inherits the text colour.
+const CHAIR_SVG = `<i class="fas fa-chair ft-chair" aria-hidden="true"></i>`;
 
 // ── AUDIT: every removal, searchable by whatever you remember ──────────────────────────────
 // He asked to be able to find one fast — "from which bill, which item was related, which KOT was
