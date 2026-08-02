@@ -24,7 +24,11 @@ import { MANAGER_POWER_FLAGS } from "@/lib/accessModel";
 // owner's equivalent of the manager's Log tab, which was the one panel tab never wired.
 // "manager_mode" (2026-08-02) gates the owner panel's Manager mode page — the full live
 // manager panel (floor/bills/platform/…) embedded in the owner cockpit. Absent = ON.
-export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu", "logs", "manager_mode"] as const;
+// "logs_signins" / "logs_service" / "logs_staff_changes" (2026-08-02) are VISIBILITY
+// switches for the owner's Activity page — which KINDS of rows it shows (read by
+// /api/owner/oplog). They never stop anything being RECORDED: the money/bill audit
+// trail is not switchable (docs/COMPLIANCE-GUARDRAILS.md). Absent = ON.
+export const OWNER_SECTION_KEYS = ["reports", "staff", "issues", "ratings", "customers", "settings", "menu", "logs", "manager_mode", "logs_signins", "logs_service", "logs_staff_changes"] as const;
 export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 
 // The manager powers (mig 091). The admin's availability switch for each lives under
