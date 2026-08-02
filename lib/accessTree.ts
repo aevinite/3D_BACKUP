@@ -117,6 +117,10 @@ export type Node = {
   // `branding` renders the branding & theme editor. Owner, 2026-08-01: "you have completely
   // removed setting and permission from restaurant detail — everything will be here".
   panel?: "settings:sessions" | "settings:kitchen" | "settings:banquet" | "settings:billing" | "settings:tables" | "settings:floor" | "settings:qr" | "branding";
+  // A format screen that can SHOW its finished page: puts a "Preview / Print" button at the
+  // top right of the embedded editor, opening the real bill drawn from this restaurant's
+  // settings (owner, 2026-08-02). The value picks which bill.
+  preview?: "bill" | "parcel";
 };
 
 export type Section = { id: string; name: string; blurb: string; icon: string; children: Node[] };
@@ -315,6 +319,26 @@ export const SECTIONS: Section[] = [
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
         bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen", configurableWhenOff: true,
         what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine. The printer check and the sample ticket are inside." },
+      // ⚡ QO/P — the floor's quick-order screen (owner, 2026-08-02). A main feature, not an
+      // extra: it is how a whole order gets punched in at speed. Default ON (mig 257) because
+      // it REPLACED the 🥡 New Parcel button every floor already had — shipping it off would
+      // take that button away from every restaurant on upgrade.
+      { id: "qop", name: "Quick order / Parcel (QO/P)", def: true, fresh: true,
+        bind: { t: "setting", key: "qop_allowed" },
+        what: "The QO/P button on the live floor: pick a category, tap a dish, and it drops straight back to the categories so a whole order goes in fast — then it asks where the order goes. The two places it can send to are the switches below. OFF here removes the button altogether; the KOT menu beside it stays.",
+        children: [
+          // The two DESTINATIONS, each its own switch (owner, 2026-08-02). Every combination
+          // is spelled out on screen because the interesting cases are the half-on ones.
+          { id: "qop_tables", name: "Quick order — send to a table", def: true,
+            bind: { t: "setting", key: "qop_tables_allowed" },
+            what: "The list of tables on the “where does it go?” step. ON with Parcel: the step shows the Parcel bar on top and every table under it. ON with Parcel off: tables only. OFF with Parcel on: no tables at all — anything built here leaves as a parcel. It cannot give more than the restaurant already has: without “Take a new order” no tables are offered whatever this says." },
+          { id: "qop_parcel", name: "Parcel — send it out", def: true,
+            bind: { t: "setting", key: "qop_parcel_allowed" },
+            what: "The big Parcel bar on the “where does it go?” step, and the Parcel tiles that sit under the live floor until a parcel is printed and paid. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar and no Parcel tiles. It needs Platforms (in Extra features) to be on as well — with that off there is no Parcel here however this is set." },
+          // Named so the admin isn't left to work the last case out for themselves.
+          { id: "qop_both_off", name: "If BOTH of the two above are off", leftToBuild: false, bind: { t: "none" },
+            what: "There is nothing left for QO/P to do, so the button does not appear on the floor at all — the header keeps only the KOT menu. Nothing is greyed out and nothing errors; the feature is simply absent, which is the same rule the rest of this screen follows." },
+        ] },
       {
         id: "bill", name: "Bill", bind: { t: "none" },
         what: "Everything that prints on a bill. There is no on/off — a restaurant can always issue one.",
@@ -324,8 +348,13 @@ export const SECTIONS: Section[] = [
           // the address were three separate rows sitting on top of a fourth box holding the rest
           // of the very same document. They are all the bill's format, so they are one screen —
           // the same shape as Menu → Design and styling.
-          { id: "bill_format", name: "Format of bill", bind: { t: "none" }, panel: "settings:billing",
-            what: "The whole bill as one form: GSTIN, the legal name and address, the phone, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for." },
+          // TWO formats, not one (owner, 2026-08-02): a dine-in bill and a parcel bill are
+          // different pieces of paper — different width, different lines, and a parcel has no
+          // table. The dine-in one is renamed so the pair reads as a pair.
+          { id: "bill_format", name: "Format of KOT bills", bind: { t: "none" }, panel: "settings:billing", preview: "bill",
+            what: "The bill for a table: GSTIN, the legal name and address, the phone, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for. Preview it at the top right to see the finished page before anyone prints one." },
+          { id: "parcel_bill_format", name: "Format of parcel bill", bind: { t: "none" }, panel: "settings:billing", preview: "parcel",
+            what: "The bill handed over with a parcel. Same restaurant details as the table bill, on the narrow counter roll and with no table on it — it says PARCEL instead. Preview it at the top right." },
           { id: "bill_designer", name: "Bill design editor", leftToBuild: true, bind: { t: "none" },
             what: "Design the whole bill like a document — move the logo, change the wording, resize the totals. Not built yet; this is where it will live." },
         ],
@@ -367,7 +396,7 @@ export const SECTIONS: Section[] = [
         // column name, and renaming a LABEL must never rename a column.
         id: "takeaway", name: "Platforms (Zomato, Swiggy, own website)", def: false, bind: { t: "module", key: "takeaway" },
         configurableWhenOff: true,
-        what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board and the 🥡 New Parcel button.",
+        what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board, takes the Parcel choice out of the floor's ⚡ QO/P screen (it then only sends to tables), and stops Parcel tiles appearing under the live floor.",
         children: [
           { id: "ch_website", name: "Takeaway / own website", def: true, configurableWhenOff: true, bind: { t: "channel", key: "website" },
             what: "A counter takeaway punched in by staff, and orders coming from the restaurant's own website. Needs no outside account.",

@@ -2282,6 +2282,99 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   .to-foot { position: sticky; bottom: 0; z-index: 4; background: var(--panel-2); box-shadow: 0 -6px 14px rgba(0,0,0,.18); }
 }
 
+/* A parcel card on the Platform board opens its detail (owner, 2026-08-02) — say so. */
+.plat-card-open { cursor: pointer; }
+.plat-card-open:hover { border-color: var(--gold); }
+.plat-print { white-space: nowrap; }
+
+/* ═══ 🥡 PARCEL TILES — the strip under the floor (owner, 2026-08-02) ═══════════
+   A parcel is floor work with no table, so it gets its own row BELOW the room rather
+   than a slot inside the table grid. The tile leaves on its own once the parcel has
+   been both printed and paid. */
+.pcstrip { margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--line); }
+.pcstrip-h { font-size: 13.5px; font-weight: 800; color: var(--gold); margin: 0 2px 10px; }
+.pcstrip-h .sub { font-weight: 500; color: var(--muted); }
+.ftile.pctile { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; text-align: left;
+  border-style: dashed; border-color: var(--gold); background: linear-gradient(180deg, rgba(212,175,55,.14), rgba(212,175,55,.05)); cursor: pointer; }
+.pctile-n { font-size: 15px; font-weight: 800; color: var(--gold-strong, var(--gold)); }
+.pctile-meta { font-size: 11.5px; color: var(--muted); }
+.pctile-marks { display: flex; gap: 6px; margin-top: 3px; }
+.pctile-mark { font-size: 12px; opacity: .32; filter: grayscale(1); }
+.pctile-mark.on { opacity: 1; filter: none; }
+
+/* the tile's popup — what's in it, print it, take the money */
+.pc-modal { width: min(430px, calc(100vw - 28px)); }
+.pc-body { padding: 14px 16px 18px; }
+.pc-cust { font-size: 12.5px; color: var(--muted); margin-bottom: 10px; }
+.pc-ln { display: flex; justify-content: space-between; gap: 10px; font-size: 13.5px; padding: 5px 0; border-bottom: 1px dotted var(--line); }
+.pc-tot { display: flex; justify-content: space-between; margin-top: 10px; padding-top: 9px; border-top: 1px dashed var(--line); font-size: 15px; }
+.pc-tot b { font-size: 18px; }
+.pc-states { display: flex; gap: 9px; margin: 13px 0 11px; }
+.pc-state { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.pc-state.on { border-color: var(--green, #22c55e); color: var(--green, #22c55e); }
+.pc-acts { display: flex; gap: 9px; }
+.pc-acts .btn { flex: 1 1 0; }
+.pc-note { margin-top: 11px; font-size: 11.5px; color: var(--muted); }
+
+/* ═══ ⚡ QO/P — quick order / parcel (owner, 2026-08-02) ════════════════════════
+   Same builder as ＋ Take order, laid out the other way round: the order you are
+   building sits on the LEFT where it stays still, and the RIGHT is one big block you
+   drill through — categories, then that category's dishes, then back to categories.
+   Only the two panes swap sides; every dish tile, cart line and editor below is the
+   shared one, so a fix there lands here too. */
+/* Quick mode takes the full height it is allowed, so the browse pane really is one big
+   block you aim at — not a short card that grows and shrinks as the order fills up. */
+.to-quick { width: min(1180px, calc(100vw - 32px)); height: 88vh; }
+/* The order you're building STAYS where it already is on ＋ Take order — the right-hand
+   column (owner, 2026-08-02: "so it will be there only"). The big block on the left is the
+   one that changes: instead of one long scrolling menu it becomes categories, then that
+   category's dishes. Nothing swaps sides, so staff who know Take order already know this. */
+.to-quick .to-cart { flex: 0 0 380px; }
+.to-quick .qo-sub { font-size: 13px; font-weight: 500; color: var(--muted); font-family: var(--body, inherit); }
+/* the breadcrumb bar that replaces the scroll-spy chip strip */
+.qo-drill { flex: 0 0 auto; box-sizing: border-box; min-height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
+.qo-back { background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 9px; padding: 6px 12px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.qo-back:hover { border-color: var(--gold); color: var(--gold); }
+.qo-crumb { font-size: 14px; font-weight: 800; color: var(--gold); }
+/* level 1 — the category cards */
+.qo-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.qo-cat { --qo-c: var(--gold); position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left;
+  background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--qo-c); border-radius: 13px; padding: 15px 16px; cursor: pointer; color: var(--text); min-height: 92px; justify-content: center; }
+.qo-cat:hover { border-color: var(--gold); border-left-color: var(--qo-c); transform: translateY(-1px); }
+.qo-cat-ic { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px;
+  background: color-mix(in srgb, var(--qo-c) 22%, transparent); color: var(--qo-c); font-size: 15px; font-weight: 800; line-height: 1; }
+.qo-cat-n { font-size: 16px; font-weight: 800; }
+.qo-cat-c { font-size: 12px; color: var(--muted); }
+/* the just-added line pulses so a tap on the far side of a wide screen still shows */
+@keyframes qoFlash { from { background: rgba(212,175,55,.30); } to { background: transparent; } }
+.qo-flash { animation: qoFlash .7s ease-out 1; border-radius: 9px; }
+
+/* ── step 2: where does it go? ── */
+.qo-dest-modal { width: min(720px, calc(100vw - 28px)); max-height: 88vh; display: flex; flex-direction: column; }
+.qo-dest-body { padding: 14px 16px 18px; overflow: auto; min-height: 0; }
+/* Parcel is the one destination with no table, so it is a full-width bar above the
+   grid rather than a tile inside it — and it carries no table name, by design. */
+.qo-dest-parcel { display: block; width: 100%; box-sizing: border-box; padding: 26px 18px; border-radius: 15px; cursor: pointer;
+  background: linear-gradient(180deg, rgba(212,175,55,.22), rgba(212,175,55,.10)); border: 2px solid var(--gold);
+  color: var(--gold-strong, var(--gold)); font-family: var(--display, inherit); font-size: 30px; font-weight: 800; letter-spacing: .5px; }
+.qo-dest-parcel:hover { background: linear-gradient(180deg, rgba(212,175,55,.34), rgba(212,175,55,.18)); }
+.qo-dest-lbl { margin: 16px 2px 9px; font-size: 12.5px; color: var(--muted); }
+.qo-dest-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 9px; }
+.qo-dest-t { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 66px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; color: var(--text); padding: 8px 6px; }
+.qo-dest-t b { font-size: 15px; font-weight: 800; }
+.qo-dest-t small { font-size: 11px; color: var(--muted); }
+.qo-dest-t:hover { border-color: var(--gold); color: var(--gold); }
+.qo-dest-t.busy { border-color: rgba(239,68,68,.55); }
+.qo-dest-t.busy small { color: #f87171; }
+@media (max-width: 760px) {
+  /* Phone: one scrolling column, same stacking ＋ Take order already uses — the browse
+     block first, the order under it. */
+  .to-quick .to-cart { flex: 1 1 auto; }
+  .qo-cats { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+  .qo-dest-parcel { font-size: 24px; padding: 20px 14px; }
+}
+
 /* ---- bill breakdown card ---- */
 .tp-bill { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 13px 15px; }
 .tp-bl { display: flex; justify-content: space-between; font-size: 13.5px; padding: 3px 0; color: var(--muted); }

@@ -67,6 +67,12 @@ const tname = (t) => (((state.tableNames || {})[String(t)]) || "").trim();
 // number. Display only — every id/bill still uses the number.
 const tshort = (t) => tname(t) || `T${t}`;              // tight spots (ticket header)
 const tlong = (t) => (t == null || t === "" ? "Table ?" : (tname(t) || `Table ${t}`)); // prints, toasts
+// A PARCEL has no table at all, so where a ticket says which table it is for, it says
+// PARCEL instead (owner, 2026-08-02). Without this a parcel printed as "Table ?" / "Tnull",
+// which tells a cook nothing and looks like a fault. The KOT number is untouched — a parcel
+// still carries its own ticket number.
+const isParcelOrder = (o) => !!o && o.source === "parcel";
+const whereFor = (o, long) => (isParcelOrder(o) ? "PARCEL" : long ? tlong(o && o.table_number) : tshort(o && o.table_number));
 const timeAgo = (ts) => {
   const m = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
   if (m < 1) return "just now";
@@ -219,7 +225,7 @@ function ticketHtml(o, rows) {
   const tb = TAG_BADGE[o.tag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${o.tag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="Table ${esc(o.table_number)}">${esc(tshort(o.table_number))}</span>${tagBadge}<span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="${isParcelOrder(o) ? "Parcel — no table" : `Table ${esc(o.table_number)}`}">${esc(whereFor(o, false))}</span>${tagBadge}<span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
@@ -803,7 +809,7 @@ function printKot(order, itemRows, restaurant) {
     const rname = restDisplayName(restaurant).replace(/\*/g, "") || "Kitchen";
     // The table as the FLOOR knows it — its name when the owner gave it one ("A1"), else
     // "Table 7". Printing the raw number on a renamed table sends staff to the wrong table.
-    const tlab = tlong(order.table_number);
+    const tlab = whereFor(order, true);   // "PARCEL" on a parcel, the table's floor name otherwise
     const kot = order.kot_no != null ? order.kot_no : "—";
     const when = order.created_at ? new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const rows = (itemRows && itemRows.length)
