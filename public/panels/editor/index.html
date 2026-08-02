@@ -145,10 +145,14 @@
   <script src="/panels/billcustomer.js?v=d165b9d0"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
   <script src="/panels/fitnums.js?v=84090f97" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
+  <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC). The manager,
+       the kitchen board and the admin previews all print this same file, so what an admin
+       approves in Access is what a guest is handed. Load BEFORE app.js. -->
+  <script src="/panels/billdoc.js?v=d7540b04"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
   <script src="/panels/editor/inventory.js?v=6dab7654"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=c2f3e9f0"></script>
+  <script src="/panels/editor/app.js?v=fdfb77ec"></script>
 </body>
 </html>

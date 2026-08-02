@@ -1,4 +1,4 @@
-// GET /api/admin/restaurants/bill-preview?rid=<uuid>&mode=bill|parcel
+// GET /api/admin/restaurants/bill-preview?rid=<uuid>&mode=bill|parcel|kot
 //
 // Renders a restaurant's bill AS IT WILL PRINT, from that restaurant's own settings, so the
 // two "Format of …" screens in Access & permissions can show a real page instead of asking
@@ -26,18 +26,19 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const ridParam = url.searchParams.get("rid");
   const rid = isUuid(ridParam) ? ridParam : DEFAULT_RESTAURANT_ID;
-  const mode: BillMode = url.searchParams.get("mode") === "parcel" ? "parcel" : "bill";
+  const asked = url.searchParams.get("mode");
+  const mode: BillMode = asked === "parcel" ? "parcel" : asked === "kot" ? "kot" : "bill";
 
-  // settings.restaurant_name is the name the BILL is printed under, which a restaurant may
-  // never have filled in. Falling back to its real name beats showing a stranger's preview
-  // headed "Your Restaurant" and leaving them unsure whose settings they are looking at.
+  // The restaurant row matters as much as the settings row: the panel's own identity resolver
+  // reads the slug (which restaurant is the flagship, which sign-off it gets) and the uploaded
+  // logo off it. Fetching less here is what used to head the preview with a different
+  // restaurant than the paper.
   const [{ data }, { data: rest }] = await Promise.all([
     sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
-    sb.from("restaurants").select("name").eq("id", rid).maybeSingle(),
+    sb.from("restaurants").select("id, name, slug, logo_url, logo_text").eq("id", rid).maybeSingle(),
   ]);
   const row = { ...((data || {}) as Record<string, unknown>) };
-  if (!String(row.restaurant_name ?? "").trim() && rest?.name) row.restaurant_name = rest.name;
-  const html = billPreviewHtml(row, mode);
+  const html = billPreviewHtml(row, mode, (rest || {}) as Record<string, unknown>);
 
   return new NextResponse(html, {
     headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" },

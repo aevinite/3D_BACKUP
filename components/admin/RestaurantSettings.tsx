@@ -11,6 +11,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FLOOR_PER_ROW_MAX, FLOOR_PER_ROW_MIN, clampPerRow } from "@/lib/floorLayout";
 import { BANQUET_FIELDS, BANQUET_LOCKED, BANQUET_PRESETS, banquetBillNo, banquetTaxOf, cleanBanquetFields } from "@/lib/banquetFields";
+// THE bill and THE kitchen ticket, written down once — the same file the manager panel and the
+// kitchen board print from. Both previews on this screen render it, so a format approved here
+// cannot come out of the printer looking like something else (owner, 2026-08-02).
+import BILLDOC from "@/public/panels/billdoc.js";
 
 type Rest = { id: string; slug: string; name: string };
 type TaxComp = { label: string; rate: number | string };
@@ -119,6 +123,14 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     fetch(`/api/admin/restaurants/branding?restaurant_id=${encodeURIComponent(restaurant.id)}`, { cache: "no-store" })
       .then((r) => r.json()).then((j) => setLogoUrl(String(j?.logo_url || ""))).catch(() => {});
   }, [restaurant.id]);
+
+  // The two previews below hand the shared document the same two things the panels hand it:
+  // the restaurant row (which decides the flagship's identity, the per-cuisine sign-off and the
+  // logo) and the settings — here the UNSAVED draft, so what is on screen is what is previewed.
+  const restForDoc = () => ({ id: restaurant.id, slug: restaurant.slug, name: { en: restaurant.name }, logo_url: logoUrl });
+  // A restaurant that renamed its tables should see the name a live document will carry ("A5").
+  const sampleTableLabel = (fallback: string) =>
+    (((draft.table_names || {}) as Record<string, string>)["5"] || "").trim() || fallback;
 
   // Success/error notes fade on their own (errors linger a little longer to be read).
   useEffect(() => {
@@ -242,95 +254,79 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     finally { setKotBusy(false); }
   };
 
-  // Same sample ticket as the manager panel's "Preview a sample KOT" button.
+  // THE SAMPLE IS THE REAL TICKET (owner, 2026-08-02: "both should be sync"). This button used
+  // to draw its own little ticket — a different heading, different rows, and no @page rule, so
+  // it came out on two pieces of paper and told you nothing about the real one. It now renders
+  // /panels/billdoc.js, the same file the manager panel and the kitchen board print from, and
+  // it does so from the values on THIS form so unsaved edits show up too.
   const previewKot = () => {
-    const now = new Date().toLocaleString("en-GB", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
-    const name = String(draft.restaurant_name || restaurant.name || "Restaurant");
-    // Show the sample on a REAL table label, so a restaurant that renamed its tables
-    // sees on the test print exactly what a live KOT will say ("A5", not "Table 5").
-    const sampleNames = (draft.table_names || {}) as Record<string, string>;
-    const sampleTable = (sampleNames["5"] || "").trim() || "Table 5";
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Sample KOT</title>
-      <style>body{font-family:ui-monospace,monospace;max-width:280px;margin:0 auto;padding:12px;color:#000}
-      h2{text-align:center;margin:2px 0 6px;font-size:16px} .r{display:flex;justify-content:space-between;font-size:13px;margin:3px 0}
-      hr{border:0;border-top:1px dashed #000;margin:8px 0} .foot{text-align:center;font-size:12px;margin-top:10px}</style></head>
-      <body onload="setTimeout(function(){window.print()},80)">
-        <h2>KITCHEN TICKET</h2>
-        <div class="r"><span>${name.replace(/</g, "&lt;")}</span><span>#SAMPLE</span></div>
-        <div class="r"><span>${sampleTable.replace(/</g, "&lt;")}</span><span>${now}</span></div>
-        <hr>
-        <div class="r"><b>2×</b><span>Margherita Pizza</span></div>
-        <div class="r"><b>1×</b><span>Garlic Bread</span></div>
-        <div class="r"><b>1×</b><span>Coke — no ice</span></div>
-        <hr>
-        <div class="foot">— sample test print —</div>
-      </body></html>`;
-    const w = window.open("", "_blank", "width=340,height=560");
+    const html = BILLDOC.kotDocHtml({
+      title: "Sample kitchen ticket",
+      rname: BILLDOC.billIdentity(draft, restForDoc()).name,
+      head: "KITCHEN TICKET · SAMPLE",
+      kot: "SAMPLE",
+      // A restaurant that renamed its tables sees the name a live ticket will carry ("A5").
+      tableLabel: sampleTableLabel("Table 5"),
+      when: new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      lines: [
+        { qty: 2, title: "Margherita Pizza" },
+        { qty: 1, title: "Garlic Bread", options: ["Extra cheese"] },
+        { qty: 1, title: "Coke", note: "no ice" },
+      ],
+      allergies: ["dairy", "nuts"],
+      note: "A sample ticket — the exact one the kitchen board prints, drawn from what is on this form right now.",
+    });
+    const w = window.open("", "lfh_kot_preview", "width=360,height=620");
     if (!w) { setErr("Allow pop-ups to preview the KOT."); return; }
+    try { w.document.open(); } catch { /* reused window: start blank */ }
     w.document.write(html); w.document.close();
+    try { w.focus(); } catch { /* already in front */ }
   };
 
-  // ── SEE THE BILL BEFORE ANYONE GETS ONE (owner, 2026-08-01) ────────────────
-  // Prints a made-up bill — invented customer, three invented lines — using THIS restaurant's
-  // real header, taxes and footer, so the layout can be checked without settling a real table.
-  // Every figure is computed from the fields on this form, so what is previewed is what prints.
+  // ── SEE THE BILL BEFORE ANYONE GETS ONE (owner, 2026-08-01, corrected 2026-08-02) ─────────
+  // A made-up bill — invented customer, three invented lines — using THIS form's header, taxes
+  // and footer, so a layout can be judged without settling a real table.
+  //
+  // It used to draw its own page, which is how a bill approved here could come out of the
+  // printer looking different ("both should be sync"). It now renders /panels/billdoc.js — the
+  // one file the manager panel prints from — fed by the fields on this form, so unsaved edits
+  // still show and what is previewed is genuinely what prints.
   const previewBill = () => {
-    const money = (n: number) => Math.round(n).toLocaleString("en-IN");
     const lines = [
-      { t: "Paneer Tikka Masala", q: 2, p: 320 },
-      { t: "Garlic Naan", q: 4, p: 60 },
-      { t: "Masala Chai", q: 2, p: 80 },
+      { title: "Paneer Butter Masala", qty: 2, price: 360, options: [{ label: "Extra gravy", price: 40 }] },
+      { title: "Garlic Naan", qty: 4, price: 85, options: [{ label: "Butter", price: 15 }] },
+      { title: "Fresh Lime Soda", qty: 2, price: 120 },
     ];
-    const sub = lines.reduce((a, l) => a + l.q * l.p, 0);
-    const taxRows = comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0);
-    const taxLines = taxRows.map((c) => ({ label: String(c.label), amt: (sub * Number(c.rate)) / 100, rate: Number(c.rate) }));
-    const taxTotal = taxLines.reduce((a, l) => a + l.amt, 0);
-    const total = sub + taxTotal;
-    const name = String(draft.restaurant_name || restaurant.name || "Restaurant");
-    const addr = String(draft.restaurant_address || "");
-    const phone = String(draft.restaurant_phone || "");
-    const gst = String(draft.gstin || "");
-    const foot = String(draft.bill_footer || "Thank you — please visit again");
-    const prefix = String(draft.invoice_prefix || "INV");
-    const esc = (v: string) => v.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Bill preview</title><style>
-      *{box-sizing:border-box}
-      body{font:12px/1.5 ui-monospace,Menlo,monospace;width:300px;margin:16px auto;color:#000;background:#fff}
-      .logo{display:block;max-width:120px;max-height:60px;margin:0 auto 8px;object-fit:contain}
-      h1{font-size:15px;text-align:center;margin:0 0 2px;letter-spacing:.04em}
-      .sub{text-align:center;font-size:10.5px;color:#333;margin:0 0 2px}
-      hr{border:0;border-top:1px dashed #999;margin:9px 0}
-      table{width:100%;border-collapse:collapse}
-      th{font-size:10px;text-align:left;border-bottom:1px solid #000;padding-bottom:3px}
-      td{padding:2px 0;font-size:11.5px} .c{text-align:center} .r{text-align:right}
-      .tot{display:flex;justify-content:space-between;font-size:11.5px;padding:1px 0}
-      .grand{font-weight:700;font-size:14px;border-top:1px solid #000;margin-top:4px;padding-top:5px}
-      .foot{text-align:center;margin-top:10px;font-size:11px}
-      .stamp{text-align:center;margin-top:14px;font-size:10px;color:#a00;border:1px dashed #a00;padding:5px}
-      @media print { .stamp { display:none } }
-    </style></head><body>
-      ${logoUrl ? `<img class="logo" src="${esc(logoUrl)}" onerror="this.style.display='none'">` : ""}
-      <h1>${esc(name)}</h1>
-      ${addr ? `<div class="sub">${esc(addr)}</div>` : ""}
-      ${phone ? `<div class="sub">${esc(phone)}</div>` : ""}
-      ${gst ? `<div class="sub">GSTIN: ${esc(gst)}</div>` : ""}
-      <hr>
-      <div class="sub" style="text-align:left">Bill: ${esc(prefix)}/2025-26/000042 &nbsp;·&nbsp; Table 7</div>
-      <div class="sub" style="text-align:left">Customer: Rahul Mehta &nbsp;·&nbsp; 98250 12345</div>
-      <hr>
-      <table><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr>
-        ${lines.map((l) => `<tr><td>${esc(l.t)}</td><td class="c">${l.q}</td><td class="r">${money(l.p)}</td><td class="r">${money(l.q * l.p)}</td></tr>`).join("")}
-      </table>
-      <hr>
-      <div class="tot"><span>Subtotal</span><span>${money(sub)}</span></div>
-      ${taxLines.map((l) => `<div class="tot"><span>${esc(l.label)} ${l.rate}%</span><span>${money(l.amt)}</span></div>`).join("")}
-      <div class="tot grand"><span>TOTAL</span><span>₹${money(total)}</span></div>
-      <div class="foot">${esc(foot)}</div>
-      <div class="stamp">SAMPLE — invented customer and items, your real header and taxes.<br>Not a real bill; this box never prints.</div>
-    </body></html>`;
-    const w = window.open("", "_blank", "width=360,height=680");
+    const subtotal = lines.reduce((a, l) => a + l.qty * l.price, 0);
+    const discount = 50;
+    const taxable = subtotal - discount;
+    const used = comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0);
+    const rateSum = used.reduce((a, c) => a + Number(c.rate), 0);
+    const taxWhole = Math.round((taxable * rateSum) / 100);
+    const bi = BILLDOC.billIdentity(draft, restForDoc());
+    const html = BILLDOC.billDocHtml({
+      logo: logoUrl,
+      name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
+      invNo: `${bi.prefix}/2026-27/000042`,
+      billNo: 42,
+      tableDisp: sampleTableLabel("T5"),
+      dateStr: new Date().toLocaleDateString("en-IN") + " " + new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      cust: draft.bill_customer_print === false ? "" : "Riya Sharma",
+      custPhone: draft.bill_customer_print === false ? "" : "98250 12345",
+      lines,
+      subtotal, discount,
+      discLabel: `${Math.round((discount / subtotal) * 1000) / 10}%`,
+      taxable,
+      total: taxable + taxWhole,
+      taxRows: BILLDOC.splitTax(taxWhole, used.map((c) => ({ label: String(c.label), rate: Number(c.rate) }))),
+      autoPrint: false,
+      note: "A sample bill — invented customer and items, your real header, taxes and footer. This is the exact page the manager panel prints.",
+    });
+    const w = window.open("", "lfh_bill_preview", "width=420,height=700");
     if (!w) { setErr("Allow pop-ups to preview the bill."); return; }
+    try { w.document.open(); } catch { /* reused window: start blank */ }
     w.document.write(html); w.document.close();
+    try { w.focus(); } catch { /* already in front */ }
   };
 
   // ── SEE THE BANQUET BILL (owner, 2026-08-01: "if possible show preview also") ──────────────
