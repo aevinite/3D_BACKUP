@@ -1499,22 +1499,35 @@ html[data-theme="light"] .ft-status {
 .ft-ico-bill .ft-bill-ico { font-size: clamp(9px, 8.5cqw, 13px); }
 .ft-ico-bill .ft-bill-t { font-size: clamp(8px, 7.4cqw, 11px); font-weight: 800; letter-spacing: .02em;
   text-transform: uppercase; }
+/* NO LIFT ON HOVER (owner, 2026-08-02: "when you hover, the icon go out of the screen"). The row
+   clips to the tile's edge so a control can never spill onto its neighbour, which means a button
+   that rises 1px on hover has its top shaved off — the hover made it look broken. On a control
+   that can be 20px wide, the colour and shadow change is all the feedback needed. */
 .ft-ico-bill:hover { background: linear-gradient(#ffffff, #dbe3ee); border-color: #0f172a; color: #0f172a;
-  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.28); transform: translateY(-1px); }
-.ft-ico-bill:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2); }
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.26); }
+.ft-ico-bill:active { box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2); }
 html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1f5f9); border-color: #94a3b8; }
 /* ✕ CLOSE — shown only on a finished table (everything served AND the bill paid), and it is the
    FIRST thing in the row, on the left of ＋ Take order (owner, 2026-08-02: "close button I want on
    the left … you don't have to write close on it, red colour and icon and that's it").
-   So: no label at any size, a red square exactly as wide as the ✓ accept square, and its own red
-   rather than the tile's state colour — the same reason the bill button owns its paper colour.
-   Everything is sized in cqw (a share of the TILE's own width), so it scales with the tile at any
-   tables-per-row setting and on any screen instead of being pinned to a pixel size. */
-.ft-ico-close { color: #fff; background: linear-gradient(#ef4444, #dc2626);
-  border-color: #b91c1c; box-shadow: 0 1px 2px rgba(185, 28, 28, 0.28); }
-.ft-ico-close:hover { background: linear-gradient(#f87171, #b91c1c); border-color: #7f1d1d; color: #fff;
-  box-shadow: 0 3px 8px rgba(185, 28, 28, 0.38); transform: translateY(-1px); }
-.ft-ico-close:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(185, 28, 28, 0.3); }
+   So: no label at any size, a square exactly as wide as the ✓ accept square.
+
+   SOFT RED, MIXED WITH THE THEME (owner, 2026-08-02: "the icon is too much red — I want it light
+   red according to theme also, and it should look of closing tables"). The first version was a
+   solid fire-engine gradient with white on it: on a calm floor of paper-and-parchment tiles it was
+   the loudest thing on the screen, and it read as DELETE rather than "this table is finished".
+   It now follows the same recipe as the ✓ accept button beside it — the accent mixed INTO the
+   panel colour, so it comes out a soft dusty red on the dark skin and a warm blush on the light
+   one, and it re-mixes itself whenever the theme changes instead of being two hard-coded hexes.
+   The glyph is the power symbol, not a cross: ⏻ is what this panel always used for "close table",
+   and a ✕ next to a bill reads as "delete this". */
+.ft-ico-close { color: color-mix(in srgb, #ef4444 62%, var(--text));
+  background: color-mix(in srgb, #ef4444 13%, var(--panel-2));
+  border-color: color-mix(in srgb, #ef4444 34%, var(--line)); }
+.ft-ico-close:hover { color: color-mix(in srgb, #ef4444 78%, var(--text));
+  background: color-mix(in srgb, #ef4444 24%, var(--panel-2));
+  border-color: color-mix(in srgb, #ef4444 62%, var(--line)); }
+.ft-ico-close:active { background: color-mix(in srgb, #ef4444 32%, var(--panel-2)); }
 /* ＋ TAKE ORDER STAYS THE BIGGEST BUTTON, ALWAYS (owner, 2026-08-02: "never make take order button
    small, it should be the biggest one"). A finished tile is the only one that carries THREE
    controls, and three of them at full width pushed the last one off the tile's right edge. The
@@ -1524,6 +1537,12 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
    shrinks with the tile and is always the widest control in the row. */
 .ftile.ft-finished .ft-ico-bill { min-width: min(clamp(20px, 19cqw, 30px), 30cqw); max-width: 30cqw; padding-inline: 0; }
 .ftile.ft-finished .ft-bill-t { display: none; }
+/* …and the decorative ＋ goes too, so the WORD "Take order" fits instead of ellipsing to
+   "Take …". That is this tile's own stated priority — the word is the information, the ＋ is
+   decoration — and it is only given up here because a finished tile is the crowded one.
+   Below 88px the ＋ comes BACK (see the container block further down): at that size the word
+   is already gone, and a button with neither would be an empty box. */
+.ftile.ft-finished .ft-take-x { display: none; }
 /* ── SMALL TILES: DROP DETAIL, NEVER RESHAPE (owner: "small will not affect the shape of
    table, it will make text and stuff small") ────────────────────────────────────────────
    These widths are the tile's INNER width (a container query measures the content box), so
@@ -1540,6 +1559,7 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
   .ft-bill-t { display: none; }        /* the receipt glyph alone still reads as "bill" */
   .ft-take-t { display: none; }
   .ft-take-x { display: inline; } /* out of room for the word — the ＋ is the fallback */
+  .ftile.ft-finished .ft-take-x { display: inline; } /* …including on a finished tile */
   .ft-seats { display: none; }
 }
 /* Genuinely tiny (a deliberately dense floor): the sub-line goes, then the state WORD. What

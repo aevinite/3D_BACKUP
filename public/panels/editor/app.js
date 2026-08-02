@@ -6644,7 +6644,7 @@ function floorTileHtml(i) {
   // worded button in this row stays ＋ Take order, which must remain the BIGGEST control on every
   // tile ("never make take order button small"). It only exists on a finished table, so on every
   // other tile the row is unchanged.
-  const acts = (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-xmark" aria-hidden="true"></i></button>` : "")
+  const acts = (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-power-off" aria-hidden="true"></i></button>` : "")
     + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
     // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
