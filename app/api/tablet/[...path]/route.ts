@@ -9,6 +9,7 @@ import { withIdempotency } from "@/lib/idempotency";
 import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { offPlanTable } from "@/lib/planTable";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
+import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
@@ -1213,6 +1214,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // editor: the lfh_delete_order_item RPC re-prices the order and refuses a
     // PAID bill (orders.total is a stored, server-priced number).
     if (a === "items" && c === "delete") {
+      // Confirm the dish belongs to THIS restaurant before the RPC (which looks it up by id
+      // alone) — the manager's twin of this endpoint has always done so and this one did not
+      // (2026-08-02). Reading it here also captures what it WAS, for the Audit row below.
+      const gone = (await sb.from("order_items").select("id, title, qty, unit_price, order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; title: string | null; qty: number | null; unit_price: number | null; order_id: string | null } | null;
+      if (!gone) return err("That dish was already removed.", 404);
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) {
@@ -1222,6 +1229,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return err(msg, reason === "order_paid" ? 409 : 400);
       }
       await log("order_item_delete", { order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
+      // The waiter panel recorded NOTHING in the Audit for anything until 2026-08-02 — a dish
+      // could come off a bill from the tablet with no record of who or why. Same row the manager
+      // writes, from the same shared recorder.
+      await recordRemoval({
+        rid, kind: "dish_removed", reason: reasonFromBody(body), user: actor ?? null, deviceId: dev,
+        orderId: data?.order_id ?? gone.order_id, itemId: gone.id, itemTitle: gone.title, qty: gone.qty,
+        amount: (Number(gone.unit_price) || 0) * (Number(gone.qty) || 1),
+        meta: { items_left: data?.items_left ?? null, order_cancelled: !!data?.order_cancelled, from: "waiter tablet" },
+      });
       return ok(data);
     }
 

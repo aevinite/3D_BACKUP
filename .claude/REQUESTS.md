@@ -1122,3 +1122,26 @@ the option to use it and they can't do that also."* Three real faults found and 
   cleared on Aangan/French House so all read the default). 5-min window unchanged where ON.
 - [x] Proved end-to-end on :4801 (headless, 0 extra logins): a manager's removal shows in
   manager + admin (+restaurant name) + owner feeds; off-switch = row gone AND 403; desktop + 390px.
+
+## 2026-08-02 · Audit tested for real on Aangan Garden — 4 gaps + 1 floor-blocking bug found & fixed
+Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French House, not read from source.
+- [x] **THE FLOOR WAS BLOCKED when "Edit menu" is off** (Aangan's live setting). `items` means two
+  things — a MENU dish and a dish on a LIVE ORDER — and the menu-editor gate matched both, so a
+  manager could not **mark a dish served**, remove a dish a guest cancelled, fix a quantity, or edit
+  a dish note. All four answered *"the menu editor isn't part of this restaurant's manager panel."*
+  Now only the real menu paths are gated. **AV live was NOT affected** (its Aangan stores no menus
+  config ⇒ Edit menu ON), but any restaurant the switch is turned off for would have been.
+- [x] **Cancelling a KOT was broken by today's "Reopen a bill = OFF" default** — both hung off
+  `void_bills`, so a manager could no longer clear a walk-out or a mistaken ticket. Cancel is not one
+  of the owner's three money rows, so per the access model it is permanently on and RECORDED instead.
+- [x] **Only 2 of 5 audit kinds were ever written, and the BROWSER wrote them.** Recording moved
+  SERVER-side (`lib/removalAudit.ts` + mig 261) so every panel/role/replay is covered by construction:
+  dish removed · quantity reduced · KOT cancelled · bill deleted · **bill reopened (with what the
+  bill stood at)** · menu item deleted · **discount** · payment reverted · on-the-house.
+- [x] **The waiter panel recorded nothing at all** — now records the same row (and it also never
+  checked the dish belonged to this restaurant before removing it; the manager twin always did).
+- [x] Removing a dish now ASKS why (the six one-tap reasons), like a cancel or a delete.
+- [x] Proved: 22/22 on Aangan + 17/17 on French House; each row carries who/role/reason/bill/KOT/₹,
+  the ₹ matches the bill's drop, a deleted bill is soft-deleted (never erased), and Aangan's
+  factory defaults still refuse reopen + delete. Guard: `npm run verify:audit` (18 checks, proven
+  to fail when a recorder is removed) + wired into the PostToolUse hook.

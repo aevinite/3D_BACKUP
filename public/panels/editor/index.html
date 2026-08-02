@@ -31,12 +31,9 @@
       <!-- Drawer-only header row (hidden on desktop): title + ✕ close. Not a .tab, so
            app.js's querySelectorAll(".tab") loops ignore it. -->
       <div class="tabs-head"><span>Sections</span><button id="navClose" type="button" aria-label="Close menu">✕</button></div>
-      <button class="tab" data-tab="items">📝 Editor</button>
+      <button class="tab active" data-tab="items">📝 Editor</button>
       <button class="tab" data-tab="orders">🧾 Bills<span id="ordersBadge" class="tab-badge" hidden></span></button>
-      <!-- Tables is the tab the panel ALWAYS opens on (see state.tab in app.js), so it is the
-           one marked active in the markup too — otherwise Editor is highlighted for the split
-           second before the script runs and the highlight visibly jumps. -->
-      <button class="tab active" data-tab="tables">Tables<span id="tablesBadge" class="tab-badge" hidden></span></button>
+      <button class="tab" data-tab="tables">Tables<span id="tablesBadge" class="tab-badge" hidden></span></button>
       <button class="tab" data-tab="platform">🛵 Platform<span id="platformBadge" class="tab-badge" hidden></span></button>
       <!-- Banquet module (mig 130): admin-entitled per restaurant — unhidden by syncBanquetTab() only when settings.banquet_allowed. -->
       <button class="tab" data-tab="banquet" hidden>🎪 Banquet</button>
@@ -145,14 +142,10 @@
   <script src="/panels/billcustomer.js?v=d165b9d0"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
   <script src="/panels/fitnums.js?v=84090f97" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
-  <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC). The manager,
-       the kitchen board and the admin previews all print this same file, so what an admin
-       approves in Access is what a guest is handed. Load BEFORE app.js. -->
-  <script src="/panels/billdoc.js?v=d7540b04"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
   <script src="/panels/editor/inventory.js?v=6dab7654"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=a5849664"></script>
+  <script src="/panels/editor/app.js?v=7e955005"></script>
 </body>
 </html>

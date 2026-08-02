@@ -15,6 +15,7 @@ import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { offPlanTable } from "@/lib/planTable";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
+import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
 import { businessDayStartIso } from "@/lib/businessDay";
@@ -159,6 +160,9 @@ async function logPartAllowed(g: { user: StaffUser | null }, rid: string, part: 
 // still reached it. Deliberately ONE gate called from every handler rather than a check
 // sprinkled per endpoint: a new endpoint under an existing tab is covered automatically.
 // The lookup only runs for paths that belong to a tab, so ordinary requests pay nothing.
+// A live-order dish operation: `items/<id>/<action>`. These belong to the floor (Tables/Bills,
+// both FIXED menus every manager has), never to the menu editor — see the editor row below.
+const ORDER_ITEM_ACTION = /^items\/[^/]+\/(delete|qty|note|removed|status)$/;
 const TAB_PATHS: { tab: ManagerTabKey; test: (p: string, method: string) => boolean }[] = [
   { tab: "ratings", test: (p) => p === "ratings" || p.startsWith("ratings/") },
   // The Audit & logs tab owns THREE reads: the activity log (oplog), the removals record
@@ -170,7 +174,15 @@ const TAB_PATHS: { tab: ManagerTabKey; test: (p: string, method: string) => bool
   // so there is no view_bills question any more and its endpoints are plain manager endpoints.
   // The two dangerous actions inside it (delete / reopen a bill) keep their own managerCan
   // gates at their handlers — the TAB being fixed hands over nothing dangerous.
-  { tab: "editor", test: (p) => /^(items|categories|filters)(\/|$)/.test(p) },
+  // THE MENU EDITOR ONLY — not the live floor (fixed 2026-08-02, found by driving Aangan Garden,
+  // which has Edit menu switched off). `items` is two completely different things sharing a word:
+  //   · the MENU editor      — POST `items` (create/edit a dish), DELETE `items/:id`
+  //   · a LIVE ORDER's dish  — POST `items/:id/{delete,qty,note,removed,status}`
+  // The old pattern matched both, so switching Edit menu off ALSO stopped a manager marking a dish
+  // SERVED, removing a dish a guest cancelled, and fixing a quantity — the floor, refused with
+  // "the menu editor isn't part of this restaurant's manager panel". Nothing about the guest's food
+  // belongs to the menu-editor switch, so the order-item actions are excluded by name.
+  { tab: "editor", test: (p) => /^(categories|filters)(\/|$)/.test(p) || (/^items(\/|$)/.test(p) && !ORDER_ITEM_ACTION.test(p)) },
 ];
 async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[], method = "GET"): Promise<NextResponse | null> {
   if (!g.user) return null;                         // admin super-user keeps every tab
@@ -2146,9 +2158,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         deletable = candidates.filter((o) => !(o.payment_status === "paid" && o.status !== "cancelled")).map((o) => o.id);
         kept = candidates.length - deletable.length;
       } else return err("no ids");
+      // What each bill was worth, read BEFORE the delete so every Audit row can say so.
+      const worthOf = new Map<string, { total: number; session_id: string | null; table_number: string | null }>();
+      if (deletable.length) {
+        for (const o of (must(await sb.from("orders").select("id,total,session_id,table_number").eq("restaurant_id", rid).in("id", deletable)) as
+          { id: string; total: number | null; session_id: string | null; table_number: string | null }[]))
+          worthOf.set(o.id, { total: Number(o.total) || 0, session_id: o.session_id, table_number: o.table_number });
+      }
       // SOFT delete — the row stays; a restore can bring it back.
       const res = deletable.length ? await softDeleteOrders(rid, deletable, { actor: actorName, actorId: g.user?.id ?? null, reason: delReason }) : { deleted: 0 };
       await log("editor", "orders_delete", { restaurant_id: rid, detail: (all ? `cleared all freed records (${res.deleted})` : `deleted ${res.deleted} bill(s)`) + (delReason ? ` — ${delReason}` : ""), device_id: dev });
+      // One Audit row per bill, written server-side (was the browser's job — see removalAudit.ts).
+      for (const oid of deletable) {
+        const w = worthOf.get(oid);
+        await recordRemoval({
+          rid, kind: "order_deleted",
+          reason: { code: typeof body?.reason_code === "string" ? body.reason_code : null, note: delReason || null },
+          user: g.user, deviceId: dev, orderId: oid, sessionId: w?.session_id ?? null,
+          tableNumber: w?.table_number ?? null, amount: w?.total ?? null,
+          meta: all ? { cleared_all: true, bills_in_batch: deletable.length } : { bills_in_batch: deletable.length },
+        });
+      }
       return ok({ ok: true, deleted: res.deleted, kept });
     }
 
@@ -2184,10 +2214,28 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // on the SESSION and splits it proportionally across the unpaid orders, each clamped to its
       // OWN subtotal. That is clamp-safe, partial-payment safe, and mutually exclusive with a
       // tablet-entered bill discount (so a manager discount can no longer be silently reverted — B5).
+      // Money off a bill is a money-lowering change, so it goes in the AUDIT as well as the
+      // activity log (owner, 2026-08-02: "even though it is a discount and all that, in the audit
+      // section everything should be there"). Removing a discount PUTS money back, so it is not
+      // recorded as a removal — the activity log carries that.
+      const auditDiscount = async (amount: number, orderId: string, sessionId: string | null) => {
+        if (!(amount > 0)) return;
+        await recordRemoval({
+          rid, kind: "discount_given",
+          // The note the manager typed IS the reason for a discount, so it becomes the reason when
+          // no explicit reason_code/-note was sent.
+          reason: { code: reasonFromBody(body).code, note: reasonFromBody(body).note || note },
+          user: g.user, deviceId: dev, orderId, sessionId, amount,
+          meta: { discount: amount },
+        });
+      };
       if (cur.session_id) {
         const amount = Number.isFinite(raw) ? Math.max(raw, 0) : 0;
         const res = must(await sb.rpc("lfh_staff_bill_discount", { p_session: cur.session_id, p_amount: amount, p_note: note }));
         await log("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `bill discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
+        // The RPC clamps + splits across the bill's unpaid orders, so record what it actually
+        // stored rather than what was asked for.
+        await auditDiscount(Number((res as { discount?: number } | null)?.discount ?? amount) || 0, b, cur.session_id);
         return ok({ ok: true, discount: (res && (res as { discount?: number }).discount) ?? amount });
       }
       // Legacy standalone order (no table session): keep the per-order write, capped at its OWN
@@ -2196,6 +2244,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
       must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid));
       await log("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
+      await auditDiscount(amount, b, null);
       return ok({ ok: true });
     }
     // orders/:id/allergies — staff edit of the order-wide "avoid" list (add a
@@ -2374,9 +2423,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       const voidReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
       if (!voidReason) return err("A reason is required to void / reopen an invoice.", 400);
+      // What the bill SAID before it was reopened — the owner's requirement is that the audit
+      // shows what it was and what changed, so the figures at reopen time are captured here.
+      const beforeVoid = (await sb.from("orders").select("total, discount").eq("session_id", b).eq("restaurant_id", rid)).data as
+        { total: number | null; discount: number | null }[] | null;
+      const wasTotal = (beforeVoid || []).reduce((s, o) => s + (Number(o.total) || 0), 0);
+      const wasDiscount = (beforeVoid || []).reduce((s, o) => s + (Number(o.discount) || 0), 0);
       const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: voidReason, p_actor: actorName });
       if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw new Error(error.message); }
       await log("editor", "invoice_void", { restaurant_id: rid, detail: `session ${b} · ${voidReason}`, device_id: dev });
+      // Into the AUDIT too (it was named by migration 251 and never written until 2026-08-02).
+      // `amount` is what the bill stood at when it was reopened, so a later change is visible as a
+      // difference rather than having to be reconstructed.
+      await recordRemoval({
+        rid, kind: "invoice_voided", reason: reasonFromBody(body), user: g.user, deviceId: dev,
+        sessionId: b, amount: wasTotal,
+        meta: { total_at_reopen: wasTotal, discount_at_reopen: wasDiscount, orders_on_bill: (beforeVoid || []).length },
+      });
       return ok(Array.isArray(data) ? data[0] : data);
     }
     // sessions/:id/credit-note — issue a CREDIT NOTE against a bill (the legal correction
@@ -2543,7 +2606,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
       // Confirm the dish belongs to THIS restaurant before the RPC (which looks it up by id alone) —
       // the same tenant boundary the sibling money endpoints enforce. (B15 scoping consistency.)
-      if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404);
+      // Read what it WAS before the RPC deletes it: the Audit row has to name the dish and what it
+      // was worth, and after the delete there is nothing left to look up (2026-08-02).
+      const gone = (await sb.from("order_items").select("id, title, qty, unit_price, order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; title: string | null; qty: number | null; unit_price: number | null; order_id: string | null } | null;
+      if (!gone) return err("That dish was already removed.", 404);
       const { data, error } = await sb.rpc("lfh_delete_order_item", { p_item_id: b });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) {
@@ -2556,6 +2623,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return err(msg, reason === "order_paid" ? 409 : 400);
       }
       await log("editor", "order_item_delete", { restaurant_id: rid, order_id: data?.order_id, detail: data?.order_cancelled ? "order emptied → cancelled" : `dish removed, ${data?.items_left} left`, device_id: dev });
+      // …and into the AUDIT, which is where a person looks for "what was taken off, and why".
+      // The dish's own worth, not the order's total: this is one line off a bill.
+      await recordRemoval({
+        rid, kind: "dish_removed", reason: reasonFromBody(body), user: g.user, deviceId: dev,
+        orderId: data?.order_id ?? gone.order_id, itemId: gone.id, itemTitle: gone.title, qty: gone.qty,
+        amount: (Number(gone.unit_price) || 0) * (Number(gone.qty) || 1),
+        meta: { items_left: data?.items_left ?? null, order_cancelled: !!data?.order_cancelled },
+      });
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -2568,11 +2643,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByItem(b)) return err(LOCKED_MSG, 409);
       const qty = Math.round(Number(body?.qty));
       if (!Number.isFinite(qty) || qty < 1) return err("invalid quantity");
-      if (!(await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data) return err("That dish was already removed.", 404); // B15 scoping
+      // What it was, so the Audit row can say 3 → 1 rather than just "1" (owner: "whatever the
+      // changes that previously it was there and he has made").
+      const wasRow = (await sb.from("order_items").select("id, title, qty, unit_price").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
+        { id: string; title: string | null; qty: number | null; unit_price: number | null } | null;
+      if (!wasRow) return err("That dish was already removed.", 404); // B15 scoping
       const { data, error } = await sb.rpc("lfh_staff_edit_item_qty", { p_item: b, p_qty: qty });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await log("editor", "order_item_qty", { restaurant_id: rid, order_id: data?.order_id, detail: `qty → ${data?.qty}`, device_id: dev });
+      // Lowering a quantity takes money off the bill exactly like removing the dish, so it is
+      // recorded the same way. Raising one adds money and is not a removal — the activity log
+      // above still carries it.
+      const wasQty = Number(wasRow.qty) || 0;
+      if (qty < wasQty) {
+        await recordRemoval({
+          rid, kind: "qty_reduced", reason: reasonFromBody(body), user: g.user, deviceId: dev,
+          orderId: data?.order_id ?? null, itemId: wasRow.id, itemTitle: wasRow.title, qty: wasQty - qty,
+          amount: (Number(wasRow.unit_price) || 0) * (wasQty - qty),
+          meta: { qty_before: wasQty, qty_after: qty },
+        });
+      }
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -2791,6 +2882,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
       }
       await log("manager", "on_the_house", { restaurant_id: rid, table_number: t, detail: `${unpaid.length} order(s) · ${tagRow.tag}`, device_id: dev });
+      // Settling with no money collected is the largest money-lowering action there is, so it
+      // gets an Audit row per order, naming what each was worth (2026-08-02).
+      for (const o of unpaid) {
+        await recordRemoval({
+          rid, kind: "on_the_house", reason: { code: reasonFromBody(body).code, note: reasonFromBody(body).note || `On the house · ${tagRow.tag}` },
+          user: g.user, deviceId: dev, orderId: o.id, tableNumber: t, amount: Number(o.subtotal) || 0,
+          meta: { table_tag: tagRow.tag, orders_on_bill: unpaid.length },
+        });
+      }
       return ok({ ok: true, count: unpaid.length });
     }
 
@@ -3374,14 +3474,22 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,table_number,session_id").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
-      // Voiding a ticket needs the void_bills power (2026-07-31). The manager panel grew a
-      // "✕ Cancel" button on each ticket when "close table" was removed — it is how a walk-out
-      // is cleared now — so the endpoint has to refuse it for a role that isn't allowed to void
-      // a bill, not just hide the button. void_bills is the right power: its own description is
-      // "reopening a settled bill, voiding a generated one, or closing a table unpaid after a
-      // walk-out". Admin and owner pass automatically (managerCan).
-      if (patch.status === "cancelled" && cur.status !== "cancelled" && !(await managerCan(g, rid, "void_bills")))
-        return permDenied("cancel an order");
+      // CANCELLING A TICKET IS NOT GATED (restored 2026-08-02, and here is why it changed twice).
+      // On 2026-07-31 it was put behind void_bills, reasoning that a cancel voids money. Then on
+      // 2026-08-02 the owner made "Reopen a bill" default OFF for every restaurant — and because
+      // both hung off that ONE flag, a manager could suddenly not clear a walk-out or a mistaken
+      // ticket at all. The floor's normal correction became impossible by default, which is worse
+      // than the risk it was guarding.
+      //
+      // The access model settles it: a capability the owner did not list has NO switch and is
+      // permanently on for whoever's panel owns it (docs/ACCESS-MODEL.md). He listed three money
+      // rows — delete a bill, reopen a bill, discount a bill — and cancelling a ticket is none of
+      // them; it is how a kitchen mistake and a walk-out are cleared. What protects it is the
+      // RECORD, not a refusal: every cancel now writes an Audit row naming the person, the reason,
+      // the KOT and the bill (below), so nothing can be cancelled quietly.
+      //
+      // DELETING a bill keeps its own power (delete_bill + void_bills, further down) — that is the
+      // one that takes a sale out of the reports, and it stays deliberately handed over.
       if (patch.payment_status === "paid" && cur.status === "cancelled")
         return err("Can't take payment on a cancelled order.", 409);
       // RULE (owner 2026-06-29): a bill can only be paid once the order is ACCEPTED (gone to
@@ -3405,6 +3513,15 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
         const reason = String((body && body.revert_reason) || "").trim();
         if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
         await log("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
+        // Un-booking collected money belongs in the Audit, not only in the activity log — it is
+        // the same question ("who took money off this bill, and why?"). The reason is already
+        // required above, so this row always carries one.
+        await recordRemoval({
+          rid, kind: "payment_reverted", reason: { note: reason }, user: g.user,
+          deviceId: deviceIdFrom(req), orderId: id, sessionId: cur.session_id ?? null,
+          tableNumber: cur.table_number != null ? String(cur.table_number) : null,
+          meta: { was_paid_at: cur.paid_at ?? null },
+        });
         // Reversing the settle reverses the visit it counted (Customer CRM, mig 212).
         // Idempotent per session, so reverting each order of a multi-order bill is safe.
         // Reverse THIS bill's visit — the order row already tells us whose party it was.
@@ -3441,6 +3558,16 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       // to move a bill in and out of the takings unobserved. (docs/COMPLIANCE-GUARDRAILS.md §3)
       if (patch.status === "cancelled" && cur.status !== "cancelled") {
         await log("editor", "order_cancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: `cancelled${cur.payment_status === "paid" ? " (was marked paid)" : ""}`, device_id: deviceIdFrom(req) });
+        // …and the AUDIT row, written HERE rather than by the browser afterwards (2026-08-02).
+        // It used to be app.js's job (POST /audit after the action), which meant the waiter panel
+        // recorded nothing and any future caller would record nothing. The reason the panel asked
+        // for now travels WITH the action, so one round trip does both.
+        await recordRemoval({
+          rid, kind: "order_cancelled", reason: reasonFromBody(body), user: g.user,
+          deviceId: deviceIdFrom(req), orderId: id, sessionId: cur.session_id ?? null,
+          tableNumber: cur.table_number != null ? String(cur.table_number) : null,
+          meta: { was_paid: cur.payment_status === "paid" },
+        });
       } else if (patch.status === "received" && cur.status === "cancelled") {
         await log("editor", "order_uncancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: "cancel undone — back on the floor", device_id: deviceIdFrom(req) });
       }
@@ -3500,8 +3627,19 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
         return err("Won't delete a PAID bill — it's a financial record. Mark it unpaid or void it first.", 409);
       // Reason from the client (?reason=) → onto the tombstone + into the log so the audit shows WHY.
       const delReason = (req.nextUrl.searchParams.get("reason") || "").trim().slice(0, 200);
+      // Read the bill's worth BEFORE the soft delete, so the Audit row says what left the reports.
+      const wasWorth = (await sb.from("orders").select("total, session_id, table_number").eq("id", id).eq("restaurant_id", rid).maybeSingle()).data as
+        { total: number | null; session_id: string | null; table_number: string | null } | null;
       await softDeleteOrders(rid, [id], { actor: actorName, actorId: g.user?.id ?? null, reason: delReason });
       await log("editor", "order_delete", { restaurant_id: rid, order_id: id, detail: delReason || undefined, device_id: deviceIdFrom(req) });
+      // Server-side Audit row (was the browser's job — see the cancel path above).
+      await recordRemoval({
+        rid, kind: "order_deleted",
+        reason: { code: (req.nextUrl.searchParams.get("reason_code") || "").trim() || null, note: delReason || null },
+        user: g.user, deviceId: deviceIdFrom(req), orderId: id,
+        sessionId: wasWorth?.session_id ?? null, tableNumber: wasWorth?.table_number ?? null,
+        amount: Number(wasWorth?.total) || 0,
+      });
       return ok({ ok: true });
     }
 
@@ -3532,6 +3670,9 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       if (a === "items" && !(await menuSubAllowed(g, rid, "delete_dish"))) return permDenied("delete dishes");
       if (a === "categories" && !(await menuSubAllowed(g, rid, "manage_categories"))) return permDenied("manage categories");
       if (a === "filters" && !(await menuSubAllowed(g, rid, "manage_filters"))) return permDenied("manage filters");
+      // What it was CALLED, read before it goes — an Audit row saying "dish: 7f3c-…" names
+      // nothing a person recognises (2026-08-02).
+      const gonesTitle = ((await sb.from(t.name).select("title").eq(t.key, id).eq("restaurant_id", rid).maybeSingle()).data as { title?: string } | null)?.title || "";
       // slug is unique only PER restaurant now (categories/filters), so a delete by
       // key MUST also pin the restaurant or it would wipe that slug everywhere.
       must(await sb.from(t.name).delete().eq(t.key, id).eq("restaurant_id", rid));
@@ -3550,7 +3691,19 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
       } catch { /* orphan cleanup is best-effort */ }
       // Record the menu deletion in the operation log (B25) — like create/edit above.
       if (a === "items" || a === "categories" || a === "filters") {
-        await log("manager", "menu_delete", { restaurant_id: rid, detail: `deleted ${a === "items" ? "dish" : a === "categories" ? "category" : "tag"}: ${id}`, device_id: deviceIdFrom(req) });
+        const what = a === "items" ? "dish" : a === "categories" ? "category" : "tag";
+        await log("manager", "menu_delete", { restaurant_id: rid, detail: `deleted ${what}: ${id}`, device_id: deviceIdFrom(req) });
+        // …and in the AUDIT. Migration 251 promised this in its own opening comment ("every item,
+        // it's been deleted from the menu … it should ask for the reason") and nothing ever wrote
+        // it, so a dish could leave the menu with no reason recorded anywhere (fixed 2026-08-02).
+        await recordRemoval({
+          rid, kind: "menu_item_deleted",
+          reason: { code: (req.nextUrl.searchParams.get("reason_code") || "").trim() || null,
+                    note: (req.nextUrl.searchParams.get("reason") || "").trim() || null },
+          user: g.user, deviceId: deviceIdFrom(req),
+          itemTitle: `${what}: ${gonesTitle || id}`,
+          meta: { kind_of_thing: what, key: id },
+        });
       }
       // Deleting a dish/category/filter changes the SHARED guest menu → bust cache.
       bustMenuCache(rid);
