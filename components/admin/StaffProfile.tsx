@@ -26,6 +26,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
+import { useScrollMemory } from "@/components/admin/useOverlayParam";
 import type { TreeState } from "@/lib/accessTree";
 import {
   capGroupsForRole, capStates, effectiveCap, roleDefault, countOverrides,
@@ -83,6 +84,11 @@ export default function StaffProfile({ userId, onClose, onChanged }: {
   const [note, setNote] = useState("");           // the small "Saved" line under the header
   const dialogRef = useRef<HTMLDivElement>(null);
   useAdminModal(dialogRef, "admin-staff-profile", onClose); // phone Back + Escape close it
+  // "A refresh leaves me where I am" (owner, 2026-08-02). Which profile is open is in the
+  // URL — see the page that mounts this — and how far DOWN it was scrolled is remembered
+  // here, per person, for this visit only. Without it a reload reopened the profile at the
+  // top, which still reads as being thrown back to the start.
+  useScrollMemory(dialogRef, `stp-scroll:${userId}`, !!d);
 
   const load = useCallback(async () => {
     setErr("");
@@ -784,20 +790,51 @@ function Danger({ d, patch, reload, onClose, onChanged }: Kit & { onClose: () =>
       onChanged?.(); onClose();
     } catch { setMsg("Network error."); }
   }
+  // "Mark as left today" WROTE A DATE AND NOTHING ELSE, so the profile ended up saying
+  // "Left 02 Aug 2026" and "Account: active" at the same time and the button looked dead
+  // (owner, 2026-08-02: "why is there a mark-as-left option, if it does nothing remove it").
+  // It was never dead — the date is what stops their salary counting from that day
+  // (migs 220/221 prorate expected pay by joined_on/left_on, and mig 252 the day's money in
+  // hand) — it just did HALF of what leaving means. Now it does both: records the day AND
+  // switches the login off, which is the thing you can actually see. Nothing is deleted;
+  // their orders, bills and pay history stay exactly where they are.
   async function markLeft() {
-    try { await patch({ action: "set_job", job: { left_on: new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10) } }); reload(); onChanged?.(); }
-    catch (e: any) { setMsg(e.message); }
+    try {
+      await patch({ action: "set_job", job: { left_on: new Date(Date.now() + 5.5 * 3600e3).toISOString().slice(0, 10) } });
+      if (p.active) await patch({ action: "set_active", active: false });
+      reload(); onChanged?.();
+    } catch (e: any) { setMsg(e.message); }
+  }
+  // They came back — clear the leaving date and let them sign in again.
+  async function unmarkLeft() {
+    try {
+      await patch({ action: "set_job", job: { left_on: "" } });
+      if (!p.active) await patch({ action: "set_active", active: true });
+      reload(); onChanged?.();
+    } catch (e: any) { setMsg(e.message); }
   }
   return (
     <section className="stp-card danger">
       <h3>⚠️ Remove this person</h3>
       <p className="stp-sub">
-        Disabling keeps the record and the history — that is what you want when someone leaves. Deleting removes the
-        login for good. Their past orders and bills stay in the books either way.
+        {p.left_on
+          ? <>This person is marked as having left on <b>{day(p.left_on)}</b>, so their pay stops counting from that
+            day{p.active
+              ? <> — but their login is still <b>active</b>, so they can still sign in. Press the button below to
+                mark them as left properly, or switch the login off from the left.</>
+              : <> and they can&apos;t sign in.</>} Everything they did is still in the books.</>
+          : <>Marking someone as left records the day, stops their pay counting from it, and switches their login off —
+            that is what you want when someone leaves. Deleting removes the login for good. Their past orders and bills
+            stay in the books either way.</>}
       </p>
       {msg ? <div className="stp-err" style={{ marginBottom: 10 }}>{msg}</div> : null}
       <div className="stp-row">
-        <button className="stp-btn" onClick={markLeft}>📅 Mark as left today</button>
+        {/* A record from before this button did the whole job (a leaving date but the login
+            still on) gets the FINISH button, not the undo — the undo only makes sense once
+            the two agree. */}
+        {p.left_on && !p.active
+          ? <button className="stp-btn" onClick={unmarkLeft}>↩ They&apos;re back — undo this</button>
+          : <button className="stp-btn" onClick={markLeft}>📅 Mark as left{p.left_on ? " (switch their login off)" : " today"}</button>}
         {confirm ? (
           <>
             <button className="stp-btn dan" onClick={del}>Yes, delete {p.name || p.username}</button>

@@ -10,6 +10,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CopyButton } from "@/components/admin/CopyButton";
 import StaffProfile from "@/components/admin/StaffProfile";
+import { useOverlayParam } from "@/components/admin/useOverlayParam";
 
 type User = {
   id: string; username: string; role: string; name: string | null; phone: string | null;
@@ -46,9 +47,11 @@ export default function AdminUsers() {
   // The password to reveal once after a CREATE (shown at the top until dismissed).
   const [reveal, setReveal] = useState<{ name: string; password: string } | null>(null);
 
-  // Which user's edit modal is open (null = closed) + a working copy of editable fields.
-  const [editId, setEditId] = useState<string | null>(null);
-  const editing = users.find((u) => u.id === editId) || null;
+  // Which person's profile is open (null = closed). It lives in the URL (?staff=<id>) so a
+  // REFRESH LEAVES YOU EXACTLY WHERE YOU ARE instead of dropping you back on the list — owner,
+  // 2026-08-02: "I refresh, why do I go back to the main thing? I should be staying here."
+  // Back closes the profile as a bonus, and the address bar is a link to that person.
+  const [editId, setEditId] = useOverlayParam("staff");
 
   // ── List filters (all client-side over the data we already loaded — no extra reads) ──
   // Merged 2026-07-08: main added a free-text search (admin audit 2026-07-07); this
@@ -265,8 +268,11 @@ export default function AdminUsers() {
       {/* The full PROFILE panel — one component for every person in the product; the small
           edit modal that used to live here was replaced by it (owner's design 1, 2026-08-01).
           See components/admin/StaffProfile.tsx for the structure every profile must keep. */}
-      {editing ? (
-        <StaffProfile userId={editing.id} onClose={() => setEditId(null)} onChanged={load} />
+      {/* Rendered straight off the id, NOT off a row in the loaded list: on a refresh the list
+          is still in flight, and waiting for it would flash the list before the profile —
+          exactly the "back to the main thing" this fixes. The profile loads its own person. */}
+      {editId ? (
+        <StaffProfile userId={editId} onClose={() => setEditId(null)} onChanged={load} />
       ) : null}
     </div>
   );
