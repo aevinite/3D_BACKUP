@@ -46,12 +46,26 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
       selected = qRid && ids.includes(qRid) ? qRid : ids.length === 1 ? ids[0] : "";
     }
   } else if (store.get(ADMIN_ACT_COOKIE)?.value && (await tokenIsValid(store.get(AUTH_COOKIE)?.value))) {
-    // Admin act-as: the one restaurant they entered from the console (the layout already
-    // vetted this). The admin sees the section even when switched off — top power, X-ray.
+    // Admin act-as: opens ON the restaurant they entered from the console (the layout
+    // already vetted this), but the list MIRRORS the real owner's estate — if this
+    // restaurant's owner owns others too, the same launcher / "Switch restaurant" bar the
+    // real owner gets appears here (owner, 2026-08-02: testing as a two-restaurant owner
+    // through the console showed no way to switch — the admin view must not hide what the
+    // owner would see). The admin may reach any restaurant anyway, so this widens nothing.
     const rid = qRid || store.get(ADMIN_ACT_COOKIE)!.value;
-    const row = (await sb.from("restaurants").select("id, name, accent_color").eq("id", rid).maybeSingle()).data as
-      { id: string; name: string; accent_color?: string } | null;
-    if (row) { restaurants = [{ id: row.id, name: row.name, accentColor: row.accent_color || undefined }]; selected = row.id; }
+    const ownerIds = ((await sb.from("restaurant_owners").select("user_id").eq("restaurant_id", rid)).data || [])
+      .map((r) => r.user_id as string);
+    const estateIds = new Set<string>([rid]);
+    if (ownerIds.length) {
+      const links = (await sb.from("restaurant_owners").select("restaurant_id").in("user_id", ownerIds).limit(50)).data || [];
+      for (const l of links) estateIds.add(l.restaurant_id as string);
+    }
+    const rows = (await sb.from("restaurants").select("id, name, accent_color").in("id", [...estateIds]).is("deleted_at", null)).data || [];
+    restaurants = rows.map((r) => ({ id: r.id as string, name: r.name as string, accentColor: (r.accent_color as string) || undefined }));
+    // The console named THIS restaurant, so land on its floor (never on the launcher);
+    // switching to a sibling is then one tap, same as for the real owner.
+    if (restaurants.some((r) => r.id === rid)) selected = rid;
+    else if (restaurants.length) selected = restaurants[0].id;
   }
 
   if (!restaurants.length) {
