@@ -27,7 +27,6 @@ import { effectiveTaxRate, taxComponents } from "@/lib/tax";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { openTableSession } from "@/lib/openSession";
 import { softDeleteOrders } from "@/lib/softDelete";
-import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts } from "@/lib/paySplit";
@@ -937,8 +936,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const d = g.reduce((a, o) => a + (Number(o.discount) || 0), 0);
         const tx = Math.max(0, sub - d), t = r2(tx * rate), tot = r2(tx + t);
         gross += sub; disc += d; taxable += tx; tax += t; net += tot;
-        // A bill counts as collected only when EVERY order on it is paid (a table
-        // settles in one go via maybeAutoSettle, so this matches real behaviour).
+        // A bill counts as collected only when EVERY order on it is paid (a table settles in
+        // one go — Mark paid pays the whole table — so this matches real behaviour).
         if (g.every((o) => o.payment_status === "paid")) { paidCount++; paidNet += tot; }
         else { unpaidCount++; unpaidNet += tot; }
       }
@@ -2159,7 +2158,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       await log("editor", "order_serve", { restaurant_id: rid, order_id: b, device_id: dev });
       // Only session_id is needed (for auto-settle); the client discards the body → not the full row.
       const servedRow = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).single());
-      await maybeAutoSettle((servedRow as any)?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
       return ok({ ok: true });
     }
     if (a === "orders" && c === "item") {
@@ -2177,7 +2175,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         : items.some((i: any) => i.status === "preparing" || i.status === "served") ? "preparing" : "received";
       // Only session_id is needed (for auto-settle); the client discards the body.
       const row = must(await sb.from("orders").update({ items, status: orderStatus }).eq("id", b).eq("restaurant_id", rid).select("session_id"));
-      if (status === "served") await maybeAutoSettle(row[0]?.session_id, { panel: "editor", deviceId: dev }); // serving may complete the table
       return ok({ ok: true });
     }
 
@@ -2391,7 +2388,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const rSp = await settleBillInParts(sb, { rid, table: t, splits: Array.isArray(body?.splits) ? body.splits : [] });
       if (!rSp.ok) return err(rSp.message, rSp.status);
       await log("editor", "bill_split", { restaurant_id: rid, table_number: t, detail: rSp.note.slice(0, 120), device_id: dev });
-      await maybeAutoSettle(rSp.sessionId, { panel: "editor", deviceId: dev });
       return ok({ ok: true, count: rSp.count, due: rSp.due });
     }
 
@@ -2692,7 +2688,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
       }
       await log("manager", "on_the_house", { restaurant_id: rid, table_number: t, detail: `${unpaid.length} order(s) · ${tagRow.tag}`, device_id: dev });
-      if (openSess) await maybeAutoSettle(openSess.id, { panel: "editor", deviceId: dev });
       return ok({ ok: true, count: unpaid.length });
     }
 
@@ -3348,7 +3343,6 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       }
       // Only session_id is needed (for auto-settle on pay); the client discards the body → no full row.
       const data = must(await sb.from("orders").update(patch).eq("id", id).eq("restaurant_id", rid).select("session_id"));
-      if (patch.payment_status === "paid") await maybeAutoSettle(data[0]?.session_id, { panel: "editor", deviceId: deviceIdFrom(req) }); // paying may complete the table
       return ok({ ok: true });
     }
 

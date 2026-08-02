@@ -24,7 +24,7 @@ export type OrderLite = { status?: string | null; payment_status?: string | null
 
 // Clear a table's live guest signals — resolve open waiter-calls + deny pending join/open
 // requests — scoped to ONE restaurant + table. Used by BOTH the manual /tables/:t/restart
-// endpoint AND the auto-restart path (lib/autoSettle) so the two can't drift. A restart keeps
+// endpoint so the restart and close cleanups can't drift. A restart keeps
 // the session OPEN, so the mig-020 close trigger never fires — this MUST be done explicitly,
 // or an unanswered call from the old party leaves a ghost 🔔 badge + ATTEND on the emptied
 // table (#7 fixed the manual path; the auto path had the same gap). Best-effort; never throws.

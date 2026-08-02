@@ -17,7 +17,6 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { softDeleteOrders } from "@/lib/softDelete";
-import { maybeAutoSettle } from "@/lib/autoSettle";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { rateAllowed } from "@/lib/rateLimit";
 import { openTableSession } from "@/lib/openSession";
@@ -1004,7 +1003,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // ...and resolve this table's open waiter-calls + deny its pending requests (#7), the
       // same cleanup a close does (mig 020 trigger). Without this, an unanswered call from the
       // old party left a ghost 🔔 badge + ATTEND on the now-empty table. Shared helper so the
-      // manual + auto (lib/autoSettle) restart paths can't drift apart.
+      // restart and close paths can't drift apart.
       await clearTableSignals(rid, t);
       // ...and CLOSE the party. It used to stay open with no orders and no guests — invisible to
       // every screen (the floor draws it Free) but "open" in the database, which is the mismatch
@@ -1118,7 +1117,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid);
       }
       await log("item_status", { detail: status, device_id: dev });
-      if (status === "served") await maybeAutoSettle(item?.session_id, { panel: "tablet", deviceId: dev }); // last dish served may complete the table
       return ok({ ok: true });
     }
 
@@ -1146,7 +1144,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       await log("order_serve", { order_id: b, device_id: dev });
       // Only session_id needed (for auto-settle); client discards the body → not the full row.
       const served = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
-      await maybeAutoSettle((served as any)?.session_id, { panel: "tablet", deviceId: dev }); // serving the order may complete the table
       return ok({ ok: true });
     }
 
@@ -1327,7 +1324,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const rSp = await settleBillInParts(sb, { rid, table: t, splits: Array.isArray(body?.splits) ? body.splits : [] });
       if (!rSp.ok) return err(rSp.message, rSp.status);
       await log("bill_split", { table_number: t, detail: rSp.note.slice(0, 120), device_id: dev });
-      await maybeAutoSettle(rSp.sessionId, { panel: "tablet", deviceId: dev });
       return ok({ ok: true, count: rSp.count, due: rSp.due });
     }
 
@@ -1398,7 +1394,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
       await log(splits ? "bill_split" : "bill_paid", { table_number: t, device_id: dev, detail: splits ? String(payUpdate.payment_note || "").slice(0, 120) : (body?.payment_method ? `via ${body.payment_method}` : undefined) });
-      await maybeAutoSettle(openSess?.id, { panel: "tablet", deviceId: dev }); // auto close/restart if paid + all served
       return ok({ ok: true, count: rows.length });
     }
 
@@ -1480,7 +1475,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
       }
       await log("on_the_house", { table_number: t, device_id: dev, detail: `${unpaid.length} order(s) · ${tagRow.tag}` });
-      if (openSess) await maybeAutoSettle(openSess.id, { panel: "tablet", deviceId: dev });
       return ok({ ok: true, count: unpaid.length });
     }
 

@@ -1998,9 +1998,13 @@ function formGeneral(s) {
     // restaurant choose between freeing a settled table and KEEPING the party seated with an empty
     // round, and that second choice is a state no screen can show since open/close was removed — it
     // is what left table 30 reading Free on the floor while the database called it open. One
-    // behaviour now, identical on every table of every restaurant: a fully paid, fully served bill
-    // frees its table (lib/autoSettle.ts). The settings.auto_table_action column stays in the
-    // database for old rows but nothing reads it.
+    // behaviour now, identical on every table of every restaurant. What that ONE behaviour is
+    // changed again on 2026-08-02: freeing the table automatically was also wrong, because a
+    // party that has paid is usually still sitting there and watched its table disappear. So
+    // nothing happens by itself at all — the floor tile and the table detail grow a ✓ Close
+    // control once everything is served AND paid, and a person ends the table. lib/autoSettle.ts
+    // is deleted; the settings.auto_table_action column stays in the database for old rows
+    // (mig 254 forces every row to 'off') but no code reads it.
   }
   if (sec === "users") {
     return userSettingCardHtml();
@@ -3415,8 +3419,8 @@ async function payOrdersWithMethod(orders, label, opts = {}) {
 // Take back a just-made payment: revert each order we settled back to unpaid, within the
 // same 30-minute grace window the manual "restore to floor" uses, with a canned (still
 // logged) reason so no prompt interrupts the one-tap undo (owner undo bar, 2026-07-22).
-// Note: if paying auto-closed/archived the table (auto_table_action), this reverts payment
-// but the fuller un-archive stays the manual "Restore to floor" tool's job.
+// Note: paying no longer closes or archives a table by itself (auto-settle was deleted
+// 2026-08-02), so this reverts the payment and the table simply stays on the floor.
 // editorUndoPay() lived here. Removed with the undo bars it was the only caller of
 // (owner, 2026-08-01). The server-side revert it used is untouched — that is the audited
 // path "Reopen a bill" goes through.
@@ -5995,11 +5999,52 @@ function tableHasAnyParty(t) {
   const tile = (state.summary.tiles || {})[String(t)];
   return !!tile && tile.state !== "free" && tile.state !== "req";
 }
-// The manual close/free path (closeBlockedReason + closeAnywayAsk + closeSession +
-// freeTableAll) was DELETED with the open/close step (owner, 2026-07-31). A settled table
-// frees itself; a walk-out is handled by cancelling the order, which keeps the void on the
-// record instead of hiding an unpaid bill behind a closed table. lib/sessionClose.ts still
-// owns closing on the SERVER (mig 232 cleanup) — that is what auto-settle calls.
+// ── CLOSING A TABLE IS A DECISION A PERSON MAKES (owner, 2026-08-02) ───────────────────────
+// History, so this doesn't get flipped back a third time. The manual close/free path was
+// deleted on 2026-07-31 with the open/close step, on the reasoning that "a settled table frees
+// itself" — which was true, because lib/autoSettle ended the table the instant the last dish
+// was served and the bill was paid. Using it showed why that is wrong: a party that has paid is
+// usually still SITTING there, and their table vanished off the floor (or, with the restart
+// mode, silently reset) while they were finishing their coffee. auto-settle is gone; this is
+// what replaces it, and it only ever runs because somebody tapped it.
+//
+// It is offered ONLY on a finished table — every dish served AND the whole bill paid, in either
+// order — so the server's own guard (lib/sessionClose.ts → closeBlock) can never refuse it, and
+// there is no "close anyway" chain to pop up under a finger. The two states this deliberately
+// does NOT cover are unchanged: money still owed, or food still cooking. A walk-out is still
+// handled by cancelling the ticket, which keeps the void on the record instead of hiding an
+// unpaid bill behind a closed table, and the waiter tablet keeps its own override close.
+//
+// `t` may be any table of a merged party; the tile always passes the table that HOLDS the bill.
+async function closeFinishedTable(t) {
+  // The floor tile is drawn from the slim summary, which can be a beat behind the truth — read
+  // this table's real slice before acting on money. (Same reason openBillPreview forces it.)
+  await ensureTableSlice(t, true);
+  const sess = openSessionForTable(t);
+  const live = partyOrders(t).filter((o) => o.status !== "cancelled");
+  // A tap is never dropped in silence: if the tile was stale, say which half is still open
+  // instead of returning with nothing on screen.
+  if (!sess) { toast(`${tableLabel(t)} has no open party to close`, "err"); return; }
+  const unpaid = live.some((o) => o.payment_status !== "paid");
+  const unserved = live.some((o) => orderItemRows(o).some((r) => r.status !== "served"));
+  if (unpaid || unserved) {
+    toast(unpaid && unserved ? `${tableLabel(t)} still owes money and has food to serve` : unpaid ? `${tableLabel(t)} still owes money` : `${tableLabel(t)} still has food to serve`, "err");
+    await pollTables([String(t)]); // put the tile back in step with the truth it just showed
+    return;
+  }
+  if (!(await confirmDialog(`Close ${tableLabel(t)}? Everything is served and the bill is paid — the table goes back to Free and the bill stays in Bills.`, "Close table"))) return;
+  try {
+    await api("POST", `/sessions/${sess.id}/close`);
+    state.selectedTable = null;
+    state.openSess = null;
+    document.querySelector(".tbl-modal-overlay")?.remove();          // the detail popup, if this came from there
+    state.floatingTables = (state.floatingTables || []).filter((f) => !partyTablesOf(t).some((x) => String(x) === String(f.table)));
+    await loadSessions();
+    toast(`${tableLabel(t)} closed — the bill is saved in Bills`, "ok");
+  } catch (e) {
+    toast("Could not close: " + e.message, "err");
+  }
+}
 // setSessAutoApprove: turn on/off "let new joiners in automatically" for a table.
 async function setSessAutoApprove(id, value) {
   try { await api("POST", "/sessions/" + id + "/auto-approve", { value: !!value }); await loadSessions(); toast(value ? "Auto-approve on" : "Auto-approve off", "ok"); }
@@ -6443,11 +6488,12 @@ function tableTileStateFromBoard(t) {
 //   row 1   T1  ································  🪑 4     (name left, seats right)
 //   row 2   the notification badges, when there are any
 //   row 3   the LIVE STATUS pill (+ the dish progress bar)
-//   row 4   ＋ Take order ····························  🖨
+//   row 4   ⏻  ＋ Take order ···························  🧾 BILL
 //
 // "Take order" is on EVERY tile (sessions off means there is no seat-them-first step), and
 // the small printer opens the bill preview — where Print / Generate invoice / Mark paid
-// live, so paying a table is one popup instead of a chain of confirms.
+// live, so paying a table is one popup instead of a chain of confirms. ⏻ CLOSE joins the row on
+// a FINISHED table only (see finishedHere below) and ends the table in one tap.
 // ── PARCEL TILES on the live floor (owner, 2026-08-02) ─────────────────────────────
 // A parcel has no table, but it is still a live job the floor has to finish, so it gets
 // its own tile in a strip at the very bottom — and it stays there until it has been BOTH
@@ -6494,10 +6540,9 @@ function parcelStripHtml() {
   return `<div class="pcstrip"><div class="pcstrip-h">🥡 Parcels <span class="sub">· stay here until printed &amp; paid</span></div>
     <div class="ftile-grid pcstrip-grid" style="--per-row:${floorPerRow()}">${list.map(parcelTileHtml).join("")}</div></div>`;
 }
-
 function floorTileHtml(i) {
   const s = state.data.settings || {};
-  const { st, label, meta, badges, counts, pay, hasNew, guests } = tableTileState(i); // everything this tile needs
+  const { st, label, meta, badges, counts, pay, hasNew, guests, done } = tableTileState(i); // everything this tile needs
   // Status progress bar (new→cooking→ready→served), same colours as the tablet's .tstrip.
   const cTot = counts.nw + counts.ck + counts.rd + counts.sv;
   const strip = cTot > 0 ? `<div class="ft-strip">${counts.nw ? `<i style="width:${(counts.nw / cTot) * 100}%;background:#f59e0b"></i>` : ""}${counts.ck ? `<i style="width:${(counts.ck / cTot) * 100}%;background:#4f9dff"></i>` : ""}${counts.rd ? `<i style="width:${(counts.rd / cTot) * 100}%;background:#ec4899"></i>` : ""}${counts.sv ? `<i style="width:${(counts.sv / cTot) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
@@ -6527,6 +6572,19 @@ function floorTileHtml(i) {
   // A joined table offers the bill too, and it opens the PARTY's bill (the table that holds it) —
   // same button, same place, no hierarchy on the floor.
   const canBillHere = mergedTo ? (pTot > 0 && pCounts.nw === 0 && pCounts.ck === 0 && pCounts.rd === 0) : canBill;
+  // A FINISHED TABLE SAYS SO AND WAITS (owner, 2026-08-02). The table used to end ITSELF the
+  // moment the last dish was served and the bill was settled (lib/autoSettle, now deleted) —
+  // so a party that had paid but was still sitting there had its table wiped out from under
+  // them, and there was no button anywhere to end a table on purpose. Now nothing happens on
+  // its own: the tile grows a ✓ CLOSE control beside the bill, and a person decides when the
+  // guests have actually left.
+  //
+  // "Finished" is BOTH halves — every dish served AND the whole bill paid — and it does not
+  // care which happened first (`done` is derived from the table's state + pay ring, not from
+  // the order of events, so paying up front and serving afterwards reaches it exactly the same
+  // way as serving first and paying at the end). A merged child shows its PARTY's state,
+  // because the money and the food live on the table that holds the bill.
+  const finishedHere = mergedTo ? !!(pTile && pTile.done) : !!done;
   // ROW 3 — A LINE, NOT A BOX (owner, 2026-08-01: "there shouldn't be the preparation box; there
   // should be a line which shows the colour — you can see how the colour works on the top — you
   // don't need to write 'Preparing' and create that whole box. And at the end of the line there
@@ -6589,7 +6647,13 @@ function floorTileHtml(i) {
     // of that print icon more i would love that"): its own paper colour, a receipt icon with the
     // word BILL beside it, and on a dense floor the word drops and the icon stays — the same
     // shed-detail rule the ＋ Take order button follows.
-    + (canBillHere ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${mergedTo || i}" title="Bill for ${esc(tableLabel(i))} — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-receipt ft-bill-ico" aria-hidden="true"></i><span class="ft-bill-t">Bill</span></button>` : "");
+    + (canBillHere ? `<button class="ft-ico ft-ico-bill" data-bill-preview="${mergedTo || i}" title="Bill for ${esc(tableLabel(i))} — preview, print, invoice, mark paid" aria-label="Bill for ${esc(tableLabel(i))}"><i class="fas fa-receipt ft-bill-ico" aria-hidden="true"></i><span class="ft-bill-t">Bill</span></button>` : "")
+    // ✓ CLOSE — the last step of a table, and the only one that used to happen by itself.
+    // It sits to the RIGHT of ＋ Take order, in the same strip as the bill control, so the
+    // end of a table reads left-to-right the way it happens: order → bill → close. Its own
+    // green (not the tile's state colour) marks it as the finishing action rather than a
+    // destructive one; the word drops before the tick does on a dense floor, exactly like BILL.
+    + (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-circle-check ft-close-ico" aria-hidden="true"></i><span class="ft-close-t">Close</span></button>` : "");
   // Seats — ALWAYS visible, top-right (owner drawing: "no. of person can sit on table").
   // ONE shared answer for "how many fit here" — see seatsForTable(): this table's own number,
   // else the floor's default, else 4.
@@ -6625,7 +6689,7 @@ function floorTileHtml(i) {
   const tinfo = TABLE_TAG_INFO[tag];
   const mergedEither = !!mergedTo || mergeKids.length > 0;
   const payShown = mergedTo && pTile ? (pTile.pay || pay) : pay;
-  return `<div class="ftile ft-${mergedEither ? "merged" : st}${mergeKids.length ? " ft-has-merged" : ""}${payShown ? " pay-" + payShown : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
+  return `<div class="ftile ft-${mergedEither ? "merged" : st}${mergeKids.length ? " ft-has-merged" : ""}${payShown ? " pay-" + payShown : ""}${finishedHere ? " ft-finished" : ""}${tinfo ? ` ft-tag tag-${tag}` : ""}${String(state.selectedTable) === String(i) ? " ft-sel" : ""}" data-floor-table="${i}" role="button" tabindex="0" title="${isEmpty ? "Tap to take an order" : "Tap to open this table"}">
         ${tinfo ? `<div class="ft-ribbon" aria-hidden="true">${tinfo.ribbon}</div>` : ""}
         <div class="ft-top"><span class="ft-num${numCls}" ${tnm ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${seatTxt ? `<span class="ft-seats" title="${esc(seatTip)}">${CHAIR_SVG}${esc(seatTxt)}</span>` : ""}</div>
         ${badges ? `<div class="ft-badges">${badges}</div>` : ""}
@@ -7093,6 +7157,7 @@ function bindFloorDelegation() {
     // inside #editor can never be double-handled by this floor-wide listener.
     if ((b = e.target.closest("[data-take-order]")) && b.closest(".ftile")) { openTakeOrder(b.dataset.takeOrder, null); return; }
     if ((b = e.target.closest("[data-bill-preview]"))) { openBillPreview(b.dataset.billPreview); return; }
+    if ((b = e.target.closest("[data-close-table]"))) { closeFinishedTable(b.dataset.closeTable); return; }
     if ((b = e.target.closest("[data-quick-accept]")))   { acceptTableOrders(b.dataset.quickAccept); return; }
     if ((b = e.target.closest("[data-quick-attend]")))   { attendTableCalls(b.dataset.quickAttend); return; }
     if ((b = e.target.closest("[data-quick-requests]"))) { openFloatingTable(b.dataset.quickRequests); return; }
@@ -7902,12 +7967,18 @@ function tablePanelParts(t, host = "float") {
   let primaryBtn = "";
   if (newOrdersN) primaryBtn = `<button class="btn primary tp-accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare${newOrdersN > 1 ? ` (${newOrdersN})` : ""}</button>`;
   else if (anyUnservedAccepted) primaryBtn = `<button class="btn green tp-serve-all-orders" data-serve-all-orders="${esc(t)}">🍽️ Serve all</button>`;
-  // "✓ Free table" / "⏻ Close table" / "Settle bill to free" are GONE (owner, 2026-07-31).
-  // A paid table frees ITSELF (maybeAutoSettle), so the button only ever existed for the
-  // case it handled badly: guests who left without paying. That case is now handled where
-  // it belongs — cancel the order in the Orders list above, which voids it on the record
-  // instead of quietly closing a table that still owes money.
-  const endBtn = "";
+  // ✕ CLOSE TABLE IS BACK, AND IT IS GATED (owner, 2026-08-02: "close table in the detail view
+  // also should only show when all mark is paid and all the serve has been completed").
+  // It was removed on 2026-07-31 because auto-settle freed a paid table by itself; auto-settle
+  // is gone (a party that has paid is usually still sitting there), so the table now waits for a
+  // person. The gate is the SAME two halves the floor tile uses, in either order — every dish
+  // served AND the whole bill paid — so the button simply is not there while either is open, and
+  // the server can never refuse the tap. Guests who left without paying are still handled by
+  // cancelling the ticket, which records the void instead of hiding an unpaid bill.
+  const liveOsEnd = os.filter((o) => o.status !== "cancelled");
+  const allServedEnd = liveOsEnd.length > 0 && liveOsEnd.every((o) => orderItemRows(o).every((r) => r.status === "served"));
+  const tableFinished = !!sess && allServedEnd && !anyUnpaidBill;
+  const endBtn = tableFinished ? `<button class="btn primary" id="sxClose" title="Everything served and the bill is paid — close this table and free it">✓ Close table</button>` : "";
   // ONE sticky action bar holds every table-wide action: the primary action + pay +
   // discount on the LEFT, then table-management (shift/print/restart/close) on the RIGHT.
   // (No 🏷 Type builder here any more — the one place to mark a table is the KOT ▾ menu, which
@@ -9521,7 +9592,10 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
 // this keeps the two views' behaviour identical.
 function bindTablePanel(root, t, parts, { rerender, close }) {
   const { sess, os } = parts;
-  // (No #sxOpen / #sxClose wiring — a table is never opened or closed by hand.)
+  // ✓ Close table — only rendered on a finished table (see endBtn); closeFinishedTable re-reads
+  // the slice and re-checks both halves before it asks, so a stale detail can't close a live one.
+  const cb = root.querySelector("#sxClose"); if (cb) cb.onclick = () => closeFinishedTable(t);
+  // (No #sxOpen wiring — a table is never opened by hand.)
   // Shift the whole party (orders + calls move along) to an EMPTY table.
   const sh = root.querySelector("#sxShift");
   if (sh && sess) sh.onclick = () => openShiftPicker(t, sess);

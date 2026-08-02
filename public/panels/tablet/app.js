@@ -2090,9 +2090,10 @@ function payBill(t, method, note) {
   }
 }
 // After a successful "Mark paid", give a few-second takeback (owner undo bar, 2026-07-22).
-// Only while the table is STILL open — if paying the last dish auto-closed the table
-// (auto_table_action), an in-place undo can't cleanly reopen it, so we just confirm and
-// leave the heavier "restore to floor" to the manager panel. The undo goes through
+// Only while the table is STILL open. Paying no longer closes a table by itself (auto-settle
+// was deleted 2026-08-02), but a table CAN have been closed by hand in between, and an in-place
+// undo can't cleanly reopen a closed one — so we just confirm and leave the heavier "restore to
+// floor" to the manager panel. The undo goes through
 // actGated so a PIN-gated restaurant is asked for a PIN to reverse a payment too.
 // o = { message, icon } — lets the different settle flows (plain pay, split, on-the-house)
 // share ONE takeback. They all reverse through /tables/:t/unpay, which un-pays the open

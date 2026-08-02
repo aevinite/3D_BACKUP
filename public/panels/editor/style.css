@@ -1496,6 +1496,30 @@ html[data-theme="light"] .ft-status {
   box-shadow: 0 3px 8px rgba(15, 23, 42, 0.28); transform: translateY(-1px); }
 .ft-ico-bill:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.2); }
 html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1f5f9); border-color: #94a3b8; }
+/* ✓ CLOSE — shown only on a finished table (everything served AND the bill paid). Like the bill
+   control it keeps its OWN colour instead of the tile's state colour, because it is the one
+   control you go looking for; green because ending a settled table is the happy last step, not a
+   destructive one. Same height and the same shed-detail behaviour as BILL, so the strip stays
+   one control row at every tile size. */
+.ft-ico-close { flex: 0 1 auto; gap: clamp(2px, 2.5cqw, 5px); padding-inline: clamp(4px, 4cqw, 9px);
+  width: auto; min-width: clamp(22px, 20cqw, 34px);
+  color: #ffffff; background: linear-gradient(#22c55e, #16a34a);
+  border-color: #15803d; box-shadow: 0 1px 2px rgba(21, 128, 61, 0.28); }
+.ft-ico-close .ft-close-ico { font-size: clamp(9px, 8.5cqw, 13px); }
+.ft-ico-close .ft-close-t { font-size: clamp(8px, 7.4cqw, 11px); font-weight: 800; letter-spacing: .02em;
+  text-transform: uppercase; }
+.ft-ico-close:hover { background: linear-gradient(#34d399, #15803d); border-color: #14532d; color: #ffffff;
+  box-shadow: 0 3px 8px rgba(21, 128, 61, 0.38); transform: translateY(-1px); }
+.ft-ico-close:active { transform: translateY(0); box-shadow: 0 1px 2px rgba(21, 128, 61, 0.3); }
+/* THREE CONTROLS DON'T FIT, SO THE LEAST URGENT ONE SHEDS ITS WORD. A finished table is the only
+   time the row holds ＋ Take order AND the bill AND close; at the default tile size that pushed
+   CLOSE off the tile's right edge (caught on screen, not in a test). On a finished table the
+   take-order button drops to its ＋ — still the same button, same place, still tappable — and the
+   two words that matter now, BILL and CLOSE, both stay readable. Same shed-detail rule as
+   everywhere else on the tile: lose detail, never reshape. */
+.ftile.ft-finished .ft-take { flex: 0 0 auto; }
+.ftile.ft-finished .ft-take-t { display: none; }
+.ftile.ft-finished .ft-take-x { display: inline; }
 /* ── SMALL TILES: DROP DETAIL, NEVER RESHAPE (owner: "small will not affect the shape of
    table, it will make text and stuff small") ────────────────────────────────────────────
    These widths are the tile's INNER width (a container query measures the content box), so
@@ -1510,6 +1534,7 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
 }
 @container (max-width: 88px) {
   .ft-bill-t { display: none; }        /* the receipt glyph alone still reads as "bill" */
+  .ft-close-t { display: none; }       /* …and the tick alone still reads as "done with it" */
   .ft-take-t { display: none; }
   .ft-take-x { display: inline; } /* out of room for the word — the ＋ is the fallback */
   .ft-seats { display: none; }
