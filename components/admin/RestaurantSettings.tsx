@@ -937,8 +937,10 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           <b>Tables per row</b> is exactly that — pick {perRow} and every row has {perRow} boxes, on this screen and on
           any other. The boxes shrink to fit your number and drop detail as they go (the served count, then the seat
           number, then the wording) while the table number and its colour always stay. Choose any number from{" "}
-          {FLOOR_PER_ROW_MIN} to {FLOOR_PER_ROW_MAX} — there is nothing to type, so the floor can never be set to a
-          number it won&rsquo;t accept.
+          {FLOOR_PER_ROW_MIN} to {FLOOR_PER_ROW_MAX}{" "}
+          {/* {" "} above is not decoration: JSX drops the leading space of a multi-line text node,
+              so "…to 12 — there…" shipped as "…to 12— there…" on the live Access screen. */}
+          &mdash; there is nothing to type, so the floor can never be set to a number it won&rsquo;t accept.
         </p>
         <p className="hint" style={{ marginTop: 8 }}>
           How many people fit at each table is set per table in <b>Table setting</b> below — that is the number beside
