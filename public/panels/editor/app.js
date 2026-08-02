@@ -6872,10 +6872,12 @@ function customFloorHtml(plan, n) {
 // auto-fill drop columns when the width isn't there (see .ftile-grid), so a phone or a
 // narrow window shows fewer per row rather than a row of unreadable slivers. That is what
 // keeps a 300-table restaurant usable on any screen.
-// Mirrors lib/floorLayout.ts — 2..12, and it is a DROP-DOWN now (numSel above), not a typing box:
-// the owner asked for a fixed list of choices on 2026-08-02. If these change, change them there,
-// in components/admin/RestaurantSettings.tsx, and keep the database's CHECK constraint no
-// narrower than the max (see the warning in lib/floorLayout.ts — that mismatch cost an evening).
+// Mirrors lib/floorLayout.ts — 2..12, picked from a fixed list, and the ONLY place it is picked
+// is the admin panel (components/admin/RestaurantSettings.tsx → Floor layout). The manager panel
+// READS this number and never sets it: its own card was removed on 2026-08-02 ("that will be only
+// set by admin"), and no switch can bring it back. If these bounds change, change them there too,
+// and keep the database's CHECK constraint no narrower than the max (see the warning in
+// lib/floorLayout.ts — that mismatch cost an evening).
 const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 function floorPerRow() {
   // The admin preview slider wins while it's driving (never persisted — see state).
