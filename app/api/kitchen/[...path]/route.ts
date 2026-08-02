@@ -15,7 +15,7 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { platformLadder, parcelLadder } from "@/lib/tableTags";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
-import { refusalMessage, refusalStatus } from "@/lib/dbRefusal";
+import { refusalMessage, refusalStatus, worthLogging } from "@/lib/dbRefusal";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 
 export const dynamic = "force-dynamic";
@@ -142,7 +142,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {
-    logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
+    if (worthLogging(e)) logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
     return err(refusalMessage(e), refusalStatus(e));
   }
 }
@@ -305,7 +305,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     return err("unknown POST endpoint", 404);
   } catch (e) {
-    logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
+    if (worthLogging(e)) logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
     return err(refusalMessage(e), refusalStatus(e));
   }
 }

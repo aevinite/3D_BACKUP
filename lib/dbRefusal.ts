@@ -51,17 +51,56 @@ const PLAIN: Record<string, string> = {
 
 type MaybePgError = { code?: unknown; message?: unknown; details?: unknown; hint?: unknown };
 
+// ── "IT ISN'T THERE ANY MORE" IS THE SAME MISTAKE AS THE ONE ABOVE (2026-08-03) ───────────────
+// A .single() that matches nothing throws PostgREST's PGRST116 with the message "Cannot coerce
+// the result to a single JSON object". Until now that fell through to the catch-all: a 500, a red
+// crash row on the admin's error board, and — because 5xx means "the server is struggling" — the
+// offline queue keeping the tap and retrying it forever. But a row that is gone will still be gone
+// on the next try, exactly like a value the CHECK constraint refuses. It is a 4xx.
+//
+// It is also NOT a fault. Two people on a floor race constantly: a waiter taps Accept on a KOT the
+// manager just cancelled, a stale tile is tapped after its table was closed. Logging that as a
+// crash puts ordinary racing on the same board as real breakage — and a board full of non-faults
+// is a board nobody reads (see the errlog "Failed to fetch" noise filter, same reasoning).
+//
+// Deliberately narrow: PGRST116 ALSO fires when .single() matches MORE than one row, and that is a
+// genuine data fault (a duplicate that shouldn't exist) which must keep its 500 and its red row.
+// So we require the "0 rows" detail; with no detail to read, nothing changes.
+const MISSING_ROW_DETAIL = /contains?\s+0\s+rows/i;
+
+/**
+ * Did the row simply not exist? (A .single()/.maybeSingle() lookup that matched nothing.)
+ * True only for the 0-row case — "more than one row" stays a real error.
+ */
+export function isMissingRow(e: unknown): boolean {
+  const o = (e || {}) as MaybePgError;
+  if (o.code !== "PGRST116") return false;
+  const detail = typeof o.details === "string" ? o.details : "";
+  return MISSING_ROW_DETAIL.test(detail);
+}
+
 /** Is this the database refusing the CONTENT of a write (as opposed to failing to serve it)? */
 export function isDataRefusal(e: unknown): boolean {
   const o = (e || {}) as MaybePgError;
   const code = typeof o.code === "string" ? o.code : "";
   if (code && REFUSAL_CODES.has(code)) return true;
+  if (isMissingRow(e)) return true;
   const msg = [o.message, o.details].filter((x) => typeof x === "string").join(" ");
   return REFUSAL_TEXT.test(msg);
 }
 
+/**
+ * Should this failure be written to the error board as a red crash row?
+ * Everything except the pure "someone else already changed/removed it" race — that is normal
+ * floor traffic, not a fault, and it drowns out the errors that ARE.
+ */
+export function worthLogging(e: unknown): boolean {
+  return !isMissingRow(e);
+}
+
 /** 400 when the database refused the value, 500 when the database failed to answer. */
 export function refusalStatus(e: unknown, fallback = 500): number {
+  if (isMissingRow(e)) return 404;
   return isDataRefusal(e) ? 400 : fallback;
 }
 
@@ -72,6 +111,9 @@ export function refusalStatus(e: unknown, fallback = 500): number {
  */
 export function refusalMessage(e: unknown): string {
   const raw = e instanceof Error ? e.message : String((e as MaybePgError)?.message ?? e ?? "");
+  // "Cannot coerce the result to a single JSON object" is a sentence for a developer, and it
+  // arrives in front of a waiter mid-service. Say what happened instead.
+  if (isMissingRow(e)) return "That's not there any more — someone else may have changed or removed it. Refresh and try again.";
   if (!isDataRefusal(e)) return raw;
   for (const name of Object.keys(PLAIN)) if (raw.includes(name)) return PLAIN[name];
   const m = raw.match(/violates unique constraint/i) ? "Something with that name or number already exists."
