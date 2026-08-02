@@ -15,8 +15,11 @@
 -- internet. (The other half of that fault — a rejected VALUE must never be mistaken for a busy
 -- server — is fixed in lib/dbRefusal.ts: it is now a 400 the person is shown.)
 --
--- 30 here is not a new opinion; it is the number lib/floorLayout.ts already ships. Keep the two
--- in step: if FLOOR_PER_ROW_MAX ever changes again, this constraint changes in the same PR.
+-- THE INVARIANT (corrected the same night, after the owner chose a fixed 2..12 picker): this
+-- constraint is the OUTER bound and must never be NARROWER than lib/floorLayout.ts's
+-- FLOOR_PER_ROW_MAX. Wider is harmless — the code clamps and the drop-down only offers the real
+-- choices — while narrower is the exact fault above. So the range stays 2..30 even though the
+-- screens now offer 2..12; if the max in the code ever goes past 30, widen this first.
 ALTER TABLE settings
   DROP CONSTRAINT IF EXISTS settings_floor_per_row_range;
 ALTER TABLE settings

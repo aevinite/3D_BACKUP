@@ -997,6 +997,22 @@ function tf(label, path, val, opts = {}) {
     ${opts.hint ? `<span class="hint">${esc(opts.hint)}</span>` : ""}
   </div>`;
 }
+// numSel: PICK a whole number from a list instead of typing one. Same data-path plumbing as
+// every other settings field, so saving is unchanged — but a number outside the range simply
+// isn't offered, which is the point (owner, 2026-08-02: "don't keep a number where I can add
+// anything"). A typing box has to be argued with afterwards — clamped, corrected on blur, and
+// refused by the database if any of that is missed; a list of the real choices can't be wrong.
+// data-num tells bindEditor to store a NUMBER, not the select's string value.
+function numSel(label, path, val, lo, hi, opts = {}) {
+  const cur = Math.min(Math.max(Math.round(Number(val)) || lo, lo), hi);
+  let out = "";
+  for (let n = lo; n <= hi; n++) out += `<option value="${n}" ${n === cur ? "selected" : ""}>${n}</option>`;
+  return `<div class="field"><label>${esc(label)}</label>
+    <select data-path="${path}" data-num="1">${out}</select>
+    ${opts.hint ? `<span class="hint">${esc(opts.hint)}</span>` : ""}
+  </div>`;
+}
+
 // ta: a multi-line text area (for longer descriptions, review text, etc).
 function ta(label, path, val, opts = {}) {
   return `<div class="field ${opts.span ? "span-2" : ""}">
@@ -2016,13 +2032,14 @@ function formGeneral(s) {
       How your live floor is drawn in the <b>Tables</b> tab. Save, then open Tables.
     </p>
     <div style="display:flex;gap:14px;flex-wrap:wrap">
-      <div style="max-width:220px">${tf("Tables per row", "floor_per_row", s.floor_per_row ?? FLOOR_PER_ROW_DEFAULT, { type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1 })}</div>
+      <div style="max-width:220px">${numSel("Tables per row", "floor_per_row", s.floor_per_row ?? FLOOR_PER_ROW_DEFAULT, FLOOR_PER_ROW_MIN, FLOOR_PER_ROW_MAX)}</div>
     </div>
     <p style="color:var(--muted);font-size:12.5px;margin:10px 0 0;line-height:1.5">
-      <b>Tables per row</b> is exactly that — put 8 and every row has 8 boxes, on this screen and on
+      <b>Tables per row</b> is exactly that — pick 8 and every row has 8 boxes, on this screen and on
       any other. The boxes shrink to fit your number and drop detail as they go (the served count,
       then the seat number, then the wording) while the table number and its colour always stay.
-      ${FLOOR_PER_ROW_MIN}–${FLOOR_PER_ROW_MAX}.
+      Choose any number from ${FLOOR_PER_ROW_MIN} to ${FLOOR_PER_ROW_MAX} — there is nothing to type,
+      so the floor can never be set to a number it won't accept.
     </p>
     <p style="color:var(--muted);font-size:12.5px;margin:8px 0 0;line-height:1.5">
       How many people fit at each table is set per table in <b>Table setting</b> below — that is the
@@ -4984,6 +5001,7 @@ function bindEditor() {
       let v;
       if (node.type === "checkbox") v = node.checked;
       else if (node.type === "number") v = node.value === "" ? null : Number(node.value);
+      else if (node.dataset.num) v = Number(node.value); // a numSel dropdown — store 8, not "8"
       else v = node.value;
       setPath(state.sel, path, v); // save it into the working copy at its dotted path
       if (path === "image" || path === "icon" || path === "color") updatePreviews(); // refresh the live preview
@@ -6846,7 +6864,11 @@ function customFloorHtml(plan, n) {
 // auto-fill drop columns when the width isn't there (see .ftile-grid), so a phone or a
 // narrow window shows fewer per row rather than a row of unreadable slivers. That is what
 // keeps a 300-table restaurant usable on any screen.
-const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 30, FLOOR_PER_ROW_DEFAULT = 12; // mirrors lib/floorLayout.ts
+// Mirrors lib/floorLayout.ts — 2..12, and it is a DROP-DOWN now (numSel above), not a typing box:
+// the owner asked for a fixed list of choices on 2026-08-02. If these change, change them there,
+// in components/admin/RestaurantSettings.tsx, and keep the database's CHECK constraint no
+// narrower than the max (see the warning in lib/floorLayout.ts — that mismatch cost an evening).
+const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 function floorPerRow() {
   // The admin preview slider wins while it's driving (never persisted — see state).
   const raw = state.floorPerRowPreview != null

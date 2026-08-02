@@ -502,6 +502,38 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       )}
     </label>
   );
+  // pickNumber: choose a whole number from a list instead of typing one (owner, 2026-08-02:
+  // "don't keep a number where I can add anything"). It saves itself the moment you pick, and
+  // it deletes a whole class of problem the typing box needed code to survive — no clamping, no
+  // correcting the field on blur, and no way to send the database a number it refuses.
+  const pickNumber = (label: string, k: string, lo: number, hi: number) => {
+    // Until this restaurant's settings have arrived there is no value to show, and a drop-down
+    // that falls back to the lowest option DISPLAYS A REAL NUMBER THAT ISN'T THE SAVED ONE for
+    // as long as the load takes (caught in verification: it read "2" while the floor was on 5).
+    // An empty placeholder is the honest state — same as the typing box it replaced, which sat
+    // blank rather than inventing a number.
+    const raw = Math.round(Number(draft[k]));
+    const known = Number.isFinite(raw);
+    const cur = known ? Math.min(Math.max(raw, lo), hi) : NaN;
+    return (
+      <label style={labelStyle}>
+        {label}
+        <select
+          value={known ? String(cur) : ""} disabled={!loadOk || busy || !known}
+          onChange={(e) => { const n = Number(e.target.value); if (!Number.isFinite(n)) return; set(k, n); autoSave(k, n); }}
+          style={{ ...inputStyle, marginTop: 4 }}
+        >
+          {!known && <option value="">—</option>}
+          {Array.from({ length: hi - lo + 1 }, (_, i) => lo + i).map((n) => (
+            <option key={n} value={n}>{n}</option>
+          ))}
+        </select>
+        <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
+          {autoSaved === k ? "✓ Saved" : "Saves on its own"}
+        </span>
+      </label>
+    );
+  };
   const boolToggle = (label: string, k: string, on: boolean) => (
     <button type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!loadOk || busy}
       onClick={() => set(k, !on)} title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
@@ -899,14 +931,14 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         <h2>🪑 Floor layout</h2>
         <p className="hint">How your live floor is drawn in the <b>Tables</b> tab.</p>
         <div style={{ width: 200 }}>
-          {field("Tables per row", "floor_per_row", {
-            type: "number", min: FLOOR_PER_ROW_MIN, max: FLOOR_PER_ROW_MAX, step: 1, auto: true,
-          })}
+          {pickNumber("Tables per row", "floor_per_row", FLOOR_PER_ROW_MIN, FLOOR_PER_ROW_MAX)}
         </div>
         <p className="hint" style={{ marginTop: 10 }}>
-          <b>Tables per row</b> is exactly that — put {perRow} and every row has {perRow} boxes, on this screen and on
+          <b>Tables per row</b> is exactly that — pick {perRow} and every row has {perRow} boxes, on this screen and on
           any other. The boxes shrink to fit your number and drop detail as they go (the served count, then the seat
-          number, then the wording) while the table number and its colour always stay. {FLOOR_PER_ROW_MIN}–{FLOOR_PER_ROW_MAX}.
+          number, then the wording) while the table number and its colour always stay. Choose any number from{" "}
+          {FLOOR_PER_ROW_MIN} to {FLOOR_PER_ROW_MAX} — there is nothing to type, so the floor can never be set to a
+          number it won&rsquo;t accept.
         </p>
         <p className="hint" style={{ marginTop: 8 }}>
           How many people fit at each table is set per table in <b>Table setting</b> below — that is the number beside
