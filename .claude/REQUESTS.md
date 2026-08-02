@@ -1103,3 +1103,22 @@ the option to use it and they can't do that also."* Three real faults found and 
   layout, each with its own switch, and everything else under settings is refused outright. So the
   row only hides cards — a switch with nothing behind it, which his own rule forbids. Recommend
   **deleting the row** from Access → Manager. Not touched: it is his screen.
+
+## 2026-08-02 · Audit & logs — one name, three panels, sub-options (owner request)
+- [x] **Access renamed + merged**: Manager's menu "Audit" and Owner's menu "Audit" are both
+  **"Audit & logs"**; the owner-side duplicate "Activity log" child (same switch bound twice)
+  is gone. Keys unchanged (`log` / `view_logs` / `logs`).
+- [x] **Sub-options** under both rows say which VIEWS are visible — manager: Removals record ·
+  Activity log · Customer log; owner: Removals record · Activity log. Stored at
+  `access_config.view_logs.<side>_opts`, absent = ON; hidden in the panel AND refused by the
+  endpoint (`/api/editor/{audit,oplog,users}`, `/api/owner/{audit,oplog}`). Admin is never gated.
+- [x] **Admin combined view** at /aevinite/logs ("Audit & logs"): Operations (everything incl.
+  errors) · **Audit · removals (new — every restaurant's deletion_audit)** · Customers; every
+  row carries its restaurant name under "All restaurants" (new `/api/admin/audit`).
+- [x] **Owner page** /owner/activity is now "Audit & logs" with both views (new `/api/owner/audit`);
+  manager tab rebuilt: one sidebar with the three views (the old top-toggle showed the CUSTOMER
+  log when you tapped "Activity log" — fixed), gate now also covers GET /audit + /users.
+- [x] **Reopen a bill defaults OFF for every restaurant** (model def + stored `void_bills`
+  cleared on Aangan/French House so all read the default). 5-min window unchanged where ON.
+- [x] Proved end-to-end on :4801 (headless, 0 extra logins): a manager's removal shows in
+  manager + admin (+restaurant name) + owner feeds; off-switch = row gone AND 403; desktop + 390px.

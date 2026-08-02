@@ -89,8 +89,12 @@ Three sub-groups, in his words: *"in the manager, there will be three suboption 
 menu, permission for manager, manager settings."*
 
 1. **Manager's menu** — exactly FOUR rows: `Edit menu (Editor)` · `Rating review` (renamed
-   from Ratings — label only, keys unchanged) · `Audit` (the activity log lives INSIDE it;
-   more sub-options to come) · `Dashboard`. The first three carry the TWO-CONTROL row:
+   from Ratings — label only, keys unchanged) · `Audit & logs` (renamed from Audit,
+   2026-08-02 — label only, the tab key stays `log` and the grant stays `view_logs`; its
+   sub-options are the tab's three VIEWS — **Removals record** · **Activity log** ·
+   **Customer log** — stored at `access_config.view_logs.manager_opts.*`, ABSENT = ON,
+   enforced at GET `/audit`, `/oplog` and `/users`; recording a removal is never gated) ·
+   `Dashboard`. The first three carry the TWO-CONTROL row:
    **Feature** (`access_config.menus.manager[key]` — OFF removes the menu from EVERY
    manager, whatever their per-person setting; the tab is gone and tabGate refuses) and
    **Default** (`manager_permissions[flag]` — what a manager on "Default" follows, and what
@@ -101,8 +105,10 @@ menu, permission for manager, manager settings."*
    **Edit menu OFF ⇒ the tab becomes the read-only "View menu" VIEWER**, never a vanished
    tab — the manager can browse the whole menu but every edit control is locked and the
    server refuses writes.
-2. **Permission for manager** — `Delete a bill` · `Reopen a bill` (with **Only within**,
-   default **5 min**, enforced at the void-invoice endpoint for a real manager) ·
+2. **Permission for manager** — `Delete a bill` · `Reopen a bill` (**default OFF for every
+   restaurant** — owner, 2026-08-02, superseding his earlier same-day word that it ships on;
+   with **Only within**, default **5 min**, enforced at the void-invoice endpoint for a real
+   manager) ·
    `Discount a bill` (with the % cap, default **50%** for a manager, 5% for a waiter —
    `lib/discountCap.ts` falls back to these model defaults when nothing is stored).
 3. **Manager settings (what manager can do)** — only `Tables — name & seats` · `Users —
@@ -113,7 +119,11 @@ menu, permission for manager, manager settings."*
 Off ⇒ the row's tab/section is gone for a real manager and the server refuses its endpoints.
 
 ## SECTION C — OWNER'S MENU
-`Edit menu` · `Ratings` · `Logs` · `Manager mode` (**LEFT TO BUILD** — shown, labelled).
+`Edit menu` · `Ratings` · `Audit & logs` (renamed from Audit, 2026-08-02 — the section key
+stays `logs`; the old duplicate "Activity log" child bound the SAME switch twice and is
+gone; its sub-options are the page's two VIEWS — **Removals record** · **Activity log** —
+stored at `access_config.view_logs.owner_opts.*`, ABSENT = ON, enforced at
+`/api/owner/audit` and `/api/owner/oplog`) · `Manager mode`.
 
 ## SECTION D — DEFAULT SET FOR USER
 The capability set a **new person of that role** starts with. A person's own row can differ

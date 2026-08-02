@@ -3146,7 +3146,6 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 .rr-foot .btn.danger:disabled { opacity: .45; cursor: not-allowed; }
 @media (max-width: 480px) { .rr-grid { grid-template-columns: 1fr; } .rr-foot { flex-direction: column-reverse; } .rr-foot .btn { width: 100%; } }
 
-.au-switch { display: flex; gap: 8px; margin: 0 0 14px; flex-wrap: wrap; }
 .au-lead { font-size: 13px; color: var(--muted); line-height: 1.5; margin: 0 0 12px; max-width: 74ch; }
 .au-q { width: 100%; box-sizing: border-box; max-width: 520px; padding: 11px 13px; margin: 0 0 14px;
   border-radius: 12px; border: 1.5px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 14px; }

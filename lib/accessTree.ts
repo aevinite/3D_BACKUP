@@ -156,6 +156,18 @@ const EDIT_MENU_PARTS: { id: string; name: string; what: string; def: boolean }[
   { id: "edit_3d", name: "Attach a 3D model", def: false, what: "Uploading and positioning a dish's 3D model. Stays OFF until you deliberately switch it on — it writes to shared storage every restaurant reads." },
 ];
 
+// The views inside "Audit & logs" (owner, 2026-08-02: "there will be sub option like for the
+// logs and audit — which can be visible and which can't"). One list feeds the manager's rows
+// AND the owner's rows, so the two sides can never offer different views. Stored at
+// access_config.view_logs.<side>_opts.<id>; ABSENT MEANS ON (def true), so no restaurant
+// changes until an admin switches one off. The ADMIN's own panel is never gated by these —
+// the admin always sees every log of every restaurant, combined.
+const LOG_PARTS: { id: string; name: string; what: string; mgrOnly?: boolean }[] = [
+  { id: "removals", name: "Removals record", what: "What was taken out and why — a cancelled KOT, a deleted bill, a dish off an order or off the menu — with the reason and the person." },
+  { id: "activity", name: "Activity log", what: "The full record of who did what, action by action." },
+  { id: "customers", name: "Customer log", mgrOnly: true, what: "The guests — who joined which table, what they did, and the blocklist. (The owner's own Customers page is separate and not affected.)" },
+];
+
 // Money & floor actions offered as a MANAGER default (restaurants.manager_permissions —
 // already enforced by managerCan) and as a WAITER default (settings.tablet_* tri-state —
 // already enforced by tabletPerm). `pin` marks the ones whose waiter row also offers
@@ -183,7 +195,10 @@ const ACTIONS: ActionDef[] = [
   // drop down for reopen bill how much minute is set… you could able to go inside and change".
   { id: "delete_bill", name: "Delete a bill", flag: "delete_bill", mgrDef: false, pin: true,
     what: "Takes a bill out of the reports. The number is NOT reused — the next bill still takes the next number — and nothing is erased: the bill stays in the records and in the audit, it simply stops counting towards sales." },
-  { id: "void_bills", name: "Reopen a bill", flag: "void_bills", capTablet: "void_bills", mgrDef: true, waiterDef: "off", pin: true, mins: 5,
+  // DEFAULT OFF (owner, 2026-08-02, superseding his earlier same-day word that it ships on):
+  // "reopening the bill will be off only, by default — permission will be off for all the
+  // restaurants." The 5-minute window below still applies wherever an admin switches it ON.
+  { id: "void_bills", name: "Reopen a bill", flag: "void_bills", capTablet: "void_bills", mgrDef: false, waiterDef: "off", pin: true, mins: 5,
     what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it." },
   { id: "give_discounts", name: "Discount a bill", flag: "give_discounts", tablet: "tablet_discount", mgrDef: true, waiterDef: "off", pin: true, cap: true,
     what: "Taking money off a bill. The cap below is the most this role may take off in one go." },
@@ -558,15 +573,19 @@ export const SECTIONS: Section[] = [
           what: "The tab where the manager reads what guests said about the food and marks a complaint handled. The Feature switch removes it from every manager; Default is what a manager starts on.",
         },
         {
-          // "Inside the audit, there are many options which will be created. For now we will
-          // just keep audit on and off, and it will also have default and all that stuff that
-          // we have built" (owner, 2026-08-02). So: the two-control row today, its future
-          // sub-options land as children here when he specifies them. The stored key stays
-          // "log" — renaming a LABEL must never rename a key.
-          id: "mgr_tab_log", name: "Audit", def: true, fresh: true,
+          // RENAMED from "Audit" (owner, 2026-08-02: "name will be changed from audit to audit
+          // and logs") and given the sub-options he asked for the same day ("inside the audit,
+          // there are many options which will be created… sub option like for the logs and
+          // audit — which can be visible and which can't"). The stored key stays "log" and the
+          // grant stays view_logs — renaming a LABEL must never rename a key.
+          id: "mgr_tab_log", name: "Audit & logs", def: true, fresh: true,
           featureBind: { t: "tab", panel: "manager", key: "log" },
           bind: { t: "grant", flag: "view_logs" },
-          what: "The Audit tab — what was removed and why, with the full activity log inside it. Admin-only actions never appear there. The Feature switch removes it from every manager; Default is what a manager starts on.",
+          what: "The Audit & logs tab — what was removed and why, the activity log, and the customer log. Admin-only actions never appear there. The Feature switch removes it from every manager; Default is what a manager starts on. The parts below say which of its views a manager gets.",
+          children: LOG_PARTS.map((p) => ({
+            id: `d_mgr_log_${p.id}`, name: p.name, what: p.what, def: true,
+            bind: { t: "opt", id: "view_logs", side: "manager", key: p.id } as Bind,
+          })),
         },
         {
           // FOURTH menu. Its reach is a setting, not a separate permission: a real manager's
@@ -627,16 +646,18 @@ export const SECTIONS: Section[] = [
       { id: "own_ratings", name: "Ratings", def: true, bind: { t: "section", key: "ratings" },
         what: "The owner's Ratings page — guest stars and written feedback." },
       {
-        // AUDIT (owner, 2026-08-01). Not "everything that happened" — that is the log — but
-        // everything that WAS NOT MEANT TO HAPPEN and did: a bill reopened after closing, a bill
-        // taken out of the reports, a correction made after the fact. The plain log lives INSIDE
-        // it, because you go looking for the log when you are already asking "what happened here".
-        id: "own_audit", name: "Audit", def: true, fresh: true, bind: { t: "section", key: "logs" },
-        what: "Everything that was not meant to happen but did — bills reopened, bills taken out of the reports, anything corrected after the event — with who did it and why.",
-        children: [
-          { id: "own_logs", name: "Activity log", def: true, bind: { t: "section", key: "logs" },
-            what: "The full record of who did what, inside Audit — the detail behind an entry." },
-        ],
+        // AUDIT & LOGS (owner, 2026-08-01; renamed + given sub-options 2026-08-02: "name will
+        // be changed from audit to audit and logs… and if there is a log separately, you have
+        // to remove it"). The old child here ("Activity log") was that separate log row — it
+        // bound the SAME owner_entitlements.logs switch twice, so it is gone; the children now
+        // are the REAL sub-options saying which views the owner's page shows. The stored
+        // section key stays "logs" — renaming a LABEL must never rename a key.
+        id: "own_audit", name: "Audit & logs", def: true, fresh: true, bind: { t: "section", key: "logs" },
+        what: "The owner's Audit & logs page — what was removed and why, plus the full activity log. The parts below say which of its views this restaurant's owners get.",
+        children: LOG_PARTS.filter((p) => !p.mgrOnly).map((p) => ({
+          id: `d_own_log_${p.id}`, name: p.name, what: p.what, def: true,
+          bind: { t: "opt", id: "view_logs", side: "owner", key: p.id } as Bind,
+        })),
       },
       // BUILT 2026-08-02: the switch is live. It gates the owner panel's Manager mode page
       // (the full live manager panel embedded in the owner cockpit — floor, bills, ordering).
@@ -660,7 +681,8 @@ export const SECTIONS: Section[] = [
           { id: "d_own_edit_menu", name: "Edit menu", def: true, bind: { t: "section", key: "menu" },
             what: "Same switch as Owner's menu → Edit menu; shown here too because this is where you'd look for it." },
           { id: "d_own_ratings", name: "Ratings", def: true, bind: { t: "section", key: "ratings" }, what: "Guest ratings and feedback." },
-          { id: "d_own_logs", name: "Logs", def: true, fresh: true, bind: { t: "section", key: "logs" }, what: "The activity log." },
+          { id: "d_own_logs", name: "Audit & logs", def: true, fresh: true, bind: { t: "section", key: "logs" },
+            what: "Same switch as Owner's menu → Audit & logs; shown here too because this is where you'd look for it." },
           { id: "d_own_manager_mode", name: "Manager mode", def: true, bind: { t: "section", key: "manager_mode" },
             what: "Same switch as Owner's menu → Manager mode; shown here too because this is where you'd look for it." },
         ],

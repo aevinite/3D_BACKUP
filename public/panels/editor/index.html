@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=1c386953" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=a20be34a" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -45,7 +45,10 @@
            same. Only the LABEL changed: the tab key, the stored menus key and the view_ratings
            grant all keep their names (renaming a label must never rename a key). -->
       <button class="tab" data-tab="ratings">⭐ Rating review</button>
-      <button class="tab" data-tab="log">🗑 Audit</button>
+      <!-- "Audit & logs", not "Audit" (owner, 2026-08-02) — one tab holding the removals
+           record, the activity log and the customer log. Only the LABEL changed: the tab
+           key, the stored menus key and the view_logs grant all keep their names. -->
+      <button class="tab" data-tab="log">🗂 Audit &amp; logs</button>
       
       <button class="tab" data-tab="general">Settings</button>
     </nav>
@@ -143,6 +146,6 @@
   <script src="/panels/editor/inventory.js?v=6dab7654"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=18d7717c"></script>
+  <script src="/panels/editor/app.js?v=f9adfb54"></script>
 </body>
 </html>

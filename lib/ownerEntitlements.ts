@@ -103,6 +103,22 @@ export async function entitledSubset(restaurantIds: string[], key: string): Prom
   return rows.filter((r) => mergeOwnerEntitlements(r.owner_entitlements)[key] !== false).map((r) => r.id as string);
 }
 
+// Which of these restaurants still show a given VIEW of the owner's Audit & logs page
+// (owner, 2026-08-02 — the Access screen's "Audit & logs" sub-options, stored at
+// access_config.view_logs.owner_opts.removals / .activity). ABSENT MEANS ON, matching the
+// model's def:true, so nothing changes until an admin switches a view off. The caller has
+// already narrowed to the "logs" section via entitledSubset — this is the finer cut.
+export async function logViewSubset(restaurantIds: string[], part: "removals" | "activity"): Promise<string[]> {
+  if (!restaurantIds.length) return [];
+  const rows = (await sb.from("restaurants").select("id, access_config").in("id", restaurantIds)).data || [];
+  return rows
+    .filter((r) => {
+      const opts = (r.access_config as { view_logs?: { owner_opts?: Record<string, boolean> } } | null)?.view_logs?.owner_opts;
+      return !opts || typeof opts !== "object" || opts[part] !== false;
+    })
+    .map((r) => r.id as string);
+}
+
 // Union across a multi-restaurant owner's estate: a section shows if ANY owned
 // restaurant still has it (per-restaurant data is filtered separately by the APIs).
 export async function getOwnerEntitlementsUnion(restaurantIds: string[]): Promise<OwnerEntitlements> {

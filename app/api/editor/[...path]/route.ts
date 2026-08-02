@@ -138,25 +138,43 @@ async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<
   return true;
 }
 
+// Which VIEWS of the Audit & logs tab a real manager gets (owner, 2026-08-02 — the Access
+// screen's "Audit & logs" sub-options): removals / activity / customers, stored at
+// access_config.view_logs.manager_opts. ABSENT MEANS ON (the model's def is true), so no
+// restaurant changes until an admin switches a view off. Admin and owner always pass —
+// these sub-options limit managers only.
+async function logPartAllowed(g: { user: StaffUser | null }, rid: string, part: "removals" | "activity" | "customers"): Promise<boolean> {
+  const u = g.user;
+  if (!u || u.role === "owner") return true;
+  const opts = ((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+    { view_logs?: { manager_opts?: Record<string, boolean> } } | null)?.view_logs?.manager_opts;
+  if (!opts || typeof opts !== "object") return true;
+  return opts[part] !== false;
+}
+
 // ── MANAGER'S MENU rung (access rebuild, 2026-07-31) ────────────────────────
 // Which manager tabs this RESTAURANT has. Hiding a tab in the panel is never the only
 // guard, so a switched-off tab's endpoints refuse here too — otherwise typing the URL
 // still reached it. Deliberately ONE gate called from every handler rather than a check
 // sprinkled per endpoint: a new endpoint under an existing tab is covered automatically.
 // The lookup only runs for paths that belong to a tab, so ordinary requests pay nothing.
-const TAB_PATHS: { tab: ManagerTabKey; test: (p: string) => boolean }[] = [
+const TAB_PATHS: { tab: ManagerTabKey; test: (p: string, method: string) => boolean }[] = [
   { tab: "ratings", test: (p) => p === "ratings" || p.startsWith("ratings/") },
-  { tab: "log", test: (p) => p === "oplog" || p.startsWith("oplog/") },
+  // The Audit & logs tab owns THREE reads: the activity log (oplog), the removals record
+  // (GET /audit) and the customer log (GET /users). READS ONLY for the last two: POST /audit
+  // is the RECORDING of a removal — that must land whether or not anyone may view the tab,
+  // or switching the menu off would quietly stop the audit trail (the compliance record).
+  { tab: "log", test: (p, method) => p === "oplog" || p.startsWith("oplog/") || ((p === "audit" || p === "users") && method === "GET") },
   // "bills" LEFT this gate (owner, 2026-08-02): the Bill menu is FIXED — every manager has it,
   // so there is no view_bills question any more and its endpoints are plain manager endpoints.
   // The two dangerous actions inside it (delete / reopen a bill) keep their own managerCan
   // gates at their handlers — the TAB being fixed hands over nothing dangerous.
   { tab: "editor", test: (p) => /^(items|categories|filters)(\/|$)/.test(p) },
 ];
-async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[]): Promise<NextResponse | null> {
+async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[], method = "GET"): Promise<NextResponse | null> {
   if (!g.user) return null;                         // admin super-user keeps every tab
   const p = path.join("/");
-  const hit = TAB_PATHS.find((t) => t.test(p));
+  const hit = TAB_PATHS.find((t) => t.test(p, method));
   if (!hit) return null;
   const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config;
   // A menu row moves TWO stored values — the tab list and the manager power behind it — so the
@@ -171,7 +189,7 @@ async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[
     : hit.tab === "ratings" ? await managerCan(g, rid, "view_ratings")
     :                         await managerCan(g, rid, "view_logs");
   if (managerTabOn(cfg, hit.tab) && granted) return null;
-  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the activity log" };
+  const LABEL: Record<ManagerTabKey, string> = { editor: "the menu editor", ratings: "guest ratings", log: "the Audit & logs tab" };
   return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
 
@@ -387,7 +405,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   // or the log. (bug 2026-07-28)
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
-  { const tg = await tabGate(g, rid, path); if (tg) return tg; }
+  { const tg = await tabGate(g, rid, path, req.method); if (tg) return tg; }
   const p = path.join("/");
   try {
     // customer-recognize?phone=… — repeat-customer lookup for the pay sheet
@@ -516,6 +534,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const menuRestricted = !!(mo && typeof mo === "object");
       const menuSub: Record<string, boolean> = {};
       for (const k of MENU_SUB_KEYS) menuSub[k] = menuRestricted ? mo![k] === true : true;
+      // Which VIEWS of the Audit & logs tab this viewer gets (the Access screen's sub-options,
+      // access_config.view_logs.manager_opts). Same resolution as logPartAllowed(): admin and
+      // owner see every view; a real manager (or the simulate view) loses only a view an admin
+      // explicitly switched off — ABSENT MEANS ON, unlike menuSub's explicit-true rule, because
+      // these rows default ON in the model. The panel hides a view that reads false here; the
+      // GET /oplog, /audit and /users guards refuse the same views server-side.
+      const lo = ((g.user && g.user.role === "manager") || simulate)
+        ? (r?.access_config as { view_logs?: { manager_opts?: Record<string, boolean> } } | null)?.view_logs?.manager_opts
+        : null;
+      const logParts: Record<string, boolean> = {};
+      for (const k of ["removals", "activity", "customers"]) logParts[k] = lo && typeof lo === "object" ? lo[k] !== false : true;
       return ok({
         actor,
         role: actor,
@@ -532,6 +561,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         effectivePowers,
         offByAdmin,
         menuSub,
+        logParts,
         // MANAGER'S MENU (access rebuild): which tabs this RESTAURANT has at all — a
         // different question from what a PERSON may do, which is the powers above. The panel
         // removes these tabs entirely (never greys them), and the guards below refuse their
@@ -1439,6 +1469,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
 
     if (p === "users") {
+      // The Customer-log VIEW of the Audit & logs tab can be switched off on its own
+      // (the tab half is refused by tabGate; this is the sub-view switch).
+      if (!(await logPartAllowed(g, rid, "customers"))) return permDenied("view the customer log");
       // The per-guest order/call tallies below are computed from these windows. The old 400/120
       // caps undercounted an active restaurant (a guest whose orders fell outside the latest 400
       // showed "0 orders"). Raised to a safer bound — this is an on-demand tab (not polled), and
@@ -1458,6 +1491,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     if (p === "oplog") {
       if (!(await canViewLogs(g, rid))) return permDenied("view the activity log");
+      // The Activity-log VIEW of the Audit & logs tab can be switched off on its own.
+      if (!(await logPartAllowed(g, rid, "activity"))) return permDenied("view the activity log");
       // The operation log: recent staff actions across all panels. HIERARCHY RULE
       // (owner, 2026-07-03 — "in the manager's logs there shouldn't be owner or admin
       // actions"): a lower role must never observe a higher role's activity. So the
@@ -1498,9 +1533,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return ok({ range, rows, truncated });
     }
 
-    // audit (GET) — the newest removals for this restaurant, for the Audit screen. Scoped, columned
-    // and capped, like every other panel read.
+    // audit (GET) — the newest removals for this restaurant, for the Audit & logs screen. Scoped,
+    // columned and capped, like every other panel read. The tab half (menus.manager.log) is
+    // refused by tabGate; these two are the person half + the Removals sub-view switch.
     if (p === "audit") {
+      if (!(await canViewLogs(g, rid))) return permDenied("view the removals record");
+      if (!(await logPartAllowed(g, rid, "removals"))) return permDenied("view the removals record");
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
       const rows = must(await sb.from("deletion_audit")
         .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount")
@@ -1540,7 +1578,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
-  { const tg = await tabGate(g, rid, path); if (tg) return tg; }
+  { const tg = await tabGate(g, rid, path, req.method); if (tg) return tg; }
   try {
     const [a, b, c] = path;
     // A missing client id arrives as literal "undefined"/"null"/"NaN" — reject before it
@@ -3267,7 +3305,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
-  { const tg = await tabGate(g, rid, path); if (tg) return tg; }
+  { const tg = await tabGate(g, rid, path, req.method); if (tg) return tg; }
   try {
     const [a, id] = path;
     // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).
@@ -3412,7 +3450,7 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
-  { const tg = await tabGate(g, rid, path); if (tg) return tg; }
+  { const tg = await tabGate(g, rid, path, req.method); if (tg) return tg; }
   try {
     const [a, id] = path;
     // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).
