@@ -2,7 +2,7 @@
 /* components/admin/AccessPerPerson.tsx — the Per-person tab of Access & permissions
  * (owner rebuild, 2026-07-31; spec docs/ACCESS-MODEL.md).
  *
- * "Default set for user" says what a MANAGER / OWNER / WAITER starts with. This screen is
+ * The role sections (Manager / Owner's menu / Waiter) say what a person starts with. This screen is
  * the exception list: give ONE person more or less than their role's default. It renders
  * the SAME capability rows as that section — both come from lib/accessTree.ts — so the two
  * screens can never drift into offering different powers.
@@ -170,7 +170,7 @@ function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null
         </div>
       </div>
       <p className="app-note">
-        <b>Default</b> follows what every {roleName.toLowerCase()} here gets — change that in <b>Default set for user</b>.
+        <b>Default</b> follows what every {roleName.toLowerCase()} here gets — change that in the <b>{roleName}</b> section of the General tab.
         Anything you set below applies to this one person and takes effect on their very next tap; no re-login.
       </p>
 

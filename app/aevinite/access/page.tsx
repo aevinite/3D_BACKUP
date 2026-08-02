@@ -6,7 +6,7 @@
  * can never offer different capabilities.
  *
  *   General     → <AccessTree/>       Main features · Staff apps · Manager's menu ·
- *                                     Owner's menu · Default set for user
+ *                                     Owner's menu · Waiter
  *   Per person  → <AccessPerPerson/>  the exception list for one member of staff
  *
  * This replaced a 1000-line screen of 54 sub-checkboxes, 45 of which no server code read.

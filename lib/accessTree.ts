@@ -671,28 +671,16 @@ export const SECTIONS: Section[] = [
     // The MANAGER folder moved into Manager's menu (owner, 2026-08-01) so a menu and its defaults
     // are one thing. The owner and the waiter keep their lists here for now — his call: "only the
     // manager for now".
-    id: "defaults", name: "Default set for user", icon: "user",
-    blurb: "What an owner and a waiter start with. A single person can still be given more or less on the Per-person tab — this is only the starting point they inherit. (A manager's set now lives inside Manager's menu.)",
-    children: [
-      {
-        id: "d_owner", name: "Owner", bind: { t: "none" },
-        what: "What an owner of this restaurant starts with. An owner is the top of their own restaurant, so only their pages are listed — money actions are always theirs.",
-        children: [
-          { id: "d_own_edit_menu", name: "Edit menu", def: true, bind: { t: "section", key: "menu" },
-            what: "Same switch as Owner's menu → Edit menu; shown here too because this is where you'd look for it." },
-          { id: "d_own_ratings", name: "Ratings", def: true, bind: { t: "section", key: "ratings" }, what: "Guest ratings and feedback." },
-          { id: "d_own_logs", name: "Audit & logs", def: true, fresh: true, bind: { t: "section", key: "logs" },
-            what: "Same switch as Owner's menu → Audit & logs; shown here too because this is where you'd look for it." },
-          { id: "d_own_manager_mode", name: "Manager mode", def: true, bind: { t: "section", key: "manager_mode" },
-            what: "Same switch as Owner's menu → Manager mode; shown here too because this is where you'd look for it." },
-        ],
-      },
-      {
-        id: "d_waiter", name: "Waiter (tablet)", bind: { t: "none" },
-        what: "What every waiter starts with on the tablet. Money actions offer a third choice — “On, but ask a manager PIN” — so a waiter can act with a manager standing there without holding the power all shift.",
-        children: ACTIONS.map(waiterAction).filter(Boolean) as Node[],
-      },
-    ],
+    // ─────────────────────────────── E · WAITER ───────────────────────────────
+    // "DEFAULT SET FOR USER" WAS DELETED (owner, 2026-08-02: "we don't even need a default set
+    // for user because we have merged all that inside — so delete that at the very bottom").
+    // Its manager folder had already moved into Manager (2026-08-01/02) and its owner folder
+    // was pure duplicates of Owner's menu, so those simply went. The WAITER rows were the one
+    // thing living only there — they become their own role section, same shape as Manager, so
+    // every role reads the same way and nothing loses its screen.
+    id: "waiter", name: "Waiter", icon: "user",
+    blurb: "What every waiter starts with on the tablet. Money actions offer a third choice — “On, but ask a manager PIN” — so a waiter can act with a manager standing there without holding the power all shift. One person can still be given more or less on the Per-person tab.",
+    children: ACTIONS.map(waiterAction).filter(Boolean) as Node[],
   },
 ];
 
