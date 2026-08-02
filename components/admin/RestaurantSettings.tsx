@@ -113,7 +113,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const [kotBusy, setKotBusy] = useState(false);
   const [qrBusy, setQrBusy] = useState<string | null>(null);
   const [showFloorPreview, setShowFloorPreview] = useState(false);
-  // The bill's logo is the restaurant's own uploaded image (Format & theme → Colours, logo &
+  // The bill's logo is the restaurant's own uploaded image (Design and styling → Theme and
   // wording). Read here so the preview shows the REAL header — including the empty case, which
   // is the whole point of the rule: no image ⇒ the bill starts with the name.
   const [logoUrl, setLogoUrl] = useState<string>("");
@@ -607,7 +607,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
           <button className="adm-btn" onClick={previewBill}>🧾 Preview the bill</button>
           <span className="adm-muted" style={{ fontSize: 11.5 }}>
-            {logoUrl ? "Your logo prints at the top." : "No logo uploaded — the bill starts with the name. Add one in Format & theme → Colours, logo & wording."}
+            {logoUrl ? "Your logo prints at the top." : "No logo uploaded — the bill starts with the name. Add one in Design and styling → Theme and logo."}
           </span>
         </div>
 

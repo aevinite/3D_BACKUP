@@ -208,7 +208,7 @@ for (let i = 0; i < idPositions.length; i++) {
   if (!bind || bind[1] !== "none") continue;                 // has real storage → fine
   // `panel:` is real storage too — the row opens one of the editor cards that moved here off the
   // restaurant-detail page (2026-08-01), which loads and saves through its own endpoint. Without
-  // this the check reads "Colours, logo & wording" as a dead switch when it is the whole branding
+  // this the check reads "Theme and logo" as a dead switch when it is the whole branding
   // form.
   if (/children:/.test(own) || /leftToBuild:\s*true/.test(own) || /link:\s*\{/.test(own) || /panel:\s*"/.test(own)) continue;
   fail(`"${id}" is a switch with no storage and no "left to build" label — exactly the dead control this rebuild removed`);

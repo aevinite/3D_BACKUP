@@ -7,7 +7,7 @@
  * every setting off the restaurant-detail page onto Access & permissions ("everything will
  * be here on access control tab, not there"). It is a component of its own now so exactly
  * ONE editor owns these values wherever it is mounted — Access renders it inside
- * Main features → Menu → Format & theme → Colours, logo & wording.
+ * Main features → Menu → Design and styling → Theme and logo.
  *
  * Writes /api/admin/restaurants/branding (+ /logo for the image); unchanged by the move. */
 import { useEffect, useState } from "react";
