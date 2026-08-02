@@ -51,6 +51,77 @@ const UNRELEASED_ON_AV = [
 ];
 const expectedMissing = (k) => UNRELEASED_ON_AV.some((re) => re.test(k));
 
+// ── WHAT HAS DELIBERATELY NOT BEEN RELEASED TO AV LIVE ───────────────────────────────────────
+// AV live does not receive releases in a line — it receives them surgically, one asked-for change
+// at a time (the two-stack rule), so "AV live is on release N" is not a real number and cannot be
+// derived from the database: there is no migrations ledger on either stack. What CAN be written
+// down honestly is the decision itself. One line per migration the owner has chosen not to send.
+//
+// THIS LIST CANNOT ROT UNNOTICED: the check below fails if a migration listed here turns out to be
+// present on AV live after all. A record that verifies itself is worth keeping; the hand-typed
+// lists that rotted today were duplicates of things the code already knew.
+const WITHHELD_FROM_AV = {
+  241: "owner heatmap tax fix — not released",
+  245: "recycle bin frees the login name — backup only, by decision",
+  249: "tables can be merged, recorded and unmerged — not released",
+  250: "ordering at a merged table — not released (needs 249)",
+  251: "the deletion audit — not released",
+  260: "a joined table cannot be given a second party — not released (needs 249)",
+};
+
+// ── WHICH RELEASE IS AV LIVE ON? ─────────────────────────────────────────────────────────────
+// "AV live is missing 4 functions" is not, by itself, a fault. AV live receives releases
+// deliberately and rarely (see the two-stack rule): every time backup gains a feature, the two
+// databases differ until the next release, and shouting DRIFT at that teaches everyone to ignore
+// this check — which is exactly what happened by 2026-08-02, when it had been red for days over
+// table-merging, the deletion audit and the recycle-bin index, all of them simply unreleased.
+//
+// The distinction that actually matters:
+//   BEHIND  — AV live lacks things that only NEWER migrations create. Expected. Reported, not failed.
+//   DRIFT   — AV live lacks (or has changed) something an OLDER migration created, while newer ones
+//             ARE present. That means somebody edited the live database by hand, or a release landed
+//             out of order, and it is the thing this check exists to catch.
+//
+// Derived from the migrations folder, never a hand-typed list: two of those rotted today already.
+const migSource = () => {
+  const out = [];
+  for (const f of readdirSync(join(root, "supabase/migrations")).filter((f) => /^\d+_.*\.sql$/.test(f)).sort())
+    out.push([parseInt(f, 10), readFileSync(join(root, "supabase/migrations", f), "utf8")]);
+  return out.sort((a, b) => a[0] - b[0]);
+};
+// object name (bare, no args / no table prefix) → the FIRST migration number that writes it.
+// FIRST, not last, and that distinction is the whole check: half these functions are re-created
+// by a dozen later migrations, so dating them by the newest one says "this is from mig 255" about
+// something that has existed since 036 — and then every older difference reads as drift.
+// TWO dates per object, because the two questions are different:
+//   firstIn — when it first appeared. Dates its EXISTENCE (is it missing? is it extra?).
+//   lastIn  — when its definition last changed. Dates its BODY (does it differ?).
+// Using one for both is how this check said "lfh_place_order drifted (mig 15)" about a function
+// that merely has a newer body here from mig 250 (2026-08-02).
+const firstIn = new Map(), lastIn = new Map();
+for (const [n, sql] of migSource()) {
+  const add = (name) => {
+    if (!name) return; const k = name.toLowerCase();
+    if (!firstIn.has(k)) firstIn.set(k, n);
+    lastIn.set(k, Math.max(n, lastIn.get(k) || 0));
+  };
+  for (const m of sql.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?([a-z0-9_]+)\s*\(/gi)) add(m[1]);
+  for (const m of sql.matchAll(/CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([a-z0-9_]+)/gi)) add(m[1]);
+  for (const m of sql.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?TRIGGER\s+([a-z0-9_]+)/gi)) add(m[1]);
+  // A DROP dates an object too: the index mig 245 replaced still exists on AV live simply because
+  // 245 has not been released there — that is BEHIND, not an index somebody invented.
+  for (const m of sql.matchAll(/DROP\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+EXISTS\s+)?(?:public\.)?([a-z0-9_]+)/gi)) add(m[1]);
+  for (const m of sql.matchAll(/DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?(?:public\.)?([a-z0-9_]+)/gi)) add(m[1]);
+  // A table's PRIMARY KEY index is created implicitly by CREATE TABLE, so no CREATE INDEX names
+  // it. Date <table>_pkey by the migration that creates the table, or it reads as "in no
+  // migration at all" — which the check calls drift, wrongly (both new tables did on 2026-08-02).
+  for (const m of sql.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?([a-z0-9_]+)/gi)) { add(m[1]); add(m[1] + "_pkey"); }
+}
+// "orders :: idx_x" → "idx_x";  "lfh_f(a uuid, b text)" → "lfh_f"
+const bare = (k) => String(k).split(" :: ").pop().split("(")[0].trim().toLowerCase();
+const firstWritten = (k) => firstIn.get(bare(k)) ?? null;
+const lastWritten  = (k) => lastIn.get(bare(k)) ?? null;
+
 let failed = 0;
 const pass = (m) => { if (!QUIET) console.log("  ✓ " + m); };
 const fail = (m) => { console.log("  ✗ " + m); failed++; };
@@ -94,13 +165,30 @@ if (!av) {
       if (norm(A.get(row.name)) !== norm(row.def)) differing.push(row.name);
     }
     const extra = a.map((r) => r.name).filter((n) => !d.some((r) => r.name === n) && !expectedMissing(n));
-    missing.length
-      ? fail(`${missing.length} ${what}(s) on dev are MISSING from AV live: ${missing.slice(0, 8).join(", ")}${missing.length > 8 ? " …" : ""}`)
-      : pass(`every ${what} dev has, AV live has too (bar the withheld modules)`);
-    differing.length
-      ? fail(`${differing.length} ${what}(s) DIFFER between the two databases: ${differing.slice(0, 8).join(", ")} — the client is running other code than the one we test`)
-      : pass(`no ${what} differs in substance between the two databases`);
-    if (extra.length) fail(`${extra.length} ${what}(s) exist ONLY on AV live (never written here): ${extra.slice(0, 8).join(", ")}`);
+    // Date each disagreement by the question it answers (see firstIn / lastIn above).
+    const gaps = [
+      ...missing.map((n) => ({ n, mig: firstWritten(n), why: "missing from AV live" })),
+      ...differing.map((n) => ({ n, mig: lastWritten(n), why: "an older definition on AV live" })),
+      ...extra.map((n) => ({ n, mig: lastWritten(n), why: "dropped here, still on AV live" })),
+    ];
+    // How far has the release train demonstrably reached on AV live? The highest migration that
+    // INTRODUCED something AV live actually has. An object it has from mig 251 proves 251 landed
+    // there, so anything older that it lacks was not "not released yet" — it was lost or edited.
+    const avLevel = Math.max(0, ...a.map((r) => firstWritten(r.name)).filter((m) => m != null));
+    const withheld = (m) => m != null && Object.prototype.hasOwnProperty.call(WITHHELD_FROM_AV, m);
+    const behind = gaps.filter((g) => g.mig != null && (g.mig > avLevel || withheld(g.mig)));
+    const drift  = gaps.filter((g) => g.mig == null || (g.mig <= avLevel && !withheld(g.mig)));
+    // Keep the record above honest: if something it says is withheld is actually THERE, say so.
+    const wrongly = a.map((r) => firstWritten(r.name)).filter((m) => withheld(m));
+    if (wrongly.length) fail(`the withheld-from-AV list names migration(s) ${[...new Set(wrongly)].join(", ")} as not released, but AV live has their ${what}s — update WITHHELD_FROM_AV in this script`);
+    if (drift.length) {
+      fail(`${drift.length} ${what}(s) DRIFTED — AV live is on release ~${avLevel}, so these are not "not released yet": ${drift.slice(0, 8).map((g) => `${g.n} — ${g.why}${g.mig ? ` (mig ${g.mig})` : ", and in no migration at all"}`).join(" · ")}`);
+    } else if (behind.length) {
+      const migs = [...new Set(behind.map((g) => g.mig))].sort((x, y) => x - y);
+      pass(`${what}s: ${behind.length} object(s) wait on ${migs.length} migration(s) not sent to AV live (${migs.map((m) => `${m}${WITHHELD_FROM_AV[m] ? ` — ${WITHHELD_FROM_AV[m]}` : ""}`).join("; ")})`);
+    } else {
+      pass(`every ${what} matches between the two databases`);
+    }
   }
 }
 
