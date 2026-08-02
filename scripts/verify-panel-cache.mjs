@@ -27,8 +27,29 @@ import { createHash } from "node:crypto";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const FIX = process.argv.includes("--fix");
+// --repo <path>: check ANOTHER checkout (a worktree, the AV live folder) instead of this one.
+// It used to be ignored in silence, which is worse than not existing: on 2026-08-02 a release was
+// checked with --repo, the flag was dropped, THIS repo was checked instead, it passed, and the
+// other checkout still had a panel pointing at a stale version. A guard that reports on a tree
+// you did not ask about is a guard that lies, so an unknown flag now stops the run.
+const argv = process.argv.slice(2);
+const KNOWN = new Set(["--fix", "--repo"]);
+for (let i = 0; i < argv.length; i++) {
+  const a = argv[i];
+  if (a === "--repo") { i++; continue; }          // its value
+  if (a.startsWith("-") && !KNOWN.has(a)) {
+    console.error(`verify-panel-cache: I don't know the flag "${a}" — refusing to run and report on the wrong thing.`);
+    process.exit(2);
+  }
+}
+const repoArg = argv.includes("--repo") ? argv[argv.indexOf("--repo") + 1] : null;
+if (argv.includes("--repo") && !repoArg) { console.error("verify-panel-cache: --repo needs a path."); process.exit(2); }
+const ROOT = repoArg ? resolve(repoArg) : join(dirname(fileURLToPath(import.meta.url)), "..");
+if (!existsSync(join(ROOT, "public", "panels"))) {
+  console.error(`verify-panel-cache: no public/panels under ${ROOT}`);
+  process.exit(2);
+}
+const FIX = argv.includes("--fix");
 const PANELS = join(ROOT, "public", "panels");
 
 const hashOf = (file) => createHash("sha1").update(readFileSync(file)).digest("hex").slice(0, 8);
