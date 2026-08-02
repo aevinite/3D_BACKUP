@@ -28,7 +28,7 @@ const SETTINGS_COLS = [
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
   "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
-  "table_count", "table_seats", "table_names", "auto_table_action", "floor_per_row",
+  "table_count", "table_seats", "table_names", "floor_per_row",
   // Banquet bill (mig 237): WHAT this restaurant is asked to fill in, its own bill-number
   // series, and WHICH paper it prints on. Admin-owned — the manager/owner save path strips
   // these (owner 2026-07-31: the info-format option lives in the admin panel).
@@ -116,10 +116,9 @@ function sanitize(body: Patch): Patch {
     }
     out.table_names = clean;
   }
-  if ("auto_table_action" in body) {
-    const v = String(body.auto_table_action || "off");
-    out.auto_table_action = ["off", "close", "restart"].includes(v) ? v : "off";
-  }
+  // auto_table_action is deliberately NOT writable any more (owner, 2026-08-02). No screen
+  // offers it and no code reads it — a table is ended by a person tapping ✓ Close. The column
+  // stays for old rows; mig 254 forces every one of them to 'off'.
   // ── banquet bill (mig 237) ────────────────────────────────────────────────
   // The field list is cleaned against lib/banquetFields.ts, so an unknown key can
   // never reach the DB and the SQL side (which filters every stored value by this

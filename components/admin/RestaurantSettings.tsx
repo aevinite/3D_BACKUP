@@ -990,9 +990,11 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       )}
 
       {/* The "Auto close / restart tables" card was here. REMOVED 2026-08-01 (owner: "this
-          option is also useless, we don't need it — it will be auto set by the session").
-          The stored auto_table_action still drives the behaviour; there is simply no longer a
-          screen offering a choice nobody should have to make. */}
+          option is also useless, we don't need it — it will be auto set by the session"), and
+          on 2026-08-02 the BEHAVIOUR went too (owner: "all served and all marked paid, the table
+          restarts — I don't want that"). Nothing ends a table on its own now: the manager's floor
+          tile and table detail show ✓ Close once everything is served and the bill is paid, and a
+          person decides. lib/autoSettle.ts is deleted and nothing reads auto_table_action. */}
 
       {(msg || err) && (
         <div role="status" style={{ position: "fixed", left: "50%", bottom: dirty ? 76 : 20, transform: "translateX(-50%)", zIndex: 1001, background: err ? "var(--adm-danger, #e5484d)" : "var(--adm-ok, #16a34a)", color: "#fff", padding: "9px 15px", borderRadius: 10, fontSize: 13, fontWeight: 700, boxShadow: "0 6px 24px rgba(0,0,0,0.25)", maxWidth: "90vw" }}>

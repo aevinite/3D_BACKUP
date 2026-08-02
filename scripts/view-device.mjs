@@ -16,6 +16,9 @@
 //   --role   guest|tablet|manager|kitchen|owner   default guest (no login needed).
 //   --slug   restaurant slug for the guest menu (default french-house).
 //   --route  optional explicit path override (e.g. /menu).
+//   --base   optional server to open (default http://localhost:4000). Use this when the work
+//            is on a worktree's own dev server (e.g. --base http://localhost:8001) — without
+//            it the window shows the shared folder's app and looks like nothing changed.
 import { chromium } from "playwright";
 import { loginAs, DIAG_LOGINS } from "./sweep/login.mjs";
 
