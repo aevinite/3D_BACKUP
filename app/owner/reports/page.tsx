@@ -82,6 +82,9 @@ type BodyKey =
   | "payments" | "discounts" | "cancellations" | "tax"
   | "dishes" | "categories" | "menu" | "hourly" | "daypart"
   | "staffpay" | "staffperf"
+  // The two sub-reports under the daily sheet (owner 2026-08-02) — both read the SAME
+  // daysummary payload, so opening either costs no extra request.
+  | "earnings" | "expenses"
   // Inventory & stock (migs 221/224/227) — one body per sub-tab.
   | "invstock" | "invpurchases" | "invusage" | "invwaste" | "invexpenses";
 const BODY_KIND: Record<BodyKey, DataKind> = {
@@ -92,6 +95,7 @@ const BODY_KIND: Record<BodyKey, DataKind> = {
   dishes: "dishes", menu: "dishes", categories: "categories",
   hourly: "hourly", daypart: "hourly",
   staffpay: "staffpay", staffperf: "staffperf",
+  earnings: "daysummary", expenses: "daysummary",
   invstock: "invstock", invpurchases: "invpurchases", invusage: "invusage",
   invwaste: "invwaste", invexpenses: "invexpenses",
 };
@@ -99,7 +103,14 @@ type OpenOpts = { sub?: string; pay?: "discounts" | "cancellations" };
 type OpenReport = (k: RKey, opts?: OpenOpts) => void;
 type SubTab = { key: string; label: string; icon: string; body: BodyKey };
 const SUBTABS: Record<RKey, SubTab[]> = {
-  daysummary: [],
+  // "Mainly report will be this, and there will be two sub reports — expenses, and one of
+  // the earning" (owner 2026-08-02). Both sub-tabs render from the payload the summary
+  // already fetched, so switching between them is instant and costs nothing.
+  daysummary: [
+    { key: "summary", label: "Summary", icon: "fa-file-invoice-dollar", body: "daysummary" },
+    { key: "earnings", label: "Earnings", icon: "fa-arrow-down-to-line", body: "earnings" },
+    { key: "expenses", label: "Expenses", icon: "fa-arrow-up-from-bracket", body: "expenses" },
+  ],
   sales: [
     { key: "revenue", label: "Revenue", icon: "fa-chart-line", body: "sales" },
     { key: "avgbill", label: "Average bill", icon: "fa-receipt", body: "avgbill" },
@@ -172,9 +183,13 @@ type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: Pa
   // The day × hour traffic grid, when this payload is a heatmap request.
   heat?: HeatRow[] };
 type HeatRow = { dow: number; hr: number; orders: number; revenue: number };
+type EarnPart = { key: string; orders: number; amount: number; gst: number; isSales: boolean };
 type InHand = {
   itemSales: number; discounts: number; netSales: number; gst: number;
   collected: number; yours: number; expenses: number; left: number;
+  // Every rupee that arrived, GST still in it — the TOTAL on top of the sheet (mig 254).
+  moneyIn?: number;
+  earnings?: { parts: EarnPart[]; dineIn: number; tips: number };
   parts: {
     manual: { amount: number; entries: number; byCategory: Record<string, number> } | null;
     salary: { accrued: number; paid: number; people: number; excluded: number } | null;
@@ -938,29 +953,25 @@ function EmptyCard({ text }: { text: string }) {
 // NOTHING was removed from the old ladder. The first five rows are exactly what was
 // there before ("don't change what's already made carefully" — owner 2026-08-01); the
 // four new rows continue underneath it.
-function InHandLadder({ ih, taxLines, singleRest, onOpenExpenses }: {
-  ih: InHand; taxLines: { label: string; rate: number; amt: number }[]; singleRest: boolean; onOpenExpenses: () => void;
-}) {
-  // FOUR LINES, in the owner's own words (2026-08-02): "total net profit with GST, minus GST,
-  // minus discount, minus expenses, profit in hand". The nine-row version that shipped first
-  // was correct and too complicated — he reads this sheet every day and does not want the
-  // whole journey, he wants the answer.
+function InHandLadder({ ih, onOpenExpenses }: { ih: InHand; onOpenExpenses: () => void }) {
+  // TWO TOTALS AND NOTHING ELSE (owner 2026-08-02, third pass): "minus GST, then total minus
+  // discount minus expenses then total. as simple as that. two times only total. And one total
+  // will be on the top, which was money in with GST."
   //
-  // ── THE ONE ARITHMETIC TRAP, and why the top line is what it is ────────────
-  // A discount in this app comes off BEFORE the guest pays (lib: revenue = total −
-  // discount*(1+rate)), so "total collected" is ALREADY net of it. Taking the discount off
-  // that a second time understates the profit by exactly the discount. So the ladder starts
-  // one line higher — at what the bills came to BEFORE the discount — and then his four
-  // subtractions are each real and land on the same figure the long version did.
-  //   itemSales + gst  −gst  −discount  −expenses  ==  (itemSales − discount) − expenses
-  // The old detailed rows are not gone; they moved behind "the full breakdown" below, because
-  // the CGST/SGST split is still needed for filing.
-  const [full, setFull] = useState(false);
-  const billed = ih.itemSales + ih.gst;
+  // The top total is `moneyIn` = every rupee that arrived with GST still in it — dine-in bills
+  // BEFORE the discount, plus parcel/delivery/banquet. It has to be before the discount, because
+  // the discount comes off before the guest pays (revenue = total − discount*(1+rate)); taking it
+  // off a figure that is already net of it would understate the profit by exactly the discount.
+  // The Earnings sub-report is this same number broken into its parts, so the two always agree.
+  // A payload stored before this shape existed has no moneyIn/earnings. Fall back to the
+  // figures that have always been there rather than crashing the whole report on a stale
+  // snapshot — the numbers are then simply dine-in only, which is what that snapshot knew.
+  const moneyIn = ih.moneyIn ?? (ih.itemSales + ih.gst);
+  const tips = ih.earnings?.tips ?? 0;
   return (
-    <Panel title="Profit in hand" hint="what the day actually left you">
+    <Panel title="Profit in hand" hint="what the period actually left you">
       <div className="rs-lines">
-        <div className="rs-line"><span className="lbl">Earned from customers <span className="rs-dim">· with GST</span></span><span className="val">{inr(billed)}</span></div>
+        <div className="rs-line total"><span className="lbl">TOTAL <span className="rs-dim">· money in, with GST</span></span><span className="val">{inr(moneyIn)}</span></div>
         <div className="rs-line"><span className="lbl">GST <span className="rs-dim">· the government&apos;s, not yours</span></span><span className="val neg">− {inr(ih.gst)}</span></div>
         <div className="rs-line"><span className="lbl">Discount given</span><span className="val neg">− {inr(ih.discounts)}</span></div>
         <button type="button" className="rs-line rs-line-btn" onClick={onOpenExpenses}
@@ -968,30 +979,85 @@ function InHandLadder({ ih, taxLines, singleRest, onOpenExpenses }: {
           <span className="lbl">Expenses <span className="rs-inside">what&apos;s inside <i className="fas fa-arrow-right" aria-hidden /></span></span>
           <span className="val neg">− {inr(ih.expenses)}</span>
         </button>
-        <div className="rs-line grand"><span className="lbl">PROFIT IN HAND</span><span className="val">{inr(ih.left)}</span></div>
+        <div className="rs-line grand"><span className="lbl">TOTAL</span><span className="val">{inr(ih.left)}</span></div>
       </div>
-
-      <button type="button" className="rs-morebtn" onClick={() => setFull((f) => !f)} aria-expanded={full}>
-        <i className={`fas fa-chevron-${full ? "up" : "down"}`} aria-hidden /> {full ? "Hide" : "Show"} the full breakdown
-      </button>
-      {full && (
-        <div className="rs-lines rs-more">
-          <div className="rs-line"><span className="lbl">Item sales <span className="rs-dim">· menu prices</span></span><span className="val">{inr(ih.itemSales)}</span></div>
-          <div className="rs-line"><span className="lbl">Discounts given</span><span className="val neg">− {inr(ih.discounts)}</span></div>
-          <div className="rs-line"><span className="lbl"><b>Net sales</b> <span className="rs-dim">· GST is charged on this</span></span><span className="val"><b>{inr(ih.netSales)}</b></span></div>
-          <div className="rs-line"><span className="lbl">GST collected</span><span className="val">+ {inr(ih.gst)}</span></div>
-          {taxLines.map((l) => <div key={l.label} className="rs-line sub"><span className="lbl">{l.label} ({l.rate}%)</span><span className="val">{inrP(l.amt)}</span></div>)}
-          <div className="rs-line total"><span className="lbl">Total collected <span className="rs-dim">· what guests actually paid</span></span><span className="val">{inr(ih.collected)}</span></div>
-          <p className="rs-note" style={{ marginTop: 10 }}>
-            The discount comes off before the guest pays, so <b>Total collected</b> ({inr(ih.collected)}) is
-            already {inr(ih.discounts)} lower than the bills above. That is why the profit sum starts at
-            {" "}{inr(billed)} — take the discount off {inr(ih.collected)} as well and you would count it twice.
-            {!singleRest && " Pick one restaurant to see its CGST/SGST split."}
-          </p>
-        </div>
+      {tips > 0 && (
+        <p className="rs-note">
+          {inr(tips)} of tips also came in. It is not counted above, because tips are
+          normally the staff&apos;s money, not yours. Tell me and I&apos;ll fold it in.
+        </p>
       )}
       <InHandGaps ih={ih} />
     </Panel>
+  );
+}
+
+// ── EARNINGS — "all the different parts" (owner 2026-08-02) ─────────────────
+// Every part of the TOTAL on top of the sheet: dine-in bills, parcel, each delivery
+// channel, banquet. It adds up to that total exactly, by construction — the same numbers
+// the ladder used. Tips sit BELOW the total, deliberately outside it.
+const EARN_LABEL: Record<string, { name: string; icon: string; note?: string }> = {
+  dinein:  { name: "Dine-in orders", icon: "fa-utensils", note: "bills before discount, with GST" },
+  parcel:  { name: "Parcel / takeaway", icon: "fa-bag-shopping", note: "counter parcels" },
+  zomato:  { name: "Zomato", icon: "fa-motorcycle" },
+  swiggy:  { name: "Swiggy", icon: "fa-motorcycle" },
+  website: { name: "Website takeaway", icon: "fa-globe" },
+  banquet: { name: "Banquet", icon: "fa-champagne-glasses" },
+  tips:    { name: "Tips", icon: "fa-hand-holding-heart", note: "normally the staff's, so not in the total" },
+};
+function EarningsReport({ ih, accent }: { ih: InHand; accent: string }) {
+  const sales = (ih.earnings?.parts ?? []).filter((p) => p.isSales);
+  const tips = (ih.earnings?.parts ?? []).find((p) => p.key === "tips");
+  const total = ih.moneyIn ?? (ih.itemSales + ih.gst);
+  if (!sales.length) return <EmptyCard text="No money came in during this period." />;
+  const chart = sales.map((p) => ({ label: EARN_LABEL[p.key]?.name ?? p.key, value: p.amount }));
+  return (
+    <>
+      <div className="rs-kpis">
+        <Stat label="Money in" tone="accent" icon="fa-arrow-down-to-line" big value={inr(total)} sub="everything that arrived, with GST" />
+        <Stat label="Ways it came in" tone="info" icon="fa-shuffle" value={nfmt(sales.length)} sub={sales.map((p) => EARN_LABEL[p.key]?.name ?? p.key).join(" · ")} />
+        {tips && <Stat label="Tips" tone="good" icon="fa-hand-holding-heart" value={inr(tips.amount)} sub="not counted in the total" />}
+      </div>
+      <Panel title="Where the money came from" hint={`${sales.length} ${sales.length === 1 ? "source" : "sources"}`}>
+        <div className="rs-lines">
+          {sales.map((p) => {
+            const m = EARN_LABEL[p.key] ?? { name: p.key, icon: "fa-circle" };
+            const share = total ? Math.round((p.amount / total) * 100) : 0;
+            return (
+              <div key={p.key}>
+                <div className="rs-line">
+                  <span className="lbl"><i className={`fas ${m.icon}`} aria-hidden style={{ marginRight: 7, opacity: .7 }} />{m.name}
+                    <span className="rs-dim"> · {share}%{p.orders ? ` · ${nfmt(p.orders)} ${p.orders === 1 ? "order" : "orders"}` : ""}{m.note ? ` · ${m.note}` : ""}</span></span>
+                  <span className="val">{inr(p.amount)}</span>
+                </div>
+                <div className="rs-paybar"><span style={{ width: `${share}%`, background: accent }} /></div>
+              </div>
+            );
+          })}
+          <div className="rs-line total"><span className="lbl">TOTAL <span className="rs-dim">· money in, with GST</span></span><span className="val">{inr(total)}</span></div>
+          {tips && <div className="rs-line"><span className="lbl">Tips <span className="rs-dim">· on top, normally the staff&apos;s</span></span><span className="val">{inr(tips.amount)}</span></div>}
+        </div>
+      </Panel>
+      {sales.length > 1 && (
+        <Panel title="Side by side" pad={false}>
+          <div style={{ padding: 12 }}><ToggleChart data={chart} color={accent} money height={240} defaultMode="bar" /></div>
+        </Panel>
+      )}
+    </>
+  );
+}
+
+// ── EXPENSES — the same parts the ladder's Expenses line adds up ─────────────
+function ExpensesReport({ ih }: { ih: InHand }) {
+  return (
+    <>
+      <div className="rs-kpis">
+        <Stat label="What it cost you" tone="bad" icon="fa-arrow-up-from-bracket" big value={inr(ih.expenses)} sub="everything that went out" />
+        <Stat label="Money in" tone="info" icon="fa-arrow-down-to-line" value={inr(ih.moneyIn ?? (ih.itemSales + ih.gst))} sub="with GST" />
+        <Stat label="Profit in hand" tone="good" icon="fa-wallet" value={inr(ih.left)} sub="after GST, discount and costs" />
+      </div>
+      <Panel title="What this cost you"><ExpensesInside ih={ih} /></Panel>
+    </>
   );
 }
 
@@ -1103,6 +1169,16 @@ function ExpensesInside({ ih }: { ih: InHand }) {
 }
 
 function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, dishesDay, hourlyDay, catsDay, heatData, rangeText = "", onOpenExpenses }: { bk: BodyKey; data: Payload; accent: string; singleRest: boolean; onOpenReport: OpenReport; onPayDetail?: (d: "" | "discounts" | "cancellations") => void; dishesDay?: Payload; hourlyDay?: Payload; catsDay?: Payload; heatData?: Payload; rangeText?: string; onOpenExpenses?: () => void }) {
+  // ── THE TWO SUB-REPORTS UNDER THE DAILY SHEET (owner 2026-08-02) ────────────
+  // Both read the payload the summary already fetched — no second request.
+  if (bk === "earnings" || bk === "expenses") {
+    const ih = data.inHand;
+    if (!ih) return <EmptyCard text="Nothing in this period yet." />;
+    return bk === "earnings"
+      ? <EarningsReport ih={ih} accent={accent} />
+      : <ExpensesReport ih={ih} />;
+  }
+
   // ── INVENTORY & STOCK (mig 227) ─────────────────────────────────────────────
   // Five sub-tabs, one payload. Rendered before the money plumbing below because these
   // bodies read `summary`/`items`/`dishes`, not the bucketed money rows. A payload that
@@ -1359,7 +1435,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
               payload where the in-hand block couldn't be built (a module read blipped) —
               the sheet then looks exactly as it did before, never blank. */}
           {ih ? (
-            <InHandLadder ih={ih} taxLines={taxLines} singleRest={singleRest} onOpenExpenses={() => onOpenExpenses?.()} />
+            <InHandLadder ih={ih} onOpenExpenses={() => onOpenExpenses?.()} />
           ) : (
           <Panel title="Where the money came from" hint="from item prices to money collected">
             <div className="rs-lines">
@@ -1439,6 +1515,9 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     if (!t) return <EmptyCard text="No sales in this period yet." />;
     return (
       <>
+        {/* The same profit block as the daily sheet (owner 2026-08-02: "the same thing on all
+            the reports"). One component, so the two screens can never drift apart. */}
+        {data.inHand && <InHandLadder ih={data.inHand} onOpenExpenses={() => onOpenExpenses?.()} />}
         <div className="rs-kpis">
           <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
           <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
