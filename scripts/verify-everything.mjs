@@ -732,7 +732,14 @@ for (const [label, col, re] of MODULE_TABS) {
     ok(!re.test(t), `still there after ${TAB_SETTLE_MS / 1000}s: ${t}`);
   });
 }
-const MGR_TABS = [["Editor", "editor", /editor/i], ["Ratings", "ratings", /ratings/i], ["Log", "log", /log/i]];
+// The REGEX must match what the tab actually says today, not what it said when this was
+// written. The access rebuild renamed two of them — "⭐ Rating review" (not "Ratings") and
+// "🗂 Audit & logs" (not "Log") — and a stale pattern here fails in the WORST way: the
+// "is GONE" half of each pair passes vacuously (nothing matches, so nothing is there) and
+// only the "comes back" half fails, which reads like a product bug and isn't. Checked
+// against the live strip 2026-08-02: 📝 Editor · 🧾 Bills · Tables · 🛵 Platform · Dashboard
+// · ⭐ Rating review · 🗂 Audit & logs · Settings.
+const MGR_TABS = [["Editor", "editor", /editor/i], ["Ratings", "ratings", /rating/i], ["Log", "log", /log/i]];
 for (const [label, key, re] of MGR_TABS) {
   phase(`Manager's menu OFF → the ${label} tab is GONE for a real manager`, async () => {
     await setState({ tabs: { manager: { [key]: false } } });
@@ -786,14 +793,14 @@ phase("the owner's Menu page comes back when switched on", async () => {
 });
 phase("the owner's Activity page disappears when switched off", async () => {
   await setState({ sections: { logs: false } });
-  const nav = await settleUntil(ownerNavLabels, (t) => !/activity/.test(t));
+  const nav = await settleUntil(ownerNavLabels, (t) => !/activity|audit & logs/.test(t));
   await setState({ sections: { logs: true } });
-  ok(!/activity/.test(nav), `still a link: ${nav.slice(0, 140)}`);
+  ok(!/activity|audit & logs/.test(nav), `still a link: ${nav.slice(0, 140)}`);
 });
 phase("the owner's Activity page comes back when switched on", async () => {
   await setState({ sections: { logs: true } });
-  const nav = await settleUntil(ownerNavLabels, (t) => /activity/.test(t));
-  ok(/activity/.test(nav), `did not return: ${nav.slice(0, 140)}`);
+  const nav = await settleUntil(ownerNavLabels, (t) => /activity|audit & logs/.test(t));
+  ok(/activity|audit & logs/.test(nav), `did not return: ${nav.slice(0, 140)}`);
 });
 phase("the owner's log ENDPOINT refuses while that page is off", async () => {
   await setState({ sections: { logs: false } });
