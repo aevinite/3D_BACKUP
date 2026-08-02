@@ -17,6 +17,13 @@
 // when the asked-for columns would make a tile smaller than a finger does the grid give back a
 // column. On a desktop that never triggers for a sane number; on a 390px phone it is what stops
 // "16 per row" turning into 16 unusable slivers.
+// ⚠️ THE DATABASE HAS THE SAME RANGE AS A CHECK CONSTRAINT (settings_floor_per_row_range).
+// When these numbers change, change the constraint in the SAME pull request. They drifted once:
+// this file went to 30 on 2026-07-31 and the constraint stayed at migration 226's 12, so the
+// screen invited a number the database refused — and because that came back as a 500, the
+// panel's offline queue took it for "the server is busy", saved it, and retried it forever under
+// "Sending 3 saved changes… made while you were offline". Migration 260 widened the constraint;
+// lib/dbRefusal.ts makes any future mismatch a visible refusal instead of a silent retry loop.
 export const FLOOR_PER_ROW_MIN = 2;
 export const FLOOR_PER_ROW_MAX = 30;
 export const FLOOR_PER_ROW_DEFAULT = 12; // compact by default (owner, 2026-07-31): the floor is

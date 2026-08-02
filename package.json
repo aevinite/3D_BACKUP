@@ -35,6 +35,7 @@
     "verify:floor": "node scripts/verify-floor-share.mjs",
     "check:floor-timeouts": "node scripts/check-floor-timeouts.mjs",
     "verify:busy": "node scripts/verify-busy-server.mjs",
+    "verify:outbox": "node scripts/verify-outbox-drain.mjs",
     "load:ramp": "node scripts/load-ramp-orders.mjs",
     "db:maintain": "node scripts/db-maintain.mjs",
     "demo:reset": "node scripts/reset-demo-history.mjs",

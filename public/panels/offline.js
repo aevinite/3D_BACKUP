@@ -25,6 +25,19 @@
   var stale = { fromCache: false, at: 0, seenOfflineRead: false };
   var box = { queued: [], failed: [], count: 0 };
   var bar = null, sheet = null, backOff = null;
+  // How long a saved change may sit before the bar stops calling it "Sending…" and says plainly
+  // that it hasn't gone. Long enough to cover a normal reconnect + a couple of retries.
+  var STUCK_MS = 90000;
+  try { if (window.LFH_TEST_PACING && window.LFH_TEST_PACING.stuck) STUCK_MS = window.LFH_TEST_PACING.stuck; } catch (e) {}
+
+  // The person asking for it NOW. Never a dead tap: it always leaves a trace on screen.
+  function sendNow() {
+    if (!window.LFH_OUTBOX) return;
+    nudgedAt = Date.now();       // makes the bar read "Sending…" again while this round runs
+    render();
+    try { window.LFH_OUTBOX.flush(); } catch (e) {}
+  }
+  var nudgedAt = 0;
 
   function isOffline() { return navigator.onLine === false; }
 
@@ -123,6 +136,10 @@
       ".lfh-offbar-btn{border:0;border-radius:8px;padding:7px 12px;font:800 11.5px/1 system-ui,sans-serif;cursor:pointer;",
       "  background:#fff;flex:0 0 auto}",
       ".lfh-offbar-btn span{color:#111827}",
+      // the secondary button next to it (e.g. "See" beside "Send now") — readable on the same
+      // solid bar without competing with the action we want tapped
+      ".lfh-offbar-alt{background:rgba(255,255,255,.22);box-shadow:inset 0 0 0 1px rgba(255,255,255,.55)}",
+      ".lfh-offbar-alt span{color:#fff}",
       /* the needs-you sheet */
       ".lfh-off-back{position:fixed;inset:0;z-index:99998;background:rgba(4,8,18,.6);backdrop-filter:blur(3px);",
       "  display:flex;align-items:flex-end;justify-content:center;padding:0}",
@@ -177,6 +194,20 @@
       return { tone: "tone-off", title: "No internet — you can keep working", sub: sub, action: waiting ? "See" : null };
     }
     if (waiting) {
+      // "Sending…" has to be TRUE. The owner watched that word for a long while on a healthy
+      // connection with nothing being sent (the queue had no timer left — fixed in outbox.js).
+      // Belt and braces: once work has sat here past STUCK_MS, the bar says what is actually
+      // happening and offers a tap that forces it, instead of a reassuring lie.
+      var since = (window.LFH_OUTBOX && window.LFH_OUTBOX.waitingSince) ? window.LFH_OUTBOX.waitingSince() : 0;
+      // A tap on "Send now" earns a genuine "Sending…" for a few seconds — that round really is
+      // in flight, and a button that appears to do nothing is the same fault in a smaller box.
+      var stuck = since && (Date.now() - since) > STUCK_MS && (Date.now() - nudgedAt) > 8000;
+      if (stuck) {
+        return { tone: "tone-stale",
+                 title: waiting + (waiting === 1 ? " change hasn't sent yet" : " changes haven't sent yet"),
+                 sub: "Saved on this device since " + fmtTime(since) + " — the connection looks fine now.",
+                 action: "Send now", onAction: sendNow, alt: "See" };
+      }
       return { tone: "tone-sync", title: "Sending " + waiting + (waiting === 1 ? " saved change" : " saved changes") + "…",
                sub: "Made while you were offline. Keep this panel open until it's done.", action: "See" };
     }
@@ -231,11 +262,30 @@
     if (st.action) {
       var b = el("button", "lfh-offbar-btn"); b.type = "button";
       b.appendChild(el("span", null, st.action));
-      b.addEventListener("click", function (e) { e.stopPropagation(); openSheet(); });
+      var run = st.onAction || openSheet;
+      b.addEventListener("click", function (e) { e.stopPropagation(); run(); });
       bar.appendChild(b);
+    }
+    // A second, quieter button so offering "Send now" never costs the person the way IN to the
+    // list of what is waiting.
+    if (st.alt) {
+      var b2 = el("button", "lfh-offbar-btn lfh-offbar-alt"); b2.type = "button";
+      b2.appendChild(el("span", null, st.alt));
+      b2.addEventListener("click", function (e) { e.stopPropagation(); openSheet(); });
+      bar.appendChild(b2);
     }
     publishHeight(); // the text can wrap to 2 lines on a phone, so re-measure every render
     if (sheet) renderSheet();
+  }
+
+  // While anything is waiting, re-render on a slow tick so "Sending…" turns into the honest
+  // wording the moment it stops being true (the 30s heartbeat below is too coarse for that).
+  // No network, no database — it only runs while the queue is non-empty.
+  var waitTimer = null;
+  function syncWaitTick() {
+    var any = box.queued.length > 0;
+    if (waitTimer) { clearInterval(waitTimer); waitTimer = null; }
+    if (any) waitTimer = setInterval(render, 2000);
   }
 
   // ── the "needs you" sheet ────────────────────────────────────────────────────
@@ -288,11 +338,22 @@
       body.appendChild(row);
     });
 
-    box.queued.forEach(function (it) {
+    box.queued.forEach(function (it, i) {
       var row = el("div", "lfh-off-item is-wait");
       row.appendChild(el("b", null, it.label || "Change"));
-      row.appendChild(el("p", "lfh-off-why", isOffline() ? "Saved here — waiting for internet." : "Sending now…"));
+      var slow = !isOffline() && (Date.now() - it.at) > STUCK_MS && (Date.now() - nudgedAt) > 8000;
+      row.appendChild(el("p", "lfh-off-why", isOffline()
+        ? "Saved here — waiting for internet."
+        : (slow ? "Saved here — it hasn't gone through yet." : "Sending now…")));
       row.appendChild(el("div", "lfh-off-when", "You did this " + fmtTime(it.at)));
+      // One button for the whole queue (it sends in order), on the first row only.
+      if (slow && i === 0) {
+        var acts = el("div", "lfh-off-acts");
+        var now = el("button", "lfh-off-ok", "Send now"); now.type = "button";
+        now.addEventListener("click", sendNow);
+        acts.appendChild(now);
+        row.appendChild(acts);
+      }
       body.appendChild(row);
     });
 
@@ -366,6 +427,7 @@
         box = snap;
         render();
         syncStamping();
+        syncWaitTick();
         // A change that came back needing a person is important enough to put in front
         // of them once, unprompted — not buried behind a tap.
         if (!hadFailed && snap.failed.length && !sheet) openSheet();
