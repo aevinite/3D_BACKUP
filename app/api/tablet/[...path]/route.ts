@@ -23,6 +23,7 @@ import { rateAllowed } from "@/lib/rateLimit";
 import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
 import { PAYMENT_METHODS } from "@/lib/payments";
+import { settleBillInParts } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { effectiveTaxRate } from "@/lib/tax";
@@ -1304,6 +1305,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       await log("order_move", { order_id: b, table_number: to, device_id: dev });
       return ok(mv);
+    }
+
+    // tables/:t/pay-split — the same bill, collected in PARTS: ₹200 UPI + ₹200 cash + …
+    // (owner, 2026-08-02, "Other → Split the payment"). Same permission as a plain settle —
+    // it IS a settle, so splitting must never become a way round tablet_mark_paid. The
+    // arithmetic and the write are lib/paySplit.ts, shared with the manager panel: the server
+    // recomputes the due itself and refuses parts that don't add up.
+    if (a === "tables" && c === "pay-split") {
+      const t = String(b || "").trim();
+      if (!/^\d+$/.test(t)) return err("valid table required");
+      const gs = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!gs.allow) return gs.resp;
+      const rSp = await settleBillInParts(sb, { rid, table: t, splits: Array.isArray(body?.splits) ? body.splits : [] });
+      if (!rSp.ok) return err(rSp.message, rSp.status);
+      await log("bill_split", { table_number: t, detail: rSp.note.slice(0, 120), device_id: dev });
+      await maybeAutoSettle(rSp.sessionId, { panel: "tablet", deviceId: dev });
+      return ok({ ok: true, count: rSp.count, due: rSp.due });
     }
 
     // tables/:t/pay — settle the WHOLE bill: mark every unpaid, non-cancelled

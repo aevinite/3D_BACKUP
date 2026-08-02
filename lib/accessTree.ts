@@ -281,8 +281,8 @@ export const SECTIONS: Section[] = [
           { id: "veg", name: "Veg / non-veg", def: true, bind: { t: "feature", key: "diet_filter" },
             what: "The veg / non-veg chips AND the little green-or-red veg mark on each dish. Switch it off for a pure-veg restaurant so nothing needs marking." },
           {
-            id: "format", name: "Format & theme", bind: { t: "none" },
-            what: "How the menu looks when a guest opens it for the first time — its colours, logo and wording — and which languages and currencies it offers.",
+            id: "format", name: "Design and styling", bind: { t: "none" },
+            what: "How the menu looks when a guest opens it for the first time — its theme, logo and wording — and which languages and currencies it offers.",
             children: [
               { id: "menu_layout", name: "Default layout", def: "grid", bind: { t: "choice", key: "menu_default_layout" },
                 what: "What a first-time guest sees before they change anything. They can still switch it themselves.",
@@ -294,7 +294,7 @@ export const SECTIONS: Section[] = [
               // Branding screen. That screen no longer exists (owner, 2026-08-01: everything
               // lives on Access now), so the editor itself moved in — still the one and only
               // place the palette, logo and wording are owned.
-              { id: "menu_theme", name: "Colours, logo & wording", bind: { t: "none" }, panel: "branding",
+              { id: "menu_theme", name: "Theme and logo", bind: { t: "none" }, panel: "branding",
                 what: "The restaurant's own look: background, cards, text and accent for both light and dark, the logo image, the header wording and the greeting under it." },
               { id: "menu_languages", name: "Languages", def: ["en"], bind: { t: "list", key: "menu_languages" }, singleOrMany: true, choices: MENU_LANGUAGES,
                 what: "Which languages the menu is offered in. Single means the menu is only ever in that one language and guests get no language button at all; Multiple puts the switcher on the menu so a guest can change it." },
@@ -323,8 +323,8 @@ export const SECTIONS: Section[] = [
           // it could be merged… and it should be as format of bill"). GSTIN, the legal name and
           // the address were three separate rows sitting on top of a fourth box holding the rest
           // of the very same document. They are all the bill's format, so they are one screen —
-          // the same shape as Menu → Format & theme.
-          { id: "bill_format", name: "Format", bind: { t: "none" }, panel: "settings:billing",
+          // the same shape as Menu → Design and styling.
+          { id: "bill_format", name: "Format of bill", bind: { t: "none" }, panel: "settings:billing",
             what: "The whole bill as one form: GSTIN, the legal name and address, the phone, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for." },
           { id: "bill_designer", name: "Bill design editor", leftToBuild: true, bind: { t: "none" },
             what: "Design the whole bill like a document — move the logo, change the wording, resize the totals. Not built yet; this is where it will live." },

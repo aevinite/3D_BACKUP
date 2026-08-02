@@ -30,6 +30,7 @@ import { softDeleteOrders } from "@/lib/softDelete";
 import { maybeAutoSettle } from "@/lib/autoSettle";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
+import { settleBillInParts } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
@@ -2330,53 +2331,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("mark a bill paid");
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      const splits = Array.isArray(body?.splits) ? body.splits : [];
-      if (splits.length < 2 || splits.length > 12) return err("Give at least two split shares (max 12).");
-      for (const s of splits) {
-        if (!(Number(s?.amount) > 0)) return err("Every split share needs an amount above zero.");
-        if (!PAYMENT_METHODS.includes(s?.method)) return err("invalid payment method in a split share");
-        if (s?.note != null && String(s.note).length > 200) return err("split note too long");
-      }
-      // Same scoping as a normal settle: the table's OPEN session's orders (fallback:
-      // active table orders), only accepted+unpaid+non-cancelled ones count.
-      const openSessSp = (await sb.from("sessions").select("id")
-        .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
-        .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
-      // Exclude un-accepted (received) orders from the split scope — the same graceful rule
-      // as mark-paid and the client split modal: settle the ACCEPTED part in legs, leave a
-      // just-added order to be accepted + paid separately (was: reject the whole split with a
-      // 409 the client could never satisfy — owner deep-QA 2026-07-23).
-      let oq = sb.from("orders").select("id,subtotal,total,discount,status,payment_status,session_id")
-        .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
-      oq = openSessSp ? oq.eq("session_id", openSessSp.id) : oq.eq("table_number", t).eq("archived", false);
-      const rowsSp = (must(await oq.limit(200)) as { id: string; subtotal: number; total: number; discount: number; status: string; session_id: string | null }[]) || [];
-      if (!rowsSp.length) return err("Nothing to settle — already paid, or accept the order first.", 409);
-      const sidSp = openSessSp?.id || rowsSp.find((o) => o.session_id)?.session_id;
-      if (!sidSp) return err("This table has no live bill session — settle it normally instead.", 409);
-      // Due — computed with the SAME aggregate rounding as billMath (app.js) / the Z-report:
-      // taxable = Σsub − Σdisc, tax rounded ONCE over the whole bill. Summing each order's
-      // already-rounded stored total instead drifts ±½ paise per order and could 409-reject
-      // a split whose legs exactly equal the printed bill (owner deep-QA 2026-07-23).
-      const setSp = (await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle()).data || {};
-      const rateSp = effectiveTaxRate(setSp);
-      const subSp = rowsSp.reduce((s, o) => s + (Number(o.subtotal) || 0), 0);
-      const discSp = rowsSp.reduce((s, o) => s + (Number(o.discount) || 0), 0);
-      const taxableSp = Math.max(0, subSp - discSp);
-      const dueSp = Math.round((taxableSp + Math.round(taxableSp * rateSp * 100) / 100) * 100) / 100;
-      const sumSp = splits.reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
-      if (Math.abs(sumSp - dueSp) > 0.02) return err(`The shares add up to ₹${sumSp.toFixed(2)} but the bill due is ₹${dueSp.toFixed(2)} — they must match.`, 409);
-      const legs = splits.map((s: { amount: number; method: string; note?: string }) => ({
-        session_id: sidSp, restaurant_id: rid, amount: Math.round(Number(s.amount) * 100) / 100,
-        method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
-      }));
-      const insSp = await sb.from("session_payments").insert(legs);
-      if (insSp.error) return err(insSp.error.message, 500);
-      const noteSp = `${splits.length}-way split: ` + splits.map((s: { amount: number; method: string }) => `₹${Number(s.amount).toFixed(0)} ${s.method}`).join(" + ");
-      must(await sb.from("orders").update({ payment_status: "paid", paid_at: nowIso(), payment_method: "Split", payment_note: noteSp.slice(0, 200) })
-        .in("id", rowsSp.map((o) => o.id)).eq("restaurant_id", rid));
-      await log("editor", "bill_split", { restaurant_id: rid, table_number: t, detail: noteSp.slice(0, 120), device_id: dev });
-      await maybeAutoSettle(sidSp, { panel: "editor", deviceId: dev });
-      return ok({ ok: true, count: rowsSp.length, due: dueSp });
+      // The arithmetic + the write live in lib/paySplit.ts, shared with the waiter tablet, so
+      // the two panels can never disagree about what a split bill does (owner, 2026-08-02).
+      // Un-accepted (received) orders stay OUT of the scope — the same graceful rule as
+      // mark-paid: settle the accepted part, leave a just-added order to be accepted and paid
+      // separately (was: a 409 the client could never satisfy — owner deep-QA 2026-07-23).
+      const rSp = await settleBillInParts(sb, { rid, table: t, splits: Array.isArray(body?.splits) ? body.splits : [] });
+      if (!rSp.ok) return err(rSp.message, rSp.status);
+      await log("editor", "bill_split", { restaurant_id: rid, table_number: t, detail: rSp.note.slice(0, 120), device_id: dev });
+      await maybeAutoSettle(rSp.sessionId, { panel: "editor", deviceId: dev });
+      return ok({ ok: true, count: rSp.count, due: rSp.due });
     }
 
     // order-items/:id/move — move ONE dish line to another table (KOT ▾ menu; the

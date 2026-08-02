@@ -2150,6 +2150,27 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .pay-other-field { margin-top: 12px; }
 .pay-other-field .dish-edit-custominput { width: 100%; box-sizing: border-box; margin-bottom: 10px; }
 .pay-other-confirm { width: 100%; }
+/* "Other" opens a choice of two: type another way to pay, or split the bill across ways —
+   ₹200 UPI + ₹200 cash + … (owner, 2026-08-02). */
+.pay-other-pick { display: flex; flex-direction: column; gap: 8px; }
+.pay-other-choice {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+  text-align: left; padding: 12px 14px; border-radius: 12px; line-height: 1.35;
+}
+.pay-other-choice b { font-size: 14px; font-weight: 700; }
+.pay-other-choice small { font-size: 11.5px; color: var(--muted); font-weight: 400; }
+.pay-split-row { display: grid; grid-template-columns: 1fr auto 28px; gap: 8px; align-items: center; margin-bottom: 8px; }
+.pay-split-row .psr-amt { margin-bottom: 0 !important; }
+.pay-split-row .psr-method {
+  padding: 10px 8px; border-radius: 9px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text); font-size: 14px; font-weight: 600;
+}
+.pay-split-row .psr-del {
+  width: 28px; height: 28px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1;
+}
+.pay-split-row .psr-del:hover { color: var(--red); border-color: var(--red); }
+.pay-split-row .psr-note { grid-column: 1 / -1; margin-bottom: 0 !important; }
 /* Add-dish picker modal (manager). */
 .add-dish-modal { max-width: 460px; width: 92%; display: flex; flex-direction: column; max-height: 80vh; }
 .add-dish-search { margin: 10px 14px; padding: 10px 12px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 15px; }
