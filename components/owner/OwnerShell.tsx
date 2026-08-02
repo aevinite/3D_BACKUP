@@ -417,13 +417,25 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
           </button>
           <div className="owx-top-nav">
             {/* Restaurant switcher. >1 restaurant → dropdown that jumps the active
-                restaurant (reuses myRests + openRestaurant). One restaurant → static pill. */}
+                restaurant (reuses myRests + openRestaurant). One restaurant → static pill.
+                THE LABEL IS THE CURRENT SCOPE (owner, 2026-08-02: picking Burger Barn kept
+                the pill saying "AANGAN…", so the switch looked dead — and so did "All
+                restaurants"). On the dashboard and Reports the pages already announce their
+                scope as the HEAD of the crumb tail (the drilled restaurant / the reports
+                scope), so the pill mirrors that — it updates on a switcher pick, an in-page
+                card drill AND the refresh-restored drill, with zero new events. An empty
+                tail = the everything view → "All restaurants", matching the dropdown row.
+                Other pages navigate away on pick, so they keep the static default. */}
             {myRests.length > 1 ? (
               <div className="owx-switch-wrap">
                 <button type="button" className="owx-scope owx-switch" onClick={() => setRestOpen((o) => !o)}
                   aria-haspopup="menu" aria-expanded={restOpen} title="Switch restaurant">
                   <span className="dot" aria-hidden="true" />
-                  <span className="lbl">{adminViewing ? shownName : "Owner overview"}</span>
+                  <span className="lbl">{
+                    path === "/owner" || path.startsWith("/owner/reports")
+                      ? (crumbTail[0] || "All restaurants")
+                      : adminViewing ? shownName : "Owner overview"
+                  }</span>
                   <i className="fas fa-chevron-down caret" aria-hidden="true" />
                 </button>
                 {restOpen && (
