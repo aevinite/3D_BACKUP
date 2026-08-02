@@ -108,14 +108,10 @@ export type Node = {
   // the switch that slides left with the default chip growing open on its right.
   featureBind?: Bind;
   link?: { href: string; label: string }; // read-only row that points at the screen which OWNS this value
-  // ── the two flags the 2026-08-01 rework added ────────────────────────────────
-  // Its dropdown OPENS while the feature is off. Rule 1 (no greyed-out ghosts) is about
-  // PERMISSIONS — a thing a role can never reach must be absent. These children are SET-UP
-  // instead: you paste a Zomato key, set the café's coordinates or lay out the banquet bill
-  // BEFORE the feature goes live, and demanding you switch it on first (so guests see it
-  // half-configured) is backwards. Owner, 2026-08-01: "you should be able to still open the
-  // dropdown without turning on the option for platforms".
-  configurableWhenOff?: boolean;
+  // `configurableWhenOff` was RETIRED on 2026-08-02: the owner made its behaviour the rule for
+  // EVERY row ("even if the feature is off, you can still go in the drop-down and check
+  // everything — you will just not able to edit it… it will be grey out"), so the flag that
+  // marked the exception says nothing any more. See Row() in components/admin/AccessTree.tsx.
   // This row owns a whole editor, shown inside its dropdown: the exact card that used to live on
   // the restaurant-detail page. `settings:<id>` renders one section of RestaurantSettings,
   // `branding` renders the branding & theme editor. Owner, 2026-08-01: "you have completely
@@ -260,14 +256,12 @@ export const SECTIONS: Section[] = [
         what: "The whole guest menu. OFF means this restaurant has NO guest menu at all — no QR menu, no menu link, nothing for a diner to open. It runs on the staff panels only.",
         children: [
           { id: "dining_sessions", name: "Dining session and location", def: false,
-            bind: { t: "setting", key: "sessions_enabled" }, panel: "settings:sessions", configurableWhenOff: true,
-            what: "The table-session system: a guest scans the table's QR, the table is opened, the party is tracked and joined. OFF means there is no “Open table” step at all — the floor switches to direct ordering, so staff punch an order straight in without opening a table first. The rules and the café's coordinates are inside." },
+            bind: { t: "setting", key: "sessions_enabled" }, panel: "settings:sessions",             what: "The table-session system: a guest scans the table's QR, the table is opened, the party is tracked and joined. OFF means there is no “Open table” step at all — the floor switches to direct ordering, so staff punch an order straight in without opening a table first. The rules and the café's coordinates are inside." },
           {
             // MASTER on/off — the rebuild lost it: only the three-way "where does the rating go"
             // picker survived, so there was no way to say "this restaurant has no rating at all"
             // (owner, 2026-08-01: "there is no toggle to on and off rating right now").
-            id: "ratings", name: "Ratings", def: true, bind: { t: "ratingsMaster" }, configurableWhenOff: true,
-            what: "The whole rating & review part of the guest menu — the star row on a dish, the “Rate dish” box and the review invite. OFF removes all of it; a guest is never asked to rate anything.",
+            id: "ratings", name: "Ratings", def: true, bind: { t: "ratingsMaster" },             what: "The whole rating & review part of the guest menu — the star row on a dish, the “Rate dish” box and the review invite. OFF removes all of it; a guest is never asked to rate anything.",
             children: [
               { id: "ratings_mode", name: "Where the rating goes", def: "off", bind: { t: "choice", key: "google_review_mode" },
                 what: "Once a guest has eaten, where do you want the rating to land? Pick one.",
@@ -350,8 +344,7 @@ export const SECTIONS: Section[] = [
         ],
       },
       { id: "auto_print_kot", name: "Auto-print kitchen tickets", def: false,
-        bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen", configurableWhenOff: true,
-        what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine. The printer check and the sample ticket are inside." },
+        bind: { t: "setting", key: "auto_print_kot_allowed" }, panel: "settings:kitchen",         what: "Kitchen tickets print themselves as orders come in, instead of someone tapping print. Needs a printer wired to the kitchen machine. The printer check and the sample ticket are inside." },
       // ⚡ QO/P — the floor's quick-order screen (owner, 2026-08-02). A main feature, not an
       // extra: it is how a whole order gets punched in at speed. Default ON (mig 257) because
       // it REPLACED the 🥡 New Parcel button every floor already had — shipping it off would
@@ -428,22 +421,21 @@ export const SECTIONS: Section[] = [
         // "Platforms" (owner, 2026-07-31). The stored key stays `takeaway`: that is the mig-235
         // column name, and renaming a LABEL must never rename a column.
         id: "takeaway", name: "Platforms (Zomato, Swiggy, own website)", def: false, bind: { t: "module", key: "takeaway" },
-        configurableWhenOff: true,
-        what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board, takes the Parcel choice out of the floor's ⚡ QO/P screen (it then only sends to tables), and stops Parcel tiles appearing under the live floor.",
+                what: "Every way an order arrives that isn't someone sitting at a table: a counter takeaway, the restaurant's own website, and the delivery apps. OFF removes the Platform board, takes the Parcel choice out of the floor's ⚡ QO/P screen (it then only sends to tables), and stops Parcel tiles appearing under the live floor.",
         children: [
-          { id: "ch_website", name: "Takeaway / own website", def: true, configurableWhenOff: true, bind: { t: "channel", key: "website" },
+          { id: "ch_website", name: "Takeaway / own website", def: true, bind: { t: "channel", key: "website" },
             what: "A counter takeaway punched in by staff, and orders coming from the restaurant's own website. Needs no outside account.",
             children: [
               { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
                 what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },
             ] },
-          { id: "ch_zomato", name: "Zomato", def: false, configurableWhenOff: true, bind: { t: "channel", key: "zomato" },
+          { id: "ch_zomato", name: "Zomato", def: false, bind: { t: "channel", key: "zomato" },
             what: "Zomato orders land on the Platform board. Needs Zomato's API key — until it is entered the channel shows as “not connected”.",
             children: [
               { id: "ch_zomato_key", name: "Zomato API key", bind: { t: "creds", key: "zomato" }, placeholder: "Paste the Zomato API key",
                 what: "From the restaurant's own Zomato partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
             ] },
-          { id: "ch_swiggy", name: "Swiggy", def: false, configurableWhenOff: true, bind: { t: "channel", key: "swiggy" },
+          { id: "ch_swiggy", name: "Swiggy", def: false, bind: { t: "channel", key: "swiggy" },
             what: "Swiggy orders land on the Platform board. Needs Swiggy's API key — until it is entered the channel shows as “not connected”.",
             children: [
               { id: "ch_swiggy_key", name: "Swiggy API key", bind: { t: "creds", key: "swiggy" }, placeholder: "Paste the Swiggy API key",
@@ -452,8 +444,7 @@ export const SECTIONS: Section[] = [
         ],
       },
       { id: "banquet", name: "Banquet billing", def: false, bind: { t: "module", key: "banquet" },
-        configurableWhenOff: true,
-        what: "Per-plate event billing that runs without a table — a wedding, a party booking. OFF removes the Banquet tab.",
+                what: "Per-plate event billing that runs without a table — a wedding, a party booking. OFF removes the Banquet tab.",
         children: [
           { id: "banquet_setup", name: "What the banquet bill asks for and how it prints", bind: { t: "none" }, panel: "settings:banquet",
             what: "Which fields staff fill in for an event, the banquet bill's own number series, its tax rows, and the paper layout it prints on." },
