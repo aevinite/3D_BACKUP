@@ -534,6 +534,11 @@ export const SECTIONS: Section[] = [
         what: "The owner's own Menu page — the same dishes/categories editor, in the owner panel." },
       { id: "own_ratings", name: "Ratings", def: true, bind: { t: "section", key: "ratings" },
         what: "The owner's Ratings page — guest stars and written feedback." },
+      // The expense book got its OWN page (mig 252) so a restaurant can write down a broken
+      // lamp without running full stock management. The entries it holds are what the daily
+      // report subtracts, so switching this off hides the page, not the money.
+      { id: "own_expenses", name: "Expenses", def: true, bind: { t: "section", key: "expenses" },
+        what: "The owner's Expenses page — breakages, repairs, utilities, rent and anything else paid out, with a photo and who recorded it. These entries are what the daily report's \u201cExpenses\u201d line adds up. OFF hides the page; the entries and the report line stay." },
       {
         // AUDIT (owner, 2026-08-01). Not "everything that happened" — that is the log — but
         // everything that WAS NOT MEANT TO HAPPEN and did: a bill reopened after closing, a bill

@@ -31,6 +31,7 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
     if (a.error) throw new Error(a.error);
     const hour = [...(a.hourly ?? [])].sort((x: { orders: number }, y: { orders: number }) => y.orders - x.orders)[0];
     const t = m && !m.error ? m.totals : null;
+    const ih = m && !m.error ? m.inHand : null;
     const comps: { label: string; amount: number }[] = (m && !m.error && m.tax?.components ? m.tax.components : [])
       .map((c: { label?: string; amount?: number }) => ({ label: String(c.label || "Tax"), amount: Number(c.amount) || 0 }))
       .filter((c: { amount: number }) => c.amount > 0);
@@ -60,6 +61,11 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
         net: t ? Number(t.revenue) || 0 : (Number(a.kpis?.revenue) || 0),
         cancelledOrders: t ? Number(t.cancelledOrders) || 0 : null,
         cancelledValue: t ? Number(t.cancelledValue) || 0 : null,
+        // What the period COST (mig 252). Rides along on the sales payload already fetched
+        // above — no extra request. null when the ladder couldn't be built, which keeps the
+        // printed statement exactly as it was rather than printing a wrong bottom line.
+        expenses: ih ? Number(ih.expenses) || 0 : null,
+        left: ih ? Number(ih.left) || 0 : null,
       },
       busiestHour: hour?.orders ? `${hour.hour}:00` : null,
       dishes: (a.dishes ?? []) as { title: string; qty: number; revenue: number }[],
@@ -89,7 +95,7 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
     } catch { /* khata line is optional — never block the report */ }
   }
   const paidOrders = perRest.reduce((s, r) => s + r.paidOrders, 0);
-  const bsum = (k: "gross" | "discount" | "taxTotal" | "cancelledOrders" | "cancelledValue") =>
+  const bsum = (k: "gross" | "discount" | "taxTotal" | "cancelledOrders" | "cancelledValue" | "expenses" | "left") =>
     perRest.every((r) => r.billing[k] != null) ? perRest.reduce((s, r) => s + (r.billing[k] || 0), 0) : null;
   const gc = new Map<string, number>();
   for (const r of perRest) for (const c of r.billing.taxComponents) gc.set(c.label, (gc.get(c.label) || 0) + c.amount);
@@ -106,6 +112,9 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
         taxComponents: Array.from(gc.entries()).map(([label, amount]) => ({ label, amount })),
         taxTotal: bsum("taxTotal"), net: totalRev,
         cancelledOrders: bsum("cancelledOrders"), cancelledValue: bsum("cancelledValue"),
+        // Only summed when EVERY restaurant produced one — a partial total would read as
+        // the group's costs while silently missing a restaurant's.
+        expenses: bsum("expenses"), left: bsum("left"),
       },
       payments: Array.from(gp.values()).sort((a, b) => b.revenue - a.revenue),
       khata,

@@ -29,9 +29,23 @@ const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, 
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
 type Totals = Omit<MoneyRow, "bucket">;
 type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean } | null;
+type InHandExport = {
+  itemSales: number; discounts: number; netSales: number; gst: number;
+  collected: number; yours: number; expenses: number; left: number;
+  parts: {
+    manual: { amount: number; entries: number; byCategory: Record<string, number> } | null;
+    salary: { accrued: number; paid: number; people: number; excluded: number } | null;
+    stock: { used: number; wasted: number; cancelledFoodRemoved: number } | null;
+    cancelled: { mode: string; lostSales: number; orders: number; foodCost: number; charged: number };
+  };
+};
 type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; bucket?: string;
   // Team & pay carries its own shapes (mig 220/221) alongside the shared `rows`.
-  people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[] };
+  people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[];
+  // The in-hand ladder (mig 252) and the inventory sub-tab shapes (mig 227).
+  inHand?: InHandExport | null;
+  summary?: Record<string, number | null>; items?: unknown[]; vendors?: unknown[];
+  expenses?: unknown[]; waste?: unknown[]; dishes?: unknown[] };
 
 export type SectionMeta = { label: string; kind: string };
 export type SectionCtx = {
@@ -57,6 +71,33 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
       // to the shown total — mirrors the on-screen split exactly.
       out.push({ title: `${meta.label} — tax split`, head: ["Component", "Rate %", "Collected"],
         rows: [["Total tax", data.tax.effectivePct, Math.round(t?.tax ?? 0)], ...splitTax(data.tax.components.map((x) => x.rate), Math.round(t?.tax ?? 0)).map((amt, i) => [data.tax!.components[i].label, data.tax!.components[i].rate, amt] as (string | number)[])] });
+    }
+    // The in-hand ladder (mig 252). Exported as its own small table so the printed sheet
+    // and the spreadsheet both end on the number the owner actually reads, instead of
+    // stopping at "Total collected" the way the screen used to.
+    const ih = data.inHand;
+    if (ih) {
+      const rows2: (string | number)[][] = [
+        ["Item sales", Math.round(ih.itemSales)],
+        ["Discounts given", -Math.round(ih.discounts)],
+        ["Net sales", Math.round(ih.netSales)],
+        ["GST collected", Math.round(ih.gst)],
+        ["Total collected", Math.round(ih.collected)],
+        ["GST set aside for the government", -Math.round(ih.gst)],
+        ["Your money", Math.round(ih.yours)],
+      ];
+      const pt = ih.parts;
+      if (pt.manual) rows2.push(["Costs you entered", -Math.round(pt.manual.amount)]);
+      for (const [k, v] of Object.entries(pt.manual?.byCategory || {})) rows2.push([`   ${k}`, -Math.round(Number(v))]);
+      rows2.push(["Team wages (period's share)", pt.salary ? -Math.round(pt.salary.accrued) : "not tracked"]);
+      rows2.push(["Food taken from stock", pt.stock ? -Math.round(pt.stock.used) : "not tracked"]);
+      rows2.push(["Thrown away", pt.stock ? -Math.round(pt.stock.wasted) : "not tracked"]);
+      rows2.push([`Cancelled orders (${pt.cancelled.mode === "bill" ? "charged at menu price" : "taken out of stock"})`,
+        pt.cancelled.charged ? -Math.round(pt.cancelled.charged) : 0]);
+      rows2.push(["Expenses in total", -Math.round(ih.expenses)]);
+      rows2.push(["LEFT IN HAND", Math.round(ih.left)]);
+      rows2.push(["Lost to cancellations (not charged above)", Math.round(ih.parts.cancelled.lostSales)]);
+      out.push({ title: `${meta.label} — what you actually kept`, head: ["Line", "Amount"], rows: rows2 });
     }
     if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
@@ -100,6 +141,46 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
         r.daysActive, r.hours, r.orders, Math.round(r.value), r.tables, r.sittings, Math.round(r.discount),
         r.ratings, r.avgRating ?? "", Math.round(r.paid)]),
     }];
+  }
+  // Inventory & stock (mig 227). Without these the five sub-tabs fell through to the empty
+  // "—" table below and Export/Print produced a BLANK document — the same fault the two
+  // staff branches above were added to fix, left behind on the inventory tabs.
+  if (meta.kind.startsWith("inv")) {
+    const sum = data.summary as Record<string, number | null> | undefined;
+    const out: ExportTable[] = [];
+    if (sum) out.push({ title: `${title} — the money`, head: ["Line", "Amount"], rows: [
+      ["Stock on the shelf now", Math.round(Number(sum.stockValue) || 0)],
+      ["Bought in this period", Math.round(Number(sum.purchases) || 0)],
+      ["Ingredients used by dishes sold", Math.round(Number(sum.theoreticalCost) || 0)],
+      ["Food taken from stock (ledger)", Math.round(Number(sum.actualUsed) || 0)],
+      ["Thrown away", Math.round(Number(sum.wasted) || 0)],
+      ["Other expenses", Math.round(Number(sum.expenses) || 0)],
+      ["Count corrections", Math.round(Number(sum.corrections) || 0)],
+    ] });
+    const items = (data.items ?? []) as Record<string, unknown>[];
+    if (items.length) out.push({ title: `${title} — every ingredient`,
+      head: ["Ingredient", "Category", "On hand", "Unit", "Value", "Bought", "Used", "Wasted", "Corrections"],
+      rows: items.map((i) => [String(i.name), String(i.category || ""), Number(i.onHandBase) || 0, String(i.baseUom || ""),
+        Math.round(Number(i.onHandVal) || 0), Math.round(Number(i.boughtVal) || 0), Math.round(Number(i.usedVal) || 0),
+        Math.round(Number(i.wastedVal) || 0), Math.round(Number(i.adjustVal) || 0)]) });
+    const vend = (data.vendors ?? []) as Record<string, unknown>[];
+    if (vend.length) out.push({ title: `${title} — suppliers`, head: ["Supplier", "Bills", "Amount"],
+      rows: vend.map((v) => [String(v.vendor), Number(v.bills) || 0, Math.round(Number(v.amount) || 0)]) });
+    const exp = (data.expenses ?? []) as Record<string, unknown>[];
+    if (exp.length) out.push({ title: `${title} — the expense book`,
+      head: ["Date", "Category", "What", "Amount", "Recorded by", "Struck out"],
+      rows: exp.map((e) => [String(e.expense_date), String(e.category), String(e.title),
+        Math.round(Number(e.amount) || 0), String(e.created_by || ""), e.voided_at ? String(e.void_reason || "yes") : ""]) });
+    const wst = (data.waste ?? []) as Record<string, unknown>[];
+    if (wst.length) out.push({ title: `${title} — waste`, head: ["Date", "Reason", "Qty", "Value", "Struck out"],
+      rows: wst.map((w) => [String(w.waste_date), String(w.reason), Number(w.qty_base) || 0,
+        Math.round((Number(w.qty_base) || 0) * (Number(w.unit_cost_snap) || 0)), w.voided_at ? "yes" : ""]) });
+    const dsh = (data.dishes ?? []) as Record<string, unknown>[];
+    if (dsh.length) out.push({ title: `${title} — cost per dish`,
+      head: ["Dish", "Price", "Sold", "Sales", "Plate cost", "Cost total"],
+      rows: dsh.map((d) => [String(d.title), Math.round(Number(d.price) || 0), Number(d.qtySold) || 0,
+        Math.round(Number(d.revenue) || 0), Math.round(Number(d.plateCost) || 0), Math.round(Number(d.costTotal) || 0)]) });
+    return out.length ? out : [{ title, head: ["—"], rows: [] }];
   }
   return [{ title, head: ["—"], rows: [] }];
 }
