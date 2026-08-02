@@ -1902,7 +1902,10 @@ const SETTINGS_SECTIONS = [
   // now: service mode behind "Put menu on maintenance" (which says WHO may use it), the bubbles as
   // Menu's last sub-option. Leaving the page here would have been a second place to change them,
   // and a manager quietly taking the menu down was exactly what that permission exists to stop.
-  { id: "tables", label: "Tables", sub: "floor & seats", icon: "fa-chair", title: "Table settings" },
+  // "name & seats", not "floor & seats" — the floor-layout card left this screen on
+  // 2026-08-02 (tables per row is admin-only), so the subtitle would have promised a
+  // control that is no longer here. It matches the Access screen's row of the same name.
+  { id: "tables", label: "Tables", sub: "name & seats", icon: "fa-chair", title: "Table settings" },
   { id: "users", label: "Users", sub: "staff logins", icon: "fa-users", title: "User settings" },
   // Renamed with the access rebuild: this section holds no permissions any more, only the
   // waiter rota. Calling it "Access" would promise controls that live in the admin panel.
@@ -2033,31 +2036,13 @@ function formGeneral(s) {
     // carries data-mgr-hide so XRAY_CONTROLS hides it for the real manager and tints it for a
     // higher role (admin/owner). The floor count itself lives in the admin RestaurantSettings.
     return `
-  <!-- FLOOR LAYOUT — the MANAGER's own card, deliberately NOT admin-only (owner, 2026-08-01:
-       "I want it in the settings of manager panel. Can't you understand?"). I had put Tables per
-       row inside the "Tables / seating" card below, which carries data-mgr-hide="table_count" —
-       so a real manager could not see it at all, which is exactly why he kept saying the option
-       wasn't there. How many tables EXIST stays admin-owned; how the floor is LAID OUT is the
-       manager's own view setting. -->
-  <div class="card"><h3>Floor layout</h3>
-    <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
-      How your live floor is drawn in the <b>Tables</b> tab. Save, then open Tables.
-    </p>
-    <div style="display:flex;gap:14px;flex-wrap:wrap">
-      <div style="max-width:220px">${numSel("Tables per row", "floor_per_row", s.floor_per_row ?? FLOOR_PER_ROW_DEFAULT, FLOOR_PER_ROW_MIN, FLOOR_PER_ROW_MAX)}</div>
-    </div>
-    <p style="color:var(--muted);font-size:12.5px;margin:10px 0 0;line-height:1.5">
-      <b>Tables per row</b> is exactly that — pick 8 and every row has 8 boxes, on this screen and on
-      any other. The boxes shrink to fit your number and drop detail as they go (the served count,
-      then the seat number, then the wording) while the table number and its colour always stay.
-      Choose any number from ${FLOOR_PER_ROW_MIN} to ${FLOOR_PER_ROW_MAX} — there is nothing to type,
-      so the floor can never be set to a number it won't accept.
-    </p>
-    <p style="color:var(--muted);font-size:12.5px;margin:8px 0 0;line-height:1.5">
-      How many people fit at each table is set per table in <b>Table setting</b> below — that is the
-      number beside the chair on every tile.
-    </p>
-  </div>
+  <!-- NO "FLOOR LAYOUT" CARD HERE — tables-per-row is ADMIN-ONLY (owner, 2026-08-02: "in the
+       manager panel there shouldn't be option of number of table per row… that will be only set
+       by admin"). It was added here on 2026-08-01 at his word and taken back out at his word; the
+       one place it is set is /aevinite → the restaurant's Floor layout card. It is also NOT a
+       permission: there is no switch anywhere that can hand it back to a manager (his "you cannot
+       on it and off it"), so nothing was made toggleable in its place — the manager panel simply
+       has no such control, and the editor route refuses floor_per_row from a manager outright. -->
   <div class="card" data-mgr-hide="table_count"><h3>Tables / seating</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       How many tables the restaurant has. Drives the live floor map in the
