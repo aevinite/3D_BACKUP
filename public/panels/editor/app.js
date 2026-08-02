@@ -23,14 +23,9 @@ const ALLERGENS = [
 // Friendly singular names for each tab, used in headings like "New Dish".
 const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", general: "Settings" };
 
-// The tabs across the top of the editor. Anything not in this list is ignored.
-// NOTE: "features" is intentionally OMITTED — that tab was moved to the admin panel
-// (/aevinite). Leaving it here let a browser whose last-used tab was "features" boot
-// straight into the removed guest-feature toggle grid (owner could flip admin-controlled
-// flags from the manager panel). A stale saved "features" now falls back to "items".
-const VALID_TABS = ["items", "categories", "filters", "orders", "tables", "platform", "dash", "log", "general", "banquet", "ratings", "inventory"];
-// Remember which tab you were on so a refresh keeps you there (e.g. stay on
-// Orders during a busy service instead of snapping back to Dishes).
+// The last tab you were on. The FULL manager panel no longer restores it (see state.tab
+// below — it always opens on the live floor); only the menu-only embed still reads it, so
+// that embed can't boot into a tab it doesn't have. It is still written on every setTab.
 const savedTab = (() => { try { return localStorage.getItem("lfh_editor_tab"); } catch { return null; } })();
 // MENU-ONLY embed (owner panel → Menu, 2026-07-25): when the panel is opened with
 // ?menuonly=1 it shows ONLY the menu editor (Dishes / Categories / Tags) — every other
@@ -89,11 +84,16 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
 // currently being edited, the search text, and the live tables board. Whenever
 // state changes we re-draw the affected part of the screen from it.
 const state = {
-  tab: FLOOR_PREVIEW ? "tables" // layout-preview embed: the live floor IS the panel
-    : INV_ONLY ? "inventory" // inventory-only embed: the 📦 tab is the whole panel
+  // ALWAYS the live floor (owner, 2026-08-02: "whenever you open the manager panel, for the
+  // first time or any time, it should be on the Tables tab only"). The panel used to reopen
+  // on whatever tab you left it on, so a refresh mid-service could strand a manager on Dishes
+  // or Bills; the floor is what they need on arrival, every time. This covers the real panel,
+  // the owner panel's Manager mode and the layout-preview embed. The two SINGLE-PURPOSE embeds
+  // keep their own tab, because for them that tab IS the whole panel. Nobody gets stuck on a
+  // floor they aren't allowed: applyHierarchyView() still hops to the first visible tab.
+  tab: INV_ONLY ? "inventory" // inventory-only embed: the 📦 tab is the whole panel
     : MENU_ONLY ? (MENU_TABS.includes(savedTab) ? savedTab : "items") // menu-only: never open a non-menu tab
-    : OWNER_MODE ? (VALID_TABS.includes(savedTab) && !OWNER_HIDDEN_TABS.includes(savedTab) ? savedTab : "tables") // owner Manager mode: live floor first, never a hidden tab
-    : savedTab === "sessions" ? "tables" : (VALID_TABS.includes(savedTab) ? savedTab : "items"), // "sessions" merged into "tables"
+    : "tables",
   data: { items: [], categories: [], filters: [], orders: [], calls: [], settings: { id: "site", bubbles_enabled: true, service_mode: false } },
   sel: null,      // working copy of the record being edited
   isNew: false,
