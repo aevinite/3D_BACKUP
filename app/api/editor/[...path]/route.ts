@@ -939,7 +939,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // finished — the tile stays until it is BOTH printed and paid.
       // payment_method too (one short string): the card's 🖨 Print bill prints the customer's
       // receipt straight from these rows, and a receipt that can't say how it was paid is wrong.
-      const rows = sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,created_at,customer_name,paid,printed_at,payment_method").eq("restaurant_id", rid)
+      // bill_no / invoice_no / invoice_at ride along (mig 261): a parcel or a delivery order is
+      // numbered from the SAME two counters a dine-in bill uses, and the numbers have to reach
+      // the panel or the printed receipt would go out blank where a table bill shows them.
+      const rows = sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,bill_no,invoice_no,invoice_at,created_at,customer_name,customer_phone,paid,printed_at,payment_method").eq("restaurant_id", rid)
         .in("source", sources)
         .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
         .order("created_at", { ascending: false }).limit(200);

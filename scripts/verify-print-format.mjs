@@ -132,7 +132,39 @@ if (/onafterprint = function\(\)\{[^}]*focus/.test(bill) && !/onafterprint[^\n]*
   ok("the bill window is never closed by the afterprint event");
 } else bad("the bill window closes itself on afterprint", "pressing Cancel would throw the bill away (PR #716)");
 
+// ── 6. ONE NUMBERING SERIES (mig 261, owner 2026-08-02) ───────────────────────────────────
+// "Make sure it is continuing — parcel or any kind of Zomato, Swiggy, everywhere it will
+// continue the invoice number and the bill number, to keep the track." A parcel receipt used to
+// print with a blank Invoice line and no Bill no at all, because printParcelReceipt() hardcoded
+// both to null and aggregator_orders had no such columns.
+const MIG = "supabase/migrations/261_parcel_platform_bill_numbers.sql";
+const mig = read(MIG);
+if (!mig) bad(`${MIG} is missing`, "parcel and delivery bills would go out unnumbered again");
+else {
+  /lfh_next_counter\(v_rid, 'bill'\)/.test(mig) && /lfh_next_seq\(v_rid, 'invoice'\)/.test(mig)
+    ? ok("parcel/delivery numbers come from the SAME two counters dine-in uses")
+    : bad("the numbering no longer draws on the shared counters", "a private counter = three parallel series, not one");
+  /BEFORE INSERT ON public\.aggregator_orders/.test(mig)
+    ? ok("every insert path is numbered (a trigger, not a caller)")
+    : bad("the numbers are not stamped by an insert trigger", "a new insert path would silently go unnumbered");
+  /IF NEW\.invoice_no IS NULL THEN/.test(mig)
+    ? ok("an order that already has an invoice number is never renumbered")
+    : bad("the trigger can overwrite an existing invoice number", "an issued invoice number must never change");
+}
+const panel = read("public/panels/editor/app.js");
+/bill_no: o\.bill_no != null \? o\.bill_no : null/.test(panel) && /invoice_no: o\.invoice_no != null/.test(panel)
+  ? ok("the parcel receipt prints the numbers off the order row")
+  : bad("printParcelReceipt no longer passes the bill/invoice numbers", "the paper would print blank where a table bill shows them");
+/bill_no,invoice_no,invoice_at/.test(read("app/api/editor/[...path]/route.ts"))
+  ? ok("the parcel board sends those numbers to the panel")
+  : bad("the platform board query dropped bill_no/invoice_no", "the panel cannot print what it was not sent");
+// And the parcel line itself: his rule is the ONLY difference from a table bill.
+const parcelBill = BILLDOC.billDocHtml({ name: "Test", lines: [], parcel: true, tableDisp: "T5", dateStr: "x" });
+/<div class="kv"><span>Parcel<\/span><b><\/b><\/div>/.test(parcelBill) && !/<span>Table<\/span>/.test(parcelBill)
+  ? ok('a parcel bill says "Parcel" with no number, and has no Table row')
+  : bad("the parcel bill's top line is wrong", 'it must read "Parcel" with nothing where the table number goes');
+
 console.log(fails
   ? `\n${fails} check(s) FAILED — the bill or the ticket has more than one description again.`
-  : "\nAll checks passed — one bill, one ticket, one file.");
+  : "\nAll checks passed — one bill, one ticket, one file, one numbering series.");
 process.exit(fails ? 1 : 0);
