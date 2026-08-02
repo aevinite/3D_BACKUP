@@ -43,8 +43,13 @@ export type Cap = {
   perPerson: boolean;
 };
 
-export const GROUP_MENUS = "Permissions";
-export const GROUP_MANAGE = "What a manager may manage";
+// THE GROUP NAMES ARE THE ACCESS SCREEN'S OWN (owner, 2026-08-02: "in the permission, also,
+// there will be same thing — manager menu, permission for manager and manager setting, all
+// that same structure"). A person's permission list reads exactly like the Manager section,
+// so nobody has to translate between two vocabularies for one idea.
+export const GROUP_MENUS = "Manager's menu";
+export const GROUP_MANAGE = "Permission for manager";
+export const GROUP_MGRSET = "Manager settings (what manager can do)";
 export const GROUP_OWNER = "Owner's menu";
 export const GROUP_WAITER = "What a waiter may do";
 
@@ -61,9 +66,9 @@ export function capsForRole(role: string): Cap[] {
   const add = (c: Cap) => { if (!seen.has(c.key)) { seen.add(c.key); out.push(c); } };
 
   if (role === "manager") {
-    // Two folders, two blocks. "Manager menu" holds the tabs; "What a manager may do" holds
-    // the actions. Walking the folders (not a hard-coded row list) means a row moved between
-    // them on the Access screen moves here too.
+    // Three folders, three blocks — the SAME structure as Access → Manager (owner, 2026-08-02:
+    // "if we add any feature in the manager section, it should be added in the user also").
+    // Walking the folders (not a hard-coded row list) is what makes that automatic.
     const mgr = section("mgrMenu")?.children ?? [];
     const walk = (nodes: Node[], group: string) => {
       for (const n of nodes) {
@@ -75,6 +80,12 @@ export function capsForRole(role: string): Cap[] {
     };
     walk(mgr.find((n) => n.id === "mgr_menu_group")?.children ?? [], GROUP_MENUS);
     walk(mgr.find((n) => n.id === "mgr_may")?.children ?? [], GROUP_MANAGE);
+    // Manager settings — the panel's Settings SECTIONS. Restaurant-wide (access_config.menus
+    // .mgrset, no per-person path), so shown READ-ONLY like the owner's pages: the structure
+    // matches the Access screen without minting a dropdown that would save a key nothing reads.
+    for (const n of section("mgrMenu")?.children.find((x) => x.id === "mgr_manage")?.children ?? []) {
+      if (n.bind.t === "tab") add({ key: `mgrset:${n.bind.key}`, group: GROUP_MGRSET, node: n, pin: false, perPerson: false });
+    }
     return out;
   }
 
@@ -119,6 +130,22 @@ export const capStates = (pin: boolean): CapValue[] =>
   pin ? ["default", "on", "pin", "off"] : ["default", "on", "off"];
 export const isCapValue = (v: unknown, pin: boolean): v is CapValue =>
   typeof v === "string" && (capStates(pin) as string[]).includes(v);
+
+/** Is this row even OFFERABLE for one person at this restaurant?
+ *
+ *  THE OWNER'S RULE (2026-08-02): "if I off the FEATURE delete bill, it will not even show in
+ *  the user that delete bill can be on and off… if the feature is closed, it should not even
+ *  be seen there." The FEATURE half of a row says whether the restaurant HAS the thing at all;
+ *  a per-person dropdown for a thing the restaurant doesn't have is a dead switch wearing a
+ *  person's name — managerCan() would refuse it whatever the dropdown said. So both per-person
+ *  screens (the profile's Permissions block and Access → Per person) hide the row entirely
+ *  while its feature is off, and it reappears the moment the feature comes back on.
+ *  No feature half (Dashboard, the mgrset sections) or no loaded state yet → visible. */
+export function capVisible(cap: Cap, st: TreeState | null): boolean {
+  const fb = cap.node.featureBind;
+  if (!fb || !st) return true;
+  return nodeValue({ ...cap.node, bind: fb }, st) === true;
+}
 
 /** What the RESTAURANT gives this role for a row — the "(on)" inside "Default (on)". */
 export function roleDefault(cap: Cap, st: TreeState | null): "on" | "off" | "pin" | null {
