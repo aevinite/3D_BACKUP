@@ -468,6 +468,14 @@
     isOfflineErr: function (e) {
       return !!(e && (e.offline === true || e.message === "offline" || /Failed to fetch|NetworkError|Load failed/i.test(e.message || "")));
     },
+    // "The server is up, its database didn't answer." Marked by the panels' api() from the
+    // 503 + X-LFH-Busy our routes send (lib/panelFailure.ts), plus the bare gateway statuses
+    // a platform can answer with instead of us. Kept SEPARATE from isOfflineErr on purpose:
+    // this must never be worded as an internet problem — the connection is fine, and blaming
+    // it is the "don't cry wolf" mistake this app has already made once.
+    isBusyErr: function (e) {
+      return !!(e && !e.offline && (e.busy === true || e.status === 502 || e.status === 503 || e.status === 504));
+    },
     open: openSheet,
     close: closeSheet,
     isStale: function () { return stale.fromCache || stale.seenOfflineRead; },

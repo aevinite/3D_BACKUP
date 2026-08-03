@@ -508,8 +508,14 @@ const perRowKey = () => { const r = panelRid(); return r ? "lfh_editor_per_row:"
 // errText: what to SHOW a person for a failed request. "No internet" is by far the most
 // common cause and must read like that — never the browser's raw "Failed to fetch",
 // which tells a manager nothing and looks like the app is broken.
+// A THIRD case sits between those two and used to read as neither: the server is up, the
+// connection is fine, and its database didn't answer. For two hours on 2026-08-03 that put
+// "TimeoutError: The operation was aborted due to timeout" in red toasts across this panel. It
+// isn't the internet (don't blame it) and it isn't a fault (don't alarm) — it is a moment.
 const errText = (e) => (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))
   ? "no internet right now — this will load when you're back online"
+  : (window.LFH_OFF && window.LFH_OFF.isBusyErr && window.LFH_OFF.isBusyErr(e))
+  ? "the system is very busy right now — this will come back by itself in a moment"
   : ((e && e.message) || "unknown error");
 
 const _inflightGET = new Map(); // coalesce concurrent identical GETs into ONE network hit
@@ -556,6 +562,8 @@ async function api(method, path, body, opts) {
       e.status = res.status;
       e.data = json;
       e.offline = json.offline === true || res.headers.get("X-LFH-Offline") === "1";
+      // The database didn't answer (503 + X-LFH-Busy, lib/panelFailure.ts) — a moment, not a fault.
+      e.busy = json.busy === true || res.headers.get("X-LFH-Busy") === "1";
       throw e;
     }
     return json;

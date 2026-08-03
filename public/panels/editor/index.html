@@ -121,7 +121,7 @@
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
   <script src="/panels/swreg.js?v=e799eb96"></script>
-  <script src="/panels/offline.js?v=16f7dd5c"></script>
+  <script src="/panels/offline.js?v=c4f73723"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
@@ -151,6 +151,6 @@
   <script src="/panels/billdoc.js?v=398f1baa"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=2a0859d0"></script>
+  <script src="/panels/editor/app.js?v=a4576fd6"></script>
 </body>
 </html>

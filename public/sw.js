@@ -133,6 +133,12 @@ const isBigMedia = (p) => p.startsWith("/models/") || /\.(glb|gltf|mp4|webm|mov|
 // Query flags that mean "give me the live value or tell me you can't" — never a saved one.
 const WANTS_LIVE = ["refresh", "force", "nocache"];
 
+// Statuses that mean "the server is there but can't answer this right now" — a database that
+// didn't reply in time (our routes send 503 + X-LFH-Busy, lib/panelFailure.ts), a gateway that
+// gave up (502/504), or the platform shedding load. Deliberately NOT 500: a 500 is a bug and must
+// reach the screen. See the note where this is used, in networkFirst().
+const CANT_ANSWER_NOW = new Set([502, 503, 504]);
+
 const isNever = (p) => NEVER.some((re) => re.test(p));
 const isData = (p) => DATA_PATHS.some((re) => re.test(p));
 
@@ -419,8 +425,24 @@ async function networkFirst(req, cacheName, key, timeout, opts) {
       const stalled = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("stall")), timeout); });
       try { res = await Promise.race([live, stalled]); } finally { clearTimeout(timer); }
     }
-    // A real server error (500/404) is the truth — pass it through rather than papering
-    // over it with stale data; only a dead or hung network falls back.
+    // A real server error (a 500 from a bug, a 404, any refusal) is the truth — pass it through
+    // rather than papering over it with stale data.
+    //
+    // BUT "I couldn't reach my database just now" is NOT a verdict about this request, and by the
+    // app's own rule it takes the same path as no internet (CLAUDE.md, the rush section; the
+    // write half of that rule already lives in public/panels/outbox.js). Those replies arrive as
+    // 503 + X-LFH-Busy from lib/panelFailure.ts, or as a bare 502/503/504 when a gateway or the
+    // platform answers instead of us. On 2026-08-03 a two-hour database wobble put 56 of them on
+    // the Repair board, and each one blanked a manager's screen with the words "TimeoutError: The
+    // operation was aborted due to timeout" — while the device held the same floor from a minute
+    // earlier. Show that, stamped, so the offline bar can say "showing saved data from 7:42 pm".
+    //
+    // Only ever a FALLBACK: with nothing saved (or a forced Refresh, which must be live or fail)
+    // the busy reply itself is returned untouched, so the panel still hears the truth.
+    if (!noFallback && cacheName === DATA && res && CANT_ANSWER_NOW.has(res.status)) {
+      const saved = await cachedCopy(cacheName, key, null, opts && opts.clientId);
+      if (saved) return saved;
+    }
     return res;
   } catch (e) {
     const stalled = e && e.message === "stall";
