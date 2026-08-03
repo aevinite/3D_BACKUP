@@ -43,6 +43,18 @@ BEGIN
     RETURN json_build_object('ok', false, 'reason', 'rate_limited');
   END IF;
 
+  -- 253: open-price dishes are staff-priced -- never orderable from a guest device. See the
+  -- long note on lfh_place_order in mig 253; same rule, same reason code. (This block was
+  -- DROPPED by 264's first draft — the body had been copied from mig 240, but mig 253
+  -- redefined this function after 240. The recreate-reverts-a-fix trap, caught in review.)
+  IF jsonb_typeof(p_items) = 'array' AND EXISTS (
+       SELECT 1 FROM jsonb_array_elements(p_items) e
+        JOIN menu_items m ON m.id = e->>'id' AND m.restaurant_id = v_rid
+       WHERE m.open_price
+     ) THEN
+    RETURN json_build_object('ok', false, 'reason', 'staff_priced_item');
+  END IF;
+
   -- Priced against the restaurant the order is FOR (118).
   v_priced := lfh_price_order(p_items, v_rid);
   IF NOT (v_priced->>'ok')::boolean THEN RETURN v_priced::json; END IF;

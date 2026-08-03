@@ -87,7 +87,9 @@ check("lib/tableMerge.ts exists (the one shared resolver)",
 // ── round 2 (mig 264): every remaining path respects a live merge ───────────
 const mig264 = read("supabase/migrations/264_every_path_respects_a_merge.sql");
 check("mig 264: a guest order at a merged table joins the party (lfh_place_order_public)",
-  /lfh_place_order_public[\s\S]{0,3500}lfh_merge_parent_table\(v_rid, v_tbl\)/.test(mig264));
+  /lfh_place_order_public[\s\S]{0,4500}lfh_merge_parent_table\(v_rid, v_tbl\)/.test(mig264));
+check("mig 264: the recreate KEPT mig 253's open-price guest guard (staff_priced_item)",
+  /lfh_place_order_public[\s\S]{0,2500}staff_priced_item/.test(mig264));
 check("mig 264: a merged party refuses to shift (party_merged)",
   /lfh_staff_shift_table[\s\S]{0,1500}party_merged/.test(mig264));
 check("mig 264: nothing shifts ONTO a joined table (merged_child, checked under the lock)",
