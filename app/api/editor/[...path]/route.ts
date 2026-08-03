@@ -954,7 +954,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // bill_no / invoice_no / invoice_at ride along (mig 261): a parcel or a delivery order is
       // numbered from the SAME two counters a dine-in bill uses, and the numbers have to reach
       // the panel or the printed receipt would go out blank where a table bill shows them.
-      const rows = sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,bill_no,invoice_no,invoice_at,created_at,customer_name,customer_phone,paid,printed_at,payment_method").eq("restaurant_id", rid)
+      // The discount comes across as TWO JSON PATHS, not the payload column (2026-08-03). A
+      // parcel's discount is recorded in `payload` because aggregator_orders has no column for
+      // it — but selecting `payload` here would drag the whole webhook body back onto this polled
+      // path, which is the exact thing the note above says not to do. `payload->discount` fetches
+      // the two small values and nothing else, so the detail card and the printed bill can show
+      // what was taken off at no meaningful egress cost.
+      const rows = sb.from("aggregator_orders").select("id,source,items,total,status,kot_no,bill_no,invoice_no,invoice_at,created_at,customer_name,customer_phone,paid,printed_at,payment_method,discount:payload->discount,discount_note:payload->>discount_note").eq("restaurant_id", rid)
         .in("source", sources)
         .or(`status.eq.new,status.eq.accepted,status.eq.preparing,status.eq.ready,and(status.eq.handed_over,updated_at.gte.${handoverCutoff})`)
         .order("created_at", { ascending: false }).limit(200);
@@ -1800,6 +1806,39 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           .eq("id", placedId).eq("restaurant_id", rid);
         await sb.from("order_items").update({ status: "preparing" }).eq("order_id", placedId).eq("restaurant_id", rid).eq("status", "received");
       }
+      // ── A DISCOUNT TYPED IN ⚡ QO/P, applied in the SAME request (owner, 2026-08-03) ──
+      // The builder holds the amount while the order is assembled and sends it here rather than
+      // firing a second POST once the order exists: a follow-up call can fail on its own, or land
+      // after the bill was printed, and either way the guest is charged the undiscounted price.
+      //
+      // Three rules, all enforced HERE and not in the browser:
+      //  · the power — same `give_discounts` the − Discount button on a table is gated by;
+      //  · the role's %-cap — the identical discountCapPct/overDiscountCap check the
+      //    orders/:id/discount handler runs, so QO/P is not a way around a waiter's 5% limit;
+      //  · ADD, never replace. A quick order can land on a table that already has a bill
+      //    discount. lfh_staff_bill_discount SETS the session's discount, so passing the new
+      //    amount alone would silently wipe the discount that table was already given.
+      const rawDisc = Number(body?.discount);
+      if (placedId && Number.isFinite(rawDisc) && rawDisc > 0) {
+        if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
+        const row = (await sb.from("orders").select("subtotal, session_id, discount").eq("id", placedId).eq("restaurant_id", rid).single()).data as
+          { subtotal?: number; session_id?: string | null; discount?: number } | null;
+        const base = Number(row?.subtotal) || 0;
+        const cap = await discountCapPct(rid, discountRole(g.user?.role));
+        if (overDiscountCap(rawDisc, base, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403);
+        const note = String(body?.discountNote || "").slice(0, 200) || null;
+        const amount = Math.round(Math.min(Math.max(rawDisc, 0), base) * 100) / 100;
+        if (row?.session_id) {
+          // The bill's CURRENT discount + this one. Read from the session's own orders so a
+          // discount given seconds earlier on another device is included rather than lost.
+          const sib = (must(await sb.from("orders").select("discount, status").eq("session_id", row.session_id).eq("restaurant_id", rid)) || []) as { discount?: number; status?: string }[];
+          const already = sib.reduce((a, o) => a + (o.status === "cancelled" ? 0 : Number(o.discount) || 0), 0);
+          must(await sb.rpc("lfh_staff_bill_discount", { p_session: row.session_id, p_amount: Math.round((already + amount) * 100) / 100, p_note: note }));
+        } else {
+          must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", placedId).eq("restaurant_id", rid));
+        }
+        await log("manager", "order_discount", { restaurant_id: rid, order_id: placedId, detail: `quick order discount ₹${amount}${note ? ` · ${note}` : ""}`, device_id: dev });
+      }
       await log("editor", "order_place", { restaurant_id: rid, table_number: t, device_id: dev, order_id: placedId ?? null });
       return ok(data);
     }
@@ -1856,8 +1895,24 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // The printed bill takes its subtotal from the LINES (never this stored total, or it would
       // tax it twice), so paper and record land on the same number.
       const parcelRate = effectiveTaxRate((await sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle()).data || {});
-      const parcelTax = Math.round(total * parcelRate * 100) / 100;
-      total = Math.round((total + parcelTax) * 100) / 100;
+      // ── DISCOUNT, BEFORE TAX (owner, 2026-08-03 — the ⚡ QO/P builder can now give one) ──
+      // The same order the whole app uses (lib/billMath): discount comes off the SUBTOTAL, and
+      // tax is charged on what is left. Taking it off the tax-inclusive total instead would
+      // over-credit by discount×rate — the 2026-07-06 bug, and on a tax tool it would also
+      // understate the tax collected. Clamped to the food value and re-checked against this
+      // role's %-cap here, because a client number is a request and never the ruling.
+      const parcelSub = total;
+      let parcelDisc = 0;
+      const rawPDisc = Number(body?.discount);
+      if (Number.isFinite(rawPDisc) && rawPDisc > 0) {
+        if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
+        const pcap = await discountCapPct(rid, discountRole(g.user?.role));
+        if (overDiscountCap(rawPDisc, parcelSub, pcap)) return err(`That discount is over your ${pcap}% limit — ask the owner.`, 403);
+        parcelDisc = Math.round(Math.min(Math.max(rawPDisc, 0), parcelSub) * 100) / 100;
+      }
+      const parcelTaxable = Math.round((parcelSub - parcelDisc) * 100) / 100;
+      const parcelTax = Math.round(parcelTaxable * parcelRate * 100) / 100;
+      total = Math.round((parcelTaxable + parcelTax) * 100) / 100;
 
       const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
       const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -1873,10 +1928,20 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // scoped UPDATE (service-role bypasses RLS, so id + restaurant_id is the fence).
       const wholeNote = String(note || "").trim().slice(0, 300);
       const alg = Array.isArray(allergies) ? allergies.map((x: unknown) => String(x)).slice(0, 20) : [];
-      const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg } };
+      // The discount is RECORDED, not just deducted. `total` already reflects it, so every board,
+      // report and Z-figure is right without touching them — but a sale whose total is lower than
+      // its lines with nothing saying why is exactly the shape a books check objects to. aggregator
+      // _orders has no discount column, so the record rides in `payload` (JSONB, already written
+      // here): what came off, and the reason, readable on the parcel and printed on its bill.
+      const pDisc = parcelDisc > 0 ? { discount: parcelDisc, discount_note: String(body?.discountNote || "").slice(0, 200) || null } : {};
+      const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg, ...pDisc } };
       if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = String(method || "cash").slice(0, 20); }
       if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw new Error(up.error.message); }
-      await log("manager", "parcel_place", { restaurant_id: rid, detail: `${paid === true ? "paid" : "unpaid"} · ₹${total}`, device_id: dev });
+      await log("manager", "parcel_place", { restaurant_id: rid, detail: `${paid === true ? "paid" : "unpaid"} · ₹${total}${parcelDisc > 0 ? ` · discount ₹${parcelDisc}` : ""}`, device_id: dev });
+      // A discount is a money change, so it gets its OWN audit row too — the "who is discounting"
+      // watch reads `order_discount`, and a parcel discount buried inside a parcel_place line
+      // would never reach it.
+      if (parcelDisc > 0) await log("manager", "order_discount", { restaurant_id: rid, detail: `parcel discount ₹${parcelDisc}${body?.discountNote ? ` · ${String(body.discountNote).slice(0, 200)}` : ""}`, device_id: dev });
       return ok({ ...row, paid: paid === true });
     }
 
