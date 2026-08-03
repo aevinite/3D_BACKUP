@@ -151,9 +151,27 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   }
 }
 
+// Drop this restaurant's shared floor snapshot AFTER the write has landed, as well as before it
+// (the long note is on the same wrapper in app/api/editor/[...path]/route.ts). Dropping it only
+// at the start leaves a gap in which another device's whole-floor poll re-shares the pre-write
+// floor for up to 1.5s — so a dish marked ready in the kitchen can still show as cooking on the
+// manager's and waiter's tiles for a moment afterwards. The rid rides on a WeakMap keyed by the
+// request object, so concurrent requests never mix. (sweep 2026-08-04)
+const writeRid = new WeakMap<NextRequest, string>();
+function invalidateFloorAfter(fn: (req: NextRequest, ctx: Ctx) => Promise<NextResponse>) {
+  return async (req: NextRequest, ctx: Ctx): Promise<NextResponse> => {
+    try {
+      return await fn(req, ctx);
+    } finally {
+      const rid = writeRid.get(req);
+      if (rid) invalidateFloor(rid);
+    }
+  };
+}
+
 // ── POST: accept / ready / item status / sold-out ────────────────────────────
 // Wrapped so a replayed offline action runs at most once (see lib/idempotency.ts).
-export const POST = withIdempotency(postImpl, "kitchen");
+export const POST = withIdempotency(invalidateFloorAfter(postImpl), "kitchen");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
@@ -162,7 +180,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   // manager and tablet routes have always done this; the kitchen never did, across all five
   // of its write paths (accept / ready / item status / platform status / sold-out), and the
   // guard that enforces the rule only ever looked at the other two routes.
-  if (rid) invalidateFloor(rid);
+  // Dropping it HERE is not enough on its own — invalidateFloorAfter() above drops it again
+  // once the handler has finished, which is what makes "read your own write" actually true.
+  if (rid) { invalidateFloor(rid); writeRid.set(req, rid); }
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;

@@ -108,6 +108,25 @@ for (const r of ROUTES) {
     const body = src.slice(start, nextImpl > 0 ? nextImpl : start + 40000);
     check(`${r.panel}: ${impl} drops the floor snapshot`, /invalidateFloor\(rid\)/.test(body),
       /invalidateFloor\(rid\)/.test(body) ? "" : "a write here would let a device read a floor older than its own action");
+    // …AND IT MUST ALSO DROP IT AFTER THE WRITE HAS LANDED (added 2026-08-04).
+    //
+    // This is the check that was missing, and its absence is why the guard sat green over a
+    // real bug for weeks: the assertion above only proves the CALL EXISTS somewhere in the
+    // handler, and every handler calls it at the TOP — before the change is written. Dropping
+    // the snapshot before the write cannot give "read your own write", because another device's
+    // whole-floor poll can land in the gap and re-share the pre-write floor for 1.5s. The
+    // acting device then reloads and is handed exactly the stale tile the sharing was written
+    // to prevent.
+    //
+    // The property to hold: each write handler is wrapped so the snapshot is dropped again once
+    // the handler has finished, and the handler records the rid for that wrapper to use. Testing
+    // the WRAPPING (not a line's position) keeps this honest through a refactor.
+    const exported = new RegExp(`(POST|PATCH|DELETE)\\s*=\\s*[^;\\n]*invalidateFloorAfter\\(\\s*${impl}\\s*\\)`).test(src);
+    check(`${r.panel}: ${impl} drops it AGAIN after the write lands`,
+      exported && /writeRid\.set\(req, rid\)/.test(body),
+      exported
+        ? (/writeRid\.set\(req, rid\)/.test(body) ? "" : `${impl} never records its rid, so the after-write invalidation has nothing to drop`)
+        : `${impl} is not wrapped in invalidateFloorAfter() — a device that writes can still be handed the floor it had`);
   }
 }
 
@@ -146,6 +165,7 @@ console.log(`\n${results.length - bad.length}/${results.length} checks passed`);
 if (bad.length) {
   console.log("\nWhat to do:");
   console.log("  · a missing invalidateFloor(rid) → add it right after that handler resolves `rid`");
+  console.log("  · no after-write drop → wrap the export in invalidateFloorAfter(…) and add writeRid.set(req, rid)");
   console.log("  · a shared ?table= refetch → keep the `tbl ? …live… : …shared…` shape");
   console.log("  · a widened window → the floor is a live screen; keep it ~1.5s");
   console.log("  · narrowing in place → `const summary = limit ? structuredClone(shared) : shared;`\n");
