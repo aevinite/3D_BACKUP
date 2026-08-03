@@ -986,6 +986,7 @@ function blank(tab) {
 function selectRecord(r) {
   state.sel = clone(r);
   state.isNew = false;
+  state.slugTouched = false; // fresh record → the name may fill the key again (new rows only)
   state._snapPending = true; // re-baseline the unsaved-changes guard for this record
   // No renderList() here: rebuilding the whole sidebar on every click was a
   // big part of the lag, and the click handler already moved the highlight.
@@ -995,6 +996,7 @@ function selectRecord(r) {
 function newRecord() {
   state.sel = blank(state.tab);
   state.isNew = true;
+  state.slugTouched = false; // nobody has typed their own link yet → the name drives it
   state._snapPending = true;
   renderList();
   renderEditor();
@@ -1160,8 +1162,12 @@ function formItems(it) {
   <div class="card"><h3>Basics</h3>
     <div class="grid cols-2">
       ${tf("Title", "title", it.title, { span: true })}
-      ${tf("ID (permanent)", "id", it.id, { disabled: !state.isNew, ph: state.isNew ? "auto from title" : "", hint: state.isNew ? "Leave blank — we'll make it from the title." : "Unique. Can't change later." })}
-      ${tf("Slug (URL)", "slug", it.slug, { ph: state.isNew ? "auto from title" : "gourmet-burger", hint: state.isNew ? "Leave blank to auto-fill from the title." : "" })}
+      ${/* NEW dish: the id is minted by the SERVER (it's a global key, so it must be unique
+            across every restaurant) — a typed one was always thrown away. So it's shown
+            read-only with the preview autoKeyFrom() fills in as you type the title, rather
+            than as an editable box that quietly does nothing. */""}
+      ${tf("ID (permanent)", "id", state.isNew ? (it.slug || "") : it.id, { disabled: true, ph: state.isNew ? "made from the title" : "", hint: state.isNew ? "Made for you when you save — you only need the title." : "Unique. Can't change later." })}
+      ${tf("Slug (URL)", "slug", it.slug, { ph: state.isNew ? "made from the title" : "gourmet-burger", hint: state.isNew ? "Fills in from the title as you type — change it if you want a different link." : "" })}
       ${tf("Price", "price", it.price, { ph: "12.99" })}
       ${catSelect(it.category)}
       ${tf("Sort order", "sort_order", it.sort_order, { type: "number" })}
@@ -1237,7 +1243,7 @@ function formCategories(c) {
   return `
   <div class="card"><h3>Category</h3>
     <div class="grid cols-2">
-      ${tf("Slug (permanent)", "slug", c.slug, { disabled: !state.isNew, hint: "Used on dishes. Can't change later." })}
+      ${tf("Slug (permanent)", "slug", c.slug, { disabled: !state.isNew, ph: state.isNew ? "made from the name" : "", hint: state.isNew ? "Fills in from the English name below as you type. Used on dishes — can't change later." : "Used on dishes. Can't change later." })}
       ${tf("Sort order", "sort_order", c.sort_order, { type: "number" })}
       ${tf("Icon (FontAwesome class)", "icon", c.icon, { ph: "fa-burger" })}
       <div class="field"><label>Colour</label>
@@ -1263,7 +1269,7 @@ function formFilters(f) {
   return `
   <div class="card"><h3>Filter</h3>
     <div class="grid cols-2">
-      ${tf("Slug (permanent)", "slug", f.slug, { disabled: !state.isNew, hint: "Used in dish tags, e.g. vegan, spicy." })}
+      ${tf("Slug (permanent)", "slug", f.slug, { disabled: !state.isNew, ph: state.isNew ? "made from the name" : "", hint: state.isNew ? "Fills in from the English name below as you type, e.g. vegan, spicy." : "Used in dish tags, e.g. vegan, spicy." })}
       ${tf("Sort order", "sort_order", f.sort_order, { type: "number" })}
       ${tf("Icon / emoji", "icon", f.icon, { ph: "🌿" })}
       <div class="field"><label>Preview</label>
@@ -5011,6 +5017,45 @@ function updatePreviews() {
 // bindEditor: make the edit form interactive. It connects Save/Delete, and — the
 // clever bit — auto-wires every input: when you change a field, it reads that
 // field's data-path and writes the new value into state.sel at that location.
+// slugifyKey: the ONE way a typed name becomes a key/link — lowercase, dashes, nothing
+// else. The server does exactly this too (app/api/editor/[...path]/route.ts), so what the
+// box shows while you type is what gets saved.
+function slugifyKey(s) {
+  return String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+// autoKeyFrom: on a BRAND-NEW dish / category / tag, typing the name fills the key boxes
+// live — Slug (URL) for all three, plus the read-only ID preview on a dish. It used to say
+// "auto from title" and stay empty until after the save, so you couldn't see the guest link
+// you were about to create (and a category/tag needed the slug typed by hand).
+// Two things it deliberately does NOT do:
+//   • it never touches an EXISTING row — changing a live dish's slug would break its
+//     /item/<slug> link and any QR/menu already pointing at it;
+//   • it stops the moment you type your own slug (state.slugTouched), so a hand-picked link
+//     is never overwritten by the next keystroke of the name. Clearing the box hands control
+//     back to the name again.
+// The value is written straight into the DOM (never a re-render) so the caret you're typing
+// in doesn't jump.
+function autoKeyFrom(path, ed) {
+  if (!state.isNew || !state.sel) return;
+  if (!(state.tab === "items" || state.tab === "categories" || state.tab === "filters")) return;
+  const nameField = state.tab === "items" ? "title" : "name.en"; // dishes have a title; categories/tags have per-language names
+  if (path === "slug") { state.slugTouched = !!String(state.sel.slug || "").trim(); return; }
+  if (path !== nameField || state.slugTouched) return;
+
+  const slug = slugifyKey(state.tab === "items" ? state.sel.title : (state.sel.name || {}).en);
+  setPath(state.sel, "slug", slug);
+  const slugBox = ed.querySelector('input[data-path="slug"]');
+  if (slugBox && document.activeElement !== slugBox) slugBox.value = slug;
+  // Dishes also show an ID preview. The real id is minted by the server (it must be unique
+  // across every restaurant, so it may come back with a -2 on the end) — this is the shape
+  // of it, in a box you can't type into, so nothing here is a promise we can't keep.
+  if (state.tab === "items") {
+    const idBox = ed.querySelector('input[data-path="id"]');
+    if (idBox) idBox.value = slug;
+  }
+}
+
 function bindEditor() {
   const ed = $("#editor");
   $("#saveBtn").onclick = save;
@@ -5032,6 +5077,7 @@ function bindEditor() {
       else v = node.value;
       setPath(state.sel, path, v); // save it into the working copy at its dotted path
       if (path === "image" || path === "icon" || path === "color") updatePreviews(); // refresh the live preview
+      autoKeyFrom(path, ed); // NEW row: fill the link (and the id preview) from the name as you type
     });
   });
 
@@ -5283,7 +5329,7 @@ async function save() {
   // another restaurant's (or this restaurant's own) dish with the same name. The SERVER
   // mints a tenant-namespaced, globally-unique id for new dishes instead. (Editing keeps
   // the existing id/slug untouched.)
-  const slugify = (s) => String(s || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  const slugify = slugifyKey; // same rule the form's live autofill and the server use
   if (state.tab === "items" && state.isNew) {
     if (!it.slug && it.title) it.slug = slugify(it.title);
   }
