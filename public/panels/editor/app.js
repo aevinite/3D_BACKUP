@@ -1146,7 +1146,7 @@ function optionsHtml(it) {
       </div>
       <button class="btn small danger" data-action="rmOptGroup" data-arg="${i}" style="margin-top:10px">Remove group</button>
     </div>`).join("");
-  return `<div class="card"><h3>Customization options</h3>
+  return `<div class="card" data-menu-part="edit_options"><h3>Customization options</h3>
     <span class="hint">Let guests customise this dish (Size, Milk, Extras…). Each choice's price adds to the base. Leave empty for none.</span>
     <div class="opt-groups">${groupsHtml}</div>
     <button class="btn small primary" data-action="addOptGroup" style="margin-top:12px">+ Add option group</button>
@@ -1159,7 +1159,10 @@ function optionsHtml(it) {
 // small field helpers above.
 function formItems(it) {
   return `
-  <div class="card"><h3>Basics</h3>
+  ${/* The hook sits on the HEADING, not the card: this card also holds Price and the
+        sold-out button, which are their OWN parts. Marking the whole card would tell an
+        admin that a manager can't touch three things when they may well hold two of them. */""}
+  <div class="card"><h3 data-menu-part="edit_dish">Basics</h3>
     <div class="grid cols-2">
       ${tf("Title", "title", it.title, { span: true })}
       ${/* NEW dish: the id is minted by the SERVER (it's a global key, so it must be unique
@@ -1177,18 +1180,23 @@ function formItems(it) {
         ? "🚫 Not available right now — tap to make available"
         : "✅ Available — tap to mark not available"}
     </button>
-    <div style="margin-top:14px">${toggle("💰 Open price — staff type the price at order time", "open_price", it.open_price)}</div>
-    <span class="hint">For as-per-MRP / market-price items (a soft-drink can, mineral water…). When on, the tablet shows “Set price” and the waiter enters the amount each time — the Price field above is ignored, and the dish is hidden from the guest menu.</span>
+    ${/* Open price rides "Change a price": it decides what the guest pays just as much as the
+          Price box does, and the server drops both together. The hint moves inside the wrapper
+          so hiding the switch can't leave its explanation behind on its own. */""}
+    <div data-menu-part="edit_price">
+      <div style="margin-top:14px">${toggle("💰 Open price — staff type the price at order time", "open_price", it.open_price)}</div>
+      <span class="hint">For as-per-MRP / market-price items (a soft-drink can, mineral water…). When on, the tablet shows “Set price” and the waiter enters the amount each time — the Price field above is ignored, and the dish is hidden from the guest menu.</span>
+    </div>
   </div>
 
-  <div class="card"><h3>Image</h3>
+  <div class="card"><h3 data-menu-part="edit_dish">Image</h3>
     <div class="grid cols-2" style="align-items:start">
       ${tf("Image URL", "image", it.image, { ph: "https://…" })}
       <img id="imgPreview" class="preview-img" src="${esc(it.image || "")}" alt="" style="opacity:${it.image ? 1 : 0.2}"/>
     </div>
   </div>
 
-  ${(XRAY_WHO && XRAY_WHO.actor === "admin") ? `<div class="card"><h3>3D · 4D</h3>
+  ${menuPartVisible("edit_3d") ? `<div class="card" data-menu-part="edit_3d"><h3>3D · 4D</h3>
     <div style="margin-bottom:14px">${toggle("4D mode — cyan glow outline + 3D preview", "is4d", it.is4d)}</div>
     <div class="grid cols-2">
       ${tf("Model folder", "model_folder", it.model_folder)}
@@ -1199,13 +1207,13 @@ function formItems(it) {
     <span class="hint">4D only appears on the menu when both GLB URLs are filled.</span>
   </div>` : ""}
 
-  <div class="card"><h3>Diet & filters</h3>
+  <div class="card"><h3 data-menu-part="edit_dish">Diet & filters</h3>
     <div style="margin-bottom:16px">${toggle("Vegetarian (green leaf icon)", "veg", it.veg)}</div>
     ${lbl("Filter tags")}
     ${tagChips(it.tags)}
   </div>
 
-  <div class="card"><h3>Allergens</h3>
+  <div class="card"><h3 data-menu-part="edit_dish">Allergens</h3>
     ${lbl("Tap the allergens this dish contains (shown on the dish page + checkout)")}
     <div class="chips">
       ${ALLERGENS.map((a) => `<span class="chip ${(it.allergens || []).includes(a.slug) ? "on" : ""}" data-action="toggleAllergen" data-arg="${a.slug}">${esc(a.label)}</span>`).join("")}
@@ -12697,6 +12705,12 @@ var XRAY_WHO = null;
 // settings (billing/KOT/sessions/table count) have no Access-page card — their home is the
 // restaurant detail's ⚙ Settings tab on /aevinite/restaurants.
 function xraySettingUrl(flag) {
+  // A zone with no flag at all (a switched-off MENU, from tabsTint) has no row to point at —
+  // and `null.split` threw here, taking the whole zones popout down with it the moment a
+  // restaurant had a menu turned off. Send the admin to that restaurant's Access page; for
+  // anyone else there is no permission screen to offer.
+  if (!flag) return XRAY_WHO && XRAY_WHO.actor === "admin"
+    ? `/aevinite/access${PANEL_RID ? `?rid=${encodeURIComponent(PANEL_RID)}` : ""}` : null;
   flag = flag.split("|")[0]; // multi-power gate → deep-link to its primary power's control
   if (XRAY_WHO && XRAY_WHO.actor === "admin") {
     if (flag === "admin_only_setting")
@@ -12743,6 +12757,27 @@ function xraySettingUrl(flag) {
   .btn.primary.xray-off, .tp-take-order.xray-off, .btn.pay.xray-off, .btn.green.xray-off {
     opacity: 1 !important; filter: none;
     box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xray-c-dot) 75%, transparent); }
+  /* A whole CARD marked cyan must NOT turn all its text cyan — .xray-off sets an inherited
+     colour, and on a card that repaints the labels, hints and inputs inside it, which reads
+     as "this card is broken" rather than "a manager doesn't have this". So a card keeps its
+     own colours and takes a cyan ring, and the cue lands on its heading. The generic dot is
+     suppressed there too: as the card's last box it floated at the bottom, far from the
+     title it was annotating. */
+  #editor .card.xray-off { color: inherit !important;
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xray-c-dot) 70%, transparent); }
+  #editor .card.xray-off::after { display: none; }
+  #editor .card.xray-off > h3 { color: var(--xray-c) !important; }
+  #editor .card.xray-off > h3::after { content: ""; display: inline-block; width: 6px; height: 6px;
+    border-radius: 50%; background: var(--xray-c-dot); margin-left: 6px; vertical-align: middle;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--xray-c-dot) 28%, transparent); }
+  /* HIDDEN MEANS GONE, for the menu-part hooks too. The wrappers are plain <div>s and the
+     cards carry their own display, both of which beat the browser's [hidden] default —
+     the same trap that left the X-ray's sidebar rows fully visible in 2026-07-29. */
+  #editor [data-menu-part][hidden], #editor .card[hidden] { display: none !important; }
+  /* "Edit dish info" off for a real manager: the descriptive fields are LOCKED, not gone
+     (hiding them would leave a blank dish). Disabled inputs already look inert; buttons and
+     chips are click-driven, so they get the same treatment explicitly. */
+  body.menu-part-locked #editor .mp-locked { opacity: .5; pointer-events: none; }
   /* The "jump to this zone" flash follows the mark colour, not the ribbon's amber — it is
      pointing AT a cyan thing, so an amber halo made the two look unrelated. */
   .xray-pulse { animation: xrayPulse 1.1s ease-out 2; border-radius: 8px; }
@@ -12950,6 +12985,73 @@ function xrayTintTitle(label, flag) {
   return `Not available — ${label} isn't enabled for this restaurant's staff (turned off by the ${xrayOffBy(flag)}). You can still use it from this view.`;
 }
 
+// ── The nine "Edit the menu" parts, mapped to what they own on screen ─────────────
+// Access → Manager's menu → Edit menu (Editor) lists nine sub-options. EIGHT of them own a
+// specific control, listed here; the ninth ("Edit dish info") owns everything left over in
+// the dish form, so it is handled by applyMenuPartLocks() below rather than by a selector.
+// `verb` completes "a manager here can't …" in the cyan tooltip; `label` is the row's own
+// name on the Access screen, so the words the admin reads here are the words they'll search
+// for there. `field: true` means the marked thing is the labelled box around the control,
+// not the bare input — marking a naked <input> puts the cue where nobody looks.
+const MENU_PARTS = [
+  { key: "add_dish", sel: "#newBtn", label: "Add a new dish", verb: "add a dish" },
+  { key: "delete_dish", sel: "#bulkBtn, #delBtn", label: "Delete a dish", verb: "delete a dish" },
+  { key: "manage_categories", sel: '.subtab[data-tab="categories"]', label: "Manage categories", verb: "manage categories" },
+  { key: "manage_filters", sel: '.subtab[data-tab="filters"]', label: "Manage filters", verb: "manage filters" },
+  { key: "edit_price", sel: '#editor [data-path="price"], #editor [data-menu-part="edit_price"]', field: true, label: "Change a price", verb: "change a price" },
+  { key: "mark_86", sel: '#editor [data-action="toggleSoldOut"]', label: "Mark as sold out", verb: "mark a dish sold out" },
+  { key: "edit_options", sel: '#editor [data-menu-part="edit_options"]', label: "Customisation", verb: "change a dish's choice groups" },
+  { key: "edit_3d", sel: '#editor [data-menu-part="edit_3d"]', label: "Attach a 3D model", verb: "attach a 3D model" },
+  // The leftover part. `noHide` because hiding every descriptive field would leave a real
+  // manager staring at a blank dish — applyMenuPartLocks() locks them instead. A higher role
+  // still gets the cyan mark here, which is the whole point: it names the cards a manager
+  // can read but not change.
+  { key: "edit_dish", sel: '#editor [data-menu-part="edit_dish"]', noHide: true, label: "Edit dish info", verb: "change a dish's name, photo or tags" },
+];
+
+// Should this part's control be BUILT at all for the current viewer? Used by the form
+// builders for the parts whose control would be misleading merely hidden — the 3D card
+// writes to storage every restaurant reads, so an owner (who may never set it, whatever a
+// manager is granted) must not be handed the boxes at all.
+//
+// ONE rule, and it is the honest one: a control exists exactly when its viewer may USE it.
+// whoami answers that per role — admin everything, owner everything except 3D, manager
+// whatever the Access screen says — so admin keeps visible = usable (and gets the cyan mark
+// from applyHierarchyView instead of a missing card), and nobody below is shown a box whose
+// save the server would silently drop.
+function menuPartVisible(part) {
+  if (!XRAY_WHO || !XRAY_WHO.menuSub) return part !== "edit_3d"; // pre-whoami: 3D defaults off
+  return XRAY_WHO.menuSub[part] !== false;
+}
+
+// "Edit dish info" (name, description, photo, tags, allergens) is the leftover part: it owns
+// every field in the dish form that no narrower part claims. It can't be hidden — that would
+// leave a blank screen — so for a REAL manager it LOCKS instead, which is honest because the
+// server drops exactly the same fields from their save. The narrower parts they DO hold stay
+// live, so "Change a price" on its own genuinely works: they open a dish, the price box is
+// the one thing they can touch, and it saves.
+//
+// A higher role is never locked (they are looking in, not restricted); the cyan mark on the
+// Basics card is how they see it, applied by the loop above via the Basics card's own hook.
+function applyMenuPartLocks(msub, higher) {
+  const ed = document.getElementById("editor");
+  const dishForm = ed && state.tab === "items" && state.sel && !state.isNew;
+  const lock = !!dishForm && !higher && msub.edit_dish === false;
+  if (document.body.classList.contains("menu-part-locked") !== lock) document.body.classList.toggle("menu-part-locked", lock);
+  if (!lock) return;
+  // Lock everything, then hand back the parts they hold. Doing it in that order means a
+  // field added to this form later starts LOCKED for them, which is the safe default and
+  // matches the server, where anything unclaimed falls into edit_dish.
+  ed.querySelectorAll("input, select, textarea").forEach((el) => roSetDisabled(el, true));
+  ed.querySelectorAll("[data-action], [data-path]").forEach((el) => { if (el.tagName === "BUTTON" || el.classList.contains("chip")) el.classList.add("mp-locked"); });
+  const free = [];
+  if (msub.edit_price !== false) free.push('[data-path="price"]', '[data-menu-part="edit_price"] input');
+  if (msub.mark_86 !== false) free.push('[data-action="toggleSoldOut"]');
+  if (msub.edit_options !== false) free.push('[data-menu-part="edit_options"] input', '[data-menu-part="edit_options"] select', '[data-menu-part="edit_options"] [data-action]');
+  if (msub.edit_3d !== false) free.push('[data-menu-part="edit_3d"] input');
+  if (free.length) ed.querySelectorAll(free.join(",")).forEach((el) => { roSetDisabled(el, false); el.classList.remove("mp-locked"); });
+}
+
 // Conditional DOM writes: only touch what actually changes, so the steady-state pass
 // is mutation-free and the MutationObserver below can never loop on its own writes.
 function xraySetHidden(el, hide) { if (el.hidden !== hide) el.hidden = hide; }
@@ -13095,33 +13197,45 @@ function applyHierarchyView() {
     renderList();
     renderEditor();
   }
-  // Finer edit-menu sub-limits (owner 2026-07-24): the owner can restrict a MANAGER to only
-  // some menu actions. The server (menuSubAllowed) already refuses a disallowed create/delete;
-  // hide the matching button so it's never shown-then-refused. DEFAULT-ALLOW: whoami.menuSub is
-  // resolved per current user (admin/owner = all true; manager = only when the owner configured
-  // limits), and a flag that isn't EXPLICITLY false leaves the button visible — an unconfigured
-  // restaurant keeps every button, exactly as today. Re-applied each repaint (delBtn is rebuilt
-  // per record render), so a redraw can't resurrect a hidden button.
+  // ── The nine parts of "Edit the menu" ──────────────────────────────────────────
+  // Access → Manager's menu → Edit menu (Editor). Every row gets the SAME treatment, and
+  // it is the treatment the owner asked for on 2026-08-03 after finding the 3D card sitting
+  // in a panel whose "Attach a 3D model" was off: "if not given it should not show… it's not
+  // like you are not able to edit", and "if you are viewing from admin it will look cyan".
+  //   • real manager  — the control is GONE (its permission is already false for them)
+  //   • admin / owner — the control STAYS and wears the cyan mark when this restaurant's
+  //     managers don't have it, and it joins the ribbon's zone list
+  // The server enforces the same nine (resolveMenuParts), so hiding is never the only guard.
+  // Re-applied on every repaint — #delBtn and the dish form are rebuilt per record render, so
+  // a redraw must not be able to resurrect a hidden control.
   const msub = XRAY_WHO.menuSub || {};
-  for (const [sel, flag] of [
-    ["#newBtn", "add_dish"], ["#bulkBtn", "delete_dish"], ["#delBtn", "delete_dish"],
-    ['.subtab[data-tab="categories"]', "manage_categories"], // hide the whole sub-section…
-    ['.subtab[data-tab="filters"]', "manage_filters"],       // …not just its + / delete buttons
-  ]) {
-    const el = document.querySelector(sel);
-    if (el) xraySetHidden(el, msub[flag] === false);
+  const mtint = XRAY_WHO.menuSubTint || {};
+  for (const part of MENU_PARTS) {
+    const els = document.querySelectorAll(part.sel);
+    if (!els.length) continue;
+    // "Absent" is measured against the MANAGER for a higher view (that is who the marks
+    // describe) and against yourself when you are the staff member.
+    const lacks = higher ? mtint[part.key] === false : msub[part.key] === false;
+    let counted = false;
+    els.forEach((el) => {
+      const box = part.field ? el.closest(".field") || el : el;
+      if (!lacks) { xraySetHidden(box, false); xraySetTint(box, false); return; }
+      if (!higher) { xraySetHidden(box, !part.noHide); xraySetTint(box, false); return; }
+      xraySetHidden(box, false);
+      xraySetTint(box, true, `Not available — a manager here can't ${part.verb} ("${part.label}" is off for this restaurant's managers). You can still use it from this view.`);
+      // The part key IS the Access row's stored key, so "⚙ change" deep-links straight to
+      // that row (AccessTree matches ?focus= against bind.key). `by` is stated rather than
+      // derived: since the access rebuild only the admin sets these, and xrayOffBy()'s
+      // default would blame the owner.
+      if (!counted) { zones.push({ flag: part.key, label: part.label, by: "by the admin", el: box }); counted = true; }
+    });
   }
   // A real manager sitting on a sub-tab that just got hidden hops back to Dishes.
   if (!higher) {
     const activeSub = document.querySelector('.subtab[data-tab="' + state.tab + '"]');
     if (activeSub && activeSub.hidden) setTab("items");
   }
-  // Field-level menu limits inside the dish form — hide the control a restricted manager
-  // isn't allowed instead of showing-then-refusing it (owner/admin get all, so nothing hides).
-  const priceEl = document.querySelector('#editor [data-path="price"]');
-  if (priceEl) { const f = priceEl.closest(".field"); if (f) xraySetHidden(f, msub.edit_price === false); }
-  const soldEl = document.querySelector('#editor [data-action="toggleSoldOut"]');
-  if (soldEl) xraySetHidden(soldEl, msub.mark_86 === false);
+  applyMenuPartLocks(msub, higher);
   applyMenuReadonly(); // flip the Editor tab to a locked "View menu" when editing is off
   renderXrayRibbon(higher, zones);
 }

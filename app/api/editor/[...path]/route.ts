@@ -206,20 +206,55 @@ async function tabGate(g: { user: StaffUser | null }, rid: string, path: string[
   return err(`${LABEL[hit.tab]} isn't part of this restaurant's manager panel.`, 403);
 }
 
-// Granular Edit-the-menu sub-option gate (owner 2026-07-24). Only restricts a plain MANAGER:
-// admin (no cookie) + owner pass fully. NON-BREAKING: if the owner hasn't configured
-// access_config.edit_menu.manager_opts for this restaurant, allow everything (current behaviour
-// for every un-migrated restaurant). When configured, a sub-option is allowed only if explicitly
-// true. Caller must already have passed managerCan(edit_menu). Sub-actions: add_dish / edit_dish /
-// delete_dish / manage_categories / manage_filters / edit_3d (edit_price & mark_86 ride edit_dish).
-async function menuSubAllowed(g: { user: StaffUser | null }, rid: string, action: string): Promise<boolean> {
+// ── The nine parts of "Edit the menu" ─────────────────────────────────────────────
+// Access → Manager's menu → Edit menu (Editor) lists nine sub-options, and the owner's
+// rule for every one of them (2026-08-03) is the same three things: OFF means the control
+// is GONE (not merely disabled), ON means it genuinely works, and an admin looking in sees
+// it MARKED rather than missing. That only holds if ONE resolution answers all three, so
+// this is it — the panel's whoami, the save path and the delete path all read from here.
+export const MENU_PART_KEYS = [
+  "edit_options", "add_dish", "edit_dish", "edit_price",
+  "delete_dish", "mark_86", "manage_categories", "manage_filters", "edit_3d",
+] as const;
+type MenuParts = Record<string, boolean>;
+
+// Resolve the nine for ONE role against a restaurant's stored manager_opts.
+//   • admin (no staff cookie) — everything, always. Visible = usable is the X-ray rule.
+//   • manager — NON-BREAKING: an unconfigured restaurant keeps allow-all (what every
+//     un-migrated restaurant has always had); once configured, only an EXPLICIT true allows.
+//   • owner / any other staff role — the menu is theirs, EXCEPT the 3D model.
+//
+// edit_3d is the one exception in both branches, and deliberately so. Attaching a model
+// writes to storage that EVERY restaurant reads, so it defaults OFF in the access model
+// (`def: false`) and it is not something an un-migrated restaurant should acquire by
+// accident. Before today it was hard-wired "admin only", which made the switch the owner
+// had put on the Access screen a dead one — granting it changed nothing. Now the switch
+// decides for a manager, and only for a manager.
+function resolveMenuParts(role: "admin" | "manager" | "other", mo: Record<string, boolean> | null | undefined): MenuParts {
+  const p: MenuParts = {};
+  const configured = !!(mo && typeof mo === "object");
+  for (const k of MENU_PART_KEYS) {
+    p[k] = role === "admin" ? true
+      : role !== "manager" ? k !== "edit_3d"
+      : configured ? mo![k] === true
+      : k !== "edit_3d";
+  }
+  return p;
+}
+
+// The current viewer's nine, in ONE read. A dish save asks about up to five of them, and
+// the old one-question-per-call helper re-read the restaurant row every single time.
+async function menuPartsFor(g: { user: StaffUser | null }, rid: string): Promise<MenuParts> {
   const u = g.user;
-  if (!u || u.role !== "manager") return true; // admin/owner: full menu editing
+  if (!u) return resolveMenuParts("admin", null);
   const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
     { edit_menu?: { manager_opts?: Record<string, boolean> } } | null;
-  const mo = cfg?.edit_menu?.manager_opts;
-  if (!mo || typeof mo !== "object") return true; // not configured → non-breaking allow-all
-  return mo[action] === true;
+  return resolveMenuParts(u.role === "manager" ? "manager" : "other", cfg?.edit_menu?.manager_opts);
+}
+
+// One question against the same resolution. Caller must already have passed managerCan(edit_menu).
+async function menuSubAllowed(g: { user: StaffUser | null }, rid: string, action: string): Promise<boolean> {
+  return (await menuPartsFor(g, rid))[action] === true;
 }
 
 // Delete-a-bill sub-permission (owner 2026-07-24). Deleting a bill is the MOST destructive
@@ -539,19 +574,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (!mp.module || !mp.power) continue;
         if (!ladders[moduleKey(mp)]?.effective) effectivePowers[mp.power] = false;
       }
-      // Finer edit-menu sub-limits (owner 2026-07-24): mirror menuSubAllowed's resolution so
-      // the panel can HIDE a create/delete button a restricted MANAGER isn't allowed, instead
-      // of showing-then-refusing it. Same rule as the server: admin/owner get full menu editing
-      // (all true); a manager is limited only when the owner configured manager_opts, and then
-      // only an EXPLICIT true allows it (an absent/unconfigured key stays ALLOWED = default).
-      // "edit_options" (a dish's Size/Milk/Extras choice groups) joined this list in the
-      // access rebuild — it is the "Customisation" row under Default set for user → Manager
-      // → Edit menu, and without it here that row would save and never be read.
-      const MENU_SUB_KEYS = ["edit_options", "add_dish", "edit_dish", "edit_price", "delete_dish", "mark_86", "manage_categories", "manage_filters", "edit_3d"];
-      const mo = ((g.user && g.user.role === "manager") || simulate) ? r?.access_config?.edit_menu?.manager_opts : null;
-      const menuRestricted = !!(mo && typeof mo === "object");
-      const menuSub: Record<string, boolean> = {};
-      for (const k of MENU_SUB_KEYS) menuSub[k] = menuRestricted ? mo![k] === true : true;
+      // Finer edit-menu sub-limits (owner 2026-07-24): the SAME resolution the save and delete
+      // paths use (resolveMenuParts), so what the panel shows and what the server allows can
+      // never disagree. `menuSub` is this viewer's own answer — the panel hides a control that
+      // reads false. The simulate view answers as the real manager, which is what it is for.
+      const mo = r?.access_config?.edit_menu?.manager_opts;
+      const menuSub = resolveMenuParts(
+        simulate ? "manager" : !g.user ? "admin" : g.user.role === "manager" ? "manager" : "other", mo);
       // Which VIEWS of the Audit & logs tab this viewer gets (the Access screen's sub-options,
       // access_config.view_logs.manager_opts). Same resolution as logPartAllowed(): admin and
       // owner see every view; a real manager (or the simulate view) loses only a view an admin
@@ -579,6 +608,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         effectivePowers,
         offByAdmin,
         menuSub,
+        // …and the same nine as this restaurant's MANAGERS get them (owner, 2026-08-03). Same
+        // job as tabsTint/settingsTint below: `menuSub` answers "what may I do", which for the
+        // admin is always everything, so on its own it left the admin looking at a complete
+        // dish form with no way to tell that a manager has no 3D card and no Customisation.
+        // Always sent; the panel only acts on it in a higher view, and it marks in cyan there
+        // rather than hiding — the admin's own power is never reduced.
+        menuSubTint: resolveMenuParts("manager", mo),
         logParts,
         // MANAGER'S MENU (access rebuild): which tabs this RESTAURANT has at all — a
         // different question from what a PERSON may do, which is the powers above. The panel
@@ -3113,32 +3149,58 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const isCreate = !!(body && typeof body === "object" && (body as Record<string, unknown>).__create === true);
       if (body && typeof body === "object") delete (body as Record<string, unknown>).__create;
       // Granular edit-menu sub-option gate (non-breaking; only a restricted manager is stopped).
-      if (a === "items") { const act = isCreate ? "add_dish" : "edit_dish"; if (!(await menuSubAllowed(g, rid, act))) return permDenied(isCreate ? "add a new dish" : "edit dishes"); }
-      else if (a === "categories") { if (!(await menuSubAllowed(g, rid, "manage_categories"))) return permDenied("manage categories"); }
-      else if (a === "filters") { if (!(await menuSubAllowed(g, rid, "manage_filters"))) return permDenied("manage filters"); }
-      // edit_3d is ADMIN-ONLY ("that 3D thing is mine" — owner 2026-07-24). A non-admin (owner OR
-      // manager) editing a dish may NOT change its 3D model — strip those fields so only the
-      // platform admin sets them. Non-breaking: a normal dish edit never carries these.
-      if (a === "items" && g.user) for (const k of ["model_folder", "model_small_url", "model_optimized_url"]) { if (body && typeof body === "object" && k in (body as Record<string, unknown>)) delete (body as Record<string, unknown>)[k]; }
-      // Field-level menu limits (owner 2026-07-25): a manager may hold edit_dish yet NOT
-      // edit_price / mark_86. On an EDIT, if they'd change the price or the sold-out flag
-      // without that sub-permission, revert JUST that field to the stored value (the rest of
-      // their edit still saves) — so the limit holds even if the hidden control is forced.
-      if (a === "items" && g.user && g.user.role === "manager" && !isCreate && body && typeof body === "object") {
+      // Resolved ONCE — a dish save asks about five of the nine parts below.
+      const parts = (a === "items" || a === "categories" || a === "filters")
+        ? await menuPartsFor(g, rid) : null;
+      if (a === "categories") { if (!parts!.manage_categories) return permDenied("manage categories"); }
+      else if (a === "filters") { if (!parts!.manage_filters) return permDenied("manage filters"); }
+      else if (a === "items" && isCreate) { if (!parts!.add_dish) return permDenied("add a new dish"); }
+      if (a === "items" && body && typeof body === "object") {
         const b = body as Record<string, unknown>;
-        const wantsPrice = "price" in b;
-        const wantsTags = Array.isArray(b.tags);
-        if (wantsPrice || wantsTags) {
-          const cur = (await sb.from(t.name).select("price, tags").eq("restaurant_id", rid).eq("id", String(b.id ?? "")).maybeSingle()).data as
-            { price?: number | null; tags?: string[] | null } | null;
-          if (cur) {
-            if (wantsPrice && !(await menuSubAllowed(g, rid, "edit_price"))) b.price = cur.price ?? null;
-            if (wantsTags && !(await menuSubAllowed(g, rid, "mark_86"))) {
-              const hadSold = Array.isArray(cur.tags) && cur.tags.includes("sold-out");
-              const kept = (b.tags as string[]).filter((x) => x !== "sold-out"); // keep their OTHER tag edits
-              if (hadSold) kept.push("sold-out");                                // but hold the stored 86 state
-              b.tags = kept;
+        const drop = (...ks: string[]) => { for (const k of ks) if (k in b) delete b[k]; };
+        // WHICH FIELDS EACH PART OWNS. Everything not claimed by a narrower part belongs to
+        // "Edit dish info" — so a column added later lands in the CONSERVATIVE bucket rather
+        // than in a hole nobody gates.
+        const PRICE_KEYS = ["price", "open_price"];
+        const D3_KEYS = ["is4d", "model_folder", "model_small_url", "model_optimized_url"];
+        const OPT_KEYS = ["options"];
+        // 3D and Customisation are stripped on a CREATE too — a part that is off must not be
+        // reachable through the one door that skipped it. `is4d` joined the 3D list today: it
+        // is the switch that puts the model in front of guests, so leaving it writable meant
+        // "Attach a 3D model · off" did not actually hold.
+        if (!parts!.edit_3d) drop(...D3_KEYS);
+        if (!parts!.edit_options) drop(...OPT_KEYS);
+        // EDITING an existing dish. Until today this was one all-or-nothing question — no
+        // edit_dish meant the whole save was refused, which made "Change a price" and "Mark as
+        // sold out" unusable on their own even though the model lists them as separate rows
+        // (and describes edit_dish as "name, description, photo, tags, allergens"). Now each
+        // part is enforced on its own: the fields a person may not change are dropped from the
+        // UPDATE (so the stored value simply stands — the panel's own upsert-vs-update split
+        // already relies on an absent column meaning "leave it alone"), and the save is refused
+        // outright only when they may change nothing at all.
+        if (!isCreate && g.user && g.user.role === "manager") {
+          if (!parts!.edit_dish && !parts!.edit_price && !parts!.mark_86 && !parts!.edit_options && !parts!.edit_3d)
+            return permDenied("edit dishes");
+          if (!parts!.edit_price) drop(...PRICE_KEYS);
+          // `tags` is shared: the filter chips are edit_dish, the "sold-out" member is mark_86.
+          // Whoever may not touch their half has it restored from the stored row, so the other
+          // half of the same array still saves.
+          if (Array.isArray(b.tags) && (!parts!.edit_dish || !parts!.mark_86)) {
+            const cur = (await sb.from(t.name).select("tags").eq("restaurant_id", rid).eq("id", String(b.id ?? "")).maybeSingle()).data as
+              { tags?: string[] | null } | null;
+            const stored = Array.isArray(cur?.tags) ? cur!.tags! : [];
+            if (cur) {
+              const sent = b.tags as string[];
+              const sold = parts!.mark_86 ? sent.includes("sold-out") : stored.includes("sold-out");
+              const rest = (parts!.edit_dish ? sent : stored).filter((x) => x !== "sold-out");
+              b.tags = sold ? [...rest, "sold-out"] : rest;
             }
+          }
+          // Everything left over is dish INFO — title, description, image, category, allergens,
+          // ingredients, nutrition… Dropped wholesale rather than listed, so nothing new leaks in.
+          if (!parts!.edit_dish) {
+            const KEEP = new Set(["id", "restaurant_id", "tags", ...PRICE_KEYS, ...D3_KEYS, ...OPT_KEYS]);
+            for (const k of Object.keys(b)) if (!KEEP.has(k)) delete b[k];
           }
         }
       }

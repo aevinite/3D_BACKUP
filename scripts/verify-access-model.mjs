@@ -163,19 +163,22 @@ for (const m of tree.matchAll(/t:\s*"section",\s*key:\s*"([^"]+)"/g)) {
 }
 ok("every owner-page switch is a known owner entitlement");
 
-// ── 6 · the nine Edit-menu parts must be in the editor's MENU_SUB_KEYS ─────
+// ── 6 · the nine Edit-menu parts must be in the editor's MENU_PART_KEYS ────
 // "Customisation" (edit_options) was added by this rebuild and was missing at first, which
-// would have made that row save and never be read.
+// would have made that row save and never be read. (The list was called MENU_SUB_KEYS and
+// lived inside whoami until 2026-08-03; it is now one exported resolver shared by whoami,
+// the save path and the delete path — npm run verify:menu-parts checks the rest of that
+// wiring, this check stays the "the model and the server agree on the LIST" one.)
 const partsBlock = tree.match(/const EDIT_MENU_PARTS[^=]*=\s*\[([\s\S]*?)\n\];/);
 const partIds = partsBlock ? [...partsBlock[1].matchAll(/id:\s*"([a-z0-9_]+)"/g)].map((m) => m[1]) : [];
 if (!partsBlock) fail("could not find EDIT_MENU_PARTS in lib/accessTree.ts");
-const subKeysLine = editorApi.match(/const MENU_SUB_KEYS = \[([^\]]+)\]/);
-if (!subKeysLine) fail("could not find MENU_SUB_KEYS in the editor API");
+const subKeysLine = editorApi.match(/MENU_PART_KEYS = \[([\s\S]*?)\]/);
+if (!subKeysLine) fail("could not find MENU_PART_KEYS in the editor API");
 else {
   const known = subKeysLine[1];
   const missing = partIds.filter((id) => !known.includes(`"${id}"`));
-  if (missing.length) fail(`Edit-menu parts missing from the editor API's MENU_SUB_KEYS: ${missing.join(", ")}`);
-  else ok(`all ${partIds.length} Edit-menu parts are enforced by menuSubAllowed()`);
+  if (missing.length) fail(`Edit-menu parts missing from the editor API's MENU_PART_KEYS: ${missing.join(", ")}`);
+  else ok(`all ${partIds.length} Edit-menu parts are enforced by resolveMenuParts()`);
 }
 
 // ── 7 · guest feature keys must have a default in lib/features.ts ──────────
