@@ -89,4 +89,7 @@ export function splitTax(
   taxWhole: number,
   comps: { label?: string; rate?: number }[],
 ): BillDocTaxRow[];
+/** A discount as a percentage of the pre-discount subtotal — "10%" / "12.5%", "" when there
+ *  is nothing to show. Derived in ONE place so the paper and every screen quote the same figure. */
+export function discPct(subtotal: number, disc: number): string;
 export function inr(v: number | string): string;

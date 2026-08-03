@@ -65,7 +65,11 @@ export function billPreviewHtml(settings: Settings, mode: BillMode, restaurant: 
 
   const parcel = mode === "parcel";
   const subtotal = SAMPLE.reduce((t, l) => t + l.price * l.qty, 0);
-  const discount = parcel ? 0 : SAMPLE_DISCOUNT;
+  // A PARCEL CAN BE DISCOUNTED TOO, so its preview has to show the line (2026-08-03). This used
+  // to be forced to 0 — true when a parcel was punched at full price and nothing else, wrong
+  // since the ⚡ QO/P builder started carrying a discount out with the order. An admin checking
+  // "what does our parcel bill look like?" was shown a layout missing a row the real one prints.
+  const discount = SAMPLE_DISCOUNT;
   const taxable = subtotal - discount;
 
   // The tax rows the restaurant actually configured, split the way the printer splits them
@@ -79,7 +83,7 @@ export function billPreviewHtml(settings: Settings, mode: BillMode, restaurant: 
   const taxWhole = Math.round((taxable * rateSum) / 100);
   const taxRows = BILLDOC.splitTax(taxWhole, comps);
 
-  const discLabel = discount > 0 ? `${Math.round((discount / subtotal) * 1000) / 10}%` : "";
+  const discLabel = BILLDOC.discPct(subtotal, discount);
   // Printing the customer's details is the restaurant's own switch — respect it here too, or
   // the preview would promise a line the printer leaves off.
   const showCust = settings.bill_customer_print !== false;

@@ -454,6 +454,17 @@ function summaryCallsOf(t) {
 // so the tablet applies the discount BEFORE tax exactly like billMath / the printed bill,
 // instead of the old total−discount (which taxed the pre-discount amount and over-stated
 // the due by discount×rate). (2026-07-05)
+// discPct(subtotal, disc) — "10%" / "12.5%" / "" for a discount, decided ONCE in billdoc.js so
+// this screen, the manager's bill and the printed paper all quote the same figure (owner,
+// 2026-08-03: "make sure in the bill also the discount percentage is being shown").
+function discPct(subtotal, disc) {
+  return (typeof LFH_BILLDOC !== "undefined" && LFH_BILLDOC.discPct) ? LFH_BILLDOC.discPct(subtotal, disc) : "";
+}
+// preTax(gross) — this panel's slim payload carries only tax-INCLUSIVE order totals, so the
+// pre-discount subtotal a percentage is measured against is the gross worked back through the
+// tax rate. Same base the discount modal uses, so the two can't disagree.
+const preTax = (gross) => (Number(gross) || 0) / (1 + effRate());
+
 function effRate() {
   const s = state.data.settings || {};
   const comps = Array.isArray(s.tax_components)
@@ -1316,6 +1327,10 @@ function renderPanel() {
   const mergedDishes = liveOrdersT.map((o, i) => (i > 0 ? `<div class="ord-sep" aria-hidden="true"></div>` : "") + dishRowsOf(o).map((r) => dishRowHtml(r, o)).join("") + orderControlsHtml(o)).join("");
   const mergedCard = liveOrdersT.length ? `<div class="ord">${mergedDishes}</div>` : "";
   const orderCards = newCards + mergedCard;
+  // A whole-bill discount is shown with its PERCENTAGE (owner, 2026-08-03) — "− ₹200" alone
+  // doesn't tell a waiter whether the party was given 5% or half the bill. Measured against the
+  // party's pre-tax subtotal, the same base the discount modal and the printed bill use.
+  const billDiscLbl = discPct(preTax(os.filter((o) => o.status !== "cancelled").reduce((a2, o) => a2 + (Number(o.total) || 0), 0)), s && s.discount);
 
   const callRows = calls.map((c) => `<div class="row"><span>🔔 ${esc(c.note || "Waiter call")}</span><button class="btn small primary" data-attend="${esc(c.id)}">Done</button></div>`).join("");
 
@@ -1350,7 +1365,7 @@ function renderPanel() {
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
       ${callRows ? `<div class="sec"><h3>Calls</h3>${calls.length > 1 ? `<button class="btn small primary" data-attend-all-calls="${esc(t)}">Attend all (${calls.length})</button>` : ""}${callRows}</div>` : ""}
       ${s ? `<div class="sec"><h3>Party</h3>${partyRows || `<div class="muted small">No guests joined yet.</div>`}</div>` : ""}
-      <div class="sec"><h3>Orders</h3>${unsentBox}${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}${Number(s && s.discount) > 0 ? `<div class="bill-disc-note" style="margin-top:8px;font-size:13px;font-weight:700;color:#f0b232">🏷️ Whole-bill discount − ${inr(s.discount)}${s.discount_note ? ` · ${esc(s.discount_note)}` : ""}</div>` : ""}</div>
+      <div class="sec"><h3>Orders</h3>${unsentBox}${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}${Number(s && s.discount) > 0 ? `<div class="bill-disc-note" style="margin-top:8px;font-size:13px;font-weight:700;color:#f0b232">🏷️ Whole-bill discount − ${inr(s.discount)}${billDiscLbl ? ` (${billDiscLbl})` : ""}${s.discount_note ? ` · ${esc(s.discount_note)}` : ""}</div>` : ""}</div>
     </div>
     <div class="dacts">
       ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
@@ -2576,17 +2591,18 @@ async function genInvoice(sid) {
     act(() => api("POST", `/sessions/${sid}/invoice`, body || undefined));
   }
 }
-// openDiscountModal: replaces the old "type the ₹ amount to knock off" prompt() with two
-// staff-friendly ways to land on the same number (owner, 2026-07-01 — "I don't want the
-// amount-to-discount option like it's right now"):
-//   "They pay"    — staff types the FINAL amount the customer will pay; we work BACKWARD
-//                   to the discount (bill − pay) and show the % that comes out to.
-//   "Percent off" — staff types a %; we work FORWARD to the discount (bill × %) and show
-//                   what the customer ends up paying.
-// Both modes converge on the same ₹ discount the server has always accepted, so the final
-// save() below still respects tablet_discount (off/on/pin) exactly like before — only the
-// INPUT changed. Mirrors the manager panel's version, styled inline like this file's other
-// self-contained modals (openDishEditModal, pinPrompt).
+// openDiscountModal — ONE discount interface for the whole product (owner, 2026-08-03:
+// "everywhere change the discount menu"). Three boxes, all live-linked to the same ₹ figure the
+// server has always stored:
+//   Discount %   — type a percentage, the ₹ off and the pay-figure follow.
+//   Discount ₹   — type the money off, the % and the pay-figure follow.
+//   They pay     — type what the customer will actually hand over ("make it 800") and the
+//                  discount + the percentage are worked out backward from it.
+// This used to be two chips you had to pick BETWEEN — a waiter who wanted "20% but no more than
+// ₹200 off" had to switch modes and do the other sum in their head. It is now the same screen the
+// manager panel shows, box for box, so a person who learns one has learned both. save() below is
+// untouched: it still respects tablet_discount (off/on/pin) and sends the same {amount, note}.
+// Styled inline like this file's other self-contained modals (openDishEditModal, pinPrompt).
 function openDiscountModal(order, opts = {}) {
   document.querySelector(".disc-overlay")?.remove();
   const round2 = (n) => Math.round(n * 100) / 100;
@@ -2601,9 +2617,10 @@ function openDiscountModal(order, opts = {}) {
   const base = Math.max(0, round2(total / (1 + rate)));
   const maxDisc = base; // can't discount more than the food's pre-tax value
   const payFor = (d) => round2(Math.max(0, base - clamp(d, 0, base)) * (1 + rate));
-  let mode = "pay"; // "pay" | "percent"
   let payVal = payFor(current);
   let pctVal = base > 0 ? Math.round((clamp(current, 0, base) / base) * 1000) / 10 : 0;
+  const fieldCss = "width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:17px;font-weight:700";
+  const lblCss = "font-size:13px;font-weight:700;margin:0 0 8px";
 
   const ov = document.createElement("div");
   ov.className = "disc-overlay";
@@ -2612,24 +2629,29 @@ function openDiscountModal(order, opts = {}) {
     <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">${opts.bill ? "Discount whole bill" : "Apply discount"}</h3><button class="disc-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
     <div style="padding:16px 18px">
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:13.5px;color:var(--muted);margin-bottom:12px"><span>Bill total</span><b style="color:var(--text);font-size:15px">${inr(total)}</b></div>
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <span class="chip disc-mode-chip on" data-mode="pay" style="flex:1;text-align:center;padding:9px 10px">They pay</span>
-        <span class="chip disc-mode-chip" data-mode="percent" style="flex:1;text-align:center;padding:9px 10px">Percent off</span>
+      <div style="display:flex;align-items:flex-end;gap:10px">
+        <div style="flex:1">
+          <div style="${lblCss}">Discount %</div>
+          <input type="number" inputmode="decimal" min="0" max="100" step="1" class="disc-pct-input" placeholder="0" style="${fieldCss}">
+        </div>
+        <div style="padding-bottom:12px;color:var(--muted);font-weight:800;font-size:16px">=</div>
+        <div style="flex:1">
+          <div style="${lblCss}">Discount amount (₹)</div>
+          <input type="number" inputmode="decimal" min="0" step="1" class="disc-amt-input" placeholder="0" style="${fieldCss}">
+        </div>
       </div>
-      <div data-panel="pay">
-        <div style="font-size:13px;font-weight:700;margin:0 0 8px">Amount they'll pay</div>
-        <input type="number" inputmode="decimal" min="0" step="1" class="disc-pay-input" placeholder="e.g. 3000" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:17px;font-weight:700">
-      </div>
-      <div data-panel="percent" style="display:none">
-        <div style="font-size:13px;font-weight:700;margin:0 0 8px">Percent off</div>
-        <input type="number" inputmode="decimal" min="0" max="100" step="1" class="disc-pct-input" placeholder="e.g. 20" style="width:100%;box-sizing:border-box;padding:11px 12px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:17px;font-weight:700">
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${[5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p}%</span>`).join("")}</div>
-      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">${[0, 5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p ? p + "%" : "None"}</span>`).join("")}</div>
       <div style="margin-top:16px;padding:12px 14px;border-radius:12px;background:var(--bg);border:1px solid var(--line);display:flex;flex-direction:column;gap:6px">
         <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted)"><span>Discount</span><b class="disc-prev-amt" style="color:var(--text)">− ${inr(current)}</b></div>
-        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted)"><span>That's</span><b class="disc-prev-pct" style="color:var(--text)">${pctVal}% off</b></div>
-        <div style="display:flex;justify-content:space-between;font-size:14.5px;padding-top:6px;margin-top:2px;border-top:1px dashed var(--line)"><span style="color:var(--gold-strong);font-weight:800">They pay</span><b class="disc-prev-pay" style="color:var(--gold-strong);font-weight:800">${inr(payVal)}</b></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;font-size:14.5px;padding-top:6px;margin-top:2px;border-top:1px dashed var(--line)">
+          <span style="color:var(--gold-strong);font-weight:800">They pay</span>
+          <label style="display:inline-flex;align-items:center;gap:1px;cursor:text;border:1px solid var(--line);border-radius:9px;padding:3px 8px 3px 9px;background:var(--panel)" title="Type what the customer will actually pay — the discount works itself out">
+            <span style="color:var(--gold-strong);font-weight:800;font-size:15px">₹</span>
+            <input type="number" inputmode="decimal" min="0" step="1" class="disc-pay-input" aria-label="Amount they pay" style="width:7ch;border:0;background:transparent;padding:0;margin:0;text-align:right;color:var(--gold-strong);font-weight:800;font-size:15px;font-family:inherit;font-variant-numeric:tabular-nums;outline:none">
+          </label>
+        </div>
       </div>
+      <div style="margin-top:8px;text-align:center;font-size:12px;color:var(--muted)">Change any one of the three — the other two follow.</div>
       <div style="font-size:13px;font-weight:700;margin:15px 0 6px">Reason <span style="color:var(--muted);font-weight:400">(optional)</span></div>
       <input type="text" class="disc-note-input" maxlength="200" placeholder="e.g. loyalty, comp, manager approval" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px">
     </div>
@@ -2643,56 +2665,56 @@ function openDiscountModal(order, opts = {}) {
   ov.querySelector(".disc-note-input").value = order.discount_note || "";
   const payInput = ov.querySelector(".disc-pay-input");
   const pctInput = ov.querySelector(".disc-pct-input");
-  payInput.value = payVal ? String(payVal) : "";
+  const amtInput = ov.querySelector(".disc-amt-input");
+  const applyBtn = ov.querySelector(".disc-apply-btn");
   pctInput.value = pctVal ? String(pctVal) : "";
+  amtInput.value = current ? String(round2(current)) : "";
 
   let discAmount = clamp(current, 0, maxDisc);
-  const updatePreview = () => {
-    // #14: a BLANK amount is "no change" — NOT "they pay ₹0" (which used to comp the whole
-    // order). Keep the current discount and disable Apply so an empty field can't zero the bill.
-    let blank = false;
-    if (mode === "pay") {
-      const raw = payInput.value.trim();
-      if (raw === "") { blank = true; discAmount = clamp(current, 0, maxDisc); }
-      else {
-        // A NEGATIVE (or non-numeric) "they pay" used to clamp to 0 → they-pay ₹0 → a silent
-        // 100%-off comp of the whole bill. Treat it as "no change" (like blank) so a stray
-        // "-50" paste can't zero a bill. A real 100% comp is still reachable by typing 0. (sweep C2)
-        const pf = parseFloat(raw);
-        if (!(pf >= 0)) { blank = true; discAmount = clamp(current, 0, maxDisc); }
-        else {
-          // "They pay P" (tax-incl) → discount d = base − P/(1+rate), clamped to the food base.
-          const p = clamp(pf, 0, payFor(0));
-          discAmount = clamp(round2(base - p / (1 + rate)), 0, maxDisc);
-        }
-      }
-    } else {
-      const raw = pctInput.value.trim();
-      if (raw === "") { blank = true; discAmount = clamp(current, 0, maxDisc); }
-      else { const pct = clamp(parseFloat(raw), 0, 100); discAmount = round2((base * pct) / 100); }
-    }
+  // Repaint every box EXCEPT the one being typed in, so a caret and a half-typed number survive.
+  // "They pay" is written in whole rupees — the figure inr() puts on the tile and the paper.
+  const paint = (typing) => {
     payVal = payFor(discAmount);
     pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
+    if (typing !== "pct") pctInput.value = discAmount ? String(pctVal) : "";
+    if (typing !== "amt") amtInput.value = discAmount ? String(round2(discAmount)) : "";
+    if (typing !== "pay") payInput.value = String(Math.round(payVal));
     ov.querySelector(".disc-prev-amt").textContent = "− " + inr(discAmount);
-    ov.querySelector(".disc-prev-pct").textContent = pctVal + "% off";
-    ov.querySelector(".disc-prev-pay").textContent = inr(payVal);
-    const applyBtn = ov.querySelector(".disc-apply-btn");
-    if (applyBtn) { applyBtn.disabled = blank; applyBtn.style.opacity = blank ? ".5" : ""; }
   };
-  updatePreview();
+  // #14 + sweep C2, both kept: a BLANK box is "I'm about to type", NOT "they pay ₹0" (which
+  // silently comped a whole order), and a NEGATIVE or non-numeric paste is treated the same way.
+  // While a box is unreadable the discount stays exactly as it was and Apply waits. A real 100%
+  // comp is still reachable — type 0 into "They pay", or 100 into the percent box.
+  const setBlank = (blank) => { if (applyBtn) { applyBtn.disabled = blank; applyBtn.style.opacity = blank ? ".5" : ""; } };
+  paint();
 
-  const setMode = (m) => {
-    mode = m;
-    ov.querySelectorAll(".disc-mode-chip").forEach((c) => c.classList.toggle("on", c.dataset.mode === m));
-    ov.querySelector('[data-panel="pay"]').style.display = m === "pay" ? "" : "none";
-    ov.querySelector('[data-panel="percent"]').style.display = m === "percent" ? "" : "none";
-    (m === "pay" ? payInput : pctInput).focus();
-    updatePreview();
+  ov.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((base * Number(c.dataset.pct)) / 100); setBlank(false); paint(); }));
+  pctInput.oninput = () => {
+    const raw = pctInput.value.trim();
+    const p = parseFloat(raw);
+    if (raw === "" || !(p >= 0)) { setBlank(true); return; }
+    setBlank(false); discAmount = round2((base * clamp(p, 0, 100)) / 100); paint("pct");
   };
-  ov.querySelectorAll(".disc-mode-chip").forEach((c) => (c.onclick = () => setMode(c.dataset.mode)));
-  ov.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { pctInput.value = c.dataset.pct; updatePreview(); }));
-  payInput.oninput = updatePreview;
-  pctInput.oninput = updatePreview;
+  amtInput.oninput = () => {
+    const raw = amtInput.value.trim();
+    const a = parseFloat(raw);
+    if (raw === "" || !(a >= 0)) { setBlank(true); return; }
+    setBlank(false); discAmount = clamp(a, 0, maxDisc); paint("amt");
+  };
+  payInput.oninput = () => {
+    const raw = payInput.value.trim();
+    const p = parseFloat(raw);
+    if (raw === "" || !(p >= 0)) { setBlank(true); return; }
+    setBlank(false);
+    // "They pay P" (tax-incl) → discount d = base − P/(1+rate), clamped to the food base.
+    discAmount = clamp(round2(base - clamp(p, 0, payFor(0)) / (1 + rate)), 0, maxDisc);
+    paint("pay");
+  };
+  // Leaving a box snaps it back to the truth — an over-limit or emptied figure must never sit
+  // there disagreeing with the discount that would actually be applied.
+  pctInput.onblur = () => { setBlank(false); paint(); };
+  amtInput.onblur = () => { setBlank(false); paint(); };
+  payInput.onblur = () => { setBlank(false); paint(); };
 
   let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-discount", () => close()) : null;
   const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
@@ -2729,7 +2751,10 @@ function openDiscountModal(order, opts = {}) {
   };
   ov.querySelector(".disc-apply-btn").onclick = () => save(discAmount);
   const removeBtn = ov.querySelector(".disc-remove-btn"); if (removeBtn) removeBtn.onclick = () => save(0);
-  setTimeout(() => payInput.focus(), 30);
+  // The pay box already holds the full bill, so tapping it must SELECT that figure — otherwise
+  // "make it 800" on a ₹817 bill types 817800 and the waiter has to clear it first.
+  payInput.onfocus = () => payInput.select();
+  setTimeout(() => { payInput.focus(); payInput.select(); }, 30);
 }
 
 // tabletDiscount: entry point wired from the "− Discount" button on each order card —

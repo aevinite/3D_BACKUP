@@ -15,6 +15,10 @@ import { useRestaurantId } from "@/lib/restaurant-context";
 import { useEffect, useRef, useState } from "react";
 // Helpers that talk to the server about the table's dining session.
 import { getStoredSession, getSessionState } from "@/lib/session";
+// The ONE place a discount percentage is worded, shared with the printer (public/panels/billdoc.js).
+// Imported the same way lib/billPreview.ts does it — the whole API object, not a named export:
+// the file is a plain CommonJS IIFE, so its exports are only visible at runtime.
+import BILLDOC from "@/public/panels/billdoc.js";
 // Reads the restaurant's on/off settings (e.g. is the session system turned on).
 import { getSettings } from "@/lib/menu";
 // Money-formatting helpers so prices show in the right currency.
@@ -220,7 +224,14 @@ export default function SessionTableBill() {
             <div className="bill-rows stb-bill">
               <div className="bill-line"><span>Subtotal</span><span>{show(Number(bill.subtotal) || 0)}</span></div>
               {Number(bill.discount) > 0 && (
-                <div className="bill-line"><span>Discount</span><span>− {show(Number(bill.discount) || 0)}</span></div>
+                // The PERCENTAGE goes next to the amount (owner, 2026-08-03: "make sure in the
+                // bill also the discount percentage is being shown"). The guest's own copy of the
+                // bill has to say the same thing the printed one does, and it is the same
+                // sentence-maker — billdoc.js — that writes it on the paper.
+                <div className="bill-line">
+                  <span>Discount{BILLDOC.discPct(Number(bill.subtotal) || 0, Number(bill.discount) || 0) ? ` (${BILLDOC.discPct(Number(bill.subtotal) || 0, Number(bill.discount) || 0)})` : ""}</span>
+                  <span>− {show(Number(bill.discount) || 0)}</span>
+                </div>
               )}
               <div className="bill-line"><span>GST</span><span>{show(Number(bill.tax) || 0)}</span></div>
               <div className="bill-line grand"><span>Table total</span><span>{show(Number(bill.total) || 0)}</span></div>
