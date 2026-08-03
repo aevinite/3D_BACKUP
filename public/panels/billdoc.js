@@ -39,6 +39,23 @@
   var inr = function (v) { return "₹" + Math.round(parseFloat(v) || 0).toLocaleString("en-IN"); };
   var pn = function (v) { return Math.round(Number(v) || 0).toLocaleString("en-IN"); };
 
+  /* discPct(subtotal, disc) — a discount written as a PERCENTAGE of the pre-discount subtotal
+     (owner, 2026-08-01: "in the bill it should show how much percentage of discount you have
+     given — and on the printed bill the percentage should show too"). The app stores a discount
+     as an AMOUNT, so every screen that wants the percentage has to derive it, and each one that
+     derived it privately rounded it its own way: the manager bill said "12.5%", the admin preview
+     "12.5%", the guest's own bill nothing at all. It is decided ONCE here, next to the money
+     formatter, so the paper and every screen quote the same figure.
+     Whole numbers read clean ("10%"), anything else keeps one decimal ("12.5%"). Returns "" when
+     there is nothing to say, so a call site can drop it in with no guard of its own. */
+  function discPct(subtotal, disc) {
+    var sub = Number(subtotal) || 0, d = Number(disc) || 0;
+    if (sub <= 0 || d <= 0) return "";
+    var pct = Math.round((d / sub) * 1000) / 10;      // one decimal, no floating dust
+    if (!pct) return "";
+    return (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + "%";
+  }
+
   /* splitTax(taxWhole, comps) — the printed tax lines MUST add up EXACTLY to the tax on the
      total. Every line is rounded to whole rupees, so rounding each component on its own drifts:
      ₹380 @ 5% = ₹19 of tax, but CGST 2.5% + SGST 2.5% each round(9.5) = ₹10 → ₹20, and the
@@ -357,6 +374,7 @@
     kotLineHtml: kotLineHtml,
     billIdentity: billIdentity,
     splitTax: splitTax,
+    discPct: discPct,
     inr: inr,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = API;

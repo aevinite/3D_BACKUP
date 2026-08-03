@@ -2399,16 +2399,10 @@ function billMath(orders) {
 // discPct(m): the discount as a PERCENTAGE of the pre-discount subtotal (owner, 2026-08-01: "in
 // the bill it should show how much percentage of discount you have given — and on the printed bill
 // the percentage should show too"). The app stores a discount as an AMOUNT, so the percentage is
-// derived here, in ONE place, or four surfaces would each round it their own way. Whole numbers
-// print clean ("10%"), anything else keeps one decimal ("12.5%"). Returns "" when there's nothing
-// to say, so every call site can drop it in without a guard.
-function discPct(subtotal, disc) {
-  const sub = Number(subtotal) || 0, d = Number(disc) || 0;
-  if (sub <= 0 || d <= 0) return "";
-  const pct = Math.round((d / sub) * 1000) / 10;      // one decimal, no floating dust
-  if (!pct) return "";
-  return `${pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)}%`;
-}
+// derived — and it now lives in billdoc.js next to the money formatter (2026-08-03), because the
+// waiter panel and the guest's own bill needed the same figure and were about to round it their
+// own way. This is the one-line door onto it; the rule itself is written down once.
+function discPct(subtotal, disc) { return LFH_BILLDOC.discPct(subtotal, disc); }
 
 // The item lines of a merged bill, shared by the LIVE card and the RECORD card (Previous
 // bills renders the SAME receipt UI as Live since 2026-08-03 — one card design, two moods).
@@ -4776,12 +4770,16 @@ function openParcelTile(id) {
   // What was taken off this parcel, if anything — recorded in payload by the /parcel route.
   const pcDisc = Math.max(0, Number(o.discount ?? (o.payload || {}).discount) || 0);
   const pcDiscNote = String(o.discount_note ?? (o.payload || {}).discount_note ?? "").trim();
+  // The percentage next to it, off the same pre-tax line total the printed parcel bill measures
+  // against (printParcelReceipt feeds billMath the lines, never the stored tax-inclusive total),
+  // so the tile and the paper in the customer's hand quote the same "(10%)".
+  const pcSub = items.reduce((a, it) => a + (Number(it.price) || 0) * (parseInt(it.qty, 10) || 1), 0);
   const wrap = el(`<div class="sx-modal-overlay pc-overlay"><div class="sx-modal pc-modal">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🥡 Parcel ${esc(o.parcel_no)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="pc-body">
       <div class="pc-cust">${esc(o.customer_name || "No name given")}${o.kot_no != null ? ` · ticket #${esc(o.kot_no)}` : ""}</div>
       <div class="pc-lines">${lines}</div>
-      ${pcDisc > 0 ? `<div class="pc-ln pc-disc"><span>Discount${pcDiscNote ? ` · ${esc(pcDiscNote)}` : ""}</span><span>− ${platMoney(pcDisc)}</span></div>` : ""}
+      ${pcDisc > 0 ? `<div class="pc-ln pc-disc"><span>Discount${discPct(pcSub, pcDisc) ? ` (${discPct(pcSub, pcDisc)})` : ""}${pcDiscNote ? ` · ${esc(pcDiscNote)}` : ""}</span><span>− ${platMoney(pcDisc)}</span></div>` : ""}
       <div class="pc-tot"><span>Total</span><b>${platMoney(o.total)}</b></div>
       <div class="pc-states">${done(!!o.printed_at, "Printed", "Not printed yet")}${done(!!o.paid, "Paid", "Not paid yet")}</div>
       <div class="pc-acts">
@@ -10262,6 +10260,12 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   // ONE interface, no mode toggle (owner, 2026-07-03): a Percent and an Amount(₹) field,
   // two-way linked from a single discAmount (₹ off, pre-tax — the value the server stores),
   // so they can never disagree. The % is off the pre-tax base.
+  //
+  // THE FIGURE THEY ACTUALLY NEGOTIATE IS "THEY PAY" (owner, 2026-08-03: "I see 817, I can change
+  // that to 800 and it can auto-calculate the discount and the discount percentage by itself").
+  // A counter conversation is "make it 800", never "give 2.08% off", so the third field is
+  // EDITABLE too: type what they'll hand over and the discount + the % fall out of it. All three
+  // boxes are views of the same discAmount, so no two of them can ever disagree.
   let discAmount = clamp(current, 0, maxDisc);
   let pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
 
@@ -10283,8 +10287,15 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
       <div class="chips disc-pct-quick">${[0, 5, 10, 15, 20, 25, 50].map((p) => `<span class="chip disc-pct-pick" data-pct="${p}">${p ? p + "%" : "None"}</span>`).join("")}</div>
       <div class="disc-preview">
         <div class="disc-prev-row"><span>Discount</span><b id="discPrevAmt">− ${inr(current)}</b></div>
-        <div class="disc-prev-row grand"><span>They pay</span><b id="discPrevPay">${inr(payFor(discAmount))}</b></div>
+        <div class="disc-prev-row grand">
+          <span>They pay</span>
+          <label class="disc-pay-edit" title="Type what the customer will actually pay — the discount works itself out">
+            <span class="disc-pay-cur">₹</span>
+            <input type="number" inputmode="decimal" min="0" step="1" id="discPayInput" class="disc-pay-input" aria-label="Amount they pay">
+          </label>
+        </div>
       </div>
+      <div class="disc-hint muted small">Change any one of the three — the other two follow.</div>
       <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(optional, shows on the bill)</span></label>
       <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. loyalty, comp, manager approval">
     </div>
@@ -10299,31 +10310,54 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   wrap.querySelector("#discNoteInput").value = order.discount_note || "";
   const pctInput = wrap.querySelector("#discPctInput");
   const amtInput = wrap.querySelector("#discAmtInput");
+  const payInput = wrap.querySelector("#discPayInput");
+  const applyBtn = wrap.querySelector(".disc-apply");
   pctInput.value = pctVal ? String(pctVal) : "";
   amtInput.value = current ? String(round2(current)) : "";
 
-  // Refresh ONLY the preview + the OTHER field from discAmount — never the field the
+  // Refresh ONLY the preview + the OTHER fields from discAmount — never the field the
   // user is typing in (so their caret/partial number isn't clobbered mid-keystroke).
+  // The pay box is written in WHOLE rupees, the same figure inr() puts on the bill and the
+  // paper: showing 799.99 for a bill that will print ₹800 is a disagreement, not precision.
   const paint = (typing) => {
     pctVal = base > 0 ? Math.round((discAmount / base) * 1000) / 10 : 0;
     if (typing !== "pct") pctInput.value = discAmount ? String(pctVal) : "";
     if (typing !== "amt") amtInput.value = discAmount ? String(round2(discAmount)) : "";
+    if (typing !== "pay") payInput.value = String(Math.round(payFor(discAmount)));
     wrap.querySelector("#discPrevAmt").textContent = "− " + inr(discAmount);
-    wrap.querySelector("#discPrevPay").textContent = inr(payFor(discAmount));
   };
-  paint();
+  // A HALF-TYPED FIGURE MUST NOT BE APPLIABLE. Clearing the pay box means "I'm about to type
+  // a number", never "they pay ₹0" — comping a whole bill by deleting three characters is the
+  // kind of silent money mistake this panel has been bitten by before (the waiter panel carries
+  // the same guard). While a box is empty or nonsense, the old discount stands and Apply waits.
+  const setBlank = (blank) => { applyBtn.disabled = blank; applyBtn.style.opacity = blank ? ".5" : ""; };
 
-  // Edit % → derive amount (off the pre-tax base). Edit amount → derive %. Both clamp so
-  // the discount can't exceed the food's pre-tax value (beyond which they'd just pay ₹0).
-  pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((base * p) / 100); paint("pct"); };
-  amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, maxDisc); paint("amt"); };
+  // Edit % → derive amount (off the pre-tax base). Edit amount → derive %. Edit "they pay" →
+  // work backward to the discount: pay is tax-INCLUSIVE, so the pre-tax discount is
+  // base − pay/(1+rate). All clamp so the discount can't exceed the food's pre-tax value
+  // (beyond which they'd just pay ₹0).
+  pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((base * p) / 100); setBlank(false); paint("pct"); };
+  amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, maxDisc); setBlank(false); paint("amt"); };
+  payInput.oninput = () => {
+    const raw = payInput.value.trim();
+    const p = parseFloat(raw);
+    if (raw === "" || !(p >= 0)) { setBlank(true); return; }   // leave the discount exactly as it was
+    setBlank(false);
+    discAmount = clamp(round2(base - clamp(p, 0, total) / (1 + rate)), 0, maxDisc);
+    paint("pay");
+  };
   // On blur, snap the field the user was typing in to the CLAMPED value — while typing we
   // leave it raw (caret-safe), but once they leave it the box shouldn't keep showing an
   // over-limit / negative figure that disagrees with the applied discount + "They pay". A
-  // full paint() (no "typing" arg) refreshes both fields from the clamped discAmount.
+  // full paint() (no "typing" arg) refreshes every field from the clamped discAmount.
   pctInput.onblur = () => paint();
   amtInput.onblur = () => paint();
-  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((base * Number(c.dataset.pct)) / 100); paint(); }));
+  payInput.onblur = () => { setBlank(false); paint(); };
+  // The pay box already holds the full bill, so clicking it must SELECT that figure — otherwise
+  // "make it 800" on a ₹817 bill types 817800 and the manager has to clear it first.
+  payInput.onfocus = () => payInput.select();
+  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((base * Number(c.dataset.pct)) / 100); setBlank(false); paint(); }));
+  paint();
 
   const close = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = close;

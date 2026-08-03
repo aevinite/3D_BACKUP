@@ -2269,6 +2269,29 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .disc-prev-row b { color: var(--text); font-weight: 700; }
 .disc-prev-row.grand { padding-top: 6px; margin-top: 2px; border-top: 1px dashed var(--line); font-size: 14.5px; }
 .disc-prev-row.grand span, .disc-prev-row.grand b { color: var(--gold); font-weight: 800; }
+/* "They pay" is TYPEABLE (owner, 2026-08-03) — the number a counter actually negotiates. It has
+   to still read as the bill's grand total (same gold, same weight, same place) while looking
+   like something you can put a cursor in, so it is a bordered field sized to its content rather
+   than a full-width input that would shout louder than the total it replaces. */
+.disc-pay-edit {
+  display: inline-flex; align-items: center; gap: 1px; cursor: text;
+  border: 1px solid var(--line); border-radius: 9px; padding: 3px 8px 3px 9px;
+  background: var(--panel); transition: border-color .15s, box-shadow .15s;
+}
+.disc-pay-edit:focus-within { border-color: var(--gold); box-shadow: 0 0 0 3px rgba(212,165,116,.18); }
+.disc-pay-cur, .disc-pay-input { color: var(--gold); font-weight: 800; font-size: 15px; }
+.disc-pay-input {
+  width: 7ch;   /* fits ₹1,07,880 without growing; browsers that can size to content do below */
+  border: 0; background: transparent; padding: 0; margin: 0; text-align: right;
+  font-family: inherit; font-variant-numeric: tabular-nums; outline: none;
+}
+@supports (field-sizing: content) {
+  .disc-pay-input { field-sizing: content; width: auto; min-width: 3ch; max-width: 11ch; }
+}
+/* No spinner arrows: they steal the width this field needs and nobody nudges a bill by ₹1 arrows. */
+.disc-pay-input::-webkit-outer-spin-button, .disc-pay-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.disc-pay-input { -moz-appearance: textfield; appearance: textfield; }
+.disc-hint { margin-top: 8px; text-align: center; font-size: 12px; color: var(--muted); }
 .disc-foot-spacer { flex: 1; }
 /* Payment-method modal ("how did they pay?"): a 2×2 grid of big tappable buttons —
    one tap completes the action for UPI/Cash/Card, "Other" reveals a small text field

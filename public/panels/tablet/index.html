@@ -97,6 +97,11 @@
   <script src="/panels/undobar.js?v=9890d642"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
   <script src="/panels/fitnums.js?v=84090f97" data-fit=".ordtotal,.ctotal"></script>
-  <script src="app.js?v=addd4cd2"></script>
+  <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC). This panel does
+       not print, but it reads the shared money rules from here — discPct(), the one definition of
+       "how much percent was taken off" — so the waiter's screen quotes the same figure as the
+       manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
+  <script src="/panels/billdoc.js?v=398f1baa"></script>
+  <script src="app.js?v=6ad04ed7"></script>
 </body>
 </html>

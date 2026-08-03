@@ -315,7 +315,7 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       custPhone: draft.bill_customer_print === false ? "" : "98250 12345",
       lines,
       subtotal, discount,
-      discLabel: `${Math.round((discount / subtotal) * 1000) / 10}%`,
+      discLabel: BILLDOC.discPct(subtotal, discount),
       taxable,
       total: taxable + taxWhole,
       taxRows: BILLDOC.splitTax(taxWhole, used.map((c) => ({ label: String(c.label), rate: Number(c.rate) }))),
