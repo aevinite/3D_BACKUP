@@ -1,7 +1,8 @@
 // The big interactive dish page lives in ItemClient (runs in the browser).
 // This file is the thin "server" wrapper that reads the address bar first.
+import { notFound } from "next/navigation";
 import ItemClient from "./ItemClient";
-import { getMenuItem } from "@/lib/menu";
+import { getMenuItem, getSettings } from "@/lib/menu";
 
 // The bare /item/<slug> route is restaurant #1's own dish page. Give it #1's
 // dish-titled tab/share title instead of the platform brand fallback (audit fix
@@ -27,6 +28,15 @@ export default async function ItemPage({
   // Wait for the address pieces, then pull out the values we want.
   const { slug } = await params;          // which dish
   const { cat } = await searchParams;     // which category we came from (optional)
+  // MENU MASTER SWITCH — brought in line with the /r/<slug>/item twin (guest sweep
+  // 2026-08-04). Gating only the tenant route left restaurant #1's dish pages fully
+  // open by their own URLs after its guest menu was switched off.
+  if (!(await getSettings()).menuEnabled) notFound();
+  // A dish that doesn't exist must ANSWER "not found". This route used to render the
+  // friendly "Item not found" card inside a 200, which tells search engines the page is
+  // real and tells our own monitoring the request succeeded — the exact reason the /r/
+  // twin already 404s here. getMenuItem is cached, so asking costs one small read.
+  if (!(await getMenuItem(slug).catch(() => null))) notFound();
   // Hand both to the browser-side component, which does the real work.
   return <ItemClient slug={slug} fromCat={cat} />;
 }

@@ -272,6 +272,33 @@ export async function getOrderStatus(
 export const CARD_COLUMNS =
   "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, description, tags, allergens, search_alias, options, open_price, sort_order, restaurant_id";
 
+// The slugs of the categories this restaurant currently has switched ON.
+//
+// WHY IT EXISTS: `categories` has an `active` flag and getCategories() honours it, but
+// menu_items only stores a category SLUG, so nothing ever checked it. The guest menu's
+// grouped view is built from the active categories and so hid those dishes correctly —
+// but SEARCH, "You might also like" and the prev/next arrows read the raw item list, so a
+// dish in a switched-off category stayed findable and orderable (guest sweep 2026-08-04).
+//
+// Returns null when we can't tell (read failed, or the restaurant has no category rows at
+// all). Callers MUST treat null as "don't filter": filtering on an empty set would blank
+// the entire menu, which is far worse than showing one extra dish.
+async function activeCategorySlugs(restaurantId: string): Promise<Set<string> | null> {
+  const { data, error } = await supabase
+    .from("categories")
+    .select("slug")
+    .eq("restaurant_id", restaurantId)
+    .eq("active", true)
+    .limit(300);
+  if (error || !data || data.length === 0) return null;
+  return new Set(data.map((c) => c.slug as string));
+}
+
+/** Drop dishes whose category is switched off. A null set means "we can't tell" → keep all. */
+function inLiveCategory<T extends { category: string }>(items: T[], live: Set<string> | null): T[] {
+  return live ? items.filter((i) => live.has(i.category)) : items;
+}
+
 export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID, columns: string = "*"): Promise<MenuItem[]> {
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
   // requests — no extra waiting). Ratings failing must never hide the menu, so
@@ -280,9 +307,11 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID,
   // restaurant's aggregates, with an explicit column list (egress rule).
   // `columns` defaults to everything (the dish page needs the full row); the grid
   // passes CARD_COLUMNS to skip heavy detail-only fields.
-  const [items, ratings] = await Promise.all([
+  const [items, ratings, liveCats] = await Promise.all([
     supabase.from("menu_items").select(columns).eq("restaurant_id", restaurantId).order("sort_order").limit(2000),
-    supabase.from("item_ratings").select("item_slug, avg_rating, review_count").eq("restaurant_id", restaurantId),
+    // .limit() added per the egress rule — every read is capped, this one was not.
+    supabase.from("item_ratings").select("item_slug, avg_rating, review_count").eq("restaurant_id", restaurantId).limit(2000),
+    activeCategorySlugs(restaurantId), // runs in parallel, so it costs no extra wait
   ]);
   if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);
   // Index the aggregates by slug for a quick lookup while mapping each dish.
@@ -292,19 +321,28 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID,
   // Hide open-price dishes from the guest menu: their price is set by staff at order time,
   // so a self-ordering guest has no price to pay (the server would reject a ₹0 line anyway).
   // Waiter/manager panels read their own API and DO show these.
-  return ((items.data ?? []) as any[]).map((row) => mapRow(row, aggBySlug.get(row.slug))).filter((it) => !it.openPrice);
+  // Then drop anything whose category is switched off, so a hidden category's dishes can't
+  // come back through search / "you might also like" / the prev-next arrows.
+  const mapped = ((items.data ?? []) as any[]).map((row) => mapRow(row, aggBySlug.get(row.slug))).filter((it) => !it.openPrice);
+  return inLiveCategory(mapped, liveCats);
 }
 
 // A single item by slug, or null if it doesn't exist.
 // A "slug" is the short URL-friendly name, e.g. "classic-burger".
 export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<MenuItem | null> {
-  // Three parallel reads: the dish, its rating aggregate, and its newest
-  // real reviews (capped at 20 so a popular dish can't flood the page).
-  const [item, agg, revs] = await Promise.all([
+  // Reads: the dish, its rating aggregate, and its live categories.
+  //
+  // The REVIEW LIST used to be fetched here too, on every single call — but nothing reads
+  // MenuItem.reviews any more: the dish page keeps its own `localReviews` (loaded in its own
+  // effect, which respects the reviews switch), and the rating/count come from the
+  // item_ratings aggregate. So this was up to 20 review rows pulled on every dish open AND
+  // every 3D viewer open, for every restaurant, including ones with reviews switched off —
+  // the last of that behaviour found by the guest sweep 2026-08-04.
+  const [item, agg, liveCats] = await Promise.all([
     supabase.from("menu_items").select("*").eq("restaurant_id", restaurantId).eq("slug", slug).maybeSingle(),
     supabase.from("item_ratings").select("item_slug, avg_rating, review_count")
       .eq("restaurant_id", restaurantId).eq("item_slug", slug).maybeSingle(), // scoped since mig 116
-    getItemReviews(slug, restaurantId), // was defaulting to restaurant #1 (stress-test fix queue)
+    activeCategorySlugs(restaurantId),  // parallel, so no extra wait
   ]);
   if (item.error) throw new Error(`Failed to load item "${slug}": ${item.error.message}`);
   if (!item.data) return null;
@@ -313,8 +351,11 @@ export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_R
   // reach one by typing/sharing its /item/<slug> URL either. Answer "no such dish" (the page
   // 404s) rather than showing a dish a guest can never order: staff set its price at the table.
   if (mapped.openPrice) return null;
-  // Replace the (now always-empty) seeded reviews with the real ones.
-  mapped.reviews = revs;
+  // Same for a dish whose CATEGORY is switched off: hidden on the menu means gone, including
+  // by its own shared URL. A null set = we couldn't tell, so don't hide anything.
+  if (liveCats && !liveCats.has(mapped.category)) return null;
+  // mapped.reviews stays as mapRow left it (the legacy column, always empty). The real list
+  // is loaded by whoever actually shows it — see the note above.
   return mapped;
 }
 

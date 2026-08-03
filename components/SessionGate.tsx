@@ -48,8 +48,11 @@ const rememberTable = (table: string) => {
 };
 
 // The named screens this gate can show. Think of it as "which page are we on".
+// ("name_first" and "request_name" were removed 2026-08-04: both were rendered but no code
+//  path ever set them — the merged "not_open" screen, which asks the name and requests a
+//  waiter together, replaced them. Dead screens read as live the next time this is edited.)
 type Step =
-  | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "name_first" | "not_open" | "request_name" | "guest_name" | "open_name" | "joining"
+  | "idle" | "ask_table" | "scan_qr" | "location_intro" | "locating" | "location_help" | "not_open" | "guest_name" | "open_name" | "joining"
   | "nickname" | "waiting_approval" | "denied" | "table_closed" | "net_error" | "request_sent" | "working" | "blocked";
 
 // Remember (per device) that the guest has already seen the "why we check your
@@ -567,14 +570,6 @@ export default function SessionGate() {
     setNote("");
     joinAsHead();
   };
-  // The compulsory name screen shown FIRST (before open / join / request). Validate,
-  // then resume the normal flow — afterLocation now knows the name and routes to the
-  // right next step (open the table, join it, or ask a waiter to open it).
-  const submitNameFirst = () => {
-    if (!name.trim()) { setNote("Please add your name to continue — you can't join a table without one."); return; }
-    setNote("");
-    afterLocation();
-  };
   // This runs when the guest taps "Ask to join this table": send their name to
   // the host. If auto-approved, act now; otherwise wait for the host's OK.
   // `preset` lets the flow REJOIN silently with a remembered name (no name screen);
@@ -651,8 +646,8 @@ export default function SessionGate() {
   // (already running) auto-continues the moment they open the table. NAME-FIRST
   // (owner, 2026-06-17): ask the guest's name BEFORE sending the open request, so
   // the manager/tablet pending-requests view shows WHO asked to open the table
-  // (not a nameless "Someone"). submitRequestName re-enters with the name set; the
-  // name is reused when the table opens, so they're never asked twice this visit.
+  // (not a nameless "Someone"). The name is collected on the "not_open" screen itself and
+  // reused when the table opens, so they're never asked twice this visit.
   const doRequestOpen = async () => {
     // Name is collected on this SAME screen — if it's blank, stay put and say why.
     if (!name.trim()) { setNote("Add your name so staff know who's asking."); return; }
@@ -663,13 +658,6 @@ export default function SessionGate() {
     const p = pending.current!; await requestAccess(p.table, "open", name.trim(), null, ridRef.current);
     setStep("request_sent");
     } finally { reqBusy.current = false; }
-  };
-  // The "request_name" screen's submit: validate, then send the open request with
-  // the name attached (doRequestOpen now passes the name through).
-  const submitRequestName = () => {
-    if (!name.trim()) { setNote("Add your name so staff know who's asking."); return; }
-    setNote("");
-    doRequestOpen();
   };
 
   // Retry from the connection-trouble screen. Settings may STILL be missing
@@ -830,18 +818,6 @@ export default function SessionGate() {
         {/* COMPULSORY name — the FIRST thing asked, before we open/join/request a
             table, so the manager always sees who's at the table and nobody connects
             anonymously. Whatever happens next (open, join, or request a waiter) reuses it. */}
-        {step === "name_first" && (<>
-          <div className="sg-badge"><i className="fas fa-user"></i></div>
-          <div className="sg-kicker">Table {pending.current?.table}</div>
-          <h3 className="sg-title">What should we call you?</h3>
-          <p className="sg-sub">Add your name to continue at table {pending.current?.table} — the staff use it to know who&apos;s at the table. We&apos;ll only ask once for this visit.</p>
-          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
-            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitNameFirst(); }} autoFocus />
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
-          <div className="sg-actions">
-            <button className="sg-btn gold" onClick={submitNameFirst}>Continue</button>
-          </div>
-        </>)}
 
         {/* Table not opened by staff yet -> ONE screen: add your name AND request a
             waiter to open it, together (no separate name step). Name is required. */}
@@ -860,18 +836,6 @@ export default function SessionGate() {
         {/* Before asking a waiter to OPEN the table, get the guest's name so the
             manager/tablet pending-requests view shows who's asking. Reused when the
             table opens, so they're not asked again this visit. */}
-        {step === "request_name" && (<>
-          <div className="sg-badge"><i className="fas fa-bell-concierge"></i></div>
-          <div className="sg-kicker">Table {pending.current?.table}</div>
-          <h3 className="sg-title">What should we call you?</h3>
-          <p className="sg-sub">So the staff know who&apos;s asking when they open table {pending.current?.table} — just a name, we&apos;ll only ask once for this visit.</p>
-          <input className="sg-input" placeholder="Type your name — e.g. Mia" value={name} maxLength={40}
-            onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") submitRequestName(); }} autoFocus />
-          {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
-          <div className="sg-actions">
-            <button className="sg-btn gold" onClick={submitRequestName}>Request a waiter</button>
-          </div>
-        </>)}
 
         {/* First one at an empty open table -> ask the HEAD's name BEFORE opening,
             so the manager + tablet panels show who opened it (with the head role). */}

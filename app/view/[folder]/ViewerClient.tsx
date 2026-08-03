@@ -9,7 +9,7 @@ import PublicModelViewer from "@/components/PublicModelViewer"; // wraps the <mo
 import InfinityLoader from "@/components/InfinityLoader";       // loading spinner
 import { modelLoader } from "@/lib/modelLoader";     // 3D model download manager
 import { modelWatchlist } from "@/lib/modelWatchlist"; // tracks who's waiting on a model (for toasts)
-import { getMenuItem, type MenuItem } from "@/lib/menu"; // fetch one dish's details
+import { getMenuItem, getSettings, type MenuItem } from "@/lib/menu"; // fetch one dish's details
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant"; // resolve the restaurant this viewer belongs to
 import { accentPaletteCss } from "@/lib/accent"; // restaurant colour for the viewer chrome
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
@@ -94,6 +94,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
   const [rid, setRid] = useState<string>(DEFAULT_RESTAURANT_ID);
   const features = useFeatures(rid); // 3D viewer / currency / language switches for THIS restaurant
   const [loadFailed, setLoadFailed] = useState(false); // did the 3D model give up loading for good?
+  // This dish's restaurant is closed to guests (menu switch off / maintenance), or the ?r=
+  // slug doesn't resolve at all. Either way: an honest message, never another tenant's dish.
+  const [unavailable, setUnavailable] = useState(false);
   const [showInfo, setShowInfo] = useState(false);       // is the details sheet open?
   // Phone back button closes the details sheet first, not the whole viewer page
   // (every overlay must register with the back manager — audit fix 2026-07-06).
@@ -134,7 +137,12 @@ export default function ViewerClient({ folder }: { folder: string }) {
       let rid = DEFAULT_RESTAURANT_ID;
       if (fromRestaurant) {
         const r = await getRestaurantBySlug(fromRestaurant);
-        if (r) {
+        // A ?r= that names a restaurant which is inactive, binned or simply unknown used to
+        // leave rid at the #1 DEFAULT — so the viewer quietly showed FRENCH HOUSE's dish of
+        // that slug (its name, description and price) under another restaurant's link. Say
+        // "not available" instead of showing someone else's dish (guest sweep 2026-08-04).
+        if (!r) { if (!cancelled) setUnavailable(true); return; }
+        {
           rid = r.id;
           if (!cancelled) setRid(r.id); // drive useFeatures() for this restaurant
           // WHITE-LABEL COLOUR (audit fix bug #2): the /view route lives outside
@@ -147,6 +155,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
           }
         }
       }
+      // The 3D page lives outside the menu's AppShell, so it never saw the two things that
+      // close a restaurant's guest menu: the Menu master switch and Service (maintenance)
+      // mode. A dish stayed viewable in 3D while the menu itself said "we'll be right back"
+      // (guest sweep 2026-08-04). getSettings is cached per restaurant, so this is ~free.
+      try {
+        const s = await getSettings(rid);
+        if (!s.menuEnabled || s.serviceMode) { if (!cancelled) setUnavailable(true); return; }
+      } catch { /* can't tell → carry on rather than hide a working dish */ }
       if (cancelled || !fromSlug) return;
       try {
         const m = await getMenuItem(fromSlug, rid);
@@ -653,6 +669,18 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, error, activeUrl]);
 
+  // This restaurant isn't serving guests right now (Menu switch off / maintenance), or the
+  // ?r= slug doesn't resolve. Say so plainly — never fall through to another tenant's dish.
+  if (unavailable) {
+    return (
+      <div className="viewer-wrapper flex flex-col items-center justify-center min-h-screen p-4">
+        <div className="text-4xl mb-4">🍽️</div>
+        <h2 className="text-xl font-bold text-white mb-2">This menu isn&apos;t available right now</h2>
+        <p className="text-white/50 mb-4">Please ask a member of staff — they can bring you the menu for your table.</p>
+      </div>
+    );
+  }
+
   // 3D viewer switched OFF for this restaurant → a simple, honest message with a
   // Back link. No spinner, no model work (features starts ON by default, so this
   // only shows once the switch resolves to off — #1 and unresolved links are on).
@@ -681,12 +709,15 @@ export default function ViewerClient({ folder }: { folder: string }) {
   }
 
   // If loading the config failed, show an error message with a Back link.
+  // The raw error text (e.g. "Failed to load config") used to be printed to the guest; it
+  // means nothing to a diner and is ours to read in the logs, not theirs on screen (guest
+  // sweep 2026-08-04). `error` is still what gates this branch, just no longer displayed.
   if (error) {
     return (
       <div className="viewer-wrapper flex flex-col items-center justify-center min-h-screen p-4">
-        <div className="text-4xl mb-4">⚠️</div>
-        <h2 className="text-xl font-bold text-white mb-2">Failed to load viewer</h2>
-        <p className="text-white/50 mb-4">{error}</p>
+        <div className="text-4xl mb-4">😔</div>
+        <h2 className="text-xl font-bold text-white mb-2">3D view unavailable</h2>
+        <p className="text-white/50 mb-4">We couldn&apos;t load this dish in 3D right now. You can still see its photo and details on the menu.</p>
         <Link href={backHref} className="text-[#6ddc8a] font-semibold hover:underline">
           ← Back
         </Link>

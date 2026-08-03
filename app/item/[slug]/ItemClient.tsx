@@ -290,9 +290,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         if (cancelled) return; // a newer slug's fetch superseded this one
         setAllItems(items);                 // light list for related/nav
         setItem(dish || null);              // this dish (or null if not found)
-        // Real reviews load separately (the aggregate carries only the average);
-        // a failure here just leaves the list empty.
-        if (dish && features.reviews) getItemReviews(dish.slug, restaurantId).then((r) => { if (!cancelled) setLocalReviews(r); }).catch(() => {}); else if (!cancelled) setLocalReviews([]);
+        // (Reviews load in their own effect below — see why there.)
         setLoading(false);                  // done loading
         setTimeout(() => { if (!cancelled) setImageLoaded(true); }, 50); // trigger the photo fade-in
 
@@ -315,6 +313,22 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       });
     return () => { cancelled = true; };
   }, [slug]);
+
+  // Real reviews, in their OWN effect keyed on the switch.
+  //
+  // They used to load inside the dish fetch above, which depends only on [slug] — so it ran
+  // with the DEFAULT feature map (reviews: true) before this restaurant's real switches had
+  // landed, and fetched up to 20 review rows on every dish open for a restaurant that had
+  // reviews switched OFF. Keying the fetch on features.reviews means it happens once the
+  // truth is known, and not at all when the answer is "off" (guest sweep 2026-08-04).
+  useEffect(() => {
+    if (!item || !features.reviews) { setLocalReviews([]); return; }
+    let cancelled = false;
+    getItemReviews(item.slug, restaurantId)
+      .then((r) => { if (!cancelled) setLocalReviews(r); })
+      .catch(() => {}); // a failure just leaves the list empty
+    return () => { cancelled = true; };
+  }, [item, restaurantId, features.reviews]);
 
   // Load THIS restaurant's Google-review mode + link once (getSettings is cached per
   // restaurant, so this is effectively free). Drives the persistent Google call-to-action
