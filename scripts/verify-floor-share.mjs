@@ -165,6 +165,7 @@ console.log(`\n${results.length - bad.length}/${results.length} checks passed`);
 if (bad.length) {
   console.log("\nWhat to do:");
   console.log("  · a missing invalidateFloor(rid) → add it right after that handler resolves `rid`");
+  console.log("  · no after-write drop → wrap the export in invalidateFloorAfter(…) and add writeRid.set(req, rid)");
   console.log("  · a shared ?table= refetch → keep the `tbl ? …live… : …shared…` shape");
   console.log("  · a widened window → the floor is a live screen; keep it ~1.5s");
   console.log("  · narrowing in place → `const summary = limit ? structuredClone(shared) : shared;`\n");
