@@ -4534,11 +4534,15 @@ function openParcelTile(id) {
     ? items.map((it) => `<div class="pc-ln"><span>${esc(it.qty)}× ${esc(it.title)}</span><span>${platMoney((Number(it.price) || 0) * (parseInt(it.qty, 10) || 1))}</span></div>`).join("")
     : `<div class="muted" style="padding:8px 0">No items recorded.</div>`;
   const done = (on, yes, no) => `<span class="pc-state ${on ? "on" : ""}">${on ? "✓ " + yes : no}</span>`;
+  // What was taken off this parcel, if anything — recorded in payload by the /parcel route.
+  const pcDisc = Math.max(0, Number(o.discount ?? (o.payload || {}).discount) || 0);
+  const pcDiscNote = String(o.discount_note ?? (o.payload || {}).discount_note ?? "").trim();
   const wrap = el(`<div class="sx-modal-overlay pc-overlay"><div class="sx-modal pc-modal">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🥡 Parcel ${esc(o.parcel_no)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="pc-body">
       <div class="pc-cust">${esc(o.customer_name || "No name given")}${o.kot_no != null ? ` · ticket #${esc(o.kot_no)}` : ""}</div>
       <div class="pc-lines">${lines}</div>
+      ${pcDisc > 0 ? `<div class="pc-ln pc-disc"><span>Discount${pcDiscNote ? ` · ${esc(pcDiscNote)}` : ""}</span><span>− ${platMoney(pcDisc)}</span></div>` : ""}
       <div class="pc-tot"><span>Total</span><b>${platMoney(o.total)}</b></div>
       <div class="pc-states">${done(!!o.printed_at, "Printed", "Not printed yet")}${done(!!o.paid, "Paid", "Not paid yet")}</div>
       <div class="pc-acts">
@@ -4592,9 +4596,16 @@ function printParcelReceipt(o) {
   // row whose lines carry no prices.
   const lineSum = items.reduce((a, i) => a + (parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1), 0);
   const sub = lineSum > 0 ? lineSum : (parseFloat(o.total) || 0);
+  // A DISCOUNT GIVEN AT THE COUNTER HAS TO BE ON THE PAPER (2026-08-03). It lives in the
+  // parcel's payload (aggregator_orders has no discount column), and `total` was stored net of
+  // it. Passing 0 here would make billMath re-derive a total from the full lines + tax — paper
+  // higher than the record, and the customer's own copy not showing the money they were given.
+  const pDisc = Math.max(0, Number(o.discount ?? (o.payload || {}).discount) || 0);
   const order = {
     id: "parcel-" + (o.kot ?? o.kot_no ?? "x"), status: "served", items,
-    subtotal: sub, total: sub, discount: 0, kot_no: o.kot ?? o.kot_no ?? null,
+    subtotal: sub, total: sub, discount: Math.min(pDisc, sub),
+    discount_note: o.discount_note ?? (o.payload || {}).discount_note ?? null,
+    kot_no: o.kot ?? o.kot_no ?? null,
     created_at: o.created_at || new Date().toISOString(),
   };
   // Only a REAL customer name goes on the Customer line. The parcel row's name is "Parcel"
@@ -8392,6 +8403,14 @@ function openTakeOrder(table, rerender, opts = {}) {
   const cart = [];               // [{ uid, id, title, price, qty, note, avoid:Set }]
   const orderAvoid = new Set();  // whole-order allergens
   let orderNote = "";
+  // A DISCOUNT ON AN ORDER THAT DOESN'T EXIST YET (owner, 2026-08-03: "you are not able to give
+  // discount in the quick order? make sure there is a discount thing also"). Every other discount
+  // in this panel edits a bill that is already on the floor; here the order is still being built,
+  // so the amount is HELD and travels with the order to the server, which applies it in the same
+  // request that creates the order — never a second "apply it afterwards" call that could land
+  // after a bill was printed, or not land at all. Stored the way the server stores it: rupees off
+  // the PRE-TAX subtotal.
+  let discAmount = 0, discNote = "";
   let q = "";
   let uidSeq = 0;
   const editing = new Set();     // cart-line UIDs whose per-dish editor is open
@@ -8532,7 +8551,16 @@ function openTakeOrder(table, rerender, opts = {}) {
   // Estimate INCLUDES tax so the "≈ ₹" staff quote matches the server's bill.
   // Parcel (takeaway) is stored & charged at the item subtotal — same as every other
   // Platform order (Zomato/Swiggy rows carry no tax line); dine-in keeps the tax-inclusive quote.
-  const estTotal = () => { const sub = cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0); if (parcel) return inr(sub); const rate = (taxModel(state.data.settings) || {}).rate || 0; return inr(sub + Math.round(sub * rate * 100) / 100); };
+  const cartSub = () => cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0);
+  // The held discount can never be worth more than the food: emptying the cart after typing
+  // ₹200 off must not leave ₹200 of discount attached to a ₹50 order.
+  const discOf = () => Math.round(Math.min(Math.max(discAmount, 0), cartSub()) * 100) / 100;
+  const estTotal = () => { const sub = Math.max(0, cartSub() - discOf()); if (parcel) return inr(sub); const rate = (taxModel(state.data.settings) || {}).rate || 0; return inr(sub + Math.round(sub * rate * 100) / 100); };
+  // May THIS person discount? Same power the table detail's − Discount button is gated by
+  // (XRAY_CONTROLS → [data-disc] → give_discounts). Checked in JS, not left to the x-ray
+  // observer, because this modal lives on document.body — outside the panel the observer
+  // watches — exactly as the destination picker's own permission checks have to be.
+  const canDiscount = () => (XRAY_WHO && XRAY_WHO.higherView ? true : xrayGrantedForManager("give_discounts"));
 
   const headTitle = quick ? "⚡ QO/P <span class=\"qo-sub\">· quick order / parcel</span>"
     : parcel ? "🥡 New Parcel"
@@ -8554,7 +8582,8 @@ function openTakeOrder(table, rerender, opts = {}) {
           <textarea class="to-note" rows="2" placeholder="Note for the kitchen (optional)"></textarea>
         </div>
         <div class="to-foot">
-          <div class="to-total">${parcel ? "" : "≈ "}<b>${estTotal()}</b></div>
+          <div class="to-total">${parcel ? "" : "≈ "}<b>${estTotal()}</b><span class="to-disc-tag" hidden></span></div>
+          ${canDiscount() ? `<button class="btn to-disc-btn" type="button" title="Give a discount on this order">− Discount</button>` : ""}
           ${quick
             ? `<button class="qo-cartbtn" type="button" aria-expanded="false" title="Show / hide the order you're building"><b class="qo-cartn">0</b> <span class="qo-cartl">items</span> <span class="qo-cartcar" aria-hidden="true">▴</span></button><button class="btn primary to-send qo-place" ${cart.length ? "" : "disabled"}>Place order →</button>`
             : parcel
@@ -8588,6 +8617,12 @@ function openTakeOrder(table, rerender, opts = {}) {
   const paintCart = () => {
     linesEl.innerHTML = cartLines(); bindCart(); totalEl.textContent = estTotal();
     sendBtns.forEach((b) => (b.disabled = !cart.length));
+    // The discount has to be VISIBLE next to the total it changed, or a ₹200 reduction is a
+    // number nobody can account for at the counter.
+    const tag = wrap.querySelector(".to-disc-tag"), d = discOf();
+    if (tag) { tag.hidden = !(d > 0); tag.textContent = d > 0 ? ` (− ${inr(d)} off)` : ""; }
+    const db = wrap.querySelector(".to-disc-btn");
+    if (db) db.textContent = d > 0 ? `− ${inr(d)} off` : "− Discount";
     // Quick mode's phone bar states what's in the order while the list itself is folded away.
     const cn = wrap.querySelector(".qo-cartn");
     if (cn) {
@@ -8872,6 +8907,24 @@ function openTakeOrder(table, rerender, opts = {}) {
   wrap.querySelector(".tbl-modal-close").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
 
+  // − Discount. Deliberately the SAME openDiscountModal every bill on this floor uses, in its
+  // pending mode — not a second discount screen. The owner asked for the interface he already
+  // knows ("discount interface should be same as … the parcel detail view"), and a money UI
+  // written twice is how one copy quietly drifts from the other (the open-price rule reached
+  // one order screen a day late for exactly that reason). It is handed a synthetic bill made
+  // of the cart: pre-tax subtotal, this restaurant's rate, and the amount already held.
+  const discBtn = wrap.querySelector(".to-disc-btn");
+  if (discBtn) discBtn.onclick = () => {
+    const rate = parcel ? 0 : ((taxModel(state.data.settings) || {}).rate || 0);
+    openDiscountModal(
+      { discount: discOf(), discount_note: discNote },
+      null, null,
+      { rate, subtotal: cartSub(), disc: discOf() },
+      true,                                   // whole-bill: nothing else on this order to preserve
+      { onApply: (amount, note) => { discAmount = amount; discNote = note; paintCart(); } },
+    );
+  };
+
   // What THIS viewer may actually do with a quick order. An admin or owner looking in
   // gets both halves (the standing x-ray rule: a higher role sees every feature, tinted
   // where it's off for the staff below); a real manager gets exactly what the ladder
@@ -8954,7 +9007,11 @@ function openTakeOrder(table, rerender, opts = {}) {
       if (!quick && !(await confirmDialog(payNow ? "Take payment now and send this parcel to the kitchen?" : "Send this parcel to the kitchen (pay on pickup)?", payNow ? "Pay & send" : "Send"))) return;
       sendBtns.forEach((b) => (b.disabled = true));
       try {
-        const r = await api("POST", "/parcel", { items, allergies, note: orderNote || null, customer: custName || null, phone: custPhone || null, paid: payNow, method: payNow ? "cash" : null });
+        // The discount travels WITH the order (2026-08-03). Not a follow-up POST: a second call
+        // can fail on its own, or land after "Pay now & print" has already put paper in a
+        // customer's hand at the undiscounted price. The server re-clamps it to the food value
+        // and re-checks this role's % cap — the client's number is a request, never the ruling.
+        const r = await api("POST", "/parcel", { items, allergies, note: orderNote || null, customer: custName || null, phone: custPhone || null, paid: payNow, method: payNow ? "cash" : null, discount: discOf() || undefined, discountNote: discOf() > 0 ? (discNote || undefined) : undefined });
         if (r && r.queued) { toast("Saved ✓ — the parcel will send when you're back online.", "ok"); close(); return; }
         toast(r && r.kot_no != null ? `Parcel sent! Ticket #${r.kot_no}${payNow ? " · paid" : " · pay on pickup"}` : "Parcel sent to the kitchen", "ok");
         // "Pay now & print" → a customer receipt for the counter printer (pay-on-pickup doesn't).
@@ -8977,7 +9034,11 @@ function openTakeOrder(table, rerender, opts = {}) {
     // the order can be cancelled from the table.
     sendBtns.forEach((b) => (b.disabled = true));
     try {
-      const r = await api("POST", "/order", { table: String(destTable), items, allergies, note: orderNote || null, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
+      // Same rule as the parcel path: the discount is part of the order, applied server-side in
+      // the same request. On a table that ALREADY has a bill discount the server ADDS to it
+      // rather than replacing it — a discount typed for these dishes must not silently wipe the
+      // one the table was already given.
+      const r = await api("POST", "/order", { table: String(destTable), items, allergies, note: orderNote || null, discount: discOf() || undefined, discountNote: discOf() > 0 ? (discNote || undefined) : undefined, ...(confirmDuplicate ? { confirmDuplicate: true } : {}) });
       if (r && r.queued) { toast("Saved ✓ — it'll send to the kitchen when you're back online.", "ok"); close(); await loadSessions(); if (rerender) rerender(); return; }
       // The pricer can REFUSE an order (sold out / off the menu / an open-price line with no
       // price) and still answer 200 with {ok:false}. Say so honestly and KEEP the cart open so
@@ -9804,7 +9865,13 @@ function openSplitBill(total) {
   paint();
 }
 
-function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
+// `pending` (2026-08-03) — the ONE case where there is no order to POST to yet: the ⚡ QO/P
+// builder, where the discount is typed while the order is still being assembled. Pass
+// { onApply(amount, note) } and this modal computes and previews exactly as it always does,
+// then hands the number back instead of calling the server. Everything above that line — the
+// two linked fields, the % chips, the pre-tax base, the "They pay" preview — is shared, which
+// is the point: one discount interface, not a second one that drifts.
+function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   document.querySelector(".disc-overlay")?.remove();
   const round2 = (n) => Math.round(n * 100) / 100;
   const clamp = (n, lo, hi) => Math.min(Math.max(Number.isFinite(n) ? n : 0, lo), hi);
@@ -9899,6 +9966,10 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill) {
   const save = async (amount) => {
     const note = wrap.querySelector("#discNoteInput").value.trim();
     close();
+    // Pending (⚡ QO/P): there is no order id, so the number goes back to the builder and rides
+    // to the server WITH the order. No toast — the footer shows the discount straight away, and
+    // "applied" would be a lie until the order is actually placed.
+    if (pending) { pending.onApply(Math.max(0, Math.min(amount, maxDisc)), amount > 0 ? note : ""); return; }
     try {
       await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" }, { expect: { table: "orders", id: order.id, fields: { discount: Number(order.discount || 0) } } });
       await loadSessions(); if (rerender) rerender();
