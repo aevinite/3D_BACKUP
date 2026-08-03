@@ -152,6 +152,70 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   );
 }
 
+// ── EVERY IMPORTANT ACTION IS EXACTLY TWO STEPS (owner, 2026-08-03) ────────────────────
+// "Two steps for an important thing — closing a table, settling a bill, placing an order.
+//  And if it already has a two, we don't need the third one."
+// A one-tap close/settle/issue is a mis-tap waiting to happen on a tablet carried through a
+// busy room; a THIRD ask is just as bad, because a question nobody reads is a question that
+// gets dismissed. So each action below must have exactly one gate — a confirm, a picker, a
+// method sheet or a PIN — and this checks the shape of the code that opens it.
+{
+  const src = read(TABLET);
+  // the source of ONE function, from its name to the next top-level `function` / `async function`
+  const fnBody = (name) => {
+    const at = src.search(new RegExp(`\\n(?:async )?function ${name}\\s*\\(`));
+    if (at < 0) return "";
+    const rest = src.slice(at + 1);
+    const end = rest.search(/\n(?:async )?function [A-Za-z_]/);
+    return end < 0 ? rest : rest.slice(0, end);
+  };
+  // 1 · ✕ Close table asks before it closes.
+  check(
+    "tablet: ✕ Close table asks a confirm before closing",
+    /#closeTable[\s\S]{0,900}?confirmDialog\(`Close table/.test(src),
+    `${TABLET}: the #closeTable handler must await confirmDialog() before POSTing the close.\n    A single tap freeing an occupied table is the mis-tap this rule exists for.`,
+  );
+  // 2 · Settling a bill goes through the payment-method sheet (that sheet IS step 2 — so
+  //     there must be no extra confirmDialog before it).
+  const payFn = fnBody("payBillWithMethod");
+  check(
+    "tablet: settling a bill opens the payment sheet as its second step",
+    /openPaymentMethodModal\(/.test(payFn),
+    `${TABLET}: payBillWithMethod() must open openPaymentMethodModal() — picking HOW they paid is\n    the deliberate second step of settling a bill.`,
+  );
+  check(
+    "tablet: settling a bill does NOT also ask a confirm (no third step)",
+    !/confirmDialog\(/.test(payFn),
+    `${TABLET}: payBillWithMethod() calls confirmDialog() as well as the payment sheet. That is a\n    THIRD step on the most repeated money action of a service — the owner banned it explicitly.`,
+  );
+  // 3 · Placing an order: the per-table flow confirms; the ⚡ quick-order flow's second step
+  //     is the table picker, so it must NOT also confirm.
+  const sendFn = fnBody("sendOrder");
+  check(
+    "tablet: placing an order for a table asks a confirm",
+    /confirmDialog\(`Send \$\{count\}/.test(sendFn),
+    `${TABLET}: sendOrder() must confirm before sending a table's order to the kitchen.`,
+  );
+  check(
+    "tablet: a ⚡ quick order's second step is the table picker, not a confirm",
+    /state\.quick && dest == null[\s\S]{0,120}openQuickDest\(\)/.test(sendFn)
+      && /dest == null && !\(await confirmDialog\(/.test(sendFn),
+    `${TABLET}: sendOrder(dest) must (a) open the table picker when a quick order has no table yet,\n    and (b) skip the confirm once the picker answered — picking the table IS the second step.\n    Asking again makes it three.`,
+  );
+  // 4 · Issuing an invoice has a second step in every configuration.
+  const invFn = fnBody("genInvoice");
+  check(
+    "tablet: generating an invoice always has a second step",
+    /willAskCustomer/.test(invFn) && /willAskPin/.test(invFn) && /confirmDialog\(/.test(invFn),
+    `${TABLET}: genInvoice() must fall back to a confirm when neither the customer sheet nor a\n    manager PIN will run — otherwise one stray tap issues a real invoice number.`,
+  );
+  check(
+    "tablet: the invoice confirm does not stack on top of the customer sheet",
+    /if \(!willAskCustomer && !willAskPin\)/.test(invFn),
+    `${TABLET}: the invoice confirm must be gated on !willAskCustomer && !willAskPin, or a\n    restaurant that captures the customer gets asked twice.`,
+  );
+}
+
 // ── report ─────────────────────────────────────────────────────────────────────────────
 // --hook stays SILENT on success (a passing guard must not add noise to every panel edit)
 // and exits 2 on failure, which is how a PostToolUse hook tells the session it broke something.

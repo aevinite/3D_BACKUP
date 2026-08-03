@@ -76,6 +76,7 @@ const state = {
   dishSearch: "",       // the dish-search text in order mode
   note: "",             // one note for the whole order
   floorFilter: "all",   // which tables the floor shows: all | needs | open | free
+  quick: false,         // ⚡ quick order: build the order first, pick the table at the END
   allergies: "",        // order-level allergies (comma list), applied to the whole order
   editOrders: new Set(),// order ids currently in staff EDIT mode (after the kitchen-confirm)
   addToOrderId: null,   // when set, the dish browser ADDS to this existing order (not a new one)
@@ -730,7 +731,7 @@ function ttagOf(t) {
 // re-render after the slice lands. Mirrors the manager selecting a table. (owner 2026-06-27)
 async function selectTable(t) {
   state.table = String(t);
-  state.ordering = false; state.cart = []; state.note = ""; state.allergies = ""; state.dishSearch = "";
+  state.ordering = false; state.quick = false; state.cart = []; state.note = ""; state.allergies = ""; state.dishSearch = "";
   // Also drop any ADD-TO-ORDER / view-order / per-order EDIT state — it belongs to the table we're
   // leaving. Without this, "＋ Add dish" then tapping another tile left addToOrderId pointing at the
   // OLD table's order, so dishes meant for the new table were appended to the old bill + kitchen
@@ -786,73 +787,75 @@ function tileHtml(i) {
   const partyMates = (mergedTo ? [mergedTo, ...mergeChildrenOf(mergedTo).filter((k) => String(k) !== String(i))] : mergeChildrenOf(i));
   const partyHead = mergedTo || i;
   const st = tileState(partyHead), a = tableAgg(partyHead), tile = summaryTile(partyHead);
+  // The "⇄ with T…" mark rides in the TOP ROW, in the seat chip's place — it is NOT its own
+  // row. A square tile at 12-per-row is ~87px tall and the extra row overflowed it: the
+  // progress bar was sliced off flat on every merged tile (caught by the 2026-08-03
+  // walkthrough's clipping measurement, which is why that check now runs on every tile).
+  // The seat count moves into the title, where a merged table needs it least.
+  // The ⇄ and the table list are separate spans on purpose: on a very dense floor the LIST
+  // drops and the ⇄ stays, so a joined table can never read as a solo one (which is the
+  // whole point of mig 249) — it just says less.
   const mergeChip = partyMates.length
-    ? `<span class="tmerge" title="Served as one party with ${esc(partyMates.map((k) => "T" + k).join(" + "))} — one bill">⇄ with ${esc(partyMates.map((k) => "T" + k).join(" "))}</span>`
+    ? `<span class="tmerge" title="Served as one party with ${esc(partyMates.map((k) => "T" + k).join(" + "))} — one bill"><i class="tm-i">⇄</i><i class="tm-t">${esc(partyMates.map((k) => "T" + k).join(" "))}</i></span>`
     : "";
   // Badges/quick-action read the SUMMARY (works for every tile). The selected table's
   // tableAgg comes from its slice; the summary badge counts still match (same RPC mirror).
   // Badges stay THIS table's own (a waiter call at T7 belongs on T7's tile, merged or not).
   const ownTile = summaryTile(i);
   const calls = summaryCallsOf(i), joiners = ownTile.pending || 0, reqsN = ownTile.reqs || 0;
-  const called = (ownTile.hasCall || ownTile.hasReq);
   // Three-way: red ring for an accepted-unpaid bill, green for accepted-paid, NOTHING for a
   // brand-new order (was a 2-way ternary that wrongly painted new orders green/"paid").
   const payCls = a.unpaid ? "pay-unpaid" : a.paid ? "pay-paid" : "";
-  // Body differs by state: free tables get the big Open button; open tables
-  // get guests + the meta line, and (once there are dishes) a progress bar + count pills.
-  let body = "";
-  if (st.cls === "free" || st.cls === "req") {
-    // Seat count (owner request, 2026-07-01 — the tablet had NO capacity info at all
-    // before) from the table_seats setting (migration 111). Same three-step answer as the
-    // manager floor's seatsForTable(): this table's own number → the floor's default
-    // (table_seats.default, one field in the manager's Settings → Tables, owner 2026-08-01)
-    // → 4. Keep the two panels reading the SAME order; when only one of them knew about the
-    // default the two screens disagreed about how many people fit at the same table.
-    // Only shown on free/req tiles — occupied tiles show the guest count instead.
-    const seatMap = (state.data.settings || {}).table_seats || {};
-    const seats = Number(seatMap[String(i)]) > 0 ? Number(seatMap[String(i)])
-      : Number(seatMap.default) > 0 ? Number(seatMap.default) : 4;
-    // No "Open" chip (owner, 2026-07-31): opening a table isn't a step any more — the first
-    // order starts the party — so a free tile just says how many can sit here, and tapping it
-    // goes straight to the table where ＋ Take order lives.
-    body = `<span class="tsub">${st.cls === "req" ? "asked to open" : "tap to take an order"}</span><span class="tseats">🪑 ${seats} seats</span>`;
-  } else {
-    // KOT # rides on the full slice only (the summary RPC carries no KOT — it's the shared
-    // manager RPC). For the selected table we show "KOT #…"; for every other tile we show the
-    // summary's meta line ("x/y served · ₹z due" / "n orders"), exactly like the manager.
-    const sub = a.kots.length
-      ? `KOT #${a.kots[a.kots.length - 1]}${a.kots.length > 1 ? ` +${a.kots.length - 1}` : ""}`
-      : (a.meta || (a.guests ? "" : "no order yet"));
-    const total = a.nw + a.ck + a.rd + a.sv;
-    const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.rd ? `<i style="width:${(a.rd / total) * 100}%;background:#ec4899"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
-    const pills = total > 0 ? `<div class="tpills">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
-    // ONE contextual quick action, same priority as the manager floor tile:
-    // new order → Accept, a call/request → Attend, served-but-unpaid → Mark paid.
-    let quick = "";
-    if (a.nw > 0) quick = `<span class="tacc" data-quick="accept" data-qt="${i}">✓ Accept</span>`;
-    else if (called || joiners) quick = `<span class="tatt" data-quick="attend" data-qt="${i}">Attend</span>`;
-    else if (st.cls === "bill" && tshow("tablet_mark_paid")) quick = `<span class="tpay${txray("tablet_mark_paid")}" data-quick="pay" data-qt="${partyHead}">💳 Mark paid</span>`;
-    body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${esc(sub)}</span>${strip}${pills}${quick}`;
-  }
+  // ── MANAGER-STYLE SQUARE TILE (owner, 2026-08-03 — "redesign the tablet just like the
+  // manager panel's table view"). Same rows as the manager's floorTileHtml:
+  //   row 1  number + seats (or seated/seats when guests are in),
+  //   row 2  badges (calls / requests / joiners — this table's own),
+  //   row 3  a full-width progress LINE with "x/y served" above it (never a worded box),
+  //   row 4  the actions: ＋ Take order (the biggest control), ✓ accept, 💳 pay.
+  // Free tiles carry only the state word — and TAPPING a free tile goes straight into
+  // taking an order for it (the manager rule; the send still confirms, so it stays 2-step).
+  // Seats: this table's own number → the floor default → 4 (same order as the manager).
+  const seatMap = (state.data.settings || {}).table_seats || {};
+  const seats = Number(seatMap[String(i)]) > 0 ? Number(seatMap[String(i)])
+    : Number(seatMap.default) > 0 ? Number(seatMap.default) : 4;
+  const seatTxt = a.guests > 0 ? `${a.guests}/${seats}` : String(seats);
+  const seatTip = a.guests > 0 ? `${a.guests} seated of ${seats} seats` : `${seats} seats`;
+  const total = a.nw + a.ck + a.rd + a.sv;
+  const strip = total > 0 ? `<div class="tstrip">${a.nw ? `<i style="width:${(a.nw / total) * 100}%;background:#f59e0b"></i>` : ""}${a.ck ? `<i style="width:${(a.ck / total) * 100}%;background:#4f9dff"></i>` : ""}${a.rd ? `<i style="width:${(a.rd / total) * 100}%;background:#ec4899"></i>` : ""}${a.sv ? `<i style="width:${(a.sv / total) * 100}%;background:#22c55e"></i>` : ""}</div>` : "";
+  // The line's title keeps the words the tile no longer prints (state + KOT/meta), so a
+  // long-press/hover still tells the whole story.
+  const kotTip = a.kots.length ? `KOT #${a.kots[a.kots.length - 1]}${a.kots.length > 1 ? ` +${a.kots.length - 1}` : ""}` : (a.meta || "");
+  const isFree = st.cls === "free" || st.cls === "req";
+  const statusRow = total > 0
+    ? `<div class="t-line" title="${esc(st.label)}${kotTip ? " · " + esc(kotTip) : ""}"><span class="t-linenum">${a.sv}/${total} served</span>${strip}</div>`
+    : `<div class="t-line t-line-plain" title="${esc(st.label)}"><span class="t-linenum">${esc(st.label)}</span></div>`;
+  // Actions: ＋ Take order on every occupied tile (a free tile IS the take-order button);
+  // one-tap ✓ accept for a brand-new order; 💳 pay when the bill is served-unpaid. All
+  // delegated on #tiles, so the patch path never re-binds anything.
+  const acts = isFree ? "" :
+    (tshow("tablet_take_orders") ? `<span class="t-take${txray("tablet_take_orders")}" role="button" data-quick="order" data-qt="${i}" title="Add another order for ${esc(tableLabel(i))}"><i class="t-take-x">＋</i><i class="t-take-t">Take order</i></span>` : "")
+    + (a.nw > 0 ? `<span class="tacc" role="button" data-quick="accept" data-qt="${i}" title="Accept the new order">✓</span>` : "")
+    + (st.cls === "bill" && tshow("tablet_mark_paid") ? `<span class="tpay${txray("tablet_mark_paid")}" role="button" data-quick="pay" data-qt="${partyHead}" title="Mark the bill paid">💳</span>` : "");
   // Special table type (mig 166): a corner ribbon + pill badge layered OVER the state
-  // look — strip/pills/pay ring keep working, the tag is unmistakable on top.
+  // look — strip/line/pay ring keep working, the tag is unmistakable on top.
   const ttag = ttagOf(i);
   const tinfo = TABLE_TAG_INFO[ttag];
-  return `<button class="tile t-${st.cls} ${payCls}${partyMates.length ? " t-merged" : ""}${tinfo ? ` t-tag tag-${ttag}` : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
+  const numTxt = String(tname(i) || i);
+  const numCls = numTxt.length >= 4 ? " tnum-xs" : numTxt.length >= 2 ? " tnum-sm" : "";
+  return `<button class="tile t-${st.cls} ${payCls}${partyMates.length ? " t-merged" : ""}${tinfo ? ` t-tag tag-${ttag}` : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}" title="${isFree ? "Tap to take an order" : "Tap to open this table"}">
       ${tinfo ? `<span class="t-ribbon" aria-hidden="true">${tinfo.ribbon}</span>` : ""}
-      <span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqsN ? `<em class="b-req">📨${reqsN}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
-      <span class="tnum" ${tname(i) ? `title="T${i}"` : ""}>${esc(tname(i) || i)}</span>
+      <span class="t-top"><span class="tnum${numCls}" ${tname(i) ? `title="T${i}"` : ""}>${esc(numTxt)}</span>${mergeChip || `<span class="tseats" title="${esc(seatTip)}">🪑${esc(seatTxt)}</span>`}</span>
+      ${(calls.length || reqsN || joiners) ? `<span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqsN ? `<em class="b-req">📨${reqsN}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>` : ""}
       ${tinfo ? `<span class="t-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
-      <span class="tlabel">${st.label}</span>
-      ${mergeChip}
-      ${body}
+      ${statusRow}
+      ${acts ? `<span class="t-act">${acts}</span>` : ""}
     </button>`;
 }
 
-// floorCountsHtml() / floorNavHtml(): the two filter strips (count chips beside the brand on
-// wide screens; the floor-nav row on narrow). Shared so the patch can refresh their counts in
-// place with byte-identical markup. Their buttons are wired ONCE by bindFloorDelegation on the
-// stable #counts / #floorNav containers, so rewriting innerHTML never orphans a handler.
+// floorNavHtml(): the ONE filter strip (All / Needs / Active / Free) above the floor, at
+// every width — the old top-bar count chips were removed with the minimal top bar (owner,
+// 2026-08-03: no live counters up there). Shared by the full render AND the patch so the
+// counts refresh with byte-identical markup; buttons are delegated on the stable #floorNav.
 function floorFilterCounts() {
   let cAll = 0, cNeeds = 0, cOpen = 0, cFree = 0;
   for (const i of floorTableList()) {    // what we DRAW, incl. occupied off-plan tables
@@ -863,26 +866,55 @@ function floorFilterCounts() {
   }
   return [["all", "All", cAll], ["needs", "⚠ Needs", cNeeds], ["open", "Active", cOpen], ["free", "Free", cFree]];
 }
-function floorCountsHtml() {
-  const filt = state.floorFilter || "all";
-  return floorFilterCounts().map(([k, lbl, c]) =>
-    `<button class="cchip ${k === "needs" && c ? "needs" : ""} ${filt === k ? "on" : ""}" data-filter="${k}"><b>${c}</b> ${lbl.replace("⚠ ", "")}</button>`).join("");
-}
 function floorNavHtml() {
   const filt = state.floorFilter || "all";
   return floorFilterCounts().map(([k, lbl, c]) =>
     `<button class="fnav ${filt === k ? "on" : ""}" data-filter="${k}">${lbl} <em>${c}</em></button>`).join("");
 }
 
+// floorPerRow(): how many tiles per row — the SAME admin-owned per-restaurant setting the
+// manager floor reads (settings.floor_per_row, mig 226), so the two floors always match.
+// The phone (<600px) ignores it via CSS and keeps readable auto-fill tiles instead.
+const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 30, FLOOR_PER_ROW_DEFAULT = 6;
+function floorPerRow() {
+  const n = Math.round(Number((state.data.settings || {}).floor_per_row));
+  if (!Number.isFinite(n)) return FLOOR_PER_ROW_DEFAULT;
+  return Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
+}
+
+// The compact ONE-LINE legend (manager style, trimmed to the three words the owner kept:
+// Free / Preparing / Served, plus the pay rings — and 🔔 only where a guest can actually
+// ring, i.e. when dining sessions are on). Rendered by renderFloor so it tracks settings.
+function floorLegendHtml() {
+  const LEG = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
+  const bell = sessionsOn() ? `<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span>` : "";
+  return `<span class="lgcap">inside:</span>${LEG.map(([k, v]) => `<span class="lgi"><i class="ldot ldot-${k}"></i>${v}</span>`).join("")}${bell}<span class="lgcap">outline:</span><span class="lgi"><i class="lring lring-red"></i>unpaid</span><span class="lgi"><i class="lring lring-green"></i>paid</span>`;
+}
+
+// The persistent ⚡ Quick order button in the top bar — shown once settings confirm this
+// waiter may take orders (admin x-ray view sees it tinted when it's off for real waiters).
+function syncQuickOrderBtn() {
+  const qb = document.getElementById("quickOrderBtn");
+  if (!qb) return;
+  const on = state.data.settings ? tshow("tablet_take_orders") : false;
+  qb.hidden = !on;
+  qb.style.display = on ? "" : "none";
+  qb.classList.toggle("xray-off", on && tperm("tablet_take_orders") === "off" && tHigher());
+}
+
 function renderFloor() {
   bindFloorDelegation(); // attach the ONE delegated tile/quick/chip handler (boolean-guarded)
   const _t0 = performance.now();
 
-  const countsEl = document.getElementById("counts");
-  if (countsEl) countsEl.innerHTML = floorCountsHtml();
   const navEl = document.getElementById("floorNav");
   if (navEl) navEl.innerHTML = floorNavHtml();
+  const legEl = document.getElementById("floorLegend");
+  if (legEl) legEl.innerHTML = floorLegendHtml();
+  syncQuickOrderBtn();
   renderMySection();               // sections: "Your tables · 1-6" (no-op when unrestricted)
+
+  const tilesGrid = document.getElementById("tiles");
+  if (tilesGrid) tilesGrid.style.setProperty("--per-row", String(floorPerRow()));
 
   let html = "";
   for (const i of floorTableList()) {       // floor plan + any occupied off-plan table
@@ -931,9 +963,7 @@ function patchTabletTiles(tables) {
     patched++;
   }
   // Filter-count strips can move on any change (e.g. a table flips to/from "needs") → refresh
-  // their counts in place. Their buttons are delegated on #counts/#floorNav, so this is safe.
-  const countsEl = document.getElementById("counts");
-  if (countsEl) countsEl.innerHTML = floorCountsHtml();
+  // their counts in place. Their buttons are delegated on #floorNav, so this is safe.
   const navEl = document.getElementById("floorNav");
   if (navEl) navEl.innerHTML = floorNavHtml();
   renderMySection();               // sections: "Your tables · 1-6" (no-op when unrestricted)
@@ -943,7 +973,7 @@ function patchTabletTiles(tables) {
 }
 
 // bindFloorDelegation: attach the floor's click handling ONCE on the stable containers
-// (#tiles for tiles + quick buttons; #counts/#floorNav for the filter chips — all three are
+// (#tiles for tiles + quick buttons; #floorNav for the filter chips — both are
 // static in index.html, only their innerHTML changes). Why delegation instead of per-tile
 // onclick? At 300 tables the old renderFloor re-bound ~300 listeners on EVERY render; with one
 // delegated handler, patched/replaced tile nodes need NO re-binding — the listener lives on the
@@ -953,10 +983,8 @@ let floorDelegationBound = false;
 function bindFloorDelegation() {
   if (floorDelegationBound) return;
   floorDelegationBound = true;
-  // Filter chips (count chips + floor-nav row) — change the floor filter, then full render.
+  // Filter chips (the floor-nav row) — change the floor filter, then full render.
   const onChip = (e) => { const b = e.target.closest("[data-filter]"); if (b) { state.floorFilter = b.dataset.filter; renderFloor(); } };
-  const countsEl = document.getElementById("counts");
-  if (countsEl) countsEl.addEventListener("click", onChip);
   const navEl = document.getElementById("floorNav");
   if (navEl) navEl.addEventListener("click", onChip);
   // The tile grid — quick actions FIRST (nested inside the tile; matching one and returning
@@ -977,8 +1005,16 @@ function bindFloorDelegation() {
       optimisticAccept(partyOrders(qt).filter((o) => o.status === "received").map((o) => o.id));
       return;
     }
-    // Quick "Attend" — open the table's detail to handle the call / join request.
-    if ((q = e.target.closest(".tatt[data-quick='attend']"))) { selectTable(q.dataset.qt); return; }
+    // Quick "＋ Take order" — open this table's detail straight into the order builder,
+    // exactly like the manager's on-tile ＋ Take order (the send still confirms — 2 steps).
+    if ((q = e.target.closest(".t-take[data-quick='order']"))) {
+      const t = q.dataset.qt;
+      if (state.ordering && state.cart.length && String(t) !== String(state.table)) {
+        if (!(await confirmDialog("Discard this unsent order and switch table?", "Yes, discard"))) return;
+      }
+      openOrderForTable(t);
+      return;
+    }
     // Quick "Mark paid" — same payment-method modal + whole-table pay as the detail panel,
     // without opening it.
     if ((q = e.target.closest(".tpay[data-quick='pay']"))) {
@@ -998,9 +1034,27 @@ function bindFloorDelegation() {
       if (state.ordering && state.cart.length && String(tile.dataset.t) !== String(state.table)) {
         if (!(await confirmDialog("Discard this unsent order and switch table?", "Yes, discard"))) return;
       }
+      // A FREE tile goes STRAIGHT into taking an order (manager rule, owner 2026-07-31 /
+      // 2026-08-03): there is no open/close step, so the detail of an empty table has
+      // nothing to show — the order builder IS the action. A table with anything on it
+      // (or a "wants in" request, or no take-orders permission) opens the detail popup.
+      const tState = summaryTile(tile.dataset.t).state;
+      if ((tState === "free") && tshow("tablet_take_orders")) { openOrderForTable(tile.dataset.t); return; }
       selectTable(tile.dataset.t);
     }
   });
+}
+
+// openOrderForTable(t): select table t and land directly in the order builder — the
+// one-tap path used by a FREE tile and the on-tile ＋ Take order button. selectTable
+// resets ordering state, so re-enter order mode after it kicks off (it renders the
+// detail first; this immediately replaces it with the builder — no visible flash,
+// both happen in the same task before the browser paints).
+function openOrderForTable(t) {
+  selectTable(t); // async slice fetch continues in the background
+  state.ordering = true; state.viewOrder = false; state.quick = false; state.cart = [];
+  state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0;
+  renderPanel();
 }
 
 // openDishEditModal: ONE editor for a single placed dish — toggle which allergens
@@ -1144,7 +1198,7 @@ function renderPanel() {
     p.classList.remove("om-open");
     const off = omBackOff; omBackOff = null; if (off) off();
   }
-  if (!state.table && !state.parcel) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
+  if (!state.table && !state.quick) { p.innerHTML = `<div class="empty">Tap a table to see it — or to take an order for it.</div>`; return; }
   if (state.ordering) { renderOrderMode(); return; }
   const t = state.table, s = sessionOf(t), a = tableAgg(t);
 
@@ -1354,12 +1408,21 @@ function renderPanel() {
   // The table detail opens as ONE centered POPUP over the floor at every width
   // (owner 2026-07-05: "keep popup only, not side view, for the tablet"). The floor
   // stays behind it; #panel:has(.detail-pop) dims + centers the card via CSS.
+  // KOT & table operations live AT THE TOP of the popup (owner, 2026-08-03 — "KOT options
+  // on the top, just like the manager, whenever the popup opens"). The money + close
+  // actions stay pinned at the bottom where thumbs expect them.
+  const headOps =
+    (s && kotOpsOn() ? `<button class="btn small${txray("tablet_table_ops")}" id="kotMenuBtn">🧾 KOT ▾</button>` : "")
+    + (s && !kotOpsOn() ? `<button class="btn small" id="shiftTable">⇄ Move table</button>` : "")
+    + (s && os.length && !kotOpsOn() ? `<button class="btn small" id="moveOrderBtn">⇄ Move an order</button>` : "")
+    + (tabletTagsOn() && tshow("tablet_table_tags") ? `<button class="btn small${txray("tablet_table_tags")}" id="tagTable">${TABLE_TAG_INFO[ttagOf(t)] ? TABLE_TAG_INFO[ttagOf(t)].emoji : "🏷"} Table type</button>` : "");
   p.innerHTML = `
    <div class="detail-pop">
     <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
       <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${mergeGroupLabel(t) ? `<span class="tmerge">⇄ one party · ${esc(mergeGroupLabel(t))}</span> · ` : ""}${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}${unsentMeta}</div></div>
     </div>
+    ${headOps ? `<div class="phead-ops">${headOps}</div>` : ""}
     <div class="detail-body">
       ${reqRows ? `<div class="sec"><h3>Requests</h3>${reqRows}</div>` : ""}
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
@@ -1369,10 +1432,8 @@ function renderPanel() {
     </div>
     <div class="dacts">
       ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
-      ${s && kotOpsOn() ? `<button class="btn${txray("tablet_table_ops")}" id="kotMenuBtn">🧾 KOT ▾</button>` : ""}
-      ${s && !kotOpsOn() ? `<button class="btn" id="shiftTable">⇄ Move table</button>` : ""}
-      ${tabletTagsOn() && tshow("tablet_table_tags") ? `<button class="btn${txray("tablet_table_tags")}" id="tagTable">${TABLE_TAG_INFO[ttagOf(t)] ? TABLE_TAG_INFO[ttagOf(t)].emoji : "🏷"} Table type</button>` : ""}
-      ${s && os.length && !kotOpsOn() ? `<button class="btn" id="moveOrderBtn">⇄ Move an order</button>` : ""}
+      <!-- 🧾 KOT ▾ / ⇄ Move / 🏷 Table type moved to the TOP of this popup (phead-ops,
+           owner 2026-08-03 — manager style). -->
       <!-- ↻ Restart REMOVED (owner, 2026-08-01). It was the last open/close-era action left in any
            panel, and it is what created the state he caught: it archived the round, released the
            guests and left the PARTY OPEN with nobody on it — a table the floor draws as Free while
@@ -2578,7 +2639,17 @@ async function genInvoice(sid) {
   // (owner, 2026-07-30). The server enforces the same rule.
   const s = state.data.settings || {};
   let body = null;
-  if (s.bill_customer_required !== false && window.LFH_BILLCUST) {
+  // TWO STEPS, NEVER THREE (owner, 2026-08-03). Issuing an invoice is a bill action, so it
+  // must not fire on a single tap — but it already has a second step whenever the customer
+  // sheet asks who the bill is for, or when the waiter's invoice power is PIN-gated. The
+  // plain confirm therefore appears ONLY when neither of those will run, which is exactly
+  // the case that used to issue an invoice number off one stray tap.
+  const willAskCustomer = s.bill_customer_required !== false && !!window.LFH_BILLCUST;
+  const willAskPin = tperm("tablet_invoice") === "pin";
+  if (!willAskCustomer && !willAskPin) {
+    if (!(await confirmDialog("Generate the invoice for this table?", "Generate invoice"))) return;
+  }
+  if (willAskCustomer) {
     // Re-issuing a reopened bill opens the sheet pre-filled with THIS session's own
     // customer (owner, 2026-07-30) — scoped to this session id, never another table's.
     const sess = (state.data.sessions || []).find((x) => x.id === sid);
@@ -3157,19 +3228,15 @@ function orderCartHtml() {
       <span class="cprice">${inr(l.price * l.qty)}</span>
     </div>`).join("");
   const total = state.cart.reduce((s, l) => s + l.price * l.qty, 0);
-  const parcel = !!state.parcel;
-  const custHtml = parcel
-    ? `<div class="pcust"><input type="text" id="pcustName" class="note" placeholder="Customer name (optional)" value="${esc(state.pcust || "")}"><input type="text" id="pcustPhone" class="note" inputmode="tel" placeholder="Phone (optional)" value="${esc(state.pphone || "")}"></div>`
-    : "";
-  const foot = parcel
-    ? `<div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
-       <div class="parcel-pay"><button class="btn green big parcel-send" data-pay="now" ${state.cart.length ? "" : "disabled"}>Pay now &amp; print</button><button class="btn primary big parcel-send" data-pay="later" ${state.cart.length ? "" : "disabled"}>Pay on pickup</button></div>`
-    : `<div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
+  // ⚡ Quick order: the table is chosen at the END, so the big button asks for it — tapping
+  // it opens the table picker, and PICKING the table is what sends (the picker is the
+  // deliberate second step; a third "are you sure" would be the over-asking the owner banned).
+  const sendLbl = state.quick ? "CHOOSE TABLE &amp; SEND →" : "SEND TO KITCHEN";
+  const foot = `<div class="ctotal"><span>Items total</span><b>${inr(total)}</b></div>
        <div class="muted small">Final bill (incl. tax) is computed by the system when you send it.</div>
-       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>SEND TO KITCHEN</button>`;
+       <button class="btn primary big" id="sendOrder" ${state.cart.length ? "" : "disabled"}>${sendLbl}</button>`;
   return `<div class="cart">
-      <h3>${parcel ? "This parcel" : "This order"}</h3>
-      ${custHtml}
+      <h3>This order</h3>
       <div class="cart-lines">${lines || `<div class="muted">Tap dishes to add them.</div>`}</div>
       <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Avoid in ALL dishes — e.g. nuts, dairy" value="${esc(state.allergies || "")}">
       ${foot}
@@ -3207,11 +3274,9 @@ function updateOrderCart() {
   // cake"). The label is worded allergen-only to steer waiters away from notes; per-dish
   // notes go through the ✎ Edit modal instead.
   const al = c.querySelector("#orderAllergy"); if (al) al.oninput = (e) => (state.allergies = e.target.value);
-  const send = c.querySelector("#sendOrder"); if (send) send.onclick = sendOrder;
-  // Parcel mode: two pay buttons + the optional customer fields.
-  c.querySelectorAll(".parcel-send").forEach((b) => (b.onclick = () => sendParcel(b.dataset.pay === "now")));
-  const pn = c.querySelector("#pcustName"); if (pn) pn.oninput = (e) => (state.pcust = e.target.value);
-  const pp = c.querySelector("#pcustPhone"); if (pp) pp.oninput = (e) => (state.pphone = e.target.value);
+  // () => sendOrder() — NOT `= sendOrder`: onclick passes the click event, and sendOrder's
+  // first argument is the destination table (the quick-order picker calls sendOrder(t)).
+  const send = c.querySelector("#sendOrder"); if (send) send.onclick = () => sendOrder();
 }
 // Leave order mode by ANY exit (← back, ✓ Done, hardware back) — one place drops the
 // takeover class + the back-stack layer so none of them can leak.
@@ -3221,7 +3286,15 @@ function exitOrderMode() {
   if (voBackOff) { voBackOff(); voBackOff = null; }   // drop the view-order back step if it's up
   state.ordering = false; state.addToOrderId = null; state._omTop = 0; state.viewOrder = false;
   state.cart = []; state.allergies = "";   // abandoning an order clears its cart + allergy list (no leak to the next table)
-  state.parcel = false; state.pcust = ""; state.pphone = "";   // and any in-progress parcel
+  state.quick = false;                     // and any in-progress ⚡ quick order
+  // Backing out of an order for a STILL-FREE table returns to the FLOOR, not to an
+  // empty-table popup — the free tile jumped straight into ordering, so there is no
+  // detail to go "back" to (found by the 2026-08-03 walkthrough: the leftover popup
+  // sat over the whole screen and blocked the top bar).
+  if (state.table != null && !sessionOf(state.table) && !ordersOf(state.table).length) {
+    state.table = null;
+    renderFloor();
+  }
   renderPanel();
 }
 // Back / ← Menu from the view-order screen → the dish LIST (one step), not out of the order.
@@ -3231,41 +3304,48 @@ function closeViewOrder() {
   renderOrderMode();
 }
 
-// ── Parcel / takeaway (no table) ─────────────────────────────────────────────
-// Same dish picker as ＋Take order, but no table + pay-now / pay-on-pickup → a takeaway
-// order in the Platform system (server /parcel). Reached from the ☰ drawer (#dwParcel),
-// gated by the parcel module + tablet_parcel cap.
-function openParcelMode() {
-  state.parcel = true; state.ordering = true; state.viewOrder = false;
+// ── ⚡ Quick order (owner, 2026-08-03) ────────────────────────────────────────
+// The tablet's ONE general order door, always on the top bar: build the order FIRST,
+// pick the table LAST. (It replaced the tablet's 🥡 Parcel entry — the owner removed
+// parcel from the waiter tablet the day after making it permanent; parcels stay a
+// manager feature. The /parcel endpoint + tablet_parcel cap are untouched server-side.)
+function openQuickOrder() {
+  if (state.ordering && state.cart.length) return; // already mid-order — don't wipe a cart
+  state.quick = true; state.ordering = true; state.viewOrder = false;
   state.table = null; state.addToOrderId = null;
-  state.cart = []; state.allergies = ""; state.pcust = ""; state.pphone = "";
+  state.cart = []; state.allergies = "";
   state.cat = ""; state.dishSearch = ""; state._omTop = 0; state._addedThisVisit = 0;
-  renderPanel();
+  renderFloor(); renderPanel();
 }
-let sendingParcel = false;
-async function sendParcel(payNow) {
-  if (sendingParcel) return;
+// Step 2 of a quick order: WHERE does it go? Picking the table IS the send — the picker
+// is the deliberate second step (tap SEND → tap the table), so nothing asks a third time.
+function openQuickDest() {
   if (!state.cart.length) { toast("Add at least one dish first", false); return; }
-  if (!(await confirmDialog(payNow ? "Take payment now and send this parcel to the kitchen?" : "Send this parcel to the kitchen (pay on pickup)?"))) return;
-  sendingParcel = true;
-  document.querySelectorAll(".parcel-send").forEach((b) => (b.disabled = true));
-  try {
-    const splitCsv = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
-    const items = state.cart.map((l) => {
-      const optTxt = (l.options && l.options.length) ? l.options.map((o) => o.label).join(", ") : "";
-      const noteFull = [optTxt, l.allergy ? `⚠ ${l.allergy}` : "", (l.note || "").trim()].filter(Boolean).join(" · ");
-      return { id: l.id, qty: l.qty, price: l.open_price ? l.price : undefined, note: noteFull || undefined };
-    });
-    const r = await api("POST", "/parcel", { items, allergies: splitCsv(state.allergies), note: null, customer: state.pcust || null, phone: state.pphone || null, paid: payNow, method: payNow ? "cash" : null });
-    if (r && r.queued) toast("Saved — the parcel will send when you're back online.", true);
-    else toast(r && r.kot_no != null ? `Parcel sent! #${r.kot_no}${payNow ? " · paid" : " · pay on pickup"}` : "Parcel sent", true);
-    state.parcel = false; state.ordering = false; state.cart = []; state.allergies = ""; state.pcust = ""; state.pphone = "";
-    renderPanel();
-    await load();
-  } catch (e) {
-    document.querySelectorAll(".parcel-send").forEach((b) => (b.disabled = false));
-    toast("Couldn't send: " + ((e && e.message) || e), false);
-  } finally { sendingParcel = false; }
+  document.querySelector(".qdest-overlay")?.remove();
+  const tiles = [];
+  for (const i of floorTableList()) {
+    if (!inMySection(i)) continue;          // a sectioned waiter only serves their own tables
+    // A MERGED table is not a free one, whatever its own summary tile says: its party — and
+    // its bill — live on the table it is joined to, and that is where this order would land.
+    // Saying "free" here would be the same lie the floor tiles were fixed for (mig 249).
+    const parent = mergeParentOf(i);
+    const busy = !!parent || tileIsOpen(i);
+    const what = parent ? `joins ${esc(tname(parent) || "T" + parent)}'s bill` : busy ? "joins its bill" : "free";
+    tiles.push(`<button class="qdest-t${busy ? " busy" : ""}" data-qdest="${i}"><b>${esc(tname(i) || "T" + i)}</b><small>${what}</small></button>`);
+  }
+  const ov = document.createElement("div");
+  ov.className = "qdest-overlay";
+  ov.innerHTML = `<div class="qdest-box">
+    <div class="qdest-head"><h3>Which table gets this order?</h3><button class="qdest-x" aria-label="Close">✕</button></div>
+    <div class="muted small" style="margin:2px 0 12px">Tap a table to send it to the kitchen — a busy table adds it to that table's bill.</div>
+    <div class="qdest-grid">${tiles.join("")}</div>
+  </div>`;
+  document.body.appendChild(ov);
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-qdest", () => closeDest()) : null;
+  const closeDest = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
+  ov.querySelector(".qdest-x").onclick = closeDest;
+  ov.onclick = (e) => { if (e.target === ov) closeDest(); };
+  ov.querySelectorAll("[data-qdest]").forEach((b) => (b.onclick = () => { const t = b.dataset.qdest; closeDest(); sendOrder(t); }));
 }
 
 // The phone VIEW-ORDER screen (owner 2026-07-05): a separate screen (like the guest
@@ -3283,7 +3363,7 @@ function renderViewOrder() {
     <div class="om lite vieworder">
       <div class="om-head">
         <button class="btn small" id="voBack">← Menu</button>
-        <h2>${state.parcel ? "🥡 New Parcel" : `Your order · ${esc(tableLabel(state.table))}`}</h2>
+        <h2>${state.quick ? "⚡ Quick order" : `Your order · ${esc(tableLabel(state.table))}`}</h2>
       </div>
       <div class="om-voscroll">
         <aside class="om-cart" id="omCart"></aside>
@@ -3315,7 +3395,7 @@ function renderOrderMode() {
   p.innerHTML = `
     <div class="om lite">
       <div class="om-head">
-        <h2>${state.parcel ? "🥡 New Parcel" : `${addMode ? "Add · " : ""}${esc(tableLabel(state.table))}`}</h2>
+        <h2>${state.quick ? "⚡ Quick order" : `${addMode ? "Add · " : ""}${esc(tableLabel(state.table))}`}</h2>
         <input type="search" id="dishSearch" class="order-search om-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">
         <button class="btn small ${addMode ? "primary" : ""}" id="omExit">${addMode ? `✓ Done${state._addedThisVisit ? ` (${state._addedThisVisit} added)` : ""}` : "← back"}</button>
       </div>
@@ -3352,14 +3432,22 @@ function renderOrderMode() {
 }
 
 let sendingOrder = false;
-async function sendOrder() {
+async function sendOrder(dest) {
   if (sendingOrder) return;
+  // ⚡ QUICK ORDER, step 2: no table yet → the SEND tap opens the table picker, and the
+  // picker calls back sendOrder(table). The pick is the deliberate second step (owner,
+  // 2026-08-03: every important action is exactly TWO steps — never a third).
+  if (state.quick && dest == null) { openQuickDest(); return; }
   // Claim the guard BEFORE the confirm dialog — otherwise a rapid double/triple-tap on SEND
   // opens the confirm (and reaches the success toast) more than once, showing two "Sent!"
   // toasts even though only one order is placed. Release it if the waiter cancels. (sweep C2)
   sendingOrder = true;
+  const tbl = dest != null ? String(dest) : state.table;
+  const sendLblIdle = state.quick ? "CHOOSE TABLE & SEND →" : "SEND TO KITCHEN";
   const count = state.cart.reduce((s, l) => s + l.qty, 0);
-  if (!(await confirmDialog(`Send ${count} item${count > 1 ? "s" : ""} to the kitchen for table ${state.table}?`))) { sendingOrder = false; return; }
+  // The per-table flow confirms here (step 2). A quick order already answered its second
+  // step in the picker — asking again would be the third step the owner banned.
+  if (dest == null && !(await confirmDialog(`Send ${count} item${count > 1 ? "s" : ""} to the kitchen for table ${tbl}?`))) { sendingOrder = false; return; }
   const sendBtn = document.getElementById("sendOrder");
   if (sendBtn) { sendBtn.disabled = true; sendBtn.textContent = "Sending…"; }
   try {
@@ -3372,7 +3460,7 @@ async function sendOrder() {
     const splitCsv = (s) => (s || "").split(",").map((x) => x.trim()).filter(Boolean);
     const orderAllergies = splitCsv(state.allergies);
     const buildBody = (extra) => Object.assign({
-      table: state.table,
+      table: tbl,
       items: state.cart.map((l) => {
         // The ✎ per-item box travels as a VERBATIM note — the kitchen sees exactly what
         // the waiter typed ("less ice", "no nuts", "extra spicy"). It used to become a
@@ -3399,7 +3487,9 @@ async function sendOrder() {
       if (voBackOff) { voBackOff(); voBackOff = null; }
       if (omBackOff) { omBackOff(); omBackOff = null; }
       state.ordering = false; state.cart = []; state.viewOrder = false; state.note = ""; state.allergies = ""; state._omTop = 0;
+      state.quick = false;
     };
+    const wasQuick = state.quick;
     let r;
     try {
       r = await place();
@@ -3423,14 +3513,14 @@ async function sendOrder() {
         : "Couldn't send the order: " + (reason || "unknown") + (item ? ` (${item})` : "") + ". Please try again.";
       toast(msg, false); return;
     }
-    toast(`Sent! Kitchen ticket #${r.kot_no}`);
+    toast(wasQuick ? `Sent to ${tableLabel(tbl)}! Kitchen ticket #${r.kot_no}` : `Sent! Kitchen ticket #${r.kot_no}`);
     finishSent();
     await load(); renderPanel();
   } catch (e) { toast("Failed: " + e.message, false); }
   finally {
     sendingOrder = false;
     const b = document.getElementById("sendOrder");
-    if (b) { b.disabled = false; b.textContent = "SEND TO KITCHEN"; }
+    if (b) { b.disabled = false; b.textContent = sendLblIdle; }
   }
 }
 
@@ -3996,14 +4086,17 @@ window.addEventListener("online", () => load().catch(() => {}));
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
     '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260722kot1</span></div>' +
+    // Spacer pins the buttons below to the drawer's bottom whichever of them are visible.
+    '<div style="flex:1"></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
     // waiter's tablet_banquet capability allow it (openDrawer re-checks each open).
-    '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:auto;margin-bottom:10px">🎪 Banquet billing</button>' +
-    // 🥡 Parcel / takeaway module (mig 197): its OWN drawer entry (owner 2026-07-26 — the
-    // tablet reaches parcel from the ☰ menu, not a top-bar button). Same ladder + x-ray rule
-    // as banquet; opens the exact same order picker in parcel mode.
-    '<button class="dw-btn" id="dwParcel" type="button" hidden style="margin-top:auto;margin-bottom:10px">🥡 New parcel / takeaway</button>' +
-    '<a class="dw-btn danger" id="dwLogout" href="/api/panel-logout" style="margin-top:0">Log out</a>';
+    '<button class="dw-btn" id="dwBanquet" type="button" hidden style="margin-top:0;margin-bottom:10px">🎪 Banquet billing</button>' +
+    // 🥡 Parcel LEFT the tablet (owner, 2026-08-03 — "the tablet will not have the parcel
+    // option, only quick order"; this reverses his 2026-08-03-morning "permanently there").
+    // Parcels remain a manager feature; the server's /parcel endpoint + cap are untouched.
+    // ⚙️ Settings (owner, 2026-08-03): the drawer's Settings door — holds Log out for now,
+    // more will move in here later.
+    '<button class="dw-btn" id="dwSettings" type="button" style="margin-top:0">⚙️ Settings</button>';
   document.body.appendChild(backdrop); document.body.appendChild(drawer);
 
   let drawerOff = null;
@@ -4022,25 +4115,6 @@ window.addEventListener("online", () => load().catch(() => {}));
       bqBtn.hidden = tHigher() ? false : offForWaiters;
       bqBtn.classList.toggle("xray-off", tHigher() && offForWaiters);
     }
-    // 🥡 Parcel drawer entry — same ladder + admin x-ray rule as banquet above.
-    const pcBtn = drawer.querySelector("#dwParcel");
-    if (pcBtn) {
-      const sset = state.data.settings || {};
-      // PARCEL is its own module again (parcel_*, mig 259) — the counter parcel, NOT the
-      // delivery apps (takeaway_* = Platforms). Between migs 235 and 259 this read takeaway_*,
-      // so every restaurant that simply isn't on Zomato/Swiggy lost its 🥡 button.
-      // PERMANENT since 2026-08-03 (owner: "…permanently there. Permanently."). The parcel_*
-      // columns are still in settings and an old row may say false — reading one again would let
-      // a retired switch take a live feature away.
-      const pAllowed = true;
-      const pOff = !pAllowed || tperm("tablet_parcel") === "off";
-      // X-ray reveals a missing GRANT, never a missing FEATURE: with the module off the server
-      // refuses the parcel for the admin too (mig 259), so revealing the button here would only
-      // walk a higher role into a wall. Hidden for everyone when the restaurant hasn't got it;
-      // tinted, as always, when the restaurant HAS it but this waiter hasn't been given it.
-      pcBtn.hidden = pAllowed && tHigher() ? false : pOff;
-      pcBtn.classList.toggle("xray-off", pAllowed && tHigher() && pOff);
-    }
     loadProfile();
     if (window.LFH_BACK && !drawerOff) drawerOff = LFH_BACK.layer("tablet-drawer", closeDrawer);
   };
@@ -4054,9 +4128,29 @@ window.addEventListener("online", () => load().catch(() => {}));
   { const meBtn = drawer.querySelector("#dwMe"); if (meBtn) meBtn.onclick = () => { closeDrawer(); if (window.LFH_ME) window.LFH_ME.open(); }; }
   const bqDrawerBtn = drawer.querySelector("#dwBanquet");
   if (bqDrawerBtn) bqDrawerBtn.onclick = () => { closeDrawer(); openBanquet(); };
-  const pcDrawerBtn = drawer.querySelector("#dwParcel");
-  if (pcDrawerBtn) pcDrawerBtn.onclick = () => { closeDrawer(); openParcelMode(); };
+  // ⚙️ Settings sheet — Log out lives INSIDE Settings now (owner, 2026-08-03: "in the
+  // settings only keep logout right now, we will add others later").
+  const setBtn = drawer.querySelector("#dwSettings");
+  if (setBtn) setBtn.onclick = () => { closeDrawer(); openSettingsSheet(); };
+  function openSettingsSheet() {
+    document.querySelector(".set-overlay")?.remove();
+    const ov = document.createElement("div");
+    ov.className = "set-overlay";
+    Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+    ov.innerHTML = `<div style="width:min(92vw,360px);background:var(--panel);color:var(--text);border-radius:16px;padding:18px 18px calc(18px + var(--sab));box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
+      <div style="display:flex;align-items:center;gap:10px;margin:0 0 14px"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">⚙️ Settings</h3><button class="set-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;width:40px;height:40px;font-size:16px;cursor:pointer">✕</button></div>
+      <a class="dw-btn danger" href="/api/panel-logout" style="margin-top:0">Log out</a>
+      <div class="muted" style="font-size:12px;margin-top:10px">More settings will live here soon.</div>
+    </div>`;
+    document.body.appendChild(ov);
+    let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-settings", () => closeSheet()) : null;
+    const closeSheet = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
+    ov.querySelector(".set-close").onclick = closeSheet;
+    ov.onclick = (e) => { if (e.target === ov) closeSheet(); };
+  }
   const ham = document.getElementById("hamburger"); if (ham) ham.onclick = openDrawer;
+  // ⚡ Quick order — the persistent top-bar door (build first, pick the table last).
+  const qob = document.getElementById("quickOrderBtn"); if (qob) qob.onclick = openQuickOrder;
   // 🚩 Report an issue (subject + optional photo + live voice note) — shared widget.
   { const rib = document.getElementById("reportIssueBtn"); if (rib) rib.onclick = () => { if (window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m, true) }); }; }
 
