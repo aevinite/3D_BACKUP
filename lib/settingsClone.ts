@@ -99,10 +99,14 @@ export function cleanClonedSettings(
   // PLATFORMS (takeaway_*) is the DIFFERENT feature below — Zomato/Swiggy/own website. It is
   // deliberately not defaulted here in the same breath: see the box at the top of
   // lib/tableTags.ts before touching either.
-  base.takeaway_allowed = false;   // Platforms: an Extra feature, off until the admin grants it
+  // Parcel + Platforms are ONE PERMANENT feature (owner, 2026-08-03, mig 263) — a new
+  // restaurant is born with both on because there is no switch to turn either off. Which
+  // delivery CHANNELS are live is the real per-restaurant choice and lives in
+  // settings.platform_channels, not here.
+  base.takeaway_allowed = true;
   base.takeaway_owner_control = false;
   base.takeaway_enabled = true;
-  base.parcel_allowed = true;      // Parcel: a Main feature, on — the counter always sells parcels
+  base.parcel_allowed = true;      // permanent (mig 263) — the counter always sells parcels
   base.parcel_owner_control = false;
   base.parcel_enabled = true;
   base.tablet_parcel = "off";

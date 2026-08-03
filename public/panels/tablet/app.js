@@ -3904,7 +3904,10 @@ window.addEventListener("online", () => load().catch(() => {}));
       // PARCEL is its own module again (parcel_*, mig 259) — the counter parcel, NOT the
       // delivery apps (takeaway_* = Platforms). Between migs 235 and 259 this read takeaway_*,
       // so every restaurant that simply isn't on Zomato/Swiggy lost its 🥡 button.
-      const pAllowed = sset.parcel_allowed === true && (sset.parcel_owner_control !== true || sset.parcel_enabled !== false);
+      // PERMANENT since 2026-08-03 (owner: "…permanently there. Permanently."). The parcel_*
+      // columns are still in settings and an old row may say false — reading one again would let
+      // a retired switch take a live feature away.
+      const pAllowed = true;
       const pOff = !pAllowed || tperm("tablet_parcel") === "off";
       // X-ray reveals a missing GRANT, never a missing FEATURE: with the module off the server
       // refuses the parcel for the admin too (mig 259), so revealing the button here would only

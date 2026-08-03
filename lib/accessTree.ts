@@ -396,15 +396,49 @@ export const SECTIONS: Section[] = [
             bind: { t: "setting", key: "qop_parcel_allowed" },
             what: "The big Parcel bar on the “where does it go?” step. ON with tables: both are offered. ON with tables off: parcel is the only destination. OFF: no Parcel bar, and QO/P sends to tables only. This switch is only about which destinations the QO/P screen offers — the Parcel feature itself is permanent and has no switch to turn off. With this AND “Quick order — send to a table” both off there is nothing left for QO/P to do, so the button simply isn't on the floor — the header keeps only the KOT menu, nothing is greyed out and nothing errors." },
         ] },
-      // 🥡 PARCEL — its own MAIN feature again (owner, 2026-08-02: "takeaway his whole
-      // separate thing, parcel his whole separate thing"). It sat inside "Platforms" from mig
-      // 235 to 259, which meant a restaurant with no Zomato/Swiggy account — Platforms off,
-      // quite correctly — silently lost the counter-parcel button, and only found out when
-      // the finished order was refused. Main, not Extra: handing a parcel over the counter is
-      // everyday running, not an add-on. Default ON for the same reason QO/P is (mig 259).
-      { id: "parcel", name: "Parcel — counter takeaway", def: true, fresh: true,
-        bind: { t: "module", key: "parcel" },
-        what: "A parcel your own staff punch in at the counter: no table, nothing to connect, no outside account. It is the Parcel choice on ⚡ QO/P, ☰ → New parcel on the waiter tablet, the Parcel tiles that sit under the live floor until one is printed and paid, its own parcel bill, and the parcel half of the 🛵 board. This is NOT Zomato / Swiggy / the restaurant's own website — those arrive from outside and are “Platforms” in Extra features, a completely separate switch. OFF removes every parcel surface above; the delivery side is untouched." },
+      // ╔════════════════════════════════════════════════════════════════════════════════╗
+      // ║ 🛵 ORDERS WITHOUT A TABLE — ONE FEATURE, PERMANENT, NO SWITCH (owner, 2026-08-03)║
+      // ╚════════════════════════════════════════════════════════════════════════════════╝
+      // "The parcel counter should not have a toggle option. The parcel counter where the
+      //  parcels are shown and where the Zomato and all that stuff will be shown will be
+      //  permanently there. Permanently." Asked how far that went, he chose: "merge them into
+      //  one permanent thing… the only switches left are the individual delivery apps inside it".
+      //
+      // This replaces TWO switched rows: "Parcel — counter takeaway" (Main, def ON) and
+      // "Platforms (Zomato, Swiggy, own website)" (Extra, def OFF). They were split apart on
+      // 2026-08-02 by mig 259 because Platforms-off silently killed the counter parcel. That
+      // fix is not being undone — it is being made unnecessary: there is no longer a switch on
+      // either half that can take the board away, which was the whole cause.
+      //
+      // `bind: {t:"none"}` = a pure group, exactly like Bill and Table above: a heading with
+      // real settings under it and nothing to turn off. What IS optional lives inside — each
+      // delivery channel, because "we're not on Swiggy" is a true per-restaurant fact and needs
+      // that company's key. A counter parcel needs no account, so it needs no switch.
+      {
+        id: "orders_no_table", name: "Parcel & delivery platforms", bind: { t: "none" },
+        what: "Every order that isn't someone sitting at a table, on one board: parcels your own staff punch in at the counter, and orders arriving from the delivery apps. Every restaurant has this and it cannot be switched off — a counter parcel needs no account and no key, so there is nothing to enable. What you do switch is the delivery channels below, one per company. The parcel side is the Parcel choice on ⚡ QO/P, ☰ → New parcel on the waiter tablet, the Parcel tiles under the live floor, and the parcel bill.",
+        children: [
+
+          { id: "ch_website", name: "Own website", def: true, bind: { t: "channel", key: "website" },
+            what: "Orders coming in from the restaurant's own website. This is not the counter parcel — a parcel staff punch in themselves needs nothing here and is switched on in Main features.",
+            children: [
+              { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
+                what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },
+            ] },
+          { id: "ch_zomato", name: "Zomato", def: false, bind: { t: "channel", key: "zomato" },
+            what: "Zomato orders land on the Platform board. Needs Zomato's API key — until it is entered the channel shows as “not connected”.",
+            children: [
+              { id: "ch_zomato_key", name: "Zomato API key", bind: { t: "creds", key: "zomato" }, placeholder: "Paste the Zomato API key",
+                what: "From the restaurant's own Zomato partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
+            ] },
+          { id: "ch_swiggy", name: "Swiggy", def: false, bind: { t: "channel", key: "swiggy" },
+            what: "Swiggy orders land on the Platform board. Needs Swiggy's API key — until it is entered the channel shows as “not connected”.",
+            children: [
+              { id: "ch_swiggy_key", name: "Swiggy API key", bind: { t: "creds", key: "swiggy" }, placeholder: "Paste the Swiggy API key",
+                what: "From the restaurant's own Swiggy partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
+            ] },
+        ],
+      },
       {
         id: "bill", name: "Bill", bind: { t: "none" },
         what: "Everything that prints on a bill. There is no on/off — a restaurant can always issue one.",
@@ -465,35 +499,6 @@ export const SECTIONS: Section[] = [
     children: [
       { id: "khata", name: "Pay later (khata)", def: false, bind: { t: "module", key: "khata" },
         what: "Parking a bill on a named regular to collect later, and the book that tracks who owes what. OFF removes the khata screens from the manager AND owner panels entirely." },
-      {
-        // "Platforms" (owner, 2026-07-31). The stored key stays `takeaway`: that is the mig-235
-        // column name, and renaming a LABEL must never rename a column.
-        // It covers the DELIVERY side ONLY. The counter parcel is its own Main feature again
-        // (mig 259) — see the box at the top of lib/tableTags.ts. Do not fold them back
-        // together: switching this off must never take the counter parcel away.
-        id: "takeaway", name: "Platforms (Zomato, Swiggy, own website)", def: false, bind: { t: "module", key: "takeaway" },
-                what: "Orders that arrive from OUTSIDE the restaurant: the delivery apps and the restaurant's own website. Each one is switched on separately below and needs that company's key. OFF removes the delivery side of the 🛵 board. It does NOT touch parcels punched in at the counter — that is “Parcel — counter takeaway” in Main features, its own switch, and it keeps its tiles and its half of the board either way.",
-        children: [
-          { id: "ch_website", name: "Own website", def: true, bind: { t: "channel", key: "website" },
-            what: "Orders coming in from the restaurant's own website. This is not the counter parcel — a parcel staff punch in themselves needs nothing here and is switched on in Main features.",
-            children: [
-              { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
-                what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },
-            ] },
-          { id: "ch_zomato", name: "Zomato", def: false, bind: { t: "channel", key: "zomato" },
-            what: "Zomato orders land on the Platform board. Needs Zomato's API key — until it is entered the channel shows as “not connected”.",
-            children: [
-              { id: "ch_zomato_key", name: "Zomato API key", bind: { t: "creds", key: "zomato" }, placeholder: "Paste the Zomato API key",
-                what: "From the restaurant's own Zomato partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
-            ] },
-          { id: "ch_swiggy", name: "Swiggy", def: false, bind: { t: "channel", key: "swiggy" },
-            what: "Swiggy orders land on the Platform board. Needs Swiggy's API key — until it is entered the channel shows as “not connected”.",
-            children: [
-              { id: "ch_swiggy_key", name: "Swiggy API key", bind: { t: "creds", key: "swiggy" }, placeholder: "Paste the Swiggy API key",
-                what: "From the restaurant's own Swiggy partner account. Once saved it is never shown again — only the last four characters, so you can tell which key is in place without the key being readable off the screen." },
-            ] },
-        ],
-      },
       { id: "banquet", name: "Banquet billing", def: false, bind: { t: "module", key: "banquet" },
                 what: "Per-plate event billing that runs without a table — a wedding, a party booking. OFF removes the Banquet tab.",
         children: [

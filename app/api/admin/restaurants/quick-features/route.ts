@@ -25,17 +25,17 @@ export const dynamic = "force-dynamic";
 const isUuid = (v: unknown): v is string =>
   typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
-const SELECT = "banquet_allowed, banquet_owner_control, banquet_enabled, auto_print_kot_allowed, auto_print_kot, takeaway_allowed, takeaway_owner_control, takeaway_enabled, payroll_allowed, payroll_owner_control, payroll_enabled";
+const SELECT = "banquet_allowed, banquet_owner_control, banquet_enabled, auto_print_kot_allowed, auto_print_kot, payroll_allowed, payroll_owner_control, payroll_enabled";
 type Row = Record<string, unknown> | null;
 const effective = (s: Row) => ({
   // moduleLadder formula (lib/tableTags.ts): enabled defaults to true unless explicitly false.
   banquet: s?.banquet_allowed === true && (s?.banquet_owner_control !== true || s?.banquet_enabled !== false),
   // kitchen route: autoPrintKot = auto_print_kot && auto_print_kot_allowed.
   auto_print_kot: s?.auto_print_kot_allowed === true && s?.auto_print_kot === true,
-  // Platform board — same moduleLadder formula (mig 209). takeaway_* = PLATFORMS only
-  // (Zomato / Swiggy / own website). The counter parcel is a DIFFERENT feature on parcel_*
-  // (mig 259) and is not a quick switch — it lives in Access → Main features.
-  platform: s?.takeaway_allowed === true && (s?.takeaway_owner_control !== true || s?.takeaway_enabled !== false),
+  // (No `platform` key any more — the parcel/delivery board became ONE PERMANENT feature on
+  //  2026-08-03, so there is nothing to quick-switch. A quick toggle for something that cannot
+  //  be off is the dead switch this screen's rebuild exists to remove. The delivery CHANNELS
+  //  are still switchable, under Access → Main features → Parcel & delivery platforms.)
   // Staff profiles & pay — same moduleLadder formula (mig 220).
   payroll: s?.payroll_allowed === true && (s?.payroll_owner_control !== true || s?.payroll_enabled !== false),
 });
@@ -46,10 +46,6 @@ const PATCH: Record<string, { on: Record<string, boolean>; off: Record<string, b
   banquet: { on: { banquet_allowed: true, banquet_enabled: true }, off: { banquet_allowed: false } },
   // ON: allow it AND turn the capability on. OFF: drop the entitlement (kitchen then won't auto-print).
   auto_print_kot: { on: { auto_print_kot_allowed: true, auto_print_kot: true }, off: { auto_print_kot_allowed: false } },
-  // Platform board — ON: allow + enabled; OFF: drop the entitlement (delivery side of the board
-  // hidden, webhooks refused). Writes takeaway_* (mig 235's column name); it does NOT touch the
-  // counter parcel, which keeps its tiles and its half of the board (mig 259).
-  platform: { on: { takeaway_allowed: true, takeaway_enabled: true }, off: { takeaway_allowed: false } },
   // Staff profiles & pay — ON: allow + enabled; OFF: drop the entitlement, which hides profiles,
   // salary records and the performance report everywhere and makes the server refuse them too.
   payroll: { on: { payroll_allowed: true, payroll_enabled: true }, off: { payroll_allowed: false } },

@@ -81,12 +81,13 @@ export const khataLadder = (rid: string) =>
 // ║     A counter order the restaurant's OWN staff punch in: ⚡ QO/P → Parcel on the       ║
 // ║     manager floor, ☰ → New parcel on the waiter tablet, the Parcel tiles under the    ║
 // ║     live floor, the parcel bill. No table, no outside account, no API key.            ║
-// ║     Access → MAIN features, default ON (it replaced a button every floor had).        ║
+// ║     Access → MAIN features. PERMANENT since 2026-08-03 — no switch (see below).       ║
 // ║                                                                                       ║
 // ║   PLATFORMS  → platformLadder() → settings.takeaway_*                                 ║
 // ║     Orders that ARRIVE from outside: Zomato, Swiggy, the restaurant's own website.    ║
 // ║     Each channel is switched on separately (settings.platform_channels) with its own  ║
-// ║     API key. Access → EXTRA features, default OFF.                                    ║
+// ║     API key — and those channel switches are now the ONLY switches here. The feature  ║
+// ║     itself is PERMANENT since 2026-08-03, merged with Parcel into one board.          ║
 // ║                                                                                       ║
 // ║ They meet in exactly one place — both kinds of order live in `aggregator_orders` and  ║
 // ║ show on the 🛵 board — and that is a storage detail, not a shared switch. mig 235     ║
@@ -95,11 +96,38 @@ export const khataLadder = (rid: string) =>
 // ║ server refused the finished order at the last tap.                                    ║
 // ╚══════════════════════════════════════════════════════════════════════════════════════╝
 
+// ╔══════════════════════════════════════════════════════════════════════════════════════╗
+// ║ ONE PERMANENT FEATURE, NO MASTER SWITCH (owner, 2026-08-03)                           ║
+// ║ "The parcel counter should not have a toggle option. The parcel counter where the     ║
+// ║  parcels are shown and where the Zomato and all that stuff will be shown will be      ║
+// ║  permanently there. Permanently." — asked which way, he chose "merge them into one    ║
+// ║  permanent thing".                                                                    ║
+// ║                                                                                       ║
+// ║ So the 🛵 board and the counter parcel are no longer two features with two switches:  ║
+// ║ they are ONE thing every restaurant always has. What stays switchable is what is      ║
+// ║ actually optional — the individual delivery CHANNELS (Zomato, Swiggy, own website),   ║
+// ║ each needing that company's account and key. Nothing else changes: both ladders keep  ║
+// ║ their shape and every call site keeps reading `.effective`.                           ║
+// ║                                                                                       ║
+// ║ WHY THIS IS SAFE, and why it is not a repeat of the bug mig 259 fixed: that bug was   ║
+// ║ "Platforms off silently killed the counter parcel — the floor offered it and the      ║
+// ║ server refused the finished order at the last tap". The cause was a master switch     ║
+// ║ that could turn parcel off. There is now no such switch to turn off, on either half.  ║
+// ║ Merging them BEHIND a switch would bring the bug back; merging them into something    ║
+// ║ permanent is what removes it for good.                                                ║
+// ║                                                                                       ║
+// ║ The settings columns (takeaway_*, parcel_*) are left in the table on purpose — an     ║
+// ║ old row saying `false` must NOT be able to take the feature away, so nothing reads    ║
+// ║ them any more. Do not "restore" a read here without a switch on the Access screen to  ║
+// ║ go with it; a gate no admin can see is the dead switch the access rebuild deleted.    ║
+// ╚══════════════════════════════════════════════════════════════════════════════════════╝
+const ALWAYS_ON: TableTagsLadder = { allowed: true, ownerControl: false, enabled: true, effective: true };
+
 // PLATFORMS — Zomato / Swiggy / the restaurant's own website (mig 209, columns renamed to
-// takeaway_* by mig 235). Which channels are live stays a separate per-restaurant config
-// (settings.platform_channels), edited under the same Access row.
-export const takeawayLadder = (rid: string) =>
-  moduleLadder(rid, { allowed: "takeaway_allowed", control: "takeaway_owner_control", enabled: "takeaway_enabled" });
+// takeaway_* by mig 235). Permanent since 2026-08-03 (see the box above). Which channels are
+// live is still a real per-restaurant config (settings.platform_channels), edited under the
+// same Access row — that is where "we're not on Swiggy" is expressed now.
+export const takeawayLadder = async (_rid: string): Promise<TableTagsLadder> => ALWAYS_ON;
 
 // Banquet's ladder (mig 130 + 167).
 export const banquetLadder = (rid: string) =>
@@ -121,8 +149,7 @@ export const takeOrdersLadder = (rid: string) =>
 // again since mig 259). Its OWN columns, deliberately: a restaurant that is not on Zomato
 // or Swiggy still hands parcels over the counter every day. See the box above before
 // pointing this at takeaway_* "because they're both takeaway" — they are not.
-export const parcelLadder = (rid: string) =>
-  moduleLadder(rid, { allowed: "parcel_allowed", control: "parcel_owner_control", enabled: "parcel_enabled" });
+export const parcelLadder = async (_rid: string): Promise<TableTagsLadder> => ALWAYS_ON;
 
 // Staff profiles, salary records & the performance report (mig 220). A brand-new module:
 // every rung starts OFF, so no restaurant sees profiles or pay until the admin grants it
