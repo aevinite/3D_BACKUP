@@ -420,7 +420,7 @@ export const SECTIONS: Section[] = [
         children: [
 
           { id: "ch_website", name: "Own website", def: true, bind: { t: "channel", key: "website" },
-            what: "Orders coming in from the restaurant's own website. This is not the counter parcel — a parcel staff punch in themselves needs nothing here and is switched on in Main features.",
+            what: "Orders coming in from the restaurant’s own website — needs the key below. This is NOT the counter parcel: a parcel staff punch in themselves needs nothing here and no switch anywhere, because the board it lands on is permanent.",
             children: [
               { id: "ch_website_key", name: "Website connection key", bind: { t: "creds", key: "website" }, placeholder: "Paste the website key",
                 what: "Only needed if the restaurant's own website sends orders in by itself. A counter takeaway punched in by staff needs nothing here." },
