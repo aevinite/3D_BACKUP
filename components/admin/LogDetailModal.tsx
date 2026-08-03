@@ -18,7 +18,7 @@
 import { useEffect, useRef } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
-import { ACT_LABEL, PANEL_COLOR, formatActionDetail, fullWhen, timeAgo, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { actLabel, PANEL_COLOR, formatActionDetail, fullWhen, timeAgo, isManagerPinRow, type Action } from "@/components/admin/shared";
 
 // One "label : value" line. Renders nothing when the value is empty, so no blank rows.
 function Field({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
@@ -69,7 +69,7 @@ export function LogDetailModal({ row, onClose, showRestaurant = true }: { row: A
   // Errors keep their raw text (the stack / where matters); everything else is shown in plain
   // English (esp. the button-tap batches, which are unreadable JSON otherwise).
   const detail = isErr ? (row.detail || "") : formatActionDetail(row.action, row.detail);
-  const actionLabel = ACT_LABEL[row.action] || row.action;
+  const actionLabel = actLabel(row.action);
   const panelColor = PANEL_COLOR[panel] || "#94a3b8";
   const sevColor = isErr && !isResolved ? "var(--adm-danger, #ef4444)" : isWarn ? "var(--adm-warn, #f59e0b)" : undefined;
 

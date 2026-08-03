@@ -14,7 +14,7 @@ import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
 import Dropdown from "@/components/admin/Dropdown";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
-import { openRestaurantPanel, PANEL_COLOR, ACT_LABEL, timeAgo, type Action } from "@/components/admin/shared";
+import { openRestaurantPanel, PANEL_COLOR, actLabel, timeAgo, type Action } from "@/components/admin/shared";
 import { errorSig, errorGroupKey, errorHeadline } from "@/lib/errorSignature";
 
 type Restaurant = { id: string; name: string };
@@ -390,7 +390,7 @@ export default function AdminRepair() {
           {groups.map((g) => {
             const a = g.sample;
             const color = PANEL_COLOR[a.panel] || "var(--adm-danger)";
-            const title = ACT_LABEL[a.action] || a.action;
+            const title = actLabel(a.action);
             const jl = jumpLabel(a);
             const isOpen = expanded.has(g.key);
             const wasSent = sent.has(g.key);
@@ -487,7 +487,7 @@ export default function AdminRepair() {
                   <span className="rp-err-bar" style={{ background: "var(--adm-ok, #4caf82)" }} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
-                      <b style={{ fontSize: 13 }}>{ACT_LABEL[m.action] || m.action}</b>
+                      <b style={{ fontSize: 13 }}>{actLabel(m.action)}</b>
                       <span className="rp-panel">{PANEL_NAME[m.panel] || m.panel}</span>
                       <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{m.restaurant}</span>
                       <span className="rp-chip ok">fixed</span>

@@ -12,7 +12,7 @@
 //      nightly prune (lfh_prune_logs, migration 152). It only ever deletes activity-log
 //      rows (staff_actions) — never bills or customer records.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ACT_LABEL, panelChipStyle, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { actLabel, panelChipStyle, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { useToast } from "@/components/admin/toast";
@@ -347,7 +347,7 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
           >
             <div><span className="adm-chip" style={panelChipStyle(a.panel)}>{a.panel}</span></div>
             <div style={{ minWidth: 0 }}>
-              <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{ACT_LABEL[a.action] || a.action}</span>
+              <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{actLabel(a.action)}</span>
               {isResolved && <span className="adm-chip" style={{ marginLeft: 6, background: "color-mix(in srgb, var(--adm-ok, #16a34a) 20%, transparent)", color: "var(--adm-ok, #16a34a)", fontWeight: 700 }}><i className="fas fa-check" aria-hidden="true" style={{ marginRight: 4 }} />Resolved</span>}
               {isTabletPin
                 ? <span className="adm-chip" title={pinShared ? "PIN shared by these managers — any could have entered it" : "Unlocked by this manager's PIN"}

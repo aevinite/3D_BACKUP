@@ -50,6 +50,17 @@ export function panelChipStyle(panel: string | null | undefined): React.CSSPrope
     color: `color-mix(in srgb, ${c} 78%, var(--text))`,
   };
 }
+// EVERY action code the app can write needs a line here (2026-08-03). The Activity log used to
+// print the raw code for anything missing — a manager reading their own Audit & logs tab saw
+// `order_item_qty`, `invoice_void`, `order_delete`, `menu_delete` sitting between "Placed order"
+// and "Signed in". Half a screen of database column names is not a record anyone can read, and it
+// is the screen the owner opens to answer "who did this?".
+//
+// Two rules keep it that way:
+//   • add a `logAction(...)`/`log(...)` code → add its label here AND in the manager panel's copy
+//     (public/panels/editor/app.js → OP_ACTION_LABELS). `npm run verify:audit` fails otherwise.
+//   • never render `ACT_LABEL[x] || x` — call actLabel(x), which prettifies an unknown code into
+//     "Order item qty" rather than leaking `order_item_qty` onto a person's screen.
 export const ACT_LABEL: Record<string, string> = {
   order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
@@ -71,7 +82,69 @@ export const ACT_LABEL: Record<string, string> = {
   repair_void_bill: "Repair · voided bill", repair_delete_order: "Repair · deleted order",
   repair_refire_order: "Repair · re-fired order", repair_unstick_table: "Repair · unstuck table",
   repair_edit_time: "Repair · edited time", fix_request: "Sent to Claude", error_resolved: "Marked resolved",
+  // ── the bill: printing it, reopening it, settling it ──────────────────────
+  invoice_generate: "Printed the bill", invoice_void: "Reopened the bill", credit_note: "Issued a credit note",
+  bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
+  on_the_house: "Settled on the house", orders_delete: "Deleted bills",
+  order_cancel: "Cancelled the KOT", order_uncancel: "Un-cancelled the KOT", order_tip: "Recorded a tip",
+  order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",
+  khata_park: "Parked the bill on khata", khata_collect: "Collected a khata payment",
+  audit_record_failed: "Audit record FAILED",
+  // ── the floor ─────────────────────────────────────────────────────────────
+  table_merge: "Merged tables", table_unmerge: "Split merged tables",
+  table_open_all: "Opened every table", table_close_all: "Closed every table",
+  table_tag_set: "Marked the table", table_tag_clear: "Cleared the table mark",
+  table_sections_set: "Set waiter sections", table_qr_regen: "Made a new QR code",
+  // ── the menu ──────────────────────────────────────────────────────────────
+  menu_create: "Added to the menu", menu_edit: "Edited the menu", menu_delete: "Deleted from the menu",
+  quick_feature: "Changed a feature switch",
+  // ── parcel, banquet and the delivery platforms ────────────────────────────
+  parcel_place: "Took a parcel order", parcel_collect: "Parcel collected", parcel_print: "Printed a parcel bill",
+  banquet_place: "Took a banquet order", banquet_bill: "Banquet bill",
+  banquet_item_save: "Saved a banquet item", banquet_item_delete: "Deleted a banquet item",
+  platform_toggle: "Turned a platform on/off", platform_channel: "Changed a platform channel",
+  platform_status: "Platform order status", platform_test_order: "Platform test order",
+  // ── stock and money out ───────────────────────────────────────────────────
+  inv_purchase: "Recorded a purchase", inv_purchase_void: "Voided a purchase", inv_waste: "Recorded waste",
+  inv_count_submit: "Submitted a stock count", inv_production: "Recorded production", inv_recipe_save: "Saved a recipe",
+  expense_add: "Recorded an expense", expense_void: "Voided an expense",
+  // ── people ────────────────────────────────────────────────────────────────
+  staff_create: "Added a staff member", staff_delete: "Deleted a staff member", staff_disable: "Disabled a staff member",
+  staff_reset_password: "Reset a staff password", staff_set_role: "Changed a staff role",
+  staff_set_permissions: "Changed permissions", staff_profile_edit: "Edited a staff profile",
+  staff_job_edit: "Edited job details", staff_payment: "Recorded a staff payment",
+  staff_payment_void: "Voided a staff payment", staff_own_pay_visibility: "Changed pay visibility",
+  manager_permissions: "Changed manager powers",
+  user_set_job: "Changed job details", user_set_permissions: "Changed permissions",
+  user_set_photo: "Changed the photo", user_set_pin: "Set the PIN",
+  // ── sign-in safety ────────────────────────────────────────────────────────
+  login_failed: "Wrong password", login_blocked: "Sign-in blocked", login_denied: "Sign-in refused",
+  rate_limited: "Limit reached", rate_limit_edit: "Edited a limit rule", rate_limit_allow: "Allowed through a limit",
+  admin_block: "Blocked a device", admin_unblock: "Unblocked a device", admin_lockout_clear: "Cleared a lockout",
+  blocklist_add: "Added to the blocklist", blocklist_remove: "Removed from the blocklist",
+  // ── the admin console ─────────────────────────────────────────────────────
+  restaurant_create: "Created a restaurant", restaurant_settings: "Changed settings",
+  restaurant_branding: "Changed branding", restaurant_logo: "Changed the logo",
+  restaurant_export: "Exported a restaurant", restaurant_set_owner: "Changed the owner",
+  restaurant_soft_delete: "Moved a restaurant to the bin", restaurant_restore: "Restored a restaurant",
+  restaurant_purge: "Permanently removed a restaurant",
+  owner_create: "Created an owner", owner_rename: "Renamed an owner", owner_reset_password: "Reset an owner's password",
+  owner_attach_restaurant: "Gave an owner a restaurant", owner_detach_restaurant: "Took a restaurant off an owner",
+  owner_set_primary: "Made primary owner", owner_soft_delete: "Moved an owner to the bin",
+  owner_restore_from_bin: "Restored an owner", owner_purge: "Permanently removed an owner",
+  logs_cleanup: "Cleaned up old logs", error_memory_cleared: "Cleared the error memory",
 };
+
+/** The label to SHOW for an action code. Never returns a raw snake_case key: an unknown code is
+ *  prettified ("order_item_qty" → "Order item qty") so a new action added tomorrow reads like
+ *  English on every screen until someone writes it a proper line above. */
+export function actLabel(code: string | null | undefined): string {
+  const k = String(code || "").trim();
+  if (!k) return "—";
+  if (ACT_LABEL[k]) return ACT_LABEL[k];
+  const words = k.replace(/_/g, " ").trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
 
 export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
 
@@ -285,7 +358,7 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
           style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)", cursor: "pointer" }}>
           <span className="adm-chip" style={panelChipStyle(a.panel)}>{a.panel}</span>
           <span style={{ minWidth: 0 }}>
-            {ACT_LABEL[a.action] || a.action}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : det ? ` · ${det}` : ""}
+            {actLabel(a.action)}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : det ? ` · ${det}` : ""}
             {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
           </span>
           <span className="adm-when">{timeAgo(a.created_at)}</span>

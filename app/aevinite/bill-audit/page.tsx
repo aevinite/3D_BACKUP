@@ -6,7 +6,7 @@
 // the change trail + delete/restore. Deleted bills are never erased — tombstoned + restorable.
 // From /api/admin/bills. Change log at /aevinite/bill-audit/changes.
 import { useCallback, useEffect, useState } from "react";
-import { useActiveAutoRefresh, timeAgo, inr } from "@/components/admin/shared";
+import { useActiveAutoRefresh, timeAgo, inr, actLabel } from "@/components/admin/shared";
 import { SkelList } from "@/components/admin/Skeleton";
 
 type BillState = "running" | "settled" | "khata" | "onhouse" | "cancelled" | "deleted";
@@ -34,6 +34,9 @@ const META: Record<BillState, { label: string; tone: string; icon: IconName }> =
 };
 const ORDER: BillState[] = ["running", "settled", "khata", "onhouse", "cancelled", "deleted"];
 
+// Bill-context wording, deliberately narrower than the shared map (this page is ONE bill's
+// trail, so "Invoice voided" reads better than the generic "Reopened the bill"). Anything not
+// listed falls through to the shared actLabel(), which never prints a raw code.
 const ACT_LABEL: Record<string, string> = {
   order_delete: "Bill/order deleted", orders_delete: "Bills cleared", bill_restore: "Bill restored",
   order_discount: "Discount applied", bill_discount: "Bill discount", payment_revert: "Payment reverted",
@@ -354,7 +357,7 @@ function Trail({ e, openedAt, rest }: { e: Expanded | undefined; openedAt: strin
     <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
       {t.map((ev, i) => (
         <div key={i} style={{ display: "flex", gap: 10, fontSize: 12.5, alignItems: "baseline" }}>
-          <span style={{ fontWeight: 600, minWidth: 150 }}>{ACT_LABEL[ev.action] || ev.action}</span>
+          <span style={{ fontWeight: 600, minWidth: 150 }}>{ACT_LABEL[ev.action] || actLabel(ev.action)}</span>
           <span style={{ color: "var(--muted)", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{ev.detail || ""}{ev.actor ? ` · ${ev.actor}` : ""}</span>
           <span style={{ color: "var(--muted)", fontSize: 11.5 }} title={ev.at}>{timeAgo(ev.at)}</span>
         </div>

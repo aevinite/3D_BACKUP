@@ -18,7 +18,7 @@
 // it's your own data). A 60s backstop refresh (paused while the tab is hidden) keeps new
 // rows appearing without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useState } from "react";
-import { ACT_LABEL, panelChipStyle, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { actLabel, panelChipStyle, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { asValue } from "@/lib/ownerPin";
 
@@ -295,7 +295,7 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen }:
               >
                 <div><span className="adm-chip" style={panelChipStyle(a.panel)}>{a.panel}</span></div>
                 <div style={{ minWidth: 0 }}>
-                  <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{ACT_LABEL[a.action] || a.action}</span>
+                  <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{actLabel(a.action)}</span>
                   {isPin
                     ? <span className="adm-chip" title={pinShared ? "PIN shared by these managers — any could have entered it" : "Unlocked by this manager's PIN"}
                         style={{ marginLeft: 6, fontWeight: 700, background: pinShared ? "color-mix(in srgb, var(--adm-warn) 20%, transparent)" : "color-mix(in srgb, #d4af37 20%, transparent)", color: pinShared ? "var(--adm-warn)" : "#d4af37" }}>🔑 {a.actor}</span>

@@ -5541,14 +5541,92 @@ const RETENTION_OPTS = [
 // Internal panel keys → friendly labels for the operation log (the manager panel's internal name
 // is still "editor"; show it as "Manager"). (polish)
 const PANEL_LABEL = { editor: "Manager", manager: "Manager", kitchen: "Kitchen", tablet: "Tablet", owner: "Owner", admin: "Admin", guest: "Guest" };
+// Human labels for every action code the app can write — the SAME list as the admin/owner
+// screens (components/admin/shared.tsx → ACT_LABEL); `npm run verify:audit` fails if the two
+// drift or if a new action code has no label. It used to hold 19 of ~130 codes, so a manager
+// reading their own Activity log saw raw database keys (`order_item_qty`, `invoice_void`,
+// `menu_delete`) between the readable lines (found 2026-08-03).
 const OP_ACTION_LABELS = {
   order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
   table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
   call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
-  login: "Signed in", logout: "Signed out",
-  profile_setup: "Completed profile", profile_update: "Updated profile", pin_set: "Set PIN", password_change: "Changed password",
+  login: "Signed in", logout: "Signed out", profile_setup: "Completed profile", profile_update: "Updated profile",
+  pin_set: "Set PIN", password_change: "Changed password",
+  user_create: "Created user", user_delete: "Deleted user", user_reset_password: "Reset password",
+  user_enable: "Enabled user", user_disable: "Disabled user", user_set_role: "Changed role", user_set_access: "Changed access",
+  order_add_item: "Added a dish", order_item_qty: "Changed quantity", order_item_note: "Edited a note",
+  order_item_delete: "Removed a dish", order_delete: "Deleted order", order_move: "Moved order",
+  order_allergies: "Set allergies", order_item_removed: "Removed allergen", item_status: "Updated dish status",
+  bill_paid: "Marked paid", close_unpaid: "Closed unpaid", payment_revert: "Reverted payment",
+  member_remove: "Removed guest", member_ban: "Banned guest", auto_approve: "Auto-approve", table_restart: "Restarted table",
+  billing_set_plan: "Set billing plan", billing_add_payment: "Recorded a payment", billing_delete_payment: "Deleted a payment",
+  // Everything Log (mig 159) + runtime-support tooling.
+  route_error: "Server error", client_error: "Screen error", ui_taps: "Button taps", row_change: "Manual DB edit",
+  alert_sent: "Alert sent",
+  repair_void_bill: "Repair · voided bill", repair_delete_order: "Repair · deleted order",
+  repair_refire_order: "Repair · re-fired order", repair_unstick_table: "Repair · unstuck table",
+  repair_edit_time: "Repair · edited time", fix_request: "Sent to Claude", error_resolved: "Marked resolved",
+  // ── the bill: printing it, reopening it, settling it ──────────────────────
+  invoice_generate: "Printed the bill", invoice_void: "Reopened the bill", credit_note: "Issued a credit note",
+  bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
+  on_the_house: "Settled on the house", orders_delete: "Deleted bills",
+  order_cancel: "Cancelled the KOT", order_uncancel: "Un-cancelled the KOT", order_tip: "Recorded a tip",
+  order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",
+  khata_park: "Parked the bill on khata", khata_collect: "Collected a khata payment",
+  audit_record_failed: "Audit record FAILED",
+  // ── the floor ─────────────────────────────────────────────────────────────
+  table_merge: "Merged tables", table_unmerge: "Split merged tables",
+  table_open_all: "Opened every table", table_close_all: "Closed every table",
+  table_tag_set: "Marked the table", table_tag_clear: "Cleared the table mark",
+  table_sections_set: "Set waiter sections", table_qr_regen: "Made a new QR code",
+  // ── the menu ──────────────────────────────────────────────────────────────
+  menu_create: "Added to the menu", menu_edit: "Edited the menu", menu_delete: "Deleted from the menu",
+  quick_feature: "Changed a feature switch",
+  // ── parcel, banquet and the delivery platforms ────────────────────────────
+  parcel_place: "Took a parcel order", parcel_collect: "Parcel collected", parcel_print: "Printed a parcel bill",
+  banquet_place: "Took a banquet order", banquet_bill: "Banquet bill",
+  banquet_item_save: "Saved a banquet item", banquet_item_delete: "Deleted a banquet item",
+  platform_toggle: "Turned a platform on/off", platform_channel: "Changed a platform channel",
+  platform_status: "Platform order status", platform_test_order: "Platform test order",
+  // ── stock and money out ───────────────────────────────────────────────────
+  inv_purchase: "Recorded a purchase", inv_purchase_void: "Voided a purchase", inv_waste: "Recorded waste",
+  inv_count_submit: "Submitted a stock count", inv_production: "Recorded production", inv_recipe_save: "Saved a recipe",
+  expense_add: "Recorded an expense", expense_void: "Voided an expense",
+  // ── people ────────────────────────────────────────────────────────────────
+  staff_create: "Added a staff member", staff_delete: "Deleted a staff member", staff_disable: "Disabled a staff member",
+  staff_reset_password: "Reset a staff password", staff_set_role: "Changed a staff role",
+  staff_set_permissions: "Changed permissions", staff_profile_edit: "Edited a staff profile",
+  staff_job_edit: "Edited job details", staff_payment: "Recorded a staff payment",
+  staff_payment_void: "Voided a staff payment", staff_own_pay_visibility: "Changed pay visibility",
+  manager_permissions: "Changed manager powers",
+  user_set_job: "Changed job details", user_set_permissions: "Changed permissions",
+  user_set_photo: "Changed the photo", user_set_pin: "Set the PIN",
+  // ── sign-in safety ────────────────────────────────────────────────────────
+  login_failed: "Wrong password", login_blocked: "Sign-in blocked", login_denied: "Sign-in refused",
+  rate_limited: "Limit reached", rate_limit_edit: "Edited a limit rule", rate_limit_allow: "Allowed through a limit",
+  admin_block: "Blocked a device", admin_unblock: "Unblocked a device", admin_lockout_clear: "Cleared a lockout",
+  blocklist_add: "Added to the blocklist", blocklist_remove: "Removed from the blocklist",
+  // ── the admin console ─────────────────────────────────────────────────────
+  restaurant_create: "Created a restaurant", restaurant_settings: "Changed settings",
+  restaurant_branding: "Changed branding", restaurant_logo: "Changed the logo",
+  restaurant_export: "Exported a restaurant", restaurant_set_owner: "Changed the owner",
+  restaurant_soft_delete: "Moved a restaurant to the bin", restaurant_restore: "Restored a restaurant",
+  restaurant_purge: "Permanently removed a restaurant",
+  owner_create: "Created an owner", owner_rename: "Renamed an owner", owner_reset_password: "Reset an owner's password",
+  owner_attach_restaurant: "Gave an owner a restaurant", owner_detach_restaurant: "Took a restaurant off an owner",
+  owner_set_primary: "Made primary owner", owner_soft_delete: "Moved an owner to the bin",
+  owner_restore_from_bin: "Restored an owner", owner_purge: "Permanently removed an owner",
+  logs_cleanup: "Cleaned up old logs", error_memory_cleared: "Cleared the error memory",
 };
+// Never print a raw code: an unlisted action is prettified ("order_item_qty" -> "Order item qty").
+function actLabel(code) {
+  const k = String(code || "").trim();
+  if (!k) return "—";
+  if (OP_ACTION_LABELS[k]) return OP_ACTION_LABELS[k];
+  const w = k.replace(/_/g, " ").trim();
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
 // which: "oplog_retention_days" (operation log) or "custlog_retention_days" (customer log).
 function retentionControl(which) {
   const cur = Number((state.data.settings || {})[which]) || 90;
@@ -10516,6 +10594,27 @@ function pinPill(r) {
   return ` <span class="op-pinpill${shared ? " op-pinpill-shared" : ""}" title="${esc(title)}">🔑 ${esc(r.actor)}</span>`;
 }
 
+// The "Where" column reads as a sentence, never as stored JSON (2026-08-03). The black-box tap
+// logger (public/panels/errlog.js) stores a batch as `[{"t":12,"l":"Add dish"}]`, and this column
+// printed that verbatim — a wall of JSON on the manager's own Activity log. Same rule and same
+// output as the admin screens (components/admin/shared.tsx → formatActionDetail); the two are
+// checked against each other by npm run verify:audit.
+function opDetailText(action, detail) {
+  if (!detail) return "";
+  if (action !== "ui_taps") return String(detail).replace(/_/g, " ");
+  let arr; try { arr = JSON.parse(detail); } catch { return detail; }
+  if (!Array.isArray(arr)) return detail;
+  const order = [], counts = new Map();
+  for (const it of arr) {
+    if (!it || typeof it !== "object") continue;
+    const l = String(it.l == null ? "" : it.l).trim();
+    if (!l || /^connection\b/i.test(l)) continue;
+    if (!counts.has(l)) order.push(l);
+    counts.set(l, (counts.get(l) || 0) + 1);
+  }
+  if (!order.length) return "checked the screen";
+  return order.map((l) => (counts.get(l) > 1 ? l + " \u00d7" + counts.get(l) : l)).join(", ");
+}
 // oplogHtml: the Operation log — every staff action across the panels (which
 // panel did what, where, and when). Fed by /oplog (the staff_actions table).
 function oplogHtml() {
@@ -10523,7 +10622,6 @@ function oplogHtml() {
   const head = `<div class="ed-head"><h2>Activity log <span class="sub">· staff actions</span></h2><div class="ed-head-actions">${retentionControl("oplog_retention_days")}<button class="btn" id="staffWatch">🔍 Staff watch</button><button class="btn" id="refreshOplog">↻ Refresh</button></div></div>
     <div class="ord-note">Every staff action across the panels — which panel <b>and which device</b> did it, where, and when. Each device gets an automatic ID (shown as <b>#id</b>) until real staff login lands. <b>Click any row</b> for its full date, time and details.</div>`;
   if (!rows.length) return head + `<div class="sx-empty">No staff actions logged yet — accept/serve an order, open/close a table, etc.</div>`;
-  const ACT = OP_ACTION_LABELS;
   // Which staff devices are currently blocked → map device_id to its blocklist
   // row id (so we can offer Unblock). Loaded alongside the customer-log data.
   const blockedDev = {};
@@ -10535,7 +10633,7 @@ function oplogHtml() {
     const device = r.device_id
       ? `<span class="op-dev">📱 #${esc(r.device_id)}</span>`
       : `<span class="lg-muted">—</span>`;
-    const where = r.table_number ? "Table " + esc(r.table_number) : (r.detail ? esc(r.detail) : "");
+    const where = r.table_number ? "Table " + esc(r.table_number) : (r.detail ? esc(opDetailText(r.action, r.detail)) : "");
     // Block/Unblock only for field devices (tablet/kitchen) — never the editor,
     // so the owner can't lock themselves out of the panel that does the unblocking.
     let act = "";
@@ -10547,7 +10645,7 @@ function oplogHtml() {
     return `<div class="oprow oprow-click${blockedDev[r.device_id] ? " op-blocked" : ""}" data-op-detail="${esc(r.id)}">
       <div class="opcell">${device}</div>
       <div class="opcell"><span class="op-panel op-${esc(r.panel)}">${esc(PANEL_LABEL[r.panel] || r.panel)}</span></div>
-      <div class="opcell"><b>${esc(ACT[r.action] || r.action)}</b>${pinPill(r)}${r.actor_id === "00000000-0000-0000-0000-0000000000ad" ? ` <span class="op-pinpill" title="You did this from an admin panel view — staff and owner logs show it as a plain panel action">🛡 Admin</span>` : ""}</div>
+      <div class="opcell"><b>${esc(actLabel(r.action))}</b>${pinPill(r)}${r.actor_id === "00000000-0000-0000-0000-0000000000ad" ? ` <span class="op-pinpill" title="You did this from an admin panel view — staff and owner logs show it as a plain panel action">🛡 Admin</span>` : ""}</div>
       <div class="opcell lg-muted">${where}</div>
       <div class="opcell"><small>${esc(whenLabel(r.created_at))}</small></div>
       <div class="opcell opacts">${act}</div>
@@ -10633,7 +10731,7 @@ function showOpDetail(id) {
     { label: "Action code", value: r.action },
     { label: "Log id", value: r.id },
   );
-  logDetailDialog(OP_ACTION_LABELS[r.action] || r.action, rows);
+  logDetailDialog(actLabel(r.action), rows);
 }
 
 // showCustDetail: open the full-info card for one customer-log (guest) row.
