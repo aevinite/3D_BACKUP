@@ -2450,7 +2450,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!(await managerCan(g, rid, "print_invoice"))) return permDenied("generate bills");
       // lfh_generate_invoice has no tenant param — confirm the session is THIS restaurant's
       // first (service-role bypasses RLS; a foreign session id must not get an invoice).
-      const ownsGen = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const ownsGen = must(await sb.from("sessions").select("id, table_number, bill_no").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; table_number: string | null; bill_no: number | null } | null;
       if (!ownsGen) return err("That table isn't for this restaurant.", 404);
       // The bill is made out to a named customer (mig 227). When the restaurant requires it,
       // NO invoice is issued without a mobile + name — enforced here, not just in the UI, so
@@ -2461,7 +2462,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const genReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReason || null, p_actor: actorName });
       if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw new Error(error.message); }
-      await log("editor", "invoice_generate", { restaurant_id: rid, detail: `session ${b}` + (genReason ? ` · ${genReason}` : ""), device_id: dev });
+      // Say WHICH table and bill, not the session's uuid. The Activity log's "Where" column read
+      // `session dce216b5-72d7-4ba2-…` — a value that identifies nothing to the person reading it
+      // (2026-08-03). table_number also fills the column the log row renders on its own.
+      await log("editor", "invoice_generate", {
+        restaurant_id: rid, table_number: ownsGen.table_number ?? null,
+        detail: `Bill #${ownsGen.bill_no ?? "?"}` + (genReason ? ` · ${genReason}` : ""), device_id: dev,
+      });
       return ok(Array.isArray(data) ? data[0] : data);
     }
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).
@@ -2469,8 +2476,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "void-invoice") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("void bills");
       // Confirm the session belongs to THIS restaurant before voiding (RPC has no tenant param).
-      const ownsVoid = must(await sb.from("sessions").select("id,invoice_at,invoice_no,invoice_voided").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
-        { id: string; invoice_at?: string | null; invoice_no?: string | null; invoice_voided?: boolean | null } | null;
+      const ownsVoid = must(await sb.from("sessions").select("id,invoice_at,invoice_no,invoice_voided,table_number,bill_no").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; invoice_at?: string | null; invoice_no?: string | null; invoice_voided?: boolean | null; table_number?: string | null; bill_no?: number | null } | null;
       if (!ownsVoid) return err("That table isn't for this restaurant.", 404);
       // THERE MUST BE A BILL TO REOPEN (2026-08-03). lfh_void_invoice deliberately no-ops when the
       // session was never invoiced (or is already reopened) — it returns the row unchanged and
@@ -2506,7 +2513,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const wasDiscount = (beforeVoid || []).reduce((s, o) => s + (Number(o.discount) || 0), 0);
       const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: voidReason, p_actor: actorName });
       if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw new Error(error.message); }
-      await log("editor", "invoice_void", { restaurant_id: rid, detail: `session ${b} · ${voidReason}`, device_id: dev });
+      // The table + bill, never the session uuid (see invoice_generate above).
+      await log("editor", "invoice_void", {
+        restaurant_id: rid, table_number: ownsVoid.table_number ?? null,
+        detail: `Bill #${ownsVoid.bill_no ?? "?"}` + (ownsVoid.invoice_no ? ` · Invoice ${ownsVoid.invoice_no}` : "") + ` · ${voidReason}`,
+        device_id: dev,
+      });
       // Into the AUDIT too (it was named by migration 251 and never written until 2026-08-02).
       // `amount` is what the bill stood at when it was reopened, so a later change is visible as a
       // difference rather than having to be reconstructed.
@@ -2522,7 +2534,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // The bill is NEVER edited — a new, numbered, immutable credit document is recorded.
     if (a === "sessions" && c === "credit-note") {
       if (!(await managerCan(g, rid, "void_bills"))) return permDenied("issue credit notes");
-      const ownsCn = must(await sb.from("sessions").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const ownsCn = must(await sb.from("sessions").select("id, table_number, bill_no").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as
+        { id: string; table_number: string | null; bill_no: number | null } | null;
       if (!ownsCn) return err("That table isn't for this restaurant.", 404);
       const cnAmount = Math.round((Number(body?.amount) || 0) * 100) / 100;
       const cnReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
@@ -2531,7 +2544,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { data: cnData, error: cnErr } = await sb.rpc("lfh_issue_credit_note", { p_session: b, p_amount: cnAmount, p_reason: cnReason, p_actor: actorName });
       if (cnErr) { if (/cannot exceed/i.test(cnErr.message)) return err("The credit can't be more than the bill total.", 400); throw new Error(cnErr.message); }
       const cnRow = Array.isArray(cnData) ? cnData[0] : cnData;
-      await log("editor", "credit_note", { restaurant_id: rid, order_id: undefined, detail: `session ${b} · credit ₹${cnAmount} · ${cnReason}`, device_id: dev });
+      // Table + bill, never the session uuid (same rule as invoice_generate / invoice_void).
+      await log("editor", "credit_note", {
+        restaurant_id: rid, order_id: undefined, table_number: ownsCn.table_number ?? null,
+        detail: `Bill #${ownsCn.bill_no ?? "?"} · credit ₹${cnAmount} · ${cnReason}`, device_id: dev,
+      });
       return ok(cnRow);
     }
     if (a === "sessions" && c === "shift") {

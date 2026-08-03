@@ -8,7 +8,7 @@
 //
 // Static + instant, so it runs in the same breath as the other verify scripts.
 // Run: node scripts/verify-audit-coverage.mjs   (or npm run verify:audit)
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -30,7 +30,7 @@ if (HOOK) {
     const j = JSON.parse(readFileSync(0, "utf8") || "{}");
     touched = (j.tool_input && (j.tool_input.file_path || j.tool_input.path)) || null;
   } catch { /* unreadable input → run everything, better than skipping */ }
-  const RELEVANT = /(app\/api\/(editor|tablet)\/|app\/api\/admin\/bills\/|lib\/(removalAudit|sessionClose)\.ts|public\/panels\/editor\/app\.js|app\/aevinite\/logs\/page\.tsx|app\/owner\/activity\/page\.tsx)/;
+  const RELEVANT = /(app\/api\/|lib\/(removalAudit|sessionClose|oplog)\.ts|public\/panels\/editor\/app\.js|components\/admin\/shared\.tsx|app\/aevinite\/(logs|repair|bill-audit)\/page\.tsx|app\/owner\/activity\/page\.tsx)/;
   if (touched && !RELEVANT.test(touched)) process.exit(0);
 }
 
@@ -68,7 +68,7 @@ for (const [where, src, marker, kind, label] of MUST_RECORD) {
   const at = src.indexOf(marker);
   if (at < 0) { fail(`could not find the ${where} handler for ${label} (looked for \`${marker}\`) — if it moved, update this guard`); continue; }
   // Look inside the handler: from its marker to the next ~4500 chars is comfortably one block.
-  const block = src.slice(at, at + 4500);
+  const block = src.slice(at, at + 6500);
   if (new RegExp(`recordRemoval\\([\\s\\S]{0,400}?kind:\\s*"${kind}"`).test(block)) ok(`${label} records "${kind}" (${where})`);
   else fail(`${label} does NOT record "${kind}" in the ${where} route — the change would leave no Audit row`);
 }
@@ -118,6 +118,70 @@ else fail("closeSession no longer records the unpaid orders it cancels — a wal
 if (/recordRemoval\([\s\S]{0,400}?kind:\s*"order_deleted"/.test(adminBills))
   ok("the admin bill ledger records a deleted bill in the Audit");
 else fail("the admin bill ledger deletes bills without an Audit row — the admin must be recorded exactly like everyone else");
+
+// ── 2f · the ACTIVITY log next to it reads as English, not as database keys ──
+// The Removals record was perfect while its neighbour — the Activity log in the same "Audit &
+// logs" tab — printed the raw action code for anything its map missed: `order_item_qty`,
+// `invoice_void`, `order_delete`, `menu_delete`, sitting between "Placed order" and "Signed in"
+// (found 2026-08-03 by screenshotting the tab, not by reading the map). The manager panel's copy
+// held 19 of ~130 codes. Three checks keep it honest.
+{
+  const shared = read("components/admin/shared.tsx");
+  const panelJs = panel;
+  const keysOf = (src, marker) => {
+    const at = src.indexOf(marker);
+    if (at < 0) return null;
+    const end = src.indexOf("\n};", at);
+    return new Set([...src.slice(at, end).matchAll(/(?:^|[{,\s])([a-z][a-z0-9_]*)\s*:/g)].map((m) => m[1]));
+  };
+  const sharedKeys = keysOf(shared, "export const ACT_LABEL: Record<string, string> = {");
+  const panelKeys = keysOf(panelJs, "const OP_ACTION_LABELS = {");
+
+  // Every action code the code can actually WRITE. logAction("panel","action") / log("panel",
+  // "action") / the tablet+kitchen's log("action") — the panel names are subtracted.
+  const PANEL_NAMES = new Set(["editor", "manager", "kitchen", "tablet", "owner", "admin", "guest", "db", "menu"]);
+  const written = new Set();
+  const scan = (dir) => {
+    for (const e of readdirSync(join(root, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) { if (e.name !== "node_modules") scan(rel); continue; }
+      if (!/\.(ts|tsx)$/.test(e.name)) continue;
+      for (const m of read(rel).matchAll(/\blog(?:Action)?\(\s*"([a-z0-9_]+)"\s*,\s*(?:"([a-z0-9_]+)"\s*,)?/g)) {
+        if (m[2]) written.add(m[2]);
+        else if (!PANEL_NAMES.has(m[1])) written.add(m[1]);
+      }
+    }
+  };
+  scan("app"); scan("lib");
+
+  if (!sharedKeys || !panelKeys) fail("could not find ACT_LABEL / OP_ACTION_LABELS — if either moved, update this guard");
+  else {
+    const missShared = [...written].filter((k) => !sharedKeys.has(k)).sort();
+    const missPanel = [...written].filter((k) => !panelKeys.has(k)).sort();
+    if (missShared.length) fail(`action codes with no label on the admin/owner screens (they render as raw keys): ${missShared.join(", ")}`);
+    else ok(`all ${written.size} action codes have a plain-English label on the admin/owner screens`);
+    if (missPanel.length) fail(`action codes with no label in the MANAGER panel's Activity log: ${missPanel.join(", ")}`);
+    else ok("…and every one of them has a label in the manager panel too");
+    const drift = [...sharedKeys].filter((k) => panelKeys.has(k) === false);
+    if (drift.length > 0 && drift.length === sharedKeys.size) fail("the manager panel's label map is unrelated to the shared one — regenerate it");
+  }
+  // A missing label must never reach the screen as a raw key: both sides prettify.
+  if (/export function actLabel\(/.test(shared)) ok("the admin/owner screens prettify an unknown action code instead of printing it raw");
+  else fail("actLabel() is gone from components/admin/shared.tsx — an unlabelled action would print its raw database key");
+  if (/function actLabel\(code\)/.test(panelJs)) ok("…and so does the manager panel");
+  else fail("actLabel() is gone from the manager panel — an unlabelled action would print its raw database key");
+  if (/ACT_LABEL\[[a-z.]+\.action\] \|\| [a-z]+\.action/.test(read("app/aevinite/logs/page.tsx") + read("app/owner/activity/page.tsx")))
+    fail("a log screen still renders `ACT_LABEL[x] || x` — that is the fallback that prints raw codes; call actLabel(x)");
+  else ok("no log screen falls back to printing the raw code");
+  // The "Where" column must never print stored JSON: the tap batches are formatted on BOTH sides.
+  if (/function opDetailText\(/.test(panelJs) && /opDetailText\(r\.action, r\.detail\)/.test(panelJs))
+    ok("the manager panel turns a stored tap batch into readable words, not JSON");
+  else fail("the manager panel prints r.detail raw — a ui_taps row would show [{\"t\":3,\"l\":\"Close\"}] on screen");
+  // The bill trail's "Where" column must name the table + bill, not a session uuid.
+  if (/detail: `session \$\{b\}/.test(editor))
+    fail("an invoice log line still writes `session <uuid>` as its detail — the Activity log's Where column must name the table and bill");
+  else ok("the invoice log lines name the table and the bill, not a session id");
+}
 
 // ── 3 · every kind the recorder can write has a LABEL in all three panels ────
 const kinds = [...lib.matchAll(/^\s*\|\s*"([a-z_]+)"/gm)].map((m) => m[1]);
