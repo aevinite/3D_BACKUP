@@ -79,6 +79,8 @@ const SYNONYMS: Record<string, string> = {
   print_invoice: "bill generate invoice print receipt",
   void_bills: "void reopen cancel bill undo",
   delete_bill: "delete bill remove bill",
+  mgr_bills: "bills record previous today yesterday parcel",
+  mgr_bills_range: "which bills previous yesterday today reach window history",
   table_ops: "move merge split shift transfer table",
   manage_staff: "staff team users waiter add person login",
   edit_settings: "settings configure restaurant setup",

@@ -110,7 +110,12 @@ menu, permission for manager, manager settings."*
    with **Only within**, default **5 min**, enforced at the void-invoice endpoint for a real
    manager) ·
    `Discount a bill` (with the % cap, default **50%** for a manager, 5% for a waiter —
-   `lib/discountCap.ts` falls back to these model defaults when nothing is stored).
+   `lib/discountCap.ts` falls back to these model defaults when nothing is stored) ·
+   `Bills` (owner, 2026-08-03 — a folder, not a switch: the Bills tab stays fixed) with
+   **"Which bills they can see"** — `Today only` (every restaurant's default) or
+   `Today + yesterday`. Stored at `access_config.view_bills.manager_opts.range`, read by
+   `lib/dashRange.ts → billsReach()`, carried to the panel by `/whoami` and ENFORCED at
+   `GET /orders?bills=` + every bill search (the free date search left the panel with it).
 3. **Manager settings (what manager can do)** — only `Tables — name & seats` · `Users —
    staff logins` · `Sections — who serves which table`. Billing/kitchen/sessions rows were
    removed (admin-only in the panel — dead switches). The Users rules: a manager may
