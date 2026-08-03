@@ -43,7 +43,9 @@
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
     "verify:print-format": "node scripts/verify-print-format.mjs",
     "verify:merged-floor": "node scripts/verify-merged-floor.mjs",
-    "verify:xray": "node scripts/verify-xray-marks.mjs"
+    "verify:xray": "node scripts/verify-xray-marks.mjs",
+    "verify:menu-parts": "node scripts/verify-menu-parts.mjs",
+    "verify:menu-parts-live": "node scripts/verify-menu-parts-live.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
