@@ -2404,6 +2404,20 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   .to-list { max-height: 42vh; }
   .to-cart { flex: 1 1 auto; }
   .to-lines { max-height: 28vh; }
+  /* ── THE FOOTER WRAPS, AND THE PRIMARY BUTTON GETS ITS OWN LINE (2026-08-03) ──
+     Adding − Discount to this footer pushed "Place order →" clean off the right edge on a
+     phone: measured on the deployed site, the send button overhung the footer by 74px at
+     360px and 44px at 390px. A footer that cannot show its own primary action is a broken
+     screen — and the check that was watching only asserted the FOOTER was on screen, not
+     the BUTTON inside it, which is why it passed while the screenshot showed the fault.
+     Rather than shrink the primary action to fit (a smaller target on the smallest screen,
+     which is backwards), the money row wraps and the send button takes a full-width line of
+     its own: bigger to hit, and impossible to clip however many controls join the row later.
+     Desktop is untouched — the whole rule is inside this phone query. */
+  .to-foot { flex-wrap: wrap; row-gap: 8px; }
+  .to-foot .to-send, .to-foot .to-pay { flex: 1 1 100%; margin-left: 0; justify-content: center; }
+  .to-foot .qo-cartbtn { margin-left: auto; }
+
   /* On phone the modal body scrolls as one column, so the footer with "Send to kitchen"
      started below the fold — a waiter had to scroll to find the primary action. Pin it to
      the bottom of the scrolling body so Send is always visible (matches the table-detail
