@@ -33,7 +33,10 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
-import { refusalMessage, refusalStatus, worthLogging } from "@/lib/dbRefusal";
+import { worthLogging } from "@/lib/dbRefusal";
+// ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
+// and the device can fall back to what it already has (lib/panelFailure.ts).
+import { panelFailure } from "@/lib/panelFailure";
 import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
@@ -1669,7 +1672,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
     if (worthLogging(e)) logError("manager", "route_error", e, { restaurant_id: rid, detail: `GET ${p || "/"}` });
-    return err(refusalMessage(e), refusalStatus(e));
+    return panelFailure(e);
   }
 }
 
@@ -3641,7 +3644,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
     if (worthLogging(e)) logError("manager", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
-    return err(refusalMessage(e), refusalStatus(e));
+    return panelFailure(e);
   }
 }
 
@@ -3813,7 +3816,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
     if (worthLogging(e)) logError("manager", "route_error", e, { restaurant_id: rid, detail: `PATCH ${path.join("/") || "/"}` });
-    return err(refusalMessage(e), refusalStatus(e));
+    return panelFailure(e);
   }
 }
 
@@ -3942,6 +3945,6 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
     // Record the unexpected failure as an error-level diary line (mig 159) so it shows red in
     // the admin log and can drive the alert / nightly-fix tooling. Fire-and-forget.
     if (worthLogging(e)) logError("manager", "route_error", e, { restaurant_id: rid, detail: `DELETE ${path.join("/") || "/"}` });
-    return err(refusalMessage(e), refusalStatus(e));
+    return panelFailure(e);
   }
 }

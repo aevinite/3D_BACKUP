@@ -15,7 +15,10 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { platformLadder, parcelLadder } from "@/lib/tableTags";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { raiseIssue } from "@/lib/issues";
-import { refusalMessage, refusalStatus, worthLogging } from "@/lib/dbRefusal";
+import { worthLogging } from "@/lib/dbRefusal";
+// ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
+// and the device can fall back to what it already has (lib/panelFailure.ts).
+import { panelFailure } from "@/lib/panelFailure";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 
 export const dynamic = "force-dynamic";
@@ -143,7 +146,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return err("unknown GET endpoint", 404);
   } catch (e) {
     if (worthLogging(e)) logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
-    return err(refusalMessage(e), refusalStatus(e));
+    return panelFailure(e);
   }
 }
 
@@ -306,6 +309,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     return err("unknown POST endpoint", 404);
   } catch (e) {
     if (worthLogging(e)) logError("kitchen", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
-    return err(refusalMessage(e), refusalStatus(e));
+    return panelFailure(e);
   }
 }

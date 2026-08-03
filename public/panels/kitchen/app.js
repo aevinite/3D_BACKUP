@@ -59,7 +59,7 @@ const api = async (method, path, body) => {
   // Live reply or the device's saved copy? The offline bar needs to know.
   if (window.LFH_OFF) window.LFH_OFF.noteResponse(r);
   const j = await r.json().catch(() => null);
-  if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; throw e; }
+  if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; e.busy = (j && j.busy === true) || r.headers.get("X-LFH-Busy") === "1"; throw e; }
   return j;
 };
 // ── table naming (mig 131) ───────────────────────────────────────────────────

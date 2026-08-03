@@ -23,6 +23,9 @@
 //
 // It is deliberately conservative: anything it does not recognise stays a 500, because a real
 // database hiccup MUST keep its "save it and retry" behaviour.
+//
+// NO IMPORTS ON PURPOSE: tests/error-text.test.mjs loads this file with plain `node --test`, which
+// resolves neither the `@/` alias nor an extensionless specifier. Keep it self-contained.
 
 // Postgres SQLSTATEs that mean "this data is not acceptable" (class 22 = data exception,
 // class 23 = integrity constraint violation). Everything else — connection failures, timeouts,
@@ -89,19 +92,107 @@ export function isDataRefusal(e: unknown): boolean {
   return REFUSAL_TEXT.test(msg);
 }
 
+// ── "I COULDN'T REACH THE DATABASE" IS THE THIRD BUCKET (2026-08-03) ──────────────────────────
+// The two buckets above split a failure into "the database refuses this VALUE" (4xx, the person
+// must see it) and "something else went wrong" (500). But the biggest group of failures we
+// actually record is neither: the database was simply not answering.
+//
+// On 2026-08-03 the Fix-NOW board filled with 56 of them in one morning — every one of these,
+// on both restaurants, across five different manager reads:
+//
+//   "GET sessions — TimeoutError: The operation was aborted due to timeout"
+//   "GET summary  — TypeError: fetch failed"
+//
+// The first is our own 8-second deadline (lib/supabaseAdmin.ts) firing because the shared
+// instance was saturated; the second is the connection never being made at all. Measured
+// afterwards, every one of those endpoints answers in 65-1000 ms — nothing was broken, the
+// database was busy for about two hours.
+//
+// A 500 was the wrong answer to that, in two ways a person feels:
+//
+//   · the manager panel showed the raw sentence "TimeoutError: The operation was aborted due to
+//     timeout" in a red toast — which reads as "this app is broken", not "one moment";
+//   · a 500 is "the truth" to the service worker, so it is passed straight through instead of
+//     falling back to the copy already saved on the device (public/sw.js). The device HAD the
+//     floor from a minute earlier and showed an error instead.
+//
+// The owner's rule is explicit (CLAUDE.md, the rush section): "the server can't take this right
+// now" takes the SAME path as "no internet". That was built for WRITES (they queue and replay).
+// This is the read half of the same rule: 503 + a `busy` marker, which the service worker reads
+// as "answer from the device and say so".
+//
+// Nothing is hidden by this: the error row is still recorded with the ORIGINAL message (the
+// routes hand the raw error to logError), so the Repair board still shows exactly what happened.
+// Only the status and the sentence a person reads change. A 500 stays a 500 for anything we do
+// NOT recognise here, so a genuine bug is never dressed up as a busy moment.
+const UNREACHABLE_CODES = new Set([
+  "57014", // query_canceled — "canceling statement due to statement timeout"
+  "08000", "08001", "08003", "08004", "08006", // connection exception family
+  "53100", // disk full
+  "53200", // out of memory
+  "53300", // too many connections  ← the peak-load shape we design against
+  "55P03", // lock not available
+  "40001", // serialization failure (retryable by definition)
+  "40P01", // deadlock detected
+]);
+
+// The same conditions as prose, for the paths where only a message survives — a fetch that never
+// connected, our own deadline, PostgREST/Cloudflare in front of a database that stopped answering.
+//
+// The last group is what a GATEWAY error PAGE says. When Supabase's edge can't reach the database
+// it answers with a whole Cloudflare HTML page and supabase-js hands that page over as the error
+// message (the 2026-07-31 ticket — errorSignature.readableError exists for the same reason). We
+// match the WORDS such a page carries rather than parsing HTML here, so there is no second copy
+// of that parser to drift from the first.
+const UNREACHABLE_TEXT =
+  /statement timeout|operation was aborted|aborted due to timeout|fetch failed|socket hang up|econnreset|econnrefused|etimedout|enotfound|eai_again|epipe|connection (refused|reset|closed|terminated|timed out)|too many (clients|connections)|server closed the connection|upstream request timeout|gateway time-?out|service unavailable|temporarily unavailable|bad gateway|web server is down|origin is unreachable|5(0[234]|22|23|24)\s*:/i;
+
+// AbortSignal.timeout() rejects with a DOMException named TimeoutError; a caller's own
+// controller gives AbortError. Both mean the same thing here: we gave up waiting.
+const UNREACHABLE_NAMES = new Set(["TimeoutError", "AbortError", "ConnectTimeoutError", "HeadersTimeoutError", "BodyTimeoutError"]);
+
+/**
+ * Was the database simply not reachable in time? (As opposed to refusing the request, or the
+ * app throwing.) True → 503 + `busy`, so the read falls back to the device's saved copy and the
+ * write keeps its existing "save it and replay" behaviour.
+ */
+export function isDbUnreachable(e: unknown): boolean {
+  // A refusal of the VALUE is decided first: it is specific, and it must never be retried.
+  if (isDataRefusal(e) || isMissingRow(e)) return false;
+  const o = (e || {}) as MaybePgError & { name?: unknown; cause?: unknown };
+  if (typeof o.name === "string" && UNREACHABLE_NAMES.has(o.name)) return true;
+  const code = typeof o.code === "string" ? o.code : "";
+  if (code && UNREACHABLE_CODES.has(code)) return true;
+  // Node's fetch reports "fetch failed" and hides the real reason (ECONNRESET, ENOTFOUND…) on
+  // `cause` — so read that too, or every dropped connection looks like an unknown 500.
+  const cause = (o.cause || {}) as { name?: unknown; code?: unknown; message?: unknown };
+  if (typeof cause.name === "string" && UNREACHABLE_NAMES.has(cause.name)) return true;
+  if (typeof cause.code === "string" && UNREACHABLE_CODES.has(cause.code)) return true;
+  const msg = [o.message, o.details, cause.message, cause.code].filter((x) => typeof x === "string").join(" ");
+  return UNREACHABLE_TEXT.test(msg);
+}
+
+/** What a person reads when the database didn't answer. Never blames their internet. */
+export const BUSY_MESSAGE = "The system is very busy right now — this will come back by itself in a moment.";
+
 /**
  * Should this failure be written to the error board as a red crash row?
  * Everything except the pure "someone else already changed/removed it" race — that is normal
  * floor traffic, not a fault, and it drowns out the errors that ARE.
+ *
+ * A busy database IS still logged: it is a real incident the owner needs to see on the Repair
+ * board (that is how the backup stacks surface trouble at all — they send no phone alerts).
  */
 export function worthLogging(e: unknown): boolean {
   return !isMissingRow(e);
 }
 
-/** 400 when the database refused the value, 500 when the database failed to answer. */
+/** 400 when the database refused the value, 503 when it didn't answer, 500 when the app broke. */
 export function refusalStatus(e: unknown, fallback = 500): number {
   if (isMissingRow(e)) return 404;
-  return isDataRefusal(e) ? 400 : fallback;
+  if (isDataRefusal(e)) return 400;
+  if (isDbUnreachable(e)) return 503;
+  return fallback;
 }
 
 /**
@@ -114,6 +205,9 @@ export function refusalMessage(e: unknown): string {
   // "Cannot coerce the result to a single JSON object" is a sentence for a developer, and it
   // arrives in front of a waiter mid-service. Say what happened instead.
   if (isMissingRow(e)) return "That's not there any more — someone else may have changed or removed it. Refresh and try again.";
+  // Same reasoning for "TimeoutError: The operation was aborted due to timeout", which is what a
+  // manager was actually shown in a red toast for two hours on 2026-08-03.
+  if (isDbUnreachable(e)) return BUSY_MESSAGE;
   if (!isDataRefusal(e)) return raw;
   for (const name of Object.keys(PLAIN)) if (raw.includes(name)) return PLAIN[name];
   const m = raw.match(/violates unique constraint/i) ? "Something with that name or number already exists."

@@ -23,6 +23,7 @@ import { logAction } from "@/lib/oplog";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { inventoryLadder } from "@/lib/tableTags";
+import { panelFailure } from "@/lib/panelFailure";
 import { powerEntitlementKey } from "@/lib/ownerEntitlements";
 import { managerGrantValue, isConfigurableGrant } from "@/lib/accessTree";
 
@@ -299,7 +300,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
 
     return err("Unknown inventory path.", 404);
   } catch (e) {
-    return err(e instanceof Error ? e.message : "Inventory read failed.", 500);
+    // A database that didn't answer says so (503 + busy) rather than looking like a broken
+    // screen — the read then comes from the device's saved copy. See lib/panelFailure.ts.
+    return panelFailure(e, { unknown: "Inventory read failed." });
   }
 }
 
@@ -703,6 +706,6 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
 
     return err("Unknown inventory path.", 404);
   } catch (e) {
-    return err(e instanceof Error ? e.message : "Inventory write failed.", 500);
+    return panelFailure(e, { unknown: "Inventory write failed." });
   }
 }, "inventory");

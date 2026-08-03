@@ -23,7 +23,10 @@ import { mergeParentTable } from "@/lib/tableMerge";
 import { rateAllowed } from "@/lib/rateLimit";
 import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
-import { refusalMessage, refusalStatus, worthLogging } from "@/lib/dbRefusal";
+import { worthLogging } from "@/lib/dbRefusal";
+// ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
+// and the device can fall back to what it already has (lib/panelFailure.ts).
+import { panelFailure } from "@/lib/panelFailure";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
@@ -550,7 +553,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     return err("unknown GET endpoint", 404);
   } catch (e) {
     if (worthLogging(e)) logError("tablet", "route_error", e, { restaurant_id: rid, detail: `GET ${path.join("/") || "/"}` });
-    return err(refusalMessage(e), refusalStatus(e));
+    return panelFailure(e);
   }
 }
 
@@ -1785,6 +1788,8 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // log it server-side and return a generic 500. (NB2)
     console.error("[tablet POST]", e instanceof Error ? e.message : e);
     if (worthLogging(e)) logError("tablet", "route_error", e, { restaurant_id: rid, detail: `POST ${path.join("/") || "/"}` });
-    return err("Something went wrong — try again.", 500);
+    // The generic sentence stays for anything we can't classify (NB2 above). A database that
+    // didn't answer, or a value it refused, now says so instead — see lib/panelFailure.ts.
+    return panelFailure(e, { unknown: "Something went wrong — try again." });
   }
 }

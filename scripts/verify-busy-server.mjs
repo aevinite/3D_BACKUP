@@ -53,6 +53,30 @@ const server = http.createServer((req, res) => {
     return res.end(`<!doctype html><meta charset="utf-8"><body>
       <script>${readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8")}</script>`);
   }
+  // Section E drives the REAL service worker, so it is served exactly as the app serves it,
+  // from the root scope. A stub copy would only prove the stub works.
+  if (req.url === "/sw.js") {
+    res.writeHead(200, { "content-type": "text/javascript", "cache-control": "no-store" });
+    return res.end(readFileSync(join(ROOT, "public/sw.js"), "utf8"));
+  }
+  if (req.url === "/panel") {
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end('<!doctype html><meta charset="utf-8"><title>panel</title><body>floor');
+  }
+  if (req.url === "/offline.html") { // the worker pre-caches this on install
+    res.writeHead(200, { "content-type": "text/html" });
+    return res.end("<!doctype html><title>offline</title>saved screens");
+  }
+  // A panel READ. Same four moods as a write, plus "the app itself threw" — which must stay a
+  // 500 and reach the screen, or a bug would hide behind yesterday's numbers.
+  if (req.method === "GET" && req.url.startsWith("/api/editor/")) {
+    if (mode === "dead") return;
+    if (mode === "busy") { res.writeHead(503, { "content-type": "application/json", "X-LFH-Busy": "1" }); return res.end('{"error":"The system is very busy right now — this will come back by itself in a moment.","busy":true}'); }
+    if (mode === "bug") { res.writeHead(500, { "content-type": "application/json" }); return res.end('{"error":"tagRow is not defined"}'); }
+    if (mode === "refuse") { res.writeHead(409, { "content-type": "application/json" }); return res.end('{"error":"Table already billed"}'); }
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end('{"tables":3,"due":0}');
+  }
   let body = "";
   req.on("data", (c) => (body += c));
   req.on("end", () => {
@@ -128,6 +152,93 @@ const src = readFileSync(join(ROOT, "public/panels/outbox.js"), "utf8");
 /window\.LFH_RT\.catchUp/.test(readFileSync(join(ROOT, "public/panels/kitchen/app.js"), "utf8"))
   ? ok("the kitchen's catch-up poll backs off instead of a fixed 5s from every device")
   : bad("the kitchen still polls at a fixed 5s while realtime is down");
+
+// ── E. THE READ HALF OF THE SAME RULE, driving the real public/sw.js ──────────────────────
+// Added 2026-08-03. The write half above has been right since July; the READ half was not, and
+// that is what a manager actually saw for two hours: 56 recorded failures, every one of them the
+// database not answering, every one of them shown as "TimeoutError: The operation was aborted due
+// to timeout" on a screen whose device already held the same floor from a minute earlier.
+// public/sw.js used to pass any server error straight through ("a real server error is the
+// truth"), which is right for a bug and wrong for "not just now".
+console.log("\nE) A read while the database isn't answering (the real service worker)");
+const swPage = await browser.newPage();
+const swLog = [];
+swPage.on("console", (m) => swLog.push(m.text()));
+await swPage.goto(BASE + "/panel", { waitUntil: "domcontentloaded" });
+const registered = await swPage.evaluate(async () => {
+  const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+  await navigator.serviceWorker.ready;
+  for (let i = 0; i < 100 && !navigator.serviceWorker.controller; i++) await new Promise((r) => setTimeout(r, 100));
+  return !!navigator.serviceWorker.controller && !!reg;
+});
+registered ? ok("the real worker is installed and in charge of the page") : bad("the service worker never took control");
+
+// A read on a good connection: this is what puts a copy on the device in the first place.
+mode = "ok";
+const fresh = await swPage.evaluate(async () => {
+  const r = await fetch("/api/editor/summary");
+  return { status: r.status, fromCache: r.headers.get("X-LFH-From-Cache"), body: await r.text() };
+});
+fresh.status === 200 && fresh.body.includes('"tables":3') && !fresh.fromCache
+  ? ok("a normal read is answered live and saved on the device")
+  : bad("the live read didn't come through", JSON.stringify(fresh));
+
+// …and now the database stops answering. Same request, same second.
+mode = "busy";
+const busyRead = await swPage.evaluate(async () => {
+  const r = await fetch("/api/editor/summary");
+  return { status: r.status, fromCache: r.headers.get("X-LFH-From-Cache"), at: r.headers.get("X-LFH-Cached-At"), body: await r.text() };
+});
+busyRead.status === 200 && busyRead.body.includes('"tables":3')
+  ? ok("the screen still gets the floor it had, instead of an error")
+  : bad("a busy database still breaks the read", JSON.stringify(busyRead));
+busyRead.fromCache === "1" && Number(busyRead.at) > 0
+  ? ok("and it is STAMPED as saved data, so the bar can say when it is from")
+  : bad("saved data was passed off as live — that is worse than the error", JSON.stringify(busyRead));
+
+// The three cases that must NOT be softened.
+const forced = await swPage.evaluate(async () => {
+  const r = await fetch("/api/editor/summary?refresh=1");
+  return { status: r.status, fromCache: r.headers.get("X-LFH-From-Cache") };
+});
+forced.status === 503 && forced.fromCache !== "1"
+  ? ok("a forced Refresh is never answered from the device — it waits or fails honestly")
+  : bad("Refresh handed back a saved number", JSON.stringify(forced));
+
+mode = "bug";
+const bug = await swPage.evaluate(async () => {
+  const r = await fetch("/api/editor/summary");
+  return { status: r.status, fromCache: r.headers.get("X-LFH-From-Cache") };
+});
+bug.status === 500 && bug.fromCache !== "1"
+  ? ok("a real 500 still reaches the screen — a bug is never hidden behind saved data")
+  : bad("an app bug was masked as 'busy'", JSON.stringify(bug));
+
+mode = "refuse";
+const refusedRead = await swPage.evaluate(async () => (await fetch("/api/editor/summary")).status);
+refusedRead === 409 ? ok("a refusal still reaches the screen unchanged") : bad(`a 4xx came back as ${refusedRead}`);
+
+// Nothing saved for THIS read → the busy answer itself must arrive, not silence.
+mode = "busy";
+const unsaved = await swPage.evaluate(async () => {
+  const r = await fetch("/api/editor/never-read-before");
+  return { status: r.status, busy: (await r.text()).includes("busy") };
+});
+unsaved.status === 503 && unsaved.busy
+  ? ok("with nothing saved, the panel is told the truth (503, busy)")
+  : bad("a busy read with no saved copy went missing", JSON.stringify(unsaved));
+
+// The server end of the same contract: the routes must actually SEND that 503 + marker.
+const failureSrc = readFileSync(join(ROOT, "lib/panelFailure.ts"), "utf8");
+/X-LFH-Busy/.test(failureSrc) && /busy: true/.test(failureSrc)
+  ? ok("the panel routes answer a dead database with 503 + the busy marker")
+  : bad("the routes send no busy marker, so the worker can't tell it apart from a bug");
+for (const p of ["app/api/editor/[...path]/route.ts", "app/api/kitchen/[...path]/route.ts", "app/api/tablet/[...path]/route.ts"]) {
+  const s = readFileSync(join(ROOT, p), "utf8");
+  /panelFailure\(e/.test(s) && !/refusalMessage\(e\), refusalStatus\(e\)/.test(s)
+    ? ok(`${p.split("/")[2]} sends its failures through the one shared answer`)
+    : bad(`${p} still builds its own failure reply`, "a busy database will look like a bug there");
+}
 
 await browser.close();
 

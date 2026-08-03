@@ -123,7 +123,7 @@ const api = async (method, path, body, opts) => {
   const j = await r.json().catch(() => null);
   // Attach the parsed body + status to the error so callers can read server flags like
   // duplicateWarning (#15) / needPin, which a bare message string would have dropped.
-  if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.data = j; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; throw e; }
+  if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.data = j; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; e.busy = (j && j.busy === true) || r.headers.get("X-LFH-Busy") === "1"; throw e; }
   return j;
 };
 // #2: a write that returned { queued:true } was saved on THIS device (offline) and will
