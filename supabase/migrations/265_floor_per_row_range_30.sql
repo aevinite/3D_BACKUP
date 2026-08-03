@@ -1,4 +1,9 @@
--- 260 — "Tables per row" really does go up to 30.
+-- 265 — "Tables per row" really does go up to 30.
+--
+-- (Was numbered 260, renamed 2026-08-04: another session had already used 260 that evening
+-- for 260_no_second_party_on_a_joined_table.sql, 62 minutes earlier. The two touch different
+-- objects so the outcome never depended on which ran first, but verify:db-parity rightly refuses
+-- a NEW duplicated number — the next collision is the one that WILL touch the same object.)
 --
 -- WHAT WENT WRONG. Migration 226 created floor_per_row with CHECK (2..12), because at the time
 -- the grid refused to shrink a tile below a readability floor and 12 was all that fitted. On
