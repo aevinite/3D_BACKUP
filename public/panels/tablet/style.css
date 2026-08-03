@@ -26,24 +26,35 @@
 *::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--gold) 46%, transparent); background-clip: padding-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
 
-.topbar { display: flex; align-items: center; justify-content: space-between; padding: calc(12px + var(--sat)) 18px 12px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 5; }
-.brand { font-size: 20px; font-weight: 800; }
-.brand .sub { color: var(--muted); font-weight: 500; font-size: 13px; margin-left: 6px; }
+/* MINIMAL top bar (owner, 2026-08-03): one slim row — ☰, a small brand, ⚡ Quick order,
+   the connection light. Every pixel saved here is floor space, which is the point.
+   Left/right safe-area insets cover a landscape phone's notch. */
+.topbar { display: flex; align-items: center; gap: 10px; padding: calc(7px + var(--sat)) calc(12px + env(safe-area-inset-right, 0px)) 7px calc(12px + env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 5; }
+.brand { font-size: 15.5px; font-weight: 800; white-space: nowrap; overflow: hidden; display: flex; align-items: center; min-width: 0; flex: 1; }
+.top-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+/* ⚡ Quick order — the one always-there action on the bar (build first, table last). */
+.qo-top { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; border: 0; border-radius: 11px; padding: 10px 14px; font: inherit; font-weight: 800; font-size: 13.5px; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+.qo-top:hover { filter: brightness(1.05); }
+.qo-top:active { transform: scale(.96); }
+.qo-top[hidden] { display: none; }
 /* Which restaurant this panel is scoped to (multi-tenant). Truncates so it can
    never push the top-bar actions off-screen at narrow (~390px) widths. Hidden
    when empty (name not loaded yet). */
 .brand .rest-name { display: inline-block; vertical-align: middle; max-width: 38vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; margin-left: 8px; }
 .brand .rest-name:empty { display: none; }
-.clock { color: var(--muted); font-variant-numeric: tabular-nums; }
-/* #5: on phones (≤760px, where the hamburger drawer exists) the clock and theme toggle move
-   INTO the drawer, leaving only the connection badge + hamburger on the top bar so it can't
-   crowd next to a longer restaurant name. Desktop (>760px) has no drawer, so it keeps both on
-   the bar. #themeToggle stays in the DOM (hidden) so the drawer's "Theme" button — which
-   proxies a .click() to it — keeps working. */
-@media (max-width: 760px) { .top-actions .clock, .top-actions .theme-toggle { display: none; } }
+/* On a phone the theme toggle moves INTO the ☰ menu, leaving only ⚡ Quick order, the
+   connection light and 🚩 on the bar so a long restaurant name has room. #themeToggle stays
+   in the DOM (just hidden) because the drawer's "Theme" button proxies a .click() to it.
+   (The clock left the bar entirely — it lives in the ☰ menu at every width now.) */
+@media (max-width: 760px) { .top-actions .theme-toggle { display: none; } }
 
-/* two-pane layout: floor left, work panel right (stacks when narrow) */
-.layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 14px; padding: 14px 18px; align-items: start; }
+/* Full-width floor (the table detail is always a popup); left/right safe-area padded. */
+.layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 14px; padding: 12px calc(14px + env(safe-area-inset-right, 0px)) 12px calc(14px + env(safe-area-inset-left, 0px)); align-items: start; }
+/* A grid item's default min-width is AUTO, so a nowrap scrolling row inside the floor (the
+   filter chips, the legend) stretched the whole column past the viewport and the PAGE
+   scrolled sideways — 481px of document on a 360px phone. min-width:0 lets those rows
+   scroll inside themselves, which is the whole point of them. */
+.floor { min-width: 0; }
 @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
 /* On tablet/desktop widths the floor and the work panel scroll INDEPENDENTLY:
    the layout fills the viewport below the sticky topbar and each pane owns its
@@ -61,33 +72,55 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   .layout .floor { padding-left: 8px; padding-right: 8px; padding-top: 8px; }
 }
 
-/* floor tiles — fluid grid, no dead gap */
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; align-items: start; }
+/* floor tiles — MANAGER-STYLE grid (owner, 2026-08-03): tiles-per-row comes from the SAME
+   admin setting the manager floor obeys (settings.floor_per_row → --per-row, set inline by
+   renderFloor), the gap scales with density, and every tile is a SQUARE. On a phone
+   (≤600px) the number is ignored in favour of readable auto-fill tiles — a 12-across floor
+   on a 360px screen would be untappable slivers. */
+.tiles { --per-row: 6; --tile-gap: clamp(3px, calc(84px / var(--per-row, 6)), 14px);
+  display: grid; grid-template-columns: repeat(var(--per-row), minmax(0, 1fr));
+  gap: var(--tile-gap); align-items: start;
+  /* The GRID is a query container so a tile can size its OWN padding from how wide a tile
+     is (100cqw / --per-row). A tile cannot use its own cqw for that: a container-query unit
+     inside the container's own declarations resolves against an OUTER container, so the
+     clamp silently sat at its 13px maximum and a 55px tile spent half its height on padding
+     — which is what clipped every tile in landscape (measured 2026-08-03). */
+  container-type: inline-size; }
+@media (max-width: 600px) { .tiles { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; } }
 
 /* First-paint SKELETON tiles: shimmer placeholders written into the HTML so the
    floor shows structure instantly instead of a blank grid while /state loads. The
    first render of #tiles overwrites them, so they vanish when real tiles arrive. */
-.skel-tile { min-height: 140px; border-radius: 16px; border: 1.5px solid var(--line); background: var(--panel); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.skel-tile { aspect-ratio: 1 / 1; border-radius: 15px; border: 1.5px solid var(--line); background: var(--panel); padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .skel-line { height: 12px; border-radius: 6px; background: linear-gradient(90deg, var(--line) 25%, #4a3f29 37%, var(--line) 63%); background-size: 400% 100%; animation: skel-shimmer 1.3s ease-in-out infinite; }
 .skel-line.title { height: 18px; width: 45%; }
 .skel-line.short { width: 60%; }
 .skel-line.foot { margin-top: auto; width: 75%; }
 @keyframes skel-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
 @media (prefers-reduced-motion: reduce) { .skel-line { animation: none; } }
-/* Tiles match the editor's floor exactly: a per-state --c accent driving a soft
-   gradient fill + border (editor ft-* colors). Open tables grow to hold real
-   info (guests, KOT, kitchen progress); free tables stay compact. */
-/* Every tile is the SAME fixed height — open or free — so the grid never goes
-   ragged (owner: don't resize a tile when it opens). Content bottom-anchors. */
-/* min-height (not a fixed height) so a tile GROWS to fit its content — e.g. the
-   served-unpaid tile that also carries a "Mark paid" button — instead of clipping it. */
-.tile { --c: #6b6253; position: relative; min-height: 140px; border-radius: 16px;
+/* Tiles match the manager's floor exactly: a per-state --c accent driving a soft gradient
+   fill + border (the same ft-* colours). Every tile is the same SQUARE whatever state it is
+   in, so the grid never goes ragged. */
+/* ── A TILE IS A SQUARE (manager rule, ported 2026-08-03) ─────────────────────
+   aspect-ratio gives the square; min-height:fit-content lets a busy tile grow instead of
+   clipping; container-type makes the tile its own query container so everything inside is
+   sized in cqw (1cqw = 1% of THIS tile's width) — a small tile stays readable instead of
+   spilling its own text. Same recipe as the manager's .ftile. */
+.tile { --c: #6b6253; position: relative; aspect-ratio: 1 / 1; min-height: fit-content; container-type: inline-size;
+  /* one tile's width, read off the GRID container — see the note on .tiles */
+  --tw: calc((100cqw - (var(--per-row, 6) - 1) * var(--tile-gap, 10px)) / var(--per-row, 6));
+  border-radius: 15px;
   border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 16%, var(--panel)), var(--panel) 78%);
-  color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: 4px;
-  font-family: inherit; padding: 12px 12px 13px; text-align: left; overflow: hidden; }
-/* the action / progress cluster sticks to the bottom, so all tiles read evenly */
-.tile .topen, .tile .tstrip { margin-top: auto; }
+  color: var(--text); cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: 0;
+  font-family: inherit;
+  padding: clamp(4px, calc(var(--tw) * 0.075), 13px) clamp(5px, calc(var(--tw) * 0.08), 14px);
+  text-align: left; overflow: hidden;
+  transition: transform .12s ease, box-shadow .16s ease; }
+/* The phone grid is auto-fill, not --per-row, so --tw means nothing there: tiles are ≥104px
+   and get a plain comfortable padding. */
+@media (max-width: 600px) { .tile { padding: 9px 10px; } }
+.tile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.4); }
 /* Selection ring: gold normally, but on a tile that carries the red/green payment
    outline the ring takes THAT colour — brighter + glowing — so selecting an unpaid
    table makes the red POP instead of hiding it (owner, 2026-07-04). */
@@ -103,29 +136,79 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    bill (.pay-unpaid), so ringing a free/requested table red was confusing. (2026-06-18) */
 /* #20: a custom table NAME (mig 131) can be long — keep it on one line and ellipsize so it
    never overflows the small tile at ~390px (the number stays in the tile's title attr). */
-.tnum { font-size: 24px; font-weight: 900; line-height: 1.05; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tlabel { font-size: 12px; font-weight: 800; }
-/* Merged party (mig 249): the "⇄ with T…" chip every member tile wears, so a joined table
-   never reads as free/solo. Accent-coloured — it is a STATE, not decoration. */
+/* Row 1: the number + the seat count (2/4 when guests are seated) — manager's ft-top. */
+.t-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+.tnum { font-size: clamp(9px, 21cqw, 30px); font-weight: 800; line-height: 1; color: color-mix(in srgb, var(--c) 78%, var(--text));
+  min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A FREE table's accent is a deliberately dull brown, so mixing 78% of it left the number and
+   the word "Free" barely 7% of a shade off the background — legible up close, not across a
+   room, which is how a floor is actually read. Free tiles lean on --text instead; every other
+   state keeps its own colour (that IS the state). Helps both skins: lighter on dark, darker
+   on white. Measured by the walkthrough's contrast check in BOTH skins. */
+.t-free .tnum, .t-free .t-linenum, .t-req .tnum, .t-req .t-linenum,
+.t-done .tnum, .t-done .t-linenum { color: color-mix(in srgb, var(--c) 30%, var(--text)); }
+.tnum-sm { font-size: clamp(8.5px, 17cqw, 25px); }   /* two digits */
+.tnum-xs { font-size: clamp(7.5px, 12cqw, 18px); }   /* a NAME rather than a number */
+.tseats { display: inline-flex; align-items: center; gap: 3px; flex: 0 0 auto;
+  font-size: clamp(9.5px, 8.3cqw, 12px); font-weight: 800; font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--c) 55%, var(--muted)); }
+/* Row 3: the full-width progress LINE with "x/y served" above it — never a worded box. */
+.t-line { margin-top: auto; display: flex; flex-direction: column; align-items: stretch;
+  min-width: 0; gap: clamp(1px, 1.6cqw, 3px); }
+.t-line .tstrip { width: 100%; min-width: 0; margin-top: 0; }
+.t-linenum { font-size: clamp(10px, 8.6cqw, 13px); line-height: 1.15; font-weight: 800;
+  color: color-mix(in srgb, var(--c) 72%, var(--text)); font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.t-line-plain .t-linenum { font-size: clamp(9px, 8.4cqw, 12px); color: color-mix(in srgb, var(--c) 70%, var(--text)); }
+/* Row 4: the actions — ＋ Take order is the biggest control; ✓ / 💳 are square icons. */
+.t-act { display: flex; align-items: stretch; gap: clamp(3px, 3cqw, 6px); margin-top: clamp(4px, 4cqw, 8px); }
+.t-take { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800;
+  font-size: clamp(9px, 8.6cqw, 13.5px); padding: clamp(4px, 4.5cqw, 9px) 4px;
+  border-radius: clamp(6px, 6cqw, 10px); white-space: nowrap; overflow: hidden; }
+.t-take:hover { filter: brightness(1.05); }
+.t-take i { font-style: normal; }
+/* ── SHED DETAIL ON THE WAY DOWN (manager's rule) ─────────────────────────────
+   A dense floor makes tiles small, and a square tile clips what doesn't fit — so instead of
+   letting anything be sliced, the tile drops the least important thing at each step. What
+   NEVER goes: the table number and the state colour.
+   A container query measures the container's CONTENT box, which is ~16px narrower than the
+   tile itself (padding + border) — so thresholds written as tile widths fire one step early
+   and, on the owner's own 12-per-row floor, the seat counts vanished from tiles that had room
+   for them. These numbers are CONTENT widths, checked against measured tiles: an 89px tile is
+   ~73 inside, 75px is ~61, 55px is ~43. */
+@container (max-width: 80px) { .t-take-t { display: none; } }        /* the word, keep ＋ */
+@container (max-width: 64px) { .tseats, .tile .tmerge .tm-t { display: none; } } /* seats, and the
+   merged table LIST — the ⇄ itself never goes, or a joined table would read as a solo one */
+@container (max-width: 56px) { .t-linenum { display: none; } }               /* the count, keep the bar */
+@container (max-width: 50px) { .t-act { display: none; } }                   /* tap the tile instead */
+.tacc, .tpay { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+  width: clamp(22px, 17cqw, 36px); border-radius: clamp(6px, 6cqw, 10px);
+  font-size: clamp(10px, 9cqw, 15px); font-weight: 800; cursor: pointer; }
+.tacc { background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; }
+.tpay { background: var(--panel-2); border: 1px solid rgba(34,197,94,.5); color: #4ade80; }
+.tacc:hover, .tpay:hover { filter: brightness(1.08); }
+/* Merged party (mig 249): the "⇄ with T…" mark every member tile wears, so a joined table
+   never reads as free/solo. Accent-coloured — it is a STATE, not decoration. On a TILE it
+   sits in the top row where the seat chip would be (never its own row — that overflowed the
+   square and sliced the progress bar), sized in cqw like everything else on the tile. */
 .tmerge { display: inline-block; font-size: 11px; font-weight: 800; color: var(--accent, #f0b232); }
-.tile .tmerge { margin-top: 2px; }
-.t-free .tlabel { color: var(--muted); }
-.t-seated .tlabel { color: #2dd4bf; }
-.t-waiting .tlabel { color: #f5c451; }
-.t-bill .tlabel { color: #f5c451; }
-.t-new .tlabel { color: #f59e0b; }
-.t-prep .tlabel { color: #4f9dff; }
-.t-ready .tlabel { color: #f472b6; }
-.t-done .tlabel { color: #22c55e; }
-.tsub { font-size: 11px; color: var(--muted); }
-.tseats { font-size: 11px; color: var(--gold); font-weight: 700; margin-top: 2px; }
+.tile .tmerge { flex: 0 1 auto; min-width: 0; font-size: clamp(8px, 7.4cqw, 11px); line-height: 1.2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #c084fc; }
+.tile .tmerge i { font-style: normal; }
+/* Light mode: a pale violet on a pale violet tile is nearly invisible — the merged mark has
+   to read in BOTH skins (the "check both skins for fixed colours" rule). */
+html[data-theme="light"] .tile .tmerge { color: #7e22ce; }
+/* (.tlabel / .tsub are gone with the old tile body — the tile's state is its COLOUR plus the
+   "x/y served" line now, exactly like the manager's, so there is no worded state row to style.
+   The per-state colours live on .t-* above, where the tile reads them through var(--c).) */
 /* Pulsing dot on the "Loading order details…" line shown while a tapped table's full
    slice streams in behind an instant summary-driven detail (stale-while-revalidate). */
 .tsl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gold); animation: tslPulse 1s ease-in-out infinite; flex: none; }
 @keyframes tslPulse { 0%, 100% { opacity: .35; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.1); } }
 @media (prefers-reduced-motion: reduce) { .tsl-dot { animation: none; } }
-/* kitchen progress strip + dish-count pills on a tile */
-.tstrip { height: 6px; border-radius: 6px; margin-top: 6px; background: #2a2218; overflow: hidden; display: flex; }
+/* kitchen progress strip (tile + detail loading state) + dish-count pills (detail) */
+.tstrip { height: clamp(3px, 5cqw, 6px); border-radius: 6px; margin-top: 6px; background: #2a2218; overflow: hidden; display: flex; }
 .tstrip i { display: block; height: 100%; }
 .tpills { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
 .tpill { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 8px; white-space: nowrap; }
@@ -134,49 +217,36 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .tpill.rd { background: rgba(236,72,153,.18); color: #f9a8d4; }
 .tpill.sv { background: rgba(34,197,94,.18); color: #4ade80; }
 .tpill.kot { background: #2a2218; color: var(--gold); }
-/* the big editor-style Open button on a free tile */
-.topen { margin-top: 8px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
-  font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; }
-.topen:hover { filter: brightness(1.05); }
-/* the on-tile "Mark paid" button for a served-but-unpaid table (same look as Open) */
-.tile .tpay { margin-top: 8px; }
-.tpay { background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
-  font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; margin-top: 8px; }
-.tpay:hover { filter: brightness(1.05); }
-/* on-tile Accept / Attend quick actions (match the manager's tile buttons) */
-.tile .tacc, .tile .tatt { margin-top: 8px; }
-.tacc, .tatt { background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c;
-  font-weight: 800; font-size: 14px; text-align: center; padding: 10px; border-radius: 11px; }
-.tacc:hover, .tatt:hover { filter: brightness(1.05); }
+/* (The old big Open / Attend / worded Mark-paid tile buttons are gone — the manager-style
+   action row above (.t-act / .t-take / .tacc / .tpay) replaced them, 2026-08-03.) */
 
-/* ── always-on legend ── */
-.legend { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; font-size: 13px;
-  color: var(--muted); padding-bottom: 12px; border-bottom: 1px solid var(--line); margin-bottom: 14px; }
-.leg-grp { display: flex; align-items: center; gap: 13px; flex-wrap: wrap; }
-.leg-key { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #7a6e58; }
-.leg-it { display: flex; align-items: center; gap: 6px; color: #e8ddc8; }
-.legend .sw { width: 14px; height: 14px; border-radius: 5px; }
-.legend .sw.o { background: transparent; border: 2px solid; }
-
-/* ── header count chips (tap to filter) ── */
-.counts { display: inline-flex; gap: 8px; margin-right: 12px; }
-.cchip { display: inline-flex; align-items: center; gap: 6px; background: var(--panel-2); border: 1px solid var(--line);
-  border-radius: 11px; padding: 6px 11px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
-.cchip b { color: var(--text); font-size: 14px; }
-.cchip.on { border-color: var(--gold); }
-.cchip.needs { border-color: var(--red); background: rgba(239,68,68,.10); }
-.cchip.needs b { color: #ff8a8a; }
-@media (max-width: 760px) { .counts { display: none; } } /* on phones the floor-nav row carries the filters */
-.tbadges { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; }
-.tbadges em { font-style: normal; font-size: 11px; background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 999px; padding: 1px 6px; }
+/* ── compact ONE-LINE legend (manager style — replaced the old two-row block, 2026-08-03) ── */
+.floor-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 12px; font-size: 12px; color: var(--muted); }
+.floor-legend:empty { display: none; }
+.lgcap { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: #7a6e58; }
+.lgi { display: inline-flex; align-items: center; gap: 6px; }
+.ldot { width: 11px; height: 11px; border-radius: 4px; display: inline-block; }
+.ldot-free { background: #6b6253; }
+.ldot-prep { background: #4f9dff; }
+.ldot-bill { background: #22c55e; }
+.ldot-merged { background: #a855f7; }   /* listed only while something IS merged */
+.ldot-call { background: transparent; width: auto; height: auto; font-size: 11px; }
+.lring { width: 11px; height: 11px; border-radius: 4px; display: inline-block; background: transparent; border: 2px solid; box-sizing: border-box; }
+.lring-red { border-color: #ef4444; }
+.lring-green { border-color: #22c55e; }
+/* Badge row (calls / requests / joiners) — its own row under the number, manager style,
+   so a busy table's badges never cover the seat count. */
+.tbadges { display: flex; gap: clamp(2px, 2.6cqw, 4px); flex-wrap: wrap; margin-top: clamp(3px, 3.4cqw, 5px); }
+.tbadges em { font-style: normal; font-size: clamp(8.5px, 7.6cqw, 12px); background: rgba(0,0,0,0.45); border: 1px solid var(--line); border-radius: 999px; padding: clamp(1px, 1.4cqw, 2px) clamp(4px, 5cqw, 7px); line-height: 1.4; }
 .b-call { animation: pulse 1.2s ease-in-out infinite; }
 @keyframes pulse { 50% { transform: scale(1.12); } }
 .t-free { --c: #6b6253; opacity: 0.7; }
 .t-seated { --c: #2dd4bf; }
 /* open but nobody seated yet → bright yellow fill (like the editor's ft-waiting) */
 .t-waiting { --c: #f5c451; background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
-/* served but UNPAID → same warm yellow as "open", red unpaid outline sits on top */
-.t-bill { --c: #f5c451; background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
+/* SERVED = GREEN inside (manager parity, owner 2026-08-01: money is told by the pay RING —
+   red owing / green settled — so inside, green means one thing: the food is out). */
+.t-bill { --c: #22c55e; background: linear-gradient(157deg, color-mix(in srgb, var(--c) 42%, var(--panel)), var(--panel) 80%); }
 /* request badge on a tile (a guest asked to open / be let in) */
 .b-req { color: var(--gold-strong); }
 .alg-add { color: #34d058; font-weight: 900; vertical-align: super; font-size: .8em; }
@@ -193,9 +263,8 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .fnav em { font-style: normal; font-size: 11px; background: var(--bg); border-radius: 999px; padding: 1px 7px; }
 .fnav.on { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
 .fnav.on em { background: rgba(0,0,0,.2); }
-/* On wide screens the count chips beside the brand are the filter, so the
-   floor-nav row is redundant — hide it. On narrow it's the only filter. */
-@media (min-width: 761px) { .floor-nav { display: none; } }
+/* The floor-nav chips are the ONE filter strip at every width now — the top-bar count
+   chips were removed with the minimal top bar (owner, 2026-08-03: no live counters up top). */
 /* Waiter sections (mig 222) — the "Your tables · 1-6" strip above the floor. Shown only
    to a waiter who has been given a section; app.js toggles display inline (an author
    display rule here would beat the `hidden` attribute, so it never relies on that). */
@@ -231,7 +300,16 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .t-prep { --c: #4f9dff; }
 /* READY to serve — pink, and it glows to nudge the waiter to carry it out */
 .t-ready { --c: #ec4899; box-shadow: 0 0 16px color-mix(in srgb, var(--c) 30%, transparent); }
-.t-done { --c: #22c55e; }
+/* Cleared (served AND paid) — neutral, like the manager's ft-done; the green ring stays. */
+.t-done { --c: #6b6253; }
+/* Merged party — PURPLE, matching the manager's ft-merged (owner, 2026-08-01). */
+.tile.t-merged { --c: #a855f7; }
+/* LIGHT MODE NEEDS MORE OF THE COLOUR (manager rule): 16% of a state colour over white is
+   nearly invisible, so light mode mixes stronger; dark theme is untouched. */
+html[data-theme="light"] .tile {
+  background: linear-gradient(157deg, color-mix(in srgb, var(--c) 32%, var(--panel)), var(--panel) 82%); }
+html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting {
+  background: linear-gradient(157deg, color-mix(in srgb, var(--c) 58%, var(--panel)), var(--panel) 84%); }
 
 /* the right work panel */
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 16px; min-height: 320px; }
@@ -450,20 +528,13 @@ html[data-theme="light"] .billbox{ background:var(--panel-2); }
 html[data-theme="light"] .tstrip{ background:#e6dcc9; }
 html[data-theme="light"] .tpill.kot{ background:var(--panel-2); }
 /* Hardcoded cream text → dark ink. */
-html[data-theme="light"] .leg-it,
 html[data-theme="light"] .iprice{ color:var(--text); }
-html[data-theme="light"] .leg-key{ color:var(--muted); }
 /* Pale status text → deepened for white. */
-html[data-theme="light"] .cchip.needs b,
 html[data-theme="light"] .inm .irem,
 html[data-theme="light"] .callergy{ color:#c0392b; }
 html[data-theme="light"] .inm .alg-removed{ color:#b45309; }
-html[data-theme="light"] .t-seated .tlabel{ color:#0d9488; }
-html[data-theme="light"] .t-waiting .tlabel, html[data-theme="light"] .t-bill .tlabel,
-html[data-theme="light"] .t-new .tlabel{ color:#b45309; }
-html[data-theme="light"] .t-prep .tlabel{ color:#1d4ed8; }
-html[data-theme="light"] .t-ready .tlabel{ color:#be185d; }
-html[data-theme="light"] .t-done .tlabel{ color:#15803d; }
+/* (the light-mode .tlabel overrides went with .tlabel itself — a tile has no worded state
+   row any more, and its number/count already derive from var(--c), which is theme-aware) */
 
 /* ════════════════════════════════════════════════════════════════════════════
    PHONE RESPONSIVE (2026-06-30): hamburger drawer (settings/profile) + the work
@@ -497,10 +568,35 @@ html[data-theme="light"] .t-done .tlabel{ color:#15803d; }
 
 @media (max-width: 760px) {
   .hamburger { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 12px; font-size: 19px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-  .topbar { padding: 10px 14px; }
-  .brand { font-size: 17px; }
-  .brand .sub { display: none; }
-  .tiles { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 10px; }
+  .topbar { padding: calc(6px + var(--sat)) calc(10px + env(safe-area-inset-right, 0px)) 6px calc(10px + env(safe-area-inset-left, 0px)); gap: 8px; }
+  .brand { font-size: 14.5px; }
+  /* The generic "🧑‍🍳 Tables" drops; the restaurant's own name stays (branding rule). */
+  .brand .brand-word { display: none; }
+  .brand .rest-name { margin-left: 0; max-width: 100%; }
+  /* The connection pill's live latency READING ("102 ms") was eating the space the
+     restaurant's name needs, and on a phone a healthy number tells a waiter nothing. Only
+     that number hides: the coloured bars stay, and so does the WORDING — which the shared
+     badge only ever prints for a problem ("Reconnecting", "Offline"). Never hide a warning,
+     only the decoration around it. */
+  .top-actions .lfh-conn { padding: 5px 7px; }
+  .top-actions .lfh-conn-ms, .top-actions .lfh-conn-unit { display: none !important; }
+  .qo-top { padding: 9px 11px; font-size: 12.5px; }
+  /* Every pixel above the tiles is floor space: the filter chips and the legend each become
+     ONE horizontally-scrollable line instead of wrapping to two rows (which pushed the first
+     tile ~270px down a 780px phone — owner, 2026-08-03: "the table screen should be shown as
+     big as possible"). Nothing is hidden; it scrolls. */
+  /* A row cut off at the edge reads as broken; a row that FADES reads as "there is more this
+     way". Same trick the guest menu's category strip uses. */
+  .floor-nav, .floor-legend { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 22px), transparent 100%); }
+  .floor-nav { margin-bottom: 8px; padding-bottom: 2px; }
+  .floor-nav::-webkit-scrollbar { display: none; }
+  .fnav { flex: 0 0 auto; padding: 7px 12px; }
+  .floor-legend { gap: 9px; margin-bottom: 8px; font-size: 11px; }
+  .floor-legend::-webkit-scrollbar { display: none; }
+  .floor-legend .lgi, .floor-legend .lgcap { flex: 0 0 auto; }
+  .my-section { padding: 6px 11px; margin-bottom: 8px; font-size: 12px; }
+  .layout { padding-top: 8px; }
 
   /* When a table is open, the panel fills the screen; the floor hides behind it. */
   body.tbl-open .floor { display: none; }
@@ -508,7 +604,7 @@ html[data-theme="light"] .t-done .tlabel{ color:#15803d; }
   body.tbl-open #tabletClose { display: inline-flex; align-items: center; justify-content: center; position: fixed; top: calc(var(--sat) + 10px); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 22px; line-height: 1; z-index: 52; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
   body.tbl-open .backtop { display: none; } /* the ✕ replaces the "↑ Tables" link */
   /* comfortable touch targets */
-  .panel .btn, .floor-nav button, .counts button { min-height: 42px; }
+  .panel .btn, .floor-nav button { min-height: 42px; }
 }
 
 /* ── skeleton shimmer for the streaming table detail (stale-while-revalidate) ──
@@ -722,6 +818,30 @@ body:has(.detail-pop) #tabletClose { display: none; }
 /* detail popup: open/closed status never collides with the pinned close X (audit 2026-07-08) */
 .detail-pop .phead .live,.detail-pop .phead .off{ white-space:nowrap; }
 
+/* KOT & table operations AT THE TOP of the popup (owner, 2026-08-03 — manager style). */
+.phead-ops { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 0 10px; border-bottom: 1px solid var(--line); }
+.phead-ops .btn { flex: 0 0 auto; }
+
+/* ⚡ Quick order, step 2: "which table gets this order?" — picking sends. */
+.qdest-overlay { position: fixed; inset: 0; z-index: 100001; background: rgba(4,8,18,.66);
+  -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px);
+  display: flex; align-items: center; justify-content: center; padding: 16px; }
+.qdest-box { width: min(94vw, 560px); max-height: 88dvh; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0,0,0,.5); padding: 16px 18px calc(16px + var(--sab)); }
+.qdest-head { display: flex; align-items: center; gap: 10px; }
+.qdest-head h3 { margin: 0; font-size: 16px; font-weight: 800; flex: 1; }
+.qdest-x { background: var(--panel-2); border: 1px solid var(--line); color: var(--text); border-radius: 10px;
+  width: 40px; height: 40px; font-size: 16px; cursor: pointer; flex: 0 0 auto; }
+.qdest-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.qdest-t { padding: 12px 6px; border-radius: 11px; border: 1px solid var(--line); background: var(--bg);
+  color: var(--text); cursor: pointer; font-family: inherit; text-align: center; min-height: 58px; }
+.qdest-t b { display: block; font-size: 16px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qdest-t small { color: var(--muted); font-size: 11px; }
+.qdest-t:hover { border-color: var(--gold); }
+.qdest-t.busy { border-color: color-mix(in srgb, var(--gold) 55%, transparent); background: color-mix(in srgb, var(--gold) 10%, var(--bg)); }
+.qdest-t.busy small { color: var(--gold-strong); font-weight: 700; }
+
 /* ── Special table types (VIP / Family / Owner's Guest) — mig 166 ──────────────
    APPROVED design (docs/superpowers/specs/2026-07-22-table-tags-mockup.html):
    coloured border + rotated corner ribbon + diagonal-stripe/radial tint + pill
@@ -752,8 +872,4 @@ html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb,
   border: 1px solid color-mix(in srgb, var(--tagc) 55%, transparent); }
 .tile.t-tag > * { position: relative; z-index: 1; }
 
-/* ── Parcel / takeaway (2026-07-26) — customer fields + two pay buttons in the cart ── */
-.cart .pcust { display: flex; gap: 8px; margin: 4px 0 10px; }
-.cart .pcust .note { margin: 0; flex: 1; min-width: 0; }
-.parcel-pay { display: flex; gap: 8px; margin-top: 8px; }
-.parcel-pay .btn { flex: 1; }
+/* (Parcel left the tablet on 2026-08-03 — its cart styles went with it.) */

@@ -303,6 +303,31 @@ if (!HOOK || !touched || /public\/panels\//.test(touched)) {
 // against the LOCAL server before deploying (not only against the deploy afterwards). It loads
 // each panel, reads the rendered text and fails on a console error or an empty screen — which is
 // exactly what both incidents produced.
+// ── 9. A PANEL STYLESHEET MUST NOT CONTAIN STRAY TEXT ─────────────────────────────────────
+//
+// 2026-08-03: editing a long CSS comment left its second half OUTSIDE the comment — five lines
+// of prose sitting in the stylesheet, ending in a lone `*/`. Nothing looked broken: the file
+// loaded, the page rendered, and every other check passed. But a CSS parser recovering from
+// that error DISCARDS the rule that follows it, and the rule that followed was the one that
+// hides the "Take order" wording on a small tile. The symptom was a tile drawing text it had
+// no room for — three sizes away from where the mistake was made — and I only found it after
+// four rounds of measuring the wrong thing.
+//
+// The check is the same shape as the HTML-comment one above: strip every WELL-FORMED block
+// comment, and if a comment delimiter survives, a comment is unbalanced and whatever follows
+// it is being thrown away.
+for (const panel of (wantPanels ? ["editor", "kitchen", "tablet"] : [])) {
+  const file = `public/panels/${panel}/style.css`;
+  let css;
+  try { css = fs.readFileSync(file, "utf8"); } catch { continue; }
+  const stripped = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const at = stripped.search(/\*\/|\/\*/);
+  if (at >= 0) {
+    bad(`${file}: a CSS comment is unbalanced — the rule after it is silently DISCARDED by the parser`,
+      `…${stripped.slice(Math.max(0, at - 120), at + 4).replace(/\s+/g, " ")}`);
+  } else ok(`${file}: comments balanced (no rule is silently dropped)`);
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");
