@@ -58,7 +58,7 @@ const frameOf = async (p) => {
   throw new Error("the tablet panel frame never appeared");
 };
 await page.goto(BASE + "/tablet", { waitUntil: "domcontentloaded" });
-const F = await frameOf(page);
+let F = await frameOf(page);
 await F.waitForSelector(".tile[data-t]", { timeout: 30000 });
 await page.waitForTimeout(1800);                    // settings + floor summary settle
 
@@ -69,7 +69,31 @@ const vis = (sel) => F.evaluate((s) => { const e = document.querySelector(s); re
 // there" off a picker is a claim about the wrong screen.
 const onPopup = async () => (await vis(".detail-pop")) && !(await vis(".picker-back"));
 const onPicker = () => vis(".picker-back");
-const backOnce = async () => { await F.evaluate(() => history.back()); await page.waitForTimeout(1000); };
+// One hardware-BACK press. If the frame DETACHES, the panel navigated away — that is the
+// back button leaving the app, which is a real fault, so it is reported rather than thrown.
+let leftThePanel = false;
+const backOnce = async () => {
+  try { await F.evaluate(() => history.back()); } catch (e) { leftThePanel = true; return; }
+  await page.waitForTimeout(1000);
+};
+// Close an open popup the way a finger does, WITHOUT spending a history entry — so a check
+// that comes later still knows how deep the back-stack is (mixing the two is what made this
+// script's own back assertions drift out of step).
+const closePopup = async () => {
+  if (await vis(".detail-pop #detailClose")) { await F.click(".detail-pop #detailClose"); await page.waitForTimeout(800); }
+  else if (await vis(".picker-back")) { await F.click(".picker-back"); await page.waitForTimeout(800); }
+};
+// A BACK assertion starts from a KNOWN history depth. Closing a layer with its ✕ deregisters
+// the back-stack layer without spending its history entry, so mixing ✕ and BACK in one run
+// drifts the depth and a later BACK sails past the panel and leaves it — which looked like a
+// product fault the first time and was this script's own bookkeeping. Reload, then press once.
+const freshPanel = async () => {
+  await page.goto(BASE + "/tablet", { waitUntil: "domcontentloaded" });
+  const f = await frameOf(page);
+  await f.waitForSelector(".tile[data-t]", { timeout: 30000 });
+  await page.waitForTimeout(1600);
+  return f;
+};
 
 // ── 1 · the minimal top bar ───────────────────────────────────────────────────
 expect(!(await F.$("#counts")), "top bar: no live order counters (the owner asked for them gone)");
@@ -193,6 +217,34 @@ await flipTheme();
 await measureSkin();
 await flipTheme();                                   // leave the skin as we found it
 
+// ── 5b · A MERGED TABLE OPENS ITS PARTY, it never starts a new order ──────────
+// A joined table has no session of its own, so its own summary row reads "free". Taking that
+// at face value sent a tap on T7 (merged into T6) into a brand-new order and left the waiter
+// no way to reach the party's bill, KOT ▾, ✕ Close or 💳 Mark paid — the exact lie mig 249
+// exists to stop. Caught in review on 2026-08-03; asserted here by really tapping the tile.
+{
+  const merged = await F.evaluate(() => {
+    const m = (window.LFH_TEST_MERGES || null);
+    const el = document.querySelector(".tile.t-merged[data-t]");
+    return el ? el.dataset.t : (m || null);
+  });
+  if (!merged) ok("no merged party on the floor right now — the merged-tile check needs one, skipped");
+  else {
+    await F.click(`.tile[data-t="${merged}"] .t-line`);      // the tile body, not an action
+    await page.waitForTimeout(1600);
+    const what = await F.evaluate(() => ({
+      detail: !!document.querySelector(".detail-pop"),
+      builder: !!document.querySelector(".om.lite"),
+      head: (document.querySelector(".detail-pop h2") || document.querySelector(".om.lite .om-head h2") || {}).textContent || "",
+    }));
+    expect(what.detail && !what.builder, `a merged table (T${merged}) opens the PARTY's detail, not a new order (got ${what.builder ? "the order builder" : "the detail"}: ${what.head.trim()})`);
+    if (what.detail) {
+      expect(await vis(".detail-pop #closeTable") || await vis(".detail-pop .phead-ops"), "…and from there the party's bill controls are reachable");
+      await closePopup();                                  // ✕, not BACK — keeps the stack depth honest
+    } else if (what.builder) { await F.click("#omExit").catch(() => {}); await page.waitForTimeout(800); }
+  }
+}
+
 // ── 6 · the table popup: KOT operations on TOP, money + close at the bottom ───
 const busyT = await F.evaluate(() => {
   const t = [...document.querySelectorAll(".tile")].find((x) => !/t-free/.test(x.className));
@@ -213,23 +265,38 @@ else {
   expect(/KOT|Move|Table type/i.test(opsTxt), `popup: its top row carries the table operations (${opsTxt.replace(/\s+/g, " ").trim()})`);
   await shot("table-popup");
 
-  // step into an operation and come back out with the hardware BACK
+  // A KOT operation opens its OWN picker — the pick is that operation's second step.
+  // Retried ONCE: this panel is live, so a realtime refresh landing on the same tick can
+  // repaint the menu away between the open and the tap. A retry tells "the code is wrong"
+  // apart from "the floor moved under the test" — and the panel now guards the repaint
+  // (state.pickerOpen), so a second failure is a real one.
   if (await vis("#kotMenuBtn")) {
-    await F.click("#kotMenuBtn");
-    await F.waitForSelector("[data-kotop]", { timeout: 8000 });
-    const openable = await F.evaluate(() => { const b = [...document.querySelectorAll("[data-kotop]")].find((x) => !x.disabled); return b && b.dataset.kotop; });
-    if (openable) {
-      await F.click(`[data-kotop='${openable}']`);
-      await page.waitForTimeout(1200);
-      expect(await onPicker(), `"${openable}" opens its own picker — the PICK is its second step`);
-      await backOnce();
-      expect(!(await onPicker()), "BACK peels the picker off");
-      expect(await vis("#tiles"), "…and never leaves the panel");
-    } else ok("every KOT operation is correctly disabled for this table");
-    for (let i = 0; i < 3 && !(await onPopup()); i++) await backOnce();
+    let opened = false, which = "";
+    for (let a = 1; a <= 2 && !opened; a++) {
+      if (!(await vis("#kotMenuBtn"))) { await closePopup(); await F.click(`.tile[data-t="${busyT}"]`); await F.waitForSelector(".detail-pop .phead-ops", { timeout: 10000 }).catch(() => {}); }
+      await F.click("#kotMenuBtn");
+      const menu = await F.waitForSelector("[data-kotop]", { timeout: 8000 }).catch(() => null);
+      if (!menu) continue;
+      which = await F.evaluate(() => { const b = [...document.querySelectorAll("[data-kotop]")].find((x) => !x.disabled); return b && b.dataset.kotop; });
+      if (!which) { ok("every KOT operation is correctly disabled for this table"); opened = true; break; }
+      await F.click(`[data-kotop='${which}']`);
+      await page.waitForTimeout(1400);
+      opened = await onPicker();
+    }
+    if (which) expect(opened, `"${which}" opens its own picker — the PICK is its second step`);
+    if (opened) await shot("kot-picker");
   }
-  if (await onPopup()) { await backOnce(); }
+  await closePopup();
+
+  // ── the hardware BACK, from a KNOWN depth: reload, open ONE layer, press once. ──
+  F = await freshPanel();
+  await F.click(`.tile[data-t="${busyT}"]`);
+  await F.waitForSelector(".detail-pop", { timeout: 10000 });
+  await page.waitForTimeout(1200);
+  await backOnce();
+  expect(!leftThePanel, "BACK peels a layer — it never navigates the panel away");
   expect(!(await vis(".detail-pop")), "BACK closes the table popup and lands on the floor");
+  expect(await vis("#tiles"), "…with the floor still there");
 }
 
 // ── 7 · ☰ → ⚙️ Settings → Log out; no parcel on the tablet ────────────────────

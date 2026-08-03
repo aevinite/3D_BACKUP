@@ -882,12 +882,25 @@ function floorPerRow() {
   return Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
 }
 
+// Is a guest-facing feature on for this restaurant? Mirrors the manager's featureOn(): the
+// settings row carries a `features` JSONB and anything unset is ON (lib/features.ts defaults
+// every switch true except the backend-only four, none of which this panel asks about).
+const tFeatureOn = (key) => {
+  const f = (state.data.settings || {}).features || {};
+  return typeof f[key] === "boolean" ? f[key] : true;
+};
+
 // The compact ONE-LINE legend (manager style, trimmed to the three words the owner kept:
-// Free / Preparing / Served, plus the pay rings — and 🔔 only where a guest can actually
-// ring, i.e. when dining sessions are on). Rendered by renderFloor so it tracks settings.
+// Free / Preparing / Served, plus the pay rings). Rendered by renderFloor so it tracks
+// settings — a legend must only ever explain a colour this floor can actually show:
+//   · PURPLE is listed only while something IS merged (same rule as the manager);
+//   · 🔔 needs BOTH dining sessions AND the guest bell — with the bell switched off nobody
+//     can ring, so explaining it would describe a colour that can never appear (the owner
+//     had exactly this removed from the manager on 2026-08-01).
 function floorLegendHtml() {
   const LEG = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
-  const bell = sessionsOn() ? `<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span>` : "";
+  if (mergeList().length) LEG.push(["merged", "Merged"]);
+  const bell = (sessionsOn() && tFeatureOn("waiter_calls")) ? `<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span>` : "";
   return `<span class="lgcap">inside:</span>${LEG.map(([k, v]) => `<span class="lgi"><i class="ldot ldot-${k}"></i>${v}</span>`).join("")}${bell}<span class="lgcap">outline:</span><span class="lgi"><i class="lring lring-red"></i>unpaid</span><span class="lgi"><i class="lring lring-green"></i>paid</span>`;
 }
 
@@ -1038,9 +1051,18 @@ function bindFloorDelegation() {
       // 2026-08-03): there is no open/close step, so the detail of an empty table has
       // nothing to show — the order builder IS the action. A table with anything on it
       // (or a "wants in" request, or no take-orders permission) opens the detail popup.
-      const tState = summaryTile(tile.dataset.t).state;
-      if ((tState === "free") && tshow("tablet_take_orders")) { openOrderForTable(tile.dataset.t); return; }
-      selectTable(tile.dataset.t);
+      //
+      // A MERGED TABLE IS NEVER "FREE", whatever its own summary row says. A child's party —
+      // and its bill — live on the table it is joined to, so its own row has no session and
+      // reads free: taking that at face value sent a tap on T7 into a brand-new order and
+      // left the waiter no way to reach the party's bill, KOT ▾, ✕ Close or 💳 Mark paid.
+      // That is the exact lie mig 249 exists to stop, so the state is read for the PARTY and
+      // anything merged always opens the detail. (Found in review, 2026-08-03.)
+      const t = tile.dataset.t;
+      const inParty = !!mergeParentOf(t) || mergeChildrenOf(t).length > 0;
+      const partyState = summaryTile(mergeParentOf(t) || t).state;
+      if (!inParty && partyState === "free" && tshow("tablet_take_orders")) { openOrderForTable(t); return; }
+      selectTable(t);
     }
   });
 }
@@ -3310,7 +3332,14 @@ function closeViewOrder() {
 // parcel from the waiter tablet the day after making it permanent; parcels stay a
 // manager feature. The /parcel endpoint + tablet_parcel cap are untouched server-side.)
 function openQuickOrder() {
-  if (state.ordering && state.cart.length) return; // already mid-order — don't wipe a cart
+  // Already building an order with something in the cart? Refuse — but SAY SO. A bare return
+  // here would be a tap that vanishes, which is indistinguishable from a dead button (the
+  // rule is absolute even where the button is currently covered by the order screen).
+  if (state.ordering && state.cart.length) {
+    const n = state.cart.reduce((s, l) => s + l.qty, 0);
+    toast(`You're already building an order (${n} item${n > 1 ? "s" : ""}) — send it or go back first.`, false);
+    return;
+  }
   state.quick = true; state.ordering = true; state.viewOrder = false;
   state.table = null; state.addToOrderId = null;
   state.cart = []; state.allergies = "";
@@ -3794,11 +3823,11 @@ async function loadImpl() {
   renderFloor();
   if (!state.ordering && !state.pickerOpen) renderPanel();   // #U1: don't wipe an open Move picker on a live update
 }
-// #5: tick BOTH the top-bar clock (desktop) and the drawer clock (#dwClock, phones).
+// The clock lives ONLY in the ☰ menu now (#dwClock) — the minimal top bar has no room for it
+// and a waiter's device shows the time anyway (owner, 2026-08-03).
 const tickClock = () => {
-  const t = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  const c = $("#clock"); if (c) c.textContent = t;
-  const dc = document.getElementById("dwClock"); if (dc) dc.textContent = t;
+  const dc = document.getElementById("dwClock");
+  if (dc) dc.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 tickClock(); setInterval(tickClock, 1000);
 
@@ -3848,6 +3877,14 @@ const XRAY_CAPS = [
   html[data-theme="light"] { --xray-c: #0e7490; --xray-c-dot: #0891b2; }
   .xray-off { color: var(--xray-c) !important; border-color: color-mix(in srgb, var(--xray-c-dot) 60%, transparent) !important;
     opacity: 1; filter: none; }
+  /* A FILLED control keeps its own label colour and takes a cyan RING instead — the same
+     carve-out the manager panel has. Cyan on the gold fill of ⚡ Quick order / ＋ Take order
+     measures about 1.15:1, which is not "annotated", it is unreadable (found in review,
+     2026-08-03 — and it is the 2026-07-23 "take-order invisible" lesson repeated). The mark
+     still lands: a cyan outline plus the dot the base rule already adds. */
+  .qo-top.xray-off, .t-take.xray-off, .tacc.xray-off, .btn.primary.xray-off, .btn.pay.xray-off {
+    color: inherit !important;
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xray-c-dot) 80%, transparent); }
   #xrayRibbon { display: flex; align-items: center; gap: 12px; padding: 6px 14px; flex: none;
     background: color-mix(in srgb, #d97706 14%, var(--panel, #101826)); border-bottom: 1px solid color-mix(in srgb, #d97706 40%, transparent);
     font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40; }
@@ -4031,7 +4068,12 @@ window.addEventListener("lfh:stale-refresh", () => load().catch(() => {}));
 // The moment something is saved on-device (or finally sent, or comes back needing a
 // person), repaint the open table so its "⏳ Waiting to send" block is always current —
 // this is what makes an order taken with no internet visible immediately.
-window.addEventListener("lfh:outbox-changed", () => { if (state.table != null && !state.ordering) { try { renderPanel(); } catch (e) {} } });
+// …but NOT while a picker is open (#U1). renderPanel() replaces the whole panel and tears
+// the picker's back layer down with it, so a queue event landing while a waiter is halfway
+// through "Change table" / "Move a KOT" would wipe the choice they were making — the exact
+// thing the three other repaint sites already guard against. This one was missed (found while
+// chasing an intermittent test failure, 2026-08-03).
+window.addEventListener("lfh:outbox-changed", () => { if (state.table != null && !state.ordering && !state.pickerOpen) { try { renderPanel(); } catch (e) {} } });
 window.addEventListener("online", () => load().catch(() => {}));
 
 /* ════════════════════════════════════════════════════════════════════════════
