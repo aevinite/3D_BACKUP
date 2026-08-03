@@ -124,8 +124,12 @@ const takeOrdersEffectiveFromRow = (s: Record<string, unknown> | null) =>
 // the counter parcel is not the delivery apps — see the box at the top of lib/tableTags.ts.
 // Reading takeaway_* here (as it did between migs 235 and 259) hides the 🥡 button on every
 // restaurant that simply isn't on Zomato/Swiggy.
-const parcelEffectiveFromRow = (s: Record<string, unknown> | null) =>
-  !!s && s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
+// PERMANENT since 2026-08-03 (owner: "the parcel counter should not have a toggle option…
+// permanently there"). Kept as a named helper rather than deleted so every caller still reads
+// one thing, and so this comment sits where the old gate was. The parcel_* columns still exist
+// in settings and an old row may say false — reading it again would let a retired switch take a
+// live feature away. See the box at the top of lib/tableTags.ts before changing this.
+const parcelEffectiveFromRow = (_s: Record<string, unknown> | null) => true;
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted

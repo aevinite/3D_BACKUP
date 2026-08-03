@@ -1983,8 +1983,9 @@ function accessCapsFor() {
     if (c.key === "tablet_khata") return s.khata_allowed === true && (s.khata_owner_control !== true || s.khata_enabled !== false);
     if (c.key === "tablet_table_ops") return s.table_ops_allowed === true && (s.table_ops_owner_control !== true || s.table_ops_enabled !== false);
     if (c.key === "tablet_take_orders") return s.take_orders_allowed === true && (s.take_orders_owner_control !== true || s.take_orders_enabled !== false);
-    // The counter parcel is its own feature again (parcel_*, mig 259) — not Platforms.
-    if (c.key === "tablet_parcel") return s.parcel_allowed === true && (s.parcel_owner_control !== true || s.parcel_enabled !== false);
+    // The parcel/platform board is PERMANENT (owner, 2026-08-03): there is no module switch left
+    // to consult, so this capability is only ever about the PERSON's grant.
+    if (c.key === "tablet_parcel") return true;
     return true;
   });
 }
