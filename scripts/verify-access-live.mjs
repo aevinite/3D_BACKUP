@@ -30,6 +30,38 @@ const fh = list.find((x) => x.slug === "french-house");
 let pass = 0, fail = 0;
 const ck = (n, ok, got) => { ok ? (pass++, console.log("  PASS " + n)) : (fail++, console.log("  FAIL " + n + " · got: " + JSON.stringify(got))); };
 
+// ── PUT EVERYTHING BACK, EVEN IF THIS SCRIPT DIES ────────────────────────────────────────────
+// This guard switches a real restaurant's things OFF to prove they disappear, then switches them
+// back. On 2026-08-03, inside the 485-phase run, it CRASHED between switching the guest menu off
+// and switching it back — so French House's QR menu answered 404 to anyone who scanned it until
+// somebody happened to notice, and every guest-menu phase after it failed for a reason that had
+// nothing to do with what those phases test.
+//
+// verify-everything.mjs already learned this lesson in its own words ("a test that cannot undo its
+// own writes must not make them") and gated every write behind a restore snapshot. This script
+// never got the same treatment. Now every flip registers its undo at the moment it is made, and
+// the undo runs on a crash, an unhandled rejection, a Ctrl-C, and on the way out.
+const undo = new Map();                       // label -> a function that puts that one thing back
+let restoring = false;
+async function putEverythingBack(why) {
+  if (restoring || !undo.size) return;
+  restoring = true;
+  console.log(`\n  ↩ putting ${undo.size} switch(es) back${why ? ` (${why})` : ""}`);
+  for (const [label, fn] of [...undo].reverse()) {
+    try { await fn(); undo.delete(label); console.log(`     restored ${label}`); }
+    catch (e) { console.log(`     ⚠ COULD NOT RESTORE ${label}: ${e.message} — fix it by hand`); }
+  }
+  restoring = false;
+}
+const onDeath = async (why, err) => {
+  if (err) console.error(err);
+  await putEverythingBack(why);
+  process.exit(err ? 1 : 130);
+};
+process.on("uncaughtException", (e) => onDeath("crash", e));
+process.on("unhandledRejection", (e) => onDeath("crash", e));
+for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => onDeath(sig));
+
 const browser = await chromium.launch();
 
 // ── 1 · every panel still opens for its real role ──────────────────────────
@@ -61,9 +93,17 @@ for (const role of ["manager", "owner", "kitchen", "tablet"]) {
 
 // ── 2 · Manager's menu: switch the Log tab off, prove it goes AND refuses ──
 console.log("\n[2] Manager's menu — switching a tab off removes it and refuses its endpoint");
-const setTab = (key, on) => fetch(B + "/api/admin/restaurants/access-tree", {
+const setTabRaw = (key, on) => fetch(B + "/api/admin/restaurants/access-tree", {
   method: "POST", headers: { ...H, "Content-Type": "application/json" },
   body: JSON.stringify({ restaurant_id: fh.id, patch: { tabs: { manager: { [key]: on } } } }) });
+// Switching OFF arms the undo; switching back ON disarms it. So at any instant the map holds
+// exactly what this script currently owes the restaurant.
+const setTab = async (key, on) => {
+  if (!on) undo.set(`manager tab "${key}"`, () => setTabRaw(key, true));
+  const r = await setTabRaw(key, on);
+  if (on) undo.delete(`manager tab "${key}"`);
+  return r;
+};
 await setTab("log", false);
 {
   const ctx = await browser.newContext();
@@ -98,9 +138,16 @@ await setTab("log", true);
 
 // ── 3 · Menu master: off = the guest menu is genuinely gone ───────────────
 console.log("\n[3] Menu master — off means no guest menu at all");
-const setMenu = (on) => fetch(B + "/api/admin/restaurants/access-tree", {
+const setMenuRaw = (on) => fetch(B + "/api/admin/restaurants/access-tree", {
   method: "POST", headers: { ...H, "Content-Type": "application/json" },
   body: JSON.stringify({ restaurant_id: fh.id, patch: { settings: { menu_enabled: on } } }) });
+// THE flip that broke a restaurant. Nothing else in this file matters more than it going back.
+const setMenu = async (on) => {
+  if (!on) undo.set("the guest menu (menu_enabled)", () => setMenuRaw(true));
+  const r = await setMenuRaw(on);
+  if (on) undo.delete("the guest menu (menu_enabled)");
+  return r;
+};
 const before = await fetch(`${B}/r/${fh.slug}/menu`);
 ck("menu opens while the switch is on", before.status === 200, before.status);
 await setMenu(false);
@@ -164,5 +211,9 @@ console.log("\n[5] owner panel — no permission screens, roster intact");
 }
 
 await browser.close();
+// Belt and braces: if any check above returned early or a restore silently failed, this catches it
+// rather than leaving the restaurant switched off.
+await putEverythingBack("end of run");
+if (undo.size) { console.log(`\n⚠ ${undo.size} switch(es) could NOT be restored — fix by hand`); fail++; }
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
