@@ -703,7 +703,14 @@ phase("the Menu master back ON restores the guest menu", async () => {
   const r = await fetch(`${BASE}/r/${FH.slug}/menu`, { cache: "no-store" });
   ok(r.status === 200, `status ${r.status}`);
 });
-const MODULE_TABS = [["Platform board", "takeaway_allowed", /platform/i], ["Banquet", "banquet_allowed", /banquet/i], ["Inventory", "inventory_allowed", /inventory/i]];
+// "Platform board" WAS here, gated by settings.takeaway_allowed. PR #742 made parcel + delivery
+// platforms ONE PERMANENT feature with no master switch (lib/accessTree: bind { t: "none" }), and
+// no panel reads takeaway_allowed any more — so the phase asserted that switching a gate that no
+// longer exists would hide a tab that is now always there, and went red on every run for a
+// deliberate product decision. A permanently-failing phase is worse than no phase: it trains
+// everyone to skim past red. Only the three delivery CHANNELS still toggle, and those are covered
+// by the switch round-trips further down.
+const MODULE_TABS = [["Banquet", "banquet_allowed", /banquet/i], ["Inventory", "inventory_allowed", /inventory/i]];
 const mgrTabText = async () => {
   const { ctx } = await roleCtx("manager");
   const p = await ctx.newPage();
