@@ -130,6 +130,28 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   );
 }
 
+// ── a button you cannot see is a button you cannot tap ─────────────────────────────────
+// 2026-08-03: adding − Discount to the order builder's footer pushed "Place order →" 74px off
+// the right edge of a 360px phone. Nothing caught it — the live check asserted the FOOTER was
+// on screen, not the BUTTON inside it — and it took a screenshot to see. The footer is a fixed
+// row of controls that grows every time a feature is added to it, so the rule is that it must
+// WRAP on a phone and the primary action must not be the thing that gets squeezed.
+{
+  const css = read("public/panels/editor/style.css");
+  // the phone block that owns this footer
+  const phone = (css.match(/@media \(max-width: 760px\) \{[\s\S]*?\n\}/g) || []).join("\n");
+  check(
+    "the order footer wraps on a phone, so a new control can't push the send button off screen",
+    /\.to-foot\s*\{[^}]*flex-wrap:\s*wrap/.test(phone),
+    "public/panels/editor/style.css: inside @media (max-width:760px), .to-foot must set\n    `flex-wrap: wrap`. Without it the footer is one un-wrapping row and every control added to\n    it (total, − Discount, the N-item toggle, Place order) steals width from the primary button\n    until it is clipped — measured at 74px off-screen on a 360px phone.",
+  );
+  check(
+    "the send button takes its own full-width line on a phone",
+    /\.to-foot \.to-send[^{]*\{[^}]*flex:\s*1 1 100%/.test(phone),
+    "public/panels/editor/style.css: inside @media (max-width:760px), .to-foot .to-send must be\n    `flex: 1 1 100%`. Shrinking the primary action to make room is backwards — the smallest\n    screen would get the smallest target. Give it a line of its own instead.",
+  );
+}
+
 // ── report ─────────────────────────────────────────────────────────────────────────────
 // --hook stays SILENT on success (a passing guard must not add noise to every panel edit)
 // and exits 2 on failure, which is how a PostToolUse hook tells the session it broke something.
