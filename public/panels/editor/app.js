@@ -8397,20 +8397,19 @@ function openTakeOrder(table, rerender, opts = {}) {
     // printing a misleading ₹0.
     return `<div class="to-dish ${n ? "has" : ""}" data-dish="${esc(d.id)}" role="button" tabindex="0" title="Tap to add">${img}<span class="to-dish-meta"><span class="to-dish-t">${esc(d.title)}</span><span class="to-dish-p">${d.open_price ? "Set price" : inr(parseFloat(d.price) || 0)}</span></span><span class="to-dish-side">${n ? `<b class="to-dish-n">×${n}</b>` : ""}<button class="to-dish-edit" data-tile-edit="${esc(d.id)}" title="Allergens & note for this dish">✎</button></span></div>`;
   };
-  // A quick-mode CATEGORY card: name, how many dishes are in it, and the category's own
-  // colour down the left edge. Tapping it drills into that category's dishes.
-  // Badge on the LEFT, text beside it — the shape that survives being shrunk. A stacked
-  // card needs badge + two lines of name + a count stacked vertically, which stops fitting
-  // the moment there are more than ~12 categories; side-by-side keeps the same card
-  // readable from a 150px-tall tile down to a 46px one (see fitBrowse below).
+  // A quick-mode CATEGORY card: the name, how many dishes are in it, and the category's
+  // own colour down the left edge. Tapping it drills into that category's dishes.
+  //
+  // NO PICTURE, and no square standing in for one (owner, 2026-08-03: "in the category
+  // option, remove that photo thing — a category doesn't have a photo"). It used to wear a
+  // rounded square holding the name's first letter, which read as an empty photo slot; a
+  // category has nothing to put in one, so the square was a hole. The colour bar down the
+  // left edge carries the identity instead, and the name gets the whole card — which is
+  // also what lets the names stay readable when 40 categories have to share one screen.
+  // (Dishes keep their photo — they have a real one.)
   const catCard = (s) => {
-    // Deliberately NOT the category's Font-Awesome icon: this panel doesn't load Font
-    // Awesome, so those classes render as empty □ boxes. The initial in the category's
-    // own colour always draws, and reads at a glance from across a counter.
-    const ic = esc((s.name || "?").trim().charAt(0).toUpperCase() || "?");
     const n = s.items.length;
     return `<button class="qo-cat" data-qocat="${esc(s.slug)}"${s.color ? ` style="--qo-c:${esc(s.color)}"` : ""}>
-      <span class="qo-cat-ic">${ic}</span>
       <span class="qo-cat-tx">
         <span class="qo-cat-n">${esc(s.name)}</span>
         <span class="qo-cat-c"><b>${n}</b><i> dish${n === 1 ? "" : "es"}</i></span>
@@ -8628,9 +8627,12 @@ function openTakeOrder(table, rerender, opts = {}) {
 
       // Everything the tile draws scales off these two numbers, so one measurement styles
       // the whole grid — no per-tile work, no layout thrash.
-      const name = Math.max(11, Math.min(kind === "cat" ? 17 : 15, Math.min(h * 0.30, w * 0.098)));
+      // A CATEGORY card carries only words now (no picture, no square standing in for one),
+      // so its name owns the tile's full width and may be sized more generously than a dish
+      // name, which still shares its row with a photo and the ✎ button.
+      const nameW = kind === "cat" ? 0.125 : 0.098;
+      const name = Math.max(11, Math.min(kind === "cat" ? 17 : 15, Math.min(h * 0.30, w * nameW)));
       const sub = Math.max(9.5, Math.min(13, name * 0.76));
-      const badge = Math.max(0, Math.min(46, Math.min(h - 14, w * 0.26)));
       // How many lines the name may take, and how tall its box may get — both worked out
       // from the room actually left once the padding and the count line have had theirs,
       // rather than guessed at 2. The line budget is measured against the SMALLEST font a
@@ -8654,7 +8656,6 @@ function openTakeOrder(table, rerender, opts = {}) {
       grid.style.setProperty("--qo-h", `${Math.round(h)}px`);
       grid.style.setProperty("--qo-name", `${name.toFixed(1)}px`);
       grid.style.setProperty("--qo-sub", `${sub.toFixed(1)}px`);
-      grid.style.setProperty("--qo-badge", `${Math.round(badge)}px`);
       grid.style.setProperty("--qo-pad", `${Math.round(Math.max(5, Math.min(16, h * 0.13)))}px`);
       grid.style.setProperty("--qo-vpad", `${vpad.toFixed(1)}px`);
       grid.style.setProperty("--qo-edit", `${Math.round(Math.max(28, Math.min(42, h * 0.55)))}px`);
@@ -8662,8 +8663,8 @@ function openTakeOrder(table, rerender, opts = {}) {
       grid.style.setProperty("--qo-lines", String(lines));
       grid.style.setProperty("--qo-nameh", `${Math.floor(room)}px`);
       grid.classList.add("qo-fit");
-      // Under these the badge / photo stops being a help and starts stealing the name's
-      // room, so it goes and the colour bar carries the identity on its own.
+      // Under these a dish's photo stops being a help and starts stealing the name's room,
+      // so it goes and the words carry the tile on their own.
       grid.classList.toggle("qo-tiny", tiny);
       grid.classList.toggle("qo-noimg", kind === "dish" && (h < 62 || w < 190));
       listEl.classList.toggle("qo-noscroll", fits);

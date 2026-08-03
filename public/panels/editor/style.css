@@ -2480,7 +2480,7 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    down because it's quick… more than twenty five, still it should show in one panel."
    So quick mode has NO fixed tile size. fitBrowse() in app.js measures the browse block,
    works out the columns × rows that hold every tile, and publishes the answer as custom
-   properties on the grid: --qo-h (row height), --qo-name, --qo-sub, --qo-badge, --qo-pad,
+   properties on the grid: --qo-h (row height), --qo-name, --qo-sub, --qo-pad,
    --qo-img, --qo-edit. Every rule below reads those, so 8 categories and 60 categories
    are the SAME stylesheet at two sizes — nothing here hardcodes a tile.
    `.qo-noscroll` is set on the list only while it genuinely all fits; when the menu is so
@@ -2490,15 +2490,16 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .to-list.qo-noscroll { overflow: hidden; }
 .qo-grid.qo-fit { align-content: start; margin-bottom: 0; }
 
-/* level 1 — the category cards. Badge LEFT, text beside it: a stacked card needs badge +
-   name + count one under the other, which stops fitting past ~12 categories; side by side
-   stays readable from a 152px-tall tile down to a 46px one. */
+/* level 1 — the category cards. WORDS ONLY: the name, its dish count, and the category's
+   colour down the left edge (owner, 2026-08-03: "in the category option, remove that photo
+   thing — a category doesn't have a photo"). The card used to open with a rounded square
+   holding the name's first letter, which read as an empty photo slot with nothing to put in
+   it. Dropping it hands the whole card to the name, which is also what keeps 40 categories
+   legible on one screen. Dishes keep their photo — they have a real one. */
 .qo-cats { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
-.qo-cat { --qo-c: var(--gold); position: relative; display: flex; flex-direction: row; align-items: center; gap: 10px; text-align: left; overflow: hidden;
-  background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--qo-c); border-radius: 13px; padding: 15px 16px; cursor: pointer; color: var(--text); min-height: 92px; justify-content: flex-start; }
+.qo-cat { --qo-c: var(--gold); position: relative; display: flex; flex-direction: row; align-items: center; text-align: left; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--line); border-left: 5px solid var(--qo-c); border-radius: 13px; padding: 15px 16px; cursor: pointer; color: var(--text); min-height: 92px; justify-content: flex-start; }
 .qo-cat:hover { border-color: var(--gold); border-left-color: var(--qo-c); transform: translateY(-1px); }
-.qo-cat-ic { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 9px;
-  background: color-mix(in srgb, var(--qo-c) 22%, transparent); color: var(--qo-c); font-size: 15px; font-weight: 800; line-height: 1; }
 .qo-cat-tx { display: flex; flex-direction: column; gap: 2px; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
 /* the name may take two lines and then stops — a third line would push the count out of a
    short tile, and the count is half of what the owner asked to see */
@@ -2508,14 +2509,12 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .qo-cat-c i { font-style: normal; }
 
 /* the measured sizes take over the moment fitBrowse() has run */
-.qo-cats.qo-fit .qo-cat { min-height: 0; height: 100%; box-sizing: border-box; padding: var(--qo-vpad, 6px) var(--qo-pad, 14px); gap: calc(var(--qo-pad, 12px) * .72); }
-.qo-cats.qo-fit .qo-cat-ic { width: var(--qo-badge, 30px); height: var(--qo-badge, 30px); border-radius: calc(var(--qo-badge, 30px) * .3); font-size: calc(var(--qo-badge, 30px) * .5); }
+.qo-cats.qo-fit .qo-cat { min-height: 0; height: 100%; box-sizing: border-box; padding: var(--qo-vpad, 6px) var(--qo-pad, 14px); }
 .qo-cats.qo-fit .qo-cat-n { font-size: var(--qo-name, 16px); -webkit-line-clamp: var(--qo-lines, 2); max-height: var(--qo-nameh, none); }
 .qo-cats.qo-fit .qo-cat-c { font-size: var(--qo-sub, 12px); }
-/* the tightest tier: the badge is now stealing the name's room, so the colour bar down the
-   left edge carries the category's identity on its own and the count drops to the bare number */
-.qo-cats.qo-tiny .qo-cat { border-left-width: 5px; }
-.qo-cats.qo-tiny .qo-cat-ic { display: none; }
+/* the tightest tier: the colour bar thickens so the category is still identifiable at a
+   glance, and the count drops to the bare number */
+.qo-cats.qo-tiny .qo-cat { border-left-width: 6px; }
 /* the count leaves the flow and sits in the corner, so the name keeps the tile's FULL
    height — that is what buys a two-word category two readable lines in a 40px tile
    instead of one line shrunk to 9px */
