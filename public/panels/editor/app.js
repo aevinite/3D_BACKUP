@@ -6384,6 +6384,17 @@ function mergeGroupLabel(t) {
   const kids = mergeChildrenOf(parent);
   return kids.length ? [parent, ...kids].map((x) => `T${x}`).join(" + ") : null;
 }
+// Plain words for the merge-aware refusals the table-ops RPCs answer with (mig 264) — a person
+// reading "party_merged" learns nothing; these say what to do instead.
+const KOT_REASON_TEXT = {
+  party_merged: "this party spans merged tables — unmerge first, then move it",
+  merged_child: "that table is joined with another and shares its bill — unmerge it first",
+  target_occupied: "that table already has a party on it",
+  target_invoiced: "that table's bill is already invoiced — void it first",
+  source_invoiced: "this bill is already invoiced — void it first",
+  order_paid: "that KOT is already paid — settled money doesn't move",
+  same_table: "that's the same bill it is on now",
+};
 
 // IS THIS TABLE BUSY? — answered by exactly what the FLOOR SHOWS, never by the raw server state
 // (owner, 2026-08-01: "see table 30 look[s] close[d] but at back-end it say[s] it's open — only
@@ -9494,7 +9505,9 @@ function openShiftPicker(t, sess) {
   // request (summaryTableOpen treats a request-only table as not-open, so without this a shift
   // could land on a table a guest is waiting to open, stranding their request).
   const reqTables = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number)));
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !summaryTableOpen(i) && !reqTables.has(String(i))) free.push(i); }
+  // A merged CHILD is not a free table (mig 264): its own summary tile reads "free" (its party
+  // lives on the parent), but shifting onto it would land a second party on a joined table.
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !summaryTableOpen(i) && !reqTables.has(String(i)) && !mergeParentOf(i)) free.push(i); }
   const grid = free.length
     ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
     : `<div class="muted" style="padding:14px">No free tables to move to right now.</div>`;
@@ -9507,7 +9520,7 @@ function openShiftPicker(t, sess) {
     const to = b.dataset.shiftto; closeM();
     try {
       const r = await api("POST", `/sessions/${sess.id}/shift`, { to });
-      if (!r.ok) { toast(r.reason === "target_occupied" ? `Table ${to} already has a party` : "Couldn't shift: " + (r.reason || ""), "err"); return; }
+      if (!r.ok) { toast("Couldn't shift: " + (KOT_REASON_TEXT[r.reason] || r.reason || ""), "err"); return; }
       toast(`Shifted to table ${to}`, "ok");
       followShiftedTable(t, to); // follow the party to its new home in docked OR popup mode
     } catch (e) { toast("Failed: " + e.message, "err"); }
@@ -9730,7 +9743,10 @@ function openKotColumns(t, sess) {
   const OPS = [
     // Works on an EMPTY table too — see the note in openKotMenu.
     { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
-    { id: "shift", icon: "⇄", label: "Change table", sub: "To a free table", on: !!sess, why: "table closed" },
+    // A MERGED PARTY DOES NOT SHIFT (mig 264): moving it would renumber the child's orders —
+    // the numbers an unmerge needs to be exact — and strand the merge record. The server
+    // refuses too ('party_merged'); this row says why instead of offering a dead end.
+    { id: "shift", icon: "⇄", label: "Change table", sub: "To a free table", on: !!sess && !mergeGroupLabel(t), why: mergeGroupLabel(t) ? "unmerge first" : "table closed" },
     { id: "merge", icon: "🪢", label: "Merge tables", sub: "One table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
     { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "One order moves", on: movable.length > 0, why: "no movable KOT" },
     { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
@@ -9755,7 +9771,7 @@ function openKotColumns(t, sess) {
   const run = async (method, path, body, okMsg, after) => {
     try {
       const r = await api(method, path, body);
-      if (r && r.ok === false) { fail("Couldn't do that: " + (r.reason || "rejected")); return; }
+      if (r && r.ok === false) { fail("Couldn't do that: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected")); return; }
       done(okMsg); if (after) after(r);
     } catch (e) { fail("Failed: " + e.message); }
   };
@@ -9774,7 +9790,10 @@ function openKotColumns(t, sess) {
   // A "free" target must have NO party row at all — not even the invisible empty one the floor
   // draws as Free (see tableHasAnyParty). Moving a party onto it would put two sessions on one
   // table, and the second one is the kind of thing nobody notices until a bill is wrong.
-  const freeTables = () => { const reqT = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number))); const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && !tableHasAnyParty(i) && !reqT.has(String(i))) out.push(i); return out; };
+  // …and a merged CHILD is never "free" either: it has no party row of its own, so
+  // tableHasAnyParty can't see it, but shifting onto it would land a second party on a joined
+  // table (the server refuses too — 'merged_child', mig 264; this list just never offers it).
+  const freeTables = () => { const reqT = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number))); const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && !tableHasAnyParty(i) && !reqT.has(String(i)) && !mergeParentOf(i)) out.push(i); return out; };
   const occTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) out.push(i); return out; };
   const allTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t)) out.push(i); return out; };
   const tileDue = (i) => { const tile = (state.summary && state.summary.tiles || {})[String(i)]; return tile && tile.due > 0 ? "due " + inr(tile.due) : "open"; };
@@ -9924,7 +9943,8 @@ function openKotMenu(t, sess) {
     // the floor's own KOT button (owner, 2026-07-31: "before a table or order is taken you can
     // mark table as VIP from that option").
     { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
-    { id: "shift", icon: "⇄", label: "Change table", sub: "Party, orders & bill move to a free table", on: !!sess, why: "table closed" },
+    // A merged party doesn't shift (mig 264) — same rule as the desktop columns above.
+    { id: "shift", icon: "⇄", label: "Change table", sub: "Party, orders & bill move to a free table", on: !!sess && !mergeGroupLabel(t), why: mergeGroupLabel(t) ? "unmerge first" : "table closed" },
     { id: "merge", icon: "🪢", label: "Merge tables", sub: "Join another party — one table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
     { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "Send one order to another table's bill", on: movable.length > 0, why: "no movable KOT" },
     // Only DB-backed dish rows (kind "session") can move — legacy JSON lines have no row id.

@@ -3050,8 +3050,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const t = await mergeParentTable(sb, rid, tRaw);
       if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "table_tags"))) return permDenied("settle a bill on the house");
-      const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
-      if (!tagRow?.tag || !COMP_TAGS.includes(tagRow.tag)) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
+      // The mark may sit on ANY member of a merged party — the family sat at T29 before it was
+      // joined to T28; their comp must not stop working because the bill now lives on T28.
+      const partyKids = ((await sb.from("table_merges").select("child_table")
+        .eq("restaurant_id", rid).eq("parent_table", t).is("ended_at", null).limit(20)).data || []) as { child_table: string }[];
+      const tagRows = ((await sb.from("table_tags").select("tag")
+        .eq("restaurant_id", rid).in("table_number", [t, ...partyKids.map((k) => k.child_table)])).data || []) as { tag?: TableTag }[];
+      const tagRow = tagRows.find((r) => r.tag && COMP_TAGS.includes(r.tag)) || null;
+      if (!tagRow) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
       const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
       let oq = sb.from("orders").select("id,subtotal,status,payment_status").eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled");
       oq = openSess ? oq.eq("session_id", openSess.id) : oq.eq("table_number", t);
