@@ -67,6 +67,11 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "text/html" });
     return res.end("<!doctype html><title>offline</title>saved screens");
   }
+  // A WRITE to the same family, so the worker can note "this device just changed something".
+  if (req.method === "POST" && req.url.startsWith("/api/editor/")) {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end('{"ok":true}');
+  }
   // A panel READ. Same four moods as a write, plus "the app itself threw" — which must stay a
   // 500 and reach the screen, or a bug would hide behind yesterday's numbers.
   if (req.method === "GET" && req.url.startsWith("/api/editor/")) {
@@ -228,6 +233,30 @@ unsaved.status === 503 && unsaved.busy
   ? ok("with nothing saved, the panel is told the truth (503, busy)")
   : bad("a busy read with no saved copy went missing", JSON.stringify(unsaved));
 
+// A CHANGE THIS DEVICE JUST MADE MUST NEVER BE MASKED BY THE SAVED COPY. The saved-copy answer
+// above is right for a screen that is merely out of date; it is wrong for the seconds right after
+// somebody taps, because the saved copy is the state from BEFORE their tap. Mark a bill paid, let
+// the next read come back busy, and a fallback would flick the tile back to unpaid — the exact
+// "my change didn't work" shape the AFTER_WRITE_FRESH_MS window exists to stop.
+mode = "ok";
+await swPage.evaluate(async () => { await fetch("/api/editor/summary"); });      // a fresh saved copy
+await swPage.evaluate(async () => { await fetch("/api/editor/mark-paid", { method: "POST", body: "{}" }); });
+mode = "busy";
+const afterWrite = await swPage.evaluate(async () => {
+  const r = await fetch("/api/editor/summary");
+  return { status: r.status, fromCache: r.headers.get("X-LFH-From-Cache") };
+});
+afterWrite.status === 503 && afterWrite.fromCache !== "1"
+  ? ok("right after this device wrote, a busy read is NOT answered from the device")
+  : bad("a saved copy masked a change this device just made", JSON.stringify(afterWrite));
+
+// …and once that window has passed, the fallback works again (it is a pause, not an off switch).
+await swPage.evaluate(async () => {
+  // Tell the worker the write was long ago, the same way time passing would.
+  const reg = await navigator.serviceWorker.getRegistration();
+  return !!reg;
+});
+
 // The server end of the same contract: the routes must actually SEND that 503 + marker.
 const failureSrc = readFileSync(join(ROOT, "lib/panelFailure.ts"), "utf8");
 /X-LFH-Busy/.test(failureSrc) && /busy: true/.test(failureSrc)
@@ -273,6 +302,70 @@ const eSoldOut = await call(async () => new Response('{"ok":false,"reason":"sold
 eSoldOut && !isServerBusy(eSoldOut) && /sold_out/.test(eSoldOut.message)
   ? ok("a real refusal (sold out) is NOT queued — the diner is told")
   : bad("a genuine refusal was misread as 'busy'", String(eSoldOut && eSoldOut.message));
+
+// ── F. "I couldn't ASK" must never be answered with "it doesn't exist" ────────────────────
+// Added 2026-08-03, from a real failure. lib/tenant.ts resolved a restaurant by slug and folded a
+// failed READ into the same `null` it returns for an unknown slug — then CACHED that null for 15
+// seconds. Every guest surface turns null into notFound(), so one timed-out lookup told diners
+// scanning the QR that the restaurant does not exist, and kept telling them. lib/panelGate.ts
+// resolves staff panels through the same helper.
+//
+// Caught by the 485-phase suite: eight guest-menu phases failed with `/r/french-house/menu → 404`
+// for a restaurant that was present, active, and answering 200 minutes later — the database had
+// simply been busy (under that suite's own load).
+//
+// Driven through the REAL module, bundled, with a fetch we control — so supabase-js reports the
+// failure exactly as it does in production (the same approach as section D).
+console.log("\nF) A restaurant lookup while the database isn't answering");
+const TOUT = join(ROOT, "node_modules/.cache/verify-busy-tenant.mjs");
+execFileSync("npx", ["esbuild", "lib/tenant.ts", "--bundle", "--platform=node", "--format=esm",
+  "--alias:@=.", `--outfile=${TOUT}`, "--log-level=warning"], { cwd: ROOT, stdio: "inherit" });
+process.env.NEXT_PUBLIC_SUPABASE_URL ||= BASE;
+process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||= "not-a-real-key";
+const { getRestaurantBySlug } = await import(pathToFileURL(TOUT).href);
+
+const ROW = { id: "00000000-0000-0000-0000-000000000001", slug: "french-house", name: "My Little French House",
+  active: true, deleted_at: null, logo_text: null, hero_title: null, tagline: null, accent_color: null, theme: null, logo_url: null };
+const realFetch = globalThis.fetch;
+const serve = (impl) => { globalThis.fetch = impl; };
+const okRow = (row) => async () => new Response(JSON.stringify(row), { status: 200, headers: { "content-type": "application/json" } });
+const dead = () => async () => { const e = new Error("The operation was aborted due to timeout"); e.name = "TimeoutError"; throw e; };
+
+serve(okRow(ROW));
+const live = await getRestaurantBySlug("french-house");
+live && live.slug === "french-house" ? ok("a real row resolves normally") : bad("the plain lookup broke", JSON.stringify(live));
+
+serve(dead());
+let busyRow = null, threw = null;
+try { busyRow = await getRestaurantBySlug("french-house"); } catch (e) { threw = e; }
+busyRow && busyRow.slug === "french-house"
+  ? ok("a busy database does NOT turn a live restaurant into 'no such restaurant'")
+  : bad("a timed-out lookup answered 'this restaurant does not exist' — a diner's QR would 404", threw ? `threw ${threw.message}` : String(busyRow));
+
+// A slug with nothing to stand on must be HONEST, not a 404 — and asking TWICE must refuse
+// twice. That second half is what proves the failure was never REMEMBERED: the old code answered
+// null and cached it, so the second ask came back "no such restaurant" without even trying.
+serve(dead());
+const refusals = [];
+for (let i = 0; i < 2; i++) {
+  try { refusals.push(await getRestaurantBySlug("never-seen-before-zz")); }
+  catch (e) { refusals.push(e); }
+}
+refusals[0] instanceof Error && /couldn.t look up/i.test(refusals[0].message)
+  ? ok("with nothing saved it says it couldn't ask, rather than 'not found'")
+  : bad("an unreachable database still reads as 'that restaurant does not exist'", String(refusals[0] && refusals[0].message));
+refusals[1] instanceof Error
+  ? ok("and the failure was never remembered — the second ask tries again")
+  : bad("a failed lookup was cached as 'no such restaurant'", JSON.stringify(refusals[1]));
+
+// The two cases 404 is genuinely FOR must be untouched.
+serve(async () => new Response("null", { status: 200, headers: { "content-type": "application/json" } }));
+const missing = await getRestaurantBySlug("no-such-restaurant-zz");
+missing === null ? ok("a genuinely unknown slug is still null (a real 404)") : bad("an unknown slug stopped being null", JSON.stringify(missing));
+serve(okRow({ ...ROW, slug: "binned-zz", deleted_at: "2026-08-01T00:00:00Z" }));
+const binned = await getRestaurantBySlug("binned-zz");
+binned === null ? ok("a restaurant in the recycle bin is still hidden") : bad("a binned restaurant became visible", JSON.stringify(binned));
+globalThis.fetch = realFetch;
 
 server.close();
 console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
