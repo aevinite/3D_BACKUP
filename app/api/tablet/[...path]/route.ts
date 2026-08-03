@@ -19,6 +19,7 @@ import { verifyManagerPin, anyManagerHasPin } from "@/lib/managerPin";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { softDeleteOrders } from "@/lib/softDelete";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
+import { mergeParentTable } from "@/lib/tableMerge";
 import { rateAllowed } from "@/lib/rateLimit";
 import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
@@ -371,8 +372,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // no-op for them anyway.
       const summary = myTables ? structuredClone(shared) : shared;
       narrowSummary(summary, myTables);
+      // WHICH TABLES ARE SERVED AS ONE PARTY (mig 249) — same ride-along the manager's summary
+      // carries. Without it the waiter's floor called a merged child "free": a waiter could seat
+      // new guests on it, and any order taken there silently joins the OLD party's bill (mig 250).
+      // Restaurant-scoped, live rows only, a handful at most. Deliberately NOT narrowed to the
+      // waiter's section: a join can cross sections, and hiding half of it hides the bill's truth.
+      // Attached to a shallow COPY — `summary` may BE the shared 1.5s floor snapshot, and the
+      // one rule of that cache is that a handler never writes into it (owner bug, 2026-08-02).
+      const merges = (await sb.from("table_merges")
+        .select("parent_table, child_table, merged_at, merged_by")
+        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || [];
+      const summaryOut = { ...(summary as Record<string, unknown>), merges };
       // Targeted (?table=N): tile only — the panel keeps its cached agnostic bundle.
-      if (tbl) return ok(summary);
+      if (tbl) return ok(summaryOut);
       // Full floor: attach the small table-agnostic collections in ONE round-trip. The dishes
       // query is STARTED here only on a full load (so it runs in parallel with the rest); on a
       // slim (nomenu) load it's never issued at all.
@@ -405,7 +417,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // narrowing the payload alone would leave every other table on screen looking free.
       // `null` = not restricted (admin / manager looking in / module off) → draw everything.
       const body: Record<string, unknown> = {
-        ...summary,
+        ...summaryOut,
         // Just the numbers — the client already knows table_count from settings, so it can
         // apply the same "off the floor plan stays visible" rule without a second field.
         my_tables: myTables ? myTables.tables : null,
@@ -1049,8 +1061,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // (a completed order kept in records/revenue — NOT cancelled). Mirrors the
     // editor's restartTable, done as one scoped bulk update. (owner, 2026-06-17)
     if (a === "tables" && c === "restart") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // A merged child's party lives on its parent — act on the whole party (lib/tableMerge).
+      const t = await mergeParentTable(sb, rid, tRaw);
       const openSess = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
@@ -1428,8 +1442,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // arithmetic and the write are lib/paySplit.ts, shared with the manager panel: the server
     // recomputes the due itself and refuses parts that don't add up.
     if (a === "tables" && c === "pay-split") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // A merged child's bill lives on its parent — split the PARTY's bill (lib/tableMerge).
+      const t = await mergeParentTable(sb, rid, tRaw);
       const gs = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!gs.allow) return gs.resp;
       const rSp = await settleBillInParts(sb, { rid, table: t, splits: Array.isArray(body?.splits) ? body.splits : [] });
       if (!rSp.ok) return err(rSp.message, rSp.status);
@@ -1441,8 +1457,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // order for the table as paid. The waiter confirms on-screen that the money
     // was actually collected before this fires.
     if (a === "tables" && c === "pay") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // A merged child's bill lives on its parent — settle the PARTY's bill, never half of it
+      // (found live 2026-08-03: paying at the child covered ₹662 of a ₹1,323 joint bill).
+      const t = await mergeParentTable(sb, rid, tRaw);
       const g = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!g.allow) return g.resp; // off/pin/on per settings
       // Settle only the CURRENT party's bill: scope to the table's open session
       // so we never mark a previous party's leftover order paid. Sessions-off
@@ -1514,8 +1533,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // "customers" entitlement (default on). Fire-and-forget from the pay sheet — a
     // failure here NEVER blocks the settle that already happened.
     if (a === "tables" && c === "customer-capture") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // The bill (and its visit) belongs to the party's session — resolve a merged child first.
+      const t = await mergeParentTable(sb, rid, tRaw);
       const ent = await getOwnerEntitlements(rid);
       if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
       const phone = String(body?.phone || "").slice(0, 20);
@@ -1563,8 +1584,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // Stored as a 100% pre-tax discount + the reserved "On the house" method, so every
     // money view (net-of-discount, paid-only) reads ₹0 — identical to the manager path.
     if (a === "tables" && c === "on-the-house") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // The comp settles the PARTY's bill — resolve a merged child to the table holding it.
+      const t = await mergeParentTable(sb, rid, tRaw);
       if (actor && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       const hg = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!hg.allow) return hg.resp;
       const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
@@ -1602,8 +1625,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // table (same flow as the manager's; see the editor route). Gated by the manager's
     // tablet_khata tri-state. body { customer_id } OR { name, phone?, note? }.
     if (a === "tables" && c === "khata") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // Parking "collect later" parks the PARTY's bill — resolve a merged child first.
+      const t = await mergeParentTable(sb, rid, tRaw);
       if (actor && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       const kg = recordPin(await tabletPerm("tablet_khata", req, body, rid, actor)); if (!kg.allow) return kg.resp;
       const openSess = (await sb.from("sessions").select("id")
@@ -1653,8 +1678,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // heavier restore stays the manager panel's job. Gated by the same tablet_mark_paid
     // permission as pay, so a mistaken revert is no easier than a mistaken payment.
     if (a === "tables" && c === "unpay") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // Reopening the bill reopens the PARTY's bill — resolve a merged child first.
+      const t = await mergeParentTable(sb, rid, tRaw);
       const g = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!g.allow) return g.resp;
       const openSess = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)

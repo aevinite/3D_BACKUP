@@ -3566,7 +3566,11 @@ async function markTablePaid(t, mtpOpts = {}) {
 async function onHouseSettle(t) {
   // Snapshot the orders being comped so a mis-tapped "on the house" can be taken back
   // (parity with the tablet, owner undo bar 2026-07-22).
-  const ids = ordersForTable(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled").map((o) => o.id);
+  // The WHOLE party's orders: the server comps the party's one bill (a merged child resolves
+  // to its parent), so an undo built from one table's own orders would reopen HALF the comp
+  // and leave the partner tables' orders settled free in silence (work-checker, 2026-08-03).
+  await ensurePartySlices(t);
+  const ids = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled").map((o) => o.id);
   try {
     const r = await api("POST", `/tables/${t}/on-the-house`, {});
     await pollTables([String(t)]);
@@ -4189,6 +4193,23 @@ new MutationObserver(() => {
 // T-prefixed table number print when their data is present.
 // The printable TAX INVOICE — "Classic" B&W design (thermal/mono printer). All
 // money via billMath (discount BEFORE tax). Restaurant identity from settings.
+// combineBillLines(entries): the BILL shows one line per dish, not one line per KOT
+// (owner, 2026-08-03: after a merge "everything should be represented as a bulk in the bill").
+// Two orders of the same Espresso — same title, same unit price, same add-ons, same removals,
+// same note — become "Espresso ×2"; anything that differs in ANY of those stays its own line,
+// because it genuinely is a different thing (a different price, a no-onion copy…). KOTs are
+// untouched: the kitchen ticket is a log of what was fired, the bill is what the guest owes.
+function combineBillLines(entries) {
+  const out = [];
+  const at = new Map(); // signature -> index in out
+  for (const e of entries || []) {
+    const sig = [e.title, e.price, JSON.stringify(e.options || null), JSON.stringify(e.removed || null), e.note || ""].join("\u0001"); // a VISIBLE escape, never a raw control byte: adjacent fields must not run together ("Special 1"@50 vs "Special"@150), and an invisible byte here begs to be "fixed" back to ""
+    const i = at.get(sig);
+    if (i == null) { at.set(sig, out.length); out.push(Object.assign({}, e, { qty: Math.max(1, parseInt(e.qty, 10) || 1) })); }
+    else out[i].qty += Math.max(1, parseInt(e.qty, 10) || 1);
+  }
+  return out;
+}
 function printBill(t, sess, os, opts = {}) {
   // A PARCEL prints THIS document, not a layout of its own (owner, 2026-08-02: "the bill
   // format should be exactly like a KOT bill — just the top changes"). The only difference
@@ -4204,7 +4225,7 @@ function printBill(t, sess, os, opts = {}) {
   // The item lines as they were ordered. Their LAYOUT — the base line, a sub-line per priced
   // add-on, the measured money columns — belongs to the document itself (/panels/billdoc.js),
   // so the Access → "Format of…" preview draws the very same rows.
-  const lines = live.reduce((a, o) => a.concat(Array.isArray(o.items) ? o.items : []), []);
+  const lines = combineBillLines(live.reduce((a, o) => a.concat(Array.isArray(o.items) ? o.items : []), []));
   // White-label identity: ALL the fallback logic lives in billIdentity() (shared with
   // the Billing settings form, which autofills the same values). The French House
   // logo applies ONLY to the flagship (#1).
@@ -4228,7 +4249,12 @@ function printBill(t, sess, os, opts = {}) {
   // (owner 2026-07-29: "print acc to the table name … on the KOT as well as the bill").
   // No name → the old "T5". Non-numeric values (e.g. "Takeaway") are left exactly as entered.
   const tnum = (t || "").toString().trim();
-  const tableDisp = /^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—");
+  // A joined party's bill names EVERY table it covers — "T6 + T7" (owner rule, mig 249) —
+  // so the paper says out loud that it settles more than one table. ONLY when the caller says
+  // this is the table's LIVE bill (opts.party): mergeGroupLabel reads the merges of RIGHT NOW,
+  // and reprinting yesterday's solo T6 bill while T6 happens to be merged today must not stamp
+  // "T6 + T7" onto a settled tax document (work-checker, 2026-08-03).
+  const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
   const invNo = sess && sess.invoice_no != null ? invFmt(sess.invoice_no, sess.invoice_at) : "";
   const billNo = sess && sess.bill_no != null ? sess.bill_no : "";
   const now = new Date();
@@ -6572,8 +6598,13 @@ function tableTileStateFromSummary(t) {
 // The ORIGINAL full-board computation — now used ONLY for the selected table's detail (and
 // as the parity reference the SQL summary mirrors). Unchanged logic.
 function tableTileStateFromBoard(t) {
-  const os = ordersForTable(t);
-  const sess = openSessionForTable(t);
+  // THE PARTY'S orders, not one table's own (owner, 2026-08-03: after a merge the SELECTED
+  // parent's tile read "0/2 served" while the server summary — and every unselected render —
+  // said "0/4"). The summary RPC counts by SESSION, which spans the whole merged party; this
+  // live path must count the same set or the tile flip-flops on selection. partyOrders is
+  // ordersForTable when no merge is live, so solo tables are byte-identical to before.
+  const os = partyOrders(t);
+  const sess = openSessionForTable(t) || (mergeParentOf(t) ? openSessionForTable(mergeParentOf(t)) : null);
   const mem = sess ? membersOf(sess.id) : [];
   const pending = mem.filter((m) => !m.approved).length;
   const cart = sess && Array.isArray(sess.cart) ? sess.cart : []; // shared cart being built, not yet ordered
@@ -7956,7 +7987,9 @@ function tablePanelParts(t, host = "float") {
     ? partyAll.flatMap((x) => ordersForTable(x))
         .sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
     : ordersForTable(t);
-  const sess = openSessionForTable(t);
+  // The child's own table has no session — the bill number, the guests and the status pill all
+  // belong to the party, which lives on partyHead. (A solo table: partyHead === t.)
+  const sess = openSessionForTable(partyHead) || openSessionForTable(t);
   const calls = callsForTable(t);
 
   // ── PENDING REQUESTS for THIS table (a guest tapped "open this table" / "join" /
@@ -8008,7 +8041,9 @@ function tablePanelParts(t, host = "float") {
   // ── HEAD: a status pill, a one-line summary (bill #, guests, dishes, due) and a
   // dish-status PROGRESS BAR (how much of this table is served vs cooking vs new).
   // Both detail views (in-panel + legacy modal) render these so they stay identical.
-  const tile = tableTileState(t);
+  // A merged child's own summary tile reads "free" (its party lives on the parent), so the
+  // status pill comes from the table that HOLDS the party — same rule the floor tile follows.
+  const tile = tableTileState(isParty ? partyHead : t);
   // VIP / Family / Owner's-guest mark (mig 166) shown right in the detail HEADER so a
   // marked table is unmistakable when opened — not only on the floor tile (owner
   // 2026-07-23: "the mark is not showing in that table thing"). tagForTable already
@@ -8369,8 +8404,13 @@ function openAddDishModal(orderId, rerender) {
 // Print never dead-ends on the invoice-first rule: a bill with no invoice yet gets one generated
 // (that IS the document that prints) and THEN prints, in the same tap.
 async function openBillPreview(t) {
-  await ensureTableSlice(t, true); // ALWAYS current: this popup shows money and issues documents
-  const live = () => ordersForTable(t).filter((o) => o.status !== "cancelled");
+  // THE WHOLE PARTY, ALWAYS (owner, 2026-08-03). This popup was reading ordersForTable(t) —
+  // one table's own orders — so a merged party's bill preview (and the paper it printed)
+  // showed HALF the food and HALF the money: proven live at ₹662 shown for a ₹1,323 party.
+  // partyOrders gathers every member table's slice; on a normal table it is ordersForTable.
+  t = mergeParentOf(String(t)) || String(t); // the popup always speaks for the table HOLDING the bill
+  await ensurePartySlices(t); // ALWAYS current: this popup shows money and issues documents
+  const live = () => partyOrders(t).filter((o) => o.status !== "cancelled");
   let os = live();
   if (!os.length) { toast(`${tableLabel(t)} has nothing to bill yet`, "ok"); return; }
   const sess = openSessionForTable(t);
@@ -8381,14 +8421,16 @@ async function openBillPreview(t) {
   // A brand-new order can't be paid before staff accept it — the same rule the orders list
   // enforces. Say so on the button instead of letting the tap fail.
   const anyReceived = os.some((o) => o.status === "received");
-  const lines = os.map((o) => orderItemRows(o).map((i) => {
+  // One line per DISH, not per KOT: identical lines across the party's orders combine, with
+  // their quantities summed — the same rule the printed bill uses (combineBillLines).
+  const lines = combineBillLines(os.flatMap((o) => orderItemRows(o))).map((i) => {
     const det = itemDetailLine(i);
     return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-line-right"><span class="bm-pr">${inr((parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1))}</span></span></div>`;
-  }).join("")).join("");
+  }).join("");
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
-      <div class="bm-head"><b>${esc(tableLabel(t))}${sess && sess.bill_no != null ? ` · Bill #${esc(sess.bill_no)}` : ""}</b>${invoiced ? `<span class="inv-chip">invoice #${esc(sess.invoice_no)}</span>` : `<span class="inv-chip pending">not invoiced</span>`}</div>
+      <div class="bm-head"><b>${esc(mergeGroupLabel(t) ? `Tables ${mergeGroupLabel(t)}` : tableLabel(t))}${sess && sess.bill_no != null ? ` · Bill #${esc(sess.bill_no)}` : ""}</b>${invoiced ? `<span class="inv-chip">invoice #${esc(sess.invoice_no)}</span>` : `<span class="inv-chip pending">not invoiced</span>`}</div>
       <div class="bm-sub">${esc(sess && sess.customer_name ? sess.customer_name : "")}${anyUnpaid ? "" : " · paid"}</div>
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
@@ -8430,7 +8472,7 @@ async function openBillPreview(t) {
       ss = openSessionForTable(t);
       if (!ss || ss.invoice_no == null || ss.invoice_voided) return; // cancelled or failed — generateInvoice already said which
     }
-    printBill(t, ss || { invoice_no: null, bill_no: null }, live());
+    printBill(t, ss || { invoice_no: null, bill_no: null }, live(), { party: true }); // a LIVE bill — the party label applies
     if (needsInvoice) await reopen();
   };
   const invBtn = wrap.querySelector("[data-bp-inv]");
@@ -9415,7 +9457,9 @@ function openKotColumns(t, sess) {
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   let occupiedOthers = 0;
   for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
-  const bill = billMath(movable.filter((o) => o.status !== "received"));
+  // The header's "bill due" is the PARTY's bill — a merged parent's movable list is per-table
+  // (that is what Move-a-KOT needs), but the money line must never show half a joint bill.
+  const bill = billMath(partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received"));
   const OPS = [
     // Works on an EMPTY table too — see the note in openKotMenu.
     { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
@@ -9525,7 +9569,15 @@ function openKotColumns(t, sess) {
     colsEl.querySelectorAll("[data-gomerge]").forEach((b) => (b.onclick = async () => {
       const to = b.dataset.gomerge;
       if (!(await confirmDialog(`Merge Table ${t} into ${partyLabel(to)}? They become ONE party on ONE bill${mergeChildrenOf(to).length ? " — Table " + t + " joins " + partyLabel(to) : ""}. The lowest table number holds the bill.`, "Merge"))) return;
-      run("POST", `/sessions/${sess.id}/merge`, { to }, `Merged into table ${to} — one bill`, () => followShiftedTable(t, to));
+      run("POST", `/sessions/${sess.id}/merge`, { to }, `Merged into table ${to} — one bill`, async (r) => {
+        // Refresh BOTH tiles + the live merges list BEFORE the detail re-renders — otherwise the
+        // panel still thinks the tables are separate and the detail/tiles count one table's food
+        // until the 60s backstop (owner, 2026-08-03). And follow the table the SERVER kept: the
+        // lowest number holds the bill, which is not always the one that was tapped.
+        const parent = (r && r.parent_table) || to;
+        await pollTables([String(parent), String(t), String(to)]);
+        followShiftedTable(t, parent);
+      });
     }));
     colsEl.querySelectorAll("[data-pickkot]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickkot; render(); }));
     colsEl.querySelectorAll("[data-pickitem]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickitem; render(); }));
@@ -9597,7 +9649,9 @@ function openKotMenu(t, sess) {
   const nAll = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   let occupiedOthers = 0;
   for (let i = 1; i <= nAll; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
-  const bill = billMath(movable.filter((o) => o.status !== "received"));
+  // The header's "bill due" is the PARTY's bill — a merged parent's movable list is per-table
+  // (that is what Move-a-KOT needs), but the money line must never show half a joint bill.
+  const bill = billMath(partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received"));
   const rows = [
     // Marking a table works with NO order on it — that is the point of reaching this menu from
     // the floor's own KOT button (owner, 2026-07-31: "before a table or order is taken you can
@@ -9710,9 +9764,12 @@ function openReprintKotPicker(t) {
 // person's share scales to the real due, so tax + discount split proportionally). The
 // server re-computes the due and refuses shares that don't add up — this UI can't
 // under- or over-collect. Replaces the old share CALCULATOR when the KOT ladder is on.
-function openSplitSettle(t) {
+async function openSplitSettle(t) {
   document.querySelector(".splitsettle-overlay")?.remove();
-  const payable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received");
+  // A merged party splits ITS WHOLE BILL — one table's own orders would quietly settle half
+  // a joint bill (the same class of bug as the half-party bill preview, owner 2026-08-03).
+  await ensurePartySlices(t); // every member table's orders, current, before money is divided
+  const payable = partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received");
   if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", "err"); return; }
   const due = billMath(payable).total;
   const METHODS = ["UPI", "Cash", "Card", "Other"];
@@ -9856,7 +9913,12 @@ function openMergePicker(t, sess) {
       const r = await api("POST", `/sessions/${sess.id}/merge`, { to });
       if (r && r.ok === false) { toast("Couldn't merge: " + (r.reason || "rejected"), "err"); return; }
       toast(`Merged into table ${to} — one bill`, "ok");
-      followShiftedTable(t, to); // the detail follows the party to its combined home
+      // Fresh tiles + merges list first, then follow the table the SERVER kept (the lowest
+      // number holds the bill — not always the one that was tapped). Same fix as the desktop
+      // columns: without the poll the detail counts one table's food (owner, 2026-08-03).
+      const parent = (r && r.parent_table) || to;
+      await pollTables([String(parent), String(t), String(to)]);
+      followShiftedTable(t, parent); // the detail follows the party to its combined home
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
 }
@@ -10099,14 +10161,19 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // print. If issuing fails or is cancelled, generateInvoice has already said so and nothing
   // prints, rather than paper going out that disagrees with the records.
   if (pr) pr.onclick = async () => {
+    // The party's session lives on the table HOLDING the bill (mig 249). Re-reading via the
+    // opened table alone meant a merged CHILD's Print issued the invoice, then found no session
+    // at its own number and returned in silence — a numbered invoice with no paper and no
+    // message (work-checker, 2026-08-03). Resolve the head for both the re-read and the print.
+    const head = mergeParentOf(t) || String(t);
     let ss = sess;
     if (ss && (ss.invoice_no == null || ss.invoice_voided)) {
       await generateInvoice(ss.id);
-      await ensureTableSlice(t, true);
-      ss = openSessionForTable(t);
+      await ensurePartySlices(t);
+      ss = openSessionForTable(head);
       if (!ss || ss.invoice_no == null || ss.invoice_voided) return;
     }
-    printBill(t, ss || sess, os);
+    printBill(head, ss || sess, os, { party: true });
   };
   // Invoice-first billing (owner 2026-07-24): Generate invoice / Reopen (void) buttons.
   const gi = root.querySelector("#sxGenInv");
@@ -11408,7 +11475,13 @@ async function pollTables(tables) {
   // NOT cancel each other — sharing one counter meant the earlier table's tile went stale
   // until the 60s backstop (fixed 2026-07-06). A per-table ticket handles same-table overlap.
   const born = dataSeq;
-  const tlist = tables.map(String);
+  // A MERGED PARTY'S TILES MOVE TOGETHER (owner, 2026-08-03: "one is marked served, the other is
+  // not — the green outline is not coming in one of them"). A child tile renders from its PARENT's
+  // summary tile, and an order keeps the table number it was ORDERED at (mig 249) — so a targeted
+  // poll for one member of the party refreshed one tile and left its partners painted stale until
+  // the 60s backstop. Widen every requested table to its whole party: the extra fetches are the
+  // same cheap ?table= reads, and only ever happen while a merge is live.
+  const tlist = [...new Set(tables.map(String).flatMap((t) => partyTablesOf(t)))];
   const mySeq = {};
   for (const t of tlist) mySeq[t] = (tileSeq[t] = (tileSeq[t] || 0) + 1);
   let results;
@@ -11442,6 +11515,10 @@ async function pollTables(tables) {
       requests: latest.requests || [],
       joiners: latest.joiners || [],
       blocklist: latest.blocklist || [],
+      // WHICH TABLES ARE ONE PARTY rides on every summary response. It used to refresh only on
+      // a FULL poll, so right after a merge the tiles had no "⇄ with T…" chip and the detail
+      // counted one table's dishes until the 60s backstop caught up. (owner, 2026-08-03)
+      merges: Array.isArray(latest.merges) ? latest.merges : (s.merges || []),
     } : {});
     state.boardLoaded = true;
 
@@ -11460,7 +11537,9 @@ async function pollTables(tables) {
   // (the chimes/alerts/counts are unchanged — only the floor's draw differs). Set the flag
   // right before, clear it right after: reconcileBoard runs synchronously, so the full-poll
   // path (pollOrders → reconcileBoard) can never see it set.
-  targetedPatchTables = tables.map(String);
+  // The PARTY-EXPANDED list, so a merged partner's tile is repainted too — its pixels come
+  // from the parent tile that was just refetched above.
+  targetedPatchTables = tlist;
   try { reconcileBoard(); } finally { targetedPatchTables = null; }
 }
 

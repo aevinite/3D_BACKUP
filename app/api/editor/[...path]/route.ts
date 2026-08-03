@@ -22,6 +22,7 @@ import { businessDayStartIso } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
+import { mergeParentTable } from "@/lib/tableMerge";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { raiseIssue } from "@/lib/issues";
 import { effectiveTaxRate, taxComponents } from "@/lib/tax";
@@ -1717,8 +1718,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     }
 
     if (a === "customer-capture") {
-      const t = String(body?.table || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(body?.table || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // The bill's session sits on the PARENT of a merged table — without this the ownership
+      // check below ("does that session really sit at this table?") refused the party's own
+      // session whenever the popup was opened from a child table, and the visit was lost.
+      const t = await mergeParentTable(sb, rid, tRaw);
       const ent = await getOwnerEntitlements(rid);
       if (!ent.customers) return err("The customer directory isn't enabled for this restaurant.", 403);
       // WHOSE BILL: the panel sends the session it just settled. Verified against this
@@ -2666,8 +2671,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Splitting a bill SETTLES money, so it needs the same permission as a plain "Mark paid" —
       // otherwise switching mark_paid off would leave the split route as a way round it.
       if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("mark a bill paid");
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // A merged child's bill lives on its parent — split the PARTY's bill (lib/tableMerge).
+      const t = await mergeParentTable(sb, rid, tRaw);
       // The arithmetic + the write live in lib/paySplit.ts, shared with the waiter tablet, so
       // the two panels can never disagree about what a split bill does (owner, 2026-08-02).
       // Un-accepted (received) orders stay OUT of the scope — the same graceful rule as
@@ -2914,8 +2921,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // remains, and reopen a session if sessions are on. The manager panel used to do this as a
     // client loop that never cleared the signals → a stuck bell on the emptied table. (B12)
     if (a === "tables" && c === "restart") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // A merged child's party lives on its parent — restart clears the whole party (lib/tableMerge).
+      const t = await mergeParentTable(sb, rid, tRaw);
       const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
       let q = sb.from("orders").update({ status: "served", archived: true, archived_at: nowIso() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
@@ -2984,8 +2993,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // changes) + mark paid under the reserved "On the house" method (the report keys
     // on it). Same accept rule as mark-paid: nothing still 'received'.
     if (a === "tables" && c === "on-the-house") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // The comp settles the PARTY's bill — resolve a merged child to the table holding it.
+      const t = await mergeParentTable(sb, rid, tRaw);
       if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "table_tags"))) return permDenied("settle a bill on the house");
       const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
@@ -3023,8 +3034,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // itself reuses closeSession(force) — orders were archived here first, so nothing
     // gets cancelled by the close's cook-guard.
     if (a === "tables" && c === "khata") {
-      const t = String(b || "").trim();
-      if (!/^\d+$/.test(t)) return err("valid table required");
+      const tRaw = String(b || "").trim();
+      if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // Parking "collect later" parks the PARTY's bill — resolve a merged child first.
+      const t = await mergeParentTable(sb, rid, tRaw);
       if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("park bills to collect later");
       const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
