@@ -594,6 +594,15 @@ function floorTableList() {
   return out.concat(extras);
 }
 
+// stepTables(): the order the ‹ › buttons in an open table's popup walk. Deliberately the
+// tables the FLOOR is drawing right now, in the same order and through the same section rule
+// (inMySection), so "next" can only ever mean the next table this waiter actually serves —
+// and, when a filter is on, the next one they were looking at. Strings, to compare with
+// state.table without surprises. (owner, 2026-08-03: "toggle the tables very fast".)
+function stepTables() {
+  return floorTableList().filter((i) => passesFilter(i)).map(String);
+}
+
 // ── Waiter sections (mig 222) ────────────────────────────────────────────────
 // `my_tables` comes down with the floor summary: an ARRAY = this waiter only serves
 // those tables; NULL/absent = not restricted (the admin, a manager/owner looking in, or
@@ -832,8 +841,15 @@ function tileHtml(i) {
   // Actions: ＋ Take order on every occupied tile (a free tile IS the take-order button);
   // one-tap ✓ accept for a brand-new order; 💳 pay when the bill is served-unpaid. All
   // delegated on #tiles, so the patch path never re-binds anything.
+  // A FINISHED table says so and WAITS: everything served AND the whole bill paid ("done"),
+  // which is the manager's own rule — nothing ends a table by itself, a person decides when
+  // the guests have actually left. The manager floor has carried a ⏻ close on that tile since
+  // 2026-08-02; the tablet made a waiter open the popup to find it, and this is the "everything
+  // else like a manager" the owner asked for. Its confirm is the second step, as always.
+  const finished = st.cls === "done" && !a.unpaid;
   const acts = isFree ? "" :
-    (tshow("tablet_take_orders") ? `<span class="t-take${txray("tablet_take_orders")}" role="button" data-quick="order" data-qt="${i}" title="Add another order for ${esc(tableLabel(i))}"><i class="t-take-x">＋</i><i class="t-take-t">Take order</i></span>` : "")
+    (finished ? `<span class="tclose" role="button" data-quick="close" data-qt="${partyHead}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}">⏻</span>` : "")
+    + (tshow("tablet_take_orders") ? `<span class="t-take${txray("tablet_take_orders")}" role="button" data-quick="order" data-qt="${i}" title="Add another order for ${esc(tableLabel(i))}"><i class="t-take-x">＋</i><i class="t-take-t">Take order</i></span>` : "")
     + (a.nw > 0 ? `<span class="tacc" role="button" data-quick="accept" data-qt="${i}" title="Accept the new order">✓</span>` : "")
     + (st.cls === "bill" && tshow("tablet_mark_paid") ? `<span class="tpay${txray("tablet_mark_paid")}" role="button" data-quick="pay" data-qt="${partyHead}" title="Mark the bill paid">💳</span>` : "");
   // Special table type (mig 166): a corner ribbon + pill badge layered OVER the state
@@ -1028,6 +1044,9 @@ function bindFloorDelegation() {
       openOrderForTable(t);
       return;
     }
+    // ⏻ on a FINISHED tile (everything served, bill paid) — closes it and frees the table,
+    // through the one shared close path, whose confirm is the second step.
+    if ((q = e.target.closest(".tclose[data-quick='close']"))) { await closeTableAndFree(q.dataset.qt); return; }
     // Quick "Mark paid" — same payment-method modal + whole-table pay as the detail panel,
     // without opening it.
     if ((q = e.target.closest(".tpay[data-quick='pay']"))) {
@@ -1438,11 +1457,24 @@ function renderPanel() {
     + (s && !kotOpsOn() ? `<button class="btn small" id="shiftTable">⇄ Move table</button>` : "")
     + (s && os.length && !kotOpsOn() ? `<button class="btn small" id="moveOrderBtn">⇄ Move an order</button>` : "")
     + (tabletTagsOn() && tshow("tablet_table_tags") ? `<button class="btn small${txray("tablet_table_tags")}" id="tagTable">${TABLE_TAG_INFO[ttagOf(t)] ? TABLE_TAG_INFO[ttagOf(t)].emoji : "🏷"} Table type</button>` : "");
+  // STEP BETWEEN TABLES WITHOUT CLOSING (owner, 2026-08-03: "they can able to toggle the
+  // tables and all that very fast"). The popup covers the floor, so moving from T6 to T7 used
+  // to cost two taps — close, then find and tap the next tile, on tiles that are deliberately
+  // small. ‹ › walk the SAME list the floor draws, in the same order, honouring this waiter's
+  // section, so "next" always means the next table they can actually serve.
+  const walk = stepTables();
+  const wi = walk.indexOf(String(t));
+  const prevT = wi > 0 ? walk[wi - 1] : (walk.length > 1 ? walk[walk.length - 1] : null);
+  const nextT = wi >= 0 && wi < walk.length - 1 ? walk[wi + 1] : (walk.length > 1 ? walk[0] : null);
+  const stepBtns = (walk.length > 1 && prevT != null && nextT != null)
+    ? `<span class="phead-step"><button class="pstep" data-step-table="${esc(prevT)}" title="${esc(tableLabel(prevT))}" aria-label="Previous table">‹</button><button class="pstep" data-step-table="${esc(nextT)}" title="${esc(tableLabel(nextT))}" aria-label="Next table">›</button></span>`
+    : "";
   p.innerHTML = `
    <div class="detail-pop">
     <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
       <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${mergeGroupLabel(t) ? `<span class="tmerge">⇄ one party · ${esc(mergeGroupLabel(t))}</span> · ` : ""}${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}${unsentMeta}</div></div>
+      ${stepBtns}
     </div>
     ${headOps ? `<div class="phead-ops">${headOps}</div>` : ""}
     <div class="detail-body">
@@ -1472,6 +1504,10 @@ function renderPanel() {
   { const dc = $("#detailClose"); if (dc) dc.onclick = () => { state.table = null; renderPanel(); renderFloor(); }; }
   // #10: backdrop tap closes the detail popup, consistent with every other tablet popup.
   p.onclick = (e) => { if (e.target === p) { state.table = null; renderPanel(); renderFloor(); } };
+  // ‹ › step to the previous/next table WITHOUT closing the popup. selectTable() does the
+  // rest (it fetches that table's slice and repaints), so this is the same one-tap open the
+  // floor gives — just reachable from inside an open table.
+  document.querySelectorAll("[data-step-table]").forEach((b) => (b.onclick = () => selectTable(b.dataset.stepTable)));
 
   // wire it up
   document.querySelectorAll("[data-req-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/requests/${b.dataset.reqApprove}/resolve`, { status: "approved" }))));
@@ -1589,43 +1625,57 @@ function renderPanel() {
   const tgb = $("#tagTable"); if (tgb) tgb.onclick = () => openTagSheet(t);
   const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
   const bdb = $("#billDiscountBtn"); if (bdb && s) bdb.onclick = () => tabletBillDiscount(t);
-  const clb = $("#closeTable"); if (clb && s) clb.onclick = async () => {
-    const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
-    if (!(await confirmDialog(`Close table ${t} and free it?${warn}`, "Close table"))) return;
-    // OPTIMISTIC: drop the session AND this table's orders/members locally so the FLOOR TILE
-    // (which renders from the slim summary, not the slice) goes free INSTANTLY, instead of
-    // showing the old occupied colour for ~1s until the reconcile. patchTileFromSlice recomputes
-    // the now-empty tile into state.summary; load() below reconciles (and reverts it if the
-    // server refuses the close). (audit 2026-07-08 round2)
-    state.data.sessions = (state.data.sessions || []).filter((x) => x.id !== s.id);
-    state.data.orders = (state.data.orders || []).filter((o) => String(o.table_number) !== String(t));
-    state.data.members = (state.data.members || []).filter((m) => m.session_id !== s.id);
-    patchTileFromSlice(t);
-    state.table = null; state.ordering = false;
-    renderFloor(); renderPanel();
-    try {
-      await api("POST", `/sessions/${s.id}/close`);
-      await load();
-    } catch (e) {
-      await load(); // server refused — refetch so the still-open table reappears
-      // THE REASON CODE FIRST, the wording only as a fallback (2026-08-01). This used to test the
-      // server's PROSE — the exact mistake the manager panel was fixed for: a paid-but-unserved
-      // table is refused with different words, so the text match missed it and the waiter got a
-      // dead-end error with no "close anyway" at all. lib/sessionClose.ts sends
-      // reason: 'unpaid' | 'cooking' | 'both'; the text test stays only for a stale or queued
-      // reply that predates it.
-      const why = (e && e.data && e.data.reason) || null;
-      if (why === "unpaid" || why === "cooking" || why === "both" || /close anyway/i.test(String(e && e.message))) {
-        if (await confirmDialog(`${e.message}`, "Close anyway")) {
-          await actGated("POST", `/sessions/${s.id}/close`, { force: true }, { message: "Enter a manager PIN to close this busy table.", toast: "Table closed" });
-        }
-        return;
-      }
-      toast("Failed: " + e.message, false);
-    }
-  };
+  const clb = $("#closeTable"); if (clb && s) clb.onclick = () => closeTableAndFree(t);
   { const tob = $("#takeOrder"); if (tob) tob.onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }; }
   restoreScroll();   // #U2: keep the popup scroll across a live-update rebuild (same table)
+}
+
+// closeTableAndFree(t): THE one close path — the popup's "✕ Close table" and the finished
+// tile's ⏻ both call this. It is a function rather than two copies on purpose: the flow
+// carries an optimistic local drop AND the reason-code "close anyway" ladder, and a second
+// copy of that would be a second place to forget the reason codes (which is exactly how a
+// paid-but-unserved table once dead-ended with no "close anyway" at all).
+//
+// It resolves the session itself, because the FLOOR renders from the slim summary: a tile's
+// ⏻ can be tapped for a table whose full slice was never fetched.
+async function closeTableAndFree(t) {
+  await ensurePartySlices(t, true);
+  const s = sessionOf(t);
+  if (!s) { toast("That table is already free.", false); await load(); renderFloor(); return; }
+  const a = tableAgg(t), os = partyOrders(t);
+  const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
+  if (!(await confirmDialog(`Close ${tableLabel(t)} and free it?${warn}`, "Close table"))) return;
+  // OPTIMISTIC: drop the session AND this table's orders/members locally so the FLOOR TILE
+  // (which renders from the slim summary, not the slice) goes free INSTANTLY, instead of
+  // showing the old occupied colour for ~1s until the reconcile. patchTileFromSlice recomputes
+  // the now-empty tile into state.summary; load() below reconciles (and reverts it if the
+  // server refuses the close). (audit 2026-07-08 round2)
+  state.data.sessions = (state.data.sessions || []).filter((x) => x.id !== s.id);
+  state.data.orders = (state.data.orders || []).filter((o) => String(o.table_number) !== String(t));
+  state.data.members = (state.data.members || []).filter((m) => m.session_id !== s.id);
+  patchTileFromSlice(t);
+  state.table = null; state.ordering = false;
+  renderFloor(); renderPanel();
+  try {
+    await api("POST", `/sessions/${s.id}/close`);
+    await load();
+  } catch (e) {
+    await load(); // server refused — refetch so the still-open table reappears
+    // THE REASON CODE FIRST, the wording only as a fallback (2026-08-01). This used to test the
+    // server's PROSE — the exact mistake the manager panel was fixed for: a paid-but-unserved
+    // table is refused with different words, so the text match missed it and the waiter got a
+    // dead-end error with no "close anyway" at all. lib/sessionClose.ts sends
+    // reason: 'unpaid' | 'cooking' | 'both'; the text test stays only for a stale or queued
+    // reply that predates it.
+    const why = (e && e.data && e.data.reason) || null;
+    if (why === "unpaid" || why === "cooking" || why === "both" || /close anyway/i.test(String(e && e.message))) {
+      if (await confirmDialog(`${e.message}`, "Close anyway")) {
+        await actGated("POST", `/sessions/${s.id}/close`, { force: true }, { message: "Enter a manager PIN to close this busy table.", toast: "Table closed" });
+      }
+      return;
+    }
+    toast("Failed: " + e.message, false);
+  }
 }
 
 // Advance one dish new→cooking→served (wrapping). Optimistic so it feels instant.
