@@ -52,9 +52,12 @@ const STALE_ON_ERROR_MS = 10 * 60 * 1000;
  * did every scan for the next 15 seconds. `lib/panelGate.ts` uses the same helper, so a staff
  * panel would likewise say the restaurant isn't there.
  *
- * Caught 2026-08-03 by the 485-phase suite: eight guest-menu phases failed with
- * `/r/french-house/menu → 404` while that restaurant was perfectly present and active, during a
- * moment the database was under load from the suite itself.
+ * HOW IT WAS FOUND, accurately: a 485-phase run had eight guest-menu phases fail with
+ * `/r/french-house/menu → 404` for a restaurant that was present and active. Those particular
+ * 404s turned out to have a DIFFERENT cause — verify-access-live.mjs crashed with the Menu master
+ * switch off and never put it back (fixed separately) — but reading the code path they pointed at
+ * turned up this fault sitting there unexercised. It is real: a failed read genuinely produced a
+ * cached "no such restaurant" for 15 seconds, which is what a scanned QR would have shown.
  *
  * So a failed read now (a) is never cached, and (b) answers with the last known row if we have
  * one, and otherwise THROWS — because "something went wrong, try again" is honest and a 404 is
