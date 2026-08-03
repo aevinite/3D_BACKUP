@@ -43,7 +43,16 @@ export default function OfflineNotice() {
 
   useEffect(() => {
     setMuted(isPanelHost(location.pathname));
-    setHasQueue(/^\/r\//.test(location.pathname) || location.pathname === "/menu");
+    // Only the GUEST surfaces have an on-device queue. This used to be any /r/ path, which
+    // includes /r/<slug>/login — a staff sign-in page, not muted above — so a staff member
+    // with no signal was told "Your order is saved and will send by itself" on a screen with
+    // no order and no queue (guest sweep 2026-08-04). Match the guest routes only:
+    // /r/<slug>/menu|item, the legacy /menu|/item, and /q/<code> (the printed table QR).
+    setHasQueue(
+      /^\/r\/[^/]+\/(menu|item)(\/|$)/.test(location.pathname) ||
+        /^\/(menu|item)(\/|$)/.test(location.pathname) ||
+        /^\/q\/[^/]+/.test(location.pathname),
+    );
   }, []);
 
   useEffect(() => {

@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
-import { getOrderStatus, updateOrderTableNumber, getSettings, type OrderStatus } from "@/lib/menu";
+import { getOrderStatus, getSettings, type OrderStatus } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { useFeatures } from "@/lib/features";
 import { getStoredSession, getSessionState } from "@/lib/session";
@@ -20,8 +20,6 @@ import {
   writeActiveOrders as write,
   liveActiveOrders,
 } from "@/lib/orderStatus";
-// Phone back button: while the details sheet is open, back closes it (not the site).
-import { useBackClose } from "@/lib/backStack";
 
 // Tell the open cart (same tab) that an order's status changed, so its
 // "Live now" section can re-read. The browser's native `storage` event only
@@ -37,9 +35,6 @@ export default function OrderTracker() {
   const features = useFeatures(restaurantId); // hide the call-waiter button when waiter_calls is off
   // useState boxes (re-draw the strip when changed):
   const [orders, setOrders] = useState<ActiveOrder[]>([]); // all orders this device is following
-  const [detailOpen, setDetailOpen] = useState(false); // is the details sheet open?
-  const [tableDraft, setTableDraft] = useState(""); // table number being typed in the sheet
-  const [savingTable, setSavingTable] = useState(false); // true while saving a table change
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
   // Per-dish progress across the whole table (from the session's order_items):
   // segs is one status per dish ("received"|"preparing"|"served") so the strip can
@@ -58,9 +53,6 @@ export default function OrderTracker() {
   // The order being animated into the cross — frozen so a newly-arrived order
   // can't swap into the strip mid-animation and play the fly-out on the wrong one.
   const dismissingOrderRef = useRef<ActiveOrder | null>(null);
-
-  // Phone back button closes the details sheet instead of leaving the site.
-  useBackClose("order-detail", detailOpen, () => setDetailOpen(false));
 
   // refresh(): re-read the saved orders into state. Also patches any already-
   // finished order that's missing a "finished at" time so it can auto-clear.
@@ -282,7 +274,6 @@ export default function OrderTracker() {
   // cart's "Live now" list (it is NOT cancelled or removed).
   const hideStrip = (id: string) => {
     write(read().map((o) => (o.id === id ? { ...o, stripHidden: true } : o))); // mark this one's strip hidden
-    setDetailOpen(false);
     refresh();
     broadcast(); // tell the cart to update its dot/list
   };
@@ -305,8 +296,6 @@ export default function OrderTracker() {
   // order-level bar. Hidden during a dismiss animation to keep that clean.
   const dishMode = dishProg.segs.length > 0 && !dismissing;
   const allDishesServed = dishMode && dishProg.served === dishProg.segs.length;
-  // The table can only be corrected while the order is early (not yet served).
-  const canEditTable = order.status === "received" || order.status === "preparing";
   // showPrice(): format a stored USD ORDER TOTAL in the chosen currency.
   // Order totals are authoritative amounts, so they get minor-unit rounding
   // (whole ₹ / cents) — never the ₹10 menu snapping. Matches SessionTableBill.
@@ -315,32 +304,15 @@ export default function OrderTracker() {
   // openDetail(): tapping the strip ALWAYS opens the cart's "Live status" tab — the
   // good warm bill card (SessionTableBill / live orders) — for a single order or
   // many. (Was: a single order opened the tracker's own dark detail sheet, which the
-  // owner didn't like.) The old .ot-sheet below is now unreachable. (owner, 2026-06-19)
+  // owner didn't like.) (owner, 2026-06-19)
+  // That sheet has now been DELETED rather than left sitting unreachable, and the one
+  // thing only it could do — correcting a wrong table number — moved into the tab this
+  // opens (CartPanel, .live-order-fixlink). Guest sweep 2026-08-04.
   const openDetail = () => {
     window.dispatchEvent(new Event("lfh:open-cart"));
     window.dispatchEvent(new Event("lfh:show-previous-orders"));
   };
 
-  // saveTable(): send a corrected table number to the server, then update locally.
-  const saveTable = async () => {
-    if (savingTable) return; // ignore double taps
-    setSavingTable(true);
-    const ok = await updateOrderTableNumber(order.id, tableDraft); // tell the server
-    setSavingTable(false);
-    if (ok) {
-      // Save succeeded: update our stored copy, re-draw, and confirm with a toast.
-      write(read().map((o) => (o.id === order.id ? { ...o, tableNumber: tableDraft.trim() } : o)));
-      refresh();
-      broadcast();
-      window.dispatchEvent(
-        new CustomEvent("lfh:toast", { detail: { message: "Table updated", subtitle: "saved", kicker: "table", variant: "success" } })
-      );
-    } else {
-      window.dispatchEvent(
-        new CustomEvent("lfh:toast", { detail: { message: "Couldn't update table", subtitle: "it may already be served", kicker: "table", variant: "error" } })
-      );
-    }
-  };
 
   // ── Drag-to-dismiss gesture ──────────────────────────────────────────
   // Tap = open detail. Press-and-drag = pick the strip up; a cross target
@@ -399,7 +371,7 @@ export default function OrderTracker() {
           message: "Tracker hidden", subtitle: "still in Previous orders",
           kicker: "order update", icon: "🧾", variant: "success",
         } }));
-        if (wasMulti) { write(read().map((o) => (allIds.includes(o.id) ? { ...o, stripHidden: true } : o))); setDetailOpen(false); refresh(); broadcast(); }
+        if (wasMulti) { write(read().map((o) => (allIds.includes(o.id) ? { ...o, stripHidden: true } : o))); refresh(); broadcast(); }
         else { hideStrip(id); }
         setDismissing(null);
         dismissingOrderRef.current = null;
@@ -514,103 +486,13 @@ export default function OrderTracker() {
         <span className="ot-grip" aria-hidden="true"><i className="fas fa-grip-lines"></i></span>
       </button>
 
-      {/* The details sheet that slides up when the strip is tapped. */}
-      {detailOpen && (
-        <>
-          {/* Dark backdrop; tapping it closes the sheet. */}
-          <div className="overlay active" onClick={() => setDetailOpen(false)} />
-          <div className="ot-sheet" role="dialog" aria-modal="true" aria-label="Order status">
-            <button className="ot-sheet-close" aria-label="Close" onClick={() => setDetailOpen(false)}>
-              <i className="fas fa-times"></i>
-            </button>
-
-            <div className={`ot-sheet-head status-${order.status}`}>
-              <div className="ot-icon" aria-hidden="true">
-                <i className={`fas ${c.icon}`}></i>
-              </div>
-              <div>
-                <div className="ot-label">{c.label}</div>
-                <div className="ot-sub">{c.sub}</div>
-              </div>
-            </div>
-
-            {/* If the order was cancelled (e.g. staff closed the table), explain it
-                and offer a quick way to get a waiter — so the guest isn't stranded. */}
-            {order.status === "cancelled" && (
-              <div className="ot-cancelled-note">
-                <p>This table was closed, so your order was cancelled.{features.waiter_calls ? " Need a hand?" : " Please ask a staff member for help."}</p>
-                {features.waiter_calls && (
-                  <button
-                    type="button"
-                    className="btn btn-gold ot-call-waiter"
-                    onClick={() => { setDetailOpen(false); window.dispatchEvent(new CustomEvent("lfh:chef-call")); }}
-                  >
-                    <i className="fas fa-bell"></i> Call a waiter
-                  </button>
-                )}
-              </div>
-            )}
-
-            {stepIndex >= 0 && (
-              <div className="ot-steps big" aria-hidden="true">
-                {STEPS.map((s, i) => (
-                  <span key={s} className={`ot-step ${i <= stepIndex ? "done" : ""} ${i === stepIndex ? "active" : ""}`} />
-                ))}
-              </div>
-            )}
-
-            {/* The list of dishes in this order, plus the total at the bottom. */}
-            {order.items && order.items.length > 0 && (
-              <div className="ot-items">
-                {order.items.map((it, i) => (
-                  <div key={i} className="ot-item-line">
-                    <span>{it.title}</span>
-                    <span>×{it.qty}</span>
-                  </div>
-                ))}
-                <div className="ot-item-line total">
-                  <span>Total</span>
-                  <span>{showPrice(order.total)}</span>
-                </div>
-              </div>
-            )}
-
-            {/* The "fix my table number" area (locked once the order is served). */}
-            <div className="ot-table-edit">
-              <label htmlFor="ot-table-input">Table number</label>
-              <div className="ot-table-row">
-                <input
-                  id="ot-table-input"
-                  type="text"
-                  inputMode="numeric"
-                  value={tableDraft}
-                  disabled={!canEditTable}
-                  placeholder="e.g. 7"
-                  onChange={(e) => setTableDraft(e.target.value)}
-                />
-                <button
-                  type="button"
-                  className="ot-save"
-                  disabled={!canEditTable || savingTable || tableDraft.trim() === (order.tableNumber || "").trim()}
-                  onClick={saveTable}
-                >
-                  {savingTable ? "Saving…" : "Save"}
-                </button>
-              </div>
-              <p className="ot-note">
-                {canEditTable
-                  ? "Got the table wrong? Fix it here — the kitchen sees the change. You can't change the dishes."
-                  : "This order is already served, so the table number is locked."}
-              </p>
-            </div>
-
-            {/* A plain link to hide the strip (same result as dropping it on the X). */}
-            <button type="button" className="ot-hide-link" onClick={() => hideStrip(order.id)}>
-              Hide this tracker — it stays in Previous orders
-            </button>
-          </div>
-        </>
-      )}
+      {/* The tracker's own detail sheet USED TO live here. It became unreachable when the
+          owner asked for a tap on the strip to open the cart's Live-status tab instead
+          (2026-06-19) — setDetailOpen(true) was never called again, so ~95 lines of UI sat
+          here looking live, including the ONLY way a guest could correct a wrong table
+          number. Deleted rather than resurrected, because the tap behaviour is the owner's
+          decision; the table-correction control now lives in the Live-status tab the tap
+          actually opens (see CartPanel .live-order-fixlink). Guest sweep 2026-08-04. */}
     </>
   );
 }

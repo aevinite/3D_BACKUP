@@ -75,14 +75,14 @@
       <b>Nothing you did is lost.</b> Any orders or changes you made while offline are stored on
       this device and will be sent automatically the moment the connection comes back.
     </div>
-    <button type="button" id="again">Try again</button>
+    <button type="button" id="retry">Try again</button>
     <button type="button" class="ghost" id="home">Go to the home screen</button>
     <div class="hint" id="hint">Checking the connection...</div>
   </main>
   <script>
     var $ = function (id) { return document.getElementById(id); };
 
-    $("again").addEventListener("click", function () { location.reload(); });
+    $("retry").addEventListener("click", function () { location.reload(); });
     // The way OUT of the dead end. Home is the lightest page in the app and is usually
     // already saved on the device, so it opens even when this screen couldn't.
     $("home").addEventListener("click", function () { location.href = "/"; });

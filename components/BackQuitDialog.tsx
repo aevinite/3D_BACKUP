@@ -24,10 +24,17 @@ import { setRootBackHandler } from "@/lib/backStack";
 // there), so the guard MUST match the tenant route or it never arms and the back
 // button quits the site in one press — the exact owner hard-rule violation fixed
 // 2026-07-05 (bug G1). Match /r/<slug>/menu exactly, NOT its /item|/view children.
+//
+// /q/<code> IS A MENU TOO, and it is the one a real diner actually opens: it's the
+// address behind every printed table sticker (mig 210). It was missing here, so on
+// the QR-scanned menu the guard never armed and ONE back press left the site — bug G1
+// all over again, on the primary entry point (found by the guest sweep 2026-08-04,
+// measured on a live table code: /r/<slug>/menu armed, /q/<code> did not).
 const HOME_PATHS = ["/", "/menu"];
 const TENANT_MENU = /^\/r\/[^/]+\/menu\/?$/;
+const QR_MENU = /^\/q\/[^/]+\/?$/;
 function isHomePath(p: string) {
-  return HOME_PATHS.includes(p) || TENANT_MENU.test(p);
+  return HOME_PATHS.includes(p) || TENANT_MENU.test(p) || QR_MENU.test(p);
 }
 
 type GuardState = (History["state"] & { __lfhExitGuard?: boolean }) | null;

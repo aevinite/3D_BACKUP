@@ -170,7 +170,10 @@ export default function OrderConfirmModal() {
 
   // The dish's own avoided allergens PLUS any free-text "other" allergy the guest
   // typed. This is the single list that flows to the cart line and the kitchen.
-  const otherTrimmed = otherOn ? otherText.trim() : "";
+  // `otherOn` is restored from a saved line, so it can be true for a restaurant that has
+  // since switched free-text OFF — and then an edit of that line would quietly re-save the
+  // typed text the switch is meant to have removed. Check the switch too (sweep 2026-08-04).
+  const otherTrimmed = otherOn && features.allergy_other ? otherText.trim() : "";
   const finalRemoved = otherTrimmed ? [...removed, otherTrimmed] : removed;
 
   // hasDeclared: does this dish list its own allergens? If so, the chips mean
@@ -198,10 +201,14 @@ export default function OrderConfirmModal() {
       // allergens, no note) yields "[]" — the same as a quick "+" add — so the
       // plain/non-allergic version always merges regardless of how it was added,
       // while any removed allergen (e.g. "no:milk") makes it a separate line.
+      // The kitchen note only travels while its own switch is on. `note` is restored from a
+      // saved line, so without this an edit re-saved a note a restaurant had since switched
+      // off — the input is hidden, so the guest couldn't see or clear it (sweep 2026-08-04).
+      const noteOut = features.guest_note ? note.trim() : "";
       const sig = JSON.stringify([
         ...chosen.map((c) => `${c.group}:${c.label}`),
         ...lineRemoved.map((r) => `no:${r}`),
-        ...(note.trim() ? [`note:${note.trim()}`] : []),
+        ...(noteOut ? [`note:${noteOut}`] : []),
       ]);
       let cart: { id: string; title: string; price: string; image: string; qty: number; options?: typeof chosen; removed?: string[]; note?: string; sig?: string }[] = [];
       // Read the existing cart out of the browser's notepad (localStorage).
@@ -225,7 +232,7 @@ export default function OrderConfirmModal() {
         id: item.id, title: item.title, price: unit.toFixed(2), image: item.image, qty: Math.min(99, qty),
         options: chosen.length ? chosen : undefined,
         removed: lineRemoved.length ? lineRemoved : undefined,
-        note: note.trim() || undefined,
+        note: noteOut || undefined,
         sig,
       });
 

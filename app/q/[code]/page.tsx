@@ -8,6 +8,7 @@
 import type { Metadata } from "next";
 import MenuView from "@/components/MenuView";
 import { getRestaurantBySlug } from "@/lib/tenant";
+import { getSettings } from "@/lib/menu";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export const dynamic = "force-dynamic";
@@ -31,7 +32,14 @@ async function resolveCode(codeRaw: string) {
   if (!rest?.slug) return null;
   const r = await getRestaurantBySlug(rest.slug);
   if (!r || !r.active) return null;
-  return { r, slug: rest.slug, table: row.table_number };
+  // MENU MASTER SWITCH — a restaurant whose Menu feature is off has no guest menu at all,
+  // and the rule is explicit that "no QR link resolves" (see lib/menu.ts). This route used
+  // to skip the check, so every printed sticker kept serving the full menu (and taking
+  // orders) after the switch was turned off. Treated like a dead code: the friendly page
+  // below, never a bare 404 — a diner at a table should be told to ask a member of staff.
+  const settings = await getSettings(r.id);
+  if (!settings.menuEnabled) return null;
+  return { r, slug: rest.slug, table: row.table_number, settings };
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }): Promise<Metadata> {
@@ -66,6 +74,18 @@ export default async function TableQrPage({ params }: { params: Promise<{ code: 
           back to restaurant #1's scope and mix restaurants on one phone. tenantSlug()
           reads this exact sessionStorage key for non-prefixed pages. */}
       <script dangerouslySetInnerHTML={{ __html: `try{sessionStorage.setItem("lfh_tab_tenant",${JSON.stringify(hit.slug)})}catch(e){}` }} />
+      {/* Access → Menu → Format → Default light/dark, exactly as /r/<slug>/menu does it.
+          The global boot script in app/layout.tsx stamps 'light' because it can't know WHICH
+          restaurant is opening; this runs as the parser reaches it, before the menu paints,
+          so a dark-default restaurant never flashes light for a guest who scanned the table
+          QR. A guest who has chosen a mode keeps it — we only act when nothing is saved. */}
+      {hit.settings.menuDefaultMode === "dark" && (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "(function(){try{if(!localStorage.getItem('lfh_theme'))document.documentElement.setAttribute('data-theme','dark');}catch(e){}})();",
+          }}
+        />
+      )}
       <MenuView
       restaurantId={hit.r.id}
       restaurantSlug={hit.slug}
@@ -77,6 +97,9 @@ export default async function TableQrPage({ params }: { params: Promise<{ code: 
       theme={hit.r.theme ?? undefined}
       logoUrl={hit.r.logoUrl ?? undefined}
       qrTable={String(hit.table)}
+      /* Access → Menu → Format → Default layout. Was omitted here, so a restaurant that
+         chose the list view still got the gallery for everyone who scanned a table QR. */
+      defaultLayout={hit.settings.menuDefaultLayout === "list" ? "list" : "gallery"}
       />
     </>
   );

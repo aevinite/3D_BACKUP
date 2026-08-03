@@ -46,18 +46,20 @@ export default function PublicModelViewer({
   // instead of an endless spinner.
   onScriptError?: () => void;
 }) {
-  // Safety check: if no real model URL was set up yet, show a friendly
-  // "not configured" placeholder instead of a broken viewer.
+  // Safety check: if no real model URL was set up yet, say so the way a GUEST needs to hear
+  // it. This used to print "Model URL not configured yet. / Check config.json for valid
+  // Supabase Storage URL." straight at a diner — an instruction for us, meaningless to them
+  // (guest sweep 2026-08-04). Same rule the AR message already follows: no internal detail.
   if (!config.modelUrl || config.modelUrl === "SUPABASE_GLB_URL_HERE") {
     return (
       <div className="flex items-center justify-center h-full text-center p-8">
         <div>
-          <div className="text-4xl mb-4">🔒</div>
+          <div className="text-4xl mb-4">🍽️</div>
           <h2 className="text-xl font-bold text-white mb-2">
-            Model URL not configured yet.
+            3D view isn&apos;t ready for this dish
           </h2>
           <p className="text-white/50">
-            Check config.json for valid Supabase Storage URL.
+            You can still see its photo and details on the menu.
           </p>
         </div>
       </div>

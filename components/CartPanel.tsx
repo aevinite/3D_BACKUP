@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
-import { getSettings, createOrder, isServerBusy, type MenuItem } from "@/lib/menu";
+import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, type MenuItem } from "@/lib/menu";
 import { enqueueGuestOrder } from "@/lib/guestOutbox"; // offline: save order, send on reconnect
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
@@ -20,6 +20,7 @@ import {
   STATUS_COPY,
   type ActiveOrder,
   readActiveOrders,
+  writeActiveOrders,
   liveActiveOrders,
   isFinalStatus,
 } from "@/lib/orderStatus";
@@ -91,6 +92,9 @@ export default function CartPanel() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]); // the full menu (for pairings/editing)
   const [liveOrders, setLiveOrders] = useState<ActiveOrder[]>([]); // orders still in progress
   const [showHistory, setShowHistory] = useState(false); // which tab: false=current bill, true=previous orders
+  const [editingTable, setEditingTable] = useState<string | null>(null); // order id whose table is being corrected
+  const [tableDraft, setTableDraft] = useState(""); // the corrected table number being typed
+  const [savingTable, setSavingTable] = useState(false); // true while that correction is in flight
   // Previous orders are now grouped by date (Today / Yesterday / Earlier) and each
   // bill collapses long item lists itself, so the old list-level "view 2 more"
   // toggle is gone — the partitioning keeps the tab tidy.
@@ -213,10 +217,17 @@ export default function CartPanel() {
     // Live orders are written/polled by OrderTracker; we just read them here.
     const loadLive = () => setLiveOrders(liveActiveOrders(readActiveOrders()));
     loadLive();
-    // restore order-wide allergy avoidances (set via "apply to all" or the bill section)
+    // Restore order-wide allergy avoidances (set via "apply to all" or the bill section).
+    // ONLY when this restaurant still has the allergy feature on: with it off the whole
+    // section is hidden, so a list saved on a previous visit would keep riding along on
+    // every order with no way for the guest to see or clear it (guest sweep 2026-08-04).
     try {
-      const d = JSON.parse(tget("lfh_declared") || "[]");
-      if (Array.isArray(d) && d.length) setDeclared(d);
+      if (features.allergies) {
+        const d = JSON.parse(tget("lfh_declared") || "[]");
+        if (Array.isArray(d) && d.length) setDeclared(d);
+      } else {
+        setDeclared([]);
+      }
     } catch {}
     // Pre-fill the table from a scanned QR (?table=N stored in lib/table). Only
     // fills an empty field, so it never clobbers what the guest typed.
@@ -297,7 +308,9 @@ export default function CartPanel() {
     // the REAL restaurant once its id lands — else a non-#1 guest saw #1's table count,
     // wrongly rejecting a valid table number as "doesn't exist". Cleanup drops old
     // listeners, so re-running never double-subscribes.
-  }, [restaurantId]);
+    // features.allergies too: the switches also resolve a beat after the defaults, and the
+    // allergy restore above must act on the REAL value, not the default "on".
+  }, [restaurantId, features.allergies]);
 
   // Persist the order-wide allergy avoidances. Skip the very first run: on mount
   // `declared` is still the empty default while the restore (above) is being
@@ -454,6 +467,59 @@ export default function CartPanel() {
     });
   };
 
+  // saveOrderTable(): send a corrected table number for ONE already-placed order.
+  // The same validation the Place Order button uses, so a guest can't move their food to
+  // a table that doesn't exist. A refusal is always SAID — never a silent no-op.
+  const saveOrderTable = async (o: ActiveOrder) => {
+    if (savingTable) return; // in flight — ignore the second tap
+    const check = validateTable(tableDraft, tableCount);
+    if (!check.ok) {
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: check.message, kicker: "table", variant: "error" } }));
+      return;
+    }
+    if (check.value === (o.tableNumber || "").trim()) { setEditingTable(null); return; } // nothing to change
+    setSavingTable(true);
+    const ok = await updateOrderTableNumber(o.id, check.value).catch(() => false);
+    setSavingTable(false);
+    if (!ok) {
+      // The server refuses once an order is no longer open — say the true reason.
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't move that order", subtitle: "it may already be served — please ask a member of staff", kicker: "table", variant: "error" } }));
+      return;
+    }
+    // Update this device's copy so the strip + this list agree with the kitchen at once.
+    const list = readActiveOrders().map((x) => (x.id === o.id ? { ...x, tableNumber: check.value } : x));
+    writeActiveOrders(list);
+    setLiveOrders(liveActiveOrders(list));
+    setEditingTable(null);
+    window.dispatchEvent(new Event("lfh:orders-updated"));
+    window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: `Moved to table ${check.value}`, subtitle: "the kitchen has been told", kicker: "table", variant: "success" } }));
+  };
+
+  // orderItems(): the item lines as they travel to the server, honouring the switches.
+  // A line SAVED earlier keeps whatever it was saved with, so a note or a removed allergen
+  // can outlive the switch that allowed it — and the guest can't see or clear it, because the
+  // input is gone. Gating only where the popup SAVES a line wasn't enough (proven by driving
+  // it: a seeded line still sent its note). This is the last gate before the wire.
+  const orderItems = () =>
+    cart.map((it) => ({
+      id: it.id,
+      qty: it.qty,
+      options: it.options?.map((o) => ({ group: o.group, label: o.label })),
+      removed: features.allergies ? it.removed : undefined,
+      note: features.guest_note ? it.note : undefined,
+    }));
+
+  // allergyPayload(): what actually travels with the order, honouring the switches.
+  // With allergies OFF the section is hidden, so anything still in state is stale and must
+  // NOT be sent; the free-text half only travels while its own switch is on. Before this
+  // there were three separate inline copies of this list and none of them checked either
+  // switch (guest sweep 2026-08-04).
+  const allergyPayload = (): string[] => {
+    if (!features.allergies) return [];
+    const other = features.allergy_other ? otherAllergy.trim() : "";
+    return [...declared, ...(other ? [other] : [])];
+  };
+
   // placeOrder(): the big "Place Order" button. Validates the table number, then
   // either routes through the v2 dining-session flow or sends the order directly.
   const placeOrder = async () => {
@@ -486,11 +552,11 @@ export default function CartPanel() {
       setPlacing(true);
       // Bundle up everything the session flow will need, captured now (before we
       // clear the cart), so it's all still here when the gate finishes.
-      const allergiesS = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];
+      const allergiesS = allergyPayload();
       // What we send the server: id + qty + chosen options (group/label only) +
       // removed allergens + note. NO prices and NO title — the server looks those
       // up from menu_items and prices the bill itself, so nothing here is trusted.
-      const itemsS = cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note }));
+      const itemsS = orderItems();
       const trackS = cart.map((it) => ({ title: it.title, qty: it.qty })); // slim list for the tracker
       const totalS = totalUsd, countS = itemCount; // USD — order records convert at render
       // onDone: runs once the SessionGate finishes (after location/join/OTP). If the
@@ -537,10 +603,10 @@ export default function CartPanel() {
     placingRef.current = true;
     setPlacing(true);
     try {
-      const allergies = [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])];
+      const allergies = allergyPayload();
       // Send ONLY id + qty + options (group/label) + removed + note — no prices.
       // The server prices and stores the order, then hands back its id to track.
-      const itemsS = cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note }));
+      const itemsS = orderItems();
       // Stable at-most-once key for this cart+table, shared by BOTH the online and the
       // offline paths. Computed BEFORE the offline branch on purpose: an online attempt
       // that committed but lost its reply, then retried after the phone dropped offline,
@@ -611,7 +677,7 @@ export default function CartPanel() {
       // broken menu — 800 orders in the same minute are all kept, then drained in order.
       if (isServerBusy(err) && orderKeyRef.current) {
         try {
-          await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: cart.map((it) => ({ id: it.id, qty: it.qty, options: it.options?.map((o) => ({ group: o.group, label: o.label })), removed: it.removed, note: it.note })), allergies: [...declared, ...(otherAllergy.trim() ? [otherAllergy.trim()] : [])], track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
+          await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: orderItems(), allergies: allergyPayload(), track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
           window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Saved — sending your order now", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" } }));
           orderKeyRef.current = null;
           setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
@@ -730,6 +796,39 @@ export default function CartPanel() {
                         </div>
                       )}
                       <div className="live-order-total"><span>Total</span><span>{showPrice(o.total)}</span></div>
+                      {/* WRONG TABLE? Only while the order is still early — once it's served
+                          the kitchen has already sent it somewhere, so the number is locked
+                          (same rule the old tracker sheet used).
+                          This lives HERE because tapping the floating strip opens THIS tab
+                          (owner, 2026-06-19). The control used to sit in the tracker's own
+                          detail sheet, which that change made unreachable — so from then on a
+                          guest who scanned the wrong table's sticker had no way to correct it
+                          and their food went to someone else's table (guest sweep 2026-08-04). */}
+                      {(o.status === "received" || o.status === "preparing") && (
+                        editingTable === o.id ? (
+                          <div className="live-order-fixtable">
+                            <input
+                              type="text" inputMode="numeric" pattern="[0-9]*" maxLength={4}
+                              aria-label="Correct table number" autoFocus
+                              value={tableDraft}
+                              onChange={(e) => setTableDraft(e.target.value.replace(/\D/g, ""))}
+                              onKeyDown={(e) => { if (e.key === "Enter") saveOrderTable(o); }}
+                            />
+                            <button type="button" onClick={() => saveOrderTable(o)} disabled={savingTable}>
+                              {savingTable ? "Saving…" : "Save"}
+                            </button>
+                            <button type="button" className="ghost" onClick={() => setEditingTable(null)}>Cancel</button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="live-order-fixlink"
+                            onClick={() => { setEditingTable(o.id); setTableDraft(o.tableNumber || ""); }}
+                          >
+                            Wrong table? Fix it — the kitchen sees the change
+                          </button>
+                        )
+                      )}
                     </div>
                   );
                 })}

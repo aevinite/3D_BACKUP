@@ -214,7 +214,10 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
     // category onto the URL (?cat=...) so going back keeps the same filter.
     <Link href={`${base}/item/${item.slug}${viewingCategory ? `?cat=${viewingCategory}` : ""}`} className="item-card-link">
       <div
-        className={`item-card fade-in ${item.is4d ? "is-4d" : ""} ${soldOut ? "sold-out" : ""}`}
+        // is-4d gives the card its 3D treatment. It must follow the SWITCH, not just the
+        // dish flag: with 3D off the badge and the cube icon correctly disappear, but the
+        // card kept wearing the 4D styling with nothing to explain it (sweep 2026-08-04).
+        className={`item-card fade-in ${item.is4d && features.model3d ? "is-4d" : ""} ${soldOut ? "sold-out" : ""}`}
         // Stagger each card's fade-in slightly based on its position.
         style={{ animationDelay: `${index * 0.06}s` }}
       >
