@@ -371,7 +371,13 @@ self.addEventListener("fetch", (event) => {
     const wroteAt = lastWriteAt[apiFamily(url.pathname)] || 0;
     const justWrote = self.navigator.onLine !== false && (Date.now() - wroteAt) < AFTER_WRITE_FRESH_MS;
     const timeout = slowByNature || justWrote ? 0 : READ_TIMEOUT_MS;
-    return event.respondWith(networkFirst(req, DATA, req.url, timeout, { clientId: event.clientId }));
+    // `justWrote` has to travel INTO networkFirst, not just shorten its timer. It used to only
+    // zero the stall timeout — which was enough while a saved copy was the answer to slowness
+    // alone. Now that a BUSY reply also falls back (below), the same masking is possible without
+    // any slowness: mark a bill paid, the next read gets a 503, and the device answers with the
+    // board from BEFORE the payment — the tile flicks back to unpaid and the change looks lost.
+    // Same rule as ever: just after a write, wait for the truth.
+    return event.respondWith(networkFirst(req, DATA, req.url, timeout, { clientId: event.clientId, justWrote }));
   }
   // Everything else same-origin static: /panels/*, /brand/*, fonts, images, /vendor/*.
   return event.respondWith(networkFirst(req, ASSET, req.url, ASSET_TIMEOUT_MS));
@@ -411,6 +417,7 @@ async function handleNav(req, url) {
 //     are legitimately slow) pass timeout 0 and simply wait.
 async function networkFirst(req, cacheName, key, timeout, opts) {
   const noFallback = opts && opts.noFallback; // must be live or fail honestly
+  const justWrote = opts && opts.justWrote;   // this device changed something seconds ago
   // Start the real request ONCE and let it finish on its own terms.
   const live = fetch(req).then((res) => {
     if (res && res.ok) putStamped(cacheName, key, res);
@@ -439,7 +446,7 @@ async function networkFirst(req, cacheName, key, timeout, opts) {
     //
     // Only ever a FALLBACK: with nothing saved (or a forced Refresh, which must be live or fail)
     // the busy reply itself is returned untouched, so the panel still hears the truth.
-    if (!noFallback && cacheName === DATA && res && CANT_ANSWER_NOW.has(res.status)) {
+    if (!noFallback && !justWrote && cacheName === DATA && res && CANT_ANSWER_NOW.has(res.status)) {
       const saved = await cachedCopy(cacheName, key, null, opts && opts.clientId);
       if (saved) return saved;
     }
