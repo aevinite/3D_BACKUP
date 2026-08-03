@@ -8913,9 +8913,10 @@ function openTakeOrder(table, rerender, opts = {}) {
   const wrap = el(`<div class="sx-modal-overlay to-overlay"><div class="sx-modal to-modal${quick ? " to-quick" : ""}">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${headTitle}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div>${parcel ? `<div class="to-cust"><input class="to-cust-name" maxlength="120" placeholder="Customer name (optional)"><input class="to-cust-phone" maxlength="20" inputmode="tel" placeholder="Phone (optional)"></div>` : ""}</div>
     <div class="to-body">
+      ${quick ? "" : `<aside class="to-rail"><div class="to-rail-h">Categories<i>${sections.length}</i></div><div class="to-crail">${catChips()}</div></aside>`}
       <div class="to-menu">
         <input type="search" class="to-search" placeholder="🔎 Search dishes…">
-        ${quick ? `<div class="qo-drill">${drillHtml()}</div>` : `<div class="to-cats">${catChips()}</div>`}
+        ${quick ? `<div class="qo-drill">${drillHtml()}</div>` : ""}
         <div class="to-list">${listHtml()}</div>
       </div>
       <div class="to-cart">
@@ -8950,7 +8951,7 @@ function openTakeOrder(table, rerender, opts = {}) {
 
   const listEl = wrap.querySelector(".to-list");
   const linesEl = wrap.querySelector(".to-lines");
-  const catsEl = wrap.querySelector(".to-cats");   // null in quick mode — it has a drill bar instead
+  const catsEl = wrap.querySelector(".to-crail");  // the left category box; null in quick mode — it has a drill bar instead
   const drillEl = wrap.querySelector(".qo-drill");  // null in the two scroll-spy modes
   const totalEl = wrap.querySelector(".to-total b");
   const sendBtns = [...wrap.querySelectorAll(".to-send")]; // parcel has TWO (pay now / pay later); dine-in has one
@@ -9199,24 +9200,79 @@ function openTakeOrder(table, rerender, opts = {}) {
     }));
   }
 
-  // ── Category scroll-spy: the strip's active chip follows the list scroll, and tapping
-  //    a chip jumps to that section — exactly like the guest menu / tablet. ──
-  const jumpTo = (slug) => { const sec = listEl.querySelector(`.to-sec[data-sec="${CSS.escape(slug)}"]`); if (sec) listEl.scrollTo({ top: sec.offsetTop - listEl.offsetTop - 4, behavior: "smooth" }); };
+  // ── Category scroll-spy: the active chip in the left box follows the list scroll, and
+  //    tapping a chip jumps to that section — exactly like the guest menu / tablet. ──
+  // The box lays out as a GRID on desktop/tablet and as a FLEX row on a phone (see
+  // .to-crail in style.css), so ask the CSS which shape it is rather than repeating the
+  // breakpoint here — one place decides, and they can't drift apart.
+  const railIsStrip = () => !!catsEl && getComputedStyle(catsEl).display === "flex";
+  const jumpTo = (slug) => {
+    // A search replaces the sections with one flat list, so there is nothing to jump to
+    // and the tap would do NOTHING — a silently swallowed tap. Clear the search first,
+    // then jump: the tap always produces the thing it promises.
+    if (q) {
+      q = ""; const s = wrap.querySelector(".to-search"); if (s) s.value = "";
+      paintList();
+    }
+    const sec = listEl.querySelector(`.to-sec[data-sec="${CSS.escape(slug)}"]`);
+    if (sec) listEl.scrollTo({ top: sec.offsetTop - listEl.offsetTop - 4, behavior: "smooth" });
+  };
   const syncSpy = () => {
     const secs = [...listEl.querySelectorAll(".to-sec")];
     if (!secs.length || !catsEl) return; // searching (flat list), or quick mode — no spy
     const top = listEl.scrollTop + 8;
     let active = secs[0].dataset.sec;
     for (const s of secs) { if (s.offsetTop - listEl.offsetTop <= top) active = s.dataset.sec; }
+    const strip = railIsStrip();
     catsEl.querySelectorAll("[data-jump]").forEach((b) => {
       const on = b.dataset.jump === active; b.classList.toggle("on", on);
-      // Centre the active chip by nudging the strip's OWN horizontal scroll only —
-      // never scrollIntoView (it scrolls a vertical ancestor and hides the strip).
-      if (on) { const cr = catsEl.getBoundingClientRect(), br = b.getBoundingClientRect(); catsEl.scrollBy({ left: (br.left + br.width / 2) - (cr.left + cr.width / 2), behavior: "smooth" }); }
+      // Only the phone's sideways strip has to chase the active chip. In the left box
+      // every chip is already on screen, so scrolling it would be movement for nothing.
+      // Nudge the strip's OWN horizontal scroll only — never scrollIntoView (it scrolls a
+      // vertical ancestor and hides the strip).
+      if (on && strip) { const cr = catsEl.getBoundingClientRect(), br = b.getBoundingClientRect(); catsEl.scrollBy({ left: (br.left + br.width / 2) - (cr.left + cr.width / 2), behavior: "smooth" }); }
     });
   };
+
+  // ── The no-scroll guarantee for the category box ──
+  // The point of the box is that EVERY category is on screen, so the layout is measured,
+  // never assumed: try the roomiest step first and go tighter only as far as needed. A
+  // fixed grid would work for one restaurant's menu and put a scrollbar back for the next
+  // one — the fit has to depend on how many categories there actually are. (Same idea as
+  // fitBrowse for the ⚡ QO/P grid.)
+  const RAIL_STEPS = [
+    { cols: 1, fs: 13,   h: 40, gap: 7, pad: "9px 12px" },
+    { cols: 2, fs: 13,   h: 38, gap: 7, pad: "8px 10px" },
+    { cols: 2, fs: 12.5, h: 36, gap: 6, pad: "7px 8px"  },
+    { cols: 2, fs: 12,   h: 34, gap: 5, pad: "6px 7px"  },
+    { cols: 3, fs: 11.5, h: 32, gap: 5, pad: "6px 6px"  },
+    { cols: 3, fs: 11,   h: 30, gap: 4, pad: "5px 5px"  },
+  ];
+  const fitRail = () => {
+    if (!catsEl || railIsStrip()) return;   // phone keeps the sideways strip
+    for (const s of RAIL_STEPS) {
+      catsEl.style.setProperty("--rail-cols", s.cols);
+      catsEl.style.setProperty("--rail-fs", s.fs + "px");
+      catsEl.style.setProperty("--rail-h", s.h + "px");
+      catsEl.style.setProperty("--rail-gap", s.gap + "px");
+      catsEl.style.setProperty("--rail-pad", s.pad);
+      if (catsEl.scrollHeight <= catsEl.clientHeight + 1) return s;   // fits — stop here
+    }
+    return RAIL_STEPS[RAIL_STEPS.length - 1];                         // tightest we have
+  };
+
   if (catsEl) catsEl.querySelectorAll("[data-jump]").forEach((b) => (b.onclick = () => jumpTo(b.dataset.jump)));
   listEl.addEventListener("scroll", () => { window.requestAnimationFrame(syncSpy); }, { passive: true });
+  // Measured, so it must be re-measured whenever its size can change: the modal is laid
+  // out a frame after it joins the page, the window can be resized, and a tablet rotating
+  // changes everything. Whatever this modal starts, this modal ends (see onClose).
+  if (catsEl) {
+    window.requestAnimationFrame(() => fitRail());
+    const onFit = () => fitRail();
+    window.addEventListener("resize", onFit);
+    window.addEventListener("orientationchange", onFit);
+    onClose.push(() => { window.removeEventListener("resize", onFit); window.removeEventListener("orientationchange", onFit); });
+  }
 
   bindList(); bindCart();
   // Quick mode's grid is sized from a MEASUREMENT, so it has to be re-measured whenever
