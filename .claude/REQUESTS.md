@@ -1145,3 +1145,19 @@ Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French Hou
   the ₹ matches the bill's drop, a deleted bill is soft-deleted (never erased), and Aangan's
   factory defaults still refuse reopen + delete. Guard: `npm run verify:audit` (18 checks, proven
   to fail when a recorder is removed) + wired into the PostToolUse hook.
+
+## 2026-08-03 · Bills section rework (owner voice note)
+- [x] **Parcel bills appear in the Bills section**, wearing their own 📦 PARCEL badge (they lived
+  only in aggregator_orders and vanished from every screen ~6 min after hand-over).
+- [x] **Previous bills reach = a manager permission**: Access → Manager → Permission for manager →
+  **Bills → "Which bills they can see"** — Today only (every restaurant's default) or Today +
+  yesterday. Enforced server-side (GET /orders?bills= and every bill search clamp to it), not
+  just hidden.
+- [x] **The free date search is GONE from the Bills tab** — a manager can never list a day the
+  setting doesn't allow; the search types left are bill/invoice/table/amount/customer.
+- [x] **Previous bills wear the LIVE-bill UI** — same full receipt cards (items, money rows,
+  pills), grouped **Today / Yesterday with each day's own bill count + collected total**; the
+  old separate "Today" sidebar row merged into it.
+- [x] **Inside an opened bill**: 🖨 Print, ↩ Reopen bill, 🧾− Credit note, 🗑 Delete bill and
+  ％ Discount (only while it is still open money — a settled bill is corrected by reopen or
+  credit note, never edited in place), each behind its existing permission/PIN gate.

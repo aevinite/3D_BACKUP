@@ -643,7 +643,30 @@ export const SECTIONS: Section[] = [
         // that never stored a value reads exactly that.
         id: "mgr_may", name: "Permission for manager", bind: { t: "none" },
         what: "The money actions, for every manager in this restaurant: delete a bill, reopen a bill (and for how long), discount a bill (and up to how much). One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
-        children: [...ACTIONS.map(mgrAction)],
+        children: [
+          ...ACTIONS.map(mgrAction),
+          {
+            // BILLS (owner, 2026-08-03): "in the permission for manager, make a bill option and
+            // in that there will be suboption of which bill should be shown… today or today plus
+            // yesterday." The Bills tab itself stays FIXED — every manager has it — so this row
+            // is a folder, not a switch: only its reach is decided here. Same two answers as the
+            // dashboard's mgr_dash_range, enforced the same way — lib/dashRange.ts → billsReach()
+            // is read by /api/editor/whoami (the panel draws its day groups from it) and by
+            // GET /api/editor/orders, which clamps the ?bills= window AND every bill search to
+            // it. The free pick-any-date search left the panel with this: a date field wider
+            // than the reach would be a control promising days the server refuses.
+            id: "mgr_bills", name: "Bills", bind: { t: "none" },
+            what: "The Bills tab is fixed — every manager always has it. This decides how far back its record of settled bills reaches. Reopen, delete and discount keep their own rows above.",
+            children: [
+              { id: "mgr_bills_range", name: "Which bills they can see", def: "today", bind: { t: "opt", id: "view_bills", side: "manager", key: "range" },
+                what: "Every restaurant starts on TODAY — the bills of the shift they are standing in. Today + yesterday is handed over deliberately, because yesterday's bills say what a shift took.",
+                choices: [
+                  { value: "today", label: "Today only", what: "Only bills since this morning. Nothing older can be listed or searched." },
+                  { value: "today_yesterday", label: "Today + yesterday", what: "Yesterday's bills too, each day with its own total." },
+                ] },
+            ],
+          },
+        ],
       },
       {
         // 3 · MANAGER SETTINGS (owner, 2026-08-02: "manager setting and in the bracket written,

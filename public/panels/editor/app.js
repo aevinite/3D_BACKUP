@@ -165,8 +165,14 @@ const state = {
   // Nothing here is persisted: dragging the preview slider must never write to the DB.
   floorPerRowPreview: null,
   ordersView: lsGet("lfh_editor_ordersview", "live"), // Orders left-bar: live | previous | bills | calls — remembered across refresh
-  billSearch: "", billSearchType: "date", billSort: "new", // Bills → Today/Previous search + sort (default to Date picker)
-  billHistRows: [], // server-side bills-history search results (bills older than the local 200-row window)
+  // Bills record search + sort. NO date type any more (owner, 2026-08-03: "why you are able
+  // to select the date… remove that") — the record only reaches today (+ yesterday when the
+  // Access screen says so), so a date picker promised days the server refuses.
+  billSearch: "", billSearchType: "bill", billSort: "new",
+  billHistRows: [], // server-side bills-history search results (within the bills window)
+  // The bills-record fetch (GET /orders?bills=1): dine-in rows for the whole window (beyond
+  // the local 200) + finished PARCEL bills + the server's reach. at = when it landed.
+  billsRec: null,
   // Audit & logs left-bar: audit | operations | customers — remembered across refresh.
   // Values stored by older builds are migrated: the retired top-toggle wrote "log" (which
   // the renderer never understood — it fell through to the customer log); everything else
@@ -773,8 +779,13 @@ function renderList() {
       return li;
     };
     ul.appendChild(mk("live", '<i class="fas fa-circle" style="color:#7ec88a"></i>', "Live", live.length));
-    ul.appendChild(mk("daybills", '<i class="fas fa-calendar-day"></i>', "Today", today.length));
-    ul.appendChild(mk("previous", '<i class="fas fa-receipt"></i>', "Previous", previous.length));
+    // ONE record row (owner, 2026-08-03): the old separate "Today" row merged into Previous
+    // bills, which now shows today's settled bills — and yesterday's beneath them when the
+    // Access screen allows — each day with its own total. The count is bills (visits), not
+    // order rows, so it says what the screen shows.
+    ul.appendChild(mk("previous", '<i class="fas fa-receipt"></i>', "Previous bills",
+      groupOrdersBySession([...today, ...previous]).length
+      + ((state.billsRec && Array.isArray(state.billsRec.parcels)) ? state.billsRec.parcels.length : 0)));
     // Pay later (mig 166): the parked-bills book, grouped by person. Count = people
     // with something outstanding (from the last book fetch; refreshed on open).
     if (tagActionAllowed("khata")) ul.appendChild(mk("khata", "📒", "Pay Later", (state.khataBook && state.khataBook.customers || []).length));
@@ -2399,21 +2410,15 @@ function discPct(subtotal, disc) {
   return `${pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)}%`;
 }
 
-function mergedOrderCardHtml(g) {
-  const o0 = g[0];
-  const tnum = (o0.table_number || "").trim();
-  // Group key for pay/accept/serve/print/delete. MUST carry the "solo:" prefix for a
-  // no-session order (e.g. a no-table banquet bill), because ordersInGroup() only treats
-  // "solo:"-prefixed keys as a single order — a bare id fell into the session_id branch,
-  // matched nothing, and the bill could never be settled (falsely said "already paid").
-  const sessKey = o0.session_id || ("solo:" + o0.id);
-  const live = g.filter((o) => o.status !== "cancelled");
-  // Items grouped per source order with a separator between orders, so the merged
-  // bill still reads as "order 1 / order 2" with some distance between them.
-  // Allergens show PER ITEM: the order-wide "avoid X in all my dishes" is distributed
-  // onto every item as "NO X" — there is NO shared/common allergy banner
-  // (owner, 2026-06-14). Different orders keep their own per-item allergens.
-  const items = g.map((o, gi) => {
+// The item lines of a merged bill, shared by the LIVE card and the RECORD card (Previous
+// bills renders the SAME receipt UI as Live since 2026-08-03 — one card design, two moods).
+// Items grouped per source order with a separator between orders, so the merged
+// bill still reads as "order 1 / order 2" with some distance between them.
+// Allergens show PER ITEM: the order-wide "avoid X in all my dishes" is distributed
+// onto every item as "NO X" — there is NO shared/common allergy banner
+// (owner, 2026-06-14). Different orders keep their own per-item allergens.
+function ordItemsHtml(g) {
+  return g.map((o, gi) => {
     const oAll = Array.isArray(o.allergies) ? o.allergies : [];
     const rows = (o.items || []).map((i) => {
       const allerg = [...new Set([...(Array.isArray(i.removed) ? i.removed : []), ...oAll])];
@@ -2429,6 +2434,17 @@ function mergedOrderCardHtml(g) {
     // now lives in the gated staff EDIT flow.
     return (gi > 0 ? `<div class="ord-grp-sep" aria-hidden="true"></div>` : "") + rows;
   }).join("");
+}
+function mergedOrderCardHtml(g) {
+  const o0 = g[0];
+  const tnum = (o0.table_number || "").trim();
+  // Group key for pay/accept/serve/print/delete. MUST carry the "solo:" prefix for a
+  // no-session order (e.g. a no-table banquet bill), because ordersInGroup() only treats
+  // "solo:"-prefixed keys as a single order — a bare id fell into the session_id branch,
+  // matched nothing, and the bill could never be settled (falsely said "already paid").
+  const sessKey = o0.session_id || ("solo:" + o0.id);
+  const live = g.filter((o) => o.status !== "cancelled");
+  const items = ordItemsHtml(g);
   const _m = billMath(g); const total = _m.total; const disc = _m.disc;
   const anyReceived = g.some((o) => o.status === "received");
   const anyPreparing = g.some((o) => o.status === "preparing");
@@ -2530,8 +2546,11 @@ function ordersViewKey() {
   const v = state.ordersView;
   if (v === "today") return "live";      // legacy: the old Live row stored the key "today"
   if (v === "bills") return "previous";  // legacy alias
+  // The separate "Today" bills row merged into Previous bills (owner, 2026-08-03): ONE
+  // record view, grouped by day with each day's own total. Old remembered keys land there.
+  if (v === "daybills") return "previous";
   if (v === "khata" && !tagActionAllowed("khata")) return "live"; // feature/power got switched off
-  return ["live", "daybills", "previous", "calls", "khata"].includes(v) ? v : "live";
+  return ["live", "previous", "calls", "khata"].includes(v) ? v : "live";
 }
 // A bill parked "collect later" (mig 166): unpaid + khata-marked. These live ONLY in
 // the Khata view (the owner's "other section, other than live") — never in Live (they
@@ -2569,27 +2588,75 @@ function fullyPaidSessionKeys(orders) {
   }
   return keys;
 }
+// Yesterday's business-day start: the boundary is a fixed 05:00 IST (no DST), so exactly
+// 24h before today's. Only meaningful when the Access screen hands yesterday over.
+function yesterdayStartMs() { return businessDayStartMs() - 864e5; }
+// Does this restaurant's bills record include yesterday? Access → Manager → Permission for
+// manager → Bills → "Which bills they can see", carried by whoami — the SAME switch the
+// server clamps GET /orders?bills= and every bill search to, so the screen and the data
+// can never disagree about how far back bills go.
+function billsReachAllowsYesterday() {
+  return !!(XRAY_WHO && XRAY_WHO.billsReach === "today_yesterday");
+}
 function ordersBuckets() {
   const all = state.data.orders || [];
   const sessKey = (o) => o.session_id || ("solo:" + o.id);
   const paidKeys = fullyPaidSessionKeys(all);
   // LIVE = the active working set: not archived, not cancelled, and NOT a bill whose
   // whole table is already fully paid (that now counts as done — see above).
-  // RECORDS = archived (freed) OR cancelled OR fully-paid — split by day into
-  // TODAY (this business day) and PREVIOUS (older). "Restore to floor" (within its
-  // 30-min window — migration 112) returns a bill from here back to Live.
   const live = all.filter((o) => !o.archived && o.status !== "cancelled" && !paidKeys.has(sessKey(o)) && !isParkedKhata(o));
+  // RECORDS = archived (freed) OR cancelled OR fully-paid — the settled bills. The local
+  // newest-200 board is UNIONED with the server's bills-window fetch (GET /orders?bills=1,
+  // state.billsRec — the whole window even past 200 rows), then CLAMPED to the window the
+  // Access screen allows: TODAY, and YESTERDAY only when "Which bills they can see" says so
+  // (owner, 2026-08-03). Anything older is not a screen any more — the owner's Reports is
+  // where history lives. "Restore to floor" (30-min window, mig 112) still returns a bill
+  // from here back to Live.
+  const localAndFetched = (() => {
+    const rows = state.billsRec && Array.isArray(state.billsRec.rows) ? state.billsRec.rows : [];
+    if (!rows.length) return all;
+    const byId = new Map(all.map((o) => [o.id, o]));
+    for (const o of rows) if (!byId.has(o.id)) byId.set(o.id, o);
+    return [...byId.values()];
+  })();
   // "Show on-the-house bills in the normal lists" toggle (mig 166; default ON). When off,
   // comp bills live only in the On-the-house report — never counted or listed here.
   const hideOnHouse = lsGet("lfh_show_onhouse", "1") === "0";
-  const records = all.filter((o) => (o.archived || o.status === "cancelled" || paidKeys.has(sessKey(o)))
+  const paidKeysAll = fullyPaidSessionKeys(localAndFetched);
+  const records = localAndFetched.filter((o) => (o.archived || o.status === "cancelled" || paidKeysAll.has(sessKey(o)))
     && !isParkedKhata(o)
     && !(hideOnHouse && o.payment_method === "On the house"));
   const dayStart = businessDayStartMs();
-  const today = records.filter((o) => new Date(o.created_at || 0).getTime() >= dayStart);
-  const previous = records.filter((o) => new Date(o.created_at || 0).getTime() < dayStart);
+  const yStart = yesterdayStartMs();
+  const tsOf = (o) => new Date(o.created_at || 0).getTime();
+  const today = records.filter((o) => tsOf(o) >= dayStart);
+  const previous = billsReachAllowsYesterday()
+    ? records.filter((o) => tsOf(o) >= yStart && tsOf(o) < dayStart)
+    : [];
   const callCount = (state.data.calls || []).filter((c) => !c.resolved).length;
   return { live, today, previous, callCount };
+}
+// Fetch the bills-record window from the server: every dine-in bill of the allowed window
+// (not just the local 200) + finished PARCEL bills, which live in a different table and
+// could never appear here before (owner, 2026-08-03). Lazy + throttled: called when the
+// Previous-bills view renders, refreshed at most every 30s — realtime re-renders keep it
+// current while the view is open, and nothing polls while it isn't.
+let _billsRecLoading = false;
+async function loadBillsRecord(force) {
+  if (_billsRecLoading) return;
+  // force = "THIS device just changed a bill, refetch now" (only user actions reach it —
+  // loadOrders is not on the realtime path), floored at 3s so a burst of taps costs ONE
+  // window read. Idle refresh: 60s, the same backstop pace every other background refresh
+  // in this file keeps — re-renders while the view is open are what call this, so a busy
+  // board must not turn into a faster poll (PR #748 review).
+  if (state.billsRec && Date.now() - (state.billsRec.at || 0) < (force ? 3000 : 60000)) return;
+  _billsRecLoading = true;
+  try {
+    const r = await api("GET", "/orders?bills=1");
+    state.billsRec = { rows: Array.isArray(r && r.rows) ? r.rows : [], parcels: Array.isArray(r && r.parcels) ? r.parcels : [], reach: (r && r.reach) || "today", at: Date.now() };
+    if (state.tab === "orders" && ordersViewKey() === "previous") { renderList(); renderEditor(); }
+  } catch { /* keep whatever we had; the local 200 still renders */ }
+  finally { _billsRecLoading = false; }
 }
 
 function ordersHtml() {
@@ -2600,8 +2667,7 @@ function ordersHtml() {
   const view = ordersViewKey();
 
   let main;
-  if (view === "previous") main = ordersPreviousHtml(previous, "previous");
-  else if (view === "daybills") main = ordersPreviousHtml(today, "today");
+  if (view === "previous") { loadBillsRecord(); main = ordersPreviousHtml(today, previous); }
   else if (view === "calls") main = ordersCallsHtml();
   else if (view === "khata") main = ordersKhataHtml();
   else main = ordersLiveHtml(live);
@@ -2657,60 +2723,88 @@ function loadBillHistory(q, type) {
     } catch { /* leave prior results; the local-200 filter still works */ }
   }, 300);
 }
-function ordersPreviousHtml(previous, kind = "previous") {
-  const isToday = kind === "today";
-  // When searching the PREVIOUS view, union the locally-cached 200 orders with the
-  // server-side history search results (state.billHistRows) so bills OLDER than the
-  // 200-row window are findable too (owner, 2026-07-03 — old bills were unsearchable).
-  // Dedup by order id; the existing filter/rank/sort below then applies to the union.
-  let src = previous;
-  if (kind === "previous" && (state.billSearch || "").trim() && Array.isArray(state.billHistRows) && state.billHistRows.length) {
-    const byId = new Map((previous || []).map((o) => [o.id, o]));
-    for (const o of state.billHistRows) if (!byId.has(o.id)) byId.set(o.id, o);
-    src = [...byId.values()];
-  }
-  const groups = groupOrdersBySession(src);
-  const bills = groups.map((g) => {
+// PREVIOUS BILLS (rebuilt 2026-08-03 — owner: "the UI… I want it like live bill, the same
+// UI as live bill", with each day's own total and parcels included). ONE record view:
+// TODAY's settled bills, and YESTERDAY's below them when the Access screen hands yesterday
+// over. Every bill renders as the SAME full receipt card Live uses (items, totals, pills);
+// clicking one opens the bill with its actions (print / reopen / delete / discount) inside.
+function ordersPreviousHtml(today, previous) {
+  // One record per BILL: dine-in groups (one per session/visit) + finished parcel bills.
+  const recOfGroup = (g) => {
     const o0 = g[0];
-    const total = billMath(g).total;
     // "paid" = every non-cancelled order on the bill is paid — the SAME rule the
     // Dashboard revenue (/stats) uses (payment_status='paid', cancelled excluded).
-    // Only paid bills count toward the revenue total below, so a table freed WITHOUT
-    // collecting payment no longer inflates the Bills total above the Dashboard.
+    // Only paid bills count toward the day totals below, so a table freed WITHOUT
+    // collecting payment never inflates the Bills total above the Dashboard.
     const liveOrders = g.filter((o) => o.status !== "cancelled");
     const paid = liveOrders.length > 0 && liveOrders.every((o) => o.payment_status === "paid");
     return {
-      key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
-      billNo: o0.bill_no, invNo: o0.invoice_no, invoiceAt: o0.invoice_at, voided: !!o0.invoice_voided,
-      customer: o0.customer_name || "", total, paid, ts: new Date(o0.created_at || 0).getTime(),
-      when: o0.created_at ? new Date(o0.created_at).toLocaleString() : "",
+      kind: "dinein", g, key: o0.session_id || ("solo:" + o0.id), table: (o0.table_number || "").trim(),
+      billNo: o0.bill_no, invNo: o0.invoice_no, invoiceAt: o0.invoice_at,
+      customer: o0.customer_name || "", total: billMath(g).total, paid,
+      ts: new Date(o0.created_at || 0).getTime(),
       cancelled: g.every((o) => o.status === "cancelled"),
     };
+  };
+  const recOfParcel = (p) => ({
+    kind: "parcel", p, key: "parcel:" + p.id, table: "parcel",
+    billNo: p.bill_no, invNo: p.invoice_no, invoiceAt: p.invoice_at,
+    customer: (p.customer_name && !/^parcel$/i.test(String(p.customer_name).trim())) ? p.customer_name : "",
+    total: Number(p.total) || 0, paid: !!p.paid && p.status !== "cancelled",
+    ts: new Date(p.created_at || 0).getTime(), cancelled: p.status === "cancelled",
   });
+  // When searching, union in the server-side history results (state.billHistRows) so any
+  // bill INSIDE the allowed window is findable even past the local rows (owner, 2026-07-03;
+  // the server clamps that search to the same window since 2026-08-03).
+  let dine = [...(today || []), ...(previous || [])];
+  if ((state.billSearch || "").trim() && Array.isArray(state.billHistRows) && state.billHistRows.length) {
+    const byId = new Map(dine.map((o) => [o.id, o]));
+    for (const o of state.billHistRows) if (!byId.has(o.id)) byId.set(o.id, o);
+    dine = [...byId.values()];
+  }
+  const dayStart = businessDayStartMs(), yStart = yesterdayStartMs();
+  const withYesterday = billsReachAllowsYesterday();
+  const parcels = (state.billsRec && Array.isArray(state.billsRec.parcels) ? state.billsRec.parcels : [])
+    .filter((p) => { const t = new Date(p.created_at || 0).getTime(); return t >= (withYesterday ? yStart : dayStart); });
+  const recs = [...groupOrdersBySession(dine).map(recOfGroup), ...parcels.map(recOfParcel)];
+  // Search + sort (NO date type any more — the record IS the allowed days, owner 2026-08-03).
   const q = (state.billSearch || "").toLowerCase().trim();
-  const stype = state.billSearchType || "date", sort = state.billSort || "new";
+  const stype = ["inv", "bill", "table", "amount", "cust"].includes(state.billSearchType) ? state.billSearchType : "bill";
+  const sort = state.billSort || "new";
   const fieldOf = (b) => stype === "inv" ? String(invFmt(b.invNo, b.invoiceAt)).toLowerCase()
     : stype === "bill" ? String(b.billNo ?? "")
-    : stype === "table" ? String(b.table)
-    : stype === "cust" ? b.customer.toLowerCase()
+    : stype === "table" ? String(b.table).toLowerCase() // a parcel's "table" is the word parcel, so typing it finds them
     : stype === "amount" ? String(Math.round(Number(b.total) || 0)) // ₹ total, whole rupees
-    : new Date(b.ts).toISOString().slice(0, 10);
-  const matchB = (b) => !q || (stype === "date" ? fieldOf(b) === q : fieldOf(b).includes(q));
+    : b.customer.toLowerCase();
+  const matchB = (b) => !q || fieldOf(b).includes(q);
   const rankB = (b) => (!q ? 0 : fieldOf(b).startsWith(stype === "bill" ? q.replace(/[^0-9]/g, "") : q) ? 0 : 1);
-  const list = bills.filter(matchB).sort((x, y) => (rankB(x) - rankB(y))
-    || (sort === "new" ? y.ts - x.ts : sort === "old" ? x.ts - y.ts : sort === "hi" ? y.total - x.total : x.total - y.total));
+  const sortB = (x, y) => (rankB(x) - rankB(y))
+    || (sort === "new" ? y.ts - x.ts : sort === "old" ? x.ts - y.ts : sort === "hi" ? y.total - x.total : x.total - y.total);
+  const cardOf = (b) => b.kind === "parcel" ? parcelRecordCardHtml(b.p) : billRecordCardHtml(b);
+  // ONE DAY = ONE SECTION, each with its own count + collected total in the divider
+  // (owner: "both amount of bill should be shown"). Paid bills only count as collected.
+  const daySection = (label, list, emptyMsg) => {
+    const shown = list.filter(matchB).sort(sortB);
+    const collected = shown.reduce((s, b) => s + (b.paid ? b.total : 0), 0);
+    const head = `<div class="ord-section-divider"><h3>${label}</h3>
+      <span class="bill-day-total">${shown.length} bill${shown.length === 1 ? "" : "s"} · <b>${inr(collected)}</b> collected</span>
+      ${label.includes("Yesterday") ? "" : `<button class="btn danger" id="clearFreed" title="Removes freed table records only; paid & cancelled bills are kept as records">🗑 Clear freed</button>`}</div>`;
+    const body = shown.length
+      ? `<div class="ord-grid">${shown.map(cardOf).join("")}</div>`
+      : `<div class="empty">${q ? "No bills match that search." : emptyMsg}</div>`;
+    return head + body;
+  };
   const bar = `<div class="bill-bar">
       <div class="bill-search">
         <select class="stype" data-bill-stype>
-          <option value="inv"${stype === "inv" ? " selected" : ""}>Invoice no.</option>
           <option value="bill"${stype === "bill" ? " selected" : ""}>Bill no.</option>
+          <option value="inv"${stype === "inv" ? " selected" : ""}>Invoice no.</option>
           <option value="table"${stype === "table" ? " selected" : ""}>Table</option>
           <option value="amount"${stype === "amount" ? " selected" : ""}>Amount ₹</option>
           <option value="cust"${stype === "cust" ? " selected" : ""}>Customer</option>
-          <option value="date"${stype === "date" ? " selected" : ""}>Date</option>
         </select>
         <span class="vline"></span><i class="fas fa-magnifying-glass"></i>
-        <input type="${stype === "date" ? "date" : "text"}" data-bill-q value="${esc(state.billSearch || "")}" placeholder="Search bills…" autocomplete="off"/>
+        <input type="text" data-bill-q value="${esc(state.billSearch || "")}" placeholder="Search bills…" autocomplete="off"/>
       </div>
       <select class="bill-sort" data-bill-sort>
         <option value="new"${sort === "new" ? " selected" : ""}>Newest</option>
@@ -2718,27 +2812,90 @@ function ordersPreviousHtml(previous, kind = "previous") {
         <option value="hi"${sort === "hi" ? " selected" : ""}>Highest ₹</option>
         <option value="lo"${sort === "lo" ? " selected" : ""}>Lowest ₹</option>
       </select>
-      <span class="bill-count">${list.length} bill${list.length === 1 ? "" : "s"} · ${inr(list.reduce((s, b) => s + (b.paid ? b.total : 0), 0))} collected</span>
     </div>`;
-  const grid = list.length
-    ? `<div class="bill-grid">${list.map(billCardHtml).join("")}</div>`
-    : `<div class="empty">${q ? "No bills match that search." : (isToday ? "No bills settled today yet." : "No previous bills yet.")}</div>`;
-  const headRow = `<div class="ord-section-divider"><h3>${isToday ? "📅 Today's bills" : "✓ Previous bills"}</h3>${isToday ? "" : `<button class="btn danger" id="clearFreed" title="Removes freed table records only; paid & cancelled bills are kept as records">🗑 Clear freed</button>`}</div>`;
-  return headRow + bar + grid;
+  const tsIn = (lo, hi) => (b) => b.ts >= lo && (hi == null || b.ts < hi);
+  let out = bar + daySection("📅 Today's bills", recs.filter(tsIn(dayStart, null)), "No bills settled today yet.");
+  if (withYesterday) out += daySection("🕐 Yesterday's bills", recs.filter(tsIn(yStart, dayStart)), "No bills from yesterday.");
+  return out;
 }
-function billCardHtml(b) {
-  const dot = b.cancelled ? "cancelled" : (b.voided ? "voided" : "paid");
-  // 🖨 Print straight from the card (Today's + Previous bills) without opening it first —
-  // owner ask 2026-07-06. Bottom-right so it clears the status dot (top-right); its own
-  // click stops propagation so it prints WITHOUT also opening the bill modal.
-  return `<div class="bill-card" data-bill-open="${esc(b.key)}">
-    <span class="bill-dot ${dot}"></span>
-    <div class="bill-bn">${b.table ? "Table " + esc(b.table) + " · " : ""}#${esc(b.billNo ?? "—")}</div>
-    <div class="bill-cust">${esc(b.customer || "—")}</div>
-    <div class="bill-amt">${inr(b.total)}</div>
-    <div class="bill-when">${esc(b.when)}</div>
-    ${b.invNo != null ? `<div class="bill-inv">${esc(invFmt(b.invNo, b.invoiceAt))}${b.voided ? " · voided" : ""}</div>` : ""}
-    <button type="button" class="bill-print" data-bill-print="${esc(b.key)}" title="Print this bill" aria-label="Print bill" style="position:absolute;bottom:9px;right:11px;background:none;border:0;cursor:pointer;font-size:16px;opacity:.5;padding:3px;line-height:1">🖨</button>
+// A settled bill as the SAME receipt card the Live view draws — items, money rows, pills —
+// with the record's own mood: a Paid / Unpaid / Cancelled pill instead of cooking stages,
+// and Print + open-for-actions instead of accept/serve. Clicking the card opens the bill.
+function billRecordCardHtml(b) {
+  const g = b.g, o0 = g[0];
+  const m = billMath(g);
+  const cls = b.cancelled ? "ord-cancelled" : "ord-served";
+  const statusPill = b.cancelled ? `<span class="ord-pill cancelled">Cancelled</span>` : `<span class="ord-pill served">Settled</span>`;
+  const payPill = b.cancelled ? "" : `<span class="pay-pill ${b.paid ? "paid" : "pending"}">${b.paid ? "💳 Paid" : "⏳ Unpaid"}</span>`;
+  const kots = g.map((o) => o.kot_no).filter((x) => x != null);
+  const when = o0.created_at ? new Date(o0.created_at).toLocaleString() : "";
+  const voided = !!o0.invoice_voided;
+  // A FULLY-CANCELLED bill must not show priced dish lines next to a ₹0 total — the exact
+  // contradiction the bill modal fixed after the owner's 2026-07-03 screenshot ("Litchi
+  // Cooler ₹229 … Total ₹0"). The lines shown are the ones the money rows count; a
+  // cancelled bill says so in words and shows only its total (nothing to charge).
+  const liveOrders = g.filter((o) => o.status !== "cancelled");
+  const itemsHtml = liveOrders.length ? ordItemsHtml(liveOrders)
+    : `<div class="ord-line"><span class="ol-name ord-cancel-note">This bill was cancelled — no charge.</span></div>`;
+  const moneyRows = liveOrders.length ? `
+    <div class="ord-sub"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
+    ${m.disc > 0 ? `<div class="ord-disc">Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}<span>− ${inr(m.disc)}</span></div>` : ""}
+    ${m.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(m.rate * 10000) / 100}%</span><span>${inr(m.tax)}</span></div>` : ""}` : "";
+  return `<div class="card ord-card ${cls} ${b.paid ? "is-paid" : ""} ord-record" data-bill-open="${esc(b.key)}" role="button" tabindex="0" title="Open this bill">
+    <div class="ord-top">
+      ${kots.length ? `<span class="kot-chip" title="Kitchen tickets">#${esc(kots[0])}${kots.length > 1 ? ` +${kots.length - 1}` : ""}</span>` : ""}
+      <b>${b.table ? "Table " + esc(b.table) : "Walk-in"}${b.billNo != null ? ` · #${esc(b.billNo)}` : ""}</b>
+      ${statusPill}${payPill}
+      ${b.invNo != null && !voided ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(b.invNo, b.invoiceAt))}</span>` : (voided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
+    </div>
+    <small class="ord-when">${esc(when)}${b.customer ? ` · ${esc(b.customer)}` : ""}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
+    <div class="ord-items">${itemsHtml}</div>
+    ${moneyRows}
+    <div class="ord-total"><span>Total</span><span>${inr(m.total)}</span></div>
+    <div class="ord-actions"><button class="ord-btn" data-bill-print="${esc(b.key)}">🖨 Print</button><button class="ord-btn ghost" data-bill-open-btn="${esc(b.key)}">⤢ Open bill</button></div>
+  </div>`;
+}
+// A finished PARCEL bill in the same receipt-card clothes, wearing its own PARCEL badge so
+// nobody mistakes it for a table (owner, 2026-08-03: "it should be named or something UI
+// should be changed for the particular parcel"). Its money comes from its own lines: the
+// stored total is tax-INCLUSIVE and net of any counter discount (see printParcelReceipt),
+// so the rows are derived the same way the printed parcel bill derives them.
+function parcelRecordCardHtml(p) {
+  const items = Array.isArray(p.items) ? p.items : [];
+  const lines = items.map((i) =>
+    `<div class="ord-line"><span class="ol-name">${esc(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span></div>`).join("");
+  const lineSum = items.reduce((a, i) => a + (parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1), 0);
+  const total = Number(p.total) || 0;
+  const disc = Math.min(Math.max(0, Number(p.discount) || 0), lineSum);
+  const sub = lineSum > 0 ? lineSum : total;
+  const taxable = Math.max(0, sub - disc);
+  const tax = Math.max(0, Math.round((total - taxable) * 100) / 100);
+  const cancelled = p.status === "cancelled";
+  const cls = cancelled ? "ord-cancelled" : "ord-served";
+  const when = p.created_at ? new Date(p.created_at).toLocaleString() : "";
+  const who = (p.customer_name && !/^parcel$/i.test(String(p.customer_name).trim())) ? p.customer_name : "";
+  // Same rule as the dine-in record: a cancelled parcel says "no charge" in words instead
+  // of showing priced lines and money rows that contradict what was actually taken (₹0).
+  const itemsHtml = cancelled
+    ? `<div class="ord-line"><span class="ol-name ord-cancel-note">This parcel was cancelled — no charge.</span></div>`
+    : (lines || '<div class="ord-line"><span class="ol-name">no items recorded</span></div>');
+  const moneyRows = cancelled ? "" : `
+    <div class="ord-sub"><span>Subtotal</span><span>${inr(sub)}</span></div>
+    ${disc > 0 ? `<div class="ord-disc">Discount${discPct(sub, disc) ? ` (${discPct(sub, disc)})` : ""}<span>− ${inr(disc)}</span></div>` : ""}
+    ${tax > 0.004 ? `<div class="ord-sub"><span>${esc(taxLabel())}</span><span>${inr(tax)}</span></div>` : ""}`;
+  return `<div class="card ord-card ${cls} ${p.paid && !cancelled ? "is-paid" : ""} ord-record">
+    <div class="ord-top">
+      ${p.kot_no != null ? `<span class="kot-chip" title="Kitchen ticket">#${esc(p.kot_no)}</span>` : ""}
+      <span class="parcel-badge">📦 PARCEL</span>
+      <b>${p.bill_no != null ? `#${esc(p.bill_no)}` : ""}</b>
+      ${cancelled ? `<span class="ord-pill cancelled">Cancelled</span>` : `<span class="ord-pill served">Handed over</span><span class="pay-pill ${p.paid ? "paid" : "pending"}">${p.paid ? "💳 Paid" : "⏳ Unpaid"}</span>`}
+      ${p.invoice_no != null && !cancelled ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(p.invoice_no, p.invoice_at))}</span>` : ""}
+    </div>
+    <small class="ord-when">${esc(when)}${who ? ` · ${esc(who)}` : ""}</small>
+    <div class="ord-items">${itemsHtml}</div>
+    ${moneyRows}
+    <div class="ord-total"><span>Total</span><span>${inr(cancelled ? 0 : total)}</span></div>
+    <div class="ord-actions">${cancelled ? "" : `<button class="ord-btn" data-parcel-print="${esc(p.id)}">🖨 Print</button>`}</div>
   </div>`;
 }
 // The orders a bill modal can open from = the locally-cached board PLUS any server-side
@@ -2748,9 +2905,13 @@ function billCardHtml(b) {
 // (server selects orders.*), so the modal renders them identically.
 function billOrdersPool() {
   const pool = (state.data.orders || []).slice();
+  const seen = new Set(pool.map((o) => o.id));
+  // The bills-window fetch (GET /orders?bills=1) — the record can hold bills past the
+  // local 200-row board, and a card the screen shows must always open (2026-08-03).
+  const rec = state.billsRec && Array.isArray(state.billsRec.rows) ? state.billsRec.rows : [];
+  for (const o of rec) if (!seen.has(o.id)) { seen.add(o.id); pool.push(o); }
   if (Array.isArray(state.billHistRows) && state.billHistRows.length) {
-    const seen = new Set(pool.map((o) => o.id));
-    for (const o of state.billHistRows) if (!seen.has(o.id)) pool.push(o);
+    for (const o of state.billHistRows) if (!seen.has(o.id)) { seen.add(o.id); pool.push(o); }
   }
   return pool;
 }
@@ -2832,6 +2993,28 @@ function openBillModal(key) {
         ${liveOrders.length === 0 && canDeleteBillNow() ? `<button class="btn danger" data-bm-delete title="Permanently delete this cancelled bill — cannot be undone">🗑 Delete bill</button>` : ""}
         <button class="btn confirm-cancel" data-bm-close>Close</button>
       </div>
+      ${(() => {
+        // THE BILL'S OWN MONEY ACTIONS live INSIDE the opened bill now (owner, 2026-08-03:
+        // "inside that bill only… reopen bill, delete bill… discount on the bill"). Each
+        // button is the SAME action the Live card / floor detail already runs — same
+        // handlers, same server gates, same PIN flow — just reachable from the record too.
+        // The data-* names are deliberately the ones XRAY_CONTROLS matches, so a manager
+        // who lacks void_bills / give_discounts sees no button here either.
+        const sid2 = o0.session_id || null;
+        const invoiced2 = !!sid2 && o0.invoice_no != null && !o0.invoice_voided;
+        const anyUnpaid2 = liveOrders.some((o) => o.payment_status !== "paid");
+        const acts = [];
+        // Reopen: only an ISSUED invoice can be reopened (the server enforces the window +
+        // permission; voiding is recorded). A voided/never-issued bill has nothing to reopen.
+        if (invoiced2) acts.push(`<button class="btn ghost" data-void-invoice="${esc(sid2)}">↩ Reopen bill</button>`);
+        // Credit note: the legal correction for a SETTLED bill — refund without editing it.
+        if (invoiced2) acts.push(`<button class="btn ghost" data-credit-note="${esc(sid2)}" title="Refund/correct without changing the bill (issues a credit note)">🧾− Credit note</button>`);
+        // Discount: only while the bill is still open money — unpaid and NOT locked by an
+        // issued invoice (a settled bill is corrected by reopening it or by a credit note,
+        // never edited in place — the billing-compliance rule).
+        if (sid2 && anyUnpaid2 && !invoiced2) acts.push(`<button class="btn ghost" data-bm-disc data-disc="${esc(liveOrders[0] ? liveOrders[0].id : "")}">％ Discount</button>`);
+        return acts.length ? `<div class="bm-actions bm-actions-money">${acts.join("")}</div>` : "";
+      })()}
     </div>`;
   document.body.appendChild(wrap);
   requestAnimationFrame(() => wrap.classList.add("show"));
@@ -2849,6 +3032,23 @@ function openBillModal(key) {
   // grant, so a stale UI can never delete without permission.
   const delBtn = wrap.querySelector("[data-bm-delete]");
   if (delBtn) delBtn.onclick = async () => { close(); await deleteOrders(g.map((o) => o.id)); };
+  // The bill's money actions (2026-08-03) — the same voidInvoice / creditNote / discount
+  // flows the Live card and the floor detail run, wired here because the modal lives on
+  // document.body, outside the #editor delegated binders.
+  const voidBtn = wrap.querySelector("[data-void-invoice]");
+  if (voidBtn) voidBtn.onclick = async () => { close(); await voidInvoice(voidBtn.dataset.voidInvoice); };
+  const cnBtn = wrap.querySelector("[data-credit-note]");
+  if (cnBtn) cnBtn.onclick = () => { close(); creditNote(cnBtn.dataset.creditNote); };
+  const discBtn = wrap.querySelector("[data-bm-disc]");
+  if (discBtn) discBtn.onclick = () => {
+    // Whole-bill discount, exactly as the floor detail passes it: the modal shows the
+    // SESSION's total discount as "current" and the server stores it on the session.
+    const bmNow = billMath(g);
+    const o1 = liveOrders[0]; if (!o1) return;
+    const discOrder = { ...o1, discount: bmNow.disc, discount_note: o1.discount_note || "" };
+    close();
+    openDiscountModal(discOrder, () => loadOrders(), bmNow.total, bmNow, !!o0.session_id);
+  };
   // Re-open this SAME bill fresh after a dish edit, so the updated note/allergy chip
   // shows immediately. openDishEditModal's own save already calls loadSessions(), but
   // that's LIVE-floor-scoped — an ARCHIVED bill's order needs the full loadOrders()
@@ -3973,9 +4173,10 @@ async function loadDashboard(useCache) {
   // KPI click-through: each card jumps to where that number lives in full detail.
   const goBills = (view) => { state.ordersView = view; lsSet("lfh_editor_ordersview", view); setTab("orders"); };
   const KPI_GO = {
-    revenue: () => goBills(dashRange === "today" ? "daybills" : "previous"),
+    // Bill records live in ONE view now — Previous bills, grouped by day (2026-08-03).
+    revenue: () => goBills("previous"),
     orders: () => goBills("live"),
-    given: () => goBills(dashRange === "today" ? "daybills" : "previous"),
+    given: () => goBills("previous"),
     cancelled: () => goBills("previous"),
     peak: () => document.getElementById("chHours")?.closest(".dash-chart")?.scrollIntoView({ behavior: "smooth", block: "center" }),
   };
@@ -4033,12 +4234,10 @@ async function loadDashboard(useCache) {
       options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
         onClick: (_e, els) => {
           if (!els.length) return;
-          if (dashRange === "today") return goBills("daybills");
-          // Yesterday: open THAT day's bill records — prefill the Previous view's date search
-          // so the click lands on the same day the point belongs to, not on "everything older".
-          const d = new Date(Date.now() - 864e5);
-          state.billSearchType = "date"; state.billSearch = d.toISOString().slice(0, 10); state.billHistRows = [];
-          loadBillHistory(state.billSearch, "date");
+          // Both days land on the SAME record view now — Previous bills shows today's
+          // section and (when the Access screen allows) yesterday's right under it, so
+          // there is no date search to prefill any more (removed 2026-08-03).
+          state.billSearch = ""; state.billHistRows = [];
           goBills("previous");
         },
         plugins: { legend: { display: datasets.length > 1, labels: { boxWidth: 18, font: { size: 10 } } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${inr(c.parsed.y)}` } } },
@@ -4818,7 +5017,7 @@ function renderEditor() {
   if (state.tab === "orders") {
     ed.innerHTML = ordersHtml(); // draw the orders screen
     const rb = document.getElementById("refreshOrders");
-    if (rb) rb.onclick = loadOrders;
+    if (rb) rb.onclick = () => { loadOrders(); if (ordersViewKey() === "previous") loadBillsRecord(true); };
     // Each block below finds a set of buttons by their data-* marker and attaches
     // the click behaviour. (We re-draw the HTML each time, so we re-bind each time.)
     ed.querySelectorAll(".ord-btn[data-act]").forEach((btn) => {
@@ -4873,11 +5072,25 @@ function renderEditor() {
         await payOrdersWithMethod(grp, "Mark this bill paid");
       };
     });
-    // Today/Previous: bill cards open a modal; search + sort drive the grid.
-    ed.querySelectorAll("[data-bill-open]").forEach((c) => { c.onclick = () => openBillModal(c.dataset.billOpen); });
+    // Previous bills: the whole record card opens the bill — except taps on its own
+    // buttons (Print / Open), which handle themselves. Same guard the Platform cards use.
+    ed.querySelectorAll("[data-bill-open]").forEach((c) => {
+      c.onclick = (e) => { if (e.target.closest("button")) return; openBillModal(c.dataset.billOpen); };
+    });
+    ed.querySelectorAll("[data-bill-open-btn]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); openBillModal(b.dataset.billOpenBtn); }));
     // Per-card 🖨: print without opening the bill. stopPropagation so the card's own
     // open-modal click doesn't also fire.
     ed.querySelectorAll("[data-bill-print]").forEach((b) => (b.onclick = (e) => { e.stopPropagation(); printBillFromKey(b.dataset.billPrint); }));
+    // A parcel record's 🖨 — the SAME parcel bill the Platform board prints, from the
+    // bills-window rows (a finished parcel is off the live board, so it isn't in
+    // state.data.platform any more).
+    ed.querySelectorAll("[data-parcel-print]").forEach((b) => (b.onclick = (e) => {
+      e.stopPropagation();
+      const rows = (state.billsRec && state.billsRec.parcels) || [];
+      const o = rows.find((x) => String(x.id) === String(b.dataset.parcelPrint));
+      if (!o) { toast("Couldn't load that parcel bill to print", "err"); return; }
+      printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method, discount: o.discount, discount_note: o.discount_note });
+    }));
     const _bst = ed.querySelector("[data-bill-stype]");
     if (_bst) _bst.onchange = () => { state.billSearchType = _bst.value; state.billSearch = ""; state.billHistRows = []; renderEditor(); };
     const _bso = ed.querySelector("[data-bill-sort]");
@@ -11225,6 +11438,10 @@ async function loadOrders() {
     const orders = await api("GET", "/orders");
     if (seq !== dataSeq) return; // a newer refresh started — drop this stale response
     state.data.orders = orders;
+    // A write just changed the board (every money action reloads through here) — keep the
+    // bills record in step while it is on screen, so a reopened/deleted/paid bill moves
+    // between Live and Previous without a manual refresh (owner: "everything should sync").
+    if (state.tab === "orders" && ordersViewKey() === "previous") loadBillsRecord(true);
     // (Don't set lastOrderCount/lastCallCount here — reconcileBoard owns them from the
     //  summary's live counts; a full-list baseline here would clash and misfire the chime.)
     try {
@@ -12727,6 +12944,12 @@ const XRAY_CONTROLS = [
   { selector: "[data-qop]", flag: "take_orders|parcel", label: "Take orders / Parcel" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
+  // Credit note is the SAME money power as reopen (the server refuses it via void_bills —
+  // "Money action → void_bills" at the credit-note endpoint), but this row was missing, so a
+  // manager without the power saw a fully clickable button that only failed after they had
+  // typed an amount and a reason (found in PR #748's review, 2026-08-03). One selector now
+  // covers the Live card and the opened-bill modal alike.
+  { selector: "[data-credit-note]", flag: "void_bills", label: "Credit note" },
   // "✕ Cancel" on a ticket is NOT listed here any more (2026-08-02): cancelling a ticket is how a
   // kitchen mistake and a walk-out are cleared, it is not one of the owner's three money rows, and
   // hiding it behind void_bills (now OFF by default) left a manager unable to correct the floor.

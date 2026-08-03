@@ -39,7 +39,7 @@ import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, type ManagerTabKey } from "@/lib/accessTree";
-import { dashboardReach, clampDashRange } from "@/lib/dashRange";
+import { dashboardReach, clampDashRange, billsReach } from "@/lib/dashRange";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
@@ -626,6 +626,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // 30-day/12-month view here was only ever a duplicate of the owner's own Reports
         // (deleted 2026-08-03 at the owner's word).
         dashReach: dashboardReach(r?.access_config),
+        // How far back the BILLS record reaches (Access → Manager → Permission for manager →
+        // Bills → "Which bills they can see"). The panel draws its Today / Yesterday bill
+        // groups from THIS, and GET /orders clamps its bills window + every bill search to
+        // the same answer — so the screen can never offer a day the server refuses.
+        billsReach: billsReach(r?.access_config),
         // MANAGER'S MENU (access rebuild): which tabs this RESTAURANT has at all — a
         // different question from what a PERSON may do, which is the powers above. The panel
         // removes these tabs entirely (never greys them), and the guards below refuse their
@@ -840,11 +845,37 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // 159 KB-and-growing whole-orders read down to a few rows.
       const sp = new URL(req.url).searchParams;
       const tbl = sp.get("table");
+      // THE BILLS WINDOW (owner, 2026-08-03): the Bills record shows TODAY only, or today +
+      // yesterday when Access → Manager → Permission for manager → Bills says so. The window
+      // start is computed HERE and applied to the ?bills= fetch AND every ?history= search —
+      // for the manager, the owner and the admin alike — so no typed URL or remembered search
+      // can list a day the screen doesn't offer. (The plain no-param read below stays
+      // unclamped: it is the LIVE floor's working set, and an open table's food must never
+      // vanish from Live just because service ran past the day boundary.)
+      const billsMode = sp.get("bills") === "1";
+      const wantsWindow = billsMode || !!sp.get("history");
+      let reach: ReturnType<typeof billsReach> = "today";
+      let windowStartIso = "";
+      if (wantsWindow) {
+        reach = billsReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+        windowStartIso = reach === "today_yesterday"
+          ? businessDayStartIso(new Date(Date.now() - 24 * 3600 * 1000))
+          : businessDayStartIso();
+      }
       // BILLS-HISTORY SEARCH (owner, 2026-07-03): the Bills tab only fetched the newest 200
       // orders, so searching for an OLDER bill found nothing (the row was never fetched). When
       // ?history=1&q=…&type=… is set, query the DB directly for the match (scoped by rid),
-      // returning up to 200 matching bill records — so any bill is findable, however old.
-      let oq = sb.from("orders").select("*").eq("restaurant_id", rid);
+      // returning up to 200 matching bill records. Since 2026-08-03 the match is CLAMPED to
+      // the bills window above — the record only reaches as far as the Access screen allows.
+      // The ?bills= window names its columns (the same discipline as the parcels read below
+      // and the Platform board): everything the record cards, the bill modal, restore's
+      // deadline math and the printed bill actually consume — and nothing else. NOT
+      // customer_name: that is a SYNTHETIC field the enrichment below attaches from
+      // session_members, not a column. The no-param floor read keeps select("*") — the live
+      // board renders every column and RT_VOLATILE/boardSig depend on the full row shape.
+      const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
+      let oq = sb.from("orders").select(billsMode ? BILLS_COLS : "*").eq("restaurant_id", rid);
+      if (wantsWindow) oq = oq.gte("created_at", windowStartIso);
       const histQ = sp.get("history") ? (sp.get("q") || "").trim() : "";
       if (histQ) {
         const type = sp.get("type") || "inv";
@@ -924,7 +955,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           }
         }
       }
-      const orders = must(await oq.order("created_at", { ascending: false }).limit(200));
+      // The bills window is a bounded day-or-two of records, so it may need more than the
+      // floor's 200-row working set on a busy day — still explicit, scoped and limited.
+      const orders = must(await oq.order("created_at", { ascending: false }).limit(billsMode ? 500 : 200));
       // Attach each order's SESSION invoice/bill state so the merged bill card knows
       // whether it's invoiced/locked (invoice lives on the session, not the order).
       const sids = [...new Set(orders.map((o: any) => o.session_id).filter(Boolean))];
@@ -946,6 +979,24 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           }
           if (nameMap[o.session_id]) o.customer_name = nameMap[o.session_id];
         }
+      }
+      if (billsMode) {
+        // PARCEL BILLS BELONG IN THE BILLS RECORD (owner, 2026-08-03: "the parcel bill should
+        // also come in the bill section"). Parcels live in aggregator_orders, a different
+        // table from dine-in orders, which is why they never appeared here — and a finished
+        // parcel even leaves the Platform board after ~6 minutes, making its bill invisible
+        // everywhere. FINISHED parcels (handed over / cancelled) inside the same clamped
+        // window ride along here; active ones stay on the Platform board, which is their
+        // operational home. Same explicit column list as the Platform read — no payload.
+        const parcels = (await parcelLadder(rid)).effective
+          ? (must(await sb.from("aggregator_orders")
+              .select("id,source,items,total,status,kot_no,bill_no,invoice_no,invoice_at,created_at,customer_name,customer_phone,paid,printed_at,payment_method,discount:payload->discount,discount_note:payload->>discount_note")
+              .eq("restaurant_id", rid).eq("source", "parcel")
+              .in("status", ["handed_over", "cancelled"])
+              .gte("created_at", windowStartIso)
+              .order("created_at", { ascending: false }).limit(300)) || [])
+          : [];
+        return ok({ rows: orders, parcels, reach });
       }
       return ok(orders);
     }

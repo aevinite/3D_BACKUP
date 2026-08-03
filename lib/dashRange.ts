@@ -37,3 +37,18 @@ export function dashboardReach(accessConfig: unknown): DashReach {
 export function clampDashRange(asked: unknown, reach: DashReach): DashRange {
   return asked === "yesterday" && reach === "today_yesterday" ? "yesterday" : "today";
 }
+
+// ── Bills list reach (owner, 2026-08-03) ────────────────────────────────────
+// The SAME two answers, for the Bills tab's record of settled bills. Its switch is Access →
+// Manager → Permission for manager → Bills → "Which bills they can see" (lib/accessTree.ts,
+// node `mgr_bills_range`), stored at access_config.view_bills.manager_opts.range. Read by
+// /api/editor/whoami (so the panel knows whether to draw the Yesterday group at all) and
+// enforced by /api/editor/orders — the window AND every bill search are clamped to it, for
+// the manager, the owner and the admin alike: a day no screen offers is a day nothing lists.
+
+/** This restaurant's bills reach, straight from its stored access_config. */
+export function billsReach(accessConfig: unknown): DashReach {
+  const stored = (accessConfig as { view_bills?: { manager_opts?: { range?: string } } } | null | undefined)
+    ?.view_bills?.manager_opts?.range;
+  return stored === "today_yesterday" ? "today_yesterday" : "today";
+}
