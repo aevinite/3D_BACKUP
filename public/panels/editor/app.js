@@ -6950,7 +6950,14 @@ function tableTileStateFromBoard(t) {
 // compliance rules). That is what keeps "Parcel 3" called Parcel 3 for the rest of the day
 // whatever happens to Parcel 2.
 function todaysParcels() {
-  const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+  // THE RESTAURANT'S DAY, NOT THE CLOCK'S (sweep 2026-08-04). This used local midnight while
+  // every other day on this panel starts at 05:00 (businessDayStartMs, used by the Bills tab).
+  // Since openParcels() below is what implements "a parcel stays on the floor until it is BOTH
+  // printed and paid", a parcel taken at 23:50 and not yet paid VANISHED from the floor at
+  // midnight — five hours before the business day it belongs to ends, and it is the
+  // collect-the-money half that disappeared. Numbering rolled over at midnight too, so between
+  // 00:00 and 05:00 "Parcel 1" and the bill series disagreed about which day it was.
+  const dayStart = businessDayStartMs();
   return (state.data.platform || [])
     .filter((o) => o.source === "parcel" && o.created_at && new Date(o.created_at) >= dayStart)
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
@@ -11656,13 +11663,19 @@ function playOrderChime() {
 // fetched ONLY when the Orders tab is showing (that tab renders all ~200 order cards); the
 // owner's 300-table fear is the floor grid, not that one detail tab. On the Tables tab the
 // SELECTED table's full slice is refreshed so its detail stays live.
-async function pollOrders() {
+async function pollOrders(opts) {
   const seq = ++dataSeq;
   let summary;
   try {
     summary = await api("GET", "/summary");
-  } catch {
-    return; // network blip — try again next tick
+  } catch (e) {
+    // The catch-up poll below needs to KNOW the read failed so it can back off (LFH_RT.catchUp
+    // doubles its interval while reads fail and returns to 5s the moment one succeeds — if the
+    // failure is swallowed it has nothing to back off from, and every device keeps hammering a
+    // database that is already struggling). Every ordinary caller keeps the quiet
+    // "network blip — try again next tick" behaviour. (sweep 2026-08-04)
+    if (opts && opts.rethrow) throw e;
+    return;
   }
   if (seq !== dataSeq) return; // a newer loader started — this poll snapshot is stale
   if (!floorOpsInFlight) state.summary = summary; // don't clobber an optimistic tile mid-action
@@ -11912,6 +11925,21 @@ function startOrderWatch() {
       menu: () => { if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
     setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 60000); // backup sync; skip on a hidden/backgrounded tab (realtime refetches on wake) so an idle tab stops costing egress (B18)
+    // CATCH UP WHILE THE SOCKET IS DOWN BUT READS STILL WORK (sweep 2026-08-04).
+    // The 60s timer above was the ONLY backstop for a socket that is connected-but-dead — a
+    // blocked websocket (restaurant wifi, a proxy) or a drop the browser hasn't noticed. So a
+    // waiter sent an order and the manager's floor didn't show it for up to a MINUTE: no tile,
+    // no badge, no chime, and the connection light often still reading weak rather than
+    // offline, so nothing on screen explained the wait. The kitchen was given exactly this fix
+    // (bug M9, 2026-07-05); the manager floor never got it.
+    //
+    // LFH_RT.catchUp is the sanctioned way and it is safe here: it does nothing while the
+    // socket is live, the tab is hidden or the device is genuinely offline; it polls at ~5s
+    // only while the socket is down AND reads are succeeding; it doubles to a minute for as
+    // long as reads FAIL (so a struggling database is not hammered); and it jitters ±20% so
+    // twenty devices never poll on the same beat. The `rethrow` flag is what lets it see a
+    // failed read — without it there is nothing to back off from.
+    if (LFH_RT.catchUp) LFH_RT.catchUp(() => pollOrders({ rethrow: true }));
   } else {
     setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 2000); // fallback poll (realtime down); paused while hidden (B18)
   }

@@ -907,11 +907,28 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           if (!sIds.length) return ok([]);
           oq = oq.in("session_id", sIds);
         } else if (type === "date") {
-          const d = new Date(histQ);
-          if (isNaN(d.getTime())) return ok([]);
-          const start = new Date(d); start.setHours(0, 0, 0, 0);
-          const end = new Date(start); end.setDate(end.getDate() + 1);
-          oq = oq.gte("created_at", start.toISOString()).lt("created_at", end.toISOString());
+          // A DAY MEANS THE RESTAURANT'S DAY, NOT THE SERVER'S (sweep 2026-08-04).
+          // This used `new Date(histQ)` + `setHours(0,0,0,0)`, which builds the window in
+          // whatever timezone the server happens to run in — UTC on Vercel. So searching for
+          // "5 August" actually asked for 05:30 IST on the 5th → 05:30 IST on the 6th: a bill
+          // taken at 03:00 IST on the 5th was filed under the 4th and simply couldn't be found
+          // under its own date. Anchored to IST explicitly, the same way gst-report builds its
+          // month. (The date PICKER left the Bills tab in PR #748, so only a stale cached panel
+          // can still reach this — but a live branch that returns the wrong day is worse than
+          // one nobody calls.)
+          // The date picker sends YYYY-MM-DD; anything else is parsed and then read back as an
+          // IST calendar date, so both spellings land on the same day.
+          const raw = String(histQ).trim();
+          let day = /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : "";
+          if (!day) {
+            const parsed = new Date(raw);
+            if (isNaN(parsed.getTime())) return ok([]);
+            day = new Date(parsed.getTime() + 5.5 * 3600e3).toISOString().slice(0, 10);
+          }
+          const dayStart = new Date(`${day}T00:00:00+05:30`);
+          if (isNaN(dayStart.getTime())) return ok([]);
+          const dayEnd = new Date(dayStart.getTime() + 864e5);
+          oq = oq.gte("created_at", dayStart.toISOString()).lt("created_at", dayEnd.toISOString());
         }
       } else if (tbl) {
         // THE FLOOR SLICE — only the party sitting there NOW.
@@ -1303,7 +1320,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const prevSince = new Date(since.getTime() - 864e5);
       const elapsedMs = until.getTime() - since.getTime();
       const [dishesQ, setQ, platRangeQ] = await Promise.all([
-        sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
+        // Bounded like every other read (egress rule). Unbounded, PostgREST capped it at ~1000
+        // anyway, so a restaurant with a bigger menu silently lost dishes from the dish→category
+        // map that feeds Top dishes and the menu matrix. (sweep 2026-08-04)
+        sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid).limit(5000),
         sb.from("settings").select("tax_rate,tax_components,platform_channels").eq("restaurant_id", rid).maybeSingle(),
         // Upper bound too: on "yesterday" today's orders are somebody else's day, and leaving
         // them out is fewer rows read as well as the right answer (egress rule).
@@ -1523,11 +1543,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // active platform orders by source, and today's platform totals (platform
       // orders live in aggregator_orders, separate from dine-in `orders`).
       const todayStart = new Date(businessDayStartIso()).toISOString();
+      // EVERY READ CARRIES A BOUND, AND A COUNT IS COUNTED (sweep 2026-08-04). These three had
+      // no .limit(), which the egress rule requires — but the real damage was that PostgREST
+      // silently caps an unbounded select at ~1000 rows, and both figures below are derived from
+      // the LENGTH of the list. So on a big floor "open tables" and today's platform revenue
+      // could read low with nothing on screen saying so, while the same endpoint honestly
+      // reports `truncated` for its orders scan. Open tables is now a rows-free head COUNT, so
+      // it cannot be capped at all (and costs no row egress); the platform reads get a bound.
       const [openSessQ, platActiveQ, platTodayQ] = await Promise.all([
-        sb.from("sessions").select("id").eq("status", "open").eq("restaurant_id", rid),
-        sb.from("aggregator_orders").select("source").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]),
-        sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", todayStart),
+        sb.from("sessions").select("id", { count: "exact", head: true }).eq("status", "open").eq("restaurant_id", rid),
+        sb.from("aggregator_orders").select("source").eq("restaurant_id", rid).in("status", ["new", "accepted", "preparing", "ready"]).limit(5000),
+        sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", todayStart).limit(5000),
       ]);
+      // A head count answers in `count`, not in rows. must() still runs on it so a FAILED read
+      // keeps raising instead of quietly reporting an empty floor (the old `must(openSessQ)`
+      // did that, and losing it would turn a database blip into "0 tables open").
+      must(openSessQ);
+      const openTableCount = Number(openSessQ.count) || 0;
       const platActive = (must(platActiveQ) || []) as { source: string }[];
       // Platform revenue counts a delivery order only once it's ACCEPTED+ (never a
       // still-"new" ticket, never a cancelled one) — owner 2026-07-05, so today's
@@ -1535,7 +1567,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const platToday = ((must(platTodayQ) || []) as { total: number; status: string }[])
         .filter((r) => r.status !== "cancelled" && r.status !== "new");
       const live = {
-        dineIn: ((must(openSessQ) || []) as unknown[]).length,
+        dineIn: openTableCount,
         zomato: platActive.filter((r) => r.source === "zomato").length,
         swiggy: platActive.filter((r) => r.source === "swiggy").length,
         takeaway: platActive.filter((r) => r.source === "takeaway").length,   // website channel
@@ -1631,6 +1663,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // instead of thousands of log rows (egress-safe). Scoped to this restaurant; hides admin + owner
       // rows exactly like /oplog. Replaces the old client that aggregated only the newest 200 rows with
       // NO date window (which silently undercounted, and could miss a staff member, on a busy day). (review #4)
+      //
+      // THIS CARD LIVES ON THE DASHBOARD, SO IT NEEDS THE DASHBOARD'S PERMISSION (sweep 2026-08-04).
+      // It had none at all: /stats (the screen around it) checks view_dashboard and /oplog (the log
+      // it summarises) checks canViewLogs, but this endpoint checked neither, and tabGate doesn't
+      // match "staff-risk" either. So a restaurant that switched the dashboard off for managers
+      // still handed any logged-in manager a per-person tally of who gave discounts, who voided
+      // bills and who deleted them — a switch on the Access screen that saved and was never read
+      // on this path, which is the dead-switch shape the access rebuild exists to remove.
+      if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
       // Same two ranges as the dashboard it sits on, clamped by the same helper — this card
       // must not reach further back than the screen around it (a manager asking ?range=year
       // used to get a year of staff-watch rows). today | yesterday, one business day each.
@@ -1676,9 +1717,41 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   }
 }
 
+// ── DROPPING THE FLOOR SNAPSHOT, ONCE BEFORE AND ONCE AFTER ──────────────────
+// Each write handler below calls invalidateFloor(rid) as soon as it knows the restaurant.
+// That is worth keeping, but on its own it CANNOT deliver what it claims ("a device can
+// never be handed a floor computed before its own action"), because the snapshot is dropped
+// BEFORE the change lands. On a floor with several devices the gap is easy to hit:
+//
+//   t=0     a waiter taps Mark paid → the snapshot is dropped
+//   t=60ms  another device's whole-floor poll lands → computes and SHARES a floor with no payment
+//   t=250ms the UPDATE commits
+//   t=300ms the acting device reloads → still inside that poll's 1.5s window → old floor
+//
+// …which is the tile-flicks-back-for-a-second behaviour the sharing was carefully written to
+// avoid (see lib/floorSummary.ts). sessions/:id/merge and tables/:t/unmerge already worked
+// round it by calling invalidateFloor a second time themselves; this wrapper does it for
+// EVERY write instead, so a new endpoint gets it without anyone remembering to.
+//
+// The rid is carried on a WeakMap keyed by the request object (withIdempotency passes the
+// same object straight through), so nothing is shared between concurrent requests. `finally`
+// means a handler that throws still drops the snapshot — a half-applied write must not leave
+// a stale floor behind either. Over-invalidating is free: the next read just computes.
+const writeRid = new WeakMap<NextRequest, string>();
+function invalidateFloorAfter(fn: (req: NextRequest, ctx: Ctx) => Promise<NextResponse>) {
+  return async (req: NextRequest, ctx: Ctx): Promise<NextResponse> => {
+    try {
+      return await fn(req, ctx);
+    } finally {
+      const rid = writeRid.get(req);
+      if (rid) invalidateFloor(rid);
+    }
+  };
+}
+
 // ── POST ─────────────────────────────────────────────────────────────────────
 // Wrapped so a replayed offline action runs at most once (see lib/idempotency.ts).
-export const POST = withIdempotency(postImpl, "editor");
+export const POST = withIdempotency(invalidateFloorAfter(postImpl), "editor");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   // Attribute every logged action to the signed-in staff member (name = their login;
@@ -1694,8 +1767,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   // A write to this restaurant drops its shared floor snapshot, so the very next read
-  // recomputes — a device can never be handed a floor computed before its own action.
+  // recomputes. Dropping it HERE is not enough on its own (a poll landing between this line
+  // and the write re-shares the old floor) — invalidateFloorAfter() drops it again once the
+  // handler has finished, which is what makes "read your own write" actually true.
   invalidateFloor(rid);
+  writeRid.set(req, rid);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
@@ -2341,7 +2417,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // payment. Stored on this one order (a table bill puts its whole tip on the first paid order);
     // completely separate from subtotal/tax/discount/total, so it never affects the bill math.
     if (a === "orders" && c === "tip") {
-      const amt = Math.max(0, Number(body?.amount) || 0);
+      // A tip is money captured at payment and it is summed into the Z-report's "tips collected
+      // today", so it gets the settle permission and a ceiling (sweep 2026-08-04). It had
+      // neither: any logged-in manager could write any number, and a mis-typed 50000 landed in
+      // the day-close figure with nothing to stop it. The cap is deliberately generous — it is
+      // there to catch a typo, not to judge a tip.
+      if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("record a tip");
+      const amt = Math.min(Math.max(0, Number(body?.amount) || 0), 100000);
       must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid));
       await log("manager", "order_tip", { restaurant_id: rid, order_id: b, detail: `tip ₹${amt}`, device_id: dev });
       return ok({ ok: true });
@@ -2977,9 +3059,38 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "restart") {
       const tRaw = String(b || "").trim();
       if (!/^\d+$/.test(tRaw)) return err("valid table required");
+      // THIS CLEARS A TABLE THAT MAY STILL OWE MONEY, SO IT NEEDS THE SAME POWER AS ITS
+      // SIBLINGS (sweep 2026-08-04). It had no permission check at all, while cancelling ONE
+      // ticket needs void_bills (whose own description is "…or closing a table unpaid after a
+      // walk-out") and deleting a bill needs void_bills + canDeleteBill. Clearing the WHOLE
+      // table needed nothing. Default is ON, so nothing changes for a restaurant that hasn't
+      // deliberately taken the power away.
+      if (!(await managerCan(g, rid, "void_bills"))) return permDenied("clear a table that still owes money");
       // A merged child's party lives on its parent — restart clears the whole party (lib/tableMerge).
       const t = await mergeParentTable(sb, rid, tRaw);
       const openSess = (await sb.from("sessions").select("id").eq("table_number", t).eq("status", "open").eq("restaurant_id", rid).order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
+      // WHAT WAS STILL OWED, READ BEFORE THE ROWS ARE ARCHIVED (sweep 2026-08-04).
+      // closeSession() deliberately reads this first so a walk-out is recorded as
+      // "closed with N unpaid order(s), ₹X owed"; this path archived the rows itself, so the
+      // mig-232 close trigger (which only looks at archived = false) then found nothing to
+      // cancel and NO money line was ever written. The bill stayed in the takings as unpaid
+      // with nothing naming the amount or the person who cleared it. Same action code
+      // (close_unpaid) and the same discount-aware math as lib/sessionClose.ts, so the
+      // compliance surfaces pick it up with no changes.
+      let owedQ = sb.from("orders").select("total,discount,subtotal,tax")
+        .eq("restaurant_id", rid).eq("archived", false).neq("status", "cancelled").neq("payment_status", "paid");
+      owedQ = openSess ? owedQ.eq("session_id", openSess.id) : owedQ.eq("table_number", t);
+      const owedRows = (must(await owedQ) || []) as { total?: number; discount?: number; subtotal?: number; tax?: number }[];
+      if (owedRows.length) {
+        // Discount is stored PRE-TAX, so what is actually owed drops by discount×(1+rate);
+        // each order's own rate comes from its stored tax/subtotal (correct per restaurant).
+        const owed = owedRows.reduce((s, o) => {
+          const sub = Number(o.subtotal) || 0, tax = Number(o.tax) || 0;
+          const rate = sub > 0 ? tax / sub : 0;
+          return s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate);
+        }, 0);
+        await log("manager", "close_unpaid", { restaurant_id: rid, table_number: t, detail: `table cleared with ${owedRows.length} unpaid order(s), ₹${Math.round(owed * 100) / 100} owed`, device_id: dev });
+      }
       let q = sb.from("orders").update({ status: "served", archived: true, archived_at: nowIso() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
       const rows = must(await q.select());
@@ -3053,6 +3164,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const t = await mergeParentTable(sb, rid, tRaw);
       if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "table_tags"))) return permDenied("settle a bill on the house");
+      // SETTLING A BILL IS SETTLING A BILL, WHATEVER BUTTON IT CAME FROM (sweep 2026-08-04).
+      // This writes payment_status='paid' + paid_at + a payment method, so it needs the same
+      // permission as a plain Mark paid — the rule tables/:t/pay-split already spells out
+      // ("otherwise switching mark_paid off would leave the split route as a way round it").
+      // Without it, switching Mark-paid off for a manager still left them able to settle any
+      // Family / Owner's-Guest table to ₹0. table_tags above says they may use the comp
+      // feature; this says they may settle money. Default ON, so nothing changes by itself.
+      if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("mark a bill paid");
       // The mark may sit on ANY member of a merged party — the family sat at T29 before it was
       // joined to T28; their comp must not stop working because the bill now lives on T28.
       const partyKids = ((await sb.from("table_merges").select("child_table")
@@ -3163,6 +3282,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "khata" && b === "pay") {
       if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("collect khata payments");
+      // Collecting a parked tab MARKS ORDERS PAID, so it needs the settle permission too —
+      // same reasoning as the on-the-house gate above and as pay-split's own comment. `khata`
+      // says they may work the pay-later book; `mark_paid` says they may take the money.
+      if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("mark a bill paid");
       const method = String(body?.method || "");
       if (!PAYMENT_METHODS.includes(method as (typeof PAYMENT_METHODS)[number])) return err("invalid payment_method");
       const note = String(body?.note || "").slice(0, 200) || null;
@@ -3649,7 +3772,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 }
 
 // ── PATCH ────────────────────────────────────────────────────────────────────
-export const PATCH = withIdempotency(patchImpl, "editor");
+export const PATCH = withIdempotency(invalidateFloorAfter(patchImpl), "editor");
 async function patchImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const actorName = g.user?.name || g.user?.username || null;
@@ -3662,8 +3785,11 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   // A write to this restaurant drops its shared floor snapshot, so the very next read
-  // recomputes — a device can never be handed a floor computed before its own action.
+  // recomputes. Dropping it HERE is not enough on its own (a poll landing between this line
+  // and the write re-shares the old floor) — invalidateFloorAfter() drops it again once the
+  // handler has finished, which is what makes "read your own write" actually true.
   invalidateFloor(rid);
+  writeRid.set(req, rid);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
@@ -3821,7 +3947,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
 }
 
 // ── DELETE ───────────────────────────────────────────────────────────────────
-export const DELETE = withIdempotency(deleteImpl, "editor");
+export const DELETE = withIdempotency(invalidateFloorAfter(deleteImpl), "editor");
 async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const actorName = g.user?.name || g.user?.username || null;
@@ -3834,8 +3960,11 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
   const rid = await editorScope(req, g);
   if (rid instanceof NextResponse) return rid;
   // A write to this restaurant drops its shared floor snapshot, so the very next read
-  // recomputes — a device can never be handed a floor computed before its own action.
+  // recomputes. Dropping it HERE is not enough on its own (a poll landing between this line
+  // and the write re-shares the old floor) — invalidateFloorAfter() drops it again once the
+  // handler has finished, which is what makes "read your own write" actually true.
   invalidateFloor(rid);
+  writeRid.set(req, rid);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).

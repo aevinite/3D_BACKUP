@@ -563,15 +563,34 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   }
 }
 
+// Drop this restaurant's shared floor snapshot AFTER the write has landed, as well as before
+// it (see the long note on the same wrapper in app/api/editor/[...path]/route.ts): dropping it
+// only at the start leaves a window where another device's whole-floor poll re-shares the
+// pre-write floor for up to 1.5s, and the waiter who just marked a table paid is handed it.
+// The rid rides on a WeakMap keyed by the request, so concurrent requests never mix.
+const writeRid = new WeakMap<NextRequest, string>();
+function invalidateFloorAfter(fn: (req: NextRequest, ctx: Ctx) => Promise<NextResponse>) {
+  return async (req: NextRequest, ctx: Ctx): Promise<NextResponse> => {
+    try {
+      return await fn(req, ctx);
+    } finally {
+      const rid = writeRid.get(req);
+      if (rid) invalidateFloor(rid);
+    }
+  };
+}
+
 // ── POST: place order / attend call / approve member / open session ──────────
 // Wrapped so a replayed offline action runs at most once (see lib/idempotency.ts).
-export const POST = withIdempotency(postImpl, "tablet");
+export const POST = withIdempotency(invalidateFloorAfter(postImpl), "tablet");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
   // A write to this restaurant drops its shared floor snapshot, so the very next read
-  // recomputes — a device can never be handed a floor computed before its own action.
-  if (rid) invalidateFloor(rid);
+  // recomputes. Dropping it here is not enough on its own — invalidateFloorAfter() above
+  // drops it again once the handler has finished, which is what makes "read your own
+  // write" actually true.
+  if (rid) { invalidateFloor(rid); writeRid.set(req, rid); }
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   // The logged-in waiter, for per-user permission checks. Bound here because the
   // tabletPerm call sites below shadow `g` with their own gate result.
