@@ -12941,6 +12941,12 @@ const XRAY_CONTROLS = [
   { selector: "[data-qop]", flag: "take_orders|parcel", label: "Take orders / Parcel" },
   { selector: "[data-disc]", flag: "give_discounts", label: "Give discounts" },
   { selector: "[data-void-invoice]", flag: "void_bills", label: "Void / reopen bills" },
+  // Credit note is the SAME money power as reopen (the server refuses it via void_bills —
+  // "Money action → void_bills" at the credit-note endpoint), but this row was missing, so a
+  // manager without the power saw a fully clickable button that only failed after they had
+  // typed an amount and a reason (found in PR #748's review, 2026-08-03). One selector now
+  // covers the Live card and the opened-bill modal alike.
+  { selector: "[data-credit-note]", flag: "void_bills", label: "Credit note" },
   // "✕ Cancel" on a ticket is NOT listed here any more (2026-08-02): cancelling a ticket is how a
   // kitchen mistake and a walk-out are cleared, it is not one of the owner's three money rows, and
   // hiding it behind void_bills (now OFF by default) left a manager unable to correct the floor.
