@@ -34,6 +34,7 @@
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
     "verify:floor": "node scripts/verify-floor-share.mjs",
+    "verify:merge": "node scripts/verify-merge-party.mjs",
     "check:floor-timeouts": "node scripts/check-floor-timeouts.mjs",
     "verify:busy": "node scripts/verify-busy-server.mjs",
     "verify:outbox": "node scripts/verify-outbox-drain.mjs",

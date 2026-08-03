@@ -324,7 +324,42 @@ async function actGated(method, path, body, opts = {}) {
 }
 
 // ── floor helpers ────────────────────────────────────────────────────────────
-const sessionOf = (t) => state.data.sessions.find((s) => String(s.table_number) === String(t) && s.status === "open");
+// ── MERGED TABLES (mig 249) — the tablet mirrors the manager panel ─────────────────────────
+// The floor summary carries the live joins (state.summary.merges: parent_table + child_table).
+// A merged CHILD table has no session of its own: its party, bill and money live on the PARENT's
+// session, while its orders keep their own table number (that is what makes an unmerge exact).
+// Before these helpers the tablet knew none of this — a merged child's tile read "Free", its
+// detail said nothing was ordered, and Mark-paid settled half a joint bill.
+function mergeList() { return (state.summary && Array.isArray(state.summary.merges)) ? state.summary.merges : []; }
+function mergeParentOf(t) {
+  const m = mergeList().find((x) => String(x.child_table) === String(t));
+  return m ? String(m.parent_table) : null;
+}
+function mergeChildrenOf(t) {
+  return mergeList().filter((m) => String(m.parent_table) === String(t)).map((m) => String(m.child_table))
+    .sort((a, b) => (Number(a) || 0) - (Number(b) || 0));
+}
+// Every table served as one party with t (t included, parent first).
+function partyTablesOf(t) {
+  const head = mergeParentOf(t) || String(t);
+  const all = [String(head), ...mergeChildrenOf(head)];
+  return all.length > 1 ? all : [String(t)];
+}
+// "T6 + T7" for a bill heading — null when t isn't part of a merged party.
+function mergeGroupLabel(t) {
+  const parent = mergeParentOf(t) || String(t);
+  const kids = mergeChildrenOf(parent);
+  return kids.length ? [parent, ...kids].map((x) => "T" + x).join(" + ") : null;
+}
+// Every live order across the whole party, deduped by id — what any whole-bill action must use.
+function partyOrders(t) {
+  const seen = new Set();
+  return partyTablesOf(t).flatMap((x) => ordersOf(x)).filter((o) => (seen.has(o.id) ? false : seen.add(o.id)));
+}
+// A merged child answers with its PARENT's session — ownership is the session, never the
+// table number (mig 232), and the child's party IS the parent's.
+const rawSessionOf = (t) => state.data.sessions.find((s) => String(s.table_number) === String(t) && s.status === "open");
+const sessionOf = (t) => rawSessionOf(t) || (mergeParentOf(t) ? rawSessionOf(mergeParentOf(t)) : undefined);
 // ordersOf(t): the orders of the party sitting at table t RIGHT NOW — see the long note on
 // the manager's ordersForTable (owner report, 2026-07-30). An order counts only when it
 // carries this table's OPEN-session id, or no session id at all (banquet/legacy rows).
@@ -438,7 +473,7 @@ function tableAgg(t) {
   //  session-only table with zero cached orders anywhere never took this live branch.)
   if (String(state.table) === String(t)
       && ((state.data.orders || []).some((o) => String(o.table_number) === String(t)) || sessionOf(t))) {
-    const os = ordersOf(t), s = sessionOf(t);
+    const os = partyOrders(t), s = sessionOf(t); // the whole party — one bill, one set of numbers
     let nw = 0, ck = 0, rd = 0, sv = 0, dueTot = 0, dueDisc = 0;
     const kots = [];
     os.forEach((o) => {
@@ -485,6 +520,9 @@ function tableAgg(t) {
 // or recomputed from the slice for the selected one (same precedence: new → ready → prep →
 // served/bill → seated/waiting → req → free).
 function tileState(t) {
+  // A merged member wears its PARTY's state (the party lives on the parent's session), so the
+  // grid, the filter chips and the count strips can never call a joined table "free".
+  t = mergeParentOf(t) || t;
   if (String(state.table) === String(t)
       && ((state.data.orders || []).some((o) => String(o.table_number) === String(t)) || sessionOf(t))) {
     const a = tableAgg(t), s = sessionOf(t);
@@ -693,7 +731,8 @@ async function selectTable(t) {
   if (window.matchMedia("(max-width: 760px)").matches) {
     document.getElementById("panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
-  await ensureTableSlice(t, true);      // FORCE a fresh pull — never trust up-to-60s-stale cached detail (M10)
+  await ensurePartySlices(t, true);     // FORCE a fresh pull — never trust up-to-60s-stale cached detail (M10);
+                                        // a merged table needs its whole PARTY's slices, not just its own
   if (String(state.table) !== String(t)) return; // the waiter already moved on — don't clobber
   lastSig = boardSig(state);            // adopt as baseline so the next poll doesn't re-flicker the detail
   renderFloor();
@@ -727,11 +766,24 @@ function passesFilter(i) {
 // live here, exactly as they did inside the old renderFloor loop. Mirrors the manager's
 // floorTileHtml. (owner perf 2026-06-27 — 300-table freeze fix)
 function tileHtml(i) {
-  const st = tileState(i), a = tableAgg(i), tile = summaryTile(i);
+  // A MERGED TABLE IS NOT A FREE TABLE (mig 249; the manager floor got this on 2026-08-01,
+  // the tablet never had it). A child's party lives on its parent, so its own summary tile
+  // reads "free" — the lie this fixes. Every member of a party wears the PARTY's state and
+  // numbers, plus a "⇄ with T…" chip naming the others; the server routes any action taken
+  // at a child to the party's bill, so the tile must say that's what a tap will touch.
+  const mergedTo = mergeParentOf(i);
+  const partyMates = (mergedTo ? [mergedTo, ...mergeChildrenOf(mergedTo).filter((k) => String(k) !== String(i))] : mergeChildrenOf(i));
+  const partyHead = mergedTo || i;
+  const st = tileState(partyHead), a = tableAgg(partyHead), tile = summaryTile(partyHead);
+  const mergeChip = partyMates.length
+    ? `<span class="tmerge" title="Served as one party with ${esc(partyMates.map((k) => "T" + k).join(" + "))} — one bill">⇄ with ${esc(partyMates.map((k) => "T" + k).join(" "))}</span>`
+    : "";
   // Badges/quick-action read the SUMMARY (works for every tile). The selected table's
   // tableAgg comes from its slice; the summary badge counts still match (same RPC mirror).
-  const calls = summaryCallsOf(i), joiners = tile.pending || 0, reqsN = tile.reqs || 0;
-  const called = (tile.hasCall || tile.hasReq);
+  // Badges stay THIS table's own (a waiter call at T7 belongs on T7's tile, merged or not).
+  const ownTile = summaryTile(i);
+  const calls = summaryCallsOf(i), joiners = ownTile.pending || 0, reqsN = ownTile.reqs || 0;
+  const called = (ownTile.hasCall || ownTile.hasReq);
   // Three-way: red ring for an accepted-unpaid bill, green for accepted-paid, NOTHING for a
   // brand-new order (was a 2-way ternary that wrongly painted new orders green/"paid").
   const payCls = a.unpaid ? "pay-unpaid" : a.paid ? "pay-paid" : "";
@@ -768,19 +820,20 @@ function tileHtml(i) {
     let quick = "";
     if (a.nw > 0) quick = `<span class="tacc" data-quick="accept" data-qt="${i}">✓ Accept</span>`;
     else if (called || joiners) quick = `<span class="tatt" data-quick="attend" data-qt="${i}">Attend</span>`;
-    else if (st.cls === "bill" && tshow("tablet_mark_paid")) quick = `<span class="tpay${txray("tablet_mark_paid")}" data-quick="pay" data-qt="${i}">💳 Mark paid</span>`;
+    else if (st.cls === "bill" && tshow("tablet_mark_paid")) quick = `<span class="tpay${txray("tablet_mark_paid")}" data-quick="pay" data-qt="${partyHead}">💳 Mark paid</span>`;
     body = `<span class="tsub">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${esc(sub)}</span>${strip}${pills}${quick}`;
   }
   // Special table type (mig 166): a corner ribbon + pill badge layered OVER the state
   // look — strip/pills/pay ring keep working, the tag is unmistakable on top.
   const ttag = ttagOf(i);
   const tinfo = TABLE_TAG_INFO[ttag];
-  return `<button class="tile t-${st.cls} ${payCls}${tinfo ? ` t-tag tag-${ttag}` : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
+  return `<button class="tile t-${st.cls} ${payCls}${partyMates.length ? " t-merged" : ""}${tinfo ? ` t-tag tag-${ttag}` : ""} ${state.table === String(i) ? "sel" : ""}" data-t="${i}">
       ${tinfo ? `<span class="t-ribbon" aria-hidden="true">${tinfo.ribbon}</span>` : ""}
       <span class="tbadges">${calls.length ? `<em class="b-call" title="${esc(calls.map((c) => c.note || "call").join(", "))}">${[...new Set(calls.map((c) => callIcon(c.note)))].join("")}</em>` : ""}${reqsN ? `<em class="b-req">📨${reqsN}</em>` : ""}${joiners ? `<em class="b-join">🙋${joiners}</em>` : ""}</span>
       <span class="tnum" ${tname(i) ? `title="T${i}"` : ""}>${esc(tname(i) || i)}</span>
       ${tinfo ? `<span class="t-tagbadge">${tinfo.emoji} ${esc(tinfo.label)}</span>` : ""}
       <span class="tlabel">${st.label}</span>
+      ${mergeChip}
       ${body}
     </button>`;
 }
@@ -906,10 +959,11 @@ function bindFloorDelegation() {
     // Quick "Accept" — load the table's orders first (grid has only the slim summary), then accept.
     if ((q = e.target.closest(".tacc[data-quick='accept']"))) {
       const qt = q.dataset.qt;
-      await ensureTableSlice(qt, true);  // FORCE — the tile's summary can be fresh while the cached
+      await ensurePartySlices(qt, true); // FORCE — the tile's summary can be fresh while the cached
                                          // slice is up to 60s stale, so a just-arrived order would be
                                          // missed and silently accept nothing (audit 2026-07-09).
-      optimisticAccept(ordersOf(qt).filter((o) => o.status === "received").map((o) => o.id));
+                                         // Party-wide: a merged party accepts as ONE bill.
+      optimisticAccept(partyOrders(qt).filter((o) => o.status === "received").map((o) => o.id));
       return;
     }
     // Quick "Attend" — open the table's detail to handle the call / join request.
@@ -918,8 +972,8 @@ function bindFloorDelegation() {
     // without opening it.
     if ((q = e.target.closest(".tpay[data-quick='pay']"))) {
       const t = q.dataset.qt;
-      await ensureTableSlice(t, true);  // FORCE fresh rows so billNo/due + optimisticPay reflect the
-                                        // table's real current bill, not an up-to-60s-stale slice.
+      await ensurePartySlices(t, true); // FORCE fresh rows so billNo/due + optimisticPay reflect the
+                                        // PARTY's real current bill, not an up-to-60s-stale slice.
       const a = tableAgg(t);
       await payBillWithMethod(t, a);
       return;
@@ -1162,7 +1216,8 @@ function renderPanel() {
   // renderPanel only ever draws the SELECTED table, whose full slice is loaded — so read its
   // orders straight from the slice (tableAgg no longer carries `os`, which would be empty for an
   // unselected table anyway). calls/joiners/members/reqs likewise come from the loaded slice.
-  const os = ordersOf(t), calls = callsOf(t), joiners = joinersOf(t), members = s ? membersOf(t) : [], reqs = reqsOf(t);
+  // The WHOLE party's orders, whichever member table is open — one bill, one list (mig 249).
+  const os = partyOrders(t), calls = callsOf(t), joiners = joinersOf(t), members = s ? membersOf(t) : [], reqs = reqsOf(t);
   // Invoice generation (tablet_invoice setting) is independent of Mark bill paid — a
   // waiter can invoice before or after payment. `s` comes straight from `select("*")`
   // on sessions, so invoice_no/invoice_voided are already on it, same as the manager reads.
@@ -1288,7 +1343,7 @@ function renderPanel() {
    <div class="detail-pop">
     <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
-      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}${unsentMeta}</div></div>
+      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${mergeGroupLabel(t) ? `<span class="tmerge">⇄ one party · ${esc(mergeGroupLabel(t))}</span> · ` : ""}${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}${unsentMeta}</div></div>
     </div>
     <div class="detail-body">
       ${reqRows ? `<div class="sec"><h3>Requests</h3>${reqRows}</div>` : ""}
@@ -1376,12 +1431,12 @@ function renderPanel() {
   document.querySelectorAll("[data-accept]").forEach((b) => (b.onclick = () => optimisticAccept([b.dataset.accept])));
   // Accept ALL un-accepted orders on the table in one tap — optimistic + bulk.
   document.querySelectorAll("[data-accept-all]").forEach((b) => (b.onclick = () =>
-    optimisticAccept(ordersOf(b.dataset.acceptAll).filter((o) => o.status === "received").map((o) => o.id))));
+    optimisticAccept(partyOrders(b.dataset.acceptAll).filter((o) => o.status === "received").map((o) => o.id))));
   // Serve ALL accepted-but-unserved dishes on the table in one tap — optimistic + bulk.
   // Flips every dish to served on screen INSTANTLY, then fires one /serve-all per order
   // in the background (mirrors the manager + advanceDish). No more waiting on the network.
   document.querySelectorAll("[data-serve-all]").forEach((b) => (b.onclick = () =>
-    optimisticServeAll(ordersOf(b.dataset.serveAll).filter((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served")).map((o) => o.id))));
+    optimisticServeAll(partyOrders(b.dataset.serveAll).filter((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served")).map((o) => o.id))));
   // Per-dish advance: optimistically flip the pill, then persist + reconcile.
   document.querySelectorAll(".ist.tap[data-item]").forEach((el) => (el.onclick = () => advanceDish(el.dataset.item, el.dataset.cur)));
   // Explicit "✓ Serve" button on each cooking/ready dish → serves it directly
@@ -1533,8 +1588,10 @@ async function advanceDish(id, cur, forceNext) {
 // state precedence deliberately match tableAgg + tileState so the optimistic tile equals
 // what load() will reconcile to. (2026-07-06)
 function patchTileFromSlice(t) {
-  const tk = String(t);
-  const os = ordersOf(t), s = sessionOf(t);
+  // A merged member's tile renders from the table HOLDING the bill, so that is the tile to
+  // patch — and its numbers are the whole party's, matching what the server will reconcile.
+  const tk = mergeParentOf(String(t)) || String(t);
+  const os = partyOrders(t), s = sessionOf(t);
   let nw = 0, ck = 0, rd = 0, sv = 0, dueTot = 0, dueDisc = 0;
   os.forEach((o) => {
     if (o.status !== "cancelled" && o.status !== "received" && o.payment_status !== "paid") {
@@ -1777,7 +1834,7 @@ function renderKotMenu(t, s) {
 // by dish). Mirrors the manager's flow; the server re-computes the due and refuses
 // shares that don't add up, and the ladder + tablet_mark_paid gates apply server-side.
 function renderSplitSettle(t) {
-  const payable = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received");
+  const payable = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received"); // a merged party splits its WHOLE bill
   if (!payable.length) { toast("Nothing to split — accept the order first, or it's already paid.", false); return; }
   const rate = effRate();
   const due = Math.round(payable.reduce((s, o) => s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate), 0) * 100) / 100;
@@ -2048,6 +2105,12 @@ async function ensureTableSlice(t, force) {
     });
   } catch { /* leave cache as-is; the action then no-ops rather than throwing */ }
 }
+// A merged party spans SEVERAL tables' slices — any whole-party read or action must have them
+// all cached, or partyOrders() silently sees half the bill. Forced on purpose, same reasoning
+// as the manager's ensurePartySlices: a whole-party action can fire the instant a detail opens.
+async function ensurePartySlices(t, force = true) {
+  await Promise.all(partyTablesOf(t).map((x) => ensureTableSlice(x, force).catch(() => {})));
+}
 
 // Open a table INSTANTLY (mirrors the manager): drop a pending "open" session into
 // local state + repaint NOW, then create it on the server and reconcile. On failure
@@ -2065,7 +2128,10 @@ function optimisticPay(t, method, note) {
       // cancelled order is NOT paid by /tables/:t/pay, so optimistically showing it paid made
       // the tile briefly read "Cleared/₹0" before the server reverted it (2026-07-07). Match
       // the server's set exactly so the optimistic view is always truthful.
-      state.data.orders.forEach((o) => { if (String(o.table_number) === String(t) && o.status !== "received" && o.status !== "cancelled") o.payment_status = "paid"; });
+      // The server settles the PARTY's whole bill (a merged child resolves to its parent),
+      // so the optimistic flip must cover every member table's orders too.
+      const party = new Set(partyTablesOf(t));
+      state.data.orders.forEach((o) => { if (party.has(String(o.table_number)) && o.status !== "received" && o.status !== "cancelled") o.payment_status = "paid"; });
       patchTileFromSlice(t);   // flip the UN-selected floor tile to paid/no-due now, not after reconcile
     },
     () => api("POST", `/tables/${t}/pay`, method ? { payment_method: method, payment_note: note || "" } : null),
@@ -2680,7 +2746,7 @@ function tabletDiscount(orderId) {
 function tabletBillDiscount(t) {
   const s = sessionOf(t);
   if (!s || String(s.id).startsWith("pending-")) { toast("Open the table first.", false); return; }
-  const unpaid = ordersOf(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
+  const unpaid = partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid"); // whole-bill = the PARTY's bill
   if (!unpaid.length) { toast("No unpaid orders to discount yet.", false); return; }
   // sessions.discount is the WHOLE-BILL discount total; the server (lfh_split_bill_discount) then
   // spreads (that − discount already on PAID orders) across the still-unpaid orders. So this modal
@@ -2688,7 +2754,7 @@ function tabletBillDiscount(t) {
   // sessions.discount. If it worked on only the unpaid remainder, the amount it SENDS would be
   // remainder-scoped while the server reads it as the whole-bill total and subtracts the paid part a
   // SECOND time — quietly over-charging the remaining guests after a partial payment. (audit 2026-07-09)
-  const billTotal = ordersOf(t).filter((o) => o.status !== "cancelled").reduce((sum, o) => sum + (Number(o.total) || 0), 0); // whole bill, gross
+  const billTotal = partyOrders(t).filter((o) => o.status !== "cancelled").reduce((sum, o) => sum + (Number(o.total) || 0), 0); // whole bill, gross — the whole PARTY's
   openDiscountModal({ id: s.id, table_number: t, total: billTotal, discount: Number(s.discount) || 0, discount_note: s.discount_note || "" }, { bill: true });
 }
 
@@ -3459,6 +3525,11 @@ async function loadTables(tables) {
   // worth making: it comes back from the device's own cache, so the board still paints.
   if (navigator.onLine === false && !(window.LFH_OFF && window.LFH_OFF.canReadOffline())) return;
   if (!tables || !tables.length) return load();
+  // A MERGED PARTY'S TILES MOVE TOGETHER: every member renders from the PARENT's tile, and an
+  // order keeps the table it was ORDERED at (mig 249) — so a breadcrumb naming one member must
+  // refresh the whole party or the other tiles sit stale until the 60s backstop. Same fix as
+  // the manager's pollTables (owner, 2026-08-03).
+  tables = [...new Set(tables.map(String).flatMap((t) => partyTablesOf(t)))];
   const seq = ++loadSeq;
   const sel = state.table != null ? String(state.table) : null;
   let tileResps, selSlice;
@@ -3485,9 +3556,23 @@ async function loadTables(tables) {
     order_count: agg.order_count ?? state.summary.order_count,
     latest_order_table: agg.latest_order_table ?? state.summary.latest_order_table,
     calls: agg.calls || [], requests: agg.requests || [], joiners: agg.joiners || [], blocklist: agg.blocklist || [],
+    // The live merges list rides on every summary response — keep it fresh on the targeted
+    // path too, or a just-made/just-ended merge shows on one device and not another.
+    merges: Array.isArray(agg.merges) ? agg.merges : (state.summary.merges || []),
   });
   // Refresh the selected table's full detail slice if it changed.
   if (sel != null && selSlice) mergeSelectedSlice(sel, selSlice);
+  // …and, while a merge is live, its party mates' slices too — the open detail renders the
+  // WHOLE party, so refreshing one member's rows while another's just changed shows a bill
+  // that is half fresh, half stale.
+  if (sel != null && selSlice) {
+    const mates = partyTablesOf(sel).filter((x) => String(x) !== String(sel) && tables.includes(String(x)));
+    if (mates.length) {
+      const mateSlices = await Promise.all(mates.map((x) => api("GET", "/state?table=" + encodeURIComponent(x)).catch(() => null)));
+      if (seq !== loadSeq) return;
+      mates.forEach((x, i) => { if (mateSlices[i]) mergeSelectedSlice(x, mateSlices[i]); });
+    }
+  }
 
   const sig = boardSig(state);
   if (sig === lastSig) return;          // nothing visible changed — don't repaint
@@ -3568,6 +3653,19 @@ async function loadImpl() {
   }
   state.data = Object.assign({}, state.data, patch);
   if (sel != null && selSlice) mergeSelectedSlice(sel, selSlice);
+  // A MERGED PARTY SPANS SEVERAL TABLES' SLICES (mig 249) — and the wipe above dropped all of
+  // them. Re-pulling only the selected table put HALF the party back: a merged child's open
+  // detail then said "closed · no orders" about a bill that was right there (its session and
+  // its partner's orders live on the OTHER tables' slices). Pull every party mate too — this
+  // costs extra reads only while a merge is live AND a member's detail is open.
+  if (sel != null) {
+    const mates = partyTablesOf(sel).filter((x) => String(x) !== sel);
+    if (mates.length) {
+      const mateSlices = await Promise.all(mates.map((x) => api("GET", "/state?table=" + encodeURIComponent(x)).catch(() => null)));
+      if (seq !== loadSeq) return;
+      mates.forEach((x, i) => { if (mateSlices[i]) mergeSelectedSlice(x, mateSlices[i]); });
+    }
+  }
   // Show WHICH restaurant this panel is scoped to (multi-tenant). Set here in load()
   // — NOT in renderFloor()/renderPanel() — because they're skipped when the board
   // signature is unchanged, and the name must still appear on the very first load.
