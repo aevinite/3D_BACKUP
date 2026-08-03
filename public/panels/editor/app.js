@@ -3566,7 +3566,11 @@ async function markTablePaid(t, mtpOpts = {}) {
 async function onHouseSettle(t) {
   // Snapshot the orders being comped so a mis-tapped "on the house" can be taken back
   // (parity with the tablet, owner undo bar 2026-07-22).
-  const ids = ordersForTable(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled").map((o) => o.id);
+  // The WHOLE party's orders: the server comps the party's one bill (a merged child resolves
+  // to its parent), so an undo built from one table's own orders would reopen HALF the comp
+  // and leave the partner tables' orders settled free in silence (work-checker, 2026-08-03).
+  await ensurePartySlices(t);
+  const ids = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled").map((o) => o.id);
   try {
     const r = await api("POST", `/tables/${t}/on-the-house`, {});
     await pollTables([String(t)]);
@@ -4199,7 +4203,7 @@ function combineBillLines(entries) {
   const out = [];
   const at = new Map(); // signature -> index in out
   for (const e of entries || []) {
-    const sig = [e.title, e.price, JSON.stringify(e.options || null), JSON.stringify(e.removed || null), e.note || ""].join("");
+    const sig = [e.title, e.price, JSON.stringify(e.options || null), JSON.stringify(e.removed || null), e.note || ""].join("\u0001"); // a VISIBLE escape, never a raw control byte: adjacent fields must not run together ("Special 1"@50 vs "Special"@150), and an invisible byte here begs to be "fixed" back to ""
     const i = at.get(sig);
     if (i == null) { at.set(sig, out.length); out.push(Object.assign({}, e, { qty: Math.max(1, parseInt(e.qty, 10) || 1) })); }
     else out[i].qty += Math.max(1, parseInt(e.qty, 10) || 1);
@@ -4246,8 +4250,11 @@ function printBill(t, sess, os, opts = {}) {
   // No name → the old "T5". Non-numeric values (e.g. "Takeaway") are left exactly as entered.
   const tnum = (t || "").toString().trim();
   // A joined party's bill names EVERY table it covers — "T6 + T7" (owner rule, mig 249) —
-  // so the paper says out loud that it settles more than one table.
-  const tableDisp = mergeGroupLabel(tnum) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
+  // so the paper says out loud that it settles more than one table. ONLY when the caller says
+  // this is the table's LIVE bill (opts.party): mergeGroupLabel reads the merges of RIGHT NOW,
+  // and reprinting yesterday's solo T6 bill while T6 happens to be merged today must not stamp
+  // "T6 + T7" onto a settled tax document (work-checker, 2026-08-03).
+  const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
   const invNo = sess && sess.invoice_no != null ? invFmt(sess.invoice_no, sess.invoice_at) : "";
   const billNo = sess && sess.bill_no != null ? sess.bill_no : "";
   const now = new Date();
@@ -8465,7 +8472,7 @@ async function openBillPreview(t) {
       ss = openSessionForTable(t);
       if (!ss || ss.invoice_no == null || ss.invoice_voided) return; // cancelled or failed — generateInvoice already said which
     }
-    printBill(t, ss || { invoice_no: null, bill_no: null }, live());
+    printBill(t, ss || { invoice_no: null, bill_no: null }, live(), { party: true }); // a LIVE bill — the party label applies
     if (needsInvoice) await reopen();
   };
   const invBtn = wrap.querySelector("[data-bp-inv]");
@@ -10154,14 +10161,19 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   // print. If issuing fails or is cancelled, generateInvoice has already said so and nothing
   // prints, rather than paper going out that disagrees with the records.
   if (pr) pr.onclick = async () => {
+    // The party's session lives on the table HOLDING the bill (mig 249). Re-reading via the
+    // opened table alone meant a merged CHILD's Print issued the invoice, then found no session
+    // at its own number and returned in silence — a numbered invoice with no paper and no
+    // message (work-checker, 2026-08-03). Resolve the head for both the re-read and the print.
+    const head = mergeParentOf(t) || String(t);
     let ss = sess;
     if (ss && (ss.invoice_no == null || ss.invoice_voided)) {
       await generateInvoice(ss.id);
-      await ensureTableSlice(t, true);
-      ss = openSessionForTable(t);
+      await ensurePartySlices(t);
+      ss = openSessionForTable(head);
       if (!ss || ss.invoice_no == null || ss.invoice_voided) return;
     }
-    printBill(t, ss || sess, os);
+    printBill(head, ss || sess, os, { party: true });
   };
   // Invoice-first billing (owner 2026-07-24): Generate invoice / Reopen (void) buttons.
   const gi = root.querySelector("#sxGenInv");

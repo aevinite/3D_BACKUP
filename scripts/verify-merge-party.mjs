@@ -41,8 +41,13 @@ check("manager: the selected tile counts the party, not one table (tableTileStat
   /function tableTileStateFromBoard[\s\S]{0,900}partyOrders\(/.test(editor));
 check("manager: the printed bill combines identical dish lines (combineBillLines)",
   /function combineBillLines/.test(editor) && /combineBillLines\(live\.reduce/.test(editor));
-check("manager: the paper bill names every table of the party (mergeGroupLabel in printBill)",
-  /const tableDisp = mergeGroupLabel\(tnum\)/.test(editor));
+check("manager: the paper bill names every table of the party — but ONLY on a LIVE bill (a reprint of yesterday's solo bill must not wear today's merge)",
+  /const tableDisp = \(opts\.party && mergeGroupLabel\(tnum\)\)/.test(editor)
+  && /printBill\(t, ss \|\| \{ invoice_no: null, bill_no: null \}, live\(\), \{ party: true \}/.test(editor));
+check("manager: a merged child's Print re-reads the session via the party head (no silent no-paper return)",
+  /const head = mergeParentOf\(t\) \|\| String\(t\);[\s\S]{0,500}printBill\(head/.test(editor));
+check("manager: the on-the-house undo snapshot covers the whole party",
+  /async function onHouseSettle[\s\S]{0,700}partyOrders\(t\)/.test(editor));
 
 // ── waiter tablet ───────────────────────────────────────────────────────────
 check("tablet: knows the live merges (mergeParentOf/partyTablesOf/partyOrders exist)",
