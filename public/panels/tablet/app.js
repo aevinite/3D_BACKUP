@@ -1824,7 +1824,9 @@ function renderKotMenu(t, s) {
   let occupiedOthers = 0;
   for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && tileIsOpen(i)) occupiedOthers++;
   const body =
-    row("shift", "⇄", "Change table", "Move this party — orders &amp; calls included — to a free table", !!s) +
+    // A merged party doesn't shift (mig 264): unmerge first — the row says so instead of
+    // offering a move the server will refuse.
+    row("shift", "⇄", mergeGroupLabel(t) ? "Change table — unmerge first" : "Change table", "Move this party — orders &amp; calls included — to a free table", !!s && !mergeGroupLabel(t)) +
     row("merge", "🪢", "Merge tables", "Join another table's party — one table, one bill", !!s && occupiedOthers > 0) +
     row("movekot", "🧾", "Move a KOT to another table", "Send ONE order (one KOT) to a different table's bill", movable.length > 0) +
     row("moveitem", "🍛", "Move a single dish", "Send one dish to another table — new KOT there", movable.some((o) => dishRowsOf(o).some((r) => r.fromDb))) +

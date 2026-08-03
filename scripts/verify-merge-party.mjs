@@ -84,5 +84,32 @@ check("tablet route: the waiter summary carries the live merges list",
 check("lib/tableMerge.ts exists (the one shared resolver)",
   read("lib/tableMerge.ts").includes("export async function mergeParentTable"));
 
+// ── round 2 (mig 264): every remaining path respects a live merge ───────────
+const mig264 = read("supabase/migrations/264_every_path_respects_a_merge.sql");
+check("mig 264: a guest order at a merged table joins the party (lfh_place_order_public)",
+  /lfh_place_order_public[\s\S]{0,4500}lfh_merge_parent_table\(v_rid, v_tbl\)/.test(mig264));
+check("mig 264: the recreate KEPT mig 253's open-price guest guard (staff_priced_item)",
+  /lfh_place_order_public[\s\S]{0,2500}staff_priced_item/.test(mig264));
+check("mig 264: a merged party refuses to shift (party_merged)",
+  /lfh_staff_shift_table[\s\S]{0,1500}party_merged/.test(mig264));
+check("mig 264: nothing shifts ONTO a joined table (merged_child, checked under the lock)",
+  /pg_advisory_xact_lock[\s\S]{0,900}merged_child/.test(mig264));
+check("mig 264: moving a KOT to a joined table joins that party's bill",
+  /lfh_staff_move_order\(p_order[\s\S]{0,1800}lfh_merge_parent_table\(p_rid, p_to\)/.test(mig264));
+check("mig 264: moving a single dish to a joined table joins that party's bill",
+  /lfh_staff_move_order_item[\s\S]{0,1800}lfh_merge_parent_table\(p_rid, p_to\)/.test(mig264));
+check("manager: the Change-table row says 'unmerge first' on a merged party (both menus)",
+  (editor.match(/why: mergeGroupLabel\(t\) \? "unmerge first"/g) || []).length >= 2);
+check("manager: no shift picker offers a merged child as a free table",
+  (editor.match(/&& !mergeParentOf\(i\)/g) || []).length >= 2);
+check("manager: refusal reasons are shown in plain words (KOT_REASON_TEXT)",
+  /const KOT_REASON_TEXT = \{/.test(editor) && /KOT_REASON_TEXT\[r\.reason\]/.test(editor));
+check("tablet: the Change-table row says 'unmerge first' on a merged party",
+  /mergeGroupLabel\(t\) \? "Change table — unmerge first"/.test(tablet));
+check("tablet route: shiftErrMsg speaks the two merge refusals",
+  /party_merged/.test(tabletRoute) && /merged_child/.test(tabletRoute));
+check("both routes: an on-the-house mark counts on ANY member of the party",
+  /in\("table_number", \[t, \.\.\.partyKids/.test(editorRoute) && /in\("table_number", \[t, \.\.\.partyKids/.test(tabletRoute));
+
 console.log(fail ? `\n${fail} merge-party check(s) FAILED` : "\nAll merge-party checks passed — a merged party is one bill everywhere.");
 process.exit(fail ? 1 : 0);

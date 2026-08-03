@@ -250,6 +250,9 @@ const shiftErrMsg = (reason?: string) =>
   : reason === "session_closed" ? "This table was just closed or settled — reopen it and try again."
   : reason === "bad_table" ? "Pick a valid table to move to."
   : reason === "same_table" ? "That party is already on that table."
+  // mig 264 — merged parties don't shift, and a joined table is never a free target.
+  : reason === "party_merged" ? "This party spans merged tables — unmerge first, then move it."
+  : reason === "merged_child" ? "That table is joined with another and shares its bill — unmerge it first."
   : (reason || "Couldn't move the table — try again.");
 
 // Friendly message for a staff-edit RPC's { ok:false, reason } (edit-qty/note/add).
@@ -1590,8 +1593,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const t = await mergeParentTable(sb, rid, tRaw);
       if (actor && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       const hg = recordPin(await tabletPerm("tablet_mark_paid", req, body, rid, actor)); if (!hg.allow) return hg.resp;
-      const tagRow = (await sb.from("table_tags").select("tag").eq("restaurant_id", rid).eq("table_number", t).maybeSingle()).data as { tag?: TableTag } | null;
-      if (!tagRow?.tag || !COMP_TAGS.includes(tagRow.tag)) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
+      // The mark may sit on ANY member of a merged party (same rule as the manager route).
+      const partyKids = ((await sb.from("table_merges").select("child_table")
+        .eq("restaurant_id", rid).eq("parent_table", t).is("ended_at", null).limit(20)).data || []) as { child_table: string }[];
+      const tagRows = ((await sb.from("table_tags").select("tag")
+        .eq("restaurant_id", rid).in("table_number", [t, ...partyKids.map((k) => k.child_table)])).data || []) as { tag?: TableTag }[];
+      const tagRow = tagRows.find((r) => r.tag && COMP_TAGS.includes(r.tag)) || null;
+      if (!tagRow) return err("On the house is only for tables marked Family or Owner's Guest.", 409);
       const openSess = (await sb.from("sessions").select("id")
         .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
         .order("last_activity_at", { ascending: false }).limit(1)).data?.[0];
