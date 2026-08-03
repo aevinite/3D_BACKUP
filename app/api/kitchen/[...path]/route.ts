@@ -14,6 +14,7 @@ import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
 import { platformLadder, parcelLadder } from "@/lib/tableTags";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
+import { invalidateFloor } from "@/lib/floorSummary";
 import { raiseIssue } from "@/lib/issues";
 import { worthLogging } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
@@ -156,6 +157,12 @@ export const POST = withIdempotency(postImpl, "kitchen");
 async function postImpl(req: NextRequest, ctx: Ctx) {
   const g = await gate(req); if (g instanceof NextResponse) return g;
   const rid = panelRestaurantId(req, g);
+  // A write to this restaurant drops its shared floor snapshot, so the very next read
+  // recomputes — no device can be handed a floor computed before the kitchen acted. The
+  // manager and tablet routes have always done this; the kitchen never did, across all five
+  // of its write paths (accept / ready / item status / platform status / sold-out), and the
+  // guard that enforces the rule only ever looked at the other two routes.
+  if (rid) invalidateFloor(rid);
   if (!rid) return err("No restaurant scope — open this panel from the admin console.", 400);
   // Resolved OUTSIDE the try so the catch below can name the endpoint that failed.
   const { path = [] } = await ctx.params;

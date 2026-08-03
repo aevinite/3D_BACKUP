@@ -92,5 +92,43 @@ check("tablet sig flips on a summary tile count change (grid)", tFlip((c) => c.s
 check("tablet sig flips on a NEW summary tile appearing (grid)", tFlip((c) => c.summary.tiles["7"] = { state: "new", label: "New order" }));
 check("tablet sig flips on a pending waiter call in summary (grid)", tFlip((c) => c.summary.calls = [{ id: "c1", table_number: "5", resolved: false }]));
 
+// ── DRIFT CHECK — the copies above must still BE what the panels ship ─────────────────────
+// Everything before this point tests functions written out in THIS file. That proves the
+// design is sound and proves nothing about the product: if someone narrowed the real boardSig
+// back to a hand-picked field list, every check above would stay green while allergy and note
+// edits went back to needing a manual refresh — the exact 2026-06-17 bug this file exists to
+// stop. So read the shipped panels and require that what they contain still matches.
+// (T4 sweep, 2026-08-04.)
+import { readFileSync, existsSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const ROOT = process.argv[2] && !process.argv[2].startsWith("-")
+  ? process.argv[2]
+  : join(dirname(fileURLToPath(import.meta.url)), "..");
+const panelSrc = (name) => {
+  const f = join(ROOT, "public", "panels", name, "app.js");
+  return existsSync(f) ? readFileSync(f, "utf8") : null;
+};
+// The one line that decides everything: the row serialiser must keep EVERY key except the
+// volatile ones. A hand-picked allow-list cannot be written in this shape.
+const STABLE_ROW = /const stableRow = \(row\) => \{ const o = \{\}; for \(const k in \(row \|\| \{\}\)\) if \(!RT_VOLATILE\.has\(k\)\) o\[k\] = row\[k\]; return o; \};/;
+const VOLATILE = /const RT_VOLATILE = new Set\(\[([^\]]*)\]\);/;
+const wantVolatile = [...RT_VOLATILE].sort().join(",");
+
+for (const panel of ["kitchen", "tablet"]) {
+  const src = panelSrc(panel);
+  if (!src) { check(`${panel}/app.js found`, false); continue; }
+  check(`${panel}: the shipped stableRow still keeps every non-volatile field`, STABLE_ROW.test(src));
+  const m = src.match(VOLATILE);
+  const got = m ? m[1].split(",").map((x) => x.trim().replace(/^["']|["']$/g, "")).filter(Boolean).sort().join(",") : "(not found)";
+  check(`${panel}: RT_VOLATILE matches the set tested here`, got === wantVolatile,
+    got === wantVolatile ? "" : `panel has [${got}], this file tests [${wantVolatile}]`);
+  // And the fingerprint must actually be BUILT from stableRow, not from a literal field list.
+  const sigFn = (src.match(/function boardSig\(d\) \{[\s\S]{0,900}?\n\}/) || [])[0] || "";
+  check(`${panel}: boardSig is built from stableRow`, /stableRow/.test(sigFn),
+    sigFn ? "" : "could not find boardSig() in the panel");
+}
+
 console.log("\n" + (pass ? "ALL PASS" : "SOME FAILED"));
 process.exit(pass ? 0 : 1);

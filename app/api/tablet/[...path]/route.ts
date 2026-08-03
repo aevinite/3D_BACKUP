@@ -385,9 +385,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // waiter's section: a join can cross sections, and hiding half of it hides the bill's truth.
       // Attached to a shallow COPY — `summary` may BE the shared 1.5s floor snapshot, and the
       // one rule of that cache is that a handler never writes into it (owner bug, 2026-08-02).
-      const merges = (await sb.from("table_merges")
+      // SHARED like the floor read beside it. This list is restaurant-wide and identical in every
+      // answer, but it rode on EVERY call including the targeted ?table=N one — and loadTables()
+      // expands a breadcrumb to the whole party and fires one targeted call per table (realtime
+      // allows up to 20 in a window), so one bulk change issued twenty identical reads for the
+      // same handful of rows. Same 1.5s window, and invalidateFloor() drops this key too, so a
+      // just-made merge is never served stale after a write.
+      const merges = await sharedFloorSummary(`merges:${rid}`, async () => (await sb.from("table_merges")
         .select("parent_table, child_table, merged_at, merged_by")
-        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || [];
+        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || []);
       const summaryOut = { ...(summary as Record<string, unknown>), merges };
       // Targeted (?table=N): tile only — the panel keeps its cached agnostic bundle.
       if (tbl) return ok(summaryOut);
@@ -1311,6 +1317,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
 
     // items/:id/note — STAFF EDIT: change ONE dish's note on a PLACED order.
     if (a === "items" && c === "note") {
+      // lfh_staff_edit_item_note(p_item, p_note) finds the row by id ALONE — it takes no
+      // restaurant argument — so without this read the dish that gets edited is decided by the
+      // id in the URL rather than by which restaurant the request belongs to. Every sibling on
+      // this endpoint family already does it (status/removed are .eq-scoped; delete and qty
+      // pre-read the row); note was the one left behind. See the note on items/:id/removed.
+      const ownNote = (await sb.from("order_items").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
+      if (!ownNote) return err(editErrMsg("item_not_found"), 404);
       const { data, error } = await sb.rpc("lfh_staff_edit_item_note", { p_item: b, p_note: String(body?.note ?? "") });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
@@ -1366,6 +1379,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         removed: Array.isArray(body?.removed) ? body.removed : undefined,
         note: body?.note ? String(body.note) : undefined,
       };
+      // lfh_staff_add_item_to_order(p_order, p_items) resolves the order by id ALONE — no
+      // restaurant argument — so confirm the order is THIS restaurant's before adding a dish to
+      // it. Without this the bill a dish lands on is decided by the id in the URL. (The `parent`
+      // read below is already rid-scoped, but it runs AFTER the dish has been added.)
+      const ownAdd = (await sb.from("orders").select("id").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data;
+      if (!ownAdd) return err(editErrMsg("order_not_found"), 404);
       const { data, error } = await sb.rpc("lfh_staff_add_item_to_order", { p_order: b, p_items: [line] });
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
