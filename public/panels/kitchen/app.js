@@ -582,8 +582,11 @@ function reprintOrder(id) {
   const o = (state.orders || []).find((x) => x.id === id);
   if (!o) { toast("That order isn't on the board any more."); return; }
   const rows = (state.items || []).filter((it) => it.order_id === id); // empty for legacy orders → printKot falls back to o.items
-  printKot(o, rows, state.restaurant);
-  toast(`Reprinting KOT #${o.kot_no ?? "—"} · ${tlong(o.table_number)}`);
+  // Say what actually happened. This used to toast "Reprinting…" unconditionally while printKot
+  // swallowed every failure, so a cook who tapped 🖨 after a paper jam was told the ticket was on
+  // its way and no paper came out.
+  if (printKot(o, rows, state.restaurant)) toast(`Reprinting KOT #${o.kot_no ?? "—"} · ${tlong(o.table_number)}`);
+  else toast(`Couldn't print KOT #${o.kot_no ?? "—"} — check the printer, then try again.`);
 }
 
 // ── the 86 board (sold-out toggles) ──────────────────────────────────────────
@@ -851,7 +854,23 @@ function printKot(order, itemRows, restaurant) {
       try { w.focus(); w.print(); } catch (e) {}
       setTimeout(cleanup, 60000);
     }, 250);
-  } catch (e) { /* printing must NEVER break the board */ }
+    return true;
+  } catch (e) {
+    // Printing must NEVER break the board — but it must never LIE either. Everything above is
+    // wrapped, so a failure here (billdoc.js missing after a bad deploy, the iframe blocked)
+    // used to be swallowed whole: a print-first kitchen could run a service with no tickets
+    // and nothing on screen or in the log saying so. Report it instead of returning silently.
+    try { logKotPrintFailure(e); } catch (_e) {}
+    return false;
+  }
+}
+// One place to say a ticket did not print. It writes to the Everything Log via the shared
+// error hook when it exists (errlog.js) and always leaves a console trace, so a kitchen with
+// no paper coming out can be diagnosed from the log instead of guesswork.
+function logKotPrintFailure(e) {
+  const msg = "KOT print failed: " + ((e && e.message) || e);
+  if (window.LFH_ERRLOG && typeof window.LFH_ERRLOG.report === "function") window.LFH_ERRLOG.report(msg, "printKot");
+  console.error("[kitchen]", msg, e);
 }
 
 // Auto-print the KOT for brand-new received orders — the ONE place both load() and
@@ -874,13 +893,29 @@ const BOOT_TS = Date.now();
 // Serialized (spaced) printer for a queue of orders — the ONE place that actually prints,
 // so print-tracking (printedIds) stays consistent and a burst can't stack N blocking
 // dialogs at once in a non-kiosk browser. Paused while the tab is hidden mid-burst.
+// Tell the cook that automatic printing isn't working — ONCE a minute, not once per ticket.
+// A rush that can't print would otherwise bury the board in toasts, and the point is that they
+// learn at all, not that they learn twelve times.
+let lastPrintTroubleAt = 0;
+function notePrintTrouble() {
+  if (Date.now() - lastPrintTroubleAt < 60000) return;
+  lastPrintTroubleAt = Date.now();
+  toast("Kitchen tickets aren't printing — check the printer. Orders are still on the board.");
+}
 function printQueue(queue, allItems, restaurant) {
   if (!queue || !queue.length) return;
   let i = 0;
   const step = () => {
     if (document.hidden || i >= queue.length) return; // paused if tab hidden mid-burst
     const o = queue[i++];
-    if (!printedIds.has(o.id)) { printedIds.add(o.id); printKot(o, (allItems || []).filter((it) => it.order_id === o.id), restaurant); }
+    if (!printedIds.has(o.id)) {
+      // Mark it printed only if it ACTUALLY printed. Marking first meant one failure (a bad
+      // deploy leaving billdoc.js missing, say) consumed the ticket forever: the order never
+      // printed and never would, on any later pass. A failure now leaves it pending — the same
+      // treatment a hidden tab already gets — and tells the cook once, rather than never.
+      if (printKot(o, (allItems || []).filter((it) => it.order_id === o.id), restaurant)) printedIds.add(o.id);
+      else notePrintTrouble();
+    }
     if (i < queue.length) setTimeout(step, 400);
   };
   step();

@@ -560,8 +560,13 @@ function tileState(t) {
 // accept, or food sitting READY to carry out. Driven by the summary tile's badge flags (so it
 // works for every tile, not just the loaded one).
 function needsAttention(i) {
-  const tile = summaryTile(i);
-  return !!(tile.hasCall || tile.hasReq || tile.hasNew || (tile.counts && tile.counts.rd > 0));
+  // Calls and requests belong to the table they were made AT, so they read from its own tile —
+  // a bell rung at T7 is T7's business, merged or not. The FOOD flags are the party's, because
+  // that is what the tile renders: a joined table shows the party's ✓ Accept and its "ready"
+  // pills, so leaving it out of "⚠ Needs" hid a tile that was visibly asking to be attended.
+  const own = summaryTile(i);
+  const party = summaryTile(mergeParentOf(i) || i);
+  return !!(own.hasCall || own.hasReq || party.hasNew || (party.counts && party.counts.rd > 0));
 }
 
 function tableCount() { return Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12); }
@@ -663,9 +668,20 @@ const tableLabel = (t) => { const n = tname(t); return n ? `${n} (T${t})` : `Tab
 // Is table i OPEN (has a dining session / live orders)? Read from the summary tile state so it
 // works for EVERY tile, not just the loaded one — "free" and "req" are the only not-open states.
 function tileIsOpen(i) {
-  const s = summaryTile(i).state;
+  // A MERGED TABLE IS NOT A FREE TABLE — the same rule the tiles already follow (mig 249). A
+  // child's party and bill live on its parent, so its OWN summary row has no session and reads
+  // "free". Reading that at face value made this function disagree with the tile beside it:
+  // the Free filter listed a table drawn as "Preparing · ₹1,150 due", the Free/Active counts
+  // were out by one per join, and KOT ▾ → Change table offered a joined table as a destination
+  // the server then refused (mig 264). tileHtml() and the quick-order picker each worked around
+  // it locally; the answer belongs here, once. (T4 sweep, 2026-08-04.)
+  const s = summaryTile(mergeParentOf(i) || i).state;
   return s !== "free" && s !== "req";
 }
+// Can a party be moved ONTO table i? Open, and not itself joined to something else — a merged
+// child can never be a destination (it has no bill of its own to join). Since tileIsOpen() now
+// tells the truth about a joined table, the merge picker has to say this part explicitly.
+const canHostAParty = (i) => tileIsOpen(i) && !mergeParentOf(i);
 // Does this restaurant use dining sessions? OFF means there is no "Open table" step at all
 // (Access → Menu → Dining sessions, owner 2026-07-31): the floor goes straight to taking an
 // order, and the server attaches it without a session. The manager panel has always gated its
@@ -1955,7 +1971,9 @@ function renderKotMenu(t, s) {
   const row = (id, icon, label, sub, on) => `<button class="kotm-row" data-kotop="${id}" ${on ? "" : "disabled"}>
     <span class="kotm-ico">${icon}</span><span class="kotm-txt"><b>${label}</b><small>${sub}</small></span><span class="kotm-chev">›</span></button>`;
   let occupiedOthers = 0;
-  for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && tileIsOpen(i)) occupiedOthers++;
+  // Count what the merge picker will actually OFFER (a joined table can't host a party), so the
+  // row is never enabled onto an empty picker.
+  for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && canHostAParty(i)) occupiedOthers++;
   const body =
     // A merged party doesn't shift (mig 264): unmerge first — the row says so instead of
     // offering a move the server will refuse.
@@ -2078,7 +2096,7 @@ function renderMergePicker(t, s) {
   // inMySection: a waiter with a section can only merge into a table they also hold — the
   // server refuses the other direction anyway (both ends of a move are checked), so
   // offering it would just be a button that fails.
-  for (let i = 1, n = tableCount(); i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && tileIsOpen(i)) occ.push(i); }
+  for (let i = 1, n = tableCount(); i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && canHostAParty(i)) occ.push(i); }
   const btns = occ.length
     ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ" data-mergeto="${i}"><b>T${i}</b><small>${tileState(i).label}</small></button>`).join("") + `</div>`
     : `<div class="muted">No other open tables to merge with.</div>`;
@@ -2830,7 +2848,13 @@ function openDiscountModal(order, opts = {}) {
   // silently comped a whole order), and a NEGATIVE or non-numeric paste is treated the same way.
   // While a box is unreadable the discount stays exactly as it was and Apply waits. A real 100%
   // comp is still reachable — type 0 into "They pay", or 100 into the percent box.
-  const setBlank = (blank) => { if (applyBtn) { applyBtn.disabled = blank; applyBtn.style.opacity = blank ? ".5" : ""; } };
+  // The button stays ENABLED and dims instead of going dead. A disabled button eats the tap, and
+  // a tap that leaves no trace is indistinguishable from a broken control — the split-payment
+  // button forty lines from here already refuses out loud for exactly this reason, and two
+  // controls in one panel should not answer the same situation two different ways. `blank` is
+  // read at click time (below) and answered with a sentence.
+  let blankNow = false;
+  const setBlank = (blank) => { blankNow = blank; if (applyBtn) applyBtn.style.opacity = blank ? ".55" : ""; };
   paint();
 
   ov.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((base * Number(c.dataset.pct)) / 100); setBlank(false); paint(); }));
@@ -2894,7 +2918,10 @@ function openDiscountModal(order, opts = {}) {
       act(() => api("POST", `/orders/${order.id}/discount`, body, { expect: { table: "orders", id: order.id, fields: { discount: wasDiscount } } }));
     }
   };
-  ov.querySelector(".disc-apply-btn").onclick = () => save(discAmount);
+  ov.querySelector(".disc-apply-btn").onclick = () => {
+    if (blankNow) { toast("Type a discount in one of the three boxes first — or tap Cancel to leave the bill as it is.", false); return; }
+    save(discAmount);
+  };
   const removeBtn = ov.querySelector(".disc-remove-btn"); if (removeBtn) removeBtn.onclick = () => save(0);
   // The pay box already holds the full bill, so tapping it must SELECT that figure — otherwise
   // "make it 800" on a ₹817 bill types 817800 and the waiter has to clear it first.
@@ -3398,9 +3425,14 @@ function openQuickOrder() {
 }
 // Step 2 of a quick order: WHERE does it go? Picking the table IS the send — the picker
 // is the deliberate second step (tap SEND → tap the table), so nothing asks a third time.
+let qdestClose = null;   // teardown of the picker currently on screen (DOM + its back layer)
 function openQuickDest() {
   if (!state.cart.length) { toast("Add at least one dish first", false); return; }
-  document.querySelector(".qdest-overlay")?.remove();
+  // Close a previous picker THROUGH ITS OWN TEARDOWN. This used to be a bare `.remove()`, which
+  // dropped the DOM but left its LFH_BACK layer — and the history entry behind it — registered,
+  // so the next hardware Back was spent closing an overlay that no longer existed. Same
+  // re-entrancy trap the confirm box and the payment sheet each already guard against.
+  if (qdestClose) qdestClose();
   const tiles = [];
   for (const i of floorTableList()) {
     if (!inMySection(i)) continue;          // a sectioned waiter only serves their own tables
@@ -3421,7 +3453,8 @@ function openQuickDest() {
   </div>`;
   document.body.appendChild(ov);
   let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-qdest", () => closeDest()) : null;
-  const closeDest = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
+  const closeDest = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); if (qdestClose === closeDest) qdestClose = null; };
+  qdestClose = closeDest;
   ov.querySelector(".qdest-x").onclick = closeDest;
   ov.onclick = (e) => { if (e.target === ov) closeDest(); };
   ov.querySelectorAll("[data-qdest]").forEach((b) => (b.onclick = () => { const t = b.dataset.qdest; closeDest(); sendOrder(t); }));

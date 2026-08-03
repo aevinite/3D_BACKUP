@@ -107,9 +107,15 @@ export async function sharedFloorSummary<T>(key: string, compute: () => Promise<
  * marked a table paid could see the tile flick back to unpaid for a moment — the exact
  * "old value for a second" behaviour the owner refuses.
  * Over-invalidating is harmless: the next read simply computes.
+ *
+ * It drops EVERY key that ends in this restaurant's id, not just `floor:` — a second shared
+ * read was added (`merges:<rid>`, the live table joins) and naming keys one by one is a list
+ * somebody eventually forgets to extend, which would leave a just-made merge showing on one
+ * device and not another for the length of the window.
  */
 export function invalidateFloor(restaurantId: string): void {
-  inflight.delete(`floor:${restaurantId}`);
+  const suffix = `:${restaurantId}`;
+  for (const k of [...inflight.keys()]) if (k.endsWith(suffix)) inflight.delete(k);
 }
 
 /** Test hook: forget everything (so a test can measure a cold call). */

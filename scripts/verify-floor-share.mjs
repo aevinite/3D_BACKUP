@@ -55,18 +55,33 @@ if (mod) {
   check(`the shared window stays small (<= ${MAX_WINDOW_MS}ms)`, win > 0 && win <= MAX_WINDOW_MS, `${win}ms`);
   check("a failed computation is never handed to the next caller",
     /catch[\s\S]{0,120}inflight\.delete/.test(mod));
+  // There is more than one shared read per restaurant now (`floor:<rid>` and `merges:<rid>`),
+  // so a write has to drop ALL of them. Naming keys one by one is a list somebody forgets to
+  // extend, and the symptom would be a just-made merge showing on one device and not another.
+  check("a write drops EVERY shared read for that restaurant, not just the floor",
+    /endsWith\(suffix\)/.test(mod) || /for \(const k of \[\.\.\.inflight\.keys\(\)\]\)/.test(mod),
+    /endsWith\(suffix\)/.test(mod) ? "" : "invalidateFloor must clear every key ending in `:<restaurantId>`");
 }
 
-// Both panel routes: share the WHOLE-floor read only, and invalidate on every write.
+// The panel routes: share the WHOLE-floor read only, and invalidate on EVERY write.
+//
+// `reads` = this route serves the floor itself (so the share/targeted properties apply).
+// The KITCHEN does not read the floor — but it WRITES to it (accept / ready / item status /
+// platform status / sold-out), and every one of those changes a tile the manager and waiter
+// are looking at. It was missing from this list for as long as the list existed, and so it
+// was the one route with no invalidation at all: a device could be handed a floor computed
+// before the kitchen acted. A write route belongs here whether or not it reads. (T4 sweep,
+// 2026-08-04.)
 const ROUTES = [
-  { file: "app/api/editor/[...path]/route.ts", panel: "manager", impls: ["postImpl", "patchImpl", "deleteImpl"] },
-  { file: "app/api/tablet/[...path]/route.ts", panel: "waiter", impls: ["postImpl"] },
+  { file: "app/api/editor/[...path]/route.ts", panel: "manager", reads: true, impls: ["postImpl", "patchImpl", "deleteImpl"] },
+  { file: "app/api/tablet/[...path]/route.ts", panel: "waiter", reads: true, impls: ["postImpl"] },
+  { file: "app/api/kitchen/[...path]/route.ts", panel: "kitchen", reads: false, impls: ["postImpl"] },
 ];
 for (const r of ROUTES) {
   const src = read(r.file);
   if (!src) { check(`${r.panel} route found`, false, r.file); continue; }
 
-  check(`${r.panel}: whole-floor read is shared`, src.includes("sharedFloorSummary(`floor:${rid}`"));
+  if (r.reads) check(`${r.panel}: whole-floor read is shared`, src.includes("sharedFloorSummary(`floor:${rid}`"));
 
   // A targeted ?table= refetch must NOT go through the shared path — that is what makes a tile
   // update the instant its order lands. This used to be asserted by matching the exact source line,
@@ -74,11 +89,13 @@ for (const r of ROUTES) {
   // it) — a guard that fails on a correct change teaches people to edit the guard, which is how a
   // guard dies. So test the PROPERTY instead: isolate the `tbl ?` branch and require that it asks
   // for this one table and does not share.
-  const tern = src.match(/const \{ data, error \} = tbl\s*([\s\S]{0,600}?);\n/);
-  const targetedBranch = tern ? tern[1].split(/\n\s*:/)[0] : "";
-  check(`${r.panel}: a targeted ?table= refetch is NOT shared`,
-    !!targetedBranch && /p_table:\s*tbl/.test(targetedBranch) && !/sharedFloorSummary/.test(targetedBranch),
-    targetedBranch ? undefined : "could not find the `const { data, error } = tbl ? … : …` read");
+  if (r.reads) {
+    const tern = src.match(/const \{ data, error \} = tbl\s*([\s\S]{0,600}?);\n/);
+    const targetedBranch = tern ? tern[1].split(/\n\s*:/)[0] : "";
+    check(`${r.panel}: a targeted ?table= refetch is NOT shared`,
+      !!targetedBranch && /p_table:\s*tbl/.test(targetedBranch) && !/sharedFloorSummary/.test(targetedBranch),
+      targetedBranch ? undefined : "could not find the `const { data, error } = tbl ? … : …` read");
+  }
 
   // EVERY write handler must drop the snapshot. Find each impl's body and look inside it.
   for (const impl of r.impls) {
