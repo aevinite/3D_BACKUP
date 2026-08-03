@@ -2644,9 +2644,12 @@ function ordersBuckets() {
 let _billsRecLoading = false;
 async function loadBillsRecord(force) {
   if (_billsRecLoading) return;
-  // force = "something just changed, refetch now" — still floored at 3s so a burst of
-  // realtime events costs ONE window read, not one per breadcrumb. Idle refresh: 30s.
-  if (state.billsRec && Date.now() - (state.billsRec.at || 0) < (force ? 3000 : 30000)) return;
+  // force = "THIS device just changed a bill, refetch now" (only user actions reach it —
+  // loadOrders is not on the realtime path), floored at 3s so a burst of taps costs ONE
+  // window read. Idle refresh: 60s, the same backstop pace every other background refresh
+  // in this file keeps — re-renders while the view is open are what call this, so a busy
+  // board must not turn into a faster poll (PR #748 review).
+  if (state.billsRec && Date.now() - (state.billsRec.at || 0) < (force ? 3000 : 60000)) return;
   _billsRecLoading = true;
   try {
     const r = await api("GET", "/orders?bills=1");

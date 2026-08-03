@@ -867,7 +867,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // ?history=1&q=…&type=… is set, query the DB directly for the match (scoped by rid),
       // returning up to 200 matching bill records. Since 2026-08-03 the match is CLAMPED to
       // the bills window above — the record only reaches as far as the Access screen allows.
-      let oq = sb.from("orders").select("*").eq("restaurant_id", rid);
+      // The ?bills= window names its columns (the same discipline as the parcels read below
+      // and the Platform board): everything the record cards, the bill modal, restore's
+      // deadline math and the printed bill actually consume — and nothing else. NOT
+      // customer_name: that is a SYNTHETIC field the enrichment below attaches from
+      // session_members, not a column. The no-param floor read keeps select("*") — the live
+      // board renders every column and RT_VOLATILE/boardSig depend on the full row shape.
+      const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
+      let oq = sb.from("orders").select(billsMode ? BILLS_COLS : "*").eq("restaurant_id", rid);
       if (wantsWindow) oq = oq.gte("created_at", windowStartIso);
       const histQ = sp.get("history") ? (sp.get("q") || "").trim() : "";
       if (histQ) {

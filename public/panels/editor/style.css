@@ -2736,8 +2736,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    .bill-card tile grid is gone. Below: the record card's own mood + the day totals. */
 .bill-day-total { font-size: 13px; color: var(--muted); }
 .bill-day-total b { color: var(--gold); font-variant-numeric: tabular-nums; }
-.ord-card.ord-record { cursor: pointer; transition: transform .08s, border-color .12s; }
-.ord-card.ord-record:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); }
+/* Only a card that actually OPENS (data-bill-open) may look tappable — a parcel record has
+   no detail behind it, and a pointer cursor on it would be a tap that vanishes in silence. */
+.ord-card.ord-record[data-bill-open] { cursor: pointer; transition: transform .08s, border-color .12s; }
+.ord-card.ord-record[data-bill-open]:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--gold) 55%, var(--line)); }
 .ord-card.ord-cancelled { border-left: 3px solid var(--red); opacity: .82; }
 .parcel-badge { font-size: 10px; font-weight: 800; letter-spacing: .05em; padding: 4px 9px; border-radius: 7px; background: rgba(232,161,60,0.18); color: #e8a13c; border: 1px solid rgba(232,161,60,0.4); white-space: nowrap; }
 .ord-cancel-note { color: var(--muted); font-style: italic; }
