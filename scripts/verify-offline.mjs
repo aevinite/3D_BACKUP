@@ -76,12 +76,31 @@ const hydrationBlame = (msg) => (IS_DEV_SERVER
 
 // Registration is async: the very first load of a new install isn't controlled yet, and
 // every offline expectation below depends on control having been taken.
-async function waitControlled(page, tries = 40) {
+//
+// 20 SECONDS WAS NOT ENOUGH AGAINST A DEPLOYED SITE (2026-08-04). This gave up at 20s inside a
+// 501-phase run, reported "service worker never took control", threw, and took the whole offline
+// phase down with it — while the very same check passed twice when run on its own, and the worker
+// provably takes control on that site in a plain browser. A cold serverless function plus a real
+// page load is simply slower than a local dev server, and this check is the FIRST thing the script
+// does, so it pays that cold start in full. A false red here is expensive: it reads as "offline is
+// broken" and hides the 54 real checks below it.
+//
+// So: a remote base gets a much longer leash, and a page that hasn't been claimed yet gets ONE
+// reload before we call it a failure — a reload is exactly what claims a worker that registered
+// late. Neither makes a genuine failure pass; they only stop a slow start from looking like one.
+const REMOTE = !/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/|$)/.test(BASE);
+async function waitControlled(page, tries = REMOTE ? 120 : 40) {   // 60s remote, 20s local
   for (let i = 0; i < tries; i++) {
     if (await page.evaluate(() => !!(navigator.serviceWorker && navigator.serviceWorker.controller))) return true;
     await sleep(500);
   }
   return false;
+}
+// One reload, then wait again. Returns true the moment the page is controlled.
+async function ensureControlled(page) {
+  if (await waitControlled(page)) return true;
+  try { await page.reload({ waitUntil: "domcontentloaded" }); } catch { /* the wait below reports it */ }
+  return waitControlled(page, REMOTE ? 60 : 20);
 }
 // Read a value out of the panel INSIDE the iframe (that's where the panel's own state
 // lives — the DOM classes change with the design, the state doesn't).
@@ -232,8 +251,8 @@ async function run() {
     const page = await ctx.newPage();
     watch(page);
     await page.goto(BASE + mgrRoute, { waitUntil: "domcontentloaded" });
-    const controlled = await waitControlled(page);
-    controlled ? ok("service worker is controlling the page") : bad("service worker never took control");
+    const controlled = await ensureControlled(page);
+    controlled ? ok("service worker is controlling the page") : bad("service worker never took control", `waited ${REMOTE ? "60s + a reload + 30s" : "20s + a reload + 10s"} at ${BASE}`);
     if (!controlled) throw new Error("no service worker — nothing below can pass");
 
     // Load again WHILE ONLINE so the shell + the panel's reads are saved on-device.

@@ -25,7 +25,7 @@
 // range is now unreachable by a person, not merely clamped after the fact.
 //
 // ⚠️ THE DATABASE'S CHECK CONSTRAINT (settings_floor_per_row_range) IS THE OUTER BOUND, and
-// migration 260 set it to 2..30. Keep the constraint >= the max below — WIDER than the UI is
+// migration 265 set it to 2..30. Keep the constraint >= the max below — WIDER than the UI is
 // safe, NARROWER is the bug that cost an evening: this file went to 30 on 2026-07-31 while the
 // constraint stayed at migration 226's 12, so the screen invited a number the database refused,
 // that came back as a 500, and the panel's offline queue took a 500 for "the server is busy",

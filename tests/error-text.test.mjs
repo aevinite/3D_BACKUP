@@ -81,7 +81,7 @@ test("the stored line reads as a sentence and fits the column", () => {
 // things were wrong at once: a developer's sentence reached a waiter mid-service; a red crash row
 // went onto the board next to the real faults; and 5xx means "the server is struggling, keep the
 // tap and retry it", so a tap that could NEVER succeed was queued and retried behind their back.
-// (Exactly the fault lib/dbRefusal.ts was written for — see migration 260 — one class wider.)
+// (Exactly the fault lib/dbRefusal.ts was written for — see migration 265 — one class wider.)
 import { isMissingRow, refusalStatus, refusalMessage, worthLogging, isDataRefusal, isDbUnreachable, BUSY_MESSAGE } from "../lib/dbRefusal.ts";
 
 /** What supabase-js hands back for a .single() that matched nothing, as `must()` rethrows it. */
@@ -168,7 +168,7 @@ test("a refused VALUE is never called busy — it must reach the person and neve
   assert.equal(refusalMessage(bug), "tagRow is not defined");
 });
 
-test("the value-refusal cases mig 260 fixed are untouched", () => {
+test("the value-refusal cases mig 265 fixed are untouched", () => {
   const check = Object.assign(new Error('new row for relation "settings" violates check constraint "settings_floor_per_row_range"'), { code: "23514" });
   assert.equal(refusalStatus(check), 400);
   assert.equal(worthLogging(check), true, "a constraint the code outgrew must stay visible");
