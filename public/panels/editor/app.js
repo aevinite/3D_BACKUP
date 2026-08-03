@@ -791,8 +791,17 @@ function renderList() {
     return;
   }
   if (state.tab === "dash") {
-    // The left column IS the dashboard's range sub-nav (Today / 30 days / Year) —
-    // same pattern as Orders — instead of a second menu inside the content.
+    // The left column IS the dashboard's range sub-nav — same pattern as Orders — instead of
+    // a second menu inside the content.
+    //
+    // TWO ROWS AT MOST: Today, and Yesterday only when this restaurant's Access setting says
+    // so ("How far back it reaches" → Today + yesterday). The 30-day and 12-month rows were
+    // DELETED on 2026-08-03 (owner, looking at Aangan through owner → manager mode: "the
+    // thirty days and one year is showing… there is literally no need for it"). They were
+    // never a manager's screen — they showed greyed to an admin/owner looking in and just
+    // repeated the owner panel's own Reports. Nobody gets them here now, so there is nothing
+    // for the X-ray to mark either. Do NOT add a wider row back: the server clamps this
+    // endpoint to the same two words, so it would return today's numbers under a false label.
     const mk = (key, icon, label, sub) => {
       const li = el(`<li class="list-item${dashRange === key ? " active" : ""}" data-dash-range="${key}">
         <div class="thumb">${icon}</div>
@@ -802,8 +811,9 @@ function renderList() {
       return li;
     };
     ul.appendChild(mk("today", '<i class="fas fa-bolt"></i>', "Today", "live snapshot"));
-    ul.appendChild(mk("30d", '<i class="fas fa-calendar-days"></i>', "30 days", "trends"));
-    ul.appendChild(mk("year", '<i class="fas fa-chart-line"></i>', "Year", "12 months"));
+    // Absent until whoami answers, rather than shown-then-yanked: a row that appears for a
+    // second and vanishes reads as broken, and this one is cheap to add late.
+    if (dashReachAllowsYesterday()) ul.appendChild(mk("yesterday", '<i class="fas fa-calendar-day"></i>', "Yesterday", "the day before"));
     return;
   }
   if (state.tab === "log") {
@@ -3726,7 +3736,17 @@ async function resolveCall(id) {
 // ---------- Dashboard tab: the restaurant's numbers as graphs ----------
 let dashCharts = []; // live Chart.js instances (destroyed before each redraw)
 
-let dashRange = (() => { try { const v = localStorage.getItem("lfh_dash_range"); return ["today", "30d", "year"].includes(v) ? v : "today"; } catch { return "today"; } })(); // today | 30d | year — remembered across reloads
+// today | yesterday — remembered across reloads. Anything else (a "30d"/"year" left in this
+// browser from before 2026-08-03) reads as today, so an old device can't sit on a range that
+// no longer exists.
+let dashRange = (() => { try { return localStorage.getItem("lfh_dash_range") === "yesterday" ? "yesterday" : "today"; } catch { return "today"; } })();
+// Does this restaurant hand the manager panel yesterday as well as today? It is ONE setting
+// (Access → Manager → Manager menu → Dashboard → "How far back it reaches"), answered by the
+// server in /whoami, and the same helper clamps /stats — so the rail can never offer a day the
+// server won't return. Unknown (whoami still in flight) = today only.
+function dashReachAllowsYesterday() {
+  return !!(XRAY_WHO && XRAY_WHO.dashReach === "today_yesterday");
+}
 // The Today summary box: a live snapshot across every channel (dine-in tables +
 // Zomato/Swiggy/takeaway live orders) and today's combined totals. Built from the
 // `live` + `platformToday` fields the /stats endpoint adds.
@@ -3841,7 +3861,7 @@ async function loadDashboard(useCache) {
   // If the owner switched tabs during the async /stats fetch, #dashBody is detached — bail before
   // rendering + drawing Chart.js onto a null canvas (rapid tab-switching threw getContext-of-null).
   if (state.tab !== "dash") return;
-  const RL = { today: "today", "30d": "last 30 days", year: "last 12 months" };
+  const RL = { today: "today", yesterday: "yesterday" };
   const rangeLabel = RL[dashRange] || dashRange;
   // The range sub-nav lives in the LEFT SIDEBAR (renderList), so the content is
   // full-width: the Today view leads with the live per-channel summary box.
@@ -3858,11 +3878,11 @@ async function loadDashboard(useCache) {
       <i class="fa-solid fa-chevron-right kgo" aria-hidden="true"></i>
     </button>`;
   // Crazy-dashboard v2 (owner, 2026-07-05): honest deltas, sparkline, narration,
-  // day-parts, channel split, weekday×hour heatmap — every number the server
-  // already sends, spelled out with context so nothing reads "blunt".
+  // day-parts and the channel split — every number the server already sends,
+  // spelled out with context so nothing reads "blunt".
   const pctOf = (n, total) => { const p = (n / total) * 100; return p > 0 && p < 1 ? "<1" : String(Math.round(p)); };
-  const CMP_LABEL = { today: "vs yesterday till this time", "30d": "vs the 30 days before (same point)", year: "vs last year (same point)" };
-  const cmpLabel = CMP_LABEL[dashRange] || "vs the period before";
+  const CMP_LABEL = { today: "vs yesterday till this time", yesterday: "vs the day before" };
+  const cmpLabel = CMP_LABEL[dashRange] || "vs the day before";
   // lowerIsBetter: for a "bad" metric (e.g. cancellations) a RISE should read as bad (red),
   // not green — so the COLOUR reflects good/bad while the ARROW still shows the real
   // direction. (Was direction-agnostic: more cancellations showed a green up chip — 2026-07-06.)
@@ -3897,13 +3917,11 @@ async function loadDashboard(useCache) {
     `<b>${s.paid}</b> paid · <b>${s.unpaid}</b> unpaid`,
     onlineCnt > 0 ? `avg ticket: dine-in <b>${inr(s.avgOrder)}</b> · online <b>${inr(onlineRev / onlineCnt)}</b>` : "",
   ].filter(Boolean).join("<br>");
-  const heatRows = (s.heatmap || []);
-  const hasHeat = heatRows.some((r) => r.some((v) => v > 0));
   const freshT = new Date(s.updatedAt || Date.now()).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
   // Plain-English narration (the Square trick): say what happened in one sentence.
   let narrate = "";
   if (s.revenue > 0) {
-    const when = dashRange === "today" ? `Today till ${freshT}` : dashRange === "30d" ? "The last 30 days" : "The last 12 months";
+    const when = dashRange === "today" ? `Today till ${freshT}` : "Yesterday";
     let cmp = "";
     if (prev.revenue > 0) {
       const p = Math.round(((s.revenue - prev.revenue) / prev.revenue) * 100);
@@ -3933,7 +3951,6 @@ async function loadDashboard(useCache) {
           <div class="pay-legend" id="chanLegend"></div>
         </div>
       </div>
-      ${hasHeat ? `<div class="dash-chart wide"><h4>When is this place actually busy? <span>· ${rangeLabel}, weekday × hour — plan shifts with this</span></h4><div class="hm" id="hmGrid"></div></div>` : ""}
       <div class="dash-chart"><h4>Top dishes <span>· plates sold</span></h4><div class="chart-wrap"><canvas id="chTop"></canvas></div></div>
       <div class="dash-chart"><h4>Busy hours <span>· orders by hour</span></h4><div class="chart-wrap"><canvas id="chHours"></canvas></div></div>
       <div class="dash-chart"><h4>Category share <span>· by plates</span></h4>
@@ -3998,12 +4015,12 @@ async function loadDashboard(useCache) {
   // same elapsed time). Clicking a point opens that day's / that period's bills.
   const salesPts = s.series.map((p) => Math.round((p.revenue || 0) * INR_RATE));
   const prevPts = (prev.series || []).map((v) => Math.round((v || 0) * INR_RATE));
-  const GHOST = { today: "Yesterday", "30d": "30 days before", year: "Last year" }[dashRange] || "Before";
+  const GHOST = dashRange === "today" ? "Yesterday" : "The day before";
   if (salesPts.some((v) => v > 0)) {
     const sctx = document.getElementById("chSales").getContext("2d");
     const grad = sctx.createLinearGradient(0, 0, 0, 260);
     grad.addColorStop(0, "rgba(185,127,53,.28)"); grad.addColorStop(1, "rgba(185,127,53,.02)");
-    const datasets = [{ label: dashRange === "today" ? "Today" : "This period", data: salesPts, borderColor: gold, backgroundColor: grad, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2.25 }];
+    const datasets = [{ label: dashRange === "today" ? "Today" : "Yesterday", data: salesPts, borderColor: gold, backgroundColor: grad, fill: true, tension: 0.35, pointRadius: 0, pointHoverRadius: 5, borderWidth: 2.25 }];
     if (prevPts.some((v) => v > 0))
       datasets.push({ label: GHOST, data: prevPts, borderColor: "rgba(150,140,125,.55)", borderDash: [5, 4], fill: false, tension: 0.35, pointRadius: 0, pointHoverRadius: 4, borderWidth: 1.5 });
     dashCharts.push(new Chart(sctx, {
@@ -4013,12 +4030,11 @@ async function loadDashboard(useCache) {
         onClick: (_e, els) => {
           if (!els.length) return;
           if (dashRange === "today") return goBills("daybills");
-          if (dashRange === "30d") {
-            // Jump to that DAY's bill records: prefill the Previous view's date search.
-            const d = new Date(Date.now() - (29 - els[0].index) * 864e5);
-            state.billSearchType = "date"; state.billSearch = d.toISOString().slice(0, 10); state.billHistRows = [];
-            loadBillHistory(state.billSearch, "date");
-          }
+          // Yesterday: open THAT day's bill records — prefill the Previous view's date search
+          // so the click lands on the same day the point belongs to, not on "everything older".
+          const d = new Date(Date.now() - 864e5);
+          state.billSearchType = "date"; state.billSearch = d.toISOString().slice(0, 10); state.billHistRows = [];
+          loadBillHistory(state.billSearch, "date");
           goBills("previous");
         },
         plugins: { legend: { display: datasets.length > 1, labels: { boxWidth: 18, font: { size: 10 } } }, tooltip: { callbacks: { label: (c) => ` ${c.dataset.label}: ${inr(c.parsed.y)}` } } },
@@ -4068,20 +4084,9 @@ async function loadDashboard(useCache) {
   } else {
     emptyCard("chChan", "Channels", "No orders in this range yet.");
   }
-  // Weekday × hour heatmap (30d/year): darker = busier; the ring marks the single
-  // hottest slot. Pure CSS grid — no chart lib, so it's crisp in both themes.
-  if (hasHeat) {
-    const hmDays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-    let hmMax = 0, pkD = 0, pkH = 0;
-    heatRows.forEach((row, d) => row.forEach((v, h) => { if (v > hmMax) { hmMax = v; pkD = d; pkH = h; } }));
-    document.getElementById("hmGrid").innerHTML =
-      `<span></span>` + Array.from({ length: 24 }, (_, h) => `<span class="hx">${h % 3 === 0 ? h : ""}</span>`).join("") +
-      heatRows.map((row, d) => `<span class="lab">${hmDays[d]}</span>` + row.map((v, h) => {
-        const a = hmMax ? v / hmMax : 0;
-        const bgc = a === 0 ? "rgba(150,140,125,.10)" : `rgba(185,127,53,${(0.10 + a * 0.85).toFixed(2)})`;
-        return `<span class="c${d === pkD && h === pkH ? " peak" : ""}" style="background:${bgc}" title="${hmDays[d]} ${h}:00 — ${v} order${v === 1 ? "" : "s"}"></span>`;
-      }).join("")).join("");
-  }
+  // (The weekday × hour heatmap that used to live here went with the 30-day / 12-month views
+  // on 2026-08-03 — one day of data can't fill a 7-day grid, and it would have read as a
+  // restaurant that is shut six days a week. The owner's Reports screen still has it.)
   // Top dishes — rounded bars.
   if ((s.topDishes || []).length) {
     dashCharts.push(new Chart(document.getElementById("chTop"), {
@@ -4283,7 +4288,7 @@ async function printManagerReport() {
   const isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
   const name = esc(set.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")));
   const accent = (r.accent_color && /^#[0-9a-fA-F]{3,6}$/.test(r.accent_color)) ? r.accent_color : "#d4a574";
-  const RL = { today: "Today", "30d": "Last 30 days", year: "Last 12 months" };
+  const RL = { today: "Today", yesterday: "Yesterday" };
   const rangeLabel = RL[dashRange] || dashRange;
   const now = new Date();
   const top = (s.topDishes || []).slice(0, 8);
@@ -4340,7 +4345,7 @@ async function printManagerReport() {
 // heads-up to glance at — the "anti-theft" pattern the bigger POS systems use.
 async function openStaffRisk() {
   document.querySelector(".sr-overlay")?.remove();
-  const rangeLbl = { today: "today", "30d": "the last 30 days", year: "the last 12 months" }[dashRange] || dashRange;
+  const rangeLbl = { today: "today", yesterday: "yesterday" }[dashRange] || dashRange;
   const wrap = el(`<div class="sx-modal-overlay sr-overlay"><div class="sx-modal" style="max-width:620px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🔍 Staff watch</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">Discounts, voids, deletes &amp; paid-reverts by staff over ${esc(rangeLbl)} (follows the Dashboard range). A high count is just worth a glance — not proof of anything.</div><div id="srBody"><div class="empty">Loading…</div></div></div>
@@ -4372,7 +4377,7 @@ async function openStaffRisk() {
 // dish cost isn't tracked yet (that's the future inventory module), so it's labelled honestly.
 async function openMenuMatrix() {
   document.querySelector(".mm-overlay")?.remove();
-  const rangeLbl = { today: "today", "30d": "the last 30 days", year: "the last 12 months" }[dashRange] || dashRange;
+  const rangeLbl = { today: "today", yesterday: "yesterday" }[dashRange] || dashRange;
   const wrap = el(`<div class="sx-modal-overlay mm-overlay"><div class="sx-modal" style="max-width:820px">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>📊 Menu winners &amp; losers</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body"><div class="muted small" style="margin-bottom:10px">By how often each dish sells × the revenue it brings, over ${esc(rangeLbl)}. (Revenue, not profit — cost tracking comes with the inventory module.)</div><div id="mmBody"><div class="empty">Loading…</div></div></div>
@@ -12675,21 +12680,21 @@ const XRAY_CONTROLS = [
   // which whoami already folds into effectivePowers), tinted-but-working for a higher
   // role looking in. Same shape as #sxKot / table_ops above.
   { selector: '[data-mgr-hide="table_sections"]', flag: "table_assign", label: "Who serves which table" },
-  // TODAY-ONLY dashboard for a real manager (owner 2026-07-29): the 30-day and 12-month
-  // views are admin/owner reporting surfaces, so their sub-nav rows disappear for a manager
-  // (and in the actual-manager-view mode). "higher_only_view" has NO admin switch on purpose
-  // — it isn't a toggle, it's who the screen belongs to — so the zones list shows no
-  // "⚙ change" link for it. The server clamps the range too (app/api/editor stats).
-  { selector: '[data-dash-range="30d"]', flag: "higher_only_view", label: "30-day dashboard" },
-  { selector: '[data-dash-range="year"]', flag: "higher_only_view", label: "12-month dashboard" },
+  // NO dashboard-range rows here any more (owner, 2026-08-03). The 30-day and 12-month rows
+  // used to sit in this list under a synthetic "higher_only_view" flag: hidden for a real
+  // manager, shown GREYED with a "not available to the manager" tooltip to an admin/owner
+  // looking in. The owner saw exactly that through owner → manager mode on Aangan and said the
+  // right thing — the rows should not exist at all ("there is literally no need for it"). They
+  // are gone from the rail itself now (renderList), so there is nothing left to hide, tint or
+  // list in the zones dropdown. Do NOT re-add a row here to "mark" a range: the rail only ever
+  // offers what the restaurant's Access setting allows, which is the honest way round.
 ];
-// The two SYNTHETIC flags above are never real manager powers (whoami never returns them, so
-// xrayGrantedForManager is always false for them). This maps each to honest words + whether a
+// The SYNTHETIC flag below is never a real manager power (whoami never returns it, so
+// xrayGrantedForManager is always false for it). This maps it to honest words + whether a
 // higher role can jump to a control for it, instead of the plain-power "turned off by the
-// owner" wording, which was wrong for them (nobody switched these off — they're admin-owned).
+// owner" wording, which was wrong for it (nobody switched these off — they're admin-owned).
 const XRAY_NEVER = {
   admin_only_setting: { by: "admin only", why: "it's set from the admin panel", settable: true },
-  higher_only_view: { by: "admin / owner only", why: "the manager panel only shows today", settable: false },
 };
 // `var`, not `let`: this is read by render/permission helpers defined FAR earlier
 // in the file (canDeleteBill, platformHtml, the Bills sub-nav…). With `let`, boot's
@@ -13347,8 +13352,8 @@ function toggleXrayZones(zones) {
     ? `<div class="zsep"></div><button class="zrow zsim" id="xraySimRow" title="Reload this tab showing exactly what ${zWho ? esc(zWho) : "the real manager"} sees — same limited access, fully working">` +
       `<span class="dot" style="background:#6b7280"></span>👁 See ${zWho ? `${esc(zWho)}'s actual panel` : "the actual manager panel"}</button>`
     : "";
-  // A synthetic admin-owned zone (XRAY_NEVER) reads "admin only" and, when there's no
-  // switch for it (higher_only_view), carries no "⚙ change" link — there's nothing to open.
+  // A synthetic admin-owned zone (XRAY_NEVER) reads "admin only", and a zone with nowhere to
+  // go carries no "⚙ change" link — an affordance that lands nowhere is worse than none.
   zp.innerHTML = `<div class="zh">${zWho ? `Not in ${esc(zWho)}'s panel` : "Not in the manager's panel"}</div>` + (zones.length
     ? zones.map((z, i) => {
         const nv = XRAY_NEVER[z.flag];
@@ -13420,15 +13425,20 @@ document.addEventListener("click", (e) => {
 });
 
 api("GET", "/whoami").then((w) => { XRAY_WHO = w;
-  // TODAY-ONLY dashboard for a real manager (owner 2026-07-29). The 30-day / 12-month rows are
-  // hidden for them (XRAY_CONTROLS), so a range REMEMBERED in localStorage from an earlier
-  // admin/owner session on this device would otherwise leave them on a wide view with no way
-  // back. Snap it to today before the first dashboard paint; the server clamps it too.
-  if (!w.higherView && dashRange !== "today") {
+  // The dashboard rail is drawn from THIS answer: Today always, Yesterday only when the
+  // restaurant's Access setting reaches that far (w.dashReach). Two things to settle now that
+  // we know it — and both matter on the FIRST paint, before anyone taps:
+  //   1. a range remembered in localStorage that this restaurant no longer allows (a device
+  //      that saw "Yesterday" at another restaurant, or a pre-2026-08-03 "30d") snaps back to
+  //      today, so nobody sits on a view with no row to return from. The server clamps too.
+  //   2. the Yesterday row only exists once whoami has answered, so the rail is redrawn here.
+  const allowed = dashRange === "today" || (dashRange === "yesterday" && dashReachAllowsYesterday());
+  if (!allowed) {
     dashRange = "today";
     try { localStorage.setItem("lfh_dash_range", "today"); } catch {}
-    if (state.tab === "dash") { renderList(); loadDashboard(); }
+    if (state.tab === "dash") loadDashboard();
   }
+  if (state.tab === "dash") renderList();
   applyHierarchyView();
   // The module tabs (Banquet, Platform) grant depends on WHO is viewing, so re-sync them once
   // whoami resolves (they first paint with higher-view assumed while whoami is still pending).

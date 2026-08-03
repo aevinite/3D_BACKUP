@@ -999,6 +999,12 @@ export function managerTabOn(accessConfig: unknown, key: ManagerTabKey): boolean
   return !managerTabsOff(accessConfig).includes(key);
 }
 
+// The mgr_dash_range row above ("How far back it reaches") is read by lib/dashRange.ts —
+// dashboardReach() / clampDashRange(), which the panel's /whoami and /stats both go through.
+// It lives outside this file on purpose: this file is the MODEL, and a reader kept inside it
+// could not prove the switch reaches real code (verify:access excludes the model from its
+// corpus for exactly that reason).
+
 /** Deep-merge a TreePatch into a TreeState (2 levels is all the shapes need). */
 export function applyPatch(s: TreeState, p: TreePatch): TreeState {
   const out: TreeState = { ...s };

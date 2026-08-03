@@ -38,6 +38,7 @@ import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
 import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, type ManagerTabKey } from "@/lib/accessTree";
+import { dashboardReach, clampDashRange } from "@/lib/dashRange";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
@@ -616,6 +617,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // rather than hiding — the admin's own power is never reduced.
         menuSubTint: resolveMenuParts("manager", mo),
         logParts,
+        // How far back this restaurant's dashboard reaches (Access → Manager → Dashboard →
+        // "How far back it reaches"). The panel draws its Today / Yesterday rail from THIS,
+        // so the switch is what puts the Yesterday row on screen — and the same helper
+        // clamps /stats below, so the rail can never offer a range the server refuses.
+        // Everyone in this panel gets the same two rows: it is the manager's screen, and a
+        // 30-day/12-month view here was only ever a duplicate of the owner's own Reports
+        // (deleted 2026-08-03 at the owner's word).
+        dashReach: dashboardReach(r?.access_config),
         // MANAGER'S MENU (access rebuild): which tabs this RESTAURANT has at all — a
         // different question from what a PERSON may do, which is the powers above. The panel
         // removes these tabs entirely (never greys them), and the guards below refuse their
@@ -1200,33 +1209,31 @@ export async function GET(req: NextRequest, ctx: Ctx) {
 
     if (p === "stats") {
       if (!(await managerCan(g, rid, "view_dashboard"))) return permDenied("view the dashboard");
-      // Range: today | 30d | year. Buckets the revenue series by hour / day / month.
-      // TODAY ONLY for real staff (owner 2026-07-29): the 30-day and 12-month dashboards are
-      // admin/owner reporting surfaces — the manager panel shows today's numbers. The panel
-      // hides the other two sub-nav rows; this is the matching server rule, so asking for a
-      // wide range in the URL just returns today instead. The OWNER (their own restaurants)
-      // and the admin super-user (no staff cookie) keep every range.
-      const askedRange = new URL(req.url).searchParams.get("range") || "30d";
-      // A real manager is clamped to their restaurant's DASHBOARD REACH (Access → Manager →
-      // Manager menu → Dashboard). Every restaurant starts on "today"; "today + yesterday" is
-      // handed over deliberately, because someone who can see yesterday can work out what a
-      // shift took. The owner and the admin super-user keep every range. Clamping here and not
-      // only in the panel is the point — asking for a wide range in the URL still returns the
-      // allowed one. (owner, 2026-08-01)
-      let range = askedRange;
-      if (g.user && g.user.role !== "owner") {
-        const cfgDash = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
-          { view_dashboard?: { manager_opts?: { range?: string } } } | null;
-        const reach = cfgDash?.view_dashboard?.manager_opts?.range === "today_yesterday" ? "today_yesterday" : "today";
-        range = reach === "today_yesterday" && askedRange === "yesterday" ? "yesterday" : "today";
-      }
+      // Range: today | yesterday. ONE business day either way, bucketed by hour.
+      //
+      // This panel's dashboard reaches exactly as far as Access → Manager → Manager menu →
+      // Dashboard hands over, and no further. Every restaurant starts on TODAY; "today +
+      // yesterday" is handed over deliberately, because someone who can see yesterday can
+      // work out what a shift took. The 30-day and 12-month windows LEFT this panel on
+      // 2026-08-03 (owner, looking at Aangan through owner → manager mode: "the thirty days
+      // and one year is showing… there is literally no need for it") — they were never a
+      // manager's screen, only a greyed extra for an admin/owner looking in, duplicating the
+      // owner panel's Reports, which does wide ranges properly (snapshot-cached and
+      // pre-aggregated instead of scanning orders live).
+      //
+      // The clamp is for EVERYONE now — manager, owner and admin alike — so no screen can ask
+      // this endpoint for a window it doesn't offer. Clamping here and not only in the panel is
+      // the point: ?range=year in the URL still returns today, it is never an error.
+      const reach = dashboardReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const range = clampDashRange(new URL(req.url).searchParams.get("range"), reach);
       const now = new Date();
-      let since: Date;
-      if (range === "today") { since = new Date(businessDayStartIso()); } // 05:00 IST business day
-      // "Today + yesterday" reaches back one more business day — nothing further.
-      else if (range === "yesterday") { since = new Date(new Date(businessDayStartIso()).getTime() - 864e5); }
-      else if (range === "year") { since = new Date(now.getFullYear(), now.getMonth() - 11, 1); }
-      else { since = new Date(Date.now() - 29 * 864e5); since.setHours(0, 0, 0, 0); }
+      // 05:00-IST business day, so a 1 a.m. bill still belongs to the night it was taken.
+      // "Yesterday" is yesterday ALONE (its own 05:00→05:00 day, ending where today starts) —
+      // not today-and-yesterday lumped together, which would make every figure on the screen
+      // mean two different days at once and read as double the takings.
+      const dayStart = new Date(businessDayStartIso());
+      const since = range === "yesterday" ? new Date(dayStart.getTime() - 864e5) : dayStart;
+      const until = range === "yesterday" ? dayStart : now;
 
       // Crazy-dashboard upgrade (owner, 2026-07-05): fetch ONE window covering the
       // current period AND the one before it, split in code. This doubles the rows
@@ -1235,15 +1242,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // yesterday till 5pm", the Restroworks trick), so a half-day never gets
       // compared against a full day. Channel split needs one extra SCOPED query
       // on aggregator_orders (column list + limit, indexed by restaurant+time).
-      let prevSince: Date;
-      if (range === "today") prevSince = new Date(since.getTime() - 864e5);
-      else if (range === "year") prevSince = new Date(since.getFullYear() - 1, since.getMonth(), 1);
-      else prevSince = new Date(since.getTime() - 30 * 864e5);
-      const elapsedMs = now.getTime() - since.getTime();
+      // The day before this one. On "today" the cut is the same ELAPSED time (today till 5pm vs
+      // yesterday till 5pm); on "yesterday" the day is already complete, so elapsed = the whole
+      // 24h and the ghost line is the full day before it.
+      const prevSince = new Date(since.getTime() - 864e5);
+      const elapsedMs = until.getTime() - since.getTime();
       const [dishesQ, setQ, platRangeQ] = await Promise.all([
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid),
         sb.from("settings").select("tax_rate,tax_components,platform_channels").eq("restaurant_id", rid).maybeSingle(),
-        sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).limit(5000),
+        // Upper bound too: on "yesterday" today's orders are somebody else's day, and leaving
+        // them out is fewer rows read as well as the right answer (egress rule).
+        sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).lt("created_at", until.toISOString()).limit(5000),
       ]);
       // Page through EVERY order in the window. A single .limit(50000) is silently capped by
       // PostgREST's db-max-rows (~1000), so on a busy restaurant the dashboard read only the newest
@@ -1268,7 +1277,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const STATS_ROW_CAP = 12000;
       const STATS_PAGE = 1000;
       let statsTruncated = false;
-      const statsPage = (from: number) => sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).order("created_at", { ascending: false }).range(from, from + STATS_PAGE - 1);
+      const statsPage = (from: number) => sb.from("orders").select("id,session_id,subtotal,total,discount,status,payment_status,payment_method,created_at,items,table_number").eq("restaurant_id", rid).gte("created_at", prevSince.toISOString()).lt("created_at", until.toISOString()).order("created_at", { ascending: false }).range(from, from + STATS_PAGE - 1);
       // Fetch those pages in DOUBLING PARALLEL WAVES — 1, then 2, then 4, then 8 at a time —
       // stopping the moment a wave comes back short. This used to be up to 12 STRICTLY
       // SEQUENTIAL round-trips: on the busiest restaurant a full-year Dashboard spent ~5.5s
@@ -1330,28 +1339,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Payment-method breakdown (owner, 2026-07-01): revenue + bill count per method
       // for whatever's ALREADY marked paid in this range — no extra query, same orders array.
       const paymentMethods: Record<string, { rev: number; bills: number }> = {};
-      const bucket = range === "today" ? "hour" : range === "year" ? "month" : "day";
+      // ONE bucket size now: both ranges are a single business day, so the series is 24 hourly
+      // points either way. (The day/month buckets went with the 30-day and 12-month views on
+      // 2026-08-03 — see the range comment above.)
       // ALL hour-of-day stats bucket in IST explicitly — dt.getHours() was server-local,
       // which on Vercel (UTC) shifted the busy-hours chart by 5½ hours (latent bug).
       const IST_OFF = 5.5 * 3600e3;
       const istHour = (d: Date) => new Date(d.getTime() + IST_OFF).getUTCHours();
-      const istDay = (d: Date) => (new Date(d.getTime() + IST_OFF).getUTCDay() + 6) % 7; // 0=Mon … 6=Sun
-      // Day/month bucket KEYS in IST too (they used to be UTC via toISOString()/getMonth(),
-      // while the hour buckets were already IST — so a post-midnight sale landed on the wrong
-      // day/bar and the axis labels were off by a day). One time zone everywhere now.
-      const istParts = (d: Date) => { const i = new Date(d.getTime() + IST_OFF); return { y: i.getUTCFullYear(), m: i.getUTCMonth(), day: i.getUTCDate() }; };
-      const dayKey = (d: Date) => { const p = istParts(d); return `${p.y}-${String(p.m + 1).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`; };
-      const monthKey = (d: Date) => { const p = istParts(d); return `${p.y}-${String(p.m + 1).padStart(2, "0")}`; };
-      const keyFor = (d: Date) => bucket === "hour" ? String(istHour(d))
-        : bucket === "month" ? monthKey(d)
-        : dayKey(d);
+      const keyFor = (d: Date) => String(istHour(d));
       // Day parts (PetPooja pattern): 7–11 breakfast · 11–15 lunch · 15–19 evening ·
-      // 19–23 dinner · 23–7 late. Weekday×hour heatmap fills for 30d/year only —
-      // today's window is too thin to mean anything.
+      // 19–23 dinner · 23–7 late.
       const DAY_PARTS = ["Breakfast 7–11", "Lunch 11–15", "Evening 15–19", "Dinner 19–23", "Late 23–7"] as const;
       const partOf = (h: number) => (h >= 7 && h < 11 ? 0 : h >= 11 && h < 15 ? 1 : h >= 15 && h < 19 ? 2 : h >= 19 && h < 23 ? 3 : 4);
       const dayParts = DAY_PARTS.map((label) => ({ label, revenue: 0, orders: 0 }));
-      const heatmap: number[][] = range === "today" ? [] : Array.from({ length: 7 }, () => Array(24).fill(0));
       let paid = 0, unpaid = 0, cancelled = 0, revenue = 0, cancelledValue = 0, taxCollected = 0;
       let discTotal = 0, discCount = 0;
       let discMax: { amt: number; table: string } | null = null;
@@ -1378,7 +1378,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         }
         hours[h] += 1;
         dayParts[partOf(h)].orders++;
-        if (heatmap.length) heatmap[istDay(dt)][h] += 1;
         const oPaid = o.payment_status === "paid";
         for (const it of (Array.isArray(o.items) ? o.items : [])) {
           const q = Number(it.qty) || 1;
@@ -1426,8 +1425,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // chips + a bucket-aligned series so the sales chart can draw it as the dashed
       // "last time" ghost line. Same PER-BILL rule as above so the delta compares
       // like with like.
-      const prevLen = bucket === "hour" ? 24 : bucket === "day" ? 30 : 12;
-      const prevSeries = Array(prevLen).fill(0);
+      const prevSeries = Array(24).fill(0);
       let prevRevenue = 0, prevOrders = 0, prevCancelled = 0;
       const prevBills = new Map<string, { sub: number; disc: number; tot: number; dt: Date }>();
       for (const o of prevRows) {
@@ -1445,10 +1443,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       for (const b of prevBills.values()) {
         const amt = Math.max(0, (Number(b.tot) || 0) - b.disc * (1 + rate)); // collected basis (B9), matches billAgg + owner
         prevRevenue += amt;
-        const idx = bucket === "hour" ? istHour(b.dt)
-          : bucket === "day" ? Math.min(29, Math.max(0, Math.floor((b.dt.getTime() - prevSinceMs) / 864e5)))
-          : Math.min(11, Math.max(0, (b.dt.getFullYear() - prevSince.getFullYear()) * 12 + b.dt.getMonth() - prevSince.getMonth()));
-        prevSeries[idx] += amt;
+        prevSeries[istHour(b.dt)] += amt;
       }
       // Channel split for the WHOLE range: dine-in from the same orders rows, the
       // three platform channels from the one scoped aggregator query above.
@@ -1461,20 +1456,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const ch = channels[pr.source] || (channels[pr.source] = { rev: 0, count: 0 });
         ch.rev += Number(pr.total) || 0; ch.count++;
       }
-      // Zero-filled, ordered revenue series with friendly labels.
+      // Zero-filled, ordered revenue series with friendly labels: the 24 hours of the day.
       const series: { label: string; revenue: number }[] = [];
       const r2 = (n: number) => Math.round(n * 100) / 100;
-      if (bucket === "hour") {
-        for (let h = 0; h < 24; h++) series.push({ label: `${h}:00`, revenue: r2(seriesMap[String(h)] || 0) });
-      } else if (bucket === "day") {
-        // Build the last-30 IST days with the SAME dayKey the data was bucketed by (IST has no
-        // DST, so stepping back 24h holds the IST wall-clock and gives consecutive IST dates).
-        for (let i = 29; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5); const k = dayKey(d); series.push({ label: k.slice(5), revenue: r2(seriesMap[k] || 0) }); }
-      } else {
-        const MN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-        const istNow = new Date(Date.now() + IST_OFF);
-        for (let i = 11; i >= 0; i--) { const d = new Date(Date.UTC(istNow.getUTCFullYear(), istNow.getUTCMonth() - i, 1)); const k = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; series.push({ label: MN[d.getUTCMonth()], revenue: r2(seriesMap[k] || 0) }); }
-      }
+      for (let h = 0; h < 24; h++) series.push({ label: `${h}:00`, revenue: r2(seriesMap[String(h)] || 0) });
       // Average per BILL (revenue is aggregated per bill): divide by the number of paid BILLS,
       // not paid ORDERS — dividing by orders understated the average on any multi-order table,
       // and the card is labelled "/bill". billAgg holds exactly one entry per paid bill.
@@ -1527,7 +1512,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // the current period, so deltas stay honest mid-day/mid-month.
         prev: { revenue: r2(prevRevenue), orders: prevOrders, cancelled: prevCancelled, series: prevSeries.map(r2) },
         dayParts: dayParts.map((d) => ({ ...d, revenue: r2(d.revenue) })),
-        heatmap, // [] for today range; 7×24 Mon-first IST order counts otherwise
+        // Kept as an empty array, not dropped: an older cached panel still reads s.heatmap and
+        // would throw on undefined. The weekday × hour card only ever meant something over a
+        // 30-day/12-month window, and those left this panel (see the range comment above) —
+        // the owner's own Reports still has the busiest-times heatmap.
+        heatmap: [] as number[][],
         discounts: { total: r2(discTotal), count: discCount, max: discMax ? { amt: r2(discMax.amt), table: discMax.table } : null },
         taxCollected: r2(taxCollected),
         biggestBill: biggestBill ? { amt: r2(biggestBill.amt), table: biggestBill.table } : null,
@@ -1587,18 +1576,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // instead of thousands of log rows (egress-safe). Scoped to this restaurant; hides admin + owner
       // rows exactly like /oplog. Replaces the old client that aggregated only the newest 200 rows with
       // NO date window (which silently undercounted, and could miss a staff member, on a busy day). (review #4)
-      const range = new URL(req.url).searchParams.get("range") || "today";
-      const DAY = 864e5;
-      let sinceMs: number;
-      if (range === "year") sinceMs = Date.now() - 365 * DAY;
-      else if (range === "30d") sinceMs = Date.now() - 30 * DAY;
-      else { const ist = new Date(Date.now() + 5.5 * 3600e3); sinceMs = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate()) - 5.5 * 3600e3; } // "today" = IST midnight
+      // Same two ranges as the dashboard it sits on, clamped by the same helper — this card
+      // must not reach further back than the screen around it (a manager asking ?range=year
+      // used to get a year of staff-watch rows). today | yesterday, one business day each.
+      const riskReach = dashboardReach((await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config);
+      const range = clampDashRange(new URL(req.url).searchParams.get("range"), riskReach);
+      const riskDayStart = new Date(businessDayStartIso()).getTime();
+      const sinceMs = range === "yesterday" ? riskDayStart - 864e5 : riskDayStart;
+      const untilMs = range === "yesterday" ? riskDayStart : Date.now();
       const sinceIso = new Date(sinceMs).toISOString();
+      const untilIso = new Date(untilMs).toISOString();
       const RISK: Record<string, "disc" | "void" | "del" | "rev"> = { order_discount: "disc", invoice_void: "void", void_invoice: "void", order_delete: "del", orders_delete: "del", payment_revert: "rev" };
       const by: Record<string, { disc: number; void: number; del: number; rev: number; total: number }> = {};
       let truncated = false;
       for (let from = 0; from < 20000; from += 1000) {
-        const page = (must(await sb.from("staff_actions").select("action,actor,created_at").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").gte("created_at", sinceIso).order("created_at", { ascending: false }).range(from, from + 999)) as { action: string; actor: string | null }[] | null) || [];
+        const page = (must(await sb.from("staff_actions").select("action,actor,created_at").eq("restaurant_id", rid).not("panel", "in", "(admin,owner,db)").gte("created_at", sinceIso).lt("created_at", untilIso).order("created_at", { ascending: false }).range(from, from + 999)) as { action: string; actor: string | null }[] | null) || [];
         for (const r of page) { const k = RISK[r.action]; if (!k) continue; const who = r.actor || "— (device only)"; const a = by[who] || (by[who] = { disc: 0, void: 0, del: 0, rev: 0, total: 0 }); a[k]++; a.total++; }
         if (page.length < 1000) break;
         if (from + 1000 >= 20000) truncated = true;
