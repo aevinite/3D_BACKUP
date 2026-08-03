@@ -6,17 +6,28 @@
 //
 // Three views of the SAME manager panel, driven headlessly:
 //
-//   1. REAL MANAGER (diag manager login) — Billing / Kitchen / Dining-sessions settings rows,
-//      the table COUNT card, the Guest-QR card and the 30-day + 12-month dashboard rows must be
-//      GONE. Not greyed, not present-but-unclickable: absent from the layout. (This is the bug
-//      that shipped: .list-item has an explicit display:flex, so the browser's [hidden] rule
-//      lost and every "hidden" sidebar row stayed on screen and merely snapped back when tapped.)
-//   2. ADMIN VIEW (?rid=…) — the same things ARE shown, greyed (.xray-off) and still usable, and
-//      the ribbon's zones dropdown lists them.
+//   1. REAL MANAGER (diag manager login) — the Billing / Kitchen / Dining-sessions settings
+//      rows, the table COUNT card and the Guest-QR card must be GONE. Not greyed, not
+//      present-but-unclickable: absent from the layout. (This is the bug that shipped:
+//      .list-item has an explicit display:flex, so the browser's [hidden] rule lost and every
+//      "hidden" sidebar row stayed on screen and merely snapped back when tapped.)
+//   2. ADMIN VIEW (?rid=…) — the SAME rows are absent for the admin too, and the ribbon +
+//      its zones dropdown work. (This used to expect them shown-greyed. That stopped being
+//      true on 2026-07-31, when the owner looked at the tinted Billing / Kitchen / Dining-
+//      sessions rows and said "there shouldn't be grayed out option also": nobody can ever
+//      grant an admin-owned setting to a manager, so a tinted row is a dead end — the admin
+//      edits them in the admin panel. The checks kept asserting the old rule and had been
+//      failing ever since; a stale check is a lie with a delay on it.)
 //   3. ADMIN ACTUAL VIEW (?rid=…&view=real) — identical to view 1 (nothing greyed left behind),
 //      while the ribbon keeps the way back.
 //
-// Plus the server rule: a real manager asking /api/editor/stats for a wide range gets today.
+// Plus the DASHBOARD RANGE rule (owner, 2026-08-03), checked in all three views: the rail
+// offers Today, and Yesterday only when this restaurant's Access setting reaches that far —
+// the 30-day and 12-month rows are gone from the MARKUP for everyone, manager, owner and admin
+// alike, so there is nothing left to grey out. (They used to be hidden-for-the-manager and
+// tinted for a higher role; the owner saw the tinted pair through owner → manager mode on
+// Aangan and said they should not exist.) And the server clamps to the same two words: asking
+// /api/editor/stats?range=year returns today, for a manager AND for the admin.
 // Never prints the admin secret (the cookie is sha256 of it, computed locally).
 //
 // Replaces scripts/verify-table-qr.mjs, which asserted the OPPOSITE (that the manager panel
@@ -54,8 +65,6 @@ const ADMIN_ONLY = [
   ['.list-item[data-settings-section="sessions"]', "Dining-sessions row", "general"],
   ['[data-mgr-hide="table_count"]', "Number-of-tables card", "tables"],
   ['[data-mgr-hide="table_qr"]', "Guest-QR-links card", "tables"],
-  ['[data-dash-range="30d"]', "30-day dashboard row", "dash"],
-  ['[data-dash-range="year"]', "12-month dashboard row", "dash"],
 ];
 
 const frameOf = (page) => page.frames().find((f) => /\/panels\/editor/.test(f.url()));
@@ -122,6 +131,31 @@ async function surveyScreen(frame, screen) {
   }, sels_(screen));
 }
 function sels_(screen) { return ADMIN_ONLY.filter(([, , s]) => s === screen).map(([sel]) => sel); }
+
+// The dashboard's range rail, as it really is in the DOM. Reads the KEYS present (not just
+// "is it visible"): a 30-day row that exists but is hidden would still be a fail now — the
+// owner's instruction was that it should not be in the panel at all.
+async function dashRail(frame) {
+  await clickIfShown(frame, '.tabs .tab[data-tab="dash"]');
+  await frame.waitForTimeout(700);
+  return frame.evaluate(() => ({
+    keys: [...document.querySelectorAll("[data-dash-range]")].map((e) => e.getAttribute("data-dash-range")),
+    shown: [...document.querySelectorAll("[data-dash-range]")].filter((e) => e.offsetParent !== null)
+      .map((e) => e.getAttribute("data-dash-range")),
+    reach: (typeof XRAY_WHO === "object" && XRAY_WHO && XRAY_WHO.dashReach) || null,
+  }));
+}
+
+// The one rule, checked identically for every viewer: Today is there, Yesterday is there when
+// (and only when) this restaurant's Access setting reaches that far, and NOTHING wider exists.
+function checkRail(who, rail) {
+  const wide = rail.keys.filter((k) => k !== "today" && k !== "yesterday");
+  check(`${who}: no wider-than-yesterday range row exists at all`, wide.length === 0, JSON.stringify(rail.keys));
+  check(`${who}: Today row is there`, rail.shown.includes("today"), JSON.stringify(rail.shown));
+  const wantY = rail.reach === "today_yesterday";
+  check(`${who}: Yesterday row ${wantY ? "IS" : "is NOT"} offered (setting says ${rail.reach})`,
+    rail.shown.includes("yesterday") === wantY, JSON.stringify(rail.shown));
+}
 const SCREENS = ["general", "tables", "dash"];
 
 async function surveyAll(frame) {
@@ -152,16 +186,13 @@ if (login.status() === 200) {
       check(`${labelOf(sel)} not on screen`, !r.present || !r.shown,
         r.present && r.shown ? `still laid out (hidden attr = ${r.hiddenAttr}) — the [hidden] rule is being overridden` : "");
     }
-    // The manager DOES keep the Today row, and we print the tabs they really have so the
-    // run is readable (which screens were reachable at all for this diag manager).
-    const keeps = await frame.evaluate(() => {
-      const t = document.querySelector('[data-dash-range="today"]');
-      return {
-        today: !!(t && t.offsetParent !== null),
-        tabs: [...document.querySelectorAll(".tabs .tab")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()),
-      };
-    });
-    check("Today dashboard row still there for the manager", keeps.today);
+    // The range rail: Today, Yesterday only if the setting allows, nothing wider in the markup.
+    checkRail("real manager", await dashRail(frame));
+    // Print the tabs they really have so the run is readable (which screens were reachable at
+    // all for this diag manager).
+    const keeps = await frame.evaluate(() => ({
+      tabs: [...document.querySelectorAll(".tabs .tab")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()),
+    }));
     console.log(`    tabs this manager sees: ${keeps.tabs.join(" · ")}`);
   }
   // Server rule: a wide range is clamped to today for a real manager.
@@ -169,6 +200,12 @@ if (login.status() === 200) {
   const body = wide.status() === 200 ? await wide.json() : null;
   check("server clamps /stats?range=year to today for a manager", body?.range === "today",
     `got range=${body?.range ?? `HTTP ${wide.status()}`}`);
+  // …and the staff-watch card on the same screen follows the same two words, so it can't
+  // summarise a year of activity under a "today" heading.
+  const riskWide = await mgrCtx.request.get(`${BASE}/api/editor/staff-risk?range=year`);
+  const riskBody = riskWide.status() === 200 ? await riskWide.json() : null;
+  check("server clamps /staff-risk?range=year to today for a manager", riskBody?.range === "today",
+    `got range=${riskBody?.range ?? `HTTP ${riskWide.status()}`}`);
 }
 await mgrCtx.close();
 
@@ -184,7 +221,7 @@ const rows = Array.isArray(listJ) ? listJ : listJ?.restaurants || [];
 const wantSlug = process.env.VERIFY_SLUG || "french-house";
 const rid = (rows.find((r) => r.slug === wantSlug) || rows[0] || {}).id;
 
-console.log("\n2. Admin view (?rid=…) — the same surfaces show GREYED and usable");
+console.log("\n2. Admin view (?rid=…) — the same admin-owned rows are absent here too");
 check("found a restaurant id to look into", !!rid, `admin restaurants → HTTP ${listR.status()}`);
 // The ONLY way an admin may enter a panel is the console's act-as hop (panelGate): it sets the
 // act-as cookie and redirects to /manager?rid=…. Landing on /manager by hand bounces to /aevinite.
@@ -200,9 +237,18 @@ if (rid) {
     const survey = await surveyAll(frame);
     for (const [sel] of ADMIN_ONLY) {
       const r = survey[sel] || { present: false };
-      check(`${labelOf(sel)} shown greyed for the admin`, !!(r.present && r.shown && r.greyed),
+      // Absent, not greyed: an admin-owned setting can never be given to a manager, so it is
+      // gone from THIS panel for everyone and lives in the admin panel instead.
+      check(`${labelOf(sel)} not on screen for the admin either`, !r.present || !r.shown,
         `present=${r.present} shown=${r.shown} greyed=${r.greyed}`);
     }
+    // The admin gets the SAME two rows as the manager — the whole point of 2026-08-03: an
+    // admin/owner looking in is not offered a range the manager's screen doesn't have.
+    checkRail("admin view", await dashRail(frame));
+    // The zones dropdown is asked on the SETTINGS screen: since the dashboard rows left the
+    // panel there is nothing dashboard-shaped to list any more, and the settings rows are the
+    // admin-only items that remain.
+    await surveyScreen(frame, "general");
     const ribbon = await frame.evaluate(() => {
       const rb = document.getElementById("xrayRibbon");
       const btn = document.getElementById("xrayZonesBtn");
@@ -216,7 +262,15 @@ if (rid) {
       };
     });
     check("admin ribbon present with a zones dropdown", ribbon.ribbon && !!ribbon.zonesLabel, JSON.stringify(ribbon.zonesLabel));
-    check("zones dropdown lists this screen's admin-only items", ribbon.zoneRows.some((t) => /dashboard/i.test(t)), JSON.stringify(ribbon.zoneRows));
+    // The dropdown lists the real manager POWERS this restaurant switched off. With every power
+    // granted (the diag restaurant's normal state) the honest answer is "Nothing is off here."
+    // What it must never do is stay EMPTY, or list something nobody can grant.
+    check("zones dropdown answers something honest", ribbon.zoneRows.length > 0, JSON.stringify(ribbon.zoneRows));
+    check("zones dropdown never lists an admin-owned setting as grantable",
+      !ribbon.zoneRows.some((t) => /billing settings|kitchen settings|dining session|number-of-tables|guest-qr/i.test(t)),
+      JSON.stringify(ribbon.zoneRows));
+    check("no dashboard range is listed as 'not in the manager's panel' any more",
+      !ribbon.zoneRows.some((t) => /30-day|12-month|dashboard/i.test(t)), JSON.stringify(ribbon.zoneRows));
     check("zones dropdown offers 'See the actual manager panel'", ribbon.simRow);
   }
 }
@@ -271,6 +325,7 @@ if (admPage) {
       tabs: [...document.querySelectorAll(".tabs .tab")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()),
     }));
     check("nothing is left greyed-out in the actual view", back.leftoverGreyed.length === 0, JSON.stringify(back.leftoverGreyed));
+    checkRail("admin actual view", await dashRail(frame));
     console.log(`    tabs shown in the actual view: ${back.tabs.join(" · ")}`);
     check("slim ribbon keeps the way back to the full admin view", back.ribbon && back.full, JSON.stringify(back.tag.trim()));
   }

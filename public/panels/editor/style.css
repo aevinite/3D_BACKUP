@@ -605,12 +605,6 @@ html[data-theme="dark"] .dash-card .kchip.dn { color: #f08c8c; }
 .dash-card.kalert { border-color: color-mix(in srgb, #c05252 55%, var(--line)); background: color-mix(in srgb, #c05252 6%, var(--panel)); }
 .dash-chart .narrate { font-size: 12px; margin-top: 10px; padding: 8px 12px; border-radius: 9px; background: rgba(185,127,53,.10); color: var(--text); line-height: 1.5; }
 .dash-chart .narrate i { color: var(--gold); margin-right: 6px; }
-/* weekday × hour heatmap: 1 label col + 24 hour cols */
-.hm { display: grid; grid-template-columns: 36px repeat(24, 1fr); gap: 2.5px; margin-top: 8px; }
-.hm .lab { font-size: 10px; font-weight: 700; color: var(--muted); align-self: center; }
-.hm .hx { font-size: 8.5px; color: var(--muted); text-align: center; }
-.hm .c { aspect-ratio: 1; border-radius: 3px; min-width: 0; }
-.hm .c.peak { outline: 2px solid var(--gold); outline-offset: 1px; }
 /* wrap the customers table so a narrow screen scrolls it sideways instead of
    clipping the right-hand columns under the page's overflow guard */
 .dash-body { overflow-x: auto; }
@@ -1261,7 +1255,7 @@ html[data-theme="light"] .ft-status {
 .subtab:hover { border-color: color-mix(in srgb, var(--gold) 45%, transparent); color: var(--text); }
 .subtab.active { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
 
-/* Dashboard range toggle (Today / 30 days / Year). */
+/* Dashboard range toggle (Today / Yesterday). */
 .dash-head { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .dash-toggle { display: inline-flex; gap: 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px; }
 .dash-range { background: transparent; border: 0; color: var(--muted); border-radius: 999px; padding: 7px 16px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
@@ -2679,7 +2673,7 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .plat-acts .btn { padding: 7px 12px; font-size: 12.5px; }
 @media (max-width: 1000px) { .plat-board { grid-template-columns: repeat(2, 1fr); } }
 
-/* ── Dashboard: left sub-nav (Today / 30 days / Year) + Today summary box ──── */
+/* ── Dashboard: left sub-nav (Today / Yesterday) + Today summary box ──────── */
 .dash-layout { display: grid; grid-template-columns: 168px 1fr; gap: 20px; align-items: start; }
 .dash-nav { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; }
 .dash-navitem { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 11px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; text-align: left; font-family: inherit; }
