@@ -169,6 +169,60 @@ for (const [w, h, tag] of [[1194, 834, "tablet 1194px"], [1024, 768, "iPad 1024p
 await page.setViewportSize({ width: 1194, height: 834 });
 await page.waitForTimeout(700);
 
+// ── 4b · THE iPHONE HOME BAR AND THE SAMSUNG NAVIGATION BAR ───────────────────
+// Owner, 2026-08-03: "for the iPhone where you have to close the app from the bottom, for the
+// Samsung where there is a navigation bar — make it whole dynamic." The host (PanelFrame)
+// measures the real insets and pushes them in as --safe-t / --safe-b, so simulating them is
+// exactly what a real device does. Anything a finger must reach has to sit ABOVE that band —
+// otherwise the control is behind the home bar and a swipe closes the app instead.
+{
+  await page.setViewportSize({ width: 390, height: 844 });                 // iPhone-ish
+  await page.waitForTimeout(600);
+  // The insets are SET AND MEASURED inside ONE synchronous evaluate. The host (PanelFrame)
+  // re-writes --safe-t / --safe-b on resize and on a timer with the REAL device values, which
+  // are 0 in a headless desktop browser — so setting them, awaiting, then measuring reads
+  // whatever won the race and this check flip-flopped between 46px and 12px. A style change
+  // followed by a layout read in the same task cannot be raced.
+  const measureInsets = (sel) => F.evaluate((s) => {
+    const SAT = 47, SAB = 34, root = document.documentElement;
+    const prevT = root.style.getPropertyValue("--safe-t"), prevB = root.style.getPropertyValue("--safe-b");
+    root.style.setProperty("--safe-t", SAT + "px");
+    root.style.setProperty("--safe-b", SAB + "px");
+    const cs = getComputedStyle(document.querySelector(s));               // forces a sync recalc
+    const out = { padT: parseFloat(cs.paddingTop), padB: parseFloat(cs.paddingBottom), under: [] };
+    const vh = window.innerHeight;
+    for (const q of ["#hamburger", "#quickOrderBtn", ".fnav", ".tile:last-of-type", "#sendOrder", ".om-viewpill"]) {
+      const el = document.querySelector(q);
+      if (!el || !el.offsetParent) continue;
+      const r = el.getBoundingClientRect();
+      if (r.bottom > vh - SAB + 1 && r.top < vh) out.under.push(`${q} (bottom ${Math.round(r.bottom)} of ${vh}; the band starts at ${vh - SAB})`);
+    }
+    root.style.setProperty("--safe-t", prevT); root.style.setProperty("--safe-b", prevB);
+    return out;
+  }, sel);
+
+  const floorIn = await measureInsets(".layout");
+  expect(floorIn.under.length === 0, floorIn.under.length ? `controls sit under the home bar / nav bar: ${floorIn.under.join(", ")}` : "nothing a finger needs sits under the iPhone home bar / Samsung nav bar");
+  expect(floorIn.padB >= 34, `the floor reserves the bottom inset (${Math.round(floorIn.padB)}px ≥ 34)`);
+  const barIn = await measureInsets(".topbar");
+  expect(barIn.padT >= 47, `the top bar clears the notch (${Math.round(barIn.padT)}px ≥ 47)`);
+  await shot("safe-area-iphone");
+  // the same for the order screen, which is 100dvh and easy to forget
+  if (await vis("#quickOrderBtn")) {
+    await F.click("#quickOrderBtn");
+    await F.waitForSelector(".om.lite", { timeout: 8000 });
+    const om = await measureInsets(".om.lite");
+    expect(om.padB >= 34, `the order screen reserves the bottom inset (${Math.round(om.padB)}px ≥ 34)`);
+    expect(om.padT >= 47, `the order screen clears the notch (${Math.round(om.padT)}px ≥ 47)`);
+    expect(om.under.length === 0, om.under.length ? `order-screen controls under the band: ${om.under.join(", ")}` : "the order screen's own controls clear the band too");
+    await shot("safe-area-order");
+    await F.click("#omExit");
+    await page.waitForTimeout(800);
+  }
+  await page.setViewportSize({ width: 1194, height: 834 });
+  await page.waitForTimeout(700);
+}
+
 // ── 5 · BOTH SKINS: no label may sink into its background ─────────────────────
 const flipTheme = async () => {
   await F.click("#hamburger");
@@ -264,6 +318,29 @@ else {
   const opsTxt = (await F.textContent(".detail-pop .phead-ops").catch(() => "")) || "";
   expect(/KOT|Move|Table type/i.test(opsTxt), `popup: its top row carries the table operations (${opsTxt.replace(/\s+/g, " ").trim()})`);
   await shot("table-popup");
+
+  // ‹ › STEP BETWEEN TABLES WITHOUT CLOSING — "toggle the tables very fast".
+  {
+    const step = await F.evaluate(() => {
+      const bs = [...document.querySelectorAll("[data-step-table]")];
+      return { n: bs.length, targets: bs.map((b) => b.dataset.stepTable), before: (document.querySelector(".detail-pop h2") || {}).textContent };
+    });
+    expect(step.n === 2, `the popup carries ‹ › to step tables (found ${step.n})`);
+    if (step.n === 2) {
+      const nextT = step.targets[1];
+      await F.click(`[data-step-table="${nextT}"]`);
+      await page.waitForTimeout(1600);
+      const after = await F.evaluate(() => ({
+        head: (document.querySelector(".detail-pop h2") || {}).textContent || "",
+        stillOpen: !!document.querySelector(".detail-pop"),
+      }));
+      expect(after.stillOpen, "…and stepping keeps the popup open (no close-then-reopen)");
+      expect(after.head.trim() !== (step.before || "").trim(), `…and it really moved on (${(step.before || "").trim()} → ${after.head.trim()})`);
+      // step back to the table the rest of this section expects
+      await F.click(`.tile[data-t="${busyT}"]`).catch(() => {});
+      await F.waitForSelector(".detail-pop .phead-ops", { timeout: 10000 }).catch(() => {});
+    }
+  }
 
   // A KOT operation opens its OWN picker — the pick is that operation's second step.
   // Retried ONCE: this panel is live, so a realtime refresh landing on the same tick can
@@ -366,7 +443,20 @@ if (READ_ONLY) {
     await page.waitForTimeout(2500);
 
     if (!(await F.waitForSelector(".detail-pop #closeTable", { timeout: 8000 }).catch(() => null))) { soft("✕ Close table disappeared after payment"); continue; }
-    await F.click(".detail-pop #closeTable");
+    // A FINISHED table (everything served, bill paid) grows a ⏻ close ON ITS TILE, like the
+    // manager's — so a waiter clearing tables doesn't have to open each one. Close THROUGH it,
+    // which proves the control exists, is wired, and shares the popup's close path.
+    await F.click(".detail-pop #detailClose");
+    await page.waitForTimeout(1400);
+    const tileClose = await F.waitForSelector(`.tile[data-t="${destT}"] .tclose`, { timeout: 9000 }).catch(() => null);
+    if (!tileClose) { soft(`the finished tile T${destT} grew no ⏻ close control`); continue; }
+    ok(`a finished table shows ⏻ close on its TILE (T${destT}) — manager parity`);
+    // A finished tile carries the MOST controls of any state (⏻ + ＋ Take order), and the
+    // clipping sweep above ran before this table existed — so measure this one now, in the
+    // state that has the most to fit.
+    const finClip = await F.evaluate((x) => { const e = document.querySelector(`.tile[data-t="${x}"]`); return e ? { sh: e.scrollHeight, ch: e.clientHeight } : null; }, destT);
+    expect(finClip && finClip.sh <= finClip.ch + 1, finClip ? `the finished tile fits its own controls (${finClip.sh}px in ${finClip.ch}px)` : "could not measure the finished tile");
+    await tileClose.click();
     if (!(await F.waitForSelector("#confirmOverlay:not([hidden])", { timeout: 8000 }).catch(() => null))) { bad("closing a table fired with NO confirm — that breaks the two-step rule"); break; }
     ok("closing a table asks a confirm first (its second step)");
     await F.click("#confirmYes");

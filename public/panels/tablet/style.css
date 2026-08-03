@@ -49,7 +49,9 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 @media (max-width: 760px) { .top-actions .theme-toggle { display: none; } }
 
 /* Full-width floor (the table detail is always a popup); left/right safe-area padded. */
-.layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 14px; padding: 12px calc(14px + env(safe-area-inset-right, 0px)) 12px calc(14px + env(safe-area-inset-left, 0px)); align-items: start; }
+/* The bottom padding carries --sab (the iPhone home bar / the Samsung navigation bar), or the
+   last row of tables sits UNDER it and the tile you need is the one you can't tap. */
+.layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 14px; padding: 12px calc(14px + env(safe-area-inset-right, 0px)) calc(12px + var(--sab)) calc(14px + env(safe-area-inset-left, 0px)); align-items: start; }
 /* A grid item's default min-width is AUTO, so a nowrap scrolling row inside the floor (the
    filter chips, the legend) stretched the whole column past the viewport and the PAGE
    scrolled sideways — 481px of document on a 360px phone. min-width:0 lets those rows
@@ -182,12 +184,16 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    merged table LIST — the ⇄ itself never goes, or a joined table would read as a solo one */
 @container (max-width: 56px) { .t-linenum { display: none; } }               /* the count, keep the bar */
 @container (max-width: 50px) { .t-act { display: none; } }                   /* tap the tile instead */
-.tacc, .tpay { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
+.tacc, .tpay, .tclose { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;
   width: clamp(22px, 17cqw, 36px); border-radius: clamp(6px, 6cqw, 10px);
   font-size: clamp(10px, 9cqw, 15px); font-weight: 800; cursor: pointer; }
 .tacc { background: linear-gradient(180deg, #34d399, #22c55e); color: #06281a; }
 .tpay { background: var(--panel-2); border: 1px solid rgba(34,197,94,.5); color: #4ade80; }
-.tacc:hover, .tpay:hover { filter: brightness(1.08); }
+/* ⏻ close a FINISHED table — red, and FIRST in the row (the manager put close on the left of
+   ＋ Take order, deliberately away from the button a waiter reaches for all night). */
+.tclose { order: -1; background: color-mix(in srgb, #ef4444 16%, var(--panel-2)); border: 1px solid rgba(239,68,68,.55); color: #fca5a5; }
+html[data-theme="light"] .tclose { color: #b91c1c; }
+.tacc:hover, .tpay:hover, .tclose:hover { filter: brightness(1.08); }
 /* Merged party (mig 249): the "⇄ with T…" mark every member tile wears, so a joined table
    never reads as free/solo. Accent-coloured — it is a STATE, not decoration. On a TILE it
    sits in the top row where the seat chip would be (never its own row — that overflowed the
@@ -701,8 +707,12 @@ body.om-mode #tabletClose { display: none; }
    every size: a browse screen (menu + ✎ per dish + floating "View order" pill) and a
    SEPARATE view-order screen (items + ONE note + SEND, one scroll). Overrides the old
    in-panel lite layout above. Desktop no longer keeps a side pane during ordering. */
+/* Bottom padding carries --sab: this screen is 100dvh, so without it the dish grid's last row
+   (and, on the review screen, SEND) end up under the home bar / navigation bar. */
 .om.lite { position: fixed; top: 0; left: 0; right: 0; z-index: 45; background: var(--bg);
-  display: flex; flex-direction: column; height: 100vh; height: 100dvh; padding: calc(10px + var(--sat)) 14px 10px; box-sizing: border-box; }
+  display: flex; flex-direction: column; height: 100vh; height: 100dvh;
+  padding: calc(10px + var(--sat)) calc(14px + env(safe-area-inset-right, 0px)) calc(10px + var(--sab)) calc(14px + env(safe-area-inset-left, 0px));
+  box-sizing: border-box; }
 /* Compact ONE-ROW header: the table number as a small pill, the search beside it. */
 .om.lite .om-head { padding: 2px 0 8px; margin: 0; align-items: center; flex-wrap: nowrap; gap: 8px; }
 .om.lite .om-head h2 { flex: 0 0 auto; font-size: 13px; font-weight: 800; margin: 0;
@@ -821,6 +831,19 @@ body:has(.detail-pop) #tabletClose { display: none; }
 /* KOT & table operations AT THE TOP of the popup (owner, 2026-08-03 — manager style). */
 .phead-ops { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 0 10px; border-bottom: 1px solid var(--line); }
 .phead-ops .btn { flex: 0 0 auto; }
+
+/* ‹ › step to the previous/next table without closing the popup — "toggle the tables very
+   fast" (owner, 2026-08-03). Full finger targets, and they sit left of the pinned ✕ so a
+   thumb reaching for "next" can't find "close" instead. */
+.phead-step { display: inline-flex; gap: 6px; flex: 0 0 auto; margin-right: 46px; }
+.pstep { width: 40px; height: 40px; flex: 0 0 auto; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--panel-2); color: var(--text); font-size: 20px; font-weight: 800; line-height: 1;
+  cursor: pointer; font-family: inherit; -webkit-tap-highlight-color: transparent; }
+.pstep:hover { border-color: var(--gold); color: var(--gold); }
+.pstep:active { transform: scale(.94); }
+/* The header already reserves room for the ✕ on its right; with the steppers there, that
+   padding would double up and squeeze the table's name. */
+.detail-pop .phead:has(.phead-step) { padding-right: 0; }
 
 /* ⚡ Quick order, step 2: "which table gets this order?" — picking sends. */
 .qdest-overlay { position: fixed; inset: 0; z-index: 100001; background: rgba(4,8,18,.66);

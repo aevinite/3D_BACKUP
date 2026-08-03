@@ -169,11 +169,29 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
     const end = rest.search(/\n(?:async )?function [A-Za-z_]/);
     return end < 0 ? rest : rest.slice(0, end);
   };
-  // 1 · ✕ Close table asks before it closes.
+  // 1 · Closing a table asks before it closes — through ONE shared path.
+  // There are two doors now (the popup's ✕ Close table and a finished tile's ⏻), and the flow
+  // behind them carries both the optimistic local drop AND the reason-code "close anyway"
+  // ladder. Two copies of that would be two places to forget the reason codes — which is
+  // exactly how a paid-but-unserved table once dead-ended with no "close anyway" at all. So
+  // the check is: the shared function confirms, and every door routes through it.
+  // POSITIONAL, not just "a confirm appears somewhere in there": the function ALSO contains
+  // the second-chance "Close anyway" dialog, so a text match was satisfied by that one and
+  // passed a body whose FIRST confirm had been deleted (proven while writing this).
+  const closeFn = fnBody("closeTableAndFree");
+  const firstAsk = closeFn.search(/await confirmDialog\(/);
+  const firstPost = closeFn.search(/api\("POST",\s*`\/sessions\/\$\{s\.id\}\/close`/);
   check(
-    "tablet: ✕ Close table asks a confirm before closing",
-    /#closeTable[\s\S]{0,900}?confirmDialog\(`Close table/.test(src),
-    `${TABLET}: the #closeTable handler must await confirmDialog() before POSTing the close.\n    A single tap freeing an occupied table is the mis-tap this rule exists for.`,
+    "tablet: the shared close path asks a confirm BEFORE it posts the close",
+    firstAsk >= 0 && firstPost >= 0 && firstAsk < firstPost,
+    `${TABLET}: closeTableAndFree() must await confirmDialog() BEFORE POSTing /sessions/:id/close\n    (found ask at ${firstAsk}, post at ${firstPost}). A single tap freeing an occupied table is\n    the mis-tap this rule exists for — and note the function's own "Close anyway" dialog comes\n    AFTER the post, so only the order of the two proves anything.`,
+  );
+  check(
+    "tablet: every way of closing a table goes through that ONE path",
+    /#closeTable[\s\S]{0,200}?closeTableAndFree\(/.test(src)
+      && /tclose\[data-quick='close'\][\s\S]{0,200}?closeTableAndFree\(/.test(src)
+      && (src.match(/sessions\/\$\{s\.id\}\/close/g) || []).length <= 2,   // the try + the forced retry, both inside closeTableAndFree
+    `${TABLET}: the popup's #closeTable AND the finished tile's .tclose must both call\n    closeTableAndFree(). A second inline close would be a second place to forget the\n    reason-code ladder ('unpaid' | 'cooking' | 'both') that offers "Close anyway".`,
   );
   // 2 · Settling a bill goes through the payment-method sheet (that sheet IS step 2 — so
   //     there must be no extra confirmDialog before it).
