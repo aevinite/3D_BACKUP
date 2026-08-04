@@ -148,6 +148,8 @@ type CatRow = { category: string; qty: number; revenue: number };
 type HourRow = { hour: number; orders: number; revenue: number };
 type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: PayRow[]; bucket?: string; drillBucket?: string; drillRows?: unknown[];
   staffPay?: { paidOut: number; people: number; entries: number } | null;
+  // Tips collected in the window (mig 268 / sweep F20). Null = nothing tipped, so no tile.
+  tips?: { collected: number; orders: number } | null;
   // Team & pay (mig 220): its own shapes — cash view, cost view, per-person, and the
   // performance rows share `rows`.
   cashRows?: unknown[]; monthRows?: unknown[]; people?: unknown[];
@@ -1093,6 +1095,17 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
               value={inr(data.staffPay.paidOut)}
               sub={data.staffPay.entries ? `${nfmt(data.staffPay.entries)} payment${data.staffPay.entries === 1 ? "" : "s"} to ${nfmt(data.staffPay.people)} ${data.staffPay.people === 1 ? "person" : "people"}` : "nothing paid out"}
               onClick={() => onOpenReport("team")} title="Open the Team & pay report" />
+          )}
+          {/* TIPS COLLECTED (mig 154 stored them; mig 268 surfaced them — sweep F20). Migration
+              154 said "Reports read SUM(orders.tip)" and only the manager's Z-report ever did,
+              so an owner had no tips figure at any range. It is money staff are OWED, not the
+              restaurant's revenue — tone "info" and its own tile, deliberately never folded into
+              Revenue or Average bill (mig 154 keeps a tip out of subtotal/tax/total). Null when
+              nothing was tipped, so a restaurant that takes no tips sees no tile at all. */}
+          {data.tips && (
+            <Stat label="Tips collected" tone="info" icon="fa-hand-holding-heart"
+              value={inr(data.tips.collected)}
+              sub={`on ${nfmt(data.tips.orders)} bill${data.tips.orders === 1 ? "" : "s"} — for the team, not revenue`} />
           )}
           {/* INVENTORY on the day sheet (mig 227) — same treatment as staff pay: a null
               payload (module off) keeps every tile off the sheet entirely. Three DIFFERENT

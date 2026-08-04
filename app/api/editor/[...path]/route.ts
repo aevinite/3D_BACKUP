@@ -2762,27 +2762,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(data || null);
     }
 
-    // sessions/open-all — open EVERY not-yet-open table in ONE round-trip (mig 102), instead
-    // of the client firing one POST /sessions/open per table (300 tables = 300 round-trips to
-    // Sydney). The RPC mirrors the single-open logic + approves pending requests; the client
-    // pairs it with optimistic tiles so the floor flips to "open" instantly.
-    if (a === "sessions" && b === "open-all") {
-      const { data, error } = await sb.rpc("lfh_staff_open_all_tables", { p_restaurant_id: rid });
-      if (error) throw new Error(error.message);
-      await log("editor", "table_open_all", { restaurant_id: rid, detail: `opened ${(data && data.opened) || 0}`, device_id: dev });
-      return ok(data || { opened: 0 });
-    }
-
-    // sessions/close-all — close every CLOSEABLE open table in ONE round-trip (mig 103). Mirrors
-    // closeSession's guard (skips tables that owe money or are still cooking) + archiving; returns
-    // { closed, skipped, closed_tables } so the client can offer UNDO. force=false → same safety as
-    // the per-table close (won't force-close unpaid/cooking tables).
-    if (a === "sessions" && b === "close-all") {
-      const { data, error } = await sb.rpc("lfh_staff_close_all_tables", { p_restaurant_id: rid, p_force: false });
-      if (error) throw new Error(error.message);
-      await log("editor", "table_close_all", { restaurant_id: rid, detail: `closed ${(data && data.closed) || 0}, skipped ${(data && data.skipped) || 0}`, device_id: dev });
-      return ok(data || { closed: 0, skipped: 0, closed_tables: [] });
-    }
+    // ── "OPEN ALL / CLOSE ALL TABLES" IS GONE (owner, 2026-08-04) ──────────────────────────
+    // The panel's "⬆ Open all / ⬇ Close all" card was removed on 2026-07-31 once the lifecycle
+    // stopped needing it (the first order starts the party; a person taps ✓ Close to end it —
+    // mig 254, "no table ends itself"). These two endpoints were left behind with no caller,
+    // and the owner's call is that the option should not exist at all: "we don't even need
+    // close every table and all that stuff. So remove that option completely."
+    //
+    // Removing them rather than leaving them is the right shape. lfh_staff_close_all_tables
+    // walked every open session, closed it, and with force=true cancelled food still cooking
+    // and bills still unpaid — the most destructive action in the product, reachable over HTTP
+    // from no screen at all. Both RPCs are dropped by migration 268.
+    //
+    // Their activity-log labels ("Opened every table" / "Closed every table") deliberately STAY
+    // in the panel + admin label maps: old staff_actions rows still carry those codes, and the
+    // log has to keep reading as English rather than leaking a raw key.
 
     // sessions/:id/close | auto-approve | shift
     // Uses the SHARED closeSession so the manager's rule is identical to the tablet's

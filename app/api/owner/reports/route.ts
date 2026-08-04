@@ -423,6 +423,32 @@ export async function GET(req: NextRequest) {
           else staffPay = { paidOut: 0, people: 0, entries: 0 };
         }
       }
+      // TIPS COLLECTED in this window (mig 154 stored them, mig 268 surfaces them — sweep F20).
+      // Migration 154's own header says "Reports read SUM(orders.tip) as tips collected", and
+      // exactly one report did: the manager's Z-report. The OWNER had no tips figure at any
+      // range, for any restaurant — yet it is money staff are owed, so it belongs on the day
+      // sheet beside "money out". It is deliberately NOT added to revenue: a tip is extra money
+      // for staff on top of the bill and must not enter subtotal/tax/total (mig 154's rule).
+      // Same nullable shape as staffPay: null keeps the line off the sheet entirely, so a
+      // restaurant that takes no tips sees no trace of it rather than a fake ₹0.
+      let tips: { collected: number; orders: number } | null = null;
+      if (type === "daysummary") {
+        const tipIds = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
+        if (tipIds.length) {
+          // One indexed read (idx_orders_tips is partial — only orders that carry a tip).
+          const t = await sb.rpc("lfh_owner_tips", {
+            p_restaurant_id: tipIds.length === 1 ? tipIds[0] : null,
+            p_from: from, p_to: to,
+            p_ids: tipIds.length === 1 ? null : tipIds,
+          });
+          // Fail-open like the inventory lines below: a tips hiccup must never blank the sheet.
+          if (!t.error) {
+            const r0 = ((t.data ?? []) as Row[])[0] || {};
+            const collected = num(r0.tips);
+            if (collected > 0) tips = { collected, orders: Number(r0.tipped_orders) || 0 };
+          }
+        }
+      }
       // ── INVENTORY on the money reports (mig 227) ────────────────────────────
       // Day summary gets the inventory money lines in the SAME shape as staffPay: a
       // NULL keeps them off the sheet entirely rather than printing fake zeroes, so a
@@ -494,7 +520,7 @@ export async function GET(req: NextRequest) {
         }
       }
       } catch { inventory = null; costSeries = null; }
-      return { type, range, bucket, rows, totals, tax, payments, staffPay, inventory, costSeries, drillBucket, drillRows };
+      return { type, range, bucket, rows, totals, tax, payments, staffPay, tips, inventory, costSeries, drillBucket, drillRows };
     }
 
     // ── breakdown reports: dishes / categories / payments / hourly ──
