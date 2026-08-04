@@ -67,6 +67,11 @@ const WITHHELD_FROM_AV = {
   250: "ordering at a merged table — not released (needs 249)",
   251: "the deletion audit — not released",
   260: "a joined table cannot be given a second party — not released (needs 249)",
+  267: "the database sweep fixes — NOT released, and it needs an explicit owner yes. It re-locks 17 "
+     + "staff-only functions (incl. close-all-tables and the bill counter), moves the activity-log "
+     + "breadcrumb off the floor topic, drops 11 unused indexes and schedules the 2 missing cron "
+     + "jobs. The GRANT half almost certainly applies to AV live too — run "
+     + "`npm run verify:grants -- --av` (read-only) to see, then ask before changing anything there.",
 };
 
 // ── WHICH RELEASE IS AV LIVE ON? ─────────────────────────────────────────────────────────────
@@ -116,6 +121,18 @@ for (const [n, sql] of migSource()) {
   // it. Date <table>_pkey by the migration that creates the table, or it reads as "in no
   // migration at all" — which the check calls drift, wrongly (both new tables did on 2026-08-02).
   for (const m of sql.matchAll(/CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:public\.)?([a-z0-9_]+)/gi)) { add(m[1]); add(m[1] + "_pkey"); }
+  // DYNAMICALLY-BUILT NAMES. Migration 078 gives every tenant table an index leading with
+  // restaurant_id inside a DO loop: `format('CREATE INDEX IF NOT EXISTS %I …', 'idx_'||t||'_restaurant', t)`.
+  // The name never appears literally, so the regexes above cannot see it and all ~20 of those
+  // indexes read as "in no migration at all" — which this check calls drift, wrongly, the moment
+  // the two stacks diverge on one (found 2026-08-04 when mig 267 dropped six of them as redundant
+  // with their table's own primary key). Date them by the loop that creates them.
+  for (const m of sql.matchAll(/'idx_'\s*\|\|\s*t\s*\|\|\s*'_restaurant'/gi)) {
+    void m;
+    for (const t of sql.matchAll(/ARRAY\[([^\]]*)\]/g)) {
+      for (const name of t[1].matchAll(/'([a-z0-9_]+)'/gi)) add("idx_" + name[1] + "_restaurant");
+    }
+  }
 }
 // "orders :: idx_x" → "idx_x";  "lfh_f(a uuid, b text)" → "lfh_f"
 const bare = (k) => String(k).split(" :: ").pop().split("(")[0].trim().toLowerCase();
