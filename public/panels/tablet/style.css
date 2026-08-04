@@ -641,6 +641,20 @@ html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c;
   .floor-legend .lgi, .floor-legend .lgcap { flex: 0 0 auto; }
   .my-section { padding: 6px 11px; margin-bottom: 8px; font-size: 12px; }
   .layout { padding-top: 8px; }
+  /* THE FOUR FILTERS MUST ALL FIT (T4 sweep, 2026-08-04). At 360px the row measured ~332px of
+     chips in ~332px of space, so "Free 26" was cut through its own word — the fade above says
+     "there is more this way", but a filter you have to discover by swiping is a filter most
+     waiters will never use, and a word sliced in half reads as a rendering fault whatever the
+     fade does. Tighter padding and count pills bring the four to ~300px, so nothing is cut and
+     the fade goes back to being for the legend, which genuinely cannot fit. */
+  .fnav { padding: 7px 8px; font-size: 12px; gap: 4px; }
+  .fnav em { font-size: 10.5px; padding: 1px 5px; }
+  .floor-nav { gap: 5px; }
+  /* The legend still scrolls — but drop its two ALL-CAPS labels ("inside:" / "outline:"), which
+     cost ~90px and are the least informative part of it: a filled dot and an outlined ring are
+     already visibly different things. That keeps the words a waiter actually reads on screen
+     instead of cut off at "OUTL". */
+  .floor-legend .lgcap { display: none; }
 
   /* When a table is open, the panel fills the screen; the floor hides behind it. */
   body.tbl-open .floor { display: none; }
@@ -879,6 +893,32 @@ body:has(.detail-pop) #tabletClose { display: none; }
 /* KOT & table operations AT THE TOP of the popup (owner, 2026-08-03 — manager style). */
 .phead-ops { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 0 10px; border-bottom: 1px solid var(--line); }
 .phead-ops .btn { flex: 0 0 auto; }
+
+/* ── THE ORDERS MUST BE THE PART YOU CAN SEE (T4 sweep, 2026-08-04) ──────────────────────────
+   Measured on the owner's phone (360×780), a table with ONE dish on it: the popup was 640px of
+   the 780px screen, and inside it the scrolling order list got 192px while the five action
+   buttons took 204px and the bill bar 91px. The single dish line began at y=385 and the list's
+   visible bottom edge was y=386 — so opening a table showed the waiter NO dishes at all until
+   they discovered that a 192px strip scrolls. The button stack had more room than the bill it
+   describes, and "Mark bill paid" / "Close table" were the parts fully in view.
+   Two changes, both phone-only, and neither hides a control:
+     · the card uses the screen it already had (88dvh → 95dvh ≈ +55px);
+     · the actions go three-to-a-row instead of two, which is ~100px back.
+   Together the order list roughly DOUBLES, so a normal table now fits with no scroll at all and
+   a busy one always shows its first dishes. (Third time this panel has buried something the
+   waiter actually opened it for — 2026-07-05, 2026-08-03, and this.) */
+@media (max-width: 600px) {
+  .detail-pop { max-height: 95dvh; }
+  .dacts { gap: 6px; padding: 8px 16px 10px; }
+  /* min-width:120px forced two per row at this width; 28% lets three sit together. The primary
+     still takes the widest share, and every button keeps a 44px finger target. */
+  /* EQUAL widths, including the primary. Giving ＋ Take order a double share put the sixth
+     action (🖨 Print bill, added the same day) onto a THIRD row and took the order list back to
+     204px — so the share is equal and six buttons sit three-and-three. The primary still stands
+     out: it keeps the gold fill. Anyone adding a SEVENTH action here should re-measure. */
+  .dacts .btn, .dacts .btn.primary { flex: 1 1 28%; min-width: 0; padding: 9px 8px; font-size: 12.5px; min-height: 44px; }
+  .foot { padding: 10px 16px; }
+}
 
 /* ‹ › step to the previous/next table without closing the popup — "toggle the tables very
    fast" (owner, 2026-08-03). Full finger targets, and they sit left of the pinned ✕ so a

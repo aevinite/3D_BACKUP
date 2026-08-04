@@ -73,9 +73,17 @@
     window.addEventListener("online", () => { if (connStatus === "offline") setStatus("weak"); });
   }
 
+  // A FAILED BOOT MUST NOT BE REMEMBERED FOREVER (T4 sweep, 2026-08-04). This used to cache
+  // the promise unconditionally — including a REJECTED one. So a single blip on the way up
+  // (a cold start, a slow tunnel, /api/rt-config answering 500 once) meant `sb` stayed null for
+  // the life of the page: every subscribe() returned immediately and every wake() — visibility,
+  // focus, pageshow, `online` — was a no-op, because nothing ever asked for the client again.
+  // The panel sat on its slow backstop while the device had a perfectly good connection, and the
+  // badge said "weak" with no way back. Forgetting the rejection is what lets ensureClient()
+  // (below) genuinely try again on the next wake.
   async function getClient() {
     if (sbPromise) return sbPromise;
-    sbPromise = (async () => {
+    const p = sbPromise = (async () => {
       const cfg = await (await fetch("/api/rt-config" + (RT_RID_Q ? "?rid=" + encodeURIComponent(RT_RID_Q) : ""), { cache: "no-store" })).json();
       RT_RID = cfg.restaurantId || ""; // this panel's restaurant → cross-tenant event filter (noteEvent)
       // SELF-HOSTED: import the Supabase client from OUR origin (built by
@@ -87,7 +95,11 @@
       const mod = await import("/vendor/supabase.js");
       return mod.createClient(cfg.url, cfg.anonKey, { realtime: { worker: true, params: { eventsPerSecond: 10 } } });
     })();
-    return sbPromise;
+    // Drop the memo on failure so the NEXT call re-boots. The rejection still reaches this
+    // caller (we attach a separate handler rather than swallowing it), and the `p === sbPromise`
+    // test means a newer boot already in flight is never cleared out from under itself.
+    p.catch(() => { if (sbPromise === p) sbPromise = null; });
+    return p;
   }
 
   function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }
@@ -196,13 +208,22 @@
           })
       );
     };
-    try {
-      sb = await getClient();
-      subscribe();
-    } catch (e) {
-      metrics.errors++; // realtime failed to boot — the backup poll keeps the panel alive
-      setStatus((typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "weak");
-    }
+    // BOOT — or RE-BOOT — the client and its channels. Kept as a function (it used to be an
+    // inline try/catch) so a wake AFTER a failed boot can try again instead of finding `sb` null
+    // and giving up: see the note on getClient(). Answers true once there is a live client.
+    const ensureClient = async () => {
+      if (sb) return true;
+      try {
+        sb = await getClient();
+        subscribe();
+        return true;
+      } catch (e) {
+        metrics.errors++; // realtime failed to boot — the backup poll keeps the panel alive
+        setStatus((typeof navigator !== "undefined" && navigator.onLine === false) ? "offline" : "weak");
+        return false;
+      }
+    };
+    await ensureClient();
 
     // Catch anything missed while the tab slept / lost focus / dropped network, AND
     // rebuild the (likely dead) socket on wake. visibilitychange + focus + pageshow
@@ -220,6 +241,15 @@
       if (document.hidden) return;
       clearTimeout(idleTimer);
       const now = Date.now();
+      // NO CLIENT AT ALL — the boot failed. Try to build one now (the whole point of the
+      // getClient memo fix), and refetch either way so the panel still catches up even if the
+      // socket stays down. Throttled by the same 1.5s window as a socket rebuild.
+      if (!sb) {
+        if (now - lastWake < 1500) { fireAll(); return; }
+        lastWake = now;
+        ensureClient().then(() => fireAll(), () => fireAll());
+        return;
+      }
       if (torndown) { torndown = false; lastWake = now; subscribe(); fireAll(); return; } // reconnect after idle
       if (now - lastWake < 1500) { fireAll(); return; } // already rebuilt this wake — just refetch
       lastWake = now;

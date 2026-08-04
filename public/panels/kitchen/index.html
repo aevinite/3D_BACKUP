@@ -6,7 +6,7 @@
   <title>Kitchen — live orders</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=8c474404">
+  <link rel="stylesheet" href="style.css?v=b5c083a7">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -17,9 +17,12 @@
     <div class="top-actions">
       <span id="clock" class="clock"></span>
       <button id="muteBtn" class="btn" title="New-order sound on/off">🔔</button>
-      <button id="boardBtn" class="btn">🚫 86 board</button>
+      <!-- The two worded buttons keep their ICON always and drop their WORDS on a phone (the
+           top bar was wrapping to four rows at 360px and eating ~230px of an 780px board —
+           T4 sweep, 2026-08-04). title/aria-label carry the meaning either way. -->
+      <button id="boardBtn" class="btn" title="86 board — mark dishes sold out" aria-label="86 board"><i class="bi">🚫</i><i class="bw">86 board</i></button>
       <button id="printerBtn" class="btn" title="Report a printer problem — the manager is told right away">🖨❗</button>
-      <button id="viewBtn" class="btn viewtgl">▦ Wall view</button>
+      <button id="viewBtn" class="btn viewtgl" title="Switch between the column board and the wall board"><i class="bi">▦</i><i class="bw" id="viewWord">Wall view</i></button>
       <button id="reportIssueBtn" class="btn" title="Report an issue" aria-label="Report an issue">🚩</button>
       <button id="themeToggle" class="theme-toggle" type="button"></button>
     </div>
@@ -49,7 +52,7 @@
 
   <div id="toasts" class="toasts"></div>
   <script src="/panels/maint.js?v=36aa5641"></script>
-  <script src="/panels/realtime.js?v=1a3eee11"></script>
+  <script src="/panels/realtime.js?v=9708934b"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=d2aaaaf0"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
@@ -71,6 +74,6 @@
   <!-- billdoc: THE kitchen ticket, written down once (LFH_BILLDOC) and shared with the manager
        panel and the admin's sample, so a ticket can never look different in two places. -->
   <script src="/panels/billdoc.js?v=e99cb899"></script>
-  <script src="app.js?v=62b259c3"></script>
+  <script src="app.js?v=5cbca9c6"></script>
 </body>
 </html>
