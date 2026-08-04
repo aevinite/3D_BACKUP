@@ -37,6 +37,7 @@
     "check:current": "node scripts/check-folder-current.mjs",
     "verify:floor": "node scripts/verify-floor-share.mjs",
     "verify:tax-mode": "node --experimental-strip-types --no-warnings scripts/verify-tax-mode.mjs",
+    "verify:guest-read": "node scripts/verify-guest-read.mjs",
     "verify:merge": "node scripts/verify-merge-party.mjs",
     "check:floor-timeouts": "node scripts/check-floor-timeouts.mjs",
     "verify:busy": "node scripts/verify-busy-server.mjs",
