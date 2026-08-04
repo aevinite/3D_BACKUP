@@ -2418,10 +2418,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // completely separate from subtotal/tax/discount/total, so it never affects the bill math.
     if (a === "orders" && c === "tip") {
       // A tip is money captured at payment and it is summed into the Z-report's "tips collected
-      // today", so it gets the settle permission and a ceiling (sweep 2026-08-04). It had
-      // neither: any logged-in manager could write any number, and a mis-typed 50000 landed in
-      // the day-close figure with nothing to stop it. The cap is deliberately generous — it is
-      // there to catch a typo, not to judge a tip.
+      // today", so it gets a CEILING — that is the real fix here (sweep 2026-08-04): there was no
+      // upper bound at all, so a mis-typed 500000 landed in the day-close figure with nothing to
+      // stop it. The cap is deliberately generous; it is there to catch a typo, not to judge a tip.
+      //
+      // The permission read below is INERT today, for the reason spelled out at the on-the-house
+      // gate (mark_paid has no Access row). It is here so a tip can never be the one settle-time
+      // write that ignores a Mark-paid row if one ever returns — not because a hole was found.
       if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("record a tip");
       const amt = Math.min(Math.max(0, Number(body?.amount) || 0), 100000);
       must(await sb.from("orders").update({ tip: amt }).eq("id", b).eq("restaurant_id", rid));
@@ -3165,12 +3168,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (g.user && !(await tableTagsLadder(rid)).effective) return err("Table types aren't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "table_tags"))) return permDenied("settle a bill on the house");
       // SETTLING A BILL IS SETTLING A BILL, WHATEVER BUTTON IT CAME FROM (sweep 2026-08-04).
-      // This writes payment_status='paid' + paid_at + a payment method, so it needs the same
-      // permission as a plain Mark paid — the rule tables/:t/pay-split already spells out
-      // ("otherwise switching mark_paid off would leave the split route as a way round it").
-      // Without it, switching Mark-paid off for a manager still left them able to settle any
-      // Family / Owner's-Guest table to ₹0. table_tags above says they may use the comp
-      // feature; this says they may settle money. Default ON, so nothing changes by itself.
+      // This writes payment_status='paid' + paid_at + a payment method, so it reads the same
+      // permission as a plain Mark paid, in the same shape as tables/:t/pay-split beside it.
+      //
+      // BE HONEST ABOUT WHAT THIS DOES TODAY: `mark_paid` has NO row on the Access screen. The
+      // owner took take_orders / mark_paid / print_invoice / table_tags / table_ops out of the
+      // grant list on 2026-08-01 — "how the floor RUNS; a restaurant that switched them off could
+      // not trade" — so managerGrantValue() answers ON for it permanently and a stored
+      // manager_permissions.mark_paid is ignored. This gate can therefore only ever fire on the
+      // feature rung (access_config.mark_paid.on), which nothing writes. It is a guard in waiting,
+      // consistent with its three siblings, NOT a hole being closed: there was no way round
+      // Mark-paid, because Mark-paid cannot be switched off. What actually protects this action is
+      // the table_tags ladder above. (I first reported this as a live gap; it was not. The gate is
+      // kept because the day a row returns, every settle path should honour it at once.)
       if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("mark a bill paid");
       // The mark may sit on ANY member of a merged party — the family sat at T29 before it was
       // joined to T28; their comp must not stop working because the bill now lives on T28.
@@ -3282,9 +3292,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "khata" && b === "pay") {
       if (g.user && !(await khataLadder(rid)).effective) return err("Pay later (khata) isn't enabled for this restaurant.", 403);
       if (!(await managerCan(g, rid, "khata"))) return permDenied("collect khata payments");
-      // Collecting a parked tab MARKS ORDERS PAID, so it needs the settle permission too —
-      // same reasoning as the on-the-house gate above and as pay-split's own comment. `khata`
-      // says they may work the pay-later book; `mark_paid` says they may take the money.
+      // Collecting a parked tab MARKS ORDERS PAID, so it reads the settle permission too, in the
+      // same shape as its siblings. It is INERT today for the reason spelled out at the
+      // on-the-house gate (mark_paid has no Access row and cannot be switched off) — the khata
+      // ladder above is what actually protects this action. Kept so that if a Mark-paid row ever
+      // returns, every path that settles money honours it on the same day.
       if (!(await managerCan(g, rid, "mark_paid"))) return permDenied("mark a bill paid");
       const method = String(body?.method || "");
       if (!PAYMENT_METHODS.includes(method as (typeof PAYMENT_METHODS)[number])) return err("invalid payment_method");
