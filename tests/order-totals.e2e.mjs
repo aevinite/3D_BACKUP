@@ -5,7 +5,7 @@
 // lib/money.mjs (the exact module the UI uses), then ask the server's
 // read-only lfh_price_order() to price the same cart, and compare.
 //
-// Run with: npm run test:totals   (needs .env.local for the anon key)
+// Run with: npm run test:totals   (needs .env.local)
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -13,8 +13,28 @@ import { niceUsd } from "../lib/money.mjs";
 
 const env = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 const URL_ = env.match(/^NEXT_PUBLIC_SUPABASE_URL=(.+)$/m)[1].trim();
-const KEY = env.match(/^NEXT_PUBLIC_SUPABASE_ANON_KEY=(.+)$/m)[1].trim();
-const HEADERS = { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" };
+const ANON = env.match(/^NEXT_PUBLIC_SUPABASE_ANON_KEY=(.+)$/m)[1].trim();
+// WHICH KEY, AND WHY IT IS NOT THE ANON ONE (2026-08-04).
+//
+// This test asks lfh_price_order() to price a cart. That function is deliberately INVOKER, not
+// SECURITY DEFINER (mig 273 says so), so it reads `settings` — for the tax mode and rate — with
+// the CALLER's privileges. Anon has no direct SELECT on `settings` any more: the guest's config
+// now comes through one RPC door instead of a table grant (migs 282/283). So calling it as anon
+// answers 401 `permission denied for table settings` — and this test failed on that for every run
+// after those migrations, which made phase 15 of verify:everything permanently red for a reason
+// that has nothing to do with money.
+//
+// THE PRODUCT IS NOT AFFECTED and that is the point worth writing down: nothing in the app calls
+// lfh_price_order from a browser. A guest order reaches it INSIDE lfh_place_order /
+// lfh_place_order_public, both of which are SECURITY DEFINER (verified against the live database),
+// so the settings read happens with the definer's rights and real pricing works.
+//
+// What this test is FOR is the arithmetic — does the server's calculator agree with lib/money.mjs
+// to the cent. So call it the way the product effectively does, with rights that can read
+// settings, and keep the anon key for the plain table read below (which anon genuinely does do).
+const SERVICE = env.match(/^SUPABASE_SERVICE_ROLE_KEY=(.+)$/m)[1].trim();
+const HEADERS = { apikey: ANON, Authorization: `Bearer ${ANON}`, "Content-Type": "application/json" };
+const PRICING_HEADERS = { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`, "Content-Type": "application/json" };
 
 // Client-side mirror of the bill: unit = nice(base) + add-ons at face value;
 // subtotal = Σ unit × qty; tax = 5% rounded to cents. (All in USD — the
@@ -60,9 +80,11 @@ test("server lfh_price_order matches client money math to the cent", async () =>
 
   // Ask the SERVER to price the same cart (read-only function, no order created).
   const rpc = await fetch(`${URL_}/rest/v1/rpc/lfh_price_order`, {
-    method: "POST", headers: HEADERS, body: JSON.stringify({ p_items: cartReq, p_restaurant_id: RESTAURANT_ID }),
+    method: "POST", headers: PRICING_HEADERS, body: JSON.stringify({ p_items: cartReq, p_restaurant_id: RESTAURANT_ID }),
   });
-  assert.equal(rpc.status, 200, `rpc status ${rpc.status}`);
+  // Name the cause in the failure itself: a bare status number sent me looking for a money bug
+  // when the answer was a table grant. The body says exactly which table and which role.
+  assert.equal(rpc.status, 200, `rpc status ${rpc.status} — ${(await rpc.clone().text()).slice(0, 160)}`);
   const server = await rpc.json();
   assert.equal(server.ok, true, `server refused: ${server.reason || "?"}`);
 
