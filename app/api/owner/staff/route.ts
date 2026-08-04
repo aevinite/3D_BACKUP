@@ -100,9 +100,14 @@ async function managerViewPin(req: NextRequest, rid: string): Promise<"manager" 
   const sp = req.nextUrl?.searchParams;
   const as = sp?.get("as");
   // A person pin is re-checked in full (admin cookie, active, same restaurant, role manager);
-  // anything doubtful returns null, which is simply today's plain admin view.
-  if (isPersonId(as)) return (await viewAsPerson(req, rid, { user: null }, "manager")) ? "manager" : null;
-  return sp?.get("view") === "real" ? "manager" : null;
+  // anything doubtful just means "no person", which is not the same as "no manager view".
+  const person = isPersonId(as) ? await viewAsPerson(req, rid, { user: null }, "manager") : null;
+  // EXACTLY the shape whoami uses (`!!person || view === "real"`), and it has to stay that way.
+  // "Visit their panel" always sends BOTH pins, so if the person goes stale — deleted, disabled,
+  // moved restaurant — a person-only test would hand this route back to the admin while whoami
+  // still answered as the manager: one screen, two different ideas of who is looking. The tab
+  // asked for the real view, so it gets the real view.
+  return (person || sp?.get("view") === "real") ? "manager" : null;
 }
 
 // Who this answer should be SHAPED for: the pinned role when a manager view was asked for,
