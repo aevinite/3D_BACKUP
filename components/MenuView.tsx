@@ -33,7 +33,7 @@ import { useTranslation, useLanguage } from "@/lib/i18n";
 import { setScannedTable } from "@/lib/table";
 import { tget } from "@/lib/tenantStorage";
 // Per-restaurant feature switches (search/favorites/3D/scroll-spy on-off).
-import { useFeatures, refreshFeatures } from "@/lib/features";
+import { useFeatures, refreshFeatures, getFeatures } from "@/lib/features";
 // Live updates: refetch the menu the instant the owner edits a dish / toggles a
 // feature, without yanking the guest around.
 import { useRealtime } from "@/lib/useRealtime";
@@ -500,10 +500,27 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
 
   // This effect pre-downloads the small 3D models so the viewer opens fast.
   // Re-runs when the dishes load or the category changes.
+  //
+  // IT MUST WAIT FOR THE REAL SWITCH, NOT THE OPTIMISTIC DEFAULT. `features` starts from
+  // FEATURE_DEFAULTS (model3d: TRUE) and only becomes this restaurant's truth a beat later.
+  // Reading it synchronously meant the queue was filled on the first pass and the downloads
+  // had already STARTED by the time the switch resolved to off — measured on a restaurant with
+  // 3D off: 2 small GLBs (~2 MB each) fetched on every menu load, forever, for a feature it
+  // does not have. `getFeatures()` is the same cached, de-duplicated read useFeatures makes,
+  // so awaiting it costs no extra request; ViewerClient already uses exactly this shape.
+  // (Found by re-running the guest sweep, 2026-08-04 — the sibling of the reviews leak.)
   useEffect(() => {
     if (!menuData.length) return;  // wait until dishes have loaded
-    if (!features.model3d) return; // 3D switched off -> don't download a single model byte
+    let cancelled = false;
+    getFeatures(restaurantId).then((feats) => {
+      if (cancelled) return;
+      // Switched off: make sure nothing queued optimistically is still pending, then stop.
+      if (feats.model3d === false) { modelLoader.setQueue([], [], [], []); return; }
+      queuePreloads();
+    });
+    return () => { cancelled = true; };
 
+    function queuePreloads() {
     // Only dishes that have a working 3D model (both file sizes present).
     const fourD = menuData.filter(
       (i) => i.is4d && i.modelSmallUrl && i.modelOptimizedUrl
@@ -533,7 +550,8 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       [],
       []
     );
-  }, [menuData, currentCategory, features.model3d]);
+    }
+  }, [menuData, currentCategory, features.model3d, restaurantId]);
 
   // Search matches the dish name OR its category (slug + translated name), so
   // typing "croissant" finds the croissant-category dishes even though their
