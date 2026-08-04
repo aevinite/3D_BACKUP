@@ -1161,3 +1161,16 @@ Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French Hou
 - [x] **Inside an opened bill**: 🖨 Print, ↩ Reopen bill, 🧾− Credit note, 🗑 Delete bill and
   ％ Discount (only while it is still open money — a settled bill is corrected by reopen or
   credit note, never edited in place), each behind its existing permission/PIN gate.
+
+## 2026-08-04 · The manager's Users screen only ever creates + disables (kitchen · tablet)
+
+- [x] **Settings → Users offers kitchen + tablet only, for every viewer** — the card used to
+  branch on who was looking, so an admin/owner inside a manager's panel (their profile →
+  "Visit their panel") got a **manager** option in every role dropdown. A manager row seen by
+  a higher role now shows its role badge with no dropdown instead of a wrong one.
+- [x] **No Remove button anywhere on that card, and no delete code path left behind** — a
+  manager disables a login (the person is told when they try to sign in); removing someone for
+  good stays in their profile in `/aevinite`. The server already refused a manager's delete.
+- [x] **A "see it as this manager" tab is now ANSWERED as that manager** — `/api/owner/staff`
+  honours `?as=`/`?view=real` like whoami does, so the list drops other managers and the panel
+  is told actor `manager`. Guarded by 5 new checks in `npm run verify:access` (26 total).

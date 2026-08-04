@@ -32,6 +32,8 @@ const accessModel = read("lib/accessModel.ts");
 const featuresLib = read("lib/features.ts");
 const menuLib = read("lib/menu.ts");
 const treeRoute = read("app/api/admin/restaurants/access-tree/route.ts");
+const staffApi = read("app/api/owner/staff/route.ts");
+const editorApp = read("public/panels/editor/app.js");
 
 // ── 1 · language / currency codes must be ones the app can RENDER ────────────
 // This one bit for real: the tree first offered "gu"/"es"/"GBP", none of which exist in
@@ -360,6 +362,43 @@ if (!deadRows) ok("no row is a switch with nothing behind it");
   }
   if (offenders.length) fail(`still reading a RETIRED column (the Access screen no longer writes it): ${offenders.join(", ")}`);
   else ok("nothing reads a column the access tree stopped writing");
+}
+
+// ── 11 · the manager panel's Users card may not offer what a manager can't have ──
+// The owner opened a MANAGER's panel (their profile → "Visit their panel"), went to
+// Settings → Users, and found a "manager" option in every role dropdown and a red Remove
+// on every row — because that card branched on the ACTOR, so an admin/owner looking in got
+// the ADMIN's powers on the manager's own screen (2026-08-04). His rule: a manager creates
+// and disables kitchen + tablet logins, nothing else, and never deletes a person. A control
+// a role can never have does not belong on that role's screen for ANY viewer.
+{
+  const card = editorApp.match(/function userSettingCardHtml\(\)[\s\S]*?\n}\n/);
+  if (!card) fail("can't find userSettingCardHtml() in the manager panel — this guard needs updating");
+  else {
+    const body = card[0];
+    const roles = body.match(/const ROLES = ([^;]+);/);
+    if (!roles) fail("the Users card no longer declares ROLES — check what it offers now");
+    else if (/manager/.test(roles[1])) fail(`the manager panel's Users card offers the MANAGER role: ${roles[1].trim()}`);
+    else ok("the manager panel's Users card offers kitchen + tablet only, for every viewer");
+    if (/data-staff-del/.test(body)) fail("the manager panel's Users card renders a Remove button — a manager disables, never deletes");
+    else ok("the manager panel's Users card has no Remove button");
+  }
+  // …and no live handler may be left behind for one: a stray marker would make it work again.
+  if (/data-staff-del/.test(editorApp)) fail("the manager panel still wires a delete handler for a staff login");
+  else ok("the manager panel has no delete-a-person code path at all");
+  // The server keeps saying the same thing (this is the gate that actually refuses).
+  if (!/s\.actor === "manager"[\s\S]{0,240}?403/.test(staffApi)) fail("the staff route no longer refuses a manager's DELETE");
+  else ok("the staff route refuses a manager's request to delete a login");
+}
+
+// ── 12 · a "see it as this manager" tab must be ANSWERED as that manager ──────
+// whoami has honoured ?as=<person> / ?view=real since they shipped, but /api/owner/staff —
+// which is what the Users card reads to decide who is looking — ignored both, so a tab whose
+// promise is "this is what they see" reported actor:"admin" and listed other managers.
+{
+  if (!staffApi.includes("managerViewPin")) fail("the staff route ignores the panel's ?as= / ?view=real pins — a manager view would be answered as the admin");
+  else if (!/actor: shownActor\(s\)/.test(staffApi)) fail("the staff route resolves the manager-view pin but still reports the raw actor");
+  else ok("a pinned manager view is answered as that manager (list + reported actor)");
 }
 
 // ── 10 · the read/write route must allow-list from the model, not by hand ──

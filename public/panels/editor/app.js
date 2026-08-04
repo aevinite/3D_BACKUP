@@ -1418,10 +1418,22 @@ function userSettingCardHtml() {
   if (state.staffDenied) {
     return `<div class="card"><h3>User setting</h3><p style="color:var(--muted);font-size:13px;margin:0;line-height:1.5">${esc(state.staffDenied)}</p></div>`;
   }
-  // Hierarchy (owner, 2026-07-03): a MANAGER manages only kitchen + tablet — the
-  // server already filters the list and refuses anything else; this just keeps the
-  // dropdowns honest. Owner/admin actors still get the full set.
-  const ROLES = state.staffActor === "manager" ? ["kitchen", "tablet"] : ["manager", "kitchen", "tablet"];
+  // THIS CARD IS THE MANAGER'S OWN SCREEN, so it offers only what a manager may do —
+  // whoever is looking (owner, 2026-08-04). It used to branch on the actor: a real
+  // manager got kitchen+tablet and no Remove, but an ADMIN or OWNER looking in (the
+  // profile's "Visit their panel", or the console's manager-panel link) got the full
+  // set — a "manager" option in every role dropdown and a red Remove on every row. The
+  // owner opened a manager's panel, saw exactly that, and read it as the manager's own
+  // powers. A control a role can never have does not belong on that role's screen at
+  // all (his 2026-08-03 rule for the dashboard ranges: "there is literally no need for
+  // it") — so the two are gone for every viewer, and the card says where they live:
+  //   • a MANAGER login is created in the owner panel → Staff & powers;
+  //   • DELETING a person is done from their profile in /aevinite (which keeps the
+  //     confirmation, the record and the recycle rules) — here, Disable is the tool.
+  // The server still refuses both for a real manager (assignableFor + the DELETE gate),
+  // and now answers a pinned "see it as this manager" tab as that manager too, so the
+  // UI and the server say the same thing.
+  const ROLES = ["kitchen", "tablet"];
   const reveal = state.staffReveal
     ? `<div class="fc-card" style="border-color:var(--green);display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
         <div><b>New password for ${esc(state.staffReveal.name)}</b><div class="muted small">Copy it now — it can't be shown again.</div></div>
@@ -1437,22 +1449,30 @@ function userSettingCardHtml() {
           ${u.active ? "" : `<span style="font-size:10.5px;color:var(--red);font-weight:700">disabled</span>`}
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px">
-          <select data-staff-role="${esc(u.id)}" style="font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text)">
-            ${ROLES.map((r) => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}
-          </select>
+          ${ROLES.includes(u.role)
+            // A row whose role this card can't offer (a MANAGER row, only ever listed to an
+            // admin/owner looking in) gets NO dropdown: with the option missing, a <select>
+            // silently displays its first option, so the row would have read "kitchen" for a
+            // manager. The role badge on the left already names them.
+            ? `<select data-staff-role="${esc(u.id)}" style="font-size:11.5px;font-weight:700;padding:5px 9px;border-radius:7px;border:1px solid var(--line);background:var(--panel);color:var(--text)">
+                ${ROLES.map((r) => `<option value="${r}" ${u.role === r ? "selected" : ""}>${r}</option>`).join("")}
+              </select>`
+            : ""}
           <button class="btn small" data-staff-resetpw="${esc(u.id)}">Reset password</button>
           <button class="btn small" data-staff-toggle="${esc(u.id)}" data-active="${u.active ? "1" : "0"}">${u.active ? "Disable" : "Enable"}</button>
-          ${state.staffActor === "manager"
-            ? "" /* a manager DISABLES, never deletes (owner, 2026-08-02) — the server refuses too, so no dead button */
-            : `<button class="btn small danger" data-staff-del="${esc(u.id)}">Remove</button>`}
+          ${"" /* NO Remove here for anyone (owner, 2026-08-04) — see the note above ROLES.
+                  Disable is this screen's tool; deleting a person happens in their profile
+                  in the admin panel. The server refuses a manager's DELETE as well. */}
         </div>
       </div>`).join("")
     : `<div class="sx-empty">No staff yet — add the first below.</div>`;
   return `<div class="card"><h3>User setting</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
+      Add and manage <b>tablet</b> and <b>kitchen</b> logins for this restaurant — create one,
+      reset a password, or disable it (a disabled person is told so when they try to sign in).
       ${state.staffActor === "manager"
-        ? "Add and manage <b>tablet</b> and <b>kitchen</b> logins for this restaurant. Manager accounts are managed by the owner."
-        : "Add and manage tablet, kitchen, and manager logins for this restaurant — the same team the owner sees in Staff &amp; powers."}
+        ? "Manager logins, and removing anyone for good, are handled by the owner."
+        : "Manager logins are created in the owner panel → <b>Staff &amp; powers</b>; removing a person for good is done from their profile in the admin panel."}
     </p>
     ${reveal}
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:14px">${rows}</div>
@@ -5468,7 +5488,7 @@ function bindEditor() {
   const usrAdd = $("#usrAddStaff");
   if (usrAdd) usrAdd.onclick = async () => {
     const name = ($("#usrNewName")?.value || "").trim();
-    const role = $("#usrNewRole")?.value || "manager";
+    const role = $("#usrNewRole")?.value || "kitchen"; // this card only ever offers kitchen | tablet
     const password = ($("#usrNewPassword")?.value || "").trim();
     if (name.length < 2) { toast("Name must be at least 2 characters.", "err"); return; }
     if (!state.staffRestaurantId) { toast("Couldn't tell which restaurant to add to — reload and try again.", "err"); return; }
@@ -5501,26 +5521,11 @@ function bindEditor() {
     try { await staffCall({ method: "PATCH", body: JSON.stringify({ id, action: "set_role", role: sel.value }) }); await loadStaffTeam(); }
     catch (e) { toast("Failed: " + e.message, "err"); }
   }));
-  ed.querySelectorAll("[data-staff-del]").forEach((b) => (b.onclick = async () => {
-    const id = b.dataset.staffDel;
-    const u = state.staffTeam.find((x) => x.id === id);
-    if (!(await confirmDialog(`Remove ${u ? (u.name || u.username) : "this person"} for good? This can't be undone.`, "Remove"))) return;
-    try {
-      // Through the outbox, like every other write here — see staffCall(). ridQ keeps the
-      // admin's per-tab restaurant pin (appends &rid=), and it is baked into the queued path so
-      // a replay still lands on the right restaurant.
-      const d = window.LFH_OUTBOX
-        ? await window.LFH_OUTBOX.send({ base: "", method: "DELETE", path: ridQ(`/api/owner/staff?id=${encodeURIComponent(id)}`), panel: "editor", label: "Remove staff member" })
-        : await (async () => {
-          const r = await fetch(ridQ(`/api/owner/staff?id=${encodeURIComponent(id)}`), { method: "DELETE" });
-          const j = await r.json().catch(() => ({}));
-          if (!r.ok) throw new Error(j.error || "Request failed");
-          return j;
-        })();
-      if (d && d.queued) { toast("Saved ✓ — syncing automatically.", "ok"); return; }
-      await loadStaffTeam();
-    } catch (e) { toast("Failed: " + e.message, "err"); }
-  }));
+  // NO DELETE PATH IN THIS PANEL AT ALL (owner, 2026-08-04). The handler that used to sit
+  // here has been deleted along with its button: this screen is the manager's, and a manager
+  // may disable a login but never remove a person. Removing someone happens in their profile
+  // in the admin panel, where the confirmation and the record live. Leaving a live handler
+  // behind would have kept a working DELETE one stray row marker away.
   const usrRevealDone = $("#usrRevealDone");
   if (usrRevealDone) usrRevealDone.onclick = () => { state.staffReveal = null; renderEditor(); };
 }

@@ -26,6 +26,7 @@ import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess"
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { newWaiterTables } from "@/lib/tableAssign";
+import { viewAsPerson, isPersonId } from "@/lib/viewAsPerson";
 import {
   PROFILE_FIELDS, hasProfile, completeness, mergeProfilePatch, jobPatchFrom, paymentFrom,
   payAccessWith, todayIST, type PayAccess,
@@ -73,7 +74,11 @@ function genPassword(): string {
 
 type Restaurant = { id: string; name: string; slug: string; accent_color: string | null; manager_permissions: Record<string, boolean>; owner_entitlements: Record<string, boolean> | null; owner_user_id: string | null };
 type Scope =
-  | { ok: true; actor: "admin" | "owner" | "manager"; actorId: string | null; restaurants: Restaurant[] }
+  // viewAs: an ADMIN tab that asked to be answered as the real manager (?view=real) or as ONE
+  // NAMED MANAGER (?as=<id>) — see managerViewPin below. It changes only what is SHOWN
+  // (shownActor); every write still runs and is logged as the admin, exactly as the pin's
+  // contract in lib/viewAsPerson promises.
+  | { ok: true; actor: "admin" | "owner" | "manager"; actorId: string | null; restaurants: Restaurant[]; viewAs?: "manager" | null }
   | { ok: false; resp: NextResponse };
 
 // ONE answer for "we could not read your setup" — deliberately different from both
@@ -81,6 +86,28 @@ type Scope =
 // retry and the panel shows a normal try-again, never a false configuration message.
 const transient = () => NextResponse.json(
   { error: "Couldn't load your team just now — please try again.", transient: true }, { status: 503 });
+
+// SEEING THIS SCREEN AS THE MANAGER DOES (owner, 2026-08-04).
+//
+// An admin tab pinned to ONE restaurant may ask to be answered as the real manager
+// (?view=real, 2026-07-28) or as ONE NAMED MANAGER (?as=<staff id>, the profile's "Visit
+// their panel", 2026-08-02). whoami has honoured both pins since they shipped — this route
+// did not, and the manager panel's Users card reads THIS route for who it thinks is looking.
+// So a tab whose whole promise is "this is what they see" listed other managers and reported
+// actor:"admin", which is how the owner came to see manager-creating and Remove controls
+// inside a manager's panel. A pin can only ever NARROW what is shown.
+async function managerViewPin(req: NextRequest, rid: string): Promise<"manager" | null> {
+  const sp = req.nextUrl?.searchParams;
+  const as = sp?.get("as");
+  // A person pin is re-checked in full (admin cookie, active, same restaurant, role manager);
+  // anything doubtful returns null, which is simply today's plain admin view.
+  if (isPersonId(as)) return (await viewAsPerson(req, rid, { user: null }, "manager")) ? "manager" : null;
+  return sp?.get("view") === "real" ? "manager" : null;
+}
+
+// Who this answer should be SHAPED for: the pinned role when a manager view was asked for,
+// else the real caller. Never used to decide whether a WRITE is allowed — that stays s.actor.
+const shownActor = (s: { actor: "admin" | "owner" | "manager"; viewAs?: "manager" | null }) => s.viewAs || s.actor;
 
 // Resolve which restaurants this caller may manage staff for (see header).
 async function scope(req: NextRequest): Promise<Scope> {
@@ -170,7 +197,11 @@ async function scope(req: NextRequest): Promise<Scope> {
       if (!ids.includes(pin)) ids.push(pin); // never lose the entered restaurant
       const { data, error } = await sb.from("restaurants").select(cols).in("id", ids).order("name");
       if (error) return { ok: false, resp: transient() };
-      return { ok: true, actor: "admin", actorId: null, restaurants: (data || []) as Restaurant[] };
+      const rows = (data || []) as Restaurant[];
+      // Answering as a manager also narrows to the ONE pinned restaurant — a manager only
+      // ever has their own, so the sibling restaurants this admin owns must not be listed.
+      const viewAs = await managerViewPin(req, pin);
+      return { ok: true, actor: "admin", actorId: null, viewAs, restaurants: viewAs ? rows.filter((r) => r.id === pin) : rows };
     }
     const { data, error } = await sb.from("restaurants").select(cols).order("name");
     if (error) return { ok: false, resp: transient() };
@@ -238,7 +269,7 @@ export async function GET(req: NextRequest) {
     // list that shows people must read the same rows the login door reads.
     const { data, error } = await sb.from("staff_users")
       .select(`id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions, ${PROFILE_COLS}`)
-      .in("restaurant_id", ids).in("role", assignableFor(s.actor)).is("deleted_at", null)
+      .in("restaurant_id", ids).in("role", assignableFor(shownActor(s))).is("deleted_at", null)
       .order("created_at", { ascending: true }).limit(2000);
     if (error) return bad("Something went wrong, please try again.", 500);
     // Never ship hashes; expose only whether a PIN exists.
@@ -266,7 +297,7 @@ export async function GET(req: NextRequest) {
   // ── Profiles & pay: the module state + this caller's rights, per restaurant ─────────
   const payrollOn = await payrollByRid(ids);
   const accessByRid: Record<string, PayAccess> = {};
-  for (const r of s.restaurants) accessByRid[r.id] = payAccessWith(s.actor, r, payrollOn[r.id] === true);
+  for (const r of s.restaurants) accessByRid[r.id] = payAccessWith(shownActor(s), r, payrollOn[r.id] === true);
 
   // Money totals per person, for the restaurants where this caller may see money. One RPC per
   // restaurant (a tiny grouped result), never one per person.
@@ -305,7 +336,9 @@ export async function GET(req: NextRequest) {
   const tcByRid: Record<string, number> = Object.fromEntries(tcRows.map((t) => [t.restaurant_id as string, Number(t.table_count) || 0]));
 
   return ok({
-    actor: s.actor,
+    // The PANEL reads this to decide what its Users card offers, so a pinned manager view
+    // must say "manager" here — that is the whole point of the pin.
+    actor: shownActor(s),
     restaurants: s.restaurants.map((r) => ({
       ...slim(r), modules: { ...(modsByRid[r.id] || {}), payroll: payrollOn[r.id] === true },
       payAccess: accessByRid[r.id],
@@ -325,17 +358,20 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
     .eq("id", id).in("restaurant_id", ids).limit(1);
   const u = (rows || [])[0] as any;
   if (!u) return bad("That person isn't on your staff.", 404);
-  if (!assignableFor(s.actor).includes(u.role)) return bad("You can't open accounts at or above your own level.", 403);
+  // shownActor, not s.actor: a pinned "as this manager" tab must answer this READ the way the
+  // manager is answered (they can't open a peer's or an owner's record), so the view can't show
+  // a person the real panel would refuse. Writes below still run with the admin's own power.
+  if (!assignableFor(shownActor(s)).includes(u.role)) return bad("You can't open accounts at or above your own level.", 403);
   const r = s.restaurants.find((x) => x.id === u.restaurant_id)!;
   const acc = await (async () => {
     const on = (await payrollByRid([u.restaurant_id]))[u.restaurant_id] === true;
-    return payAccessWith(s.actor, r, on);
+    return payAccessWith(shownActor(s), r, on);
   })();
   if (!acc.moduleOn) return ok({ disabled: true, error: "Staff profiles & pay aren't enabled for this restaurant — contact Aevidine." }, 403);
   if (!hasProfile(u.role)) return ok({ notEligible: true, error: "Kitchen logins don't have a profile.", role: u.role }, 200);
 
   // Kicked off BEFORE the pay reads so it overlaps them instead of queueing behind.
-  const perfQ = (s.actor === "owner" || s.actor === "admin") && sp.get("perf") !== "0"
+  const perfQ = (shownActor(s) === "owner" || shownActor(s) === "admin") && sp.get("perf") !== "0"
     ? sb.rpc("lfh_staff_performance", {
         p_restaurant: u.restaurant_id,
         p_from: new Date(todayIST().slice(0, 8) + "01T00:00:00+05:30").toISOString(),
