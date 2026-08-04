@@ -3,7 +3,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { prettyUsd, toMinor, unitDisplay, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
-import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, type MenuItem } from "@/lib/menu";
+import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRulesOf, DEFAULT_TAX_RULES, type MenuItem, type TaxRules } from "@/lib/menu";
+// The ONE rule that turns a dish's price into money under the three behaviours (mig 270):
+// GST on top ('excl'), GST already inside ('incl'), never taxed ('exempt' — an MRP bottle).
+// Mirrored byte-for-byte by lfh_split_items_tax in SQL, so the quote and the bill agree.
+import { splitBill, resolveTaxMode, isMrpDish } from "@/lib/tax";
 import { enqueueGuestOrder } from "@/lib/guestOutbox"; // offline: save order, send on reconnect
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
@@ -87,6 +91,10 @@ export default function CartPanel() {
   const [tableCount, setTableCount] = useState(0); // how many tables exist; 0 = no limit known
   const [sessionsEnabled, setSessionsEnabled] = useState(false); // v2 dining-session system
   const [taxRate, setTaxRate] = useState(0.05); // this restaurant's effective tax rate (decimal); 5% until settings load
+  // How this restaurant's PRICES are meant (mig 270): GST added on top, GST already inside,
+  // or composition (no GST to the diner at all) + whether per-dish overrides are allowed.
+  // Starts at today's behaviour, so the quote never changes shape while settings load.
+  const [taxRules, setTaxRules] = useState<TaxRules>(DEFAULT_TAX_RULES);
   const [currency, setCurrencyState] = useState<CurrencyMeta | null>(null); // currency for all prices
   const [allergenMap, setAllergenMap] = useState<Record<string, string[]>>({}); // dish id -> its allergens, for warnings
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]); // the full menu (for pairings/editing)
@@ -211,7 +219,7 @@ export default function CartPanel() {
     };
     // How many tables exist, so we can reject an out-of-range table number.
     getSettings(restaurantId)
-      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); })
+      .then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); setTaxRules(taxRulesOf(s)); })
       .catch(() => {});
 
     // Live orders are written/polled by OrderTracker; we just read them here.
@@ -250,7 +258,7 @@ export default function CartPanel() {
     const handleOpen = () => {
       setOpen(true); loadMenuOnce(); loadCart(); loadLive(); setShowHistory(false); prefillScanned(); syncSession();
       // re-read settings on open so a freshly-toggled sessions mode is always respected
-      getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); }).catch(() => {});
+      getSettings(restaurantId).then((s) => { setTableCount(s.tableCount); setSessionsEnabled(s.sessionsEnabled); setTaxRate(s.taxRate); setTaxRules(taxRulesOf(s)); }).catch(() => {});
     };
     // handleShowPrev: open straight to the LIVE-STATUS tab (the live table view
     // with the served-progress bar). Fired when the multi-order tracker is tapped.
@@ -379,20 +387,64 @@ export default function CartPanel() {
     unitDisplay(parseFloat(it.price), (it.options || []).map((o) => o.price || 0), currency || undefined) * it.qty;
   // Red dot on the Live-status tab: a live order whose floating strip was hidden.
   const hiddenLive = liveOrders.some((o) => o.stripHidden && !isFinalStatus(o.status));
+  // ── the three price behaviours (mig 270) ───────────────────────────────────
+  // What a dish's own tax_mode is. A line whose dish hasn't loaded yet (the menu is fetched
+  // lazily on first open) reads as "default" = follow the restaurant, which is exactly the
+  // pre-269 behaviour, and settles the moment the menu lands.
+  const dishMode = (id: string) => menuItems.find((m) => m.id === id)?.taxMode;
+  // The BEHAVIOUR the line actually gets, decided ONLY by lib/tax.ts (mirrors SQL
+  // lfh_resolve_tax_mode): 'excl' = GST on top, 'incl' = GST already in the price,
+  // 'exempt' = never taxed. Never branch on the dish's raw setting instead of this.
+  const behaviourOf = (it: CartItem) => resolveTaxMode(dishMode(it.id), taxRules);
+  // Purely presentational: does this line wear the "MRP" stamp (a final, locked price)?
+  const isMrpLine = (it: CartItem) => isMrpDish(dishMode(it.id), taxRules);
   // Bill math — in the guest's DISPLAY currency, not USD, so the printed
   // lines visibly add up: subtotal = sum of the printed line values.
   const subtotal = cart.reduce((sum, it) => sum + lineDisp(it), 0);
   const itemCount = cart.reduce((sum, it) => sum + it.qty, 0); // total number of items
-  // Tax at this restaurant's rate, rounded to the currency's minor unit (whole ₹ /
-  // cents) so it doesn't jump in ₹10 hops like the menu prices do.
-  const tax = toMinor(subtotal * taxRate, currency || undefined);
+  // ONE rule for the money, run twice — once over the display-currency line values (what the
+  // guest reads) and once over the stored USD units (what the order record keeps). Passing
+  // the already-multiplied line value with qty 1 keeps splitBill's per-line rounding on
+  // exactly the figures printed above it, so the rows can never fail to add up.
+  const dispLines = cart.map((it) => ({ price: lineDisp(it), qty: 1, tax_mode: behaviourOf(it) }));
+  const dispSplit = splitBill(dispLines, taxRules);
+  // GST is ADDED only to lines priced NET ('excl'). A tax-INSIDE price already contains its
+  // GST — adding splitBill's whole `tax` on top would charge it twice and break the single
+  // promise 'incl' makes (you pay the price on the menu) — and an MRP line is never taxed at
+  // all. So the base for the on-top GST is the taxable base of the 'excl' lines ALONE, taken
+  // from the same splitBill (never a second formula). With every line 'excl' — every
+  // restaurant today — that base IS the subtotal, so this line is arithmetically the old
+  // `toMinor(subtotal * taxRate)`, to the rupee, proven over 28,000 carts × 7 rates.
+  const onTopBase = splitBill(dispLines.filter((l) => l.tax_mode === "excl"), taxRules).taxableBase;
+  // Rounded to the currency's minor unit (whole ₹ / cents) so it doesn't jump in ₹10 hops
+  // like the menu prices do.
+  const tax = dispSplit.composition ? 0 : toMinor(onTopBase * taxRate, currency || undefined);
   const total = subtotal + tax; // what the guest pays (display currency, for the BILL UI only)
+  // Is there anything to SHOW on a GST row? A composition restaurant may not charge the diner
+  // GST at all, and a fully tax-inclusive bill has nothing to add — in both cases the row is
+  // removed rather than printed as ₹0 (a ₹0 tax line reads as a mistake).
+  const showTaxRow = !dispSplit.composition && tax > 0;
+  // MRP money on this bill, in display currency — used for the "MRP items" row. Under the
+  // composition scheme EVERY line is untaxed, and none of it is MRP, so there is nothing to
+  // separate out and the row would be a lie about why there's no GST.
+  const nontaxDisp = dispSplit.composition ? 0 : dispSplit.nontaxAmount;
   // ORDER RECORDS are stored in USD — the tracker, history list and the
   // session pull (which saves the server's USD totals) all share one storage,
   // and they convert at render time. Storing the display number here once put
   // ₹578 through a ×84 conversion and showed ₹48,550. One domain only.
+  // SAME rule as the display side above (never a second formula, or the stored figure and the
+  // shown figure drift apart the first time a restaurant turns MRP on).
+  const usdLines = cart.map((it) => ({ price: it.price, qty: it.qty, tax_mode: behaviourOf(it) }));
   const subtotalUsd = cart.reduce((sum, it) => sum + parseFloat(it.price) * it.qty, 0);
-  const totalUsd = Math.round(subtotalUsd * (1 + taxRate) * 100) / 100;
+  const usdOnTopBase = taxRules.price_tax_mode === "composition"
+    ? 0
+    : splitBill(usdLines.filter((l) => l.tax_mode === "excl"), taxRules).taxableBase;
+  // Written as "the taxable part, grossed up + everything else at face value" rather than
+  // `subtotal + base × rate`: when every line is taxable the two terms collapse to exactly
+  // `subtotalUsd × (1 + taxRate)` — the same expression, in the same order, as before — so the
+  // stored figure is bit-for-bit what it always was (`a + a×r` and `a×(1+r)` are NOT the same
+  // number in floating point, and that alone was moving a paisa on 0.3% of carts).
+  const totalUsd = Math.round((usdOnTopBase * (1 + taxRate) + (subtotalUsd - usdOnTopBase)) * 100) / 100;
 
   // itemAllergens(): the allergens a given dish contains.
   const itemAllergens = (id: string) => allergenMap[id] || [];
@@ -882,6 +934,17 @@ export default function CartPanel() {
                           Sold out
                         </span>
                       )}
+                      {/* MRP: the printed price is FINAL — nothing is added to it and nothing may
+                          be taken off it. Saying so on the line is what makes the missing GST on
+                          this dish read as correct instead of as a mistake. */}
+                      {isMrpLine(item) && (
+                        <span
+                          title="Maximum Retail Price — this price is final, no tax is added"
+                          style={{ marginLeft: 8, fontSize: 11, fontWeight: 700, color: "var(--muted)", border: "1px solid var(--line, rgba(255,255,255,0.25))", borderRadius: 6, padding: "1px 6px", whiteSpace: "nowrap" }}
+                        >
+                          MRP
+                        </span>
+                      )}
                     </div>
                     {/* Chosen options (e.g. "Large, Oat milk"), if any. */}
                     {item.options && item.options.length > 0 && (
@@ -1061,11 +1124,30 @@ export default function CartPanel() {
               onChange={(e) => setTableNumber(e.target.value.replace(/\D/g, ""))}
             />
 
-            {/* The bill summary: subtotal, tax, and grand total. */}
+            {/* The bill summary: subtotal, tax, and grand total.
+                The GST row exists ONLY when GST is actually ADDED to what's printed above it.
+                A tax-inclusive restaurant (the price already contains it) and a composition
+                restaurant (which may not charge the diner GST at all) both have nothing to add,
+                so the row is REMOVED — printing "GST ₹0" reads as a bug, and printing the GST
+                hidden inside the price would charge it twice. */}
             <div className="bill-rows">
               <div className="bill-line"><span>Subtotal</span><span>{fmtDisp(subtotal)}</span></div>
-              <div className="bill-line"><span>GST ({Math.round(taxRate * 10000) / 100}%)</span><span>{fmtDisp(tax)}</span></div>
+              {nontaxDisp > 0 && (
+                <div className="bill-line" style={{ color: "var(--muted)" }}>
+                  <span>MRP items (no GST)</span><span>{fmtDisp(nontaxDisp)}</span>
+                </div>
+              )}
+              {showTaxRow && (
+                <div className="bill-line"><span>GST ({Math.round(taxRate * 10000) / 100}%)</span><span>{fmtDisp(tax)}</span></div>
+              )}
               <div className="bill-line grand"><span>Total</span><span>{fmtDisp(total)}</span></div>
+              {!showTaxRow && !dispSplit.composition && subtotal > 0 && (
+                // Tax-inclusive prices: say WHY there's no GST line, or the guest reads the
+                // missing row as the restaurant forgetting to charge it.
+                <div className="bill-line" style={{ color: "var(--muted)", fontSize: "12px" }}>
+                  <span>{nontaxDisp >= subtotal ? "No GST on these items" : "GST is already included in these prices"}</span><span />
+                </div>
+              )}
             </div>
 
             {/* The Place Order button. Disabled while an order is being sent. */}

@@ -110,8 +110,16 @@
    *   logo, name, addr, phone, gstin, footer,          // identity (raw, escaped here)
    *   invNo, billNo, parcel, tableDisp, dateStr,       // the header rows ("" hides a row)
    *   cust, custPhone,                                 // who it is for ("" hides the block)
-   *   lines: [{ title, qty, price, options:[{label,price}] }],   // price = unit INCLUDING add-ons
+   *   lines: [{ title, qty, price, options:[{label,price}], is_mrp }], // price = unit INCLUDING add-ons
    *   subtotal, discount, discLabel, taxable, taxRows:[{label,rate,amt}], total,
+   *   taxIncluded,                                     // true = menu prices already contain
+   *                                                    //   GST. Pass GROSS subtotal+discount;
+   *                                                    //   tax prints BELOW the total as
+   *                                                    //   "Price includes", never added.
+   *   nontax, mrpLabel, mrpNote,                       // MRP / untaxed lines (mig 270).
+   *                                                    // nontax 0 or absent = render as before.
+   *                                                    // taxRows [] = no tax line at all
+   *                                                    //   (a composition-scheme restaurant).
    *   autoPrint,                                       // true = open the print dialog by itself
    *   note                                             // a line in the toolbar (a preview says so)
    * }
@@ -134,7 +142,11 @@
       var addUnit = opts.reduce(function (a, x) { return a + (Number(x.price) || 0); }, 0);
       var baseUnit = (parseFloat(i.price) || 0) - addUnit;
       measure("qty", pn(q)); measure("rate", pn(baseUnit)); measure("amt", pn(baseUnit * q));
-      var r = '<tr><td class="n">' + esc(i.title) + '</td><td class="c">' + pn(q) + '</td><td class="r">' + pn(baseUnit) + '</td><td class="r">' + pn(baseUnit * q) + "</td></tr>";
+      // An MRP line wears its stamp right next to the name, in the one list where the guest
+      // looks for it (owner's chosen layout, 2026-08-04). The stamp is the promise that this
+      // price is FINAL — nothing below the line adds to it.
+      var mrp = i.is_mrp ? '<span class="mrpt">MRP</span>' : "";
+      var r = '<tr><td class="n">' + esc(i.title) + mrp + '</td><td class="c">' + pn(q) + '</td><td class="r">' + pn(baseUnit) + '</td><td class="r">' + pn(baseUnit * q) + "</td></tr>";
       for (var k = 0; k < opts.length; k++) {
         var x = opts[k];
         measure("rate", pn(x.price)); measure("amt", pn(Number(x.price) * q));
@@ -148,8 +160,40 @@
     }).join("");
 
     var disc = Number(d.discount) || 0;
+    /* TAX-INCLUSIVE BILLS PRINT A DIFFERENT SHAPE, and they have to.
+       When menu prices already contain GST, the item rows show the GROSS price the guest
+       recognises — so a "Taxable value" line (the net) sitting under them, with the tax then
+       ADDED below, reads as an arithmetic error to anyone who checks the column: the rows sum
+       to ₹1,340 and the subtotal says ₹1,338.
+       So in this mode the tax is reported, not applied: Subtotal → Discount → TOTAL, and the
+       tax lines sit BELOW the total labelled as already included. That is the standard
+       tax-inclusive receipt and it foots exactly. The caller passes GROSS subtotal and GROSS
+       discount for this mode (this file formats; it never computes money — see the header). */
+    var inclusive = !!d.taxIncluded;
     var discBlock = disc > 0
-      ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(disc) + '</span></div><div class="t tx"><span>Taxable value</span><span>' + inr(d.taxable) + "</span></div>"
+      ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(disc) + "</span></div>"
+        + (inclusive ? "" : '<div class="t tx"><span>Taxable value</span><span>' + inr(d.taxable) + "</span></div>")
+      : "";
+
+    /* MRP / untaxed lines (mig 270). 'nontax' is the part of the bill GST is NOT charged on —
+       a sealed water bottle sold at its printed price. It is added AFTER the tax lines, which
+       is exactly how the owner described it, and the first row above becomes "Food subtotal"
+       so the column still FOOTS: food − discount = taxable value, and taxable + tax + MRP =
+       total. (A "Subtotal" of 880 followed by "Taxable value 720" with only an 80 discount
+       between them reads as an arithmetic error even though it isn't.)
+       When there are no such lines — every restaurant today — nothing here renders and the
+       bill is byte-identical to the one before this feature. */
+    var nontax = Number(d.nontax) || 0;
+    var subLabel = nontax > 0 ? "Food subtotal" : "Subtotal";
+    var subAmount = nontax > 0 ? (Number(d.subtotal) || 0) - nontax : Number(d.subtotal) || 0;
+    var mrpBlock = nontax > 0
+      ? '<div class="t"><span>' + esc(d.mrpLabel || "MRP items") + "</span><span>" + inr(nontax) + "</span></div>"
+      : "";
+    /* The note only claims tax is inside the price when tax genuinely IS inside it — i.e.
+       when the restaurant treats MRP as tax-inclusive. Saying it otherwise would be a
+       statement on a tax invoice that the accounts do not support. */
+    var mrpNote = (nontax > 0 && d.mrpNote)
+      ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">' + esc(d.mrpNote) + "</div>"
       : "";
 
     var custBlock = (d.cust || d.custPhone)
@@ -209,6 +253,15 @@
 + "  tbody tr:last-child td{padding-bottom:6px}\n"
 + "  .t{display:flex;justify-content:space-between;font-size:12px;padding:2.5px 0}\n"
 + "  .t.tx{border-top:1px solid #000;margin-top:4px;padding-top:5px}\n"
++ "  /* The MRP stamp and the note under the total. Boxed outline rather than a shade —\n"
++ "     a thermal head has no grey (see the ONE INK note above), so a tint would print as\n"
++ "     broken dots. 10px is the floor; nothing smaller survives 203 dpi. */\n"
++ "  .mrpt{font-size:10px;letter-spacing:.08em;border:1px solid #000;border-radius:2px;\n"
++ "        padding:0 3px;margin-left:5px;white-space:nowrap}\n"
++ "  .mini{font-size:10.5px;text-align:center}\n"
++ "  /* the 'price includes' block sits UNDER the total: reported, not added */\n"
++ "  .incl{margin-top:5px;font-size:11px}\n"
++ "  .incl .t{padding:1px 0;font-size:11px}\n"
 + "  .totals{margin-top:6px;border-top:1px solid #000;padding-top:6px}\n"
 + "  .g{display:flex;justify-content:space-between;align-items:baseline;border-top:2px solid #000;\n"
 + "     border-bottom:2px solid #000;margin-top:7px;padding:6px 0;font-weight:700;font-size:16px;letter-spacing:.02em}\n"
@@ -246,11 +299,16 @@
 + "<colgroup><col><col style=\"width:calc(" + widest.qty + "ch + 8px)\"><col style=\"width:calc(" + widest.rate + "ch + 11px)\"><col style=\"width:calc(" + widest.amt + "ch + 11px)\"></colgroup>\n"
 + '<thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr></thead><tbody>' + rows + "</tbody></table>\n"
 + '<div class="totals">\n'
-+ '  <div class="t"><span>Subtotal</span><span>' + inr(d.subtotal) + "</span></div>\n"
++ '  <div class="t"><span>' + subLabel + "</span><span>" + inr(subAmount) + "</span></div>\n"
 + "  " + discBlock + "\n"
-+ "  " + taxRows + "\n"
++ "  " + (inclusive ? "" : taxRows) + "\n"
++ "  " + mrpBlock + "\n"
 + '  <div class="g"><span>TOTAL</span><span>' + inr(d.total) + "</span></div>\n"
++ (inclusive && taxRows
+   ? '  <div class="incl"><div class="t"><span>Price includes</span><span></span></div>' + taxRows + "</div>\n"
+   : "")
 + "</div>\n"
++ mrpNote + "\n"
 + '<div class="foot">' + footer + "</div>\n"
 + pageScript(d.autoPrint);
   }

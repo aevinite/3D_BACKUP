@@ -456,6 +456,30 @@ export const SECTIONS: Section[] = [
           // a look-alike drawn by separate code, which meant a format could be approved here and
           // come out of the printer differently. Both now render /panels/billdoc.js, the one file
           // the manager panel prints from.
+          // ── GST and prices (mig 270) ────────────────────────────────────────────────────
+          // These three decide what a typed menu price MEANS, so they sit with the bill they
+          // print on rather than in a tax corner of their own. All three are ADMIN-ONLY: no
+          // owner and no manager screen offers them (owner, 2026-08-04). Each binds to a real
+          // settings column that lib/tax.ts already reads on every money path — the resolver,
+          // not the screen, is what makes them count.
+          { id: "price_tax_mode", name: "What a menu price means", def: "excl", bind: { t: "choice", key: "price_tax_mode" },
+            what: "The prices typed into this restaurant's menu — is GST added on top of them, or already inside them? Every bill, the guest cart and the reports follow this one answer, so they can never show three different totals. Composition scheme is the third case: those restaurants pay a flat rate themselves and may NOT charge GST to a diner, so their bills print no tax line at all.",
+            choices: [
+              { value: "excl", label: "GST is added on top", what: "The typed price is the net amount and GST is added to it. This is how every restaurant works today." },
+              { value: "incl", label: "The price already includes GST", what: "The typed price is what the guest pays; the GST inside it is pulled out and declared. Totals do not move — only the split changes." },
+              { value: "composition", label: "Composition scheme — no GST shown", what: "For a restaurant registered under the composition scheme. No tax line appears on any bill, and nothing is added to a price. Do not pick this unless the restaurant really is registered that way." },
+            ] },
+          { id: "item_tax_modes", name: "Let individual dishes differ from this", def: false,
+            bind: { t: "setting", key: "item_tax_modes_allowed" },
+            what: "Needed for MRP items like a sealed water bottle, whose printed price is final and may never be added to. OFF — where every restaurant starts — means a dish's own tax setting is ignored completely, not just hidden, and every line follows the answer above. Turn it on and the menu editor offers a per-dish choice.",
+            children: [
+              { id: "mrp_tax_treatment", name: "GST on MRP items", def: "none", bind: { t: "choice", key: "mrp_tax_treatment" },
+                what: "The guest pays the same either way — never a rupee above MRP. This only decides what the restaurant declares underneath, so pick the one their accountant files.",
+                choices: [
+                  { value: "none", label: "No GST on MRP items", what: "The line carries no GST at all. Nothing is added to the printed price and nothing is declared on it." },
+                  { value: "inclusive", label: "GST is inside the MRP price", what: "The GST is pulled out of the MRP and declared. The guest still pays exactly the MRP — this is the cleaner one for the books." },
+                ] },
+            ] },
           { id: "bill_format", name: "Format of KOT bills", bind: { t: "none" }, panel: "settings:billing", preview: "bill",
             what: "The bill for a table: GSTIN, the legal name and address, the phone, the invoice number's prefix, the tax rows that make up the total, the footer line, and whether a customer's name is asked for. Preview at the top right is the real page — exactly what the manager panel hands the printer." },
           { id: "parcel_bill_format", name: "Format of parcel bill", bind: { t: "none" }, panel: "settings:billing", preview: "parcel",

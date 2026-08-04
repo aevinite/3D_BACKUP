@@ -402,7 +402,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // slim (nomenu) load it's never issued at all.
       const dishesP = nomenu
         ? null
-        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price").eq("restaurant_id", rid).order("category");
+        : sb.from("menu_items").select("id,title,price,category,tags,veg,options,open_price,tax_mode").eq("restaurant_id", rid).order("category");
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
@@ -519,7 +519,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid),
         sb.from("session_members").select("id, session_id, phone, phone_verified, name, role, approved, location_ok, removed, joined_at, device_id, restaurant_id").eq("removed", false).eq("restaurant_id", rid),
         sb.from("waiter_calls").select("*").eq("resolved", false).eq("restaurant_id", rid),
-        sb.from("menu_items").select("id,title,price,category,tags,veg,options").eq("restaurant_id", rid).order("category"),
+        sb.from("menu_items").select("id,title,price,category,tags,veg,options,tax_mode").eq("restaurant_id", rid).order("category"),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
         sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).order("created_at"),
         // THIS restaurant's identity, so the tablet header shows which restaurant the
@@ -1002,7 +1002,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const g = recordPin(await tabletPerm("tablet_discount", req, body, rid, actor)); if (!g.allow) return g.resp; // off/pin/on per settings
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS); the perm
       // gate above is a FEATURE gate, not a tenant one, so a foreign ?rid= must still be blocked.
-      const cur = must(await sb.from("orders").select("total, subtotal, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("total, subtotal, taxable_base, session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't there anymore — refresh.", 404);
       // Per-ticket and whole-bill discount are mutually exclusive (the whole-bill discount
       // owns every ticket's discount via the split) — so block a single-ticket discount while
@@ -1012,10 +1012,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (sd && Number(sd.discount) > 0) return err("Clear the whole-bill discount first, then discount a single ticket.", 409);
       }
       const raw = Number(body && body.amount);
-      // Clamp to the PRE-TAX food base (subtotal), NOT the tax-inclusive total: the bill drops
-      // by discount×(1+rate), so a discount above the pre-tax base would drive the due negative.
+      // Clamp to the TAXABLE base, NOT the tax-inclusive total and no longer the whole subtotal:
+      // the bill drops by discount×(1+rate), so a discount above that base would drive the due
+      // negative — and with untaxed MRP lines in the ticket (mig 270) the subtotal INCLUDES money
+      // that is legally final, so discounting against it would quietly cut an MRP price.
+      // taxable_base is NULL on every order placed before mig 270, and NULL there means "all of
+      // it was taxable" — which is exactly what subtotal says, so the fallback is not a guess.
       // Defense-in-depth — the modal already caps the UI, this guards a replay / hand-formed body.
-      const base = Number(cur.subtotal) || 0;
+      const base = Number(cur.taxable_base ?? cur.subtotal) || 0;
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), base) : 0;
       // Per-role %-cap (owner 2026-07-24): a waiter can't exceed their configured discount limit
       // (non-breaking — no cap → no block; admin uncapped). actor?.role: tablet → waiter bucket.
@@ -1056,10 +1060,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           .neq("status", "cancelled").neq("payment_status", "paid").gt("discount", 0).limit(1));
         if (perTicket.length) return err("Clear the single-ticket discount first, then apply a whole-bill discount.", 409);
       }
-      // Clamp to the table's Σ pre-tax subtotal of UNPAID, non-cancelled orders (defense in
-      // depth — the modal already caps the UI; this guards a replay / hand-formed body).
-      const subs = must(await sb.from("orders").select("subtotal").eq("session_id", b).eq("restaurant_id", rid).neq("status", "cancelled").neq("payment_status", "paid"));
-      const maxBase = subs.reduce((s: number, o: any) => s + (Number(o.subtotal) || 0), 0);
+      // Clamp to the table's Σ TAXABLE base over its UNPAID, non-cancelled orders (defense in
+      // depth — the modal already caps the UI; this guards a replay / hand-formed body). Same
+      // reason as the per-ticket clamp above: an MRP line's money sits in `subtotal` but is a
+      // final price, so it may never be part of what a discount is measured against (mig 270).
+      // NULL taxable_base = an order from before that migration = all of it was taxable.
+      const subs = must(await sb.from("orders").select("subtotal, taxable_base").eq("session_id", b).eq("restaurant_id", rid).neq("status", "cancelled").neq("payment_status", "paid"));
+      const maxBase = subs.reduce((s: number, o: any) => s + (Number(o.taxable_base ?? o.subtotal) || 0), 0);
       const raw = Number(body && body.amount);
       const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), maxBase) : 0;
       const note = String((body && body.note) || "").slice(0, 200) || null;

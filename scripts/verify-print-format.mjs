@@ -71,7 +71,15 @@ const USERS = [
   ["public/panels/kitchen/app.js", /LFH_BILLDOC\.kotDocHtml\(/, "the kitchen board's ticket"],
   ["lib/billPreview.ts", /BILLDOC\.billDocHtml\(/, "the Access bill preview"],
   ["lib/billPreview.ts", /BILLDOC\.kotDocHtml\(/, "the Access KOT preview"],
-  ["components/admin/RestaurantSettings.tsx", /BILLDOC\.billDocHtml\(/, "the settings form's bill preview"],
+  // The settings form's bill preview may reach the shared document EITHER WAY: by calling it
+  // directly, or by calling billPreviewHtml() — the one builder of the sample bill, which the
+  // line above already proves calls BILLDOC.billDocHtml. Going through billPreviewHtml is the
+  // STRONGER form, not a weaker one: since mig 270 the sample's figures depend on the price
+  // modes (GST on top / inside / composition scheme, and MRP lines), and a second copy of those
+  // sums on this screen is exactly how a composition restaurant got shown a bill with CGST and
+  // SGST rows it may not legally print. So accept both shapes and keep rejecting a hand-rolled
+  // <html> of its own, which check 2 above is what actually catches.
+  ["components/admin/RestaurantSettings.tsx", /BILLDOC\.billDocHtml\(|billPreviewHtml\(/, "the settings form's bill preview"],
   ["components/admin/RestaurantSettings.tsx", /BILLDOC\.kotDocHtml\(/, "the settings form's KOT preview"],
 ];
 for (const [file, mark, label] of USERS) {

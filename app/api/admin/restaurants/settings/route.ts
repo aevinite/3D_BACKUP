@@ -26,6 +26,10 @@ const isUuid = (v: unknown): v is string =>
 const SETTINGS_COLS = [
   "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone", "gstin",
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
+  // GST and prices (mig 270). What a typed menu price MEANS, whether a single dish may differ
+  // from that, and what an MRP line declares underneath. Admin-only — there is no owner or
+  // manager control for any of the three, by the owner's instruction (2026-08-04).
+  "price_tax_mode", "item_tax_modes_allowed", "mrp_tax_treatment",
   "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
   "table_count", "table_seats", "table_names", "floor_per_row",
@@ -72,9 +76,24 @@ function sanitize(body: Patch): Patch {
     const v = parseFloat(String(body.tax_rate));
     out.tax_rate = Number.isFinite(v) && v >= 0 && v <= 1 ? v : null;
   }
+  // ── GST and prices (mig 270) ──────────────────────────────────────────────
+  // Both columns carry a CHECK constraint, so an unexpected value would be refused by the
+  // database with a 500 the admin can do nothing about. Fall back to the SAFE default instead
+  // — 'excl' is today's behaviour (GST on top) and 'none' declares no tax on an MRP line, so a
+  // typo can never quietly move a restaurant onto a different tax posture or print a tax line
+  // a composition-scheme restaurant may not show.
+  if ("price_tax_mode" in body) {
+    const v = String(body.price_tax_mode ?? "");
+    out.price_tax_mode = v === "incl" || v === "composition" ? v : "excl";
+  }
+  if ("mrp_tax_treatment" in body) {
+    out.mrp_tax_treatment = String(body.mrp_tax_treatment ?? "") === "inclusive" ? "inclusive" : "none";
+  }
   // Customer on the bill (mig 227): asking for the guest's mobile + name, and printing
   // those two lines, are separate switches — see the (i) note in the admin card.
-  for (const k of ["sessions_enabled", "require_location", "require_otp", "bill_customer_required", "bill_customer_print"]) {
+  // item_tax_modes_allowed rides the same boolean loop — it is the master switch for per-dish
+  // tax modes and is a real boolean column (NOT NULL DEFAULT false), never a tri-state.
+  for (const k of ["sessions_enabled", "require_location", "require_otp", "bill_customer_required", "bill_customer_print", "item_tax_modes_allowed"]) {
     if (k in body) out[k] = body[k] === true || body[k] === "true";
   }
   for (const k of ["geo_lat", "geo_lng"]) {
