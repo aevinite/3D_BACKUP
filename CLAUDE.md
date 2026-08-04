@@ -190,56 +190,30 @@ top there's nothing behind it to frost. Use this exact recipe for any "blur".
   build then DROPS the property entirely and the blur silently vanishes (cost us
   a long debugging round). The build auto-prefixes for Safari on its own.
 
-## Long-term direction (owner, 2026-06-12 — context only, do NOT build yet)
+## SaaS multi-tenant architecture (approved 2026-06-25, since built — plan: `docs/SAAS-ARCHITECTURE-PLAN.html`)
 
-This becomes a **hybrid SaaS**: one shared backend serving MANY restaurants, where
-every feature (dining sessions, 3D viewer, geofence, waiter calls, allergy system…)
-can be **enabled/disabled PER RESTAURANT** — a per-tenant feature-flag model.
-Frontends may differ completely per restaurant (white-label); the backend stays one
-engine. Implications to keep in mind when building today: keep business rules in the
-backend (RPCs/endpoints, not the UI), keep features cleanly separable, and avoid
-hard-wiring single-restaurant assumptions deeper than necessary. Nothing multi-tenant
-is to be built until the owner says so.
+Many restaurants, ONE backend, every feature enable/disable-able PER RESTAURANT; frontends may
+differ completely per restaurant (white-label). The live technical rules — all still binding:
 
-> **STATUS 2026-06-25: APPROVED & ACTIVE — see the SaaS section directly below.** The
-> owner approved this pivot. Build still starts ONLY on the owner's explicit "go".
-
-## SaaS multi-tenant build — APPROVED 2026-06-25 (plan: `docs/SAAS-ARCHITECTURE-PLAN.html`)
-
-Converting this single-restaurant app into a multi-tenant SaaS (many restaurants, ONE
-backend). Full visual plan: `docs/SAAS-ARCHITECTURE-PLAN.html`. **Do NOT write feature
-code until the owner explicitly says "go."** Agreed core decisions:
-
-- **One shared database, POOL model.** Every tenant-scoped row carries a `restaurant_id`;
-  Row-Level Security enforces isolation AT THE DB LEVEL — never rely on app-code filtering
-  alone. NO database-per-restaurant. (plan §2)
-- **Build order (each phase = its own plan):** `0` Tenancy core (keystone) → `1` Guest
-  tenant resolution → `2` Per-restaurant features + white-label → `3` Roles & permissions
-  → `4` Owner panel (the new 5th panel) → `5` Admin super-panel. Phase 0 first; everything
-  depends on it.
-- **LIVE-SITE SAFETY (non-negotiable):** every schema change is ADDITIVE — add
-  `restaurant_id` defaulting to the existing restaurant (#1), backfill, THEN enforce
-  NOT NULL / RLS. Verify the live menu still works at each step. No big-bang rewrite;
-  Phase 0 on one careful branch.
-- **Scale discipline baked in from day one (all cheap, do them now):** use Supabase's
-  POOLED connection, never a direct one (this is what prevents the "too many connections"
-  peak-load crash — the PetPooja-at-300-tables failure); INDEX every column we filter by;
-  realtime channels keyed PER restaurant (never one global firehose); scoped queries only
-  (`WHERE restaurant_id = …`, never "select all then filter in code"). **Redis / job
-  queues / read replicas are Stage-3 (50–300+ restaurants) — do NOT add them early (YAGNI).**
-- **Dashboards read pre-aggregated summary tables**, never live scans of millions of order
-  rows (owner's all-restaurants profit view). (plan §4-F)
-
-### Routing — path NOW, subdomains LATER (owner, 2026-06-25)
-- Ship **path-based** first: `/r/<restaurant-slug>/t/<table>` (the QR encodes slug + table).
-- Tenant resolution is ONE resolver (e.g. `lib/tenant.ts`). It reads the slug from the PATH
-  today, but is written so it can ALSO read a **subdomain** (`<slug>.app.com`) or a
-  restaurant's **own custom domain** later. KEEP that abstraction in every route so the
-  switch is a config/DNS flip, NOT a rewrite.
-- **When we switch to subdomains:** ONLY on the owner's explicit go — expected trigger is
-  the first real/paying restaurant wanting a branded link, or just before public launch.
-  The switch is small: add a wildcard domain + wildcard TLS on Vercel, point the resolver
-  at the Host header, keep path-based as fallback. Until then, path is the source of truth.
+- **One shared database, POOL model.** Every tenant-scoped row carries a `restaurant_id`; Row-Level
+  Security enforces isolation AT THE DB LEVEL — never rely on app-code filtering alone. NO
+  database-per-restaurant.
+- **Every schema change is ADDITIVE** — add the column with a default, backfill, THEN enforce NOT
+  NULL / RLS. Verify the live menu still works at each step. No big-bang rewrite.
+- **Scale discipline (all cheap — always do them):** the POOLED Supabase connection, never a direct
+  one (this is what prevents the "too many connections" peak-load crash — the PetPooja-at-300-tables
+  failure); INDEX every column we filter by; realtime channels keyed PER restaurant (never one
+  global firehose); scoped queries only (`WHERE restaurant_id = …`, never "select all then filter in
+  code"). **Redis / job queues / read replicas are Stage-3 (50–300+ restaurants) — do NOT add them
+  early (YAGNI).**
+- **Dashboards read pre-aggregated summary tables**, never live scans of millions of order rows.
+- **Business rules live in the backend** (RPCs / route handlers, not the UI); keep features cleanly
+  separable.
+- **Routing is path-based today** (`/r/<slug>/t/<table>`, the QR encodes slug + table) through ONE
+  resolver (`lib/tenant.ts`) written so it can ALSO read a **subdomain** or a restaurant's **own
+  custom domain** later — KEEP that abstraction in every route so the switch is a config/DNS flip,
+  NOT a rewrite. Switching to subdomains happens ONLY on the owner's explicit go.
+- Build order + the subdomain switch detail: `docs/PROJECT-HISTORY.md` §9.
 
 ### EVERY new feature is a toggleable, permission-scoped MODULE (owner, 2026-06-25)
 Planned future systems (CONTEXT ONLY — do NOT build until told): **inventory management,
@@ -278,10 +252,10 @@ without being reminded.** When you add anything, wire ALL of these that apply:
      `pollTables` refetches just that table); leave `table_number` NULL when it can't be scoped
      (forces a safe full reload). For column-scoped triggers (`UPDATE OF …`), **every column a
      panel renders must be in the watch-list** — a rendered column the trigger ignores = a silent
-     missed instant update (this bit us: invoice-void columns weren't watched, mig 096 fixed it).
+     missed instant update.
    - **Per-table fetch + merge:** extend the panel's `?table=N` endpoint + client merge to
-     drop/re-add that table's rows **dedup'd by row id** (never table_number alone — it changes
-     on a shift; that shipped a dup-tile bug, mig 096 + pollTables dedup fixed it).
+     drop/re-add that table's rows **dedup'd by row id** (never table_number alone — it changes on
+     a shift). Both bugs behind these two rules: `docs/PROJECT-HISTORY.md` §12.
    - **No new poll faster than the 60s backstop;** realtime channels stay keyed per restaurant
      and drop on hidden/idle. Verify in the Network tab that one change refetches ONLY that table.
 10. **WORKS WITH NO INTERNET (owner, 2026-07-30 — "this is a must thing, for every restaurant").**
@@ -350,18 +324,16 @@ The editor/kitchen/tablet UIs are the original vanilla files served from
 `public/panels/<name>/` (embedded full-screen); their old Express APIs are ported
 to Next route handlers at `app/api/<name>/[...path]/route.ts` (service-role via
 `lib/supabaseAdmin.ts`). The admin-only floating switcher (`components/AdminSwitcher`)
-hops between panels. The old standalone `editor/ kitchen/ tablet/ admin/` folders +
-the separate editor repo were DELETED (preserved in `reference/` + the
-`pre-rewrite-reference` git tag).
+hops between panels. The old standalone folders + the separate editor repo were deleted
+(`docs/PROJECT-HISTORY.md` §12).
 
 ## Security gate (2026-06-13)
 
-**⚠️ THERE IS NO `middleware.ts` — this section described it until 2026-08-04 and it does not
-exist** (nor a Next 16 `proxy.ts`). Anyone auditing the login gate by looking for that file finds
-nothing and may conclude the gate is missing. It isn't; it MOVED, and the per-route shape is
-deliberate — env vars are reliable in the Node runtime, which the edge middleware could not promise
-(that is why `lib/staffAuth.ts`'s own comment says the admin gate runs in "layout + /api/admin
-routes"). What actually guards what, verified route by route in the 2026-08-04 API sweep:
+**⚠️ THERE IS NO `middleware.ts`** (nor a Next 16 `proxy.ts`). Looking for that file finds nothing
+and may suggest the gate is missing — it isn't, it MOVED, and the per-route shape is deliberate:
+env vars are reliable in the Node runtime, which edge middleware could not promise (hence
+`lib/staffAuth.ts`'s comment that the admin gate runs in "layout + /api/admin routes"). What
+actually guards what, verified route by route in the 2026-08-04 API sweep:
 
 - **`/aevinite` (the admin console)** — `app/aevinite/layout.tsx` checks `tokenIsValid` server-side.
 - **`/api/admin/**`** — every one of the 43 route files checks `tokenIsValid` (usually via a local
@@ -390,50 +362,38 @@ work in prod). **If you re-introduce a middleware, update this section in the sa
 
 ## KOT / bills / billing depth (migrations 036–038)
 
-- Every order gets a daily `kot_no`, every session a daily `bill_no`
-  (triggers + `daily_counters`); `get_order_status` returns `kot_no`.
-- `orders.discount` (+note) is stored APART from totals; every due/total view
-  is net of discounts. `lfh_staff_shift_table` moves a party atomically.
-- `feedback` table: one rating per order via anon `lfh_leave_feedback`; the
-  guest UI is the star row on past bills in the cart.
-- **GOTCHA: new Postgres functions are PUBLIC-executable by default.** Every
-  staff-only function MUST get `REVOKE ... FROM PUBLIC, anon, authenticated` +
-  `GRANT ... TO service_role` (see migration 038 — the verify run caught anon
-  calling a staff RPC).
+- Every order gets a daily `kot_no`, every session a daily `bill_no` (triggers +
+  `daily_counters`); `get_order_status` returns `kot_no`. `orders.discount` (+note) is stored APART
+  from totals; every due/total view is net of discounts. `lfh_staff_shift_table` moves a party
+  atomically. More: `docs/PROJECT-HISTORY.md` §12.
+- **GOTCHA: new Postgres functions are PUBLIC-executable by default.** Every staff-only function
+  MUST get `REVOKE ... FROM PUBLIC, anon, authenticated` + `GRANT ... TO service_role` (mig 038 —
+  the verify run caught anon calling a staff RPC; mig 267 caught 17 more that had drifted).
 
 ## Architecture cheat sheet
 
-- `lib/modelLoader.ts` — SINGLETON on `globalThis.__lfh_modelLoader`. Downloads
-  GLBs into in-memory blobs, hands `blob:` URLs to `<model-viewer>`. This is
-  what makes "no re-fetch on navigation" work.
-- `lib/modelWatchlist.ts` — sibling singleton; tracks who tried to view 3D
-  before it loaded so toasts only fire for them.
-- `components/ModelToastHost.tsx` — mounted globally in `app/layout.tsx`;
-  listens for `lfh:model-loaded` / `lfh:model-failed` and shows clickable toasts.
-- Event bus pattern: components talk via `window.dispatchEvent(new CustomEvent(...))`.
-  Names: `lfh:open-cart`, `lfh:close-all`, `lfh:chef-call`, `lfh:cart-updated`,
-  `lfh:toast`.
-- Persistence: `localStorage` keys `lfh_cart`, `lfh-favorites`; session theme
-  in `lfh_theme_session` (read-side currently broken — see bug B2).
-- Menu data: `lib/menu.ts` — `getMenuItems()` / `getMenuItem(slug)` read the
-  `menu_items` table; `getCategories()` / `getFilters()` read the `categories` /
-  `filters` tables. All via the ANON key (`lib/supabase.ts`), mapping snake_case
-  columns to camelCase. `/menu` and `/item/[slug]` use these; the old
-  `public/content/menu.json` is the seed source only, no longer fetched at runtime.
-- Categories & filters are DB-driven, not hardcoded. `categories` (slug, `name`
-  JSONB of 6-lang translations, icon FA-class, color, sort_order, active) and
-  `filters` (slug, `name` JSONB, icon emoji, sort_order, active). Each dish has a
-  `tags TEXT[]` listing the filter slugs it matches (seeded from the `veg` flag,
-  which still exists for the VegIcon). `app/menu/page.tsx` builds the category bar
-  and filter chips from these, prepending a virtual "All". Multilingual labels use
-  `localized(name, lang)` + the `useLanguage()` hook in `lib/i18n.ts` (falls back to
-  `en`, then any value). New categories/filters added later should get their other
-  languages auto-translated at editor-save time, not by hand.
-- Re-seed with `node scripts/seed-supabase.mjs` (runs ALL `supabase/migrations/*.sql`
-  in order via the Management API, upserts categories + filters + items via the
-  service role, then verifies an anon read of all three tables). Secrets all live in
-  `.env.local` (gitignored): anon key, service-role key, and `SUPABASE_ACCESS_TOKEN`
-  (the Management-API PAT used for DDL).
+- `lib/modelLoader.ts` — SINGLETON on `globalThis.__lfh_modelLoader`; downloads GLBs into in-memory
+  blobs and hands `blob:` URLs to `<model-viewer>`. **This is what makes "no re-fetch on navigation"
+  work.** `lib/modelWatchlist.ts` is a sibling singleton tracking who tried to view 3D before it
+  loaded, so toasts only fire for them; `components/ModelToastHost.tsx` (mounted in `app/layout.tsx`)
+  listens for `lfh:model-loaded` / `lfh:model-failed`.
+- Event bus pattern: components talk via `window.dispatchEvent(new CustomEvent(...))`. Names:
+  `lfh:open-cart`, `lfh:close-all`, `lfh:chef-call`, `lfh:cart-updated`, `lfh:toast`.
+- Persistence: `localStorage` keys `lfh_cart`, `lfh-favorites`; session theme in
+  `lfh_theme_session` (read-side currently broken — see bug B2).
+- Menu data: `lib/menu.ts` — `getMenuItems()` / `getMenuItem(slug)` read `menu_items`;
+  `getCategories()` / `getFilters()` read `categories` / `filters`. All via the ANON key
+  (`lib/supabase.ts`), snake_case → camelCase. The old `public/content/menu.json` is the seed source
+  only, no longer fetched at runtime.
+- **Categories & filters are DB-driven, not hardcoded** — the `categories` / `filters` tables; each
+  dish's `tags TEXT[]` lists the filter slugs it matches. `app/menu/page.tsx` builds the category bar
+  and chips from these, prepending a virtual "All". Multilingual labels use `localized(name, lang)` +
+  the `useLanguage()` hook in `lib/i18n.ts`. Column shape + the auto-translate-at-save rule:
+  `docs/PROJECT-HISTORY.md` §12.
+- Re-seed with `node scripts/seed-supabase.mjs` (runs ALL `supabase/migrations/*.sql` in order via
+  the Management API, upserts categories + filters + items via the service role, then verifies an
+  anon read of all three). Secrets all live in `.env.local` (gitignored): anon key, service-role
+  key, and `SUPABASE_ACCESS_TOKEN` (the Management-API PAT used for DDL).
 
 ## Routes
 
@@ -517,13 +477,12 @@ detached mockup):**
 
 ## Mobile hardware BACK button — every screen & popup is a "back step" (2026-06-19)
 
-The Android/phone hardware back button must NEVER quit the site in one press. It
-peels off ONE layer at a time: open popup → its parent → … → menu → a "Leave this
-site?" dialog (and only THEN, one more back, does the tab close). This is **Option A**
-(owner-chosen 2026-06-19): popups stay state-driven (NO URL change, so **zero extra
-egress / DB load** — it's pure browser history), and a tiny central manager syncs
-them to the History API. Real PAGES (`/item`, `/view`) already have their own URL, so
-the browser handles their back for free; only state-driven overlays need wiring.
+The Android/phone hardware back button must NEVER quit the site in one press. It peels off ONE
+layer at a time: open popup → its parent → … → menu → a "Leave this site?" dialog (and only THEN,
+one more back, does the tab close). Popups stay state-driven (NO URL change, so **zero extra
+egress / DB load** — pure browser history) and a tiny central manager syncs them to the History
+API. Real PAGES (`/item`, `/view`) already have their own URL, so only state-driven overlays need
+wiring.
 
 - **Guest app:** the manager is `lib/backStack.ts`. ANY popup/overlay/drawer/sheet/
   dialog MUST register itself while open with the hook — ONE line, called
@@ -595,12 +554,10 @@ So tripping a limit during our own work counts as a BUG in the test, not a findi
 
 - **Sign in ONCE per session and reuse that session** (keep the cookie / the Playwright context /
   the logged-in tab). Never put a login inside a loop, a retry, or a per-request helper.
-- **The trap that actually caused this (2026-07-29):** the "open it in Chrome so the owner can look"
-  scripts (`scripts/view-device.mjs`, `scripts/sweep/login.mjs`, any `show-*.mjs`) sign in AGAIN for
-  every browser context / role / restaurant they open. Two sessions doing that a few seconds apart
-  put six `diagm1` logins inside five minutes and pinged the owner's phone about himself. If a script
-  opens several views, **log in once and reuse that context's cookies for the rest**, and never run
-  the same show-script back-to-back in a loop.
+- **The trap that actually caused this:** the "open it in Chrome so the owner can look" scripts
+  (`view-device.mjs`, `sweep/login.mjs`, any `show-*.mjs`) sign in AGAIN for every browser context /
+  role / restaurant they open. If a script opens several views, **log in once and reuse that
+  context's cookies for the rest**, and never run the same show-script back-to-back in a loop.
 - **Never repeat a limited action just to "see what happens".** The limited ones are: staff/owner
   login (5 per 5 min), manager PIN, guest orders, waiter calls, join-table, OTP requests
   (`rate_limit_rules`, mig 205).
@@ -615,21 +572,19 @@ So tripping a limit during our own work counts as a BUG in the test, not a findi
   `/aevinite` → rate limits and say so.
 - **Don't leave anything re-logging in on a timer** (watchers, polling scripts, parallel panels).
 
-**NOW ENFORCED, not just asked for (2026-07-30).** Two more of these slipped through, so the rule
-has teeth:
+**NOW ENFORCED, not just asked for (2026-07-30)** — the stories are in
+`docs/PROJECT-HISTORY.md` §3:
 
 - **Use the shared helpers, never a hand-rolled login.** `scripts/sweep/login.mjs` exports
-  `loginAs()` — which now CACHES the session, so five browser contexts cost ONE login (proven:
-  1 login row for 5 contexts, all with a working session) — and `adminCookie()`/`adminHeaders()`,
-  which present the admin gate cookie and make **zero** login requests ever.
+  `loginAs()` — which CACHES the session, so five browser contexts cost ONE login — and
+  `adminCookie()`/`adminHeaders()`, which present the admin gate cookie and make **zero** login
+  requests ever.
 - **Never POST to `/api/staff-login` with JSON.** That route reads FORM data, so a JSON body sends
-  an EMPTY password: three "checks" became three wrong-password attempts and raised an
-  `admin_login` limit event about the owner's own panel. If you need admin API access from a
-  script, use `adminHeaders()` — no request, no failed-login row, no alert.
+  an EMPTY password and each "check" becomes a wrong-password attempt that raises an `admin_login`
+  limit event about the owner's own panel. For admin API access from a script use `adminHeaders()`.
 - **A test that deliberately trips a wall must sweep up in the same run.** Deleting the test users
   does NOT clear `rate_limit_events` / `rate_limit_counters` / `login_throttle`, and an OPEN event
-  sits in the admin's Problems list looking like a real restaurant in trouble
-  (`verify-staff-accounts.mjs` now clears its own rows).
+  sits in the admin's Problems list looking like a real restaurant in trouble.
 - **Guarded by `npm run verify:test-safety`** (`scripts/verify-test-safety.mjs`) — checks each of
   the mistakes above, proven to fail on all three. It also runs AUTOMATICALLY as a PostToolUse hook
   after any edit under `scripts/` or `tests/`: silent when clean, and it REFUSES the edit with an
@@ -640,15 +595,10 @@ Code: `lib/rateLimit.ts` (counter + alert), `lib/alerts.ts` (phone ping), mig 20
 
 ## 👆 A USER'S TAP MUST NEVER VANISH IN SILENCE (owner, 2026-07-30 — every panel, every dialog)
 
-A button that swallows a tap is indistinguishable from a broken button, and it leaves no trace
-to debug. This cost a real close on a live client's floor: the manager's confirm box ignores
-clicks for its first 350ms (so the tail of a double-tap can't answer a question nobody read),
-and "Close anyway" is a CHAINED dialog — it appears only when the server's refusal lands, so it
-pops up under a finger already tapping, in the same spot. A normal tap 200–300ms later was
-dropped with nothing on screen; the owner closed two tables and the third "didn't work"
-(PR #554, then the sibling paths in the follow-up).
-
-Whenever you write a dialog, overlay, or any handler that can decline a tap:
+A button that swallows a tap is indistinguishable from a broken button, and it leaves no trace to
+debug. It cost a real close on a live client's floor (PR #554 — the story is in
+`docs/PROJECT-HISTORY.md` §4). Whenever you write a dialog, overlay, or any handler that can
+decline a tap:
 
 - **Never `return` on a user action without a trace.** Either HOLD the action and run it when
   you can (`tapGuard().act()` in the manager panel), or refuse it VISIBLY — a shake
@@ -670,16 +620,13 @@ Whenever you write a dialog, overlay, or any handler that can decline a tap:
 
 ## 🪑 A TABLE SHOWS ONLY ITS OWN PARTY (owner, 2026-07-30 — every floor, every panel)
 
-The owner tapped **Open** on a FREE table and it appeared instantly as *"Preparing · 0/5
-served · ₹1,150 due"* with three KOTs — food ordered nine days earlier by a party whose
-session was long closed. "Mark all paid" / "Generate invoice" would have billed the new
-guests for it. Two rules came out of it; keep BOTH true forever:
+A FREE table once showed a nine-day-old party's food and ₹1,150 due; "Mark all paid" would have
+billed the new guests for it (`docs/PROJECT-HISTORY.md` §5). Two rules came out of it; keep BOTH
+true forever:
 
 - **Ownership is the SESSION, never the table number.** Anything that answers "which orders
   are at this table?" must match the table's CURRENT open-session id (a session-less row —
-  banquet/legacy — still counts, so no order is ever hidden). `lfh_table_view_summary` always
-  did this; the panels' `ordersForTable` (manager) / `ordersOf` (waiter) did not, which is why
-  the tile flip-flopped between "Preparing" and "Open · waiting for guests".
+  banquet/legacy — still counts, so no order is ever hidden).
 - **An order can never outlive its session.** Cleanup lives on the status change itself
   (mig 232 extends the mig-020/146 close trigger + the delete trigger), so EVERY close —
   the app path, a script's bare `UPDATE sessions SET status='closed'`, a hand-run SQL fix,
@@ -691,19 +638,12 @@ guests for it. Two rules came out of it; keep BOTH true forever:
 
 ## 🩺 A GREEN TEST SUITE IS NOT EVIDENCE THAT THE SCREEN IS RIGHT (2026-07-30 — after two faults reached the owner)
 
-Two faults reached the owner's screen on the same day, and **every check that was running passed**,
-because in both cases the source was valid and the data was fine — only what a person SAW was
-wrong:
-
-1. A `<script>` tag was inserted INSIDE an HTML comment. The comment ended early, so the manager's
-   top bar displayed *"…the pill was inserted at the far LEFT of the topbar. -->"* to every user.
-2. An orange *"Connection is struggling"* bar sat directly above the panel's own green *"Live"*
-   badge. Nothing was broken; the UI contradicted itself, from ONE slow read.
-
-The root cause of BOTH was the same, and it is the thing to guard against: **I verified my work
-with checks that could not have caught the failure** — the wrong surface (offline-only tests), the
-wrong artefact (source instead of the served file), or the wrong signal (skimming output instead of
-an exit code). So, permanently:
+Two faults reached the owner's screen on the same day and **every check that was running passed** —
+the source was valid, the data was fine, only what a person SAW was wrong (both are written up in
+`docs/PROJECT-HISTORY.md` §6 and reproduced as tests in `verify:ui`). The root cause of BOTH is the
+thing to guard against: **the work was verified with checks that could not have caught the failure**
+— the wrong surface (offline-only tests), the wrong artefact (source instead of the served file), or
+the wrong signal (skimming output instead of an exit code). So, permanently:
 
 - **`npm run verify:ui`** — static, instant, and wired into the PostToolUse hook: refuses an edit
   that leaves an HTML comment open, strands a panel script inside a comment, or commits a
@@ -722,13 +662,12 @@ an exit code). So, permanently:
 
 ## 🔑 ACCESS & PERMISSIONS WAS REBUILT (2026-07-31) — the LADDER above is retired
 
-Everything in this file about the 4-rung ladder (`admin → owner → manager → tablet`), about
-the owner granting manager powers, and about `docs/ACCESS-LADDER.md` describes how it USED to
-work. It is all kept above as history — nothing has been removed — but the LOGIC is retired:
+The old 4-rung ladder (`admin → owner → manager → tablet`) with the owner granting manager powers is
+**retired** — `docs/ACCESS-LADDER.md` is HISTORY only (why: `docs/PROJECT-HISTORY.md` §10). What is
+true now:
 
 - **A toggle exists only where the owner listed one** (`lib/accessTree.ts`). Everything else is
-  permanently ON for whoever's panel owns it. The old model had 54 sub-checkboxes of which 45
-  were read by no code.
+  permanently ON for whoever's panel owns it.
 - **Only the admin holds permissions.** `/aevinite` → Access & permissions is the one screen
   (plus its Per-person tab). The owner panel and the manager panel configure none.
 - **No greyed-out ghosts.** Unreachable = absent from that role's screen — but hiding is never
@@ -749,13 +688,12 @@ work. It is all kept above as history — nothing has been removed — but the L
   prove all 68 of its switches still read exactly the model's `def`. Put any restaurant back
   to those defaults with **`npm run access:defaults -- --slug <slug> --apply`** (dry run
   without `--apply`); it refuses to point at anything but the backup database.
-- **Access & permissions has a search bar at the top** (`components/admin/AccessSearch.tsx`) —
-  type a few letters and jump to any of the ~90 settings, phone-Settings style, with the path
-  shown and the same amber ring the `?focus=` deep links use. The index is built ONCE at module
-  load from `SECTIONS` (a constant), so a keystroke costs ~1.3ms and no network call; there is a
-  small synonym map for words people type that aren't labels (khata, zomato, swiggy, 3d, sold
-  out, salary…) — ADD TO IT when you add a node. A row whose parent is off has no row to jump
-  to, so its result is labelled "needs <parent>" and lands on that parent instead. Guarded by
+- **Access & permissions has a search bar** (`components/admin/AccessSearch.tsx`) — jump to any of
+  the ~90 settings, phone-Settings style, with the path shown and the same amber ring the `?focus=`
+  deep links use. The index is built ONCE at module load from `SECTIONS` (a constant), so a keystroke
+  costs ~1.3ms and no network call; **ADD TO the synonym map when you add a node** (khata, zomato,
+  swiggy, 3d, sold out, salary…). A row whose parent is off has no row to jump to, so its result is
+  labelled "needs <parent>" and lands on that parent instead. Guarded by
   **`npm run verify:access-search`** (22 checks, desktop + A35 phone) = phase 501.
 
 ## 👤 EVERY PERSON HAS ONE PROFILE, AND IT HAS ONE SHAPE (owner, 2026-08-01 — ALWAYS)
@@ -783,78 +721,51 @@ buttons. Right column: Permissions → who they are → emergency → job → pa
 
 ## 🧾 THE FLOOR IS READ ONCE AND SHARED — a write MUST drop that snapshot (2026-07-31)
 
-`lfh_table_view_summary` USED TO run ~6 queries per table (~1,800 statements on a 300-table
-floor). Alone that was ~300ms; the fault was CONCURRENCY — every manager/waiter device polls the
-WHOLE floor as its 60s backstop, and a dozen landing together queued and crossed the statement
-timeout (134 error rows in 12h, and pings on the owner's phone).
+Whole-floor reads for the same restaurant inside a **1.5s window share ONE database call**
+(`lib/floorSummary.ts`, wired into both panel routes). Three properties keep that safe, and each
+is easy to break with no symptom in any other test:
 
-**BOTH LEVERS ARE NOW PULLED, and they are complementary — sharing cuts the NUMBER of calls,
-mig 238 cuts the COST of each.** Read the history here so neither gets undone:
-
-- A first set-based rewrite was tried and **rejected by measurement**: byte-identical output,
-  5× faster at 4 concurrent reads, **2× slower at 12**, because it computed one big aggregate
-  per call where many small queries interleave better. That rejection was correct *for that
-  implementation*.
-- **Migration 238 is a different rewrite and was measured the same way, harder.** It keeps the
-  per-table wording ladder and the small aggregates, adds one set-based data pass, deletes a
-  floor-wide `count(*) FILTER` that walked EVERY order the restaurant ever took (~42k rows a
-  call), and stops accumulating tiles with `v_tiles := v_tiles || one_tile` (quadratic copying,
-  106ms at 300 tables). It does **not** show the collapse that got the first attempt rejected —
-  on one 300-table floor, whole-floor reads fired together: **12 at once 4.6× faster, 24 at
-  once 7.1×, 36 at once 7.6×, 48 at once 8.0×** (it improves with load, it does not degrade).
-  Single call went 169/386/**1675**ms → 11/16/**29**ms (min/avg/worst of 7).
-- **The one-line count fix alone is NOT the win** — measured at only ~1.1× under load. Do not
-  "simplify" mig 238 back to a loop on the theory that the count was the whole problem.
-- Touching this function again? Use **`node scripts/verify-summary-parity.mjs`** — it compares
-  a candidate against the live one tile by tile, for every restaurant and every occupied table,
-  and it is itself proven to catch a trailing space in a label, money rounded to 1 decimal, and
-  an off-by-one in the ready threshold. Do not hand-review a diff of this function instead.
-- ⏳ **OPEN FOLLOW-UP — run `npm run check:floor-timeouts` and act on the verdict.** Mig 238 landed
-  after the day's timeout bursts had already stopped, so "none since" proved nothing. The check
-  reports FIXED / TOO EARLY / NOT FIXED against the real error rows and prints what a floor read
-  costs now. **`docs/FLOOR-TIMEOUT-WATCH.md`** holds the ordered what-to-do-if-not-fixed list (and
-  the trap: if a floor read is already ~10–30ms, the remaining cause is CONTENTION, so making the
-  query faster again achieves nothing). On FIXED, delete the doc + script + npm script — it's
-  designed to be retired. AV live has the sharing fix but NOT mig 238; that needs its own ask.
-
-Whole-floor reads for the same restaurant inside a **1.5s window still share ONE database call**
-(`lib/floorSummary.ts`, wired into both panel routes). Three properties keep that safe, and
-each is easy to break with no symptom in any other test:
-
-- **Every write handler drops that restaurant's snapshot** (`invalidateFloor(rid)`, one line
-  right after the handler resolves `rid`). Without it, a device that changes something and
-  reloads is handed a floor computed BEFORE its own action — a waiter marks a table paid and
-  watches the tile flick back. **Add a write path → add that line.**
-- **A targeted `?table=N` refetch is NEVER shared** — that is what makes a tile update the
-  instant its order lands. Keep the `tbl ? …live… : …shared…` shape.
+- **Every write handler drops that restaurant's snapshot** (`invalidateFloor(rid)`, one line right
+  after the handler resolves `rid`). Without it, a device that changes something and reloads is
+  handed a floor computed BEFORE its own action — a waiter marks a table paid and watches the tile
+  flick back. **Add a write path → add that line.**
+- **A targeted `?table=N` refetch is NEVER shared** — that is what makes a tile update the instant
+  its order lands. Keep the `tbl ? …live… : …shared…` shape.
 - **The window stays ~1.5s.** The floor is a live screen; widening it makes it stale.
 
-Guarded by **`npm run verify:floor`** (`scripts/verify-floor-share.mjs`) — static, instant,
-proven to fail when an invalidation is removed. Run it against another checkout with
-`--repo <path>` (that is how AV live is checked without adding a file there).
+Also:
+
+- **Mig 238 made each call cheap too; do NOT "simplify" it back to a per-table loop** on the theory
+  that its one-line count fix was the whole win (measured: it wasn't). An earlier set-based rewrite
+  was rejected by measurement — read **`docs/PROJECT-HISTORY.md` §1** before touching this.
+- **Touching `lfh_table_view_summary`? Use `node scripts/verify-summary-parity.mjs`** — it compares
+  a candidate against the live one tile by tile, for every restaurant and every occupied table, and
+  is proven to catch a trailing space in a label, money rounded to 1 decimal, and an off-by-one in
+  the ready threshold. Do not hand-review a diff of this function instead.
+- ⏳ **OPEN FOLLOW-UP — run `npm run check:floor-timeouts` and act on the verdict.** It reports
+  FIXED / TOO EARLY / NOT FIXED against the real error rows and prints what a floor read costs now.
+  **`docs/FLOOR-TIMEOUT-WATCH.md`** holds the ordered what-to-do-if-not-fixed list (and the trap:
+  if a floor read is already ~10–30ms, the remaining cause is CONTENTION, so making the query
+  faster again achieves nothing). On FIXED, delete the doc + script + npm script — it's designed to
+  be retired. AV live has the sharing fix but NOT mig 238; that needs its own ask.
+
+Guarded by **`npm run verify:floor`** (`scripts/verify-floor-share.mjs`) — static, instant, proven
+to fail when an invalidation is removed. Run it against another checkout with `--repo <path>` (that
+is how AV live is checked without adding a file there).
 
 ## 🌊 A RUSH MUST SLOW THE APP DOWN, NEVER TAKE IT DOWN (owner, 2026-08-01 — every write, every poll)
 
-The owner's question after the 2026-07-31 outage was the right one: *"hammering should not have
-done this — what if my restaurant has 800 simultaneous orders?"* Measured answers, on the backup
-database (399,617 orders, free-tier shared vCPU, PostgREST's 8s statement ceiling):
+**Order volume is NOT the risk** — 100 genuinely simultaneous orders land in ~2s on the free tier
+and the rest of the site never wobbles (measured, `npm run load:ramp`). What saturates the instance
+is a handful of **unbounded analytics reads landing together**. The measurements, and the ramp's own
+two safety rules, are in **`docs/PROJECT-HISTORY.md` §2** — read it before buying compute to
+"handle the rush", or before writing any load/test script.
 
-- **An order is cheap: ~64-138 ms** (`lfh_staff_place_order` / `lfh_place_order`). 800 orders
-  spread over even five minutes is ~2.7/s — a few percent of one core. **Orders were never the
-  problem.**
-- **What saturates the instance is a handful of EXPENSIVE reads landing together.** The worst was
-  the snapshot cache's own "cheap" change-detector: `lfh_owner_orders_fingerprint` scanned all
-  orders — **21,591 ms and ~2.9 GB of page reads** for an all-time window. That is 2.7× the 8s
-  ceiling, so a dashboard couldn't even finish: it burned 8 full seconds of the shared CPU and
-  then FAILED, and a person's retry burned 8 more. **Mig 246** replaced it with a
-  trigger-maintained watermark (`orders_change_watermark`, one row per restaurant per business
-  day): **21,591 ms → 5 ms, 370,451 buffers → 157**, proven still to notice a change and still to
-  respect the window.
-
-Four rules came out of it. Keep all four true:
+Four rules came out of the 2026-07-31 outage. Keep all four true:
 
 1. **A change-detector may never scan the table it guards.** If a guard costs more than the query
-   it protects, it is not a guard. Maintain a counter/watermark on write and read that.
+   it protects, it is not a guard. Maintain a counter/watermark on write and read that (mig 246
+   turned a 21.6s all-orders scan into 5ms this way).
 2. **"The server can't take this right now" takes the SAME path as "no internet"** (owner's own
    words: *"it should work like online, things just save on his device, and when internet comes
    everything starts working"*). A 5xx or a timed-out write is NOT a rejection: the panel
@@ -862,21 +773,19 @@ Four rules came out of it. Keep all four true:
    a `busy` error, `components/CartPanel.tsx` catches it) save it on-device under the SAME
    `X-LFH-Action-Id` and deliver it when the server recovers. **4xx is different** — a clash, a
    closed table, a sold-out dish must reach the person, never be retried behind their back.
-3. **Every write carries a deadline, and every retry backs off with jitter.** `doFetch` had NO
-   timeout, so an overloaded server (which answers *nothing* for 30-90s) left a waiter's tap on a
-   spinner forever — not applied, not saved. And a FIXED retry beat means every device retries in
-   lockstep, which is a retry storm: `WRITE_TIMEOUT_MS` + `RETRY_BASE_MS`→`RETRY_MAX_MS` with ±25%,
-   and `useActiveAutoRefresh` spreads its 60s tick by ±20%.
-4. **Nothing may poll at a fixed fast rate while its own reads are failing.** The kitchen's
-   catch-up poll ran every 5s whenever realtime wasn't connected — and a saturated database is
-   exactly what drops realtime, so every device switched to a 5s board read at the same moment and
-   kept the database down. `LFH_RT.catchUp()` (in `public/panels/realtime.js`) keeps the 5s
-   liveness when reads succeed and doubles to a minute while they fail. Use it for any new
-   "realtime is down" poll.
+3. **Every write carries a deadline, and every retry backs off with jitter** — `WRITE_TIMEOUT_MS`
+   + `RETRY_BASE_MS`→`RETRY_MAX_MS` with ±25%, and `useActiveAutoRefresh` spreads its 60s tick by
+   ±20%. No timeout leaves a waiter's tap on a spinner forever (not applied, not saved); a FIXED
+   retry beat makes every device retry in lockstep, which is a retry storm.
+4. **Nothing may poll at a fixed fast rate while its own reads are failing.** A saturated database
+   is exactly what drops realtime, so a "realtime is down" poll at a fixed 5s puts every device on
+   the same fast read and keeps the database down. `LFH_RT.catchUp()` (`public/panels/realtime.js`)
+   keeps 5s liveness when reads succeed and doubles to a minute while they fail — use it for any new
+   catch-up poll.
 
-Also: **`npm run verify:everything` now refuses to start while another run is alive** (a pid lock
-at `.claude/verify-everything.lock`, `--force` to override). Two concurrent 501-phase runs are
-what actually took the database down — the test rig, not the product.
+Also: **`npm run verify:everything` refuses to start while another run is alive** (a pid lock at
+`.claude/verify-everything.lock`, `--force` to override). Two concurrent 501-phase runs are what
+actually took the database down — the test rig, not the product.
 
 **Guarded by `npm run verify:busy`** (`scripts/verify-busy-server.mjs`) — 14 checks against the
 REAL shipped files via a local stub (no database, no login, no load): a busy server's tap is
@@ -884,54 +793,19 @@ queued not lost, delivered exactly once under its original id on recovery, a 4xx
 person, deadlines/backoff/jitter are present, and the guest's order is classed correctly (5xx and
 timeout = save it, sold-out = tell them). Proven to fail with 5 red checks when the fix is removed.
 
-### The ceiling is MEASURED now, not guessed (2026-08-01) — and it is not order volume
-
-`npm run load:ramp` (`scripts/load-ramp-orders.mjs`) fires real staff orders at the deployed
-backup site, one distinct table each, ramping and stopping at the first sign of trouble. Result:
-
-| at once | placed | wall time | p50 / p95 | `/api/health` during the burst |
-|---|---|---|---|---|
-| 10 | 10/10 | 6.6s (cold) → 1.5s warm | 1.4s / 1.5s | 200, worst 392ms |
-| 25 | 25/25 | 2.2s | 2.0s / 2.2s | 200 |
-| 50 | 50/50 | 2.2s | 1.6s / 1.7s | 200 |
-| **100** | **100/100** | **2.1s** | **1.7s / 2.1s** | **200, worst 207ms** |
-
-**100 genuinely simultaneous orders land in about two seconds on the FREE tier, and the rest of
-the site never wobbles.** So the fear that a busy restaurant collapses the app was aimed at the
-wrong thing: order volume is not the risk, a handful of unbounded analytics scans is. Don't spend
-money on compute to "handle the rush" without measuring first — re-run this ramp instead.
-
-Two rules for the ramp itself, both learned the hard way in its first run:
-- **It must not become the outage it measures.** It refuses to point anywhere but the backup
-  database, refuses to start while another heavy run holds a lock, makes ZERO logins (the admin
-  gate cookie, so no `staff_login` limit event and no ping to the owner's phone), uses the staff
-  order path (no rate-limit rule; `guest_order` is 8/table/min and would alert), and samples
-  `/api/health` throughout — the question is whether the OTHER screens kept working.
-- **Test rows are put back by CLOSING the session, never by deleting.** The first version tried to
-  delete and the database refused: an order gets a bill number on insert, so it is an ISSUED bill
-  and `lfh_block_issued_delete` blocks a hard delete (the CGST rule we built in — it was right to
-  stop me). It reported "removed 0" and left 185 rows on the floor. Closing lets the mig-232
-  trigger cancel the unpaid work with a visible ✕ and archive the rest: tables free, audit trail
-  intact, nothing erased. **Any future load/test script cleans up the same way.**
-
 ⚠️ Still true: it is a free-tier shared-CPU instance with 60 connections, and these changes add no
-capacity — they mean a burst QUEUES and drains instead of collapsing. But the measured order
-ceiling is far above anything a single restaurant does, so the honest reason to buy compute would
-be many restaurants at once, not one busy night.
+capacity — they mean a burst QUEUES and drains instead of collapsing.
 
 ## Known gotchas (read before editing)
 
-- **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The
-  `/kitchen` and `/tablet` panels only repaint when a fingerprint (`boardSig` in
-  their `app.js`) changes, so a realtime refetch whose data "looks the same" is
-  dropped (prevents flicker). `boardSig` now serialises the FULL rows minus a tiny
-  `RT_VOLATILE` set (heartbeat/derived timestamps), so ANY field that affects a
-  ticket/tile auto-repaints — *including columns you add later*. If you ever shrink
-  it back to a hand-picked field list, edits to the omitted field (e.g. a new
-  allergy/note/discount) will silently fail to auto-refresh and only show on a
-  MANUAL refresh — the exact bug fixed 2026-06-17. Adding a new editable order/dish/
-  session field needs NO `boardSig` change now; if you add a new heartbeat-y column,
-  add it to `RT_VOLATILE`. Guarded by `scripts/verify-board-sig.mjs`. (The separate
+- **Live-update redraw guard (kitchen + tablet) — DON'T narrow `boardSig`.** The `/kitchen` and
+  `/tablet` panels only repaint when a fingerprint (`boardSig` in their `app.js`) changes, so a
+  realtime refetch whose data "looks the same" is dropped (prevents flicker). `boardSig` serialises
+  the FULL rows minus a tiny `RT_VOLATILE` set (heartbeat/derived timestamps), so ANY field that
+  affects a ticket/tile auto-repaints — *including columns you add later*. **Never shrink it back to
+  a hand-picked field list** — edits to an omitted field then silently fail to auto-refresh and only
+  show on a MANUAL refresh (the bug fixed 2026-06-17). A new editable field needs NO change; a new
+  heartbeat-y column goes in `RT_VOLATILE`. Guarded by `scripts/verify-board-sig.mjs`. (The separate
   "latest-wins" seq guard in each loader is a DIFFERENT mechanism — don't conflate.)
 - **Supabase HEAD lies about Cache-Control.** Use GET with `Range: bytes=0-0`
   for header checks. `scripts/set-glb-cache.mjs` has this bug.
@@ -961,17 +835,9 @@ be many restaurants at once, not one busy night.
 
 ## Deferred optimizations (owner-approved to revisit later — NOT yet built)
 
-- **Realtime-UPDATE latency on an already-open table detail (owner, 2026-07-02).** Opening a
-  table detail now paints instantly from the slim summary (stale-while-revalidate — see
-  `tablePanelParts` streaming branch / tablet `renderPanel`), so FIRST-open feels instant. But
-  a LIVE update to a detail that's already open (a new order/dish landing) still waits on a
-  full per-table slice refetch (`?table=N` → sessions+orders+calls+items, one Sydney round-trip
-  each ≈ 1–1.5s on the tablet). Idea for later, if it still feels laggy: instead of refetching
-  the whole slice on every breadcrumb, apply the realtime DELTA in place (the rt_emit breadcrumb
-  already names the table + change; patch just the changed row into `state.data.orders`/`items`
-  and re-render). That's the Linear/Figma "apply the delta, don't refetch" model — near-zero
-  egress, near-zero latency. Only build if the owner still notices the lag after the instant-open
-  win. Keep the 60s full-slice poll underneath as the safety net either way.
+- **Realtime-UPDATE latency on an already-open table detail** (owner, 2026-07-02) — apply the
+  realtime DELTA in place instead of refetching the whole per-table slice. Only build if the owner
+  still notices the lag. Full write-up: `docs/PROJECT-HISTORY.md` §11.
 
 ## Definition of done for code changes
 
@@ -1007,15 +873,13 @@ this product. A change made for AV live or for backup-2 is still merged into bac
 other stacks only ever receive what backup-1 already has. That is what stops the three stacks
 forking, and it is why backup-1 is the one place to look to answer "what is the latest?".
 
-**"First" means MERGED — not necessarily deployed.** This is the part that was missing and that the
-owner corrected on 2026-08-01. Backup-1's Vercel is on the free plan (~100 deploys/day) and a busy
-day of parallel sessions genuinely exhausts it — 142 deploys in 24h, of which 76 were PR previews
-nobody opens. When it caps, `POST /v13/deployments` answers 402 `api-deployments-free-per-day` and a
-merged fix simply cannot go out. **That does NOT block anything.** The order is:
+**"First" means MERGED — not necessarily deployed** (owner, 2026-08-01). Backup-1's Vercel is on the
+free plan (~100 deploys/day) and a busy day of parallel sessions genuinely exhausts it; when it caps,
+a merged fix simply cannot go out. **That does NOT block anything.** The order is:
 
 1. **Merge into backup-1 `main`** — always, without exception. This alone satisfies "backup-1 first".
-2. **Deploy backup-1** when it can. If it is capped: retry a couple of times spaced ~60–90s, then
-   STOP (see the note below) — the code is safe on main and deploys when the rolling window frees.
+2. **Deploy backup-1** when it can. If capped: retry a couple of times spaced ~60–90s, then STOP —
+   the code is safe on main and deploys when the rolling window frees. **Do not hammer the cap.**
 3. **Meanwhile, deploy backup-2 so the owner still has a live, current site** —
    **https://3d-backup-2.vercel.app** (separate Vercel account = its own 100/day quota, separate
    Supabase). Put that link in the "In short" line so he can switch immediately.
@@ -1023,7 +887,7 @@ merged fix simply cannot go out. **That does NOT block anything.** The order is:
 
 **How to deploy backup-2** (its Vercel project has NO Git connection, so a push does nothing):
 upload a clean checkout of `main` — do NOT reuse the `backup_Menu_2` folder, other sessions keep
-uncommitted work there (541 changed paths on 2026-08-01):
+uncommitted work there:
 
 ```bash
 git worktree add --detach /tmp/b2 origin/main          # a clean copy of main
@@ -1032,15 +896,9 @@ cd /tmp/b2 && npx vercel deploy --prod --yes --token "$(cat .claude/.vercel2.tok
 git worktree remove /tmp/b2                            # tidy up after
 ```
 
-**Before assuming backup-2 needs schema work, CHECK.** Its database is a separate Supabase project
-(`jhhqzexl…`) whose management token is currently **expired (401)** — use `psql` instead:
-`db.jhhqzexlpzzwoqnzrgje.supabase.co`, user `postgres`, password in `backup_Menu_2/.env.local`. On
-2026-08-01 a schema diff showed **zero** missing tables and **zero** missing functions — it was
-already in step. Note a PostgREST **404 on an RPC means "no function with THAT ARGUMENT SIGNATURE"**,
-not "missing" — calling one with an empty body will fool you, as it fooled me.
-
-**Do not fix the cap by hammering it.** The waste is real and worth fixing properly (54% of the
-quota is PR previews); the owner has been shown the options and it is his call.
+**Before assuming backup-2 needs schema work, CHECK** — on 2026-08-01 it was already in step. Its
+management token is expired, so use `psql`; connection details + the PostgREST-404 trap that fooled
+me are in **`docs/PROJECT-HISTORY.md` §8**, along with the deploy-cap waste numbers.
 
 ### 📥 THE MAC FOLDER MUST NEVER FALL BEHIND BACKUP-1 (owner, 2026-08-04 — ABSOLUTE, EVERY SESSION)
 
@@ -1054,12 +912,8 @@ The owner's freshness ladder, in his own order. Each rung is **never newer** tha
 | 4 | **backup-2** (3d-backup-2.vercel.app) | an uploaded clean checkout of `main` |
 | 5 · last | **AV live** | the asked-first release ritual |
 
-**WHY THIS RULE EXISTS.** On 2026-08-04 a ten-terminal sweep audited this folder and every terminal
-was reading code **105 commits old** (folder at PR #705, `origin/main` at #762). Whole features were
-missing from disk — `lib/panelFailure.ts` and the busy-database read fallback did not exist here — so
-the sweep reported gaps that had been fixed days earlier, and "passes" that were passing on dead code.
-It cost a full sweep. **A stale folder does not announce itself: nothing is red, the app runs, the
-findings just aren't about the real product.**
+**A stale folder does not announce itself: nothing is red, the app runs, the findings just aren't
+about the real product.** (It cost a full ten-terminal sweep — `docs/PROJECT-HISTORY.md` §7.)
 
 - **CHECK BEFORE YOU AUDIT, PLAN, OR CLAIM ANYTHING IS BROKEN.** `npm run check:current` (or
   `git fetch origin && git status -sb`). Behind by even a few commits → say so in chat and get
@@ -1073,14 +927,12 @@ findings just aren't about the real product.**
   uncommitted edits. Before syncing: `git status --porcelain` — if files you don't recognise are
   modified, they are **another live session's unshipped work. Leave them untouched, do NOT stash,
   commit or revert them,** and do not sync until those sessions have landed their work (ask the
-  owner to let them finish). On 2026-08-04, 15 of 16 uncommitted files collided with the incoming
-  commits — pulling would have forced conflict resolution in code the syncing session did not write.
+  owner to let them finish).
 - **CANNOT SYNC RIGHT NOW? WORK IN A WORKTREE INSTEAD, off `origin/main`** — never switch the shared
   folder's branch under another session (`git worktree add -b <branch> .claude/worktrees/<name>
-  origin/main`, then a real `npm install` in it). That is how this rule itself was written.
-- **A worktree is only as fresh as the moment you made it.** Between PR #758 and #762, four of this
-  sweep's own findings were fixed by another session. Re-`git fetch` and re-check a finding before
-  you fix it, or you will "fix" something already fixed and conflict with the session that did it.
+  origin/main`, then a real `npm install` in it).
+- **A worktree is only as fresh as the moment you made it.** Re-`git fetch` and re-check a finding
+  before you fix it, or you will "fix" something another session already fixed — and conflict with it.
 - Guarded by **`npm run check:current`** (`scripts/check-folder-current.mjs`): prints how far behind
   the folder is, names the uncommitted files that would collide with a sync, and exits non-zero when
   the folder is behind. Read-only — it never fetches destructively and never touches the working tree.
