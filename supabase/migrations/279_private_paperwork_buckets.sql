@@ -1,4 +1,4 @@
--- 276 · the two buckets holding a restaurant's private paperwork stop being public
+-- 279 · the two buckets holding a restaurant's private paperwork stop being public
 --
 -- FOUND BY the 2026-08-04 API sweep (finding F23). Two storage buckets were created public:
 --

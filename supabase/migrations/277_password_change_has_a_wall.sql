@@ -1,4 +1,4 @@
--- 274 · the "change my password" box gets the same wall every other password box has
+-- 277 · the "change my password" box gets the same wall every other password box has
 --
 -- FOUND BY the 2026-08-04 API sweep (finding F12). Two endpoints check a password:
 --

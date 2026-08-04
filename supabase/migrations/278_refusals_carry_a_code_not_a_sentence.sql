@@ -1,4 +1,4 @@
--- 275 · a refusal the app must recognise gets its own CODE, not an English sentence
+-- 278 · a refusal the app must recognise gets its own CODE, not an English sentence
 --
 -- FOUND BY the 2026-08-04 API sweep (finding F22), and the real mechanism is worse than it looked.
 --

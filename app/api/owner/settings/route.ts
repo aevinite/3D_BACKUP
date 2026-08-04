@@ -138,7 +138,7 @@ export async function POST(req: NextRequest) {
   const row = (await sb.from("staff_users").select("password_hash, token_version").eq("id", owner.id).maybeSingle()).data as
     { password_hash: string | null; token_version: number } | null;
   if (!row) return NextResponse.json({ error: "Account not found." }, { status: 404 });
-  // Same wall as app/api/panel-profile (sweep 2026-08-04, mig 274) — see the note there for why an
+  // Same wall as app/api/panel-profile (sweep 2026-08-04, mig 277) — see the note there for why an
   // already-signed-in password box still needs one. Counted per account, before the check.
   if (!(await rateAllowed("password_change", owner.id, {
     restaurantId: owner.restaurant_id ?? null,

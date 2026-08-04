@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
     const next = String(body?.newPassword || "");
     // Fetch the stored hash explicitly (it's intentionally NOT on the StaffUser
     // type, so it can never leak through a serialized user object).
-    // A WALL ON THE ONE PASSWORD BOX THAT HAD NONE (sweep 2026-08-04, mig 274). This check happens
+    // A WALL ON THE ONE PASSWORD BOX THAT HAD NONE (sweep 2026-08-04, mig 277). This check happens
     // AFTER someone is already signed in — an unlocked tablet on a counter, a shared browser — so it
     // was the only credential check in the product a person could hammer indefinitely. Counted per
     // ACCOUNT, not per device: a guesser can clear a cookie, not change whose password they are

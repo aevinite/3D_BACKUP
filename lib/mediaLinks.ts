@@ -20,7 +20,7 @@
 //   · Rows written BEFORE this hold a full public URL. `pathOf()` recovers the object path from it,
 //     so old rows sign correctly too. Nothing needs migrating.
 //   · A signed link works on a bucket that is STILL PUBLIC. So this code can ship first and behave
-//     identically, and the buckets can be flipped private afterwards (mig 276) once it is live.
+//     identically, and the buckets can be flipped private afterwards (mig 279) once it is live.
 //     Flipping first would have broken every existing image the moment it ran.
 //   · If signing fails for any reason we return the value UNCHANGED rather than nothing — a bill
 //     photo that still loads is better than a broken thumbnail, and the bucket flip is what actually

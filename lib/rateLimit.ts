@@ -16,7 +16,7 @@ export type RateKey =
 const RATE_LABELS: Record<string, string> = {
   guest_order: "Guest orders", staff_login: "Staff / owner login", admin_login: "Admin login",
   manager_pin: "Manager PIN", waiter_call: "Waiter calls", join_session: "Join table", otp_request: "OTP requests",
-  // mig 274 — the "change my password" box, the one credential check that had no wall.
+  // mig 277 — the "change my password" box, the one credential check that had no wall.
   password_change: "Change-password attempts",
 };
 

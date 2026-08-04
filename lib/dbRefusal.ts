@@ -31,7 +31,7 @@
 // class 23 = integrity constraint violation). Everything else — connection failures, timeouts,
 // deadlocks, out-of-memory — is a server problem and stays a 500.
 const REFUSAL_CODES = new Set([
-  // ── OUR OWN refusal codes (mig 275) ──────────────────────────────────────────────────────────
+  // ── OUR OWN refusal codes (mig 278) ──────────────────────────────────────────────────────────
   // A refusal the app must RECOGNISE gets its own SQLSTATE instead of being identified by the words
   // of its message. Registered here as data refusals so that even a route branch nobody wrote
   // answers 4xx — never a 500, which public/panels/outbox.js would queue and retry forever behind
@@ -59,13 +59,13 @@ const PLAIN: Record<string, string> = {
   settings_floor_per_row_range: "Tables per row has to be a whole number between 2 and 30.",
 };
 
-// Our own codes → the sentence a person reads (mig 275). Keyed by SQLSTATE, so the wording of the
+// Our own codes → the sentence a person reads (mig 278). Keyed by SQLSTATE, so the wording of the
 // SQL exception can change freely without changing what anyone is told.
 const OWN_CODE_TEXT: Record<string, string> = {
   LFH01: "This bill is settled — its invoice can't be reopened. Make a credit note instead.",
   LFH02: "The credit can't be more than the bill total.",
 };
-/** Our own refusal code, if this error carries one (mig 275). Null for anything else. */
+/** Our own refusal code, if this error carries one (mig 278). Null for anything else. */
 export function ownRefusalCode(e: unknown): string | null {
   const c = (e as { code?: unknown } | null)?.code;
   return typeof c === "string" && c in OWN_CODE_TEXT ? c : null;
@@ -102,7 +102,7 @@ export function isMissingRow(e: unknown): boolean {
 }
 
 /**
- * Rethrow a Supabase/Postgres error WITHOUT losing its SQLSTATE (mig 275).
+ * Rethrow a Supabase/Postgres error WITHOUT losing its SQLSTATE (mig 278).
  *
  * THE BUG THIS EXISTS FOR. Route handlers did `throw new Error(error.message)`, which builds a
  * brand-new Error carrying only the text. Every classifier in this file reads `.code` first, so a
@@ -232,7 +232,7 @@ export function worthLogging(e: unknown): boolean {
 /** 400 when the database refused the value, 503 when it didn't answer, 500 when the app broke. */
 export function refusalStatus(e: unknown, fallback = 500): number {
   // Our own refusals are CONFLICTS, not bad input: the request was well-formed, the bill's state
-  // says no. 409 is what the panels already treat as "a person must read this" (mig 275).
+  // says no. 409 is what the panels already treat as "a person must read this" (mig 278).
   if (ownRefusalCode(e)) return 409;
   if (isMissingRow(e)) return 404;
   if (isDataRefusal(e)) return 400;
@@ -253,7 +253,7 @@ export function refusalMessage(e: unknown): string {
   // Same reasoning for "TimeoutError: The operation was aborted due to timeout", which is what a
   // manager was actually shown in a red toast for two hours on 2026-08-03.
   if (isDbUnreachable(e)) return BUSY_MESSAGE;
-  // One of OUR codes (mig 275) → its own sentence, never the raw `lfh: invoice locked — …` prose,
+  // One of OUR codes (mig 278) → its own sentence, never the raw `lfh: invoice locked — …` prose,
   // which was written for the error log and not for a waiter mid-service.
   const own = ownRefusalCode(e);
   if (own) return OWN_CODE_TEXT[own];
