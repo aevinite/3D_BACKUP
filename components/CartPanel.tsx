@@ -8,7 +8,9 @@ import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRule
 // GST on top ('excl'), GST already inside ('incl'), never taxed ('exempt' — an MRP bottle).
 // Mirrored byte-for-byte by lfh_split_items_tax in SQL, so the quote and the bill agree.
 import { splitBill, resolveTaxMode, isMrpDish } from "@/lib/tax";
-import { enqueueGuestOrder } from "@/lib/guestOutbox"; // offline: save order, send on reconnect
+// offline: save order, send on reconnect. reasonMsg/refusalOf are the ONE place that turns a
+// refusal code into words a diner can act on — shared with the queue and the session gate.
+import { enqueueGuestOrder, reasonMsg, refusalOf } from "@/lib/guestOutbox";
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 // Per-restaurant feature switches: the allergy section can be turned off.
@@ -765,16 +767,17 @@ export default function CartPanel() {
           // below rather than pretending the order is safe somewhere.
         }
       }
-      if (/sold_out/i.test(msg)) {
-        const m = msg.match(/\(([^)]+)\)/); // the dish title in parentheses, if present
-        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: m ? `Sold out: ${m[1]}` : "A dish just sold out", subtitle: "please remove it to place your order", kicker: "order", variant: "error" } }));
-      } else if (/staff_priced_item/i.test(msg)) {
-        // mig 253: a dish in the cart is now priced by staff at order time. Say so plainly —
-        // "please try again" would be a lie, because retrying fails the same way every time.
-        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "One dish needs a member of staff", subtitle: "its price is set when you order — please ask your server", kicker: "order", variant: "error" } }));
-      } else {
-        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Order didn't go through", subtitle: "please try again", kicker: "order", variant: "error" } }));
-      }
+      // WHY it was refused, in the one place that knows every reason (lib/guestOutbox.ts).
+      // This used to handle exactly two codes by pattern-matching the error's prose and answer
+      // "please try again" for all the rest — which is wrong for most of them and harmful for
+      // `rate_limited`, where trying again trips the same per-table limit and sends the owner
+      // another "limit reached" alert about a diner following our own instruction.
+      const { reason, dish } = refusalOf(err);
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+        message: reasonMsg(reason, { dish }),
+        kicker: "order",
+        variant: "error",
+      } }));
     } finally {
       placingRef.current = false;
       setPlacing(false); // re-enable the button either way

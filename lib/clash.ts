@@ -63,6 +63,20 @@ export function replayMarkers(req: NextRequest): { queuedAt: Date } | null {
   return { queuedAt: at };
 }
 
+// Some rows are not identified by an `id` the screen knows. A stock count line is the case that
+// forced this: it is one row per (count, item) and the panel only ever holds the count id and the
+// item id — the row's own uuid never reaches the browser. Rather than let that feature grow its
+// own private comparison (which is how the one gate stops being one gate), a call site may name a
+// COMPOSITE key instead of an id:
+//
+//   expect: { table: "inv_count_lines", where: { count_id, item_id }, fields: { counted_base: was } }
+//
+// Only the columns listed here may be used, per table — so `where` can never be turned into a
+// free-form filter over a table, and the restaurant scope below still always applies.
+const COMPOSITE_KEYS: Record<string, string[]> = {
+  inv_count_lines: ["count_id", "item_id"],
+};
+
 // Tables a panel may ask us to compare. An allowlist, so a client can never point the check
 // at something it has no business reading.
 const COMPARABLE_TABLES: Record<string, string> = {
@@ -75,6 +89,12 @@ const COMPARABLE_TABLES: Record<string, string> = {
   settings: "restaurant_id",   // one row per restaurant
   staff_users: "id",
   table_tags: "id",
+  // Inventory. Two people stock-taking at once is the commonest real collision in the whole
+  // product (the count sheet is deliberately shared), and until these were listed the gate
+  // could not answer for them even if a screen sent an expectation — an unknown table returns
+  // null, which reads as "nothing to protect".
+  inv_count_lines: "id",
+  inv_items: "id",
 };
 
 /**
@@ -93,7 +113,7 @@ const COMPARABLE_TABLES: Record<string, string> = {
  * staff learn one behaviour. FAILS OPEN on any lookup problem.
  */
 export async function expectClash(req: NextRequest, rid: string): Promise<ClashInfo | null> {
-  type Want = { table?: string; id?: string; fields?: Record<string, unknown>; label?: string };
+  type Want = { table?: string; id?: string; where?: Record<string, unknown>; fields?: Record<string, unknown>; label?: string };
   let want: Want | null = null;
   try {
     const raw = req.headers.get("x-lfh-expect");
@@ -107,7 +127,25 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
   const idCol = COMPARABLE_TABLES[table];
   const id = String(want?.id || "");
   const fields = want?.fields;
-  if (!idCol || !id || !fields || typeof fields !== "object") return null;
+  if (!idCol || !fields || typeof fields !== "object") return null;
+
+  // Either an id OR a whitelisted composite key (see COMPOSITE_KEYS). Every column named must
+  // be on that table's list and carry a non-empty value, or we ignore the expectation entirely
+  // rather than run a half-specified lookup that could match the wrong row.
+  const allowedKeyCols = COMPOSITE_KEYS[table] || [];
+  const where: Array<[string, string]> = [];
+  if (!id) {
+    const w = want?.where;
+    if (!w || typeof w !== "object" || Array.isArray(w)) return null;
+    const named = Object.keys(w);
+    if (!named.length || named.length !== allowedKeyCols.length) return null;
+    for (const col of named) {
+      if (!allowedKeyCols.includes(col)) return null;
+      const v = String((w as Record<string, unknown>)[col] ?? "");
+      if (!v) return null;
+      where.push([col, v]);
+    }
+  }
 
   // A field may name a SUB-KEY of a jsonb column with a dot: "profile.notes" (added 2026-08-04).
   // Without this, protecting anything stored in a jsonb meant comparing the WHOLE blob, which fires
@@ -122,11 +160,15 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
   const cols = [...new Set(keys.map((k) => k.split(".")[0]))];
 
   try {
-    let q = sb.from(table).select(cols.join(", ")).eq(idCol, id);
+    let q = sb.from(table).select(cols.join(", "));
+    if (id) q = q.eq(idCol, id);
+    else for (const [col, v] of where) q = q.eq(col, v);
     // Tenant boundary: service-role bypasses RLS, so scope every comparison to this
     // restaurant — a foreign id must never be readable through this check.
     if (idCol !== "restaurant_id") q = q.eq("restaurant_id", rid);
     const res = await q.maybeSingle();
+    // No row: nothing to overwrite. For a composite key that is the normal "first person to
+    // count this item" case, so it must READ as fine rather than as a clash.
     if (res.error || !res.data) return null;
     const row = res.data as unknown as Record<string, unknown>;
     for (const c of keys) {
@@ -197,6 +239,12 @@ function readable(col: string): string {
     allergies: "the allergens",
     notes: "this person's private note",
     id_type: "the ID on file", id_number: "the ID number",
+    // Inventory, in the words the stock screens use — never the column name. "counted_base" in
+    // front of a person counting tomatoes would mean nothing.
+    counted_base: "the counted quantity",
+    reorder_level: "the reorder level",
+    purchase_factor: "the pack size",
+    purchase_uom: "the unit it's bought in",
   };
   return map[col] || `the ${col.replace(/_/g, " ")}`;
 }

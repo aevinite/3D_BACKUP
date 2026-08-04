@@ -256,32 +256,19 @@ export async function placeSessionOrderSafe(
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
 export async function createOrder(o: OrderInput, restaurantId: string = DEFAULT_RESTAURANT_ID, actionId?: string): Promise<string> {
-  // When an actionId is given, route through our server endpoint so the at-most-once
-  // guard applies to the ONLINE order too: if the reply is lost on a flaky connection
-  // and the guest taps again, the SAME actionId makes the server place it ONCE and
-  // echo the original order_id back — no more double order / double charge.
-  if (actionId) {
-    return postGuestOrder(
-      { mode: "public", table: o.tableNumber || "", restaurantId, items: o.items, allergies: o.allergies },
-      actionId,
-    );
-  }
-  // Call the server function that prices and stores the order. It returns the
-  // new order's id (the SERVER generates it) so the device can poll its status.
-  const { data, error } = await supabase.rpc("lfh_place_order_public", {
-    p_table: o.tableNumber || "",
-    p_items: o.items,
-    p_allergies: o.allergies,
-    p_restaurant_id: restaurantId,
-  });
-  if (error) throw new Error(`Order failed: ${error.message}`);
-  // The function answers { ok, order_id } on success, or { ok:false, reason }
-  // (e.g. a sold-out or unknown dish slipped through) which we surface as an error.
-  const res = (data ?? {}) as { ok?: boolean; reason?: string; item?: string; order_id?: string };
-  if (!res.ok || !res.order_id) {
-    throw new Error(`Order failed: ${res.reason || "unknown"}${res.item ? ` (${res.item})` : ""}`);
-  }
-  return res.order_id;
+  // ALWAYS through our own endpoint, so the at-most-once guard and the deadline apply to every
+  // order there is: if the reply is lost on a flaky connection and the guest taps again, the same
+  // action id makes the server place it ONCE and echo the original order_id back.
+  //
+  // `actionId` used to be optional, and without one this function fell through to a direct anon
+  // RPC with no dedup and no deadline — the exact pair of bugs postGuestOrder was written to fix.
+  // Its only caller has always passed an id, so that branch was dead code; but it was dead code
+  // that silently removed both protections for whoever called it next. There is no way to place a
+  // guest order without an at-most-once key any more, which is the point.
+  return postGuestOrder(
+    { mode: "public", table: o.tableNumber || "", restaurantId, items: o.items, allergies: o.allergies },
+    actionId || (globalThis.crypto?.randomUUID?.() as string) || `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+  );
 }
 
 // A guest corrects only their own order's table number (migration 007). Only

@@ -114,13 +114,13 @@
   <script src="/panels/maint.js?v=d6f9ad32"></script>
   <script src="/panels/realtime.js?v=1a3eee11"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=ad497f62"></script>
+  <script src="/panels/outbox.js?v=d2aaaaf0"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=ace792b5"></script>
+  <script src="/panels/connbadge.js?v=75b579de"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
-  <script src="/panels/swreg.js?v=e799eb96"></script>
+  <script src="/panels/swreg.js?v=3b3117cc"></script>
   <script src="/panels/offline.js?v=c4f73723"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
@@ -143,7 +143,7 @@
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
   <script src="/panels/fitnums.js?v=84090f97" data-fit=".dash-card .kbody b:not(.ktext),.tbox-n,.fstat-n,.bill-amt,.ks-val,.ord-total span:last-child"></script>
   <!-- Inventory tab (mig 221) — owns the 📦 tab; app.js delegates via LFH_INV. Load BEFORE app.js. -->
-  <script src="/panels/editor/inventory.js?v=424421e3"></script>
+  <script src="/panels/editor/inventory.js?v=697c0f49"></script>
   <!-- billdoc: THE bill and THE kitchen ticket, written down once (LFH_BILLDOC) and shared with
        the kitchen panel and the admin's sample, so a document can never look different in two
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —

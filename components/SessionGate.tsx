@@ -32,7 +32,7 @@ import {
   callWaiterSession, setMemberName, isSessionTimeout,
 } from "@/lib/session";
 // Offline: save the order on-device and send it automatically when back online.
-import { enqueueGuestOrder } from "@/lib/guestOutbox";
+import { enqueueGuestOrder, reasonMsg, refusalOf } from "@/lib/guestOutbox";
 // Phone back button: while this sheet is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
 // Which restaurant this guest is ordering at (from the /r/<slug> URL).
@@ -239,26 +239,10 @@ export default function SessionGate() {
   // ── perform the queued action once the session is ready ────────────────────
   // Now that we're in the session, actually do the job: place the order or call
   // the waiter, then report success/failure and close.
-  // WHY an order was refused, in words a diner can act on. This whole path used to answer every
-  // refusal with the same flat "Couldn't place order", which tells someone nothing about whether
-  // to remove a dish, call a waiter, or simply wait — while the QR path named the dish.
-  const orderFailMsg = (reason?: string, raw?: string): string => {
-    switch (reason) {
-      case "sold_out": {
-        const dish = (raw?.match(/\(([^)]+)\)/) || [])[1];
-        return dish ? `Sold out: ${dish} — please remove it` : "A dish just sold out — please remove it";
-      }
-      case "staff_priced_item": return "One dish needs a member of staff — please ask your server";
-      case "unknown_item": return "A dish is no longer on the menu — please remove it";
-      case "session_closed": return "This table has been closed — please ask your server";
-      case "not_approved": return "You're not approved to order on this table yet";
-      case "otp_required": return "Please confirm your phone number first";
-      case "invalid_token": return "Your table session has expired — please scan again";
-      case "rate_limited": return "Too many orders in a row — please wait a moment";
-      case "empty_order": return "There's nothing in your order";
-      default: return "Couldn't place order — please try again";
-    }
-  };
+  // WHY an order was refused, in words a diner can act on — now the SHARED wording
+  // (lib/guestOutbox.ts reasonMsg). This used to be a private copy of the same switch, which is
+  // how the three copies drifted: the saved-order queue and this gate both knew every code while
+  // the QR path in CartPanel knew two. One list means a new refusal code can only be missed once.
 
   // Actually send the order to the kitchen (nickname already ensured by act()).
   // Split out from act() so the nickname screen can resume here after the guest
@@ -311,11 +295,11 @@ export default function SessionGate() {
         catch { /* couldn't even save → fall through to the honest message below */ }
       }
       // A REAL REFUSAL. Say WHICH, instead of the one flat "Couldn't place order" this path
-      // showed for every reason there is — the QR path has always named the dish or the table.
-      const msg = String((err as Error)?.message || "");
-      const reason = (msg.match(/Order failed: ([a-z_]+)/) || [])[1];
+      // showed for every reason there is. Reading the code out of the message happens ONCE now,
+      // in refusalOf() — both guest order paths were doing their own version of that regex.
+      const { reason, dish } = refusalOf(err);
       if (reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "order" }); setStep("blocked"); return; }
-      toast(orderFailMsg(reason, msg), "order", "error");
+      toast(reasonMsg(reason, { dish }), "order", "error");
       fireDone({ ok: false, reason, action: "order" });
       close();
       return;

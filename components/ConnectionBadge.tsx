@@ -15,7 +15,7 @@
 // delivery time) — it never sends its own request, so it adds ZERO egress (owner's
 // #1 fear). The poll-only owner panel shows a calm "Connected" (no ms — its refresh
 // time is dominated by heavy analytics query time, not connection latency).
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useConnection, latencyTier, LATENCY_FRESH_MS } from "@/lib/connectionStatus";
 import { useGuestOutbox, dismissGuestFailed, retryGuestFailed, type GuestOrder } from "@/lib/guestOutbox";
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the popover first
@@ -116,6 +116,39 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
   // Register the popover with the phone back-button manager (self-noops while closed).
   useBackClose("conn-badge", open, () => setOpen(false));
 
+  // KEEP THE PANEL ON SCREEN. It is anchored `right: 0` to the badge and is up to 288px wide, so
+  // it opens LEFTWARDS — and on the guest menu the badge sits in `.nav-actions` with the currency,
+  // language, theme and cart buttons to its right, which pushes it well in from the left edge. On
+  // the owner's 360px phone the panel's own box measured x = −58: 58px of every line was cut off,
+  // so it read "nected — live updates are flowing", "ve", "d shows when data flows", "ything is
+  // synced". Measured on the deployed site.
+  //
+  // A pure-CSS clamp can't do this (a transformed ancestor defeats position:fixed, which is why
+  // the vanilla twin measures too — public/panels/connbadge.js clampPop). So measure the rendered
+  // rect and nudge it back inside, re-running whenever the panel's CONTENT changes: it grows when
+  // the "waiting to send" list appears, and a one-shot clamp leaves the grown panel hanging out.
+  const popRef = useRef<HTMLSpanElement | null>(null);
+  const [shift, setShift] = useState(0);
+  const waitingN = box.queued.length, failedN = box.failed.length;
+  useLayoutEffect(() => {
+    if (!open) { setShift(0); return; }
+    const clamp = () => {
+      const el = popRef.current;
+      if (!el) return;
+      // Measure from the UNSHIFTED position — the live rect already includes any shift applied
+      // last time, so re-clamping on top of it would walk the panel further on every pass.
+      el.style.transform = "";
+      const r = el.getBoundingClientRect(), pad = 8;
+      let next = 0;
+      if (r.left < pad) next = pad - r.left;
+      else if (r.right > window.innerWidth - pad) next = (window.innerWidth - pad) - r.right;
+      setShift(Math.round(next));
+    };
+    clamp();
+    window.addEventListener("resize", clamp);
+    return () => window.removeEventListener("resize", clamp);
+  }, [open, waitingN, failedN, level, latencyMs]);
+
   const v = computeView(level, everConnected, latencyMs, latencyAt, pollMode);
   const waiting = box.queued.length, failed = box.failed.length;
   const extra = failed ? `${failed} failed` : waiting ? `${waiting} waiting` : "";
@@ -140,7 +173,17 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
       </button>
 
       {open && (
-        <span className="lfh-conn-pop" role="dialog" aria-label="Connection details">
+        <span
+          className="lfh-conn-pop"
+          role="dialog"
+          aria-label="Connection details"
+          ref={popRef}
+          // The clamp travels through a CSS variable as well as the inline transform, because the
+          // entry animation below also animates `transform` and a running animation outranks an
+          // inline style — so without the variable the panel painted clipped for its first 160ms
+          // and then snapped into place. (Same fix, same reason, as the vanilla twin.)
+          style={shift ? ({ "--pop-x": `${shift}px`, transform: `translateX(${shift}px)` } as React.CSSProperties) : undefined}
+        >
           <span className="lfh-conn-pop-hd">
             <span className="lfh-conn-pop-dot" style={{ background: v.color }} />
             {statusLine(v, pollMode)}
@@ -216,9 +259,18 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
           border: 1px solid var(--line, rgba(127,127,127,.28)); border-radius: 14px;
           box-shadow: 0 18px 50px rgba(0,0,0,.4);
           font: 500 12.5px/1.35 system-ui, sans-serif;
+          --pop-x: 0px;
           animation: lfhConnPop 0.16s cubic-bezier(.16,1,.3,1);
         }
-        @keyframes lfhConnPop { from { transform: translateY(-4px); opacity: 0; } to { transform: none; opacity: 1; } }
+        /* Carries the on-screen clamp THROUGH the entry animation (see --pop-x above): a running
+           animation on the transform property beats an inline transform, so the keyframes have to
+           respect the nudge or the panel opens clipped and then jumps into place.
+           NOTE: no backticks in here — this whole block is a template literal, so one would end
+           it early and the file would stop parsing. */
+        @keyframes lfhConnPop {
+          from { transform: translate(var(--pop-x), -4px); opacity: 0; }
+          to { transform: translate(var(--pop-x), 0); opacity: 1; }
+        }
         .lfh-conn-pop-hd { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 12.5px; }
         .lfh-conn-pop-dot { width: 9px; height: 9px; border-radius: 999px; flex: 0 0 auto; }
         .lfh-conn-pop-main { display: flex; align-items: center; gap: 12px; padding: 4px 2px; }

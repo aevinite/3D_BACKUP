@@ -21,7 +21,11 @@ export type GuestOrder = {
   items: unknown[]; allergies: string[];
   track?: GuestTrack;
   at: number; status: "queued" | "failed"; error?: string;
-  tries?: number;   // rounds of "the server couldn't take it" so far — see SERVER_MAX_TRIES
+  // Rounds of each kind of non-answer so far. All three are persisted with the order, so a
+  // reload does not reset the count and an order cannot retry in silence forever.
+  tries?: number;      // the server answered 5xx — see SERVER_MAX_TRIES
+  netTries?: number;   // the request never completed (dropped / timed out) — NET_MAX_TRIES
+  busyTries?: number;  // the server keeps saying it is still handling this id — BUSY_MAX_TRIES
 };
 
 const DB_NAME = "lfh_guest_outbox";
@@ -85,30 +89,66 @@ function notify() {
   try { window.dispatchEvent(new CustomEvent("lfh:guest-outbox-changed")); } catch { /* ignore */ }
 }
 
-export function reasonMsg(reason?: string): string {
+/**
+ * WHY AN ORDER WAS REFUSED, in words a diner can act on. THE ONE COPY.
+ *
+ * There were three: this one, `orderFailMsg` in SessionGate, and an inline pair of `if`s in
+ * CartPanel. The two complete ones agreed; the third — the QR path, which is the busiest — knew
+ * only `sold_out` and `staff_priced_item` and answered everything else with "please try again".
+ * For `rate_limited` that is actively harmful advice: the diner taps again, trips the 8-per-minute
+ * table limit again, and each trip pings the owner's phone with a "limit reached" alert about a
+ * guest who was only doing what the app told them to. Wording lives here once so a new reason
+ * added to the RPCs can only be missing in one place.
+ */
+export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: boolean }): string {
+  // `queued` = this order had been SAVED on the phone and is only being refused now, so the past
+  // tense ("while you were offline") is the true sentence. A live refusal happens while the person
+  // is standing at the screen, so it says what to do instead. Same code, two honest tenses.
+  const q = opts?.queued;
+  const dish = opts?.dish ? `“${opts.dish}”` : "";
   switch (reason) {
-    case "session_closed": return "Your table was closed while you were offline.";
-    case "not_approved": return "You weren't approved to order on this table.";
-    case "blocked": return "This order was blocked.";
-    case "otp_required": return "Phone verification was needed.";
-    case "invalid_token": return "Your table session expired.";
-    case "sold_out": return "A dish sold out while you were offline.";
-    case "unknown_item": return "A dish is no longer on the menu.";
+    case "session_closed": return q ? "Your table was closed while you were offline." : "This table has been closed — please ask your server.";
+    case "not_approved": return q ? "You weren't approved to order on this table." : "You're not approved to order on this table yet.";
+    case "blocked": return "This order was blocked — please ask a member of staff.";
+    case "otp_required": return q ? "Phone verification was needed." : "Please confirm your phone number first.";
+    case "invalid_token": return q ? "Your table session expired." : "Your table session has expired — please scan the code again.";
+    case "sold_out": return q
+      ? (dish ? `${dish} sold out while you were offline.` : "A dish sold out while you were offline.")
+      : (dish ? `Sold out: ${dish} — please remove it to order.` : "A dish just sold out — please remove it to order.");
+    case "unknown_item": return dish
+      ? `${dish} is no longer on the menu — please remove it.`
+      : "A dish is no longer on the menu — please remove it.";
     // mig 253: the dish is priced by staff at order time, so it cannot be self-ordered.
-    case "staff_priced_item": return "A dish now needs a member of staff to price it.";
-    case "empty_order": return "The order was empty.";
-    // The one refusal code the RPC returns that had no wording — it reached the phone as the
-    // literal word "rate_limited" (mig 240).
-    case "rate_limited": return "Too many orders in a row — please wait a moment and order again.";
+    case "staff_priced_item": return "One dish needs a member of staff — its price is set when you order, so please ask your server.";
+    case "empty_order": return q ? "The order was empty." : "There's nothing in your order yet.";
+    // The refusal that MUST never say "try again": doing so trips the same per-table limit and
+    // fires another alert at the owner. Tell them to wait, which is the thing that actually works.
+    case "rate_limited": return "That's a lot of orders in a row — please wait a moment, then order again.";
     case "server_busy": return "The restaurant's system couldn't take this one.";
     case "unknown_restaurant": return "We couldn't tell which restaurant this order was for.";
-    case "off_plan_table": return "That table number isn't one this restaurant has.";
+    case "off_plan_table": return "That table number isn't one this restaurant has — please check it.";
     case "bad_body": return "Something was wrong with this order.";
     // NEVER echo a code we don't have words for. An unrecognised reason is a machine word (or,
     // worse, a database message) and means nothing to a diner — say the honest general thing and
     // let the server log carry the detail.
-    default: return "Couldn't send this order — please order again.";
+    default: return q ? "Couldn't send this order — please order again." : "Order didn't go through — please try again.";
   }
+}
+
+/**
+ * Pull the refusal CODE (and the dish it named) out of the Error that postGuestOrder throws.
+ *
+ * The two live paths were matching the PROSE of that message with `/sold_out/i.test(msg)` — the
+ * thing the "never decide UI behaviour by pattern-matching a server's prose" rule exists to stop.
+ * The code is right there in the string, so read it ONCE, here, and let every caller branch on a
+ * code instead of a sentence. Kept beside reasonMsg because the two are only ever used together.
+ */
+export function refusalOf(err: unknown): { reason?: string; dish?: string } {
+  const msg = String((err as Error)?.message || "");
+  return {
+    reason: (msg.match(/Order failed:\s*([a-z_]+)/) || [])[1],
+    dish: (msg.match(/\(([^)]+)\)/) || [])[1],
+  };
 }
 
 // Record a successfully-sent order into the guest's active-orders list so the normal
@@ -226,9 +266,33 @@ export async function enqueueGuestOrder(p: {
   return { ok: true, queued: true, action_id: item.id, persisted };
 }
 
+// How long ONE send may wait for an answer before we treat it as "no answer" and let the
+// backoff try again. This was missing entirely, and it was the one write path in the app with
+// no deadline (the staff queue has had one since 2026-08-01, and the diner's ONLINE order got
+// one at the same time — see lib/menu.ts orderDeadline). A browser fetch has no timeout of its
+// own, so on a connection that HANGS rather than drops — a café Wi-Fi with a dead uplink, which
+// is exactly what this queue exists for — the await below never settled. `flushing` then stayed
+// true forever, which made ensureRetry() a no-op and made every wake-up ('online',
+// visibilitychange, the diner tapping Try again) return at the top of flushGuestOutbox. The
+// queue was wedged with NO timer pending: the order never went and nothing on screen changed.
+// Same 15s as the staff twin, and for the same reason — a route can make two or three database
+// calls of up to 8s, so anything shorter would abandon writes that were about to succeed.
+const SEND_TIMEOUT_MS = 15_000;
+// Guarded, not assumed: `AbortSignal.timeout` is recent and READING it throws on an older
+// phone. lib/menu.ts was bitten by exactly that (the throw was caught and mis-reported as "the
+// restaurant is busy"), so do what it now does and fall back to no signal rather than break.
+function sendDeadline(): AbortSignal | undefined {
+  try {
+    return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(SEND_TIMEOUT_MS)
+      : undefined;
+  } catch { return undefined; }
+}
+
 function doPost(item: GuestOrder) {
   return fetch("/api/guest/place-order", {
     method: "POST",
+    signal: sendDeadline(),
     headers: {
       "Content-Type": "application/json",
       "X-LFH-Action-Id": item.id,
@@ -248,6 +312,15 @@ function doPost(item: GuestOrder) {
 // so an order the server kept refusing sat in "Waiting" for the life of the tab with the diner
 // never told and no control to touch. Six rounds of the backoff above is roughly four minutes.
 const SERVER_MAX_TRIES = 6;
+
+// The OTHER two ways a saved order can stop moving. The 5xx case above was bounded; these two
+// were not — each simply `break`ed out of the loop with no counter, so the backoff kept trying
+// for the life of the tab and the diner was never told and given nothing to tap. The staff queue
+// bounds all three (AUTH/BUSY/NET_MAX_TRIES in public/panels/outbox.js) precisely because "a
+// change stuck in waiting is the worst place for it" — a row that is merely Waiting has no
+// buttons. Six rounds of the backoff is roughly four minutes, matching SERVER_MAX_TRIES.
+const NET_MAX_TRIES = 6;    // the request itself never completed (dropped, or hit the deadline)
+const BUSY_MAX_TRIES = 6;   // the server keeps answering 409 "still handling this id"
 
 // A CEILING ON WHAT ONE PHONE MAY HOLD. Nothing bounded this: a device left with no signal could
 // pile up orders until IndexedDB refused, and the failure would land on the NEWEST order (the one
@@ -272,14 +345,33 @@ export async function flushGuestOutbox() {
       const item = queued[0];
       let res: Response;
       try { res = await doPost(item); }
-      catch { break; }                                   // still offline → stop, keep queue
+      catch {
+        // The request never completed: genuinely offline, dropped, or it hit the deadline above.
+        if (isOffline()) break;                          // no signal → stop, keep the queue; that is what it is for
+        // ONLINE and still not getting through. This used to `break` with no counter, so it
+        // retried in silence for the life of the tab: the order sat on "Waiting" with the diner
+        // never told and nothing to tap. Bounded now, exactly like the staff queue.
+        item.netTries = (item.netTries || 0) + 1;
+        if (item.netTries < NET_MAX_TRIES) { await persist(item); break; }
+        await moveToFailed(item, "We couldn't reach the restaurant — please order again.");
+        notify(); continue;
+      }
       // Read the body ONCE: the old code parsed it inside the 409 branch and then again
       // below, where the already-consumed stream yielded null — so a clash message never
       // reached the guest.
       const j = await res.json().catch(() => null) as
         | { ok?: boolean; order_id?: string; duplicate?: boolean; reason?: string; retry?: boolean; clash?: { plain?: string } }
         | null;
-      if (res.status === 409 && j?.retry) break;           // idempotency "processing" → try later
+      // Idempotency says a request under this id is in flight → wait and try again. A stale claim
+      // is taken over after 30s (lib/idempotency.ts), so if it KEEPS saying this something is
+      // wrong and the diner has to hear about it rather than watch "Waiting" all evening. This
+      // also used to `break` forever with no counter.
+      if (res.status === 409 && j?.retry) {
+        item.busyTries = (item.busyTries || 0) + 1;
+        if (item.busyTries < BUSY_MAX_TRIES) { await persist(item); break; }
+        await moveToFailed(item, "The restaurant's system is still busy with this one — please order again.");
+        notify(); continue;
+      }
       if (res.status === 409 && j?.clash?.plain) {          // the table moved on while offline
         await moveToFailed(item, j.clash.plain); notify(); continue;
       }
@@ -330,9 +422,11 @@ export async function retryGuestFailed(id: string) {
   const it = failed.find((x) => x.id === id);
   if (!it) return;
   failed = failed.filter((x) => x.id !== id);
-  it.status = "queued"; it.error = undefined; it.tries = 0;
-  // A person asking for a fresh go is asking for it NOW: reset the backoff too.
-  retryStep = 0;
+  // A person asking for a fresh go is asking for a FRESH go: clear all three attempt counters,
+  // not just the 5xx one. Resetting only `tries` left the other two at their ceiling, so one tap
+  // of Try again bought a single attempt and the order fell straight back into "Couldn't send".
+  it.status = "queued"; it.error = undefined; it.tries = 0; it.netTries = 0; it.busyTries = 0;
+  retryStep = 0;                       // …and reset the backoff, so it goes now rather than in two minutes
   queued.push(it);
   await persist(it);
   notify();

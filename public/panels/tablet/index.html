@@ -69,14 +69,14 @@
   <script src="/panels/maint.js?v=d6f9ad32"></script>
   <script src="/panels/realtime.js?v=1a3eee11"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=ad497f62"></script>
+  <script src="/panels/outbox.js?v=d2aaaaf0"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
-  <script src="/panels/connbadge.js?v=ace792b5"></script>
+  <script src="/panels/connbadge.js?v=75b579de"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and after backstack.js
        is available for the back button. -->
-  <script src="/panels/swreg.js?v=e799eb96"></script>
+  <script src="/panels/swreg.js?v=3b3117cc"></script>
   <script src="/panels/offline.js?v=c4f73723"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js?v=efe8afdb"></script>

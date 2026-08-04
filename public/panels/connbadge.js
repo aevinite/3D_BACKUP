@@ -21,7 +21,9 @@
     if (ms <= 700)  return { color: "#22c55e", text: "#16a34a", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
     if (ms <= 1500) return { color: "#eab308", text: "#ca8a04", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
     if (ms <= 3000) return { color: "#f97316", text: "#ea580c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
-    return              { color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)",  bars: 1, label: "Poor" };
+    // 0 bars, not 1 — Slow and Poor used to show the same bars, so the two worst states differed
+    // only by hue. Kept in step with latencyTier() in lib/connectionStatus.ts.
+    return              { color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)",  bars: 0, label: "Poor" };
   }
 
   function connLevel() {
@@ -244,11 +246,22 @@
         t.appendChild(el("b", null, it.label || "Action"));
         t.appendChild(el("small", "lfh-e", (it.error || "Failed") + " · " + fmtAgo(it.at)));
         row.appendChild(t);
-        var retry = el("button", "lfh-conn-x", "Retry"); retry.style.background = "#f59e0b";
-        retry.addEventListener("click", function (e) { e.stopPropagation(); if (window.LFH_OUTBOX) window.LFH_OUTBOX.retryFailed(); });
+        // RETRY THIS ROW, not all of them. It called retryFailed() — the whole list — from a
+        // button sitting inside one row, so tapping Retry on the discount also re-sent the
+        // unrelated change under it. The React twin has always been per-item; this is that.
+        // A clash (retryable === false) gets NO Retry: the server said the ground moved, so
+        // sending the identical change again cannot work and offering it only wastes a tap.
+        if (it.retryable !== false) {
+          var retry = el("button", "lfh-conn-x", "Retry"); retry.style.background = "#f59e0b";
+          retry.addEventListener("click", function (e) {
+            e.stopPropagation();
+            if (window.LFH_OUTBOX) window.LFH_OUTBOX.retryOne(it.id);
+          });
+          row.appendChild(retry);
+        }
         var dis = el("button", "lfh-conn-x", "Dismiss"); dis.style.background = "#64748b";
         dis.addEventListener("click", function (e) { e.stopPropagation(); if (window.LFH_OUTBOX) window.LFH_OUTBOX.dismiss(it.id); });
-        row.appendChild(retry); row.appendChild(dis);
+        row.appendChild(dis);
         sync.appendChild(row);
       });
       outbox.queued.forEach(function (it) {

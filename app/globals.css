@@ -218,9 +218,17 @@ body.menu-scrolling .chef-call {
 }
 .overlay.active { opacity: 1; pointer-events: auto; }
 
+/* --lfh-offbar-h is the height of the offline status strip (components/OfflineNotice.tsx),
+   0px whenever it isn't showing. It MUST be added to the bottom padding of every bottom
+   sheet: the strip is position:fixed at z-index 99990 and this sheet is 5000, both anchored
+   to bottom:0, so without the reservation the strip painted straight over the sheet's last
+   control. On the guest cart that control is PLACE ORDER  it was cut in half on a phone and
+   taps on the covered part died. Keep this in the calc() for any new bottom sheet. */
 .panel {
   position: fixed; bottom: 0; left: 0; width: 100%; background: var(--bg);
-  border-radius: 36px 36px 0 0; padding: 32px 32px calc(32px + env(safe-area-inset-bottom, 0px)); z-index: 5000;
+  border-radius: 36px 36px 0 0;
+  padding: 32px 32px calc(32px + env(safe-area-inset-bottom, 0px) + var(--lfh-offbar-h, 0px));
+  z-index: 5000;
   transform: translateY(100%); transition: 0.5s var(--ease);
   border-top: 2px solid var(--accent);
   box-shadow: 0 -20px 60px rgba(0,0,0,0.5);

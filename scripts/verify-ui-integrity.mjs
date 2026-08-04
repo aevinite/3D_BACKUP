@@ -252,6 +252,50 @@ if (!HOOK || !touched || /public\/panels\//.test(touched)) {
   );
 }
 
+// ── 7b. THE SAME FAULT, IN REACT'S styled-jsx ─────────────────────────────────────────────
+//
+// The check above walks public/panels only, and the identical mistake is available in every React
+// component that carries a `<style jsx>{` … `}</style>` block: that stylesheet is ALSO a template
+// literal, so one backtick in a CSS comment inside it ends the string and the file stops parsing.
+// I did exactly that on 2026-08-04 while fixing the connection popover — quoted a CSS property
+// name in backticks inside a /* … */ comment. `tsc --noEmit` passed (it forgives it) and the
+// TURBOPACK build failed with "Expected '</', got 'ident'", which names a line but not the cause.
+// Same blunt rule as above, scoped to the style block so ordinary JSDoc elsewhere is untouched.
+{
+  const files = [];
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p);
+      else if (e.name.endsWith(".tsx")) files.push(p);
+    }
+  };
+  walk("components");
+  walk("app");
+  const offenders = [];
+  let styleBlocks = 0;
+  for (const f of files) {
+    const src = fs.readFileSync(f, "utf8");
+    // Each <style jsx>{` … `}</style> body. Non-greedy up to the closing tag, so a file with
+    // several style blocks is checked block by block.
+    for (const blk of src.matchAll(/<style[^>]*jsx[^>]*>\{`([\s\S]*?)`\}\s*<\/style>/g)) {
+      styleBlocks++;
+      for (const c of blk[1].matchAll(/\/\*[\s\S]*?\*\//g)) {
+        if (!c[0].includes("`")) continue;
+        const line = src.slice(0, blk.index + c.index).split("\n").length;
+        offenders.push(`${f}:${line}  ${c[0].replace(/\s+/g, " ").slice(0, 70)}…`);
+      }
+    }
+  }
+  if (offenders.length === 0) ok(`${styleBlocks} styled-jsx block(s): no backtick inside a /* … */ comment`);
+  else bad(
+    `${offenders.length} CSS comment(s) inside a styled-jsx block contain a backtick — that ENDS the template literal and the component stops compiling`,
+    offenders.join("\n         ") + "\n         Quote code with 'single quotes' or nothing at all.",
+  );
+}
+
 // ── 8. THE EMBED'S SKIN HAS EXACTLY ONE WRITER ────────────────────────────────────────────
 //
 // Owner, 2026-08-03: "I changed the colour to white, then I go to parcel and it shifts to dark."

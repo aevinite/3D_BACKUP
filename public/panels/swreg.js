@@ -27,6 +27,20 @@
       document.addEventListener("visibilitychange", function () {
         if (document.visibilityState === "visible") { try { r.update(); } catch (e) {} }
       });
+      // AND SAVE THIS PANEL'S OWN PAGE. The comment at the top of this file already noted that
+      // "a brand-new device's very first load may not be controlled yet" — this is the other half
+      // of that. The worker can only store a page whose navigation it handled, so on a device's
+      // first load the panel HTML was never saved: lose signal, reload, and a waiter got the
+      // "hasn't been opened on this device yet" screen mid-service. Ask for it explicitly.
+      function warm() {
+        try {
+          if (navigator.serviceWorker.controller) {
+            navigator.serviceWorker.controller.postMessage({ type: "LFH_WARM_SHELL", url: location.href });
+          }
+        } catch (e) { /* never throw into the panel */ }
+      }
+      if (navigator.serviceWorker.controller) warm();
+      else navigator.serviceWorker.addEventListener("controllerchange", warm, { once: true });
     }).catch(function () { /* offline layer is a bonus; never break the panel */ });
   }
 

@@ -131,10 +131,14 @@ export function useConnectionStatus(): ConnLevel {
 // number goes green → yellow → orange → red exactly as the owner asked. `bars` (0–3)
 // carries the SAME meaning as the colour so it's never colour-only (accessibility).
 export type Tier = { key: string; color: string; text: string; tint: string; bars: number; label: string };
+// `bars` must differ wherever the COLOUR differs, or the tier is colour-only for that step and the
+// promise above is not kept. Slow and Poor both said 1, so the two worst states were told apart by
+// hue alone — the one place it matters most, and unreadable to anyone who can't separate orange
+// from red. Poor is the floor now: 0 lit bars, which also reads correctly as "barely connected".
 export function latencyTier(ms: number | null): Tier | null {
   if (ms == null) return null;
   if (ms <= 700)  return { key: "good", color: "#22c55e", text: "#16a34a", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
   if (ms <= 1500) return { key: "okay", color: "#eab308", text: "#ca8a04", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
   if (ms <= 3000) return { key: "slow", color: "#f97316", text: "#ea580c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
-  return              { key: "poor", color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)",  bars: 1, label: "Poor" };
+  return              { key: "poor", color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)",  bars: 0, label: "Poor" };
 }
