@@ -4,10 +4,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type CSSProperties } from "react";
 import { getOrderStatus, getSettings, type OrderStatus } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
-import { useFeatures } from "@/lib/features";
 import { getStoredSession, getSessionState } from "@/lib/session";
 import { tremove } from "@/lib/tenantStorage";
-import { toMinor, formatAmount, getCurrency, type CurrencyMeta } from "@/lib/format";
 import {
   STEPS,
   STATUS_COPY as COPY,
@@ -32,10 +30,8 @@ const broadcast = () => window.dispatchEvent(new Event("lfh:orders-updated"));
 // onto an X to hide it (the order stays alive in the cart's history).
 export default function OrderTracker() {
   const restaurantId = useRestaurantId();
-  const features = useFeatures(restaurantId); // hide the call-waiter button when waiter_calls is off
   // useState boxes (re-draw the strip when changed):
   const [orders, setOrders] = useState<ActiveOrder[]>([]); // all orders this device is following
-  const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // currency for prices
   // Per-dish progress across the whole table (from the session's order_items):
   // segs is one status per dish ("received"|"preparing"|"served") so the strip can
   // draw a segment per dish, and served is how many are done. Lets the guest see
@@ -71,23 +67,18 @@ export default function OrderTracker() {
     setOrders(list);
   };
 
-  // Load orders + currency, then listen for "order placed" (refresh) and "currency
-  // changed" messages. Re-runs when the resolved restaurant changes — a soft, same-tab
+  // Load the saved orders, then listen for "order placed". Re-runs when the resolved restaurant changes — a soft, same-tab
   // switch from /r/A to /r/B doesn't remount this widget (same route file), so without
   // this it kept showing restaurant A's live-order strip over B until an event fired.
   // read()/getCurrency() are tenant-scoped, so re-reading picks up B's own data.
   useEffect(() => {
     refresh();
-    setCurrency(getCurrency());
     const onPlaced = () => refresh(); // a new order arrived (this tab or another)
-    const onCur = () => setCurrency(getCurrency());
     window.addEventListener("lfh:order-placed", onPlaced);
     window.addEventListener("storage", onPlaced); // "storage" fires when another tab changes localStorage
-    window.addEventListener("lfh:currency-changed", onCur);
     return () => {
       window.removeEventListener("lfh:order-placed", onPlaced);
       window.removeEventListener("storage", onPlaced);
-      window.removeEventListener("lfh:currency-changed", onCur);
     };
   }, [restaurantId]);
 
@@ -95,7 +86,6 @@ export default function OrderTracker() {
   // restaurants in the SAME tab (client-side nav — GuestChrome lives in the root layout
   // and doesn't remount) must re-read against THIS restaurant, else the previous
   // restaurant's live strip lingered over the new one (audit fix cart-3, 2026-07-08).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { refresh(); }, [restaurantId]);
 
   // Poll the kitchen for each order we're still following.
@@ -296,10 +286,6 @@ export default function OrderTracker() {
   // order-level bar. Hidden during a dismiss animation to keep that clean.
   const dishMode = dishProg.segs.length > 0 && !dismissing;
   const allDishesServed = dishMode && dishProg.served === dishProg.segs.length;
-  // showPrice(): format a stored USD ORDER TOTAL in the chosen currency.
-  // Order totals are authoritative amounts, so they get minor-unit rounding
-  // (whole ₹ / cents) — never the ₹10 menu snapping. Matches SessionTableBill.
-  const showPrice = (n: number) => (currency ? formatAmount(toMinor(n * currency.rate, currency), currency) : `$${n.toFixed(2)}`);
 
   // openDetail(): tapping the strip ALWAYS opens the cart's "Live status" tab — the
   // good warm bill card (SessionTableBill / live orders) — for a single order or
