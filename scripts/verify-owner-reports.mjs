@@ -156,6 +156,22 @@ check("the month-compare chart excludes today's part-day",
   /cur: d < todayDom/.test(dashPage) && /Today is still in progress/.test(dashPage),
   "a part-day plotted against full days read as a crash to zero");
 
+console.log("\n── 8b. THE OWNER'S PHONE IS 360px WIDE ──");
+// `.adm-main` measured 496px inside a 360px screen: the Busy-heatmap and Payment-methods cards
+// ran 136px off the right edge — taking the heatmap's ⤢ Enlarge button with them — with no
+// horizontal scrollbar to reveal them. A bare `1fr` grid track is `minmax(auto,1fr)`, and that
+// `auto` floor is the item's MIN-CONTENT width, so a card holding the heatmap's 430px grid
+// pushed its own track wider than the phone instead of letting its inner scroller do the work.
+check("the dashboard's two-up grid tracks can shrink below their content",
+  /\.ow2-two \{ display: grid; grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\)/.test(dashPage),
+  "a bare 1fr track cannot go below min-content, so a wide card overflows the phone");
+check("its children may shrink too",
+  /\.ow2-two > \* \{ min-width: 0; \}/.test(dashPage),
+  "without min-width:0 a grid item still refuses to shrink");
+check("the phone breakpoint collapses to a SHRINKABLE single column",
+  /\.ow2-two, \.ow2-callouts \{ grid-template-columns: minmax\(0, 1fr\); \}/.test(dashPage),
+  "one column is not enough — it has to be a column that can be narrower than its content");
+
 console.log("\n── 9. NO DUPLICATE READS ──");
 check("the reports page uses the shared overview de-duper",
   /fetchOwnerOverview\(scp\)/.test(reportsPage) && !/fetch\(`\/api\/owner\/overview/.test(reportsPage),
