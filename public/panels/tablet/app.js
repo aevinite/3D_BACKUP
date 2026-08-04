@@ -612,7 +612,14 @@ function floorTableList() {
 // and, when a filter is on, the next one they were looking at. Strings, to compare with
 // state.table without surprises. (owner, 2026-08-03: "toggle the tables very fast".)
 function stepTables() {
-  return floorTableList().filter((i) => passesFilter(i)).map(String);
+  const on = floorTableList().filter((i) => passesFilter(i));
+  // ONLY tables that have something on them. Stepping into a FREE table used to open an empty
+  // popup ("No orders yet") — while TAPPING that same tile jumps straight into the order
+  // builder, so one table had two different destinations depending on how you reached it
+  // (caught in review, 2026-08-04). ‹ › are for walking the work: the tables with a party, a
+  // bill or a request on them. A free table is still one tap away on the floor behind.
+  const busy = on.filter((i) => tileIsOpen(i) || !!mergeParentOf(i) || mergeChildrenOf(i).length > 0);
+  return (busy.length ? busy : on).map(String);
 }
 
 // ── Waiter sections (mig 222) ────────────────────────────────────────────────
@@ -864,11 +871,18 @@ function tileHtml(i) {
   // Actions: ＋ Take order on every occupied tile (a free tile IS the take-order button);
   // one-tap ✓ accept for a brand-new order; 💳 pay when the bill is served-unpaid. All
   // delegated on #tiles, so the patch path never re-binds anything.
-  // A FINISHED table says so and WAITS: everything served AND the whole bill paid ("done"),
-  // which is the manager's own rule — nothing ends a table by itself, a person decides when
-  // the guests have actually left. The manager floor has carried a ⏻ close on that tile since
-  // 2026-08-02; the tablet made a waiter open the popup to find it, and this is the "everything
-  // else like a manager" the owner asked for. Its confirm is the second step, as always.
+  // A FINISHED table says so and WAITS: everything served AND the whole bill paid ("done").
+  // Nothing ends a table by itself — a person decides when the guests have actually left.
+  //
+  // THE LOOK IS THE MANAGER'S, THE CONFIRM IS THE TABLET'S — and that is deliberate, not an
+  // oversight (flagged in review, 2026-08-04). The manager's identical ⏻ is ONE TAP by the
+  // owner's explicit word (2026-08-02: "close table should not have 2 step"), and its reasoning
+  // is sound there: by the time the button exists nothing is at stake. The tablet asks anyway,
+  // because his NEWER instruction (2026-08-03) named this panel and gave this reason: "if there
+  // is a small click of close and all it could be a miss click… what we require is two step in
+  // a important, like closing a table". On a 12-per-row waiter floor this control is ~22px in a
+  // walking hand, which is exactly the mis-tap he described. Two of his rulings meet here; if he
+  // wants one tap on the tablet too, change BOTH floors and the guard together.
   const finished = st.cls === "done" && !a.unpaid;
   const acts = isFree ? "" :
     (finished ? `<span class="tclose" role="button" data-quick="close" data-qt="${partyHead}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}">⏻</span>` : "")
@@ -914,7 +928,13 @@ function floorNavHtml() {
 // floorPerRow(): how many tiles per row — the SAME admin-owned per-restaurant setting the
 // manager floor reads (settings.floor_per_row, mig 226), so the two floors always match.
 // The phone (<600px) ignores it via CSS and keeps readable auto-fill tiles instead.
-const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 30, FLOOR_PER_ROW_DEFAULT = 6;
+// These MUST equal lib/floorLayout.ts, which the server, the admin picker and the manager floor
+// all read — the whole point of the comment below is that the two floors agree. They didn't:
+// this said MAX 30 / DEFAULT 6 against the canonical 12 / 12 (migration 265 spells out that 30
+// is only the DB's outer bound and the screens offer 2..12), so a stored 18 would have drawn
+// differently here than in the manager. A panel file can't import TS, so the values are
+// restated — keep them in step, and prefer changing lib/floorLayout.ts first.
+const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 function floorPerRow() {
   const n = Math.round(Number((state.data.settings || {}).floor_per_row));
   if (!Number.isFinite(n)) return FLOOR_PER_ROW_DEFAULT;
@@ -1662,9 +1682,19 @@ function renderPanel() {
 // It resolves the session itself, because the FLOOR renders from the slim summary: a tile's
 // ⏻ can be tapped for a table whose full slice was never fetched.
 async function closeTableAndFree(t) {
-  await ensurePartySlices(t, true);
+  // Did the slice actually LAND? ensurePartySlices swallows a failed read, and without knowing
+  // that, a missing session reads as "already free" — which is a lie when the truth is "we
+  // couldn't ask". Two different problems deserve two different sentences (2026-08-04).
+  let readOk = true;
+  try { await ensurePartySlices(t, true); } catch { readOk = false; }
   const s = sessionOf(t);
-  if (!s) { toast("That table is already free.", false); await load(); renderFloor(); return; }
+  if (!s) {
+    toast(readOk && sliceLoaded(t)
+      ? `${tableLabel(t)} is already free.`
+      : `Couldn't check ${tableLabel(t)} just now — try again in a moment.`, false);
+    await load().catch(() => {}); renderFloor();
+    return;
+  }
   const a = tableAgg(t), os = partyOrders(t);
   const warn = a.unpaid && os.length ? ` The bill (${inr(a.due)}) is still UNPAID.` : "";
   if (!(await confirmDialog(`Close ${tableLabel(t)} and free it?${warn}`, "Close table"))) return;
@@ -3441,7 +3471,13 @@ function openQuickDest() {
   // re-entrancy trap the confirm box and the payment sheet each already guard against.
   if (qdestClose) qdestClose();
   const tiles = [];
-  for (const i of floorTableList()) {
+  // THE FLOOR PLAN ONLY — 1..table_count, never floorTableList(). That list deliberately also
+  // carries tables numbered ABOVE the count when they still hold a live order, so their money
+  // stays reachable; but as a DESTINATION such a table is refused by the server ("Table 9234792
+  // isn't on the floor plan"), and the rule is already written down beside floorTableList: you
+  // may take a party OFF an off-plan table, never send one TO one. Stray test rows made this
+  // real — the picker offered a junk number and the send failed (found 2026-08-04).
+  for (let i = 1, n = tableCount(); i <= n; i++) {
     if (!inMySection(i)) continue;          // a sectioned waiter only serves their own tables
     // A MERGED table is not a free one, whatever its own summary tile says: its party — and
     // its bill — live on the table it is joined to, and that is where this order would land.
