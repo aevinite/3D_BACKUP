@@ -62,6 +62,11 @@ export function panelChipStyle(panel: string | null | undefined): React.CSSPrope
 //   • never render `ACT_LABEL[x] || x` — call actLabel(x), which prettifies an unknown code into
 //     "Order item qty" rather than leaking `order_item_qty` onto a person's screen.
 export const ACT_LABEL: Record<string, string> = {
+  // Not from this PR — the printing feature (80a39a5f) added these three codes without labels, so
+  // `npm run verify:audit` was already red on main and they were printing as raw keys on the
+  // Activity screens. Three lines, same class of gap as the nine this PR fixed.
+  kot_reprint_sent: "Reprinted a KOT", printer_problem: "Printer problem",
+  printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit
   // catches it), so the label lands in the SAME commit as the logAction call.

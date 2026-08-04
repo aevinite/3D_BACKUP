@@ -11,6 +11,7 @@ import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@
 import { USER_COOKIE, userFromCookie, hashSecret, verifySecret } from "@/lib/userAuth";
 import { MODULE_DEFS } from "@/lib/accessModel";
 import { logAction } from "@/lib/oplog";
+import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -137,8 +138,17 @@ export async function POST(req: NextRequest) {
   const row = (await sb.from("staff_users").select("password_hash, token_version").eq("id", owner.id).maybeSingle()).data as
     { password_hash: string | null; token_version: number } | null;
   if (!row) return NextResponse.json({ error: "Account not found." }, { status: 404 });
+  // Same wall as app/api/panel-profile (sweep 2026-08-04, mig 277) — see the note there for why an
+  // already-signed-in password box still needs one. Counted per account, before the check.
+  if (!(await rateAllowed("password_change", owner.id, {
+    restaurantId: owner.restaurant_id ?? null,
+    label: `Owner ${owner.name || owner.username} changing their own password`,
+  }))) {
+    return NextResponse.json({ error: "Too many tries. Please wait a few minutes and try again." }, { status: 429 });
+  }
   if (!(await verifySecret(current, row.password_hash)))
     return NextResponse.json({ error: "Your current password is wrong." }, { status: 403 });
+  await rateResetOnSuccess("password_change", owner.id);
 
   const hash = await hashSecret(next);
   const { error } = await sb.from("staff_users")

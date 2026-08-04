@@ -10,6 +10,7 @@
 //     money — just signals. Admin-gated.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { signRows } from "@/lib/mediaLinks";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 
 export const dynamic = "force-dynamic";
@@ -53,7 +54,10 @@ export async function GET(req: NextRequest) {
   const slugOf: Record<string, string> = {};
   for (const r of restaurants) { nameOf[r.id] = r.name; slugOf[r.id] = r.slug; }
 
-  const tickets = (ticketsQ.data || []).map((t) => ({ ...t, restaurantName: nameOf[t.restaurant_id] || "—", restaurantSlug: slugOf[t.restaurant_id] || "" }));
+  // The bell shows a complaint's photo/voice note, so those links are signed too — short-lived,
+  // never the permanent public URL (lib/mediaLinks.ts).
+  const signedTickets = await signRows("issue-media", (ticketsQ.data || []) as Record<string, unknown>[], ["image_url", "audio_url"]);
+  const tickets = signedTickets.map((t: any) => ({ ...t, restaurantName: nameOf[t.restaurant_id] || "—", restaurantSlug: slugOf[t.restaurant_id] || "" }));
 
   // Recent app errors (last 24h) — a signal that something broke, with a jump into the log.
   const errors = (errorsQ.data || []).map((e) => ({ ...e, restaurantName: e.restaurant_id ? (nameOf[e.restaurant_id] || "—") : "Platform" }));

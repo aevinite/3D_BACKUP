@@ -19,6 +19,7 @@ import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { payrollLadder } from "@/lib/tableTags";
 import { waiterTables } from "@/lib/tableAssign";
 import { completeness, hasProfile, mergeProfilePatch, SELF_PROFILE_FIELDS, todayIST } from "@/lib/staffProfile";
+import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -109,12 +110,28 @@ export async function POST(req: NextRequest) {
     const next = String(body?.newPassword || "");
     // Fetch the stored hash explicitly (it's intentionally NOT on the StaffUser
     // type, so it can never leak through a serialized user object).
+    // A WALL ON THE ONE PASSWORD BOX THAT HAD NONE (sweep 2026-08-04, mig 277). This check happens
+    // AFTER someone is already signed in — an unlocked tablet on a counter, a shared browser — so it
+    // was the only credential check in the product a person could hammer indefinitely. Counted per
+    // ACCOUNT, not per device: a guesser can clear a cookie, not change whose password they are
+    // guessing. Placed BEFORE verifySecret so a wrong guess is counted, and reset on success below
+    // so a person legitimately changing their password twice is never walled.
+    if (!(await rateAllowed("password_change", u.id, {
+      restaurantId: u.restaurant_id ?? null,
+      label: `${u.name || u.username} (${u.role}) changing their own password`,
+      device: deviceIdFrom(req),
+    }))) {
+      return NextResponse.json({ error: "Too many tries. Please wait a few minutes and try again." }, { status: 429 });
+    }
     const row = (await sb.from("staff_users").select("password_hash").eq("id", u.id).limit(1)).data?.[0];
     // Re-authenticate with the current password so a hijacked open session can't
     // silently lock the real owner out.
     if (!(await verifySecret(current, row?.password_hash ?? null))) {
       return NextResponse.json({ error: "Current password is wrong." }, { status: 403 });
     }
+    // They knew it → clear the counter, so a person who legitimately changes their password twice in
+    // one sitting is never walled (the same rule login already follows, lib/rateLimit).
+    await rateResetOnSuccess("password_change", u.id);
     if (next.length < 6) return NextResponse.json({ error: "New password must be at least 6 characters." }, { status: 400 });
     if (next === current) return NextResponse.json({ error: "New password must be different." }, { status: 400 });
     // Bump token_version → every existing cookie (incl. this one) is invalidated;

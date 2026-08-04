@@ -6212,6 +6212,11 @@ const PANEL_LABEL = { editor: "Manager", manager: "Manager", kitchen: "Kitchen",
 // reading their own Activity log saw raw database keys (`order_item_qty`, `invoice_void`,
 // `menu_delete`) between the readable lines (found 2026-08-03).
 const OP_ACTION_LABELS = {
+  // Not from this PR — the printing feature (80a39a5f) added these three codes without labels, so
+  // `npm run verify:audit` was already red on main and they were printing as raw keys on the
+  // Activity screens. Three lines, same class of gap as the nine this PR fixed.
+  kot_reprint_sent: "Reprinted a KOT", printer_problem: "Printer problem",
+  printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit
   // catches it), so the label lands in the SAME commit as the logAction call.

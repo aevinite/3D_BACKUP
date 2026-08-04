@@ -31,6 +31,13 @@
 // class 23 = integrity constraint violation). Everything else — connection failures, timeouts,
 // deadlocks, out-of-memory — is a server problem and stays a 500.
 const REFUSAL_CODES = new Set([
+  // ── OUR OWN refusal codes (mig 278) ──────────────────────────────────────────────────────────
+  // A refusal the app must RECOGNISE gets its own SQLSTATE instead of being identified by the words
+  // of its message. Registered here as data refusals so that even a route branch nobody wrote
+  // answers 4xx — never a 500, which public/panels/outbox.js would queue and retry forever behind
+  // the person. See the migration's header for the full reasoning.
+  "LFH01", // the invoice is locked — the bill is settled and cannot be reopened
+  "LFH02", // a credit note bigger than the bill total
   "22001", // string too long
   "22003", // number out of range
   "22007", // invalid date/time format
@@ -51,6 +58,18 @@ const REFUSAL_TEXT = /violates (check|unique|foreign key|not-null|exclusion) con
 const PLAIN: Record<string, string> = {
   settings_floor_per_row_range: "Tables per row has to be a whole number between 2 and 30.",
 };
+
+// Our own codes → the sentence a person reads (mig 278). Keyed by SQLSTATE, so the wording of the
+// SQL exception can change freely without changing what anyone is told.
+const OWN_CODE_TEXT: Record<string, string> = {
+  LFH01: "This bill is settled — its invoice can't be reopened. Make a credit note instead.",
+  LFH02: "The credit can't be more than the bill total.",
+};
+/** Our own refusal code, if this error carries one (mig 278). Null for anything else. */
+export function ownRefusalCode(e: unknown): string | null {
+  const c = (e as { code?: unknown } | null)?.code;
+  return typeof c === "string" && c in OWN_CODE_TEXT ? c : null;
+}
 
 type MaybePgError = { code?: unknown; message?: unknown; details?: unknown; hint?: unknown };
 
@@ -80,6 +99,29 @@ export function isMissingRow(e: unknown): boolean {
   if (o.code !== "PGRST116") return false;
   const detail = typeof o.details === "string" ? o.details : "";
   return MISSING_ROW_DETAIL.test(detail);
+}
+
+/**
+ * Rethrow a Supabase/Postgres error WITHOUT losing its SQLSTATE (mig 278).
+ *
+ * THE BUG THIS EXISTS FOR. Route handlers did `throw new Error(error.message)`, which builds a
+ * brand-new Error carrying only the text. Every classifier in this file reads `.code` first, so a
+ * rethrown database error arrived with no code at all — and a refusal whose message matched none of
+ * the patterns below became an unknown failure → 500 → and a 500 on a write means "the server is
+ * struggling", so public/panels/outbox.js queued it and retried it forever behind the person.
+ *
+ * Carrying `code`, `details` and `hint` through means isDataRefusal / isDbUnreachable / isMissingRow
+ * all still work on the way out of the catch, so the status a person gets is the honest one.
+ */
+export function pgError(e: unknown): Error {
+  const o = (e || {}) as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
+  const err = new Error(typeof o.message === "string" ? o.message : String(o.message ?? "database error"));
+  // Assigned rather than passed to the constructor so this stays a plain Error for every caller
+  // that only reads .message (which is most of them).
+  if (o.code !== undefined) (err as unknown as { code?: unknown }).code = o.code;
+  if (o.details !== undefined) (err as unknown as { details?: unknown }).details = o.details;
+  if (o.hint !== undefined) (err as unknown as { hint?: unknown }).hint = o.hint;
+  return err;
 }
 
 /** Is this the database refusing the CONTENT of a write (as opposed to failing to serve it)? */
@@ -189,6 +231,9 @@ export function worthLogging(e: unknown): boolean {
 
 /** 400 when the database refused the value, 503 when it didn't answer, 500 when the app broke. */
 export function refusalStatus(e: unknown, fallback = 500): number {
+  // Our own refusals are CONFLICTS, not bad input: the request was well-formed, the bill's state
+  // says no. 409 is what the panels already treat as "a person must read this" (mig 278).
+  if (ownRefusalCode(e)) return 409;
   if (isMissingRow(e)) return 404;
   if (isDataRefusal(e)) return 400;
   if (isDbUnreachable(e)) return 503;
@@ -208,6 +253,10 @@ export function refusalMessage(e: unknown): string {
   // Same reasoning for "TimeoutError: The operation was aborted due to timeout", which is what a
   // manager was actually shown in a red toast for two hours on 2026-08-03.
   if (isDbUnreachable(e)) return BUSY_MESSAGE;
+  // One of OUR codes (mig 278) → its own sentence, never the raw `lfh: invoice locked — …` prose,
+  // which was written for the error log and not for a waiter mid-service.
+  const own = ownRefusalCode(e);
+  if (own) return OWN_CODE_TEXT[own];
   if (!isDataRefusal(e)) return raw;
   for (const name of Object.keys(PLAIN)) if (raw.includes(name)) return PLAIN[name];
   const m = raw.match(/violates unique constraint/i) ? "Something with that name or number already exists."

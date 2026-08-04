@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
+import { signRows, signOne } from "@/lib/mediaLinks";
 import { logAction } from "@/lib/oplog";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
@@ -172,7 +173,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       const r = await sb.from("inv_purchases").select(PURCHASE_COLS).eq("restaurant_id", rid)
         .order("created_at", { ascending: false }).limit(lim);
       if (r.error) return err(r.error.message, 500);
-      return ok({ purchases: r.data });
+      // A purchase bill / waste photo / expense slip is a restaurant's private paperwork: the
+      // screen gets a short-lived signed link, never the permanent public one (lib/mediaLinks.ts).
+      return ok({ purchases: await signRows("inv-media", r.data as Record<string, unknown>[], ["photo_url"]) });
     }
     if (path[0] === "purchases" && path[1]) {
       const [p, lines] = await Promise.all([
@@ -181,7 +184,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
           .eq("restaurant_id", rid).eq("purchase_id", path[1]).limit(200),
       ]);
       if (p.error || !p.data) return err("Purchase not found.", 404);
-      return ok({ purchase: p.data, lines: lines.data || [] });
+      // A purchase bill / waste photo / expense slip is a restaurant's private paperwork: the
+      // screen gets a short-lived signed link, never the permanent public one (lib/mediaLinks.ts).
+      return ok({ purchase: { ...p.data, photo_url: await signOne("inv-media", (p.data as { photo_url?: string }).photo_url) }, lines: lines.data || [] });
     }
 
     if (path[0] === "counts" && !path[1]) {
@@ -207,7 +212,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       const r = await sb.from("inv_waste_entries").select(WASTE_COLS).eq("restaurant_id", rid)
         .gte("waste_date", from).order("created_at", { ascending: false }).limit(200);
       if (r.error) return err(r.error.message, 500);
-      return ok({ waste: r.data });
+      // A purchase bill / waste photo / expense slip is a restaurant's private paperwork: the
+      // screen gets a short-lived signed link, never the permanent public one (lib/mediaLinks.ts).
+      return ok({ waste: await signRows("inv-media", r.data as Record<string, unknown>[], ["photo_url"]) });
     }
 
     if (path[0] === "expenses") {
@@ -227,7 +234,9 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         totals[e.category] = (totals[e.category] || 0) + Number(e.amount);
         total += Number(e.amount);
       }
-      return ok({ month, expenses: r.data, totals, total: Math.round(total * 100) / 100 });
+      // Expense slips are signed the same way (lib/mediaLinks.ts). Totals were summed from the
+      // raw rows above — signing only rewrites the URL field, never a figure.
+      return ok({ month, expenses: await signRows("inv-media", r.data as Record<string, unknown>[], ["photo_url"]), totals, total: Math.round(total * 100) / 100 });
     }
 
     // The hook: "what to order today" — par-based suggestions in purchase units.

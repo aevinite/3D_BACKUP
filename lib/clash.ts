@@ -106,8 +106,17 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
   const fields = want?.fields;
   if (!idCol || !id || !fields || typeof fields !== "object") return null;
 
-  const cols = Object.keys(fields).filter((c) => /^[a-z_][a-z0-9_]*$/.test(c)).slice(0, 8);
-  if (!cols.length) return null;
+  // A field may name a SUB-KEY of a jsonb column with a dot: "profile.notes" (added 2026-08-04).
+  // Without this, protecting anything stored in a jsonb meant comparing the WHOLE blob, which fires
+  // on a change to any unrelated key in the same column — a false-positive machine that would teach
+  // people to stop passing expectations. The staff profile keeps a person's private note and their
+  // papers inside `profile`, so this is what makes those protectable at all.
+  const keys = Object.keys(fields)
+    .filter((c) => /^[a-z_][a-z0-9_]*(\.[a-zA-Z0-9_-]+)?$/.test(c))
+    .slice(0, 8);
+  if (!keys.length) return null;
+  // Ask the database only for the real COLUMNS (dedup'd); the sub-key is read out of the object.
+  const cols = [...new Set(keys.map((k) => k.split(".")[0]))];
 
   try {
     let q = sb.from(table).select(cols.join(", ")).eq(idCol, id);
@@ -117,9 +126,15 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
     const res = await q.maybeSingle();
     if (res.error || !res.data) return null;
     const row = res.data as unknown as Record<string, unknown>;
-    for (const c of cols) {
-      if (sameValue((fields as Record<string, unknown>)[c], row[c])) continue;
-      const what = want?.label || readable(c);
+    for (const c of keys) {
+      // "profile.notes" → read `notes` out of the `profile` object. A missing object compares as
+      // absent, which is correct: "it had nothing there" is a real previous value.
+      const [col, sub] = c.split(".");
+      const current = sub
+        ? ((row[col] && typeof row[col] === "object" ? (row[col] as Record<string, unknown>)[sub] : undefined))
+        : row[col];
+      if (sameValue((fields as Record<string, unknown>)[c], current)) continue;
+      const what = want?.label || readable(sub || col);
       // QUOTING THE CURRENT VALUE IS THE USEFUL PART — but this gate deliberately runs once at
       // the top of the dispatcher, BEFORE the per-action permission check inside each branch.
       // So for a money column the sentence could state a figure the person's own role is not
@@ -180,6 +195,8 @@ function readable(col: string): string {
     payment_status: "the payment status",
     table_count: "the number of tables",
     allergies: "the allergens",
+    notes: "this person's private note",
+    id_type: "the ID on file", id_number: "the ID number",
   };
   return map[col] || `the ${col.replace(/_/g, " ")}`;
 }
