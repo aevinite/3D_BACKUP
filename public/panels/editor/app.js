@@ -6278,12 +6278,6 @@ const OP_ACTION_LABELS = {
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
   order_cancel: "Cancelled the KOT", order_uncancel: "Un-cancelled the KOT", order_tip: "Recorded a tip",
-  // Print reliability (mig 269). Added with the feature but never labelled, so these three rendered
-  // as their raw codes on the admin, owner and manager log screens — the "MAP[x] || x leaks the key"
-  // fault the Activity-log rule exists to prevent. verify:audit was already red on main for this.
-  kot_reprint_sent: "Re-sent a kitchen ticket to the printer",
-  printer_problem: "Printer problem reported",
-  printer_problem_resolved: "Printer problem resolved",
   order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",
   khata_park: "Parked the bill on khata", khata_collect: "Collected a khata payment",
   audit_record_failed: "Audit record FAILED",
