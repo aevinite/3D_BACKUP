@@ -384,7 +384,7 @@ export async function flushGuestOutbox() {
       // an order the diner had been promised would send simply vanished — no ticket, no entry in
       // their list, no message. Now it is surfaced like any other refusal.
       if (res.ok && j?.duplicate) {
-        if (j.ok === false) { await moveToFailed(item, reasonMsg(j.reason)); notify(); continue; }
+        if (j.ok === false) { await moveToFailed(item, reasonMsg(j.reason, { queued: true })); notify(); continue; }
         progressed = true;
         if (j.order_id) recordActive(item, j.order_id as string);
         await removeItem(item.id); notify(); continue;
@@ -401,7 +401,12 @@ export async function flushGuestOutbox() {
       }
       // Server accepted the call but rejected the order (state changed while offline),
       // or a hard 4xx → surface it instead of losing it.
-      await moveToFailed(item, reasonMsg(j?.reason)); notify(); continue;
+      // `queued: true` because EVERY refusal that reaches this file is a saved order being turned
+      // down later — so the diner reads why the order they placed never arrived ("your table was
+      // closed while you were offline") instead of an instruction aimed at someone standing at the
+      // screen right now ("please ask your server"). The two live paths pass no flag and get the
+      // present tense, which is correct for them.
+      await moveToFailed(item, reasonMsg(j?.reason, { queued: true })); notify(); continue;
     }
   } finally {
     flushing = false;
