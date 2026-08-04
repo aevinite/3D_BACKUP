@@ -69,6 +69,23 @@ async function begin(actionId: string, panel: string): Promise<Claim> {
   }
 }
 
+// KEEP THE CLAIMS TABLE FROM GROWING FOREVER (migration 268).
+//
+// Nothing ever deleted a claim, and a row older than a day cannot be replayed by anything — both
+// offline queues give up long before that. Measured 2026-08-04: 87% of the table was already dead.
+//
+// Opportunistic on purpose: roughly one write in two hundred pays for a bounded 500-row delete, so
+// a busy restaurant keeps itself tidy and an idle stack does no work at all. No cron, no timer
+// touching idle data. Fire-and-forget and fully swallowed — tidying up must never affect a write.
+const PRUNE_ODDS = 200;
+function maybePrune(): void {
+  if (Math.floor(Math.random() * PRUNE_ODDS) !== 0) return;
+  void sb.rpc("lfh_prune_action_idempotency").then(
+    () => {},
+    () => {}, // the function may not be applied yet on a given stack → ignore, exactly like the rest of this file
+  );
+}
+
 async function finish(actionId: string, ok: boolean, result?: unknown): Promise<void> {
   try {
     // Store the successful result so a later duplicate echoes the same order_id.
@@ -91,6 +108,7 @@ export function withIdempotency<C>(
     const actionId = req.headers.get("x-lfh-action-id");
     if (!actionId) return fn(req, ctx);
 
+    maybePrune(); // fire-and-forget; never awaited, never able to affect this write
     const claim = await begin(actionId, panel);
     if (claim.state === "done") {
       // Echo the original result (order_id etc.) alongside the duplicate flag so the

@@ -28,6 +28,11 @@ const VALUE_EDIT = [
   /\/orders\/[^/]+\/allergies/, /\/orders\/[^/]+\/discount/,
   /\/sessions\/[^/]+\/bill-discount/,
   /\/tables\/[^/]+\/tag/,
+  // The MENU EDITOR's save. A dish's price and name are the classic "two managers, one dish"
+  // collision and had no expectation at all: the second save simply won, silently. It sends only
+  // CHANGED fields, which stops a stale form reverting an untouched column — but that is a
+  // different problem from two people typing in the SAME box. (buildEditExpect in editor/app.js.)
+  /api\("POST", "\/" \+ kind, payload/,
 ];
 
 // Deliberately not clash-checked, each with the reason. Reviewed when this list changes.
@@ -35,6 +40,7 @@ const KNOWN_EXEMPT = [
   { match: /"\/orders\/" \+ id \+ "\/discount"/, why: "bulk 'undo on-the-house' deliberately clears the discount on MANY orders at once; one stale row must not refuse the whole batch, and the operation is already confirmed + logged" },
   { match: /\/sessions\/[^/]+\/bill-discount/, why: "PIN-gated bill discount goes through actGated; wire `expect` when the bill-discount screen carries the previous value" },
   { match: /\/tables\/[^/]+\/tag/, why: "table tag is a toggle chip, not a typed value — a second tap is visibly reflected immediately" },
+  { match: /payload\.__create = true;/, why: "undo of a DELETE re-creates the row from a snapshot — there is no concurrent edit to overwrite, the row does not exist" },
 ];
 
 let problems = 0, valueEdits = 0, covered = 0;
@@ -52,7 +58,12 @@ for (const file of PANELS) {
     // The expectation may be on this line or the next couple (the call is often wrapped).
     const window = lines.slice(i, i + 3).join(" ");
     const hasExpect = /expect\s*:/.test(window);
-    const exempt = KNOWN_EXEMPT.find((e) => e.match.test(line));
+    // An exemption is judged on the SURROUNDING lines, not just the call itself. What makes a
+    // write exempt is usually stated a line or two above it (an undo re-creating a deleted row,
+    // a bulk operation), and keying only on the call line forced brittle regexes that matched
+    // the wrong statement.
+    const around = lines.slice(Math.max(0, i - 3), i + 3).join(" ");
+    const exempt = KNOWN_EXEMPT.find((e) => e.match.test(line) || e.match.test(around));
     if (hasExpect) { covered++; console.log(`  ✅ ${file}:${i + 1}`); }
     else if (exempt) { console.log(`  ➖ ${file}:${i + 1}  exempt — ${exempt.why}`); }
     else { problems++; console.log(`  ❌ ${file}:${i + 1}  VALUE EDIT WITH NO EXPECTATION\n       ${line.trim().slice(0, 120)}`); }
@@ -60,6 +71,16 @@ for (const file of PANELS) {
 }
 
 console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${problems} unprotected`);
+
+// BE HONEST ABOUT WHAT THIS DOES NOT SEE. A green tick here has been read as "every value edit in
+// the app is protected", and it is not — this walks the three vanilla staff panels only, because
+// they are the surfaces whose writes carry X-LFH-Expect through the offline queue. Saying so is
+// the difference between a guard and a false sense of one.
+console.log("\nNot covered by this check (by design — no expectation travels from these yet):");
+console.log("  · the OWNER panel and the ADMIN console (React, plain fetch — not outbox writes)");
+console.log("  · public/panels/editor/inventory.js (its own fetch helper)");
+console.log("  · anything writing settings.table_names (table renames) or a bill's customer name");
+console.log("  Widening any of those means routing the write through the panel's api()/outbox first.");
 if (problems) {
   console.log(`\n❌ FAIL — wire \`expect: { table, id, fields: { <col>: <oldValue> } }\` at each one, or`);
   console.log(`   add it to KNOWN_EXEMPT with a reason. See CLAUDE.md → NEW-FEATURE CHECKLIST item 11.`);

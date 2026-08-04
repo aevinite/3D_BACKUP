@@ -13,13 +13,14 @@ behaviour stays correct.
 
 Before this, losing signal didn't just stop new data, it BROKE the app: every route sits
 behind an async server component, so a reload with no network produced nothing — the
-browser's dinosaur page, mid-service. Now a service worker keeps three per-device caches:
+browser's dinosaur page, mid-service. Now a service worker keeps four per-device caches:
 
 | Cache | Holds | Strategy |
 |---|---|---|
 | `lfh-shell` | HTML of pages already visited + `/offline.html` | network-first, cached page as fallback |
 | `lfh-asset` | `/_next/static`, `/panels/*`, images, fonts | cache-first for hashed Next chunks in prod; network-first everywhere else |
 | `lfh-data` | last good reply of each `GET /api/…` read | network-first, saved copy as fallback |
+| `lfh-fallback` | `/offline.html` alone | precached at install; **deliberately NOT wiped on sign-in/out** — wiping it left a device on the browser's own error page mid-sign-out |
 
 **Rules that must not be "optimised" away** (all enforced in `public/sw.js`):
 
@@ -184,6 +185,11 @@ to an offline-only test — keep online assertions in any test you add here.
   wrapped: `export const POST = withIdempotency(postImpl, "<panel>")`. A new client write
   must go through the panel's `api()` (staff) or the guest outbox, so it carries an
   `X-LFH-Action-Id`. Without this, an offline replay can double-fire.
+  **"Replayable" means it goes through an offline queue** — the vanilla staff panels, the guest
+  cart and inventory. The OWNER panel and the ADMIN console are plain React `fetch`es with no
+  queue, so they have nothing to replay; they are wrapped only where a repeat would cost money
+  (`/api/admin/bills` issues credit notes, `/api/owner/staff` creates logins). If you give one of
+  those surfaces a queue, wrap the rest at the same time.
 - **Fail open, never fail closed.** `lib/idempotency.ts` proceeds without dedup if the table
   errors — a dedup hiccup must never block real writes.
 - Keep it **egress-safe**: the badge derives state from existing signals; do not add a
@@ -215,6 +221,10 @@ to an offline-only test — keep online assertions in any test you add here.
       saved figures. **DECIDED 2026-07-30: 2 hours.**
 - [ ] **New panels/features** must include the connection badge and wire their writes through
       the outbox + `withIdempotency` (see NEW-FEATURE CHECKLIST in CLAUDE.md).
+      **And add the API family to `DATA_PATHS` in `public/sw.js`** — a read under a family that
+      isn't listed is passed straight through, so that screen comes up EMPTY with no internet
+      rather than showing its last known state. This is CLAUDE.md checklist item 10 and it is the
+      step most easily missed, because nothing fails until someone is offline.
 - [x] **Duplicate-ack carries the original body** (done) — `action_idempotency.result` stores the
       completed reply, so a duplicate echoes the original `order_id` and the guest tracker can
       still follow that order (`lib/idempotency.ts`, `lib/guestOutbox.ts`).
