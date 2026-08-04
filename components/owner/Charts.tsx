@@ -12,7 +12,7 @@ import { useState, useId, Fragment, type CSSProperties } from "react";
 import { useBackClose } from "@/lib/backStack";
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, ComposedChart, Line, PieChart, Pie, Cell,
-  XAxis, YAxis, Tooltip, CartesianGrid, Legend, LabelList,
+  XAxis, YAxis, Tooltip, CartesianGrid, LabelList,
 } from "recharts";
 
 const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
@@ -386,67 +386,27 @@ export function WhoEarnsMore({ data, onSelect }: {
     : <ColumnsChart data={sorted} onSelect={onSelect} />;
 }
 
-// ── HourlyBar — busy hours (orders by hour, count not money) ────────────────
-export function HourlyBar({ data, color }: { data: { hour: number; orders: number }[]; color: string }) {
-  if (!data.length) return <Empty />;
-  const byHour = new Map(data.map((d) => [d.hour, d.orders]));
-  const full = Array.from({ length: 24 }, (_, h) => ({ label: `${h}:00`, orders: byHour.get(h) || 0 }));
-  const max = Math.max(1, ...full.map((d) => d.orders));
-  return (
-    <div style={{ width: "100%", height: 200 }}>
-      <ResponsiveContainer>
-        <BarChart data={full} margin={{ left: 0, right: 8, top: 6, bottom: 4 }}>
-          <CartesianGrid stroke={GRID} vertical={false} />
-          {/* Adaptive ticks (owner's axis rule): let Recharts drop labels by available
-              width instead of a hard every-3rd-hour — narrow cards thin out, wide fill. */}
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
-          {/* width must fit the widest count label — a busy restaurant's 4-digit hourly count
-              (e.g. Green Bowl's 0/350/700/1050/1303) overflowed the old 28px axis, so each
-              label's leading digit was clipped and the numbers read as a scrambled
-              "303/050/700" (1303→303, 1050→050) — the owner's bug, 2026-07-25. Widen the axis
-              + round to whole orders so the full label always fits. */}
-          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={40} allowDecimals={false} tickFormatter={(v: number) => Math.round(v).toString()} />
-          <Tooltip content={<CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
-          <Bar dataKey="orders" name="Orders" fill={color} radius={[5, 5, 0, 0]} />
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-// ── CountBar — a generic count-per-bucket bar (orders/volume, not money) ─────
-// Same visual language as TimeBar but the tooltip/axis are plain counts, not ₹.
-export function CountBar({ data, color, name = "Orders", height = 220 }: {
-  data: { label: string; value: number }[]; color: string; name?: string; height?: number;
-}) {
-  const values = data.map((d) => d.value);
-  if (populated(values) < MIN_POINTS) return <NotEnough height={height} value={populated(values) === 1 ? String(Math.round(soleValue(values))) : undefined} />;
-  const max = Math.max(1, ...values);
-  return (
-    <ScrollX count={data.length} height={height}>
-      <ResponsiveContainer>
-        <BarChart data={data} margin={{ left: 0, right: 12, top: 6, bottom: 4 }}>
-          <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
-          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={34} allowDecimals={false} />
-          <Tooltip content={<CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
-          <Bar dataKey="value" name={name} fill={color} radius={[5, 5, 0, 0]} maxBarSize={46} />
-        </BarChart>
-      </ResponsiveContainer>
-    </ScrollX>
-  );
-}
+/** "29%" · "<1%" for a real-but-tiny share · "0%" only when it really is nothing. */
+const sharePct = (v: number, total: number) => {
+  if (total <= 0 || v <= 0) return "0%";
+  const p = (v / total) * 100;
+  return p < 0.5 ? "<1%" : `${Math.round(p)}%`;
+};
 
 // ── CategoryDonut ───────────────────────────────────────────────────────────
-const PALETTE = ["#34d399", "#5b8def", "#e0b341", "#e2607a", "#a36bd4", "#4bbdc9", "#e3935b", "#9aa84a"];
+const PALETTE =["#34d399", "#5b8def", "#e0b341", "#e2607a", "#a36bd4", "#4bbdc9", "#e3935b", "#9aa84a"];
 export function CategoryDonut({ data }: { data: { category: string; revenue: number }[] }) {
-  if (!data.length) return <Empty />;
+  // A category that took NO money is not a slice — it's a legend row to read past, and a
+  // zero-width wedge (PaymentDonut has always filtered this; this one didn't). Sort FIRST,
+  // then colour, so the palette follows the ranking instead of the caller's row order.
+  const rows = data.filter((d) => (Number(d.revenue) || 0) > 0).sort((a, b) => b.revenue - a.revenue);
+  if (!rows.length) return <Empty />;
   // DYNAMIC legend (owner round-5): the old bottom legend wrapped into a wall of
   // text with 25+ categories and squeezed the donut. Now the legend fills the RIGHT
   // column first; past its capacity a LEFT column joins; past both, the text steps
   // down a size. The donut always keeps the middle. Sorted by revenue so the labels
   // an owner actually cares about are always at the top of the columns.
-  const sorted = [...data].map((d, i) => ({ ...d, color: PALETTE[i % PALETTE.length] })).sort((a, b) => b.revenue - a.revenue);
+  const sorted = rows.map((d, i) => ({ ...d, color: PALETTE[i % PALETTE.length] }));
   const n = sorted.length;
   const perCol = 9;                                   // comfortable rows per side column
   const twoCols = n > perCol;
@@ -457,11 +417,12 @@ export function CategoryDonut({ data }: { data: { category: string; revenue: num
   const legendCol = (items: typeof sorted) => (
     <div style={{ display: "flex", flexDirection: "column", gap: small ? 3 : 5, minWidth: 0, flex: "1 1 0", maxHeight: 230, overflowY: "auto" }}>
       {items.map((d) => (
-        <span key={d.category} title={`${d.category} · ${inr(d.revenue)} · ${Math.round((d.revenue / total) * 100)}%`}
+        <span key={d.category} title={`${d.category} · ${inr(d.revenue)} · ${sharePct(d.revenue, total)}`}
           style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: small ? 10 : 11.5, fontWeight: 600, color: "var(--muted)", minWidth: 0 }}>
           <span style={{ width: small ? 8 : 9, height: small ? 8 : 9, borderRadius: 3, background: d.color, flexShrink: 0 }} aria-hidden="true" />
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.category}</span>
-          <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", color: "var(--text)", flexShrink: 0 }}>{Math.round((d.revenue / total) * 100)}%</span>
+          {/* A real-but-tiny share reads "<1%", never a flat "0%" beside a non-zero amount. */}
+          <span style={{ marginLeft: "auto", fontVariantNumeric: "tabular-nums", color: "var(--text)", flexShrink: 0 }}>{sharePct(d.revenue, total)}</span>
         </span>
       ))}
     </div>
@@ -535,69 +496,12 @@ export function PaymentDonut({ data }: { data: { method: string; revenue: number
             <span style={{ fontSize: 13, fontWeight: 700 }}>{p.method}</span>
             <span style={{ fontSize: 13.5, fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{inr(p.revenue)}</span>
             <span style={{ gridColumn: "2 / 4", fontSize: 11.5, color: "var(--muted)", fontVariantNumeric: "tabular-nums" }}>
-              {Math.round((p.revenue / total) * 100)}% · {p.orders} bill{p.orders === 1 ? "" : "s"}
+              {sharePct(p.revenue, total)} · {p.orders} bill{p.orders === 1 ? "" : "s"}
             </span>
           </div>
         ))}
       </div>
     </div>
-  );
-}
-
-// ── SameHourBar — "is today actually good?" (the Restroworks honest compare) ─
-// All four windows are cut at the SAME elapsed time, so a half-day is compared
-// to half-days only. Current window in the accent, history in fading grays.
-export function SameHourBar({ data, accent }: { data: { label: string; revenue: number }[]; accent: string }) {
-  if (!data.length || !data.some((d) => d.revenue > 0)) return <Empty />;
-  const grays = ["", "rgba(138,147,163,.45)", "rgba(138,147,163,.32)", "rgba(138,147,163,.22)"];
-  const max = Math.max(1, ...data.map((d) => d.revenue));
-  return (
-    <div style={{ width: "100%", height: 200 }}>
-      <ResponsiveContainer>
-        <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
-          <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} interval={0} />
-          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
-          <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
-          <Bar dataKey="revenue" name="Revenue" radius={[6, 6, 0, 0]} maxBarSize={52}>
-            {data.map((d, i) => <Cell key={d.label} fill={i === 0 ? accent : grays[i] || grays[3]} />)}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
-  );
-}
-
-// ── PayTrendStack — how money arrives, per day × method (stacked) ───────────
-export function PayTrendStack({ data }: { data: { day: string; method: string; revenue: number }[] }) {
-  // pivot rows → one object per day with a key per method, fixed method order.
-  const methods = Object.keys(PAY_COLORS).filter((m) => data.some((r) => canonPayMethod(r.method) === m));
-  const byDay = new Map<string, Record<string, number | string>>();
-  for (const r of data) {
-    const d = String(r.day);
-    const row = byDay.get(d) || { day: d };
-    const m = canonPayMethod(r.method);
-    row[m] = (Number(row[m]) || 0) + r.revenue;
-    byDay.set(d, row);
-  }
-  const rows = [...byDay.values()].sort((a, b) => String(a.day).localeCompare(String(b.day)))
-    .map((r) => ({ ...r, label: new Date(String(r.day)).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }) }));
-  if (!methods.length || rows.length < MIN_POINTS) return <NotEnough height={200} />;
-  return (
-    <ScrollX count={rows.length} height={200}>
-      <ResponsiveContainer>
-        <BarChart data={rows} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
-          <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
-          <YAxis tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
-          <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-          {methods.map((m) => (
-            <Bar key={m} dataKey={m} name={m} stackId="pay" fill={PAY_COLORS[m]} radius={[2, 2, 0, 0]} maxBarSize={26} />
-          ))}
-        </BarChart>
-      </ResponsiveContainer>
-    </ScrollX>
   );
 }
 
@@ -749,13 +653,6 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
       )}
     </div>
   );
-}
-
-// ── back-compat aliases — the current /aevinite admin page still imports these
-// names; the admin redesign branch replaces that page, at which point these can go.
-export const RevenueBar = LeaderBar;
-export function TrendLine({ data, lines }: { data: Record<string, unknown>[]; lines: { key: string; name: string; color: string }[]; money?: boolean }) {
-  return <AreaTrend data={data} lines={lines} height={230} />;
 }
 
 // ── Heatmap — day-of-week × hour busy grid (interactive redesign, 2026-07-26) ──

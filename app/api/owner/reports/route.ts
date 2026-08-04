@@ -17,17 +17,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
-import { effectiveTaxPct, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
+import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollLadder, inventoryLadder } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic";
 
 const DAY = 86_400_000;
+const IST = 5.5 * 3600_000;
+const BIZ_START_H = 5;                       // a restaurant's day starts at 05:00 IST
+/** The 05:00-IST business day that CONTAINS the IST calendar date `d` (YYYY-MM-DD). */
+function businessDayWindow(d: string): { from: number; to: number } {
+  const [y, m, dd] = d.split("-").map(Number);
+  const from = Date.UTC(y, (m || 1) - 1, dd || 1, BIZ_START_H, 0, 0) - IST;
+  return { from, to: from + DAY };
+}
 function windowFor(range: string, sp?: URLSearchParams): { from: string; to: string; bucket: string } {
+  // ── ONE business day (the Day summary sheet) ────────────────────────────────
+  // `range=day&date=YYYY-MM-DD` = [that date 05:00 IST, the next 05:00 IST) — the SAME day a
+  // restaurant means by "today": the manager dashboard (businessDayStartIso), the manager
+  // Z-report, `range=today` here and the owner dashboard's "TODAY SO FAR" tile all use it.
+  //
+  // The day sheet used to be fetched as `range=custom&from=D&to=D`, i.e. a CALENDAR day from
+  // 00:00 IST, so the 00:00–05:00 slice of trade was counted on the previous business day by
+  // every other screen and again on this sheet. Measured 4 Aug 2026 on the backup demo: the
+  // sheet said ₹38,640 / 111 orders while Sales "Today", the dashboard and the Z-report all
+  // said ₹30,324 / 90 (owner-panel sweep). Named `day` rather than folding it into `custom`
+  // because a custom range IS calendar-based on purpose — a GST filing period is.
+  if (range === "day" && sp) {
+    const d = sp.get("date");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      const w = businessDayWindow(d);
+      if (Number.isFinite(w.from)) {
+        return { from: new Date(w.from).toISOString(), to: new Date(Math.min(w.to, Date.now())).toISOString(), bucket: "hour" };
+      }
+    }
+    return windowFor("today");
+  }
   // custom: exact IST day range from the owner report dialog (round-4). Inclusive
   // dates, day buckets; bad input falls back to the last 30 days.
   if (range === "custom" && sp) {
@@ -96,11 +125,32 @@ function windowFor(range: string, sp?: URLSearchParams): { from: string; to: str
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 type Row = Record<string, unknown>;
 
+// ── DOCUMENT DATES vs the 05:00-IST BUSINESS DAY ──────────────────────────────────────────
+// Purchases, waste and expenses carry a DATE (bill_date / waste_date / expense_date), not an
+// instant, so a window of instants has to be turned into a first/last calendar date.
+//
+// `istDay(from)` is the low bound and is always right. The HIGH bound used to be
+// `istDay(to − 1ms)`, which silently assumes the window ends on an exclusive IST MIDNIGHT.
+// That holds for `custom` and `lastmonth` — but NOT for a window that ends on a business-day
+// boundary: `range=yesterday` ends at 05:00 IST *today*, so `to − 1ms` still landed on TODAY'S
+// date and a one-day report covered TWO calendar days (measured 4 Aug 2026: 2026-08-03 →
+// 2026-08-04). Stepping back the 5-hour business-day offset first fixes that case and leaves
+// every other range on the same date it had: "now"-ending ranges lose 5h and stay on today,
+// a midnight-ending range lands on its last real day.
+// mig 288 applies the IDENTICAL rule inside the inventory SQL, so the hero band and these
+// lists can never describe different windows.
+const istDay = (iso: string, backMs = 0) =>
+  new Date(Date.parse(iso) + IST - backMs).toISOString().slice(0, 10);
+const docDateHi = (toIso: string) => istDay(toIso, BIZ_START_H * 3600_000 + 1);
+
+/** How many detail rows an inventory list returns before it says "there are more". */
+const MERGED_CAP = 300;
+
 // Every range windowFor() understands. An unknown value used to fall through to
 // "today" for the DATA but was still echoed back verbatim in the response, so the
 // client title (which looks range up in a fixed table) rendered blank (bug L-…).
 // Normalising here means `range` in the payload is ALWAYS a known key.
-const VALID_RANGES = new Set(["today", "yesterday", "week", "7d", "30d", "month", "lastmonth", "12m", "fy", "all", "custom"]);
+const VALID_RANGES = new Set(["today", "yesterday", "week", "7d", "30d", "month", "lastmonth", "12m", "fy", "all", "custom", "day"]);
 
 // Fetch EVERY restaurant id, paging past PostgREST's default row cap. The admin
 // "all restaurants" merge for dishes/categories/hourly must cover the SAME universe
@@ -222,7 +272,12 @@ export async function GET(req: NextRequest) {
   // being served a pre-inventory snapshot — the new day-sheet tiles and the cost line
   // would silently never appear until the snapshot happened to expire. BUMP THIS VERSION
   // WHENEVER A PAYLOAD SHAPE CHANGES, not just when the numbers change.
-  const cacheKey = `reports:v3:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : `${range}:${from.slice(0, 10)}`}`;
+  // v4: the day sheet moved from a calendar day (`range=custom`) to the 05:00-IST BUSINESS day
+  // (`range=day`), so its numbers changed shape-for-shape — old rows must not be served.
+  const rangePart = range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}`
+    : range === "day" ? `day:${sp.get("date")}`
+    : `${range}:${from.slice(0, 10)}`;
+  const cacheKey = `reports:v4:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${rangePart}`;
   const force = sp.get("refresh") === "1";
   const fpIds = rid ? [rid] : scope.all ? null : scopeIds;
   // Change-detector choice. The precise ordersFingerprint SCANS its window — on a WIDE
@@ -350,7 +405,7 @@ export async function GET(req: NextRequest) {
       }), { orders: 0, paidOrders: 0, subtotal: 0, tax: 0, discount: 0, revenue: 0, cancelledOrders: 0, cancelledValue: 0 });
 
       // Tax model for the split — single restaurant only (per-tenant config).
-      let tax = null;
+      let tax: { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean; composition: boolean } | null = null;
       if (rid) {
         const st = await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle();
         if (st.error) throw st.error;
@@ -358,8 +413,16 @@ export async function GET(req: NextRequest) {
           .map((c: Row) => ({ label: String(c?.label ?? "").trim(), rate: Number(c?.rate) || 0 }))
           .filter((c: { label: string; rate: number }) => c.label && c.rate > 0);
         const pct = effectiveTaxPct(st.data);
+        // COMPOSITION SCHEME: the restaurant cannot legally pass GST to the diner, so
+        // `effectiveTaxPct` is 0 and the printed bill shows NO tax line at all
+        // (lib/tax.ts → composition, docs/COMPLIANCE-GUARDRAILS.md). The report used to build
+        // the 50/50 fallback anyway and rendered a CGST/SGST table of zeroes plus the note
+        // "showing the standard CGST/SGST halves" — telling a composition restaurant it has
+        // tax lines and taxable supplies when it has neither (owner-panel sweep 2026-08-04).
+        // Ship the FLAG instead and let the report say the true thing.
+        const composition = priceTaxMode(st.data) === "composition";
         // No named components → the printed bill splits 50/50 CGST+SGST (mig 117).
-        const effective = comps.length ? comps : [
+        const effective = composition ? [] : comps.length ? comps : [
           { label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 },
         ];
         const rateSum = effective.reduce((a, c) => a + c.rate, 0) || 1;
@@ -375,7 +438,7 @@ export async function GET(req: NextRequest) {
           running = num(running + amount);
           return { ...c, amount };
         });
-        tax = { effectivePct: pct, components, configured: comps.length > 0 };
+        tax = { effectivePct: pct, components, configured: comps.length > 0, composition };
       }
 
       // Day summary also needs the settlement split (how the money arrived). Same merge
@@ -433,7 +496,13 @@ export async function GET(req: NextRequest) {
       // restaurant that takes no tips sees no trace of it rather than a fake ₹0.
       let tips: { collected: number; orders: number } | null = null;
       if (type === "daysummary") {
-        const tipIds = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
+        // Tips DO merge across restaurants (unlike a shelf of stock or a person's salary), so
+        // the ADMIN's all-restaurants day sheet gets them too. `scopeIds` is [] for scope.all,
+        // which used to mean the tips line silently vanished from that view with no note
+        // (owner-panel sweep 2026-08-04). The ids must be ENUMERATED — mig 281 makes
+        // lfh_owner_tips return NOTHING when both scope arguments are null, deliberately, so a
+        // caller that forgets its scope gets zero instead of the platform's tips.
+        const tipIds = (rid ? [rid] : scope.all ? await scopedRestaurantIds(scope) : scopeIds).filter(Boolean) as string[];
         if (tipIds.length) {
           // One indexed read (idx_orders_tips is partial — only orders that carry a tip).
           const t = await sb.rpc("lfh_owner_tips", {
@@ -639,20 +708,22 @@ export async function GET(req: NextRequest) {
           cur.purchased += num(r.purchased); cur.used += num(r.used); cur.wasted += num(r.wasted);
           sMap.set(k, cur);
         }
-        const dFromM = new Date(Date.parse(from) + 5.5 * 3600_000).toISOString().slice(0, 10);
-        const dToM = new Date(Date.parse(to) + 5.5 * 3600_000 - 1).toISOString().slice(0, 10);
+        const dFromM = istDay(from), dToM = docDateHi(to);   // same business-day rule as single mode
         const [expM, wasteM] = await Promise.all([
           type === "invexpenses"
             ? sb.from("expenses").select("id, category, title, amount, expense_date, note, photo_url, created_by, voided_at, void_reason, restaurant_id")
                 .in("restaurant_id", invEnabled).gte("expense_date", dFromM).lte("expense_date", dToM)
-                .order("expense_date", { ascending: false }).limit(300)
+                .order("expense_date", { ascending: false }).limit(MERGED_CAP + 1)
             : Promise.resolve({ data: [] as Row[] }),
           type === "invwaste"
             ? sb.from("inv_waste_entries").select("id, item_id, qty_base, reason, note, unit_cost_snap, waste_date, created_by, voided_at")
                 .in("restaurant_id", invEnabled).gte("waste_date", dFromM).lte("waste_date", dToM)
-                .order("waste_date", { ascending: false }).limit(300)
+                .order("waste_date", { ascending: false }).limit(MERGED_CAP + 1)
             : Promise.resolve({ data: [] as Row[] }),
         ]);
+        // Same "say it out loud" rule as the single-restaurant lists below.
+        const expMRows = (expM.data || []) as Row[], wasteMRows = (wasteM.data || []) as Row[];
+        const expMMore = expMRows.length > MERGED_CAP, wasteMMore = wasteMRows.length > MERGED_CAP;
         return {
           type, range, bucket, merged: true,
           summary: {
@@ -681,7 +752,9 @@ export async function GET(req: NextRequest) {
           series: [...sMap.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)),
           // Multi-restaurant path — the same signing (lib/mediaLinks.ts). Both branches matter:
           // an owner with several restaurants reads this one.
-          expenses: await signRows("inv-media", (expM.data || []) as Record<string, unknown>[], ["photo_url"]), waste: wasteM.data || [],
+          expenses: await signRows("inv-media", (expMMore ? expMRows.slice(0, MERGED_CAP) : expMRows) as Record<string, unknown>[], ["photo_url"]),
+          waste: wasteMMore ? wasteMRows.slice(0, MERGED_CAP) : wasteMRows,
+          listCap: MERGED_CAP, expensesMore: expMMore, wasteMore: wasteMMore,
         };
       }
       // ── single restaurant (explicit ?rid, or the owner only has one with the module) ──
@@ -722,27 +795,32 @@ export async function GET(req: NextRequest) {
       // mig 227 computes on bill_date/expense_date/waste_date) and match the Inventory page.
       // from/to are UTC ISO instants — shift into IST before taking the calendar date, or
       // an IST-midnight window reads one day early (the SQL side uses AT TIME ZONE for
-      // exactly this reason). The END bound follows the same rule as mig 227's header:
-      // `to` is "now" for named ranges and an exclusive IST midnight for custom ones, so
-      // take the IST day of (to − 1ms) and compare INCLUSIVELY — a bare `< toDay` drops
-      // everything dated today on every named range.
-      const istDay = (iso: string, backMs = 0) =>
-        new Date(Date.parse(iso) + 5.5 * 3600_000 - backMs).toISOString().slice(0, 10);
-      const dFrom = istDay(from), dTo = istDay(to, 1);
-      const expenses = type === "invexpenses"
+      // exactly this reason). The END bound uses the shared docDateHi() rule (lib/businessDay
+      // note below) and compares INCLUSIVELY — a bare `< toDay` drops everything dated today.
+      const dFrom = istDay(from), dTo = docDateHi(to);
+      // LIST CAP, said out loud. These two detail lists are capped at 300 rows while the hero
+      // band's totals come from the (uncapped) RPC — so past the cap the list quietly stopped
+      // and stopped adding up to the total above it, with nothing on screen (owner-panel sweep
+      // 2026-08-04). Ask for ONE more than the cap: if it comes back, the UI says so.
+      const LIST_CAP = MERGED_CAP;
+      const expensesRaw = type === "invexpenses"
         ? (await sb.from("expenses")
             .select("id, category, title, amount, expense_date, note, photo_url, created_by, voided_at, void_reason")
             .eq("restaurant_id", one).gte("expense_date", dFrom).lte("expense_date", dTo)
-            .order("expense_date", { ascending: false }).limit(300)).data || []
+            .order("expense_date", { ascending: false }).limit(LIST_CAP + 1)).data || []
         : [];
+      const expensesMore = expensesRaw.length > LIST_CAP;
+      const expenses = expensesMore ? expensesRaw.slice(0, LIST_CAP) : expensesRaw;
       // Expense slips are private paperwork — sign them on the way out (lib/mediaLinks.ts).
       const expensesOut = await signRows("inv-media", expenses as Record<string, unknown>[], ["photo_url"]);
-      const waste = type === "invwaste"
+      const wasteRaw = type === "invwaste"
         ? (await sb.from("inv_waste_entries")
             .select("id, item_id, qty_base, reason, note, unit_cost_snap, waste_date, created_by, voided_at")
             .eq("restaurant_id", one).gte("waste_date", dFrom).lte("waste_date", dTo)
-            .order("waste_date", { ascending: false }).limit(300)).data || []
+            .order("waste_date", { ascending: false }).limit(LIST_CAP + 1)).data || []
         : [];
+      const wasteMore = wasteRaw.length > LIST_CAP;
+      const waste = wasteMore ? wasteRaw.slice(0, LIST_CAP) : wasteRaw;
       return {
         type, range, bucket, rid: one,
         summary: {
@@ -777,6 +855,8 @@ export async function GET(req: NextRequest) {
           bucket: String(r.bucket), purchased: num(r.purchased), used: num(r.used), wasted: num(r.wasted),
         })),
         expenses: expensesOut, waste,
+        // "there are more than these" — the UI prints a plain line instead of stopping silently.
+        listCap: LIST_CAP, expensesMore, wasteMore,
       };
     }
 

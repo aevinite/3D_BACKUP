@@ -63,7 +63,23 @@ export type InvPayload = {
   series: { bucket: string; purchased: number; used: number; wasted: number }[];
   expenses: { id: string; category: string; title: string; amount: number; expense_date: string; note: string | null; photo_url: string | null; created_by: string | null; voided_at: string | null; void_reason: string | null }[];
   waste: { id: string; item_id: string; qty_base: number; reason: string; note: string | null; unit_cost_snap: number; waste_date: string; created_by: string | null; voided_at: string | null }[];
+  // The two detail lists above are CAPPED (the hero band's totals are not), so past the cap
+  // the list quietly stopped adding up to the total printed over it, with nothing on screen
+  // (owner-panel sweep 2026-08-04). When the server saw more, it says so and we print a line.
+  listCap?: number; expensesMore?: boolean; wasteMore?: boolean;
 };
+
+/** "Showing the latest 300 — there are more in this period. Pick a shorter period to see them all." */
+function MoreThanCap({ cap, what }: { cap?: number; what: string }) {
+  if (!cap) return null;
+  return (
+    <p className="rs-note">
+      <i className="fas fa-circle-info" aria-hidden style={{ marginRight: 6 }} />
+      Showing the most recent <b>{cap}</b> {what} — there are more in this period, so the list is
+      shorter than the total above it. Pick a shorter period to see them all.
+    </p>
+  );
+}
 
 // Styles these bodies need that the studio doesn't already define globally. Kept HERE
 // (the house pattern — each report file carries its own <style jsx global>) so a body
@@ -384,6 +400,7 @@ export function InvWasteReport({ d }: { d: InvPayload }) {
         ] as Col<InvPayload["waste"][number]>[]} searchKey={(r) => `${nameOf(r.item_id)} ${r.reason} ${r.note || ""}`}
           initialSort={{ key: "date", dir: "desc" }} placeholder="Search waste…"
           emptyText="Nothing was logged as wasted in this period — good." />
+        {d.wasteMore && <MoreThanCap cap={d.listCap} what="waste entries" />}
       </Panel>
     </>
   );
@@ -421,6 +438,7 @@ export function InvExpensesReport({ d }: { d: InvPayload }) {
           initialSort={{ key: "date", dir: "desc" }} placeholder="Search expenses…"
           emptyText="No expenses recorded in this period."
           footer={<tr><td><b>Total</b></td><td /><td /><td /><td className="num"><b>{inr(d.summary.expenses)}</b></td></tr>} />
+        {d.expensesMore && <MoreThanCap cap={d.listCap} what="expenses" />}
       </Panel>
     </>
   );

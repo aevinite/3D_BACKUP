@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { canonPayMethod } from "@/components/owner/Charts";
+import { buildFiling, taxableValue } from "@/lib/taxFiling";
 import type { ExportTable, ExportCol } from "@/components/owner/ownerReportDoc";
 
 // Paise only when the amount actually has them (the CGST/SGST halves of an odd tax total),
@@ -17,18 +18,11 @@ const inr = (n: number) => {
   return "₹" + v.toLocaleString("en-IN", { minimumFractionDigits: hasPaise ? 2 : 0, maximumFractionDigits: 2 });
 };
 const nfmt = (n: number) => Math.round(Number(n) || 0).toLocaleString("en-IN");
-// Proportional-by-rate split, paise, last line absorbs the remainder so parts add to total.
-const splitTax = (rates: number[], target: number): number[] => {
-  const sum = rates.reduce((a, r) => a + r, 0) || 1;
-  const p2 = (v: number) => Math.round(v * 100) / 100;
-  let running = 0;
-  return rates.map((r, i) => { const amt = i === rates.length - 1 ? p2(target - running) : p2(target * (r / sum)); running = p2(running + amt); return amt; });
-};
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
 type Totals = Omit<MoneyRow, "bucket">;
-type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean } | null;
+type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean; composition?: boolean } | null;
 type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; bucket?: string;
   // Team & pay carries its own shapes (mig 220/221) alongside the shared `rows`.
   people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[];
@@ -73,6 +67,10 @@ export type SectionCtx = {
   isTax?: boolean;   // the Tax/GST report → append the CGST/SGST split table
   bucketLabel: (iso: string, bucket: string) => string;
   extra?: ExportTable[];   // extra tables appended to print/CSV (Day summary: dishes + hours)
+  // When the SERVER computed these figures (the snapshot cache's `cachedAt`). "Generated
+  // <now>" alone put a current timestamp over numbers that could be hours old, on a sheet
+  // somebody files (owner-panel sweep 2026-08-04), so the masthead states both.
+  asOf?: string;
 };
 
 // ── build the flat tables (CSV / Excel) for the current section ──────────────
@@ -86,11 +84,30 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
     const rows: (string | number)[][] = m.map((r) => [c.bucketLabel(r.bucket, grain), r.orders, r.paidOrders, Math.round(r.subtotal), Math.round(r.tax), Math.round(r.discount), Math.round(r.revenue), r.cancelledOrders, Math.round(r.cancelledValue)]);
     if (t) rows.push(["Total", t.orders, t.paidOrders, Math.round(t.subtotal), Math.round(t.tax), Math.round(t.discount), Math.round(t.revenue), t.cancelledOrders, Math.round(t.cancelledValue)]);
     const out: ExportTable[] = [{ title, head, rows }];
-    if (c.isTax && data.tax) {
-      // Whole-rupee target (GST-return rounding): equal rates export equal halves that sum
-      // to the shown total — mirrors the on-screen split exactly.
+    if (c.isTax && data.tax && data.tax.components.length) {
+      // ONE filing computation, shared with the screen (lib/taxFiling.ts) — so the exported
+      // split, the exported per-period table and what the owner just looked at are the SAME
+      // numbers. They used to be three separate roundings: the export split the period total
+      // once, the screen's filing table rounded every day and summed them, and the two came
+      // out ₹2 apart on a document captioned "ready to copy into a return"
+      // (owner-panel sweep 2026-08-04).
+      const lines = data.tax.components.map((x) => ({ label: x.label, rate: x.rate }));
+      const filing = buildFiling(m.filter((r) => r.tax > 0), lines, (r) => r.tax);
       out.push({ title: `${meta.label} — tax split`, head: ["Component", "Rate %", "Collected"],
-        rows: [["Total tax", data.tax.effectivePct, Math.round(t?.tax ?? 0)], ...splitTax(data.tax.components.map((x) => x.rate), Math.round(t?.tax ?? 0)).map((amt, i) => [data.tax!.components[i].label, data.tax!.components[i].rate, amt] as (string | number)[])] });
+        cols: ["text", "pct", "money"],
+        rows: [["Total tax", data.tax.effectivePct, filing.total],
+          ...lines.map((l, i) => [l.label, l.rate, filing.columnTotals[i]] as (string | number)[])] });
+      if (filing.rows.length) out.push({
+        title: `${meta.label} — tax by period (filing view)`,
+        head: ["Period", "Taxable value", ...lines.map((l) => `${l.label} (${l.rate}%)`), "Total tax"],
+        cols: ["text", "money", ...lines.map(() => "money" as ExportCol), "money"],
+        rows: [
+          ...filing.rows.map((fr) => [c.bucketLabel(fr.row.bucket, grain),
+            Math.round(taxableValue(fr.row, data.tax!.effectivePct)), ...fr.parts, fr.tax] as (string | number)[]),
+          ["Total", Math.round(filing.rows.reduce((a, fr) => a + taxableValue(fr.row, data.tax!.effectivePct), 0)),
+            ...filing.columnTotals, filing.total] as (string | number)[],
+        ],
+      });
     }
     if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
@@ -281,6 +298,7 @@ export function sectionHtml(c: SectionCtx): string {
   .mast{display:flex;justify-content:space-between;align-items:baseline;border-bottom:3px solid #0f766e;padding-bottom:10px}
   .brand{font-weight:800;font-size:13px;letter-spacing:.06em;color:#0f766e;text-transform:uppercase}.gen{font-size:10.5px;color:#6b7f78}
   h1{font-size:22px;margin:14px 0 2px}.scope{color:#4b615a;font-size:13px;margin-bottom:6px}
+  .asof{color:#6b7f78;font-size:10.5px;margin:-3px 0 6px;font-variant-numeric:tabular-nums}
   h3{font-size:12px;margin:20px 0 7px;text-transform:uppercase;letter-spacing:.05em;color:#4b615a}
   table{width:100%;border-collapse:collapse;margin-top:4px}
   th{text-align:left;font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;color:#4b615a;border-bottom:1.5px solid #0f766e;padding:5px 8px}
@@ -292,6 +310,7 @@ export function sectionHtml(c: SectionCtx): string {
 </style></head><body>
   <div class="mast"><span class="brand">Aevidine · Restaurant OS</span><span class="gen">Generated ${esc(gen)}</span></div>
   <h1>${esc(c.meta.label)}</h1><div class="scope">${esc(c.restName)} · ${esc(c.periodLabel)}</div>
+  ${c.asOf ? `<div class="asof">Figures as of ${esc(new Date(c.asOf).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" }))}</div>` : ""}
   ${tables.map(tableHtml).join("")}
   <div class="note">Item sales are menu prices before discount. Total collected is every rupee guests paid (GST included) on paid, non-cancelled orders; your earnings are the item sales minus discount, before GST. Generated automatically by the Aevidine owner console.</div>
 <script>window.addEventListener("load",function(){setTimeout(function(){window.print()},300)});</script>

@@ -33,9 +33,15 @@ import {
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
 import { readSnap, writeSnap } from "@/lib/ownerSnap";
+import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { SectionExport, printSection, POPUP_BLOCKED } from "@/components/owner/reports/sectionExport";
+// ONE filing computation for the whole app (screen, CSV, printed sheet) — see lib/taxFiling.ts
+// for why having three was a bug rather than a style choice.
+import { buildFiling, splitTax, taxableValue } from "@/lib/taxFiling";
 
-type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom";
+// "day" never appears in the period dropdown — it is the Day-summary sheet's own window
+// (`range=day&date=…` = ONE 05:00-IST business day). See DAY_KINDS below.
+type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom" | "day";
 const RANGES: { k: Range; label: string }[] = [
   { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
   { k: "7d", label: "7 days" }, { k: "30d", label: "30 days" },
@@ -46,7 +52,13 @@ const RANGES: { k: Range; label: string }[] = [
 const rangeLabel = (r: Range) => RANGES.find((x) => x.k === r)?.label ?? r;
 // A "Day summary" is inherently ONE day — it must NOT carry a 7d/30d toggle (owner
 // round-6). These report kinds get a single-DATE control instead of the range seg;
-// under the hood a chosen day is fetched as range=custom with from=to=that day.
+// under the hood a chosen day is fetched as `range=day&date=<that day>`.
+//
+// It used to be `range=custom&from=D&to=D`, which is a CALENDAR day from 00:00 IST — while
+// Sales "Today", the owner dashboard's "TODAY SO FAR" tile, the manager dashboard and the
+// manager Z-report all mean the 05:00-IST BUSINESS day. Measured 4 Aug 2026: the day sheet
+// said ₹38,640 / 111 orders and every other screen said ₹30,324 / 90 for the same "today"
+// (owner-panel sweep). `range=day` is the business day, so they agree now.
 const DAY_KINDS = new Set<DataKind>(["daysummary"]);
 const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 const yesterdayIso = () => new Date(Date.now() + 5.5 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
@@ -141,7 +153,10 @@ const bodyKeyFor = (sel: RKey, subKey: string): BodyKey => {
 type Rest = { id: string; name: string; accent: string };
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
 type Totals = Omit<MoneyRow, "bucket">;
-type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean } | null;
+// `composition` = this restaurant charges the diner no GST at all (composition scheme), so
+// there is no CGST/SGST split and no taxable supply to file — the report says so instead of
+// printing a table of zeroes (owner-panel sweep 2026-08-04).
+type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean; composition?: boolean } | null;
 type PayRow = { method: string; revenue: number; orders: number };
 type DishRow = { title: string; qty: number; revenue: number };
 type CatRow = { category: string; qty: number; revenue: number };
@@ -159,6 +174,7 @@ type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: Pa
   // when the module is off, which is what keeps inventory invisible then.
   summary?: InvPayload["summary"]; coverage?: InvPayload["coverage"]; costDataFrom?: string | null;
   merged?: boolean; perRestaurant?: InvPayload["perRestaurant"];
+  listCap?: number; expensesMore?: boolean; wasteMore?: boolean;
   dishes?: InvPayload["dishes"]; items?: InvPayload["items"]; vendors?: InvPayload["vendors"];
   series?: InvPayload["series"]; expenses?: InvPayload["expenses"]; waste?: InvPayload["waste"];
   inventory?: {
@@ -167,7 +183,39 @@ type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; payments?: Pa
     foodCostPct: number | null; coveragePct: number; hasRecipes?: boolean;
   } | null;
   costSeries?: { bucket: string; purchased: number; used: number; wasted: number }[] | null };
-type Entry = { loading?: boolean; error?: string; data?: Payload };
+// `cachedAt` is the moment the SERVER computed these figures — not the moment we fetched
+// them. Reports are served from the compute-on-view snapshot cache, so an idle key can be
+// minutes or hours old (a day sheet was observed reading ₹12,285 when the live figure was
+// ₹38,640 — owner-panel sweep 2026-08-04). Keeping it per entry is what lets the page say
+// "updated X ago" and offer Refresh, exactly like the dashboard already does.
+type Entry = { loading?: boolean; error?: string; data?: Payload; cachedAt?: string };
+
+// The effective backend window for one fetch. `day` carries a DATE (one business day),
+// `custom` carries from/to, every other range carries nothing else.
+type Eff = { range: Range; from?: string; to?: string; date?: string };
+const keyOf = (kind: DataKind, rid: string, e: Eff) =>
+  `${kind}|${rid}|${e.range}${e.date ? `|${e.date}` : e.from ? `|${e.from}|${e.to}` : ""}`;
+const qsOf = (kind: DataKind, rid: string, e: Eff, scopePin: string | null) => {
+  const q = new URLSearchParams({ type: apiType(kind), range: e.range });
+  if (e.date) q.set("date", e.date);
+  if (e.from) { q.set("from", e.from); q.set("to", e.to as string); }
+  if (rid) q.set("rid", rid);
+  if (scopePin) q.set("scope", scopePin);
+  return q;
+};
+
+/** "just now" / "4 min ago" / "2 h ago" — how old the figures on screen are. */
+function timeAgo(iso?: string): string {
+  if (!iso) return "";
+  const ms = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  const m = Math.floor(ms / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} h ago`;
+  return `${Math.floor(h / 24)} d ago`;
+}
 
 const apiType = (kind: DataKind): string =>
   kind === "money" ? "sales" : kind === "daysummary" ? "daysummary" : kind;
@@ -182,21 +230,6 @@ function bucketLabel(iso: string, bucket: string): string {
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: TZ });
 }
 
-// Split a tax total across its lines PROPORTIONALLY to their rates, to the paise, with the
-// last line absorbing the rounding remainder so the parts ALWAYS add back to the total
-// exactly. Paise (not whole rupees) is the fix for the owner's "both are 2.5% — why is CGST
-// ₹81,370 but SGST ₹81,369?" — an odd total (₹162,739) splits to ₹81,369.50 + ₹81,369.50,
-// two EQUAL halves. Mirrors the server's own split (route.ts) so screen == printed bill.
-function splitTax(rates: number[], target: number): number[] {
-  const sum = rates.reduce((a, r) => a + r, 0) || 1;
-  const p2 = (v: number) => Math.round(v * 100) / 100;
-  let running = 0;
-  return rates.map((r, i) => {
-    const amt = i === rates.length - 1 ? p2(target - running) : p2(target * (r / sum));
-    running = p2(running + amt);
-    return amt;
-  });
-}
 
 
 // Build the Day-summary's extra print/CSV tables (the day's dishes + busy hours) so a
@@ -415,7 +448,14 @@ export default function OwnerReports() {
   // of opening it — the owner's "when the inventory is off that all will not show".
   const [hasInventory, setHasInventory] = useState(false);
   useEffect(() => {
-    fetch(`/api/owner/overview?_=1${scp}`, { cache: "no-store" }).then((r) => r.json()).then((o) => {
+    // fetchOwnerOverview() — NOT a bare fetch. The owner SHELL asks for this same payload on
+    // every load, and the shared de-duper exists precisely so the two callers cost ONE request
+    // (lib/ownerOverviewCache.ts, audit 2026-07-07). Calling fetch() directly here put the
+    // duplicate read straight back: two identical GET /api/owner/overview on every Reports
+    // open, observed live (owner-panel sweep 2026-08-04) — and that route is force-dynamic,
+    // so it is a doubled uncached aggregate, not a cache hit.
+    fetchOwnerOverview(scp).then((o0) => {
+      const o = o0 as { modules?: Record<string, boolean>; restaurants?: Record<string, unknown>[] };
       setHasPayroll(o?.modules?.payroll === true);
       setHasInventory(o?.modules?.inventory === true);
       // Overview returns camelCase (accentColor) — reading accent_color left every chart
@@ -434,33 +474,29 @@ export default function OwnerReports() {
   // The effective backend window for the ACTIVE report: a day-kind report is always a
   // single day (range=custom, from=to=day); a report on the "Custom…" range uses the
   // date pickers; everything else is the plain named range.
-  const effFor = (kind: DataKind, rg: Range): { range: Range; from?: string; to?: string } =>
-    DAY_KINDS.has(kind) ? { range: "custom", from: day, to: day }
+  const effFor = (kind: DataKind, rg: Range): Eff =>
+    DAY_KINDS.has(kind) ? { range: "day", date: day }
     : rg === "custom" ? { range: "custom", from: cFrom, to: cTo }
     : { range: rg };
-  const cacheKey = (kind: DataKind, r: string, rg: Range) => {
-    const e = effFor(kind, rg);
-    return `${kind}|${r}|${e.range}${e.from ? `|${e.from}|${e.to}` : ""}`;
-  };
+  const cacheKey = (kind: DataKind, r: string, rg: Range) => keyOf(kind, r, effFor(kind, rg));
   // A key is fetched at most once (period/rid/kind combos are stable) — dedup via a ref so
   // React StrictMode's double-invoke can't double-fetch, and no stale `store` closure.
   const started = useRef<Set<string>>(new Set());
-  const ensure = useCallback((kind: DataKind, r: string, rg: Range, eff: { range: Range; from?: string; to?: string }) => {
-    const ck = `${kind}|${r}|${eff.range}${eff.from ? `|${eff.from}|${eff.to}` : ""}`;
-    if (started.current.has(ck)) return;
+  const load = useCallback((kind: DataKind, r: string, eff: Eff, force?: boolean): Promise<void> => {
+    const ck = keyOf(kind, r, eff);
+    if (!force && started.current.has(ck)) return Promise.resolve();
     started.current.add(ck);
     // Instant-paint: if a hydrated snapshot already fills this key, keep showing it while
     // the fetch revalidates silently (SWR) — only a truly empty key shows the skeleton.
+    // A forced refresh keeps the old numbers on screen too (the spinner lives on the button).
     setStore((s) => (s[ck]?.data ? s : { ...s, [ck]: { loading: true } }));
-    const q = new URLSearchParams({ type: apiType(kind), range: eff.range });
-    if (eff.from) { q.set("from", eff.from); q.set("to", eff.to as string); }
-    if (r) q.set("rid", r);
-    if (scopePin) q.set("scope", scopePin);
-    fetch(`/api/owner/reports?${q}`, { cache: "no-store" })
+    const q = qsOf(kind, r, eff, scopePin);
+    if (force) q.set("refresh", "1");      // ?refresh=1 = recompute live, don't serve a snapshot
+    return fetch(`/api/owner/reports?${q}`, { cache: "no-store" })
       .then((x) => x.json())
       .then((d) => {
         if (d.error) throw new Error(d.error);
-        setStore((s) => ({ ...s, [ck]: { data: d } }));
+        setStore((s) => ({ ...s, [ck]: { data: d, cachedAt: d.cachedAt } }));
       })
       .catch((e) => {
         started.current.delete(ck);                       // allow a later retry
@@ -469,6 +505,7 @@ export default function OwnerReports() {
         setStore((s) => (s[ck]?.data ? s : { ...s, [ck]: { error: e instanceof Error ? e.message : String(e) } }));
       });
   }, [scopePin]);
+  const ensure = useCallback((kind: DataKind, r: string, _rg: Range, eff: Eff) => { void load(kind, r, eff); }, [load]);
 
   // The active body (sub-tab aware) and the payload it reads. The hub reads "money".
   const bodyKey: BodyKey = sel ? bodyKeyFor(sel, sub) : "sales";
@@ -484,14 +521,16 @@ export default function OwnerReports() {
   // Day summary also bundles that day's DISHES + BUSY HOURS (owner 2026-07-26: "in the daily
   // report there is no dish info — it should be added … all the report for that day"). Both
   // are fetched scoped to the SINGLE chosen day.
-  const dayEff = { range: "custom" as Range, from: day, to: day };
-  const dayKeyFor = (kind: DataKind) => `${kind}|${rid}|custom|${day}|${day}`;
+  // The day sheet's extras use the SAME business-day window as its money lines — a calendar
+  // day here would put a 2am order's dish on a different sheet than its money.
+  const dayEff: Eff = { range: "day", date: day };
+  const dayKeyFor = (kind: DataKind) => keyOf(kind, rid, dayEff);
   useEffect(() => {
     if (!ready) return;
     if (isCustom && !customOk) return;                      // wait for a valid custom range
     ensure(activeKind, rid, range, effFor(activeKind, range));
     if (needMoneyToo) ensure("money", rid, range, effFor("money", range));
-    if (sel === "daysummary") { ensure("dishes", rid, "custom", dayEff); ensure("hourly", rid, "custom", dayEff); }
+    if (sel === "daysummary") { ensure("dishes", rid, range, dayEff); ensure("hourly", rid, range, dayEff); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, activeKind, rid, range, day, cFrom, cTo, ensure, needMoneyToo, sel]);
 
@@ -514,7 +553,40 @@ export default function OwnerReports() {
   const exportCtx = data ? {
     meta: exportMeta, data, restName, periodLabel: effLabel, isTax: bodyKey === "tax", bucketLabel,
     extra: sel === "daysummary" ? dayExtraTables(dishesDay, hourlyDay) : undefined,
+    // When the SERVER computed these figures — printed in the masthead beside "Generated <now>".
+    asOf: entry?.cachedAt,
   } : null;
+
+  // ── Freshness + Refresh (owner-panel sweep 2026-08-04) ──────────────────────
+  // Every report here is served from the compute-on-view snapshot cache, which returns a
+  // stored value HOWEVER OLD it is and only refreshes in the background — so the first open
+  // of an idle key shows old figures. It was showing a day sheet of ₹12,285 while the live
+  // number was ₹38,640, with nothing on the page to say so and no way to ask for the truth.
+  // The owner dashboard has had "updated X ago" + Refresh since mig 196; this is the same
+  // pattern, and it is the project rule ("the response carries cachedAt so the UI shows
+  // updated X ago next to Refresh") plus the never-present-saved-data-as-live rule.
+  const [refreshing, setRefreshing] = useState(false);
+  const [briefTick, setBriefTick] = useState(0);
+  // Re-render once a minute so "updated 4 min ago" ages by itself instead of freezing.
+  const [, setAgeTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setAgeTick((n) => n + 1), 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const shownCachedAt = entry?.cachedAt;
+  const refreshNow = () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    const started = Date.now();
+    const jobs = [load(activeKind, rid, effFor(activeKind, range), true)];
+    if (needMoneyToo) jobs.push(load("money", rid, effFor("money", range), true));
+    if (sel === "daysummary") { jobs.push(load("dishes", rid, dayEff, true), load("hourly", rid, dayEff, true)); }
+    setBriefTick((n) => n + 1);
+    Promise.allSettled(jobs).finally(() => {
+      // hold the spinner ~400ms minimum so a fast answer still reads as "it did something"
+      setTimeout(() => setRefreshing(false), Math.max(0, 400 - (Date.now() - started)));
+    });
+  };
 
   // ── Print ask-dialog (owner 2026-07-26: "when you click print it should autofill the date
   // you're on, with Today/Yesterday quick options — and for ranged reports ask from which to
@@ -619,6 +691,20 @@ export default function OwnerReports() {
             <input type="date" className="rs-date" value={cTo} min={cFrom} max={istToday()} onChange={(e) => setCTo(e.target.value)} aria-label="To date" />
           </div>
         )}
+        {/* How old are the figures on screen, and how to ask for live ones. Sits next to the
+            period control on BOTH the hub and an open report — the numbers are snapshot-served
+            in both places. */}
+        <span className="rs-fresh">
+          <button type="button" className="rs-btn" onClick={refreshNow} disabled={refreshing}
+            title="Refresh now — recomputes the live numbers">
+            <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} aria-hidden /> Refresh
+          </button>
+          {shownCachedAt && !refreshing && (
+            <span className="rs-fresh-t" title={`Figures computed ${new Date(shownCachedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: TZ })}`}>
+              updated {timeAgo(shownCachedAt)}
+            </span>
+          )}
+        </span>
         {sel ? (
           /* Phase 3: professional section-scoped Print / CSV / Excel (was a raw CSV +
              UI print). Builds a clean standalone document for THIS report + period. */
@@ -695,22 +781,23 @@ export default function OwnerReports() {
 
       {!sel ? (
         <Hub range={range} money={entry} restName={restName} accent={accent} onOpen={openReport}
-          rests={rests} rid={rid} onPickRest={setRid} hasPayroll={hasPayroll} hasInventory={hasInventory}
+          rests={rests} rid={rid} onPickRest={setRid} hasPayroll={hasPayroll} hasInventory={hasInventory} briefTick={briefTick}
           briefQs={`type=byrestaurant&range=${range}${range === "custom" ? `&from=${cFrom}&to=${cTo}` : ""}${scp}`} />
       ) : (
         <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
           rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
           onOpenReport={openReport} payDetail={payDetail} onPayDetail={setPayDetail}
-          moneyData={moneyEntry?.data} dishesDay={dishesDay} hourlyDay={hourlyDay} />
+          moneyData={moneyEntry?.data} dishesDay={dishesDay} hourlyDay={hourlyDay} asOf={entry?.cachedAt} />
       )}
     </div>
   );
 }
 
 // ── The hub: hero snapshot + per-restaurant brief + categorised report cards ──
-function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll, hasInventory }: {
+function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, briefQs, hasPayroll, hasInventory, briefTick }: {
   range: Range; money?: Entry; restName: string; accent: string; onOpen: (k: RKey) => void;
   rests: Rest[]; rid: string; onPickRest: (id: string) => void; briefQs: string;
+  briefTick: number;   // bumped by Refresh so the per-restaurant brief re-reads too
   hasPayroll: boolean;   // mig 220 — hides the Team & pay card when the module is off
   hasInventory: boolean; // migs 221/224/227 — hides the Inventory & stock card when the module is off
 }) {
@@ -729,7 +816,7 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
     fetch(`/api/owner/reports?${briefQs}`, { cache: "no-store" }).then((r) => r.json())
       .then((d) => { if (Array.isArray(d.rows)) { briefMemo.set(briefQs, d.rows); if (live) setBrief(d.rows); } }).catch(() => {});
     return () => { live = false; };
-  }, [showBrief, briefQs]);
+  }, [showBrief, briefQs, briefTick]);
   const briefMax = brief && brief.length ? Math.max(...brief.map((b) => b.revenue), 1) : 1;
 
   const t = money?.data?.totals;
@@ -817,9 +904,10 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
 }
 
 // ── The report view (title + loading/error, delegates body) ───────────────────
-function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay }: {
+function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay, asOf }: {
   sel: RKey; bodyKey: BodyKey; data?: Payload; loading?: boolean; error?: string;
   rangeText: string; accent: string; restName: string; singleRest: boolean;
+  asOf?: string;
   onOpenReport: OpenReport;
   payDetail: "" | "discounts" | "cancellations"; onPayDetail: (d: "" | "discounts" | "cancellations") => void;
   moneyData?: Payload; dishesDay?: Payload; hourlyDay?: Payload;
@@ -828,7 +916,7 @@ function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, res
   const tone = meta.tone || "accent";
   return (
     <div className={`rs-report tone-${tone}`} id="rs-print">
-      <PrintHead restName={restName} title={meta.label} period={rangeText} />
+      <PrintHead restName={restName} title={meta.label} period={rangeText} asOf={asOf} />
       <div className="rs-rtitle">
         <span className="cic"><i className={`fas ${meta.icon}`} aria-hidden /></span>
         <div><h2>{meta.label}</h2><div className="scope">{restName} · {rangeText}</div></div>
@@ -893,6 +981,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
       dishes: data.dishes ?? [], items: data.items ?? [], vendors: data.vendors ?? [],
       series: data.series ?? [], expenses: data.expenses ?? [], waste: data.waste ?? [],
       merged: data.merged, perRestaurant: data.perRestaurant,
+      listCap: data.listCap, expensesMore: data.expensesMore, wasteMore: data.wasteMore,
     };
     return (
       <>
@@ -1409,12 +1498,16 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     // are different boxes on the form.
     const netSales = t.subtotal - t.discount;
     const configuredPct = data.tax?.effectivePct ?? null;         // the rate that's set up
-    // The taxable value is recoverable exactly from the tax itself: tax = taxable × rate.
-    // That needs no extra column and no rollup change, and it stays right when a period mixes
-    // taxed and untaxed lines. With no rate configured (composition scheme) nothing is taxable.
-    const taxableDerived = configuredPct ? t.tax / (configuredPct / 100) : 0;
-    // Legacy/no-MRP periods: the derived figure equals netSales, so this is a no-op for them.
-    const taxable = configuredPct ? Math.min(taxableDerived, netSales) : netSales;
+    // COMPOSITION SCHEME: this restaurant charges the diner no GST at all, so there is no
+    // taxable supply, no CGST/SGST split and nothing to file under those boxes. The report
+    // used to print a zero-value CGST/SGST table and call all of net sales "Taxable sales"
+    // (owner-panel sweep 2026-08-04) — the server now says so with a flag and the whole
+    // block below reads differently.
+    const composition = data.tax?.composition === true;
+    // The taxable value is recoverable exactly from the tax itself: tax = taxable × rate
+    // (lib/taxFiling → taxableValue, shared with the export). It stays right when a period
+    // mixes taxed and MRP/exempt lines, and is capped at net sales.
+    const taxable = composition ? 0 : taxableValue(t, configuredPct);
     const exempt = Math.max(0, Math.round((netSales - taxable) * 100) / 100);
     const actualPct = taxable ? (t.tax / taxable) * 100 : 0;       // rate the numbers actually realised
     // With the exempt part accounted for, a REMAINING mismatch is a genuine data problem
@@ -1422,52 +1515,72 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     const rateOk = configuredPct == null || Math.abs(actualPct - configuredPct) < 0.5;
     const avgTaxPerBill = t.paidOrders ? t.tax / t.paidOrders : 0;
     const comps = data.tax?.components ?? [];
-    // Per-period filing view: split each period's tax across the set tax lines, integer-rounded
-    // so each row's parts still sum to that row's total tax (matches the printed-bill split).
-    // Whole-rupee per-row tax (GST-return rounding) so each row's parts sum exactly to the
-    // row's displayed total, and two equal rates never differ by a paisa.
-    const filingRows = (comps.length ? mrows.filter((r) => r.tax > 0) : []).map((r) => ({
-      bucket: r.bucket,
-      // Same derivation as the KPI above — the filing table must show the TAXABLE value, not
-      // total sales, or a period containing MRP items overstates the box it is filed under.
-      taxable: configuredPct
-        ? Math.min(r.tax / (configuredPct / 100), r.subtotal - r.discount)
-        : r.subtotal - r.discount,
-      tax: Math.round(r.tax),
-      parts: splitTax(comps.map((c) => c.rate), Math.round(r.tax)),
+    // ── ONE filing computation for the whole report (lib/taxFiling → buildFiling) ──
+    // Every number below reconciles in BOTH directions: a period's tax lines sum to that
+    // period's whole-rupee tax, each column sums to the period total, and the grand total is
+    // EXACTLY `Math.round(totals.tax)` — the same figure the "Tax collected" tile shows.
+    //
+    // It used to be two independent roundings and they disagreed on screen: "The split"
+    // rounded the period total once (CGST ₹207,887.50) while this table rounded all 30 days
+    // and summed them (CGST ₹207,888.50, total tax ₹415,777 vs the tile's ₹415,775) — two
+    // different CGST figures on one page captioned "ready to copy into a return"
+    // (owner-panel sweep 2026-08-04). The largest-remainder allocation keeps the whole-rupee
+    // filing grain AND the exact total.
+    const filing = buildFiling(comps.length ? mrows.filter((r) => r.tax > 0) : [], comps, (r) => r.tax);
+    const filingRows = filing.rows.map((fr) => ({
+      bucket: fr.row.bucket, taxable: taxableValue(fr.row, configuredPct), tax: fr.tax, parts: fr.parts,
     }));
-    const compTotals = comps.map((_, i) => filingRows.reduce((a, r) => a + r.parts[i], 0));
+    const compTotals = filing.columnTotals;
     const filingTaxable = filingRows.reduce((a, r) => a + r.taxable, 0);
-    const filingTax = filingRows.reduce((a, r) => a + r.tax, 0);
+    const filingTax = filing.total;
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} sub={`${nfmt(t.paidOrders)} paid bills`} spark={mrows.map((r) => r.tax)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
-          <Stat label="Taxable sales" tone="accent" icon="fa-cart-shopping" value={inr(taxable)}
-            sub={exempt > 0 ? "the part GST was charged on" : "subtotal − discount"} />
-          {exempt > 0 && (
+          <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} sub={composition ? "composition scheme — no GST charged" : `${nfmt(t.paidOrders)} paid bills`} spark={mrows.map((r) => r.tax)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
+          {composition ? (
+            <Stat label="Sales" tone="accent" icon="fa-cart-shopping" value={inr(netSales)}
+              sub="none of it taxable to the diner" />
+          ) : (
+            <Stat label="Taxable sales" tone="accent" icon="fa-cart-shopping" value={inr(taxable)}
+              sub={exempt > 0 ? "the part GST was charged on" : "subtotal − discount"} />
+          )}
+          {!composition && exempt > 0 && (
             <Stat label="Exempt / MRP sales" tone="info" icon="fa-bottle-water" value={inr(exempt)}
               sub="sold with no GST — file separately" />
           )}
-          <Stat label="Effective rate" tone={rateOk ? "good" : "warn"} icon="fa-percent" value={`${actualPct.toFixed(2)}%`}
-            sub={configuredPct != null ? (rateOk ? `matches the set ${configuredPct}%` : `set rate is ${configuredPct}%`) : "tax ÷ taxable sales"} />
-          <Stat label="Tax per bill" tone="info" icon="fa-receipt" value={inr(avgTaxPerBill)} sub="average" />
+          {!composition && (
+            <Stat label="Effective rate" tone={rateOk ? "good" : "warn"} icon="fa-percent" value={`${actualPct.toFixed(2)}%`}
+              sub={configuredPct != null ? (rateOk ? `matches the set ${configuredPct}%` : `set rate is ${configuredPct}%`) : "tax ÷ taxable sales"} />
+          )}
+          {!composition && <Stat label="Tax per bill" tone="info" icon="fa-receipt" value={inr(avgTaxPerBill)} sub="average" />}
         </div>
-        {configuredPct != null && !rateOk && (
+        {composition && (
+          <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
+            <i className="fas fa-circle-info" aria-hidden style={{ color: "var(--accent)", marginRight: 6 }} />
+            This restaurant is on the <b>composition scheme</b>, so it cannot charge GST to guests and
+            the bill shows no tax line. There is no CGST/SGST split to file — you pay the flat
+            composition rate on turnover yourself, from the <b>Sales</b> figure above.
+          </p>
+        )}
+        {!composition && configuredPct != null && !rateOk && (
           <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
             <i className="fas fa-triangle-exclamation" aria-hidden style={{ color: "var(--adm-warn)", marginRight: 6 }} />
             The rate the bills actually realised ({actualPct.toFixed(2)}%) doesn&apos;t match the set rate ({configuredPct}%) — usually from tax-free or specially-priced items in this period. Worth a look before filing.
           </p>
         )}
-        {data.tax ? (
+        {composition ? null : data.tax && comps.length ? (
           <Panel title="The split" hint="same total, shown the way the printed bill shows it">
             <div className="rs-tablewrap">
               <table className="rs-table">
                 <thead><tr><th>Tax line</th><th className="num">Rate</th><th className="num">Collected</th></tr></thead>
                 <tbody>
                   <tr><td><b>Total tax</b></td><td className="num">{data.tax.effectivePct}%</td><td className="num"><b>{inr(t.tax)}</b></td></tr>
-                  {splitTax(data.tax.components.map((c) => c.rate), Math.round(t.tax)).map((amt, i) => {
-                    const c = data.tax!.components[i];
+                  {/* The SAME column totals the filing table below adds up to — one computation,
+                      so the two panels can never print different CGST figures. When there are no
+                      per-period rows to allocate (a period with no tax at all) fall back to
+                      splitting the total once. */}
+                  {(filingRows.length ? compTotals : splitTax(comps.map((c) => c.rate), Math.round(t.tax))).map((amt, i) => {
+                    const c = comps[i];
                     return <tr key={c.label}><td>{c.label}</td><td className="num">{c.rate}%</td><td className="num">{inrP(amt)}</td></tr>;
                   })}
                 </tbody>
@@ -1622,7 +1735,13 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
       row.revenue += p.revenue; row.orders += p.orders;
       merged.set(method, row);
     }
-    const pays = [...merged.values()].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue);
+    // Every settled method, INCLUDING one that collected ₹0 (a fully-discounted bill is still
+    // a settled bill). Dropping those rows made "bills settled" 4,243 while the Tax and Sales
+    // reports said 4,254 paid bills for the same period, and pushed this report's average bill
+    // to ₹2,058 against their ₹2,052 — three different answers to one question
+    // (owner-panel sweep 2026-08-04). The DONUT still shows only methods with money in them
+    // (a zero-width wedge is not a slice) — PaymentDonut filters that itself.
+    const pays = [...merged.values()].sort((a, b) => b.revenue - a.revenue);
     const total = pays.reduce((a, p) => a + p.revenue, 0);
     const bills = pays.reduce((a, p) => a + p.orders, 0);
     const top = pays[0];
@@ -1633,7 +1752,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <div className="rs-kpis">
           <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(total)} sub={`${nfmt(bills)} bills settled`} />
           <Stat label="Top method" tone="good" icon="fa-wallet" value={canonPayMethod(top?.method)} sub={`${Math.round(topShare)}% of money · ${nfmt(top?.orders || 0)} bills`} onClick={() => scrollToId("rs-pay-method")} title="Jump to the per-method table" />
-          <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avgBill)} />
+          <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avgBill)} sub="collected ÷ bills settled" />
           {/* Discounts + cancellations fold in here as drill-boxes → open a detail overlay
               (owner 2026-07-26: a box on top that opens the full detail, not a sub-report). */}
           <Stat label="Discounts given" tone="warn" icon="fa-tag" value="View" sub="what was given away" onClick={onPayDetail ? () => onPayDetail("discounts") : undefined} title="Open the discounts detail" />
@@ -1722,7 +1841,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} orders` : "no orders yet"} onClick={quietest ? () => scrollToId("rs-hourly-table") : undefined} title={quietest ? "Jump to the hour-by-hour table" : undefined} />
           <Stat label="Total orders" tone="info" icon="fa-list-check" value={nfmt(totalOrders)} />
           <Stat label="Total revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(totalRev)} />
-          <Stat label="Avg bill" tone="good" icon="fa-scale-balanced" value={inr(avgBill)} sub="revenue ÷ orders" />
+          {/* NOT called "Avg bill": this divides paid revenue by ALL orders in these hours, so
+              it reads lower than the average bill every other report shows (₹1,991 vs ₹2,052 on
+              the same period — owner-panel sweep 2026-08-04). The hourly payload carries no paid
+              count, so the honest fix is to name what it actually is. */}
+          <Stat label="Per order" tone="good" icon="fa-scale-balanced" value={inr(avgBill)} sub="revenue ÷ all orders in these hours" />
         </div>
         {top3.length > 0 && (
           <p className="rs-note" style={{ marginBottom: 12 }}>
@@ -1739,7 +1862,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <Panel id="rs-hourly-table" title="Hour by hour" hint="only hours with orders" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
-              <thead><tr><th>Hour</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% of revenue</th><th className="num">Avg bill</th></tr></thead>
+              <thead><tr><th>Hour</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% of revenue</th><th className="num">Per order</th></tr></thead>
               <tbody>{tableRows.map((h) => {
                 const isPeak = h.hour === peak.hour && h.revenue > 0;
                 return (
@@ -1801,7 +1924,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <Panel id="rs-daypart-breakdown" title="Breakdown" hint="each stretch of the day" pad={false}>
           <div className="rs-tablewrap">
             <table className="rs-table">
-              <thead><tr><th>Day part</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% share</th><th className="num">Avg bill</th></tr></thead>
+              <thead><tr><th>Day part</th><th className="num">Orders</th><th className="num">Revenue</th><th className="num">% share</th><th className="num">Per order</th></tr></thead>
               <tbody>{parts.map((p) => {
                 const isBest = p.label === best.label && p.rev > 0;
                 const isWorst = weakest && p.label === weakest.label && !isBest;
