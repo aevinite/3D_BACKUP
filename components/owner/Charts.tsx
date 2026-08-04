@@ -8,7 +8,7 @@
 //     but the top of the domain is EXACTLY the data max — no headroom.
 // Series colour = each restaurant's own accent. ₹ tooltips. All charts sit in
 // fixed-height responsive boxes so cards never jump while loading.
-import { useState, Fragment, type CSSProperties } from "react";
+import { useState, useId, Fragment, type CSSProperties } from "react";
 import { useBackClose } from "@/lib/backStack";
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, ComposedChart, Line, PieChart, Pie, Cell,
@@ -199,6 +199,18 @@ export function RevMonthCompare({ data, height = 260, curName, prevName, curColo
   if (!data.length) return <Empty />;
   const hasPrev = data.some((d) => (Number(d.prev) || 0) > 0);
   const values = data.flatMap((d) => [Number(d.cur) || 0, ...(hasPrev ? [Number(d.prev) || 0] : [])]);
+  // Dynamic-chart rule — this was the SECOND time chart to skip the shared gate (the first
+  // was AreaTrend, fixed 2026-07-28; this one was added the same week and missed). It is
+  // LOCKED to whole calendar months, so the range dropdown can't rescue it: on the 1st or 2nd
+  // of a month, or for any new restaurant, it drew ~30 dead-flat days plus one lonely spike —
+  // exactly the "reads as broken" shape the owner banned. `cur` is deliberately `null` for
+  // future days, so count activity across BOTH months' real values.
+  const activity = data.flatMap((d) => [Number(d.cur) || 0, Number(d.prev) || 0]);
+  if (populated(activity) < MIN_POINTS) {
+    return <NotEnough height={height}
+      value={populated(activity) === 1 ? inr(soleValue(activity)) : undefined}
+      hint="A month-on-month comparison needs takings on more than one day — it fills in as the month goes on." />;
+  }
   const gid = "own-g-monthcur";
   return (
     <div>
@@ -688,7 +700,14 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
   const max = Math.max(1, ...values, ...costValues);
   const COST_COLOR = "#f59e0b";
   const enough = populated(values) >= MIN_POINTS;
-  const gid = "own-tg-" + cssId(label);
+  // The gradient id must be unique PER CHART INSTANCE, not per series label. It used to be
+  // derived from `label` alone, so the Day summary — which renders "Revenue through the day"
+  // and the Busy-hours chart, both money charts with no `name` — emitted the same
+  // id="own-tg-Revenue" twice. Duplicate SVG ids mean the second <linearGradient> is ignored
+  // and both charts fill from the FIRST one; identical colours hid it, but giving either
+  // chart its own colour later would silently paint both the same (found 2026-08-04).
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const gid = `own-tg-${cssId(label)}-${uid}`;
   return (
     <div>
       <div className="rs-tc-head">

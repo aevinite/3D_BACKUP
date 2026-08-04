@@ -65,6 +65,10 @@ const FALLBACK = GREEN;
 type Restaurant = {
   id: string; slug: string; name: string; active: boolean; accentColor: string;
   ordersToday: number; revenueToday: number; ordersAll: number; revenueAll: number; openTables: number;
+  // The admin has taken Reports away for this restaurant, so /api/owner/overview sends ZERO
+  // revenue for it on purpose. Rendering that zero as a real figure made a trading restaurant
+  // look dead — every money cell below says "hidden" instead (found 2026-08-04).
+  reportsOff?: boolean;
 };
 type Overview = { restaurants: Restaurant[]; totals: { revenueToday: number; ordersToday: number; openTables: number; restaurantCount: number }; entitlements?: Record<string, boolean> };
 type GroupRev = { id: string; slug: string; name: string; accentColor: string; revenue: number; orders: number };
@@ -280,7 +284,7 @@ function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; valu
 // per restaurant matches its portfolioColor(i) in the charts, so a restaurant
 // keeps ONE identity colour across the selector and every graph.
 function RestaurantDrop({ rests, activeRid, onPick }: {
-  rests: { id: string; name: string; accentColor: string; revenueToday: number }[];
+  rests: { id: string; name: string; accentColor: string; revenueToday: number; reportsOff?: boolean }[];
   activeRid: string | null; // null = All restaurants
   onPick: (rid: string | null) => void;
 }) {
@@ -323,7 +327,7 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
               onClick={() => { onPick(r.id); setOpen(false); }}>
               <span className="sw" style={{ background: portfolioColor(i) }} aria-hidden="true" />
               <span className="nm">{r.name}</span>
-              <small>{money(r.revenueToday)} today</small>
+              <small>{r.reportsOff ? "takings hidden" : `${money(r.revenueToday)} today`}</small>
             </button>
           ))}
         </span>
@@ -833,7 +837,7 @@ export default function OwnerDashboard() {
       return {
         id: r.id, slug: r.slug, name: r.name, active: r.active, accent: r.accentColor || FALLBACK,
         revenue, orders, avg: orders ? revenue / orders : 0, share: revenue / total,
-        openTables: r.openTables, today: r.revenueToday, ordersToday: r.ordersToday,
+        openTables: r.openTables, today: r.revenueToday, ordersToday: r.ordersToday, reportsOff: r.reportsOff === true,
         revenueAll: r.revenueAll, ordersAll: r.ordersAll, spark: sparks.get(r.id),
       };
     });
@@ -1209,12 +1213,22 @@ export default function OwnerDashboard() {
                       tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setDrawerRid(r.id); }}>
                       <td className="rk l">{r.rank}</td>
                       <td className="l"><span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span></td>
-                      <td className="mut"><AnimatedNumber value={r.today} money /></td>
-                      <td><b><AnimatedNumber value={r.revenue} money /></b></td>
-                      <td className="mut"><AnimatedNumber value={r.orders} /></td>
-                      <td className="mut"><AnimatedNumber value={r.avg} money /></td>
-                      <td className="hide-m">{r.spark && r.spark.length >= 2 ? <Spark points={r.spark} color={GREEN} width={84} height={22} /> : <span className="mut">—</span>}</td>
-                      <td className="hide-m"><span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round(r.share * 100)}%`, background: r.accent }} /></span><span style={{ fontSize: 11 }}>{Math.round(r.share * 100)}%</span></td>
+                      {/* Reports switched off ⇒ every money cell says so rather than printing
+                          the deliberate zero as if it were this restaurant's real takings. */}
+                      {r.reportsOff ? (
+                        <td className="mut" colSpan={4} title="Reports are switched off for this restaurant, so its figures aren't shown here.">
+                          <span style={{ opacity: .7 }}><i className="fas fa-eye-slash" style={{ marginRight: 6, fontSize: 10 }} aria-hidden="true" />figures hidden</span>
+                        </td>
+                      ) : (
+                        <>
+                          <td className="mut"><AnimatedNumber value={r.today} money /></td>
+                          <td><b><AnimatedNumber value={r.revenue} money /></b></td>
+                          <td className="mut"><AnimatedNumber value={r.orders} /></td>
+                          <td className="mut"><AnimatedNumber value={r.avg} money /></td>
+                        </>
+                      )}
+                      <td className="hide-m">{!r.reportsOff && r.spark && r.spark.length >= 2 ? <Spark points={r.spark} color={GREEN} width={84} height={22} /> : <span className="mut">—</span>}</td>
+                      <td className="hide-m">{r.reportsOff ? <span className="mut">—</span> : <><span className="hq-meter" aria-hidden="true"><span style={{ width: `${Math.round(r.share * 100)}%`, background: r.accent }} /></span><span style={{ fontSize: 11 }}>{Math.round(r.share * 100)}%</span></>}</td>
                       <td className="mut"><AnimatedNumber value={r.openTables} /></td>
                       <td className="go"><i className="fas fa-chevron-right" aria-hidden="true" /></td>
                     </tr>

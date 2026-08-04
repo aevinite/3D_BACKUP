@@ -13,6 +13,8 @@
 //     struck through. Same discipline as bills.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
+import { useBackClose } from "@/lib/backStack";
 import { asSuffix } from "@/lib/ownerPin";
 // staffProfileShared (never lib/staffProfile) — the shared module is import-free, so this
 // client page can use the field enums without dragging the service-role client into the browser.
@@ -75,6 +77,49 @@ const WAITER_CAPS: [string, string][] = [
 ];
 const OVR_MODES: [string, string][] = [["default", "Default"], ["on", "On"], ["pin", "PIN"], ["off", "Off"]];
 type Tab = "personal" | "job" | "pay" | "access" | "perf" | "activity";
+
+// ── One "saves on blur" profile field ────────────────────────────────────────────────
+// DECLARED AT MODULE SCOPE ON PURPOSE. It used to live inside the page component, which
+// made it a BRAND-NEW component type on every render — so React unmounted and remounted
+// every field whenever anything on the page changed state. These inputs are uncontrolled
+// (`defaultValue`, saved on blur), and a remount throws the DOM value away: the owner
+// typed into a field, the previous field's green "Saved" tick expired 1.6s later, the page
+// re-rendered, and the half-typed text vanished with the cursor jumping out of the box.
+// (Found by the 2026-08-04 owner-panel sweep; eslint react-hooks/static-components had been
+// flagging all 15 fields.)
+//
+// Two details keep the old GOOD behaviour while losing the bug:
+//   • `key` on the input is the SAVED value, so the field remounts only when that value
+//     genuinely changes — which is what restores the old text if a save FAILS and
+//     saveProfile() rolls the value back. Typing elsewhere never touches it.
+//   • it is NOT disabled while a save is in flight. A disabled input loses focus in every
+//     browser, so the old `busy` disable interrupted the very next field the owner started
+//     typing in. Each field saves its own key and the server merges, so overlapping saves
+//     are safe.
+function ProfileField({ label, k, value, hint, type = "text", options, maxLength, self, canEdit, flash, onSave }: {
+  label: string; k: string; value: string; hint?: string; type?: string;
+  options?: [string, string][]; maxLength?: number; self?: boolean;
+  canEdit: boolean; flash: string | null; onSave: (key: string, value: string) => void;
+}) {
+  return (
+    <div className={`sp-f ${value ? "" : "empty"}`}>
+      <label htmlFor={`f-${k}`}>{label}{self ? <span className="sp-self" title="They can also edit this from their own panel">•</span> : null}</label>
+      {options ? (
+        <select key={`${k}:${value}`} id={`f-${k}`} defaultValue={value} disabled={!canEdit} onChange={(e) => onSave(k, e.target.value)}>
+          <option value="">not added</option>
+          {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      ) : (
+        <input key={`${k}:${value}`} id={`f-${k}`} type={type} defaultValue={value} placeholder="not added" maxLength={maxLength}
+          disabled={!canEdit}
+          inputMode={type === "tel" ? "tel" : type === "email" ? "email" : undefined}
+          onBlur={(e) => onSave(k, e.target.value)} />
+      )}
+      {hint && <div className="sp-hint">{hint}</div>}
+      {flash === k && <div className="sp-saved"><i className="fas fa-check" /> Saved</div>}
+    </div>
+  );
+}
 
 export default function StaffProfilePage() {
   const params = useParams<{ id: string }>();
@@ -240,45 +285,29 @@ export default function StaffProfilePage() {
   if (loading) return <div className="adm-empty">Loading…</div>;
   if (notEnabled) return (
     <>
-      <div className="own-bar"><div className="own-crumb"><a href="/owner/staff">Team &amp; pay</a><i className="fas fa-chevron-right" style={{ fontSize: 9, opacity: 0.5, margin: "0 6px" }} /><span className="cur">Profile</span></div></div>
+      <div className="own-bar"><div className="own-crumb"><Link href="/owner/staff">Team &amp; pay</Link><i className="fas fa-chevron-right" style={{ fontSize: 9, opacity: 0.5, margin: "0 6px" }} /><span className="cur">Profile</span></div></div>
       <div className="adm-card"><div className="adm-empty">{notEnabled}</div></div>
     </>
   );
   if (!staff) return (
     <>
-      <div className="own-bar"><div className="own-crumb"><a href="/owner/staff">Team &amp; pay</a><i className="fas fa-chevron-right" style={{ fontSize: 9, opacity: 0.5, margin: "0 6px" }} /><span className="cur">Profile</span></div></div>
+      <div className="own-bar"><div className="own-crumb"><Link href="/owner/staff">Team &amp; pay</Link><i className="fas fa-chevron-right" style={{ fontSize: 9, opacity: 0.5, margin: "0 6px" }} /><span className="cur">Profile</span></div></div>
       <div className="adm-card"><div className="adm-empty">{err || "Couldn't open that person."}</div>
         <button className="sp-btn" onClick={() => load()}>Try again</button></div>
     </>
   );
 
-  const F = ({ label, k, value, hint, type = "text", options, maxLength, self }: {
-    label: string; k: string; value: string; hint?: string; type?: string;
-    options?: [string, string][]; maxLength?: number; self?: boolean;
-  }) => (
-    <div className={`sp-f ${value ? "" : "empty"}`}>
-      <label htmlFor={`f-${k}`}>{label}{self ? <span className="sp-self" title="They can also edit this from their own panel">•</span> : null}</label>
-      {options ? (
-        <select id={`f-${k}`} defaultValue={value} disabled={!canEdit || busy} onChange={(e) => saveProfile(k, e.target.value)}>
-          <option value="">not added</option>
-          {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-      ) : (
-        <input id={`f-${k}`} type={type} defaultValue={value} placeholder="not added" maxLength={maxLength}
-          disabled={!canEdit || busy}
-          inputMode={type === "tel" ? "tel" : type === "email" ? "email" : undefined}
-          onBlur={(e) => saveProfile(k, e.target.value)} />
-      )}
-      {hint && <div className="sp-hint">{hint}</div>}
-      {flash === k && <div className="sp-saved"><i className="fas fa-check" /> Saved</div>}
-    </div>
-  );
+  // The per-field props that don't change per field — spread into every <ProfileField>.
+  // The COMPONENT itself lives at module scope (see ProfileField above); building this
+  // little object per render is fine, because the component type stays identical and React
+  // therefore updates the existing inputs instead of replacing them.
+  const fp = { canEdit, flash, onSave: (key: string, value: string) => { void saveProfile(key, value); } };
 
   return (
     <>
       <div className="own-bar">
         <div className="own-crumb">
-          <a href={scopePin ? `/owner/staff?rid=${scopePin}` : "/owner/staff"}>Team &amp; pay</a>
+          <Link href={scopePin ? `/owner/staff?rid=${scopePin}` : "/owner/staff"}>Team &amp; pay</Link>
           <i className="fas fa-chevron-right" style={{ fontSize: 9, opacity: 0.5, margin: "0 6px" }} />
           <span className="cur">{who}</span>
         </div>
@@ -364,7 +393,7 @@ export default function StaffProfilePage() {
             </div>
             <p className="sp-sect">Who they are</p>
             <div className="sp-grid">
-              <F label="Full name" k="full_name" value={String(pr.full_name || "")} self />
+              <ProfileField {...fp} label="Full name" k="full_name" value={String(pr.full_name || "")} self />
               <div className="sp-f"><label>Login username</label>
                 <input value={staff.username} readOnly disabled />
                 <div className="sp-hint">Change it from the team list (it&apos;s how they sign in).</div>
@@ -380,12 +409,12 @@ export default function StaffProfilePage() {
                   }} />
                 {flash === "phone" && <div className="sp-saved"><i className="fas fa-check" /> Saved</div>}
               </div>
-              <F label="Alternate phone" k="alt_phone" value={String(pr.alt_phone || "")} type="tel" self />
-              <F label="Email" k="email" value={String(pr.email || "")} type="email" self />
-              <F label="Date of birth" k="dob" value={String(pr.dob || "")} type="date" hint="Used later for a birthday reminder." self />
-              <F label="Blood group" k="blood_group" value={String(pr.blood_group || "")}
+              <ProfileField {...fp} label="Alternate phone" k="alt_phone" value={String(pr.alt_phone || "")} type="tel" self />
+              <ProfileField {...fp} label="Email" k="email" value={String(pr.email || "")} type="email" self />
+              <ProfileField {...fp} label="Date of birth" k="dob" value={String(pr.dob || "")} type="date" hint="Used later for a birthday reminder." self />
+              <ProfileField {...fp} label="Blood group" k="blood_group" value={String(pr.blood_group || "")}
                 options={["O+", "O-", "A+", "A-", "B+", "B-", "AB+", "AB-"].map((x) => [x, x])} self />
-              <F label="Language they read" k="language" value={String(pr.language || "")}
+              <ProfileField {...fp} label="Language they read" k="language" value={String(pr.language || "")}
                 options={[["hi", "Hindi"], ["en", "English"], ["gu", "Gujarati"], ["mr", "Marathi"], ["ta", "Tamil"], ["other", "Other"]]} self />
             </div>
 
@@ -397,16 +426,16 @@ export default function StaffProfilePage() {
                   disabled={!canEdit || busy} onBlur={(e) => saveProfile("address", e.target.value)} />
                 {flash === "address" && <div className="sp-saved"><i className="fas fa-check" /> Saved</div>}
               </div>
-              <F label="City" k="city" value={String(pr.city || "")} self />
-              <F label="Pincode" k="pincode" value={String(pr.pincode || "")} maxLength={6} self />
+              <ProfileField {...fp} label="City" k="city" value={String(pr.city || "")} self />
+              <ProfileField {...fp} label="Pincode" k="pincode" value={String(pr.pincode || "")} maxLength={6} self />
             </div>
 
             <p className="sp-sect">In case of emergency</p>
             <div className="sp-grid">
-              <F label="Contact name" k="emg_name" value={String(pr.emg_name || "")} self />
-              <F label="Relation" k="emg_relation" value={String(pr.emg_relation || "")}
+              <ProfileField {...fp} label="Contact name" k="emg_name" value={String(pr.emg_name || "")} self />
+              <ProfileField {...fp} label="Relation" k="emg_relation" value={String(pr.emg_relation || "")}
                 options={[["Father", "Father"], ["Mother", "Mother"], ["Spouse", "Spouse"], ["Brother", "Brother"], ["Sister", "Sister"], ["Friend", "Friend"], ["Other", "Other"]]} self />
-              <F label="Their phone" k="emg_phone" value={String(pr.emg_phone || "")} type="tel" self />
+              <ProfileField {...fp} label="Their phone" k="emg_phone" value={String(pr.emg_phone || "")} type="tel" self />
             </div>
 
             <p className="sp-sect">ID on file</p>
@@ -417,9 +446,9 @@ export default function StaffProfilePage() {
                 Staff cannot change these two fields; only you can.</div>
             </div>
             <div className="sp-grid">
-              <F label="ID type" k="id_type" value={String(pr.id_type || "")}
+              <ProfileField {...fp} label="ID type" k="id_type" value={String(pr.id_type || "")}
                 options={[["Aadhaar", "Aadhaar"], ["PAN", "PAN"], ["Driving licence", "Driving licence"], ["Voter ID", "Voter ID"], ["Passport", "Passport"]]} />
-              <F label="Last 4 digits" k="id_last4" value={String(pr.id_last4 || "")} maxLength={4} />
+              <ProfileField {...fp} label="Last 4 digits" k="id_last4" value={String(pr.id_last4 || "")} maxLength={4} />
               <div className="sp-f"><label>Verified</label>
                 <button type="button" className={`sp-toggle ${pr.id_verified ? "on" : ""}`} disabled={!canEdit || busy}
                   onClick={() => saveProfile("id_verified", !pr.id_verified)}>
@@ -548,8 +577,8 @@ export default function StaffProfilePage() {
                   {PAY_MODES.map((v) => <option key={v} value={v}>{MODE_LABEL[v]}</option>)}
                 </select>
               </div>
-              <F label="UPI ID" k="upi_id" value={String(pr.upi_id || "")} self />
-              <F label="Bank account · last 4" k="bank_last4" value={String(pr.bank_last4 || "")} maxLength={4} self />
+              <ProfileField {...fp} label="UPI ID" k="upi_id" value={String(pr.upi_id || "")} self />
+              <ProfileField {...fp} label="Bank account · last 4" k="bank_last4" value={String(pr.bank_last4 || "")} maxLength={4} self />
             </div>
 
             <p className="sp-sect">Regular additions &amp; cuts <span className="sp-mut">— optional, every cycle</span></p>
@@ -959,6 +988,11 @@ function RecordPayment({ who, busy, expected, onClose, onSave, onError }: {
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
+  // …and so does the PHONE's hardware Back. This sheet only ever handled Escape, so on a
+  // phone Back left the page with a half-filled money form still open (project rule: every
+  // popup registers a back layer; found 2026-08-04). The sheet is only rendered while open,
+  // so `true` is the right "is it open" answer here.
+  useBackClose("owner-record-payment", true, onClose);
   const [saving, setSaving] = useState(false);
 
   return (

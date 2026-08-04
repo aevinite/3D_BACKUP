@@ -6,7 +6,7 @@
 // Egress-safe: explicit columns, scoped by restaurant_id, .limit — never SELECT *.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope, type OwnerScope } from "@/lib/ownerScope";
+import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
@@ -25,11 +25,10 @@ const disabledResp = () =>
   NextResponse.json({ error: "Guest ratings aren't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
 
 // The concrete id list for the current scope (admin-all → every restaurant id).
-async function scopedIds(scope: OwnerScope): Promise<string[]> {
-  if (!scope.all) return scope.ids;
-  const r = await sb.from("restaurants").select("id");
-  return (r.data || []).map((x) => x.id as string);
-}
+// The concrete id list for this scope. Shared helper (lib/ownerScope) because the
+// admin all-restaurants read must be PAGED — three local copies each dropped restaurants
+// past PostgREST's row cap (found 2026-08-04).
+const scopedIds = scopedRestaurantIds;
 
 export async function GET(req: NextRequest) {
   let scope = await ownerScope(req);

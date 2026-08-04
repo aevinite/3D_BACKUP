@@ -169,6 +169,26 @@ function prevTsWindowFor(range: string, from: string, to: string): { from: strin
   return prevWindowFor(range, from, to);
 }
 
+// Run an RPC over a list of restaurants with a CONCURRENCY CAP, order preserved. A bare
+// Promise.all fires one call PER RESTAURANT at once, which on a grown platform saturates the
+// pool and times the whole dashboard payload out — the sibling reports route has capped this
+// at 8 since the 2026-07-07 audit, and these two fan-outs were never given the same
+// treatment (found by the 2026-08-04 owner-panel sweep). 8 keeps the few-restaurant case
+// exactly as fast as before.
+async function mapLimit<I, O>(items: I[], limit: number, fn: (item: I) => PromiseLike<O> | O): Promise<O[]> {
+  const out = new Array<O>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  }));
+  return out;
+}
+const FANOUT = 8;
+
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 
 // Paid revenue + orders summed over a window (tiny pre-summed rows), scoped to
@@ -256,8 +276,8 @@ export async function GET(req: NextRequest) {
       // the payment/category per-restaurant fan-outs and the prev-window totals used to
       // wait for the base block, serialising 3 extra round-trips into the compute time.
       const pmIds: (string | null)[] = scope.all ? [null] : scope.ids;
-      const pmP = Promise.all(pmIds.map((id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
-      const catScopedP = scope.all ? null : Promise.all(scope.ids.map((id) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const pmP = mapLimit(pmIds, FANOUT, (id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
+      const catScopedP = scope.all ? null : mapLimit(scope.ids, FANOUT, (id) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
       const prevP = prevWin ? windowTotals(pIds, prevWin.from, prevWin.to) : Promise.resolve(null);
       // Previous-period revenue PER BUCKET (same grain), for the "this period vs previous"
       // overlay that replaces Busy hours. ONE extra pre-summed RPC, only inside the cached
@@ -315,9 +335,9 @@ export async function GET(req: NextRequest) {
       // scope.all (admin) merges across every restaurant id from the revenue rows.
       const catByName = new Map<string, { category: string; qty: number; revenue: number }>();
       // scoped owners: already in flight; admin all-view needs the rev rows to know the ids
-      const catRes = catScopedP ? await catScopedP : await Promise.all(
-        ((rev.data ?? []).map((r: Record<string, unknown>) => r.restaurant_id as string))
-          .map((id: string) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to })));
+      const catRes = catScopedP ? await catScopedP : await mapLimit(
+        (rev.data ?? []).map((r: Record<string, unknown>) => r.restaurant_id as string),
+        FANOUT, (id: string) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
       for (const r of catRes) {
         if (r.error) throw r.error;
         for (const row of (r.data ?? []) as Record<string, unknown>[]) {

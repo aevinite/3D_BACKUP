@@ -608,7 +608,13 @@ export async function PATCH(req: NextRequest) {
 
   if (!id) return bad("Missing staff id.");
   const ids = s.restaurants.map((r) => r.id);
-  const u = (await sb.from("staff_users").select("*").eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0];
+  // Explicit column list — exactly the five fields the handlers below read. It used to be
+  // `select("*")`, which needlessly pulled `password_hash` into the route (it was never
+  // echoed to the client, but there is no reason to move secret material at all), and broke
+  // the project's own explicit-column rule (found 2026-08-04).
+  const u = (await sb.from("staff_users")
+    .select("id, username, role, restaurant_id, token_version, permissions")
+    .eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0];
   if (!u) return bad("That person isn't on your staff.", 404);
   // Hierarchy: the TARGET must be below the actor's level — a manager can never
   // touch another manager's (or an owner's) account, in any way.

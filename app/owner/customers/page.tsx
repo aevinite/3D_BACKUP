@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { nfmt } from "@/components/owner/reports/kit";
 import { asSuffix } from "@/lib/ownerPin";
+import { useBackClose } from "@/lib/backStack";
 
 const IST = "Asia/Kolkata";
 type Customer = {
@@ -122,6 +123,10 @@ export default function OwnerCustomers() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [detail, detailBusy]);
+  // …and the PHONE's hardware Back closes it too. Escape alone only helps on a desktop:
+  // without a back-stack layer the guest record stayed open and Back navigated off the page
+  // instead (project rule: every popup registers the moment it's built; found 2026-08-04).
+  useBackClose("owner-customer-detail", !!detail || detailBusy, () => setDetail(null));
 
   const rows = customers || [];
 

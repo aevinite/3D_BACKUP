@@ -9,7 +9,7 @@
 // mig-184 RPCs as the manager panel, so the two views can never disagree on what's owed.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, type OwnerScope } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
 import { khataLadder } from "@/lib/tableTags";
 import { businessDayStartIso } from "@/lib/businessDay";
 
@@ -22,11 +22,10 @@ const istMonthStartIso = () => {
   return new Date(Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), 1) - 5.5 * 3600e3).toISOString();
 };
 
-async function scopedIds(scope: OwnerScope): Promise<string[]> {
-  if (!scope.all) return scope.ids;
-  const r = await sb.from("restaurants").select("id");
-  return (r.data || []).map((x) => x.id as string);
-}
+// The concrete id list for this scope. Shared helper (lib/ownerScope) because the
+// admin all-restaurants read must be PAGED — three local copies each dropped restaurants
+// past PostgREST's row cap (found 2026-08-04).
+const scopedIds = scopedRestaurantIds;
 
 export async function GET(req: NextRequest) {
   const scope = await ownerScope(req);
@@ -35,7 +34,12 @@ export async function GET(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ summary: emptySummary(), customers: [] });
 
   // Keep only restaurants whose pay-later module is actually on.
-  const ladders = await Promise.all(ids.map((id) => khataLadder(id)));
+  // Capped fan-out: on the admin's all-restaurants view this is one ladder read per
+  // restaurant on the platform, and a bare Promise.all fires them all at once (2026-08-04).
+  const ladders: Awaited<ReturnType<typeof khataLadder>>[] = [];
+  for (let i = 0; i < ids.length; i += 8) {
+    ladders.push(...(await Promise.all(ids.slice(i, i + 8).map((id) => khataLadder(id)))));
+  }
   const moduleIds = ids.filter((_, i) => ladders[i].effective);
   if (!moduleIds.length) return NextResponse.json({ summary: emptySummary(), customers: [], moduleOff: true });
 
