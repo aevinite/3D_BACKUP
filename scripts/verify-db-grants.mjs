@@ -139,6 +139,10 @@ const REQUIRED_CRON = {
   "lfh-rt-prune":                     "guaranteed breadcrumb sweep every 10 min (mig 060)",
   "refresh-owner-daily-agg":          "the owner report's daily rollup (mig 191)",
   "refresh-owner-report-monthly-agg": "the owner report's monthly rollup (mig 201)",
+  // VACUUM reclaims the heap but not index space, so the breadcrumb table's indexes grow without
+  // limit on ~1.5M inserts / 1.3M deletes — the sweep measured 21 MB of index on a 152 kB table.
+  // Reclaimed by hand once (7,344 kB → 48 kB); mig 289 stops it needing a human to remember.
+  "lfh-reindex-breadcrumbs":          "weekly REINDEX of realtime_events so its indexes stay small (mig 289)",
 };
 // Deliberately absent — a table is ended only by a person tapping ✓ Close (mig 254).
 const FORBIDDEN_CRON = { lfh_auto_close_idle_sessions: "no table ends itself (owner rule, mig 254)" };

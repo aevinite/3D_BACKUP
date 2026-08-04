@@ -19,6 +19,7 @@
     "verify:lifecycle": "node scripts/verify-table-lifecycle.mjs",
     "verify:db-parity": "node scripts/verify-db-parity.mjs",
     "verify:grants": "node scripts/verify-db-grants.mjs",
+    "verify:write-paths": "node scripts/verify-write-paths.mjs",
     "verify:live-rush": "node scripts/verify-manager-live-rush.mjs",
     "verify:owner-home": "npx esbuild scripts/verify-owner-home.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/verify-owner-home.mjs --log-level=warning && node --env-file=.env.local node_modules/.cache/verify-owner-home.mjs",
     "verify:test-safety": "node scripts/verify-test-safety.mjs",
