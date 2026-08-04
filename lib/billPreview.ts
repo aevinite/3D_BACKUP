@@ -77,8 +77,12 @@ export function billPreviewHtml(settings: Settings, mode: BillMode, restaurant: 
   const configured = Array.isArray(settings.tax_components)
     ? (settings.tax_components as { label?: string; rate?: number }[]).filter((c) => s(c?.label) && num(c?.rate) > 0)
     : [];
-  const pct = num(settings.tax_rate, 0.05) * 100;
-  const comps = configured.length ? configured : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
+  // A stored `tax_rate` of 0 is a finite number, so num()'s default never fired for it and this
+  // preview drew 0% while effectiveTaxRate() (which reads 0 as "not configured") charged 5%.
+  // Use the same > 0 test the rate rule itself uses, and honour the no-tax flag.
+  const pct = (num(settings.tax_rate) > 0 ? num(settings.tax_rate) : 0.05) * 100;
+  const comps = settings.tax_exempt === true ? []
+    : configured.length ? configured : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
   const rateSum = comps.reduce((t, c) => t + num(c.rate), 0);
   const taxWhole = Math.round((taxable * rateSum) / 100);
   const taxRows = BILLDOC.splitTax(taxWhole, comps);

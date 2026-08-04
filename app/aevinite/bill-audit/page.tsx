@@ -18,7 +18,13 @@ type Bill = {
   deletedAt: string | null; deletedBy: string | null; deleteReason: string | null;
 };
 type Rest = { id: string; name: string };
-type Data = { bills: Bill[]; counts: Record<string, number>; total: number; restaurants: Rest[]; generatedAt: string };
+type Data = {
+  bills: Bill[]; counts: Record<string, number>; total: number; restaurants: Rest[]; generatedAt: string;
+  // deletedTotal is the REAL database count of deleted bills (not "how many are on this page") —
+  // the chip used to be able to say 0 while deleted bills existed. nextBefore is the paging
+  // cursor: null once there is nothing older to fetch.
+  deletedTotal?: number; nextBefore?: string | null;
+};
 type TrailEvent = { action: string; actor: string | null; detail: string | null; at: string };
 type InvEvent = { event: string; no: number | null; reason: string | null; actor: string | null; at: string };
 type CNote = { no: number; amount: number; reason: string | null; actor: string | null; at: string };
@@ -89,21 +95,57 @@ export default function AdminBills() {
   const [open, setOpen] = useState<string | null>(null);
   const [exp, setExp] = useState<Record<string, Expanded>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  // Reaching BACK. The list used to be "the newest 200 sessions, then filtered" — so a bill
+  // deleted yesterday could not be found at all. A date window, a search and a Load-more cursor
+  // are what make "admin can see it and reopen it at any time" true (owner, 2026-08-04).
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [q, setQ] = useState("");
+  const [qLive, setQLive] = useState("");   // what is typed; `q` is what has been submitted
+  const [more, setMore] = useState<Bill[]>([]);   // pages after the first
+  const [moreBusy, setMoreBusy] = useState(false);
+
+  const qsFor = useCallback((extra?: Record<string, string>) => {
+    const p = new URLSearchParams();
+    if (rid) p.set("restaurant_id", rid);
+    if (state) p.set("state", state);
+    if (from) p.set("from", from);
+    // An end DATE means the whole of that day, not midnight at its start — otherwise picking
+    // "to: today" hides everything taken today, the exact off-by-one the report window rule warns about.
+    if (to) p.set("to", to + "T23:59:59.999+05:30");
+    if (q) p.set("q", q);
+    for (const [k, v] of Object.entries(extra || {})) p.set(k, v);
+    return p.toString();
+  }, [rid, state, from, to, q]);
 
   const load = useCallback(async () => {
     setLoading(true); setErr(null);
     try {
-      const qs = new URLSearchParams();
-      if (rid) qs.set("restaurant_id", rid);
-      if (state) qs.set("state", state);
-      const res = await fetch("/api/admin/bills?" + qs.toString(), { cache: "no-store" });
+      const res = await fetch("/api/admin/bills?" + qsFor(), { cache: "no-store" });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't load.");
-      setD(j);
+      setD(j); setMore([]);              // a new filter starts a fresh first page
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
-  }, [rid, state]);
+  }, [qsFor]);
   useEffect(() => { load(); }, [load]);
-  useActiveAutoRefresh(load, 60000);
+  // Auto-refresh only while looking at the FIRST page. Refreshing under someone who has paged
+  // back through months would throw their place away — the thing they came here to do.
+  const pagedIn = more.length > 0;
+  const autoRefresh = useCallback(() => { if (!pagedIn) load(); }, [pagedIn, load]);
+  useActiveAutoRefresh(autoRefresh, 60000);
+
+  // The oldest bill currently on screen is the cursor for the next page.
+  const nextBefore = more.length ? more[more.length - 1].at : (d?.nextBefore ?? null);
+  const loadMore = async () => {
+    if (!nextBefore || moreBusy) return;
+    setMoreBusy(true);
+    try {
+      const res = await fetch("/api/admin/bills?" + qsFor({ before: nextBefore }), { cache: "no-store" });
+      const j = await res.json();
+      if (!res.ok) throw new Error(j.error || "Couldn't load more.");
+      setMore((m) => [...m, ...((j.bills || []) as Bill[])]);
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setMoreBusy(false); }
+  };
 
   const expand = async (b: Bill) => {
     const next = open === b.sessionId ? null : b.sessionId;
@@ -163,7 +205,9 @@ export default function AdminBills() {
 
   const counts = d?.counts || {};
   const totalAll = ORDER.reduce((s, k) => s + (counts[k] || 0), 0);
-  const settledPaid = (d?.bills || []).filter((b) => b.state === "settled").reduce((s, b) => s + b.paid, 0);
+  // Everything on screen = the first page plus whatever "Load more" has fetched.
+  const rows: Bill[] = [...(d?.bills || []), ...more];
+  const settledPaid = rows.filter((b) => b.state === "settled").reduce((s, b) => s + b.paid, 0);
 
   return (
     <div className="blz">
@@ -206,9 +250,52 @@ export default function AdminBills() {
         </select>
       </div>
 
+      {/* REACHING BACK — a date window and a search, so a bill from any day can be found and put
+          back. Without these the screen only ever showed the newest page, and a bill deleted
+          yesterday was already unreachable (owner, 2026-08-04). */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        <form
+          onSubmit={(e) => { e.preventDefault(); setQ(qLive.trim()); setOpen(null); }}
+          style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}
+        >
+          <input
+            value={qLive} onChange={(e) => setQLive(e.target.value)} maxLength={40}
+            placeholder="Find a bill — bill no, invoice no, or table"
+            aria-label="Find a bill by its bill number, invoice number or table"
+            style={{ padding: "9px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13, minWidth: 260 }}
+          />
+          <button className="adm-btn" type="submit">Find</button>
+          {(q || from || to) && (
+            <button className="adm-btn" type="button" onClick={() => { setQ(""); setQLive(""); setFrom(""); setTo(""); setOpen(null); }}>Clear</button>
+          )}
+        </form>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--muted)" }}>
+          From
+          <input type="date" value={from} onChange={(e) => { setFrom(e.target.value); setOpen(null); }}
+            style={{ padding: "8px 10px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+        </label>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: "var(--muted)" }}>
+          to
+          <input type="date" value={to} onChange={(e) => { setTo(e.target.value); setOpen(null); }}
+            style={{ padding: "8px 10px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }} />
+        </label>
+        {typeof d?.deletedTotal === "number" && d.deletedTotal > 0 && state !== "deleted" && (
+          <button className="adm-btn" onClick={() => { setState("deleted"); setOpen(null); }}
+            style={{ color: "#ef4444", borderColor: "color-mix(in srgb, #ef4444 40%, transparent)" }}>
+            Show all {d.deletedTotal} deleted {d.deletedTotal === 1 ? "bill" : "bills"}
+          </button>
+        )}
+      </div>
+
       <div className="adm-card" style={{ padding: 0, overflow: "hidden" }}>
-        {!d ? (err ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={5} label="Loading bills" />) : d.bills.length === 0 ? <div className="adm-empty">No bills in this view.</div>
-          : d.bills.map((b) => {
+        {!d ? (err ? <div className="adm-empty">Couldn&apos;t load.</div> : <SkelList rows={5} label="Loading bills" />) : rows.length === 0 ? (
+          <div className="adm-empty">
+            {q || from || to
+              ? "No bill matches that search or date range."
+              : state === "deleted" ? "No bills have been deleted." : "No bills in this view."}
+          </div>
+        )
+          : rows.map((b) => {
             const m = META[b.state];
             const isOpen = open === b.sessionId;
             const del = b.state === "deleted";
@@ -284,6 +371,19 @@ export default function AdminBills() {
               </div>
             );
           })}
+
+        {/* Walking further back. Present whenever the server says there is an older page, so the
+            admin is never silently stopped at the newest one. */}
+        {d && rows.length > 0 && nextBefore && (
+          <div style={{ padding: "14px 16px", textAlign: "center", borderTop: "1px solid var(--adm-line, rgba(255,255,255,0.06))" }}>
+            <button className="adm-btn" onClick={loadMore} disabled={moreBusy}>
+              {moreBusy ? "Loading…" : "Load older bills"}
+            </button>
+            <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 6 }}>
+              Showing {rows.length} — there are older ones. Use the dates or the search to jump straight to a bill.
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

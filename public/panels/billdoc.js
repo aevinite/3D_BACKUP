@@ -82,7 +82,16 @@
   function billIdentity(settings, restaurant) {
     var s = settings || {}, r = restaurant || {};
     var isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
-    var DEFAULT_BILL = { address: "Aevidine, Ahmedabad, Gujarat 380015, India", phone: "+91 90000 00000" };
+    /* NO INVENTED IDENTITY ON A REAL BILL (2026-08-04). This used to fall back to
+       "Aevidine, Ahmedabad, Gujarat 380015, India" and "+91 90000 00000" for any restaurant that
+       had not filled its Billing card — so a paying client's tax invoice carried another company's
+       address and a phone number that does not exist, next to a real bill number and, if set, a
+       real GSTIN. That is a document making a false statement about who issued it.
+       The GSTIN line below already refused to invent a value, with a comment saying why; the same
+       reasoning applies to the address and the phone. An empty value prints NO line at all
+       (the document handles it), which is the honest thing for a detail nobody has supplied.
+       RestaurantSettings deliberately leaves these blank for the same reason, so a Save can never
+       persist a fake — this makes the printer agree with that. */
     var FOOTERS = {
       "pizza-palace": "Grazie — a presto! 🍕",
       "sakura-sushi": "Arigato — mata kite ne 🍣",
@@ -94,14 +103,36 @@
     return {
       isDefault: isDefault,
       name: s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")),
-      address: s.restaurant_address || (isDefault ? "" : DEFAULT_BILL.address),
-      phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : DEFAULT_BILL.phone),
+      address: s.restaurant_address || "",
+      phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : ""),
       // NEVER fall back to a placeholder GSTIN — a fake tax number on a real bill is illegal.
       // Empty prints no GSTIN line (the document handles it).
       gstin: s.gstin || "",
       prefix: s.invoice_prefix || "INV",
       footer: s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
       taxLabel: ((s.tax_label || "Tax") + "").trim() || "Tax",
+    };
+  }
+
+  /* billRows(d) — the whole-rupee money rows a bill SHOWS, worked out once so the paper and
+     every screen quote the same figures and every one of them adds up. See the long note at its
+     call site in billDocHtml for why this exists. Give it the exact figures (subtotal, discount,
+     total, taxRows) and it returns what to print:
+       subtotal · discount · taxable (= subtotal − discount) · tax · roundOff · total
+     'total' is passed straight through — this NEVER changes what is charged, it only decides how
+     the rows are written so they reconcile to it. The manager's bill card and bill modal render
+     from this too, so the screen can't contradict the paper (they used to, identically wrongly). */
+  function billRows(d) {
+    d = d || {};
+    var disc = Number(d.discount) || 0;
+    var subtotal = Math.round(parseFloat(d.subtotal) || 0);
+    var discount = Math.round(disc);
+    var taxable = subtotal - discount;
+    var tax = (d.taxRows || []).reduce(function (a, c) { return a + (Math.round(Number(c.amt)) || 0); }, 0);
+    var total = Math.round(parseFloat(d.total) || 0);
+    return {
+      disc: disc, subtotal: subtotal, discount: discount, taxable: taxable, tax: tax, total: total,
+      roundOff: total - ((disc > 0 ? taxable : subtotal) + tax),
     };
   }
 
@@ -147,9 +178,37 @@
       return '<div class="t"><span>' + esc(c.label) + " " + c.rate + '%</span><span>' + inr(c.amt) + "</span></div>";
     }).join("");
 
-    var disc = Number(d.discount) || 0;
+    /* ── THE BILL MUST ADD UP (2026-08-04) ──────────────────────────────────────────────
+       Every money row here is rounded to whole rupees on its own, while the TOTAL is worked
+       out at full precision and only rounded at the end. Those two facts disagree, and on a
+       DISCOUNTED bill they disagree often: replaying billMath + this document over whole-rupee
+       subtotals with the discounts the modal offers (5/10/15/20/25/50%), 7,468 of 22,806 bills
+       — 32.7% — printed rows that contradicted their own TOTAL. Undiscounted bills were fine
+       (0 of 4,901), which is why it went unnoticed for so long.
+
+       Two examples off the real numbers:
+         · ₹201, 15% off → Taxable 171 + CGST 5 + SGST 4 = 180, but the TOTAL line said 179.
+         · ₹201, 50% off → Discount −101 against Subtotal 201 and Taxable 101 (201−101 = 100).
+       The amount COLLECTED was always right; it is the arithmetic on a document headed "Tax
+       Invoice" that was wrong, and a guest who adds it up cannot be shown where the rupee went.
+
+       Fixed by making the paper obey its two identities by construction, and never by moving
+       money. The TOTAL stays exactly what the panel charges:
+         · Taxable value is DERIVED as Subtotal − Discount, so line 1 always holds.
+         · A "Round off" row carries whatever the whole-rupee rows cannot express, so
+           Taxable + tax + round-off == TOTAL always holds. That row is how every Indian POS
+           bill states this, it is at most a rupee or two, and it is the honest place to put it —
+           the alternative is silently bending one of the GST figures. */
+    var R = billRows(d);
+    var disc = R.disc, pSubtotal = R.subtotal, pDiscount = R.discount,
+        pTaxable = R.taxable, pTotal = R.total, roundOff = R.roundOff;
+
     var discBlock = disc > 0
-      ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(disc) + '</span></div><div class="t tx"><span>Taxable value</span><span>' + inr(d.taxable) + "</span></div>"
+      ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(pDiscount) + '</span></div><div class="t tx"><span>Taxable value</span><span>' + inr(pTaxable) + "</span></div>"
+      : "";
+    // Only ever shown when it is needed — a bill that already foots says nothing extra.
+    var roundBlock = roundOff !== 0
+      ? '<div class="t"><span>Round off</span><span>' + (roundOff < 0 ? "− " : "+ ") + inr(Math.abs(roundOff)) + "</span></div>"
       : "";
 
     var custBlock = (d.cust || d.custPhone)
@@ -246,10 +305,11 @@
 + "<colgroup><col><col style=\"width:calc(" + widest.qty + "ch + 8px)\"><col style=\"width:calc(" + widest.rate + "ch + 11px)\"><col style=\"width:calc(" + widest.amt + "ch + 11px)\"></colgroup>\n"
 + '<thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr></thead><tbody>' + rows + "</tbody></table>\n"
 + '<div class="totals">\n'
-+ '  <div class="t"><span>Subtotal</span><span>' + inr(d.subtotal) + "</span></div>\n"
++ '  <div class="t"><span>Subtotal</span><span>' + inr(pSubtotal) + "</span></div>\n"
 + "  " + discBlock + "\n"
 + "  " + taxRows + "\n"
-+ '  <div class="g"><span>TOTAL</span><span>' + inr(d.total) + "</span></div>\n"
++ "  " + roundBlock + "\n"
++ '  <div class="g"><span>TOTAL</span><span>' + inr(pTotal) + "</span></div>\n"
 + "</div>\n"
 + '<div class="foot">' + footer + "</div>\n"
 + pageScript(d.autoPrint);
@@ -375,6 +435,7 @@
     billIdentity: billIdentity,
     splitTax: splitTax,
     discPct: discPct,
+    billRows: billRows,
     inr: inr,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = API;

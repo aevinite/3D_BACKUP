@@ -164,7 +164,84 @@ const parcelBill = BILLDOC.billDocHtml({ name: "Test", lines: [], parcel: true, 
   ? ok('a parcel bill says "Parcel" with no number, and has no Table row')
   : bad("the parcel bill's top line is wrong", 'it must read "Parcel" with nothing where the table number goes');
 
+// ── 7. THE BILL ADDS UP (2026-08-04) ──────────────────────────────────────────────────────
+// Every row was rounded to whole rupees on its own while the TOTAL was rounded from full
+// precision, so a DISCOUNTED bill's rows contradicted its own total 32.7% of the time (measured:
+// 7,468 of 22,806 over the discounts the modal offers). Undiscounted bills were always fine,
+// which is how it survived so long. These replay the document itself and read the RENDERED rows
+// back out of the HTML — asserting what a person holding the paper can add up, not what we think
+// we computed. The money charged is never changed: the TOTAL is the anchor and a "Round off" row
+// carries whatever the whole-rupee rows cannot express.
+const readRows = (html) => {
+  const num = (s) => (s ? parseInt(String(s).replace(/[^0-9]/g, ""), 10) || 0 : 0);
+  const one = (re) => { const m = re.exec(html); return m ? m[1] : ""; };
+  const rowOf = (label) => one(new RegExp(`<div class="t[^"]*"><span>${label}[^<]*</span><span>([^<]*)</span>`));
+  const roundRaw = rowOf("Round off");
+  return {
+    subtotal: num(one(/<span>Subtotal<\/span><span>([^<]*)</)),
+    discount: num(rowOf("Discount")),
+    taxable: num(rowOf("Taxable value")),
+    tax: [...html.matchAll(/<div class="t"><span>(?:CGST|SGST|CESS)[^<]*<\/span><span>([^<]*)<\/span><\/div>/g)]
+      .reduce((a, m) => a + num(m[1]), 0),
+    roundOff: roundRaw.includes("−") ? -num(roundRaw) : num(roundRaw),
+    total: num(one(/class="g"><span>TOTAL<\/span><span>([^<]*)</)),
+  };
+};
+const r2 = (n) => Math.round(n * 100) / 100;
+const buildBill = (sub, disc, rate, comps) => {
+  const taxable = Math.max(0, sub - disc), tax = r2(taxable * rate), total = r2(taxable + tax);
+  return BILLDOC.billDocHtml({
+    name: "T", lines: [{ title: "X", qty: 1, price: sub }],
+    subtotal: sub, discount: disc, discLabel: BILLDOC.discPct(sub, disc), taxable, total,
+    taxRows: BILLDOC.splitTax(Math.round(tax), comps),
+  });
+};
+const CG = [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }];
+const HOTEL = [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }];
+const sweeps = [
+  ["a bill with a % discount", (f) => { for (let s2 = 200; s2 <= 900; s2++) for (const p of [5, 10, 15, 20, 25, 50]) f(s2, r2(s2 * p / 100), 0.05, CG); }],
+  ["a bill with no discount", (f) => { for (let s2 = 100; s2 <= 900; s2++) f(s2, 0, 0.05, CG); }],
+  ["a bill in paise at 18%", (f) => { for (let c = 10000; c < 24000; c += 7) { const s2 = c / 100; f(s2, r2(s2 * 0.13), 0.18, HOTEL); } }],
+];
+for (const [what, sweep] of sweeps) {
+  let n = 0, broke = null;
+  sweep((sub, disc, rate, comps) => {
+    n++;
+    const r = readRows(buildBill(sub, disc, rate, comps));
+    const base = disc > 0 ? r.taxable : r.subtotal;
+    const identity1 = disc > 0 ? (r.subtotal - r.discount === r.taxable) : true;
+    const identity2 = base + r.tax + r.roundOff === r.total;
+    if ((!identity1 || !identity2) && !broke) broke = { sub, disc, ...r };
+  });
+  if (broke) bad(`${what} does not add up on the paper (${n} cases checked)`, `e.g. ${JSON.stringify(broke)} — the rows must reconcile to the TOTAL`);
+  else ok(`${what} always adds up (${n} cases)`);
+}
+// The total is the ANCHOR: the fix may never move what is charged.
+{
+  const r = readRows(buildBill(201, 30.15, 0.05, CG));
+  r.total === 179 ? ok("the amount charged is untouched (₹201 less 15% still totals ₹179)")
+    : bad("the printed TOTAL has moved", `expected ₹179, got ₹${r.total} — this fix must never change money`);
+}
+// And the rule lives in ONE place, shared with the screen.
+typeof BILLDOC.billRows === "function"
+  ? ok("billRows() is exported, so the manager's screen quotes the same figures as the paper")
+  : bad("billRows() is gone", "the screen would round its rows separately and contradict the bill again");
+/LFH_BILLDOC\.billRows\(/.test(read("public/panels/editor/app.js"))
+  ? ok("the manager panel renders its money rows from billRows()")
+  : bad("the manager panel rounds its own money rows again", "screen and paper drifted apart the last time this happened");
+
+// ── 8. NO INVENTED IDENTITY ON A TAX INVOICE ──────────────────────────────────────────────
+// A restaurant that had not filled its Billing card printed a hardcoded placeholder address and
+// a fake phone number on real bills, beside a real bill number.
+{
+  const bi = BILLDOC.billIdentity({}, { slug: "some-client", name: { en: "Some Client" } });
+  !bi.gstin && !bi.address && !bi.phone
+    ? ok("an unconfigured restaurant prints no GSTIN, no address and no phone (rather than a fake one)")
+    : bad("a bill can still print an invented address/phone/GSTIN",
+      `got address="${bi.address}" phone="${bi.phone}" gstin="${bi.gstin}" — an empty value prints no line, which is the honest thing`);
+}
+
 console.log(fails
   ? `\n${fails} check(s) FAILED — the bill or the ticket has more than one description again.`
-  : "\nAll checks passed — one bill, one ticket, one file, one numbering series.");
+  : "\nAll checks passed — one bill, one ticket, one file, one numbering series, and it adds up.");
 process.exit(fails ? 1 : 0);

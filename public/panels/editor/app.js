@@ -2346,6 +2346,13 @@ function dishNoTag(title) {
 function financialYear(when) {
   // FY of the INVOICE's OWN date, not "today" — reprinting a March invoice after 1 April must
   // keep its issued year. Falls back to now when no/invalid date is passed (legacy callers).
+  //
+  // That fallback was quietly doing all the work: the three reprint paths (the bill card's 🖨,
+  // the bill modal's Print, and the table-detail print) all built a stand-in session object and
+  // left invoice_at OUT, so every reprint of a recorded bill was stamped with TODAY's financial
+  // year. Once the year turned, a March bill reprinted as INV/2026-27/000042 — a second identity
+  // for one sale, colliding with the real 2026-27 invoice 42, in exactly the window when people
+  // come back asking for copies. They pass invoice_at now (the bills endpoint has always sent it).
   const d = when ? new Date(when) : new Date();
   const base = isNaN(d.getTime()) ? new Date() : d;
   const y = base.getFullYear();
@@ -2369,6 +2376,11 @@ function invFmt(no, when) {
 // Returns { rate (decimal, e.g. 0.05), pct (5), components:[{label,rate%}] }.
 function taxModel(settings) {
   const s = settings || {};
+  // "This restaurant charges no tax" — the explicit flag (lib/tax.ts taxExempt, SQL
+  // lfh_effective_tax_rate). Deleting every tax row used to leave the fallback to substitute 5%,
+  // so the settings card read "Total tax: 0%" while the printer added CGST+SGST anyway, and a
+  // composition-scheme restaurant (which may not charge the diner GST at all) could not be set up.
+  if (s.tax_exempt === true) return { rate: 0, pct: 0, components: [] };
   const comps = Array.isArray(s.tax_components) ? s.tax_components
     .map((c) => ({ label: String(c && c.label || "").trim(), rate: Number(c && c.rate) || 0 }))
     .filter((c) => c.label && c.rate > 0) : [];
@@ -2417,11 +2429,27 @@ function billMath(orders) {
   const disc = live.reduce((a, o) => a + (parseFloat(o.discount) || 0), 0);
   const taxable = Math.max(0, subtotal - disc);
   const tm = taxModel(state.data.settings);
-  const rate = tm.rate;
+  // THE RATE THE ORDER WAS ACTUALLY CHARGED AT, not whatever the settings say right now
+  // (orders.tax_rate, mig 269). Two things were wrong without it:
+  //   · A BANQUET is taxed at its own rate (18% where set, mig 239) and nothing outside the
+  //     banquet screen knew. This function is what the Bills tab shows AND what the payment
+  //     sheet asks for, so a ₹100,000 banquet printed ₹118,000 and asked the manager to
+  //     collect ₹105,000 — the restaurant short ₹13,000 on its biggest sale of the month.
+  //   · Correcting the tax setup re-priced bills that had already been printed and paid.
+  // A bill is one party's orders, so they share a rate; take the first stamped one and fall
+  // back to the restaurant's current setting for rows from before the column existed.
+  const stamped = live.find((o) => Number(o.tax_rate) > 0);
+  const rate = stamped ? Number(stamped.tax_rate) : tm.rate;
   const tax = Math.round(taxable * rate * 100) / 100;
   const total = Math.round((taxable + tax) * 100) / 100;
-  // components carried through so the printed bill can itemise each named tax.
-  return { subtotal, disc, taxable, rate, tax, total, taxComponents: tm.components };
+  // Components carried through so the printed bill can itemise each named tax — but ONLY when
+  // they actually describe THIS bill's rate. A banquet charged at 18% must not be itemised with
+  // the dine-in "CGST 2.5% + SGST 2.5%" labels: splitTax would still hand out the right rupees,
+  // under percentages that don't add up to what was charged. Mismatch ⇒ hand back none, and
+  // printBill's 50/50 fallback labels them at the real rate.
+  const compPct = tm.components.reduce((a, c) => a + (Number(c.rate) || 0), 0);
+  const compsMatch = tm.components.length > 0 && Math.abs(compPct / 100 - rate) < 0.0001;
+  return { subtotal, disc, taxable, rate, tax, total, taxComponents: compsMatch ? tm.components : [] };
 }
 // discPct(m): the discount as a PERCENTAGE of the pre-discount subtotal (owner, 2026-08-01: "in
 // the bill it should show how much percentage of discount you have given — and on the printed bill
@@ -2430,6 +2458,25 @@ function billMath(orders) {
 // waiter panel and the guest's own bill needed the same figure and were about to round it their
 // own way. This is the one-line door onto it; the rule itself is written down once.
 function discPct(subtotal, disc) { return LFH_BILLDOC.discPct(subtotal, disc); }
+
+// moneyRowsHtml(): the Subtotal / Discount / Tax / Round-off rows a bill SHOWS on screen —
+// the same figures, from the same rule, as the printed bill (LFH_BILLDOC.billRows).
+//
+// They used not to be. Each row was rounded on its own with inr() while the total was rounded
+// from full precision, so a discounted bill's rows contradicted its own total about a third of
+// the time — ON PAPER AND ON THIS SCREEN, identically, which is why staff could not explain the
+// missing rupee to a guest either. The rule now lives once, in billdoc.js, and both read it.
+// `opts.taxPct` prints the rate next to the tax word where the caller knows it.
+function moneyRowsHtml(sub, disc, tax, total, opts = {}) {
+  const R = LFH_BILLDOC.billRows({ subtotal: sub, discount: disc, total, taxRows: [{ amt: tax }] });
+  const pct = opts.taxPct != null ? ` ${opts.taxPct}%` : "";
+  return `
+    <div class="ord-sub"><span>Subtotal</span><span>${inr(R.subtotal)}</span></div>
+    ${R.disc > 0 ? `<div class="ord-disc">Discount${discPct(sub, R.disc) ? ` (${discPct(sub, R.disc)})` : ""}<span>− ${inr(R.discount)}</span></div>
+    <div class="ord-sub"><span>Taxable value</span><span>${inr(R.taxable)}</span></div>` : ""}
+    ${R.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())}${pct}</span><span>${inr(R.tax)}</span></div>` : ""}
+    ${R.roundOff !== 0 ? `<div class="ord-sub"><span>Round off</span><span>${R.roundOff < 0 ? "− " : "+ "}${inr(Math.abs(R.roundOff))}</span></div>` : ""}`;
+}
 
 // The item lines of a merged bill, shared by the LIVE card and the RECORD card (Previous
 // bills renders the SAME receipt UI as Live since 2026-08-03 — one card design, two moods).
@@ -2515,9 +2562,7 @@ function mergedOrderCardHtml(g) {
     </div>
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
-    <div class="ord-sub"><span>Subtotal</span><span>${inr(_m.subtotal)}</span></div>
-    ${disc > 0 ? `<div class="ord-disc">Discount${discPct(_m.subtotal, disc) ? ` (${discPct(_m.subtotal, disc)})` : ""}<span>− ${inr(disc)}</span></div>` : ""}
-    ${_m.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
+    ${moneyRowsHtml(_m.subtotal, disc, _m.tax, total, { taxPct: Math.round(_m.rate * 10000) / 100 })}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
     <div class="ord-actions">${billBtns}${stage}${freeBtn}</div>
   </div>`;
@@ -2858,10 +2903,9 @@ function billRecordCardHtml(b) {
   const liveOrders = g.filter((o) => o.status !== "cancelled");
   const itemsHtml = liveOrders.length ? ordItemsHtml(liveOrders)
     : `<div class="ord-line"><span class="ol-name ord-cancel-note">This bill was cancelled — no charge.</span></div>`;
-  const moneyRows = liveOrders.length ? `
-    <div class="ord-sub"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-    ${m.disc > 0 ? `<div class="ord-disc">Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}<span>− ${inr(m.disc)}</span></div>` : ""}
-    ${m.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(m.rate * 10000) / 100}%</span><span>${inr(m.tax)}</span></div>` : ""}` : "";
+  const moneyRows = liveOrders.length
+    ? moneyRowsHtml(m.subtotal, m.disc, m.tax, m.total, { taxPct: Math.round(m.rate * 10000) / 100 })
+    : "";
   return `<div class="card ord-card ${cls} ${b.paid ? "is-paid" : ""} ord-record" data-bill-open="${esc(b.key)}" role="button" tabindex="0" title="Open this bill">
     <div class="ord-top">
       ${kots.length ? `<span class="kot-chip" title="Kitchen tickets">#${esc(kots[0])}${kots.length > 1 ? ` +${kots.length - 1}` : ""}</span>` : ""}
@@ -2900,10 +2944,7 @@ function parcelRecordCardHtml(p) {
   const itemsHtml = cancelled
     ? `<div class="ord-line"><span class="ol-name ord-cancel-note">This parcel was cancelled — no charge.</span></div>`
     : (lines || '<div class="ord-line"><span class="ol-name">no items recorded</span></div>');
-  const moneyRows = cancelled ? "" : `
-    <div class="ord-sub"><span>Subtotal</span><span>${inr(sub)}</span></div>
-    ${disc > 0 ? `<div class="ord-disc">Discount${discPct(sub, disc) ? ` (${discPct(sub, disc)})` : ""}<span>− ${inr(disc)}</span></div>` : ""}
-    ${tax > 0.004 ? `<div class="ord-sub"><span>${esc(taxLabel())}</span><span>${inr(tax)}</span></div>` : ""}`;
+  const moneyRows = cancelled ? "" : moneyRowsHtml(sub, disc, tax, total);
   return `<div class="card ord-card ${cls} ${p.paid && !cancelled ? "is-paid" : ""} ord-record">
     <div class="ord-top">
       ${p.kot_no != null ? `<span class="kot-chip" title="Kitchen ticket">#${esc(p.kot_no)}</span>` : ""}
@@ -2946,7 +2987,7 @@ function printBillFromKey(key) {
     : pool.filter((o) => o.session_id === key);
   if (!g.length) { toast("Couldn't load that bill to print", "err"); return; }
   const o0 = g[0];
-  printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
+  printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no, invoice_at: o0.invoice_at }, g);
 }
 // Expand one bill into a modal: full item list + totals + Print / Restore / Close.
 // May the current viewer DELETE a bill? Admin + owner always (higherView); a real manager
@@ -3045,7 +3086,7 @@ function openBillModal(key) {
   document.addEventListener("keydown", onEsc);
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.querySelector("[data-bm-close]").onclick = close;
-  wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
+  wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no, invoice_at: o0.invoice_at }, g);
   const restoreBtn = wrap.querySelector("[data-bm-restore]");
   if (restoreBtn) restoreBtn.onclick = async () => { close(); await restoreBill(g); };
   // Delete a CANCELLED bill permanently (owner 2026-07-24). deleteOrders() itself REQUIRES a
@@ -5138,7 +5179,7 @@ function renderEditor() {
         const os = ordersInGroup(btn.dataset.printGroup);
         if (!os.length) return;
         const o0 = os[0];
-        printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, os);
+        printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no, invoice_at: o0.invoice_at }, os);
       };
     });
     ed.querySelectorAll("[data-sess-del]").forEach((btn) => {

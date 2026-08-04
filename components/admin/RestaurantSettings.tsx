@@ -23,7 +23,7 @@ type Draft = Record<string, unknown>;
 // Every settings-row field this tab owns (used for the dirty-diff and the save patch).
 const KEYS = [
   "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone", "gstin",
-  "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
+  "invoice_prefix", "bill_footer", "tax_components", "tax_rate", "tax_exempt",
   "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
   "table_count", "table_seats", "table_names",
@@ -300,7 +300,17 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
     const subtotal = lines.reduce((a, l) => a + l.qty * l.price, 0);
     const discount = 50;
     const taxable = subtotal - discount;
-    const used = comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0);
+    // THE PREVIEW HAS TO USE THE PRINTER'S FALLBACK, NOT ITS OWN (2026-08-04). With no named
+    // components this built taxRows from an EMPTY list — no tax lines, total = taxable — while
+    // printBill() substitutes a 50/50 CGST/SGST pair at the effective rate and lib/billPreview.ts
+    // does the same. So an admin could set a bill up here, see ₹1,530, approve it, and the guest
+    // was handed ₹1,607. That is precisely the "approve the preview, hand over something else"
+    // fault that billdoc.js was created to end, still alive in the one preview nobody re-checked.
+    const exempt = draft.tax_exempt === true;
+    const configured = comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0);
+    const fallbackPct = (Number(draft.tax_rate) > 0 ? Number(draft.tax_rate) : 0.05) * 100;
+    const used = exempt ? [] : (configured.length ? configured
+      : [{ label: "CGST", rate: fallbackPct / 2 }, { label: "SGST", rate: fallbackPct / 2 }]);
     const rateSum = used.reduce((a, c) => a + Number(c.rate), 0);
     const taxWhole = Math.round((taxable * rateSum) / 100);
     const bi = BILLDOC.billIdentity(draft, restForDoc());
@@ -674,6 +684,28 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           The taxes that make up your total (e.g. <b>CGST 2.5%</b> + <b>SGST 2.5%</b>). Each prints as its own
           line; on screen they show merged as one “{taxWord} <b>{compTotal}%</b>” line — the split and the total can never disagree.
         </p>
+        {/* "WE DON'T CHARGE TAX" HAD TO BE SAYABLE. Emptying the list below did NOT mean it —
+            with no rows the rate falls back to 5% and the printer added it anyway, so the card
+            said 0% and the guest paid tax. A composition-scheme restaurant (which legally may
+            not put GST on a diner bill) had no way to be set up at all. */}
+        <label style={{ display: "flex", gap: 9, alignItems: "flex-start", margin: "10px 0 14px", maxWidth: 560, cursor: "pointer" }}>
+          <input type="checkbox" checked={draft.tax_exempt === true} disabled={!loadOk || busy}
+            onChange={(e) => set("tax_exempt", e.target.checked)} style={{ marginTop: 3 }} />
+          <span style={{ fontSize: 13 }}>
+            <b>This restaurant adds no tax to a bill.</b>
+            <span className="hint" style={{ display: "block", marginTop: 2 }}>
+              The bill prints no tax line and the total is the food value. Tick this for a
+              composition-scheme restaurant (it pays the flat 5% itself and may not charge the
+              diner), or if you are simply not registered. Leaving the list below empty does
+              <b> not</b> mean this — without this tick the bill falls back to 5%.
+            </span>
+          </span>
+        </label>
+        {draft.tax_exempt === true && (
+          <p className="hint" style={{ color: "var(--adm-warn, #f59e0b)", maxWidth: 560 }}>
+            No tax is being added, so the rows below are ignored until you untick it.
+          </p>
+        )}
         <div style={{ display: "grid", gap: 8, maxWidth: 480 }}>
           {comps.map((c, i) => (
             <div key={i} style={{ display: "grid", gridTemplateColumns: "1fr 92px 22px 36px", gap: 8, alignItems: "center" }}>

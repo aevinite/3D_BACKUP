@@ -7,8 +7,22 @@
 //   GET  ?restaurant_id=<uuid>  scope to one restaurant
 //        ?state=<bucket>        filter to one state bucket
 //        ?limit=<n>             cap (default 200, max 500)
+//        ?before=<iso>          "Load more" cursor — bills created before this instant
+//        ?from=<iso>&?to=<iso>  a date window, so an OLD bill can be reached at all
+//        ?q=<text>              find one bill by its bill no / invoice no / table
 //        ?trail=<sessionId>     instead of the list, return that ONE bill's action trail
 //   POST { action:'delete'|'restore', sessionId, reason? }  admin soft-delete / restore ANY bill
+//
+// THE ADMIN MUST BE ABLE TO REACH A DELETED BILL AT ANY TIME (owner, 2026-08-04: "admin can see
+// it and he can reopen at any time"). Until now this endpoint read the newest ~200 sessions
+// ACROSS ALL RESTAURANTS and only then filtered to the chosen state — so pressing "🗑️ Deleted"
+// did not search for deleted bills, it searched inside that window. On a two-restaurant day 200
+// sessions is comfortably less than a day, which meant a bill deleted YESTERDAY was already
+// unreachable, the chip could read 0 while deleted bills existed, and the "you can restore them"
+// promise (and the 90-day retention behind it) could not be kept. Nowhere else in the product
+// lists deleted bills: /aevinite/recycle holds restaurants and owners only, and the owner panel
+// shows a deletion as an audit LINE with no restore. This screen is the whole story, so the
+// filter now runs in the DATABASE, with a date window, a search and a cursor.
 //
 // Egress-safe: sessions capped + scoped, orders fetched once by session-id set, explicit
 // column lists, no select("*") on the hot path.
@@ -69,9 +83,39 @@ export async function GET(req: NextRequest) {
   }
 
   // ── The ledger list ─────────────────────────────────────────────────────────
+  const before = url.searchParams.get("before") || "";      // "Load more" cursor
+  const from = url.searchParams.get("from") || "";           // date window start
+  const to = url.searchParams.get("to") || "";               // date window end
+  const q = (url.searchParams.get("q") || "").trim().slice(0, 40);
+  const isIso = (s: string) => !!s && !Number.isNaN(Date.parse(s));
+
   let sq = sb.from("sessions").select(SESSION_COLS).order("created_at", { ascending: false }).limit(limit);
   if (rid && isUuid(rid)) sq = sq.eq("restaurant_id", rid);
-  const [sessQ, restsQ] = await Promise.all([sq, sb.from("restaurants").select("id, name").is("deleted_at", null)]);
+  // DELETED is the one state that lives on the session row itself, so it can be asked for
+  // directly instead of being sieved out of a window. A whole-bill delete ALWAYS tombstones the
+  // session (lib/softDelete.ts stamps it once the last live order goes, and the delete branch
+  // below stamps an order-less bill directly), so `deleted_at is not null` is exactly the
+  // "deleted" bucket — and idx_sessions_deleted (mig 188) already covers it.
+  if (stateFilter === "deleted") sq = sq.not("deleted_at", "is", null);
+  // A date window + a cursor are what let the admin walk back past the newest page at all.
+  if (isIso(before)) sq = sq.lt("created_at", new Date(before).toISOString());
+  if (isIso(from)) sq = sq.gte("created_at", new Date(from).toISOString());
+  if (isIso(to)) sq = sq.lte("created_at", new Date(to).toISOString());
+  // Search jumps straight to one bill by the numbers a person actually has in front of them.
+  // Digits → bill_no / invoice_no; anything else → the table it was on.
+  if (q) {
+    const m = q.match(/(\d+)(?!.*\d)/);              // last run of digits, so "INV/2026-27/000042" → 42
+    const n = m ? parseInt(m[1], 10) : NaN;
+    sq = Number.isFinite(n) ? sq.or(`bill_no.eq.${n},invoice_no.eq.${n}`) : sq.eq("table_number", q);
+  }
+
+  // The REAL number of deleted bills, counted in the database rather than inside the page — the
+  // chip said "0" while deleted bills existed, which is the worst possible thing for the one
+  // screen whose job is proving no sale quietly vanished. Rows-free head count, so it is cheap.
+  let delCountQ = sb.from("sessions").select("id", { count: "exact", head: true }).not("deleted_at", "is", null);
+  if (rid && isUuid(rid)) delCountQ = delCountQ.eq("restaurant_id", rid);
+
+  const [sessQ, restsQ, delQ] = await Promise.all([sq, sb.from("restaurants").select("id, name").is("deleted_at", null), delCountQ]);
   if (sessQ.error) return NextResponse.json({ error: sessQ.error.message }, { status: 500 });
 
   const sessions = (sessQ.data || []) as unknown as BillSession[];
@@ -79,7 +123,7 @@ export async function GET(req: NextRequest) {
 
   // Orders for exactly these sessions — one scoped read, grouped in JS.
   const sessionIds = sessions.map((s) => s.id);
-  let ordersBySession = new Map<string, BillOrder[]>();
+  const ordersBySession = new Map<string, BillOrder[]>();
   if (sessionIds.length) {
     const oQ = await sb.from("orders").select(ORDER_COLS).in("session_id", sessionIds).limit(5000);
     if (oQ.error) return NextResponse.json({ error: oQ.error.message }, { status: 500 });
@@ -104,14 +148,26 @@ export async function GET(req: NextRequest) {
     for (const b of bills) b.invoiceGens = genBy.get(b.sessionId) || 0;
   }
 
-  // Bucket counts BEFORE the state filter, so the filter chips always show totals.
+  // Bucket counts for the chips. The derived states (running / settled / pay-later / on-house /
+  // closed-unpaid) can only be worked out by rolling a session up with its orders, so those are
+  // counts WITHIN the page being shown and are labelled as such by the UI. DELETED is different:
+  // it is a real column, so it gets the true database count and can never under-report.
   const counts: Record<string, number> = {};
   for (const b of bills) counts[b.state] = (counts[b.state] || 0) + 1;
+  counts.deleted = delQ.count ?? counts.deleted ?? 0;
 
   if (stateFilter) bills = bills.filter((b) => b.state === stateFilter);
 
+  // The cursor for "Load more": the oldest bill on this page. Null once a page comes back short,
+  // which is how the UI knows it has reached the end rather than guessing from the count.
+  const full = sessions.length >= limit;
+  const nextBefore = full && bills.length ? bills[bills.length - 1].at || null : null;
+
   const restaurants = (restsQ.data || []).map((r) => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name));
-  return NextResponse.json({ bills, counts, total: bills.length, restaurants, generatedAt: new Date().toISOString() });
+  return NextResponse.json({
+    bills, counts, total: bills.length, restaurants,
+    deletedTotal: delQ.count ?? 0, nextBefore, generatedAt: new Date().toISOString(),
+  });
 }
 
 // ── Admin soft-delete / restore ANY bill ───────────────────────────────────────
@@ -134,7 +190,11 @@ async function postImpl(req: NextRequest) {
   const rid = sess.restaurant_id;
 
   if (action === "delete") {
+    // A REASON IS REQUIRED, as it is for a manager's delete and for every void. This is the
+    // strongest removal in the product — an admin taking out any bill on any restaurant — and it
+    // was the one that could leave "no reason recorded" on the Removals record the owner reads.
     const reason = String(body?.reason || "").trim().slice(0, 200);
+    if (!reason) return NextResponse.json({ error: "A reason is required to delete a bill." }, { status: 400 });
     const orderRows = (await sb.from("orders").select("id, total").eq("session_id", sessionId).is("deleted_at", null)).data as { id: string; total: number | null }[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
@@ -164,7 +224,9 @@ async function postImpl(req: NextRequest) {
     const ids = (orderRows || []).map((o) => o.id);
     const res = await restoreOrders(rid, ids);
     // Un-tombstone the session itself (covers the no-orders case + belt for the rest).
-    await sb.from("sessions").update({ deleted_at: null, deleted_by: null, deleted_by_id: null, delete_reason: null }).eq("id", sessionId);
+    // Scoped by restaurant like every other write on this route — rid came from this very
+    // session two reads ago, so the row was already right; the missing pair was a consistency gap.
+    await sb.from("sessions").update({ deleted_at: null, deleted_by: null, deleted_by_id: null, delete_reason: null }).eq("id", sessionId).eq("restaurant_id", rid);
     invalidateFloor(rid);
     await logAction("admin", "bill_restore", { restaurant_id: rid, table_number: sess.table_number, detail: `admin restored bill${sess.bill_no ? ` #${sess.bill_no}` : ""}` });
     return NextResponse.json({ ok: true, restored: res.restored });

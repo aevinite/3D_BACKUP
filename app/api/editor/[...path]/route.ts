@@ -876,8 +876,23 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // customer_name: that is a SYNTHETIC field the enrichment below attaches from
       // session_members, not a column. The no-param floor read keeps select("*") — the live
       // board renders every column and RT_VOLATILE/boardSig depend on the full row shape.
-      const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
+      const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at,tax_rate";
       let oq = sb.from("orders").select(billsMode ? BILLS_COLS : "*").eq("restaurant_id", rid);
+      // A DELETED BILL LEAVES THIS PANEL ENTIRELY (owner, 2026-08-04: "it will show only to
+      // admin — it will delete from manager and stuff like that").
+      //
+      // It did not. `softDeleteOrders` stamps `deleted_at` AND `archived`, and the manager's
+      // buckets read `archived` as "freed" — so a deleted bill simply moved from Live into the
+      // Bills record and sat there, fully readable, printable and restorable by the very person
+      // who deleted it. The panel has never referenced `deleted_at` at all (0 occurrences in
+      // app.js), so the only place this can be enforced is here, which is also the right place:
+      // a stale panel or a direct call cannot see round it.
+      //
+      // Deliberately NOT applied to /stats, /zreport or the GST report: a deleted bill still
+      // counts in the day's takings and the tax return (docs/COMPLIANCE-GUARDRAILS.md — "Z-report
+      // includes voids/deletes"). Hiding a sale from the OPERATOR is a permissions decision;
+      // hiding it from the RECORDS is the illegal one. Only the working list is filtered.
+      oq = oq.is("deleted_at", null);
       if (wantsWindow) oq = oq.gte("created_at", windowStartIso);
       const histQ = sp.get("history") ? (sp.get("q") || "").trim() : "";
       if (histQ) {
@@ -1098,7 +1113,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // stays complete even if PostgREST's db-max-rows is configured below 1000 (a fixed +1000
       // step would break early and undercount there). Hard cap the loop as a safety belt.
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status,tip")
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status,tip,tax_rate")
           .eq("restaurant_id", rid).gte("created_at", since)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
         orders.push(...page);
@@ -1134,7 +1149,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       for (const g of groups.values()) {
         const sub = g.reduce((a, o) => a + (Number(o.subtotal) || 0), 0);
         const d = g.reduce((a, o) => a + (Number(o.discount) || 0), 0);
-        const tx = Math.max(0, sub - d), t = r2(tx * rate), tot = r2(tx + t);
+        // THE RATE EACH BILL WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 269), not the rate
+        // configured right now. Re-deriving from the live setting meant an admin correcting the
+        // tax at 6pm made the 11pm day-close disagree with every bill already handed to a guest,
+        // and it re-taxed a BANQUET (its own 18%, mig 239) at the dine-in rate — reporting
+        // ₹5,000 of tax on a banquet that charged ₹18,000. `rate` stays the fallback for rows
+        // from before the column existed.
+        const stamped = g.find((o) => Number(o.tax_rate) > 0);
+        const gRate = stamped ? Number(stamped.tax_rate) : rate;
+        const tx = Math.max(0, sub - d), t = r2(tx * gRate), tot = r2(tx + t);
         gross += sub; disc += d; taxable += tx; tax += t; net += tot;
         // A bill counts as collected only when EVERY order on it is paid (a table settles in
         // one go — Mark paid pays the whole table — so this matches real behaviour).
@@ -1632,8 +1655,14 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           .select("id, name, phone, phone_verified, role, approved, removed, location_ok, joined_at, session:sessions(table_number, status)")
           .eq("restaurant_id", rid).order("joined_at", { ascending: false }).limit(500)
       );
-      const customers = must(await sb.from("customers").select("*").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
-      const blocklist = must(await sb.from("blocklist").select("*").eq("restaurant_id", rid).order("blocked_at", { ascending: false }));
+      // Named columns, and a cap on the blocklist. select("*") dragged every column of every
+      // guest row (including the DPDP consent/notes fields the screen never shows) and the
+      // blocklist read had no limit at all — the owner-side twin has done this properly since
+      // it was written (app/api/owner/customers/route.ts).
+      const customers = must(await sb.from("customers").select("phone, name, blocked, visits, consent, first_seen_at, last_seen_at").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
+      // The blocklist read had NO limit at all. Columns named to match what the panel renders
+      // (b.id / b.phone / b.table_number / b.reason) plus member_id, which unblocking needs.
+      const blocklist = must(await sb.from("blocklist").select("id, phone, table_number, member_id, reason, blocked_at").eq("restaurant_id", rid).order("blocked_at", { ascending: false }).limit(500));
       const orders = must(await sb.from("orders").select("member_id, total, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(3000));
       const calls = must(await sb.from("waiter_calls").select("member_id, note, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(3000));
       return ok({ members, customers, blocklist, orders, calls });
