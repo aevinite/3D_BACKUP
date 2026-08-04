@@ -9,10 +9,18 @@
 // that comes back.
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
+// Migrations get RENUMBERED when parallel branches merge (this one shipped as 290 and landed as
+// 294), so find it by CONTENT. A guard that hard-codes a filename breaks for everyone the moment
+// someone else's migration lands first.
+const migrationsWith = (needle) => {
+  const dir = join(root, "supabase/migrations");
+  return readdirSync(dir).filter((f) => f.endsWith(".sql") && readFileSync(join(dir, f), "utf8").includes(needle));
+};
 let pass = 0;
 const fails = [];
 const check = (name, cond, why) => {
@@ -51,6 +59,23 @@ check("the day sheet's dishes + hours use the SAME window as its money",
 check("the day-sheet cache key carries the date",
   /range === "day" \? `day:\$\{sp\.get\("date"\)\}`/.test(reportsRoute),
   "two different days would share one snapshot row");
+
+console.log("\n── 1b. BETWEEN MIDNIGHT AND 5AM, 'TODAY' IS STILL LAST NIGHT'S SHIFT ──");
+// The T5 re-run at 00:29 IST: the day sheet defaulted to the NEW calendar date, whose business
+// day has not started, so it showed ₹0 "Today" while the dashboard tile beside it read ₹46,935
+// for the shift still in progress. The server was right; the picker's default was a calendar date.
+check("the day picker's 'Today' is the BUSINESS date",
+  /const istToday = \(\) => new Date\(Date\.now\(\) \+ 5\.5 \* 3600_000 - BIZ_H \* 3600_000\)/.test(reportsPage),
+  "a calendar date makes the sheet read 0 between midnight and 5am");
+check("'Yesterday' steps back from the business date too",
+  /const yesterdayIso = \(\) => new Date\(Date\.now\(\) \+ 5\.5 \* 3600_000 - BIZ_H \* 3600_000 - 86_400_000\)/.test(reportsPage),
+  "otherwise Yesterday lands on the shift that is still open");
+check("a CUSTOM range still has the CALENDAR date as its ceiling",
+  /const istCalToday = \(\)/.test(reportsPage) && (reportsPage.match(/max=\{istCalToday\(\)\}/g) || []).length === 2,
+  "a GST filing period is calendar-based; the custom pickers must still reach today's date");
+check("the two DAY pickers keep the business ceiling",
+  (reportsPage.match(/max=\{istToday\(\)\}/g) || []).length === 2,
+  "you cannot file a day sheet for a shift that has not started");
 
 console.log("\n── 2. NEVER PRESENT A SAVED FIGURE AS A LIVE ONE ──");
 // The page rendered a snapshot of ₹12,285 while the live figure was ₹38,640, with no age and
@@ -122,9 +147,16 @@ check("document dates use the business-day-aware high bound",
 check("both inventory paths use docDateHi",
   (reportsRoute.match(/docDateHi\(to\)/g) || []).length >= 2,
   "the merged and single-restaurant list windows must agree");
+const docDateMigs = migrationsWith("lfh_doc_date_hi");
 check("the SQL side has the same rule",
-  /lfh_doc_date_hi/.test(read("supabase/migrations/290_document_dates_follow_the_business_day.sql")),
-  "the hero band and the detail list must describe the same window (mig 290)");
+  docDateMigs.length > 0,
+  "the hero band and the detail list must describe the same window — a migration must define lfh_doc_date_hi");
+check("the SQL helper steps back the business-day offset",
+  docDateMigs.some((f) => /interval '5 hours'[\s\S]{0,60}interval '1 microsecond'/.test(read("supabase/migrations/" + f))),
+  "without the 5-hour step-back a window ending at 05:00 IST lands on the next calendar date");
+check("every inventory function that filters a document date uses the helper",
+  docDateMigs.some((f) => (read("supabase/migrations/" + f).match(/lfh_doc_date_hi\(p_to\)/g) || []).length >= 5),
+  "one function left on the old rule makes the band and the list disagree");
 
 console.log("\n── 6. A CHART LABEL IS FOR A HUMAN ──");
 check("the group-trend fallback labels its buckets",
