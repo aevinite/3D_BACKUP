@@ -1998,24 +1998,37 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   .floor-head .floor-stats { order: 3; flex: 0 0 100%; flex-wrap: nowrap; overflow-x: auto; }
   .floor-head .fstat { flex: 0 0 auto; }
   .floor-head .floor-legend { order: 4; flex: 0 0 100%; }
-  /* KEEP THE COLUMN COUNT, KEEP THE TILE READABLE — AND KEEP EVERY TABLE REACHABLE.
-     His number is his number (he said so twice), so on a phone the floor does NOT drop columns to
-     fit: 12 columns stay 12 columns and the floor scrolls sideways instead.
-     ⚠️ THAT SCROLL HAD TO BE MADE REAL (sweep 2026-08-04). This rule used to be
-     `min-width: calc(var(--per-row) * 62px)` on the assumption — written in the comment right
-     here — that "the floor scrolls sideways when his number needs more room than the phone has".
-     It did not. `.editor:has(.floor-wrap)` is `overflow-x: hidden` (unconditionally, further up
-     this file) and so is `html, body` in this same phone block, so the 744px-wide grid was simply
-     CLIPPED: on an A35 at the default 12 per row, tables 7–12 and 19–24 were drawn and then thrown
-     away — measured, and no swipe, no scrollLeft and no scrollIntoView could reach them, so ~40% of
-     the restaurant did not exist on the owner's own phone (and on that day 8 of the 10 BUSY tables
-     were in the hidden columns, leaving a floor that read almost entirely "Free").
-     The fix keeps his column count and makes the promised scroller exist, on the GRID itself — not
-     on an ancestor, because `.editor` owning an x-scroll would force its y-axis to `auto` too and
-     take the phone's normal page scroll away (per the CSS spec), and because the header is a
-     SIBLING above the grid, so it stays put with no sticky trick needed.
-     `minmax(72px, 1fr)` is what makes the row overflow (and 72px is the smallest tile that still
-     fits all four of its rows — see .ft-act's flex-shrink note). */
+  /* (the grid's 72px minimum tile + sideways scroll live in their own <=1040px block just below
+     this one — they are needed at TABLET widths too, not only on a phone.) */
+}
+
+/* ── A TILE NEVER SHRINKS BELOW 72px, AND THE FLOOR SCROLLS INSTEAD (sweep 2026-08-05) ─────────
+   His column count is his instruction, given twice ("I want how much table can I put in a
+   particular one row … adjust according to screen size and all that shit doesn't count here"), so
+   the floor does NOT drop columns to fit a narrow screen — it keeps them and scrolls sideways.
+   72px is the MEASURED floor: below it the tile's four rows stop fitting and the browser collapses
+   the action row to 0x0 (see the flex-shrink note on .ft-act), so `＋ Take order` and the one-tap
+   accept become unclickable and the "0/3 served" line goes with them.
+
+   ⚠️ WHY <=1040px AND NOT <=760px. The first cut of this fix was phone-only, and a width sweep
+   immediately afterwards found the same dead buttons alive at TABLET widths: 768x1024, 800x1000 and
+   iPad-portrait 834x1194 each drew 53-58px tiles with **all 15 action buttons at 0x0** and only 20
+   of 30 tiles showing their line. Nothing was clipped there (`align-items: stretch` above fixed that
+   half) — but a button you cannot tap is as dead as a table you cannot reach. 1040px is where the
+   floor stops being side-by-side and becomes a stacked column, which is exactly the range where the
+   grid has to fend for itself.
+
+   ⚠️ AND WHY IT LIVES DOWN HERE, not up beside the other <=1040px rule. The base `.ftile-grid`
+   declaration (with `minmax(0, 1fr)`) is at ~line 1167 of this same stylesheet. A media query does
+   NOT raise specificity, so a copy of this block placed ABOVE that line loses to it and does
+   nothing — measured: tiles went to 22px and every button stayed 0x0, worse than before. It has to
+   come after. (Third time this file has bitten someone this way; see the two similar notes in the
+   injected KOT-menu stylesheet.)
+
+   The scroller is on the GRID, never an ancestor: `.editor` owning an x-scroll would force its
+   y-axis to `auto` too (per the CSS spec) and take the page scroll away, and the floor header is a
+   SIBLING above the grid, so it stays still while only the tables move. */
+@media (max-width: 1040px) {
   .ftile-grid {
     min-width: 0;                                  /* never push the box wider than the screen */
     grid-template-columns: repeat(var(--per-row, 6), minmax(72px, 1fr));
