@@ -1,0 +1,37 @@
+-- 276 · the two buckets holding a restaurant's private paperwork stop being public
+--
+-- FOUND BY the 2026-08-04 API sweep (finding F23). Two storage buckets were created public:
+--
+--   inv-media    purchase bills, waste photos, expense slips  (vendor names + amounts)
+--   issue-media  photos and VOICE NOTES a staff member records about a floor problem
+--
+-- A public bucket serves a file to anyone who has the address, with no login check on the file
+-- itself. The only thing in the way was not knowing the URL — and those URLs are stored in the
+-- database, returned by eight API routes, rendered on sixteen screens, and kept in every saved
+-- offline copy of those responses. Anywhere a link is forwarded, it keeps working forever.
+--
+-- ⚠️ ORDER MATTERS, AND THIS MIGRATION IS THE SECOND STEP.
+--   Flipping a bucket to private instantly breaks every public URL already stored — so the app must
+--   be able to sign links BEFORE this runs. `lib/mediaLinks.ts` does that (it turns the stored value
+--   into a fresh 4-hour signed link on the way out of each route) and it works on a bucket that is
+--   still public, so the code ships first and behaves identically. Then this flips the buckets and
+--   the same screens keep working, now genuinely private.
+--   If you are applying migrations to a database whose app code is OLDER than PR #767, DO NOT run
+--   this one yet — images would 400 until the code catches up.
+--
+-- NOT INCLUDED, on purpose:
+--   restaurant-logos  — a logo is rendered on the guest menu, to the public, by design.
+--   staff photos      — same bucket as logos; making them private is a separate decision, and a
+--                       staff photo is already optional everywhere.
+--
+-- Reversible in one line if anything is wrong: set `public = true` for the id concerned.
+
+update storage.buckets set public = false where id in ('inv-media', 'issue-media');
+
+-- A private bucket still needs the service role to be able to read/write it, which is what signs
+-- the links. Supabase grants that by default (service_role bypasses storage RLS), so there is
+-- nothing to add — this comment exists so the next person doesn't go looking for a missing policy.
+--
+-- Nothing else references these buckets: the guest app never reads them, and anon/authenticated
+-- have no reason to. If a future feature needs a guest to see one of these files, it must go
+-- through a signed link like everything else, never by making the bucket public again.

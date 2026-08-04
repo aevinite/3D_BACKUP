@@ -23,7 +23,7 @@ import { mergeParentTable } from "@/lib/tableMerge";
 import { rateAllowed } from "@/lib/rateLimit";
 import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
-import { worthLogging } from "@/lib/dbRefusal";
+import { worthLogging, pgError } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
@@ -231,7 +231,7 @@ const stampEdited = async (orderId?: string | null, rid?: string) => {
 // Keep the SQLSTATE on the thrown error: lib/dbRefusal reads it to tell a refused VALUE (400,
 // the person must see it) from the server failing to answer (500, saved and retried).
 const must = (r: any) => {
-  if (r.error) { const e: any = new Error(r.error.message); e.code = r.error.code; e.details = r.error.details; throw e; }
+  if (r.error) throw pgError(r.error); // pgError keeps code/details/hint — see lib/dbRefusal
   return r.data;
 };
  
@@ -1098,7 +1098,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const custSaveT = await saveBillCustomer(sb, rid, b as string, body);
       if (!custSaveT.ok) return err(custSaveT.message, 400);
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: null, p_actor: actor?.name || actor?.username || null });
-      if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened.", 409); throw new Error(error.message); }
+      if (error) { if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened.", 409); throw pgError(error); }
       await log("invoice_generate", { detail: `session ${b}`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
     }

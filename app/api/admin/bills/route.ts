@@ -178,7 +178,8 @@ async function postImpl(req: NextRequest) {
     if (amount <= 0) return NextResponse.json({ error: "Enter a credit amount greater than zero." }, { status: 400 });
     if (!reason) return NextResponse.json({ error: "A reason is required to issue a credit note." }, { status: 400 });
     const { data, error } = await sb.rpc("lfh_issue_credit_note", { p_session: sessionId, p_amount: amount, p_reason: reason, p_actor: "Admin" });
-    if (error) return NextResponse.json({ error: /cannot exceed/i.test(error.message) ? "The credit can't be more than the bill total." : error.message }, { status: 400 });
+    // Code first, prose as the fallback for a database without mig 275 (see that migration's header).
+    if (error) return NextResponse.json({ error: (error.code === "LFH02" || /cannot exceed/i.test(error.message)) ? "The credit can't be more than the bill total." : error.message }, { status: error.code === "LFH02" ? 409 : 400 });
     const row = Array.isArray(data) ? data[0] : data;
     await logAction("admin", "credit_note", { restaurant_id: rid, table_number: sess.table_number, detail: `admin credit note #${row?.credit_no} · ₹${amount} on bill${sess.bill_no ? ` #${sess.bill_no}` : ""} — ${reason}` });
     return NextResponse.json({ ok: true, creditNo: row?.credit_no });

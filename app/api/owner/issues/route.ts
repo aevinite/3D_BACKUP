@@ -6,6 +6,7 @@
 // Manager/kitchen/tablet raise issues via /api/editor/issue instead (panel-scoped).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { signRows } from "@/lib/mediaLinks";
 import { ownerScope, inScope, type OwnerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
@@ -51,9 +52,11 @@ export async function GET(req: NextRequest) {
   }
   const { data, error } = await q;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // signRows turns the stored value into a short-lived link on the way out (lib/mediaLinks.ts).
+  const signed = await signRows("issue-media", (data || []) as Record<string, unknown>[], ["image_url", "audio_url"]);
 
   // Attach restaurant names via a separate small fetch (avoids a PostgREST embed).
-  const list = (data || []) as Array<{ restaurant_id: string; status: string } & Record<string, unknown>>;
+  const list = signed as unknown as Array<{ restaurant_id: string; status: string } & Record<string, unknown>>;
   const rids = [...new Set(list.map((i) => i.restaurant_id))];
   const names: Record<string, string> = {};
   const slugs: Record<string, string> = {};

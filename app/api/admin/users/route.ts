@@ -25,6 +25,7 @@ import { logAction } from "@/lib/oplog";
 import { newWaiterTables } from "@/lib/tableAssign";
 import { PROFILE_FIELDS, mergeProfilePatch, jobPatchFrom } from "@/lib/staffProfile";
 import { capsForRole, isCapValue } from "@/lib/staffCaps";
+import { expectClash, clashJson } from "@/lib/clash";
 
 export const dynamic = "force-dynamic";
 
@@ -188,6 +189,22 @@ export async function PATCH(req: NextRequest) {
   const OWNER_OK = new Set(["set_profile", "set_job", "set_permissions"]);
   if (u.role === "owner" && !OWNER_OK.has(action))
     return bad("Owners are managed on the Owners page, not here.", 403);
+
+  // ── NO SILENT OVERWRITES, ON THE REACT SCREENS TOO (sweep 2026-08-04, finding F21) ────────────
+  // "First save wins, and the loser is told" was only ever enforced on the three vanilla panels:
+  // expectClash appeared in the editor/kitchen/tablet routes and NOWHERE else, and the guard that
+  // polices it (scripts/verify-clash-coverage.mjs) only scanned public/panels/*/app.js — so the
+  // whole owner + admin surface, including every person's PAY, was outside the rule AND outside the
+  // check, which reported green anyway. Two people on the staff profile could set different salaries
+  // and the second silently won.
+  //
+  // One gate for every action on this route, exactly like the panel dispatchers: it does nothing at
+  // all unless the screen said what it was editing FROM (the X-LFH-Expect header), so nothing
+  // changes for a caller that hasn't opted in. Scoped to the person's OWN restaurant.
+  {
+    const overwrite = await expectClash(req, String(u.restaurant_id || ""));
+    if (overwrite) return clashJson(overwrite);
+  }
 
   // ── the PROFILE actions (the panel in components/admin/StaffProfile) ───────
   if (action === "set_profile") {

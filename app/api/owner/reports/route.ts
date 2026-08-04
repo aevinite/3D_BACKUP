@@ -16,6 +16,7 @@
 // components are per-restaurant config and can't be merged across tenants.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { signRows } from "@/lib/mediaLinks";
 import { ownerScope } from "@/lib/ownerScope";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
@@ -652,7 +653,9 @@ export async function GET(req: NextRequest) {
           items: [...iMap.values()],
           vendors: [...vMap.values()].sort((a, b) => b.amount - a.amount),
           series: [...sMap.values()].sort((a, b) => a.bucket.localeCompare(b.bucket)),
-          expenses: expM.data || [], waste: wasteM.data || [],
+          // Multi-restaurant path — the same signing (lib/mediaLinks.ts). Both branches matter:
+          // an owner with several restaurants reads this one.
+          expenses: await signRows("inv-media", (expM.data || []) as Record<string, unknown>[], ["photo_url"]), waste: wasteM.data || [],
         };
       }
       // ── single restaurant (explicit ?rid, or the owner only has one with the module) ──
@@ -706,6 +709,8 @@ export async function GET(req: NextRequest) {
             .eq("restaurant_id", one).gte("expense_date", dFrom).lte("expense_date", dTo)
             .order("expense_date", { ascending: false }).limit(300)).data || []
         : [];
+      // Expense slips are private paperwork — sign them on the way out (lib/mediaLinks.ts).
+      const expensesOut = await signRows("inv-media", expenses as Record<string, unknown>[], ["photo_url"]);
       const waste = type === "invwaste"
         ? (await sb.from("inv_waste_entries")
             .select("id, item_id, qty_base, reason, note, unit_cost_snap, waste_date, created_by, voided_at")
@@ -745,7 +750,7 @@ export async function GET(req: NextRequest) {
         series: ((series.data ?? []) as Row[]).map((r) => ({
           bucket: String(r.bucket), purchased: num(r.purchased), used: num(r.used), wasted: num(r.wasted),
         })),
-        expenses, waste,
+        expenses: expensesOut, waste,
       };
     }
 

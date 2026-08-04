@@ -113,9 +113,20 @@ export default function StaffProfile({ userId, onClose, onChanged }: {
   const flash = (m: string) => { setNote(m); setTimeout(() => setNote((n) => (n === m ? "" : n)), 1800); };
 
   // One PATCH helper for every write on this screen.
-  const patch = useCallback(async (payload: object): Promise<any> => {
+  //
+  // `expect` = "this is what the row said when I opened it" (sweep 2026-08-04, finding F21). It
+  // becomes the X-LFH-Expect header, which lib/clash.ts → expectClash compares against the row NOW;
+  // if someone else changed it first, the server refuses with 409 and tells this person what it says
+  // instead of letting them overwrite it. This is the SAME one-line-at-the-call-site shape the
+  // vanilla panels use — the rule just never reached the React screens, and a person's PAY was the
+  // most valuable thing left unprotected. Omit it and nothing changes.
+  const patch = useCallback(async (payload: object, expect?: { fields: Record<string, unknown> }): Promise<any> => {
     const r = await fetch("/api/admin/users", {
-      method: "PATCH", headers: { "Content-Type": "application/json" },
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(expect ? { "X-LFH-Expect": JSON.stringify({ table: "staff_users", id: userId, fields: expect.fields }) } : {}),
+      },
       body: JSON.stringify({ id: userId, ...payload }),
     });
     const j = await r.json().catch(() => ({}));
@@ -490,7 +501,7 @@ function Personal({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: ()
         await patch({ action: "edit", name: f.name, phone: f.phone });
       }
       const { name, phone, ...profile } = f;
-      await patch({ action: "set_profile", profile, ...(p.role === "owner" ? { phone } : {}) });
+      await patch({ action: "set_profile", profile, ...(p.role === "owner" ? { phone } : {}) }, profileExpect(p, profile));
       flash("Saved"); reload(); onChanged?.();
     } catch (e: any) { flash(e.message); }
     finally { setBusy(false); }
@@ -526,7 +537,7 @@ function Emergency({ d, patch, reload, flash }: Kit) {
   useEffect(() => { const q = d.person.profile || {}; setF({ emg_name: q.emg_name || "", emg_relation: q.emg_relation || "", emg_phone: q.emg_phone || "" }); }, [d.person]);
   async function save() {
     setBusy(true);
-    try { await patch({ action: "set_profile", profile: f }); flash("Saved"); reload(); }
+    try { await patch({ action: "set_profile", profile: f }, profileExpect(d.person, f)); flash("Saved"); reload(); }
     catch (e: any) { flash(e.message); } finally { setBusy(false); }
   }
   return (
@@ -563,7 +574,15 @@ function Job({ d, patch, reload, flash }: Kit) {
 
   async function save() {
     setBusy(true);
-    try { await patch({ action: "set_job", job: f }); flash("Saved"); reload(); }
+    // What this screen was editing FROM — so if another manager changed the job while this card was
+    // open, the server refuses and says what it holds now instead of silently taking ours.
+    try {
+      await patch({ action: "set_job", job: f }, { fields: {
+        designation: p.designation ?? "", employment_type: p.employment_type ?? "",
+        joined_on: p.joined_on ?? "", left_on: p.left_on ?? "", shift_label: p.shift_label ?? "",
+      } });
+      flash("Saved"); reload();
+    }
     catch (e: any) { flash(e.message); } finally { setBusy(false); }
   }
   return (
@@ -593,6 +612,15 @@ function Job({ d, patch, reload, flash }: Kit) {
   );
 }
 
+
+// What the `profile` jsonb held for exactly the keys a card is about to write (sweep 2026-08-04).
+// Returns lib/clash.ts's dotted sub-key form, so a clash is judged per FIELD — editing an emergency
+// number can never be refused because somebody changed an unrelated part of the same jsonb column.
+function profileExpect(person: any, next: Record<string, unknown>): { fields: Record<string, unknown> } {
+  const before = (person?.profile || {}) as Record<string, unknown>;
+  return { fields: Object.fromEntries(Object.keys(next).map((k) => [`profile.${k}`, before[k] ?? ""])) };
+}
+
 // ── ⑥ pay + what has actually been paid ──────────────────────────────────────
 function Pay({ d, patch, reload, flash }: Kit) {
   const p = d.person;
@@ -606,7 +634,15 @@ function Pay({ d, patch, reload, flash }: Kit) {
 
   async function save() {
     setBusy(true);
-    try { await patch({ action: "set_job", job: f }); flash("Saved"); reload(); }
+    // THE MONEY. Two people on two devices setting different salaries was the exact case the
+    // no-silent-overwrites rule exists for, and this screen had no protection at all.
+    try {
+      await patch({ action: "set_job", job: f }, { fields: {
+        pay_type: p.pay_type ?? "", pay_amount: p.pay_amount ?? "",
+        pay_day: p.pay_day ?? "", pay_mode: p.pay_mode ?? "",
+      } });
+      flash("Saved"); reload();
+    }
     catch (e: any) { flash(e.message); } finally { setBusy(false); }
   }
   async function setPayroll(on: boolean) {
@@ -714,7 +750,7 @@ function Papers({ d, patch, reload, flash }: Kit) {
   useEffect(() => { const q = d.person.profile || {}; setF({ id_type: q.id_type || "", id_last4: q.id_last4 || "", upi_id: q.upi_id || "", bank_last4: q.bank_last4 || "", id_verified: !!q.id_verified }); }, [d.person]);
   async function save(next = f) {
     setBusy(true);
-    try { await patch({ action: "set_profile", profile: next }); flash("Saved"); reload(); }
+    try { await patch({ action: "set_profile", profile: next }, profileExpect(d.person, next)); flash("Saved"); reload(); }
     catch (e: any) { flash(e.message); } finally { setBusy(false); }
   }
   return (
@@ -801,7 +837,7 @@ function PrivateNote({ d, patch, reload, flash }: Kit) {
   useEffect(() => setV((d.person.profile || {}).notes || ""), [d.person]);
   async function save() {
     setBusy(true);
-    try { await patch({ action: "set_profile", profile: { notes: v } }); flash("Saved"); reload(); }
+    try { await patch({ action: "set_profile", profile: { notes: v } }, profileExpect(d.person, { notes: v })); flash("Saved"); reload(); }
     catch (e: any) { flash(e.message); } finally { setBusy(false); }
   }
   return (
@@ -884,7 +920,7 @@ function Danger({ d, patch, reload, onClose, onChanged }: Kit & { onClose: () =>
 }
 
 // ── small shared bits ────────────────────────────────────────────────────────
-type Kit = { d: Detail; patch: (payload: object) => Promise<any>; reload: () => void; flash: (m: string) => void };
+type Kit = { d: Detail; patch: (payload: object, expect?: { fields: Record<string, unknown> }) => Promise<any>; reload: () => void; flash: (m: string) => void };
 
 function Field({ label, v, on, type = "text", placeholder, wide, disabled }: {
   label: string; v: string; on: (v: string) => void; type?: string; placeholder?: string; wide?: boolean; disabled?: boolean;

@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { signRows } from "@/lib/mediaLinks";
 import { withIdempotency } from "@/lib/idempotency";
 import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { offPlanTable } from "@/lib/planTable";
@@ -33,7 +34,7 @@ import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
-import { worthLogging } from "@/lib/dbRefusal";
+import { worthLogging, pgError } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
@@ -352,7 +353,7 @@ const stampEdited = async (orderId?: string | null, rid?: string) => {
 // into a clean 500 (mirrors the editor server's `must`).
 
 const must = (r: any) => {
-  if (r.error) { const e: any = new Error(r.error.message); e.code = r.error.code; e.details = r.error.details; throw e; } // keep the SQLSTATE: lib/dbRefusal reads it to tell "bad value" (400) from "server trouble" (500)
+  if (r.error) throw pgError(r.error); // pgError keeps code/details/hint — see lib/dbRefusal // keep the SQLSTATE: lib/dbRefusal reads it to tell "bad value" (400) from "server trouble" (500)
   return r.data;
 };
 
@@ -1059,7 +1060,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     // Issues this restaurant has raised (newest first, open before resolved) — so the
     // manager can see what they've reported + its status. Scoped to THIS restaurant.
     if (p === "issues") {
-      return ok(must(await sb.from("issues").select("*").eq("restaurant_id", rid).order("status", { ascending: true }).order("created_at", { ascending: false }).limit(100)));
+      const rows = must(await sb.from("issues").select("*").eq("restaurant_id", rid).order("status", { ascending: true }).order("created_at", { ascending: false }).limit(100));
+      // A photo or voice note attached to a complaint is private paperwork: hand the screen a
+      // short-lived signed link, never the permanent public one (lib/mediaLinks.ts).
+      return ok(await signRows("issue-media", rows as Record<string, unknown>[], ["image_url", "audio_url"]));
     }
 
     // Platform (Zomato/Swiggy/takeaway) orders + the two operator toggles. Read
@@ -2769,7 +2773,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!custSave.ok) return err(custSave.message, 400);
       const genReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReason || null, p_actor: actorName });
-      if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw new Error(error.message); }
+      if (error) { if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw pgError(error); }
       // Say WHICH table and bill, not the session's uuid. The Activity log's "Where" column read
       // `session dce216b5-72d7-4ba2-…` — a value that identifies nothing to the person reading it
       // (2026-08-03). table_number also fills the column the log row renders on its own.
@@ -2820,7 +2824,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const wasTotal = (beforeVoid || []).reduce((s, o) => s + (Number(o.total) || 0), 0);
       const wasDiscount = (beforeVoid || []).reduce((s, o) => s + (Number(o.discount) || 0), 0);
       const { data, error } = await sb.rpc("lfh_void_invoice", { p_session: b, p_reason: voidReason, p_actor: actorName });
-      if (error) { if (/invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw new Error(error.message); }
+      if (error) { if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw pgError(error); }
       // The table + bill, never the session uuid (see invoice_generate above).
       await log("editor", "invoice_void", {
         restaurant_id: rid, table_number: ownsVoid.table_number ?? null,
@@ -2850,7 +2854,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (cnAmount <= 0) return err("Enter a credit amount greater than zero.", 400);
       if (!cnReason) return err("A reason is required to issue a credit note.", 400);
       const { data: cnData, error: cnErr } = await sb.rpc("lfh_issue_credit_note", { p_session: b, p_amount: cnAmount, p_reason: cnReason, p_actor: actorName });
-      if (cnErr) { if (/cannot exceed/i.test(cnErr.message)) return err("The credit can't be more than the bill total.", 400); throw new Error(cnErr.message); }
+      if (cnErr) { if (cnErr.code === "LFH02" || /cannot exceed/i.test(cnErr.message)) return err("The credit can't be more than the bill total.", 409); throw pgError(cnErr); }
       const cnRow = Array.isArray(cnData) ? cnData[0] : cnData;
       // Table + bill, never the session uuid (same rule as invoice_generate / invoice_void).
       await log("editor", "credit_note", {

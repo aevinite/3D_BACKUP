@@ -10,12 +10,14 @@ import { sendOwnerAlert, alertText } from "@/lib/alerts";
 
 export type RateKey =
   | "guest_order" | "staff_login" | "admin_login" | "manager_pin"
-  | "waiter_call" | "join_session" | "otp_request";
+  | "waiter_call" | "join_session" | "otp_request" | "password_change";
 
 // Friendly names for the phone ping (the DB rule labels aren't loaded here).
 const RATE_LABELS: Record<string, string> = {
   guest_order: "Guest orders", staff_login: "Staff / owner login", admin_login: "Admin login",
   manager_pin: "Manager PIN", waiter_call: "Waiter calls", join_session: "Join table", otp_request: "OTP requests",
+  // mig 274 — the "change my password" box, the one credential check that had no wall.
+  password_change: "Change-password attempts",
 };
 
 // How long the window was, in words ("5 min", "60 sec") — for the alert text only.

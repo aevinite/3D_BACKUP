@@ -7,6 +7,7 @@
 //     ?refresh=1 forces a live recompute. Response carries cachedAt for "updated X ago".
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { signRows } from "@/lib/mediaLinks";
 import { ownerScope } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { inventoryLadder } from "@/lib/tableTags";
@@ -132,7 +133,9 @@ export async function GET(req: NextRequest) {
             expenses: Number(sum.expenses_amt || 0),
           },
           low, negative,
-          expenses: expenses.data || [],
+          // Expense slips get a short-lived signed link, not the permanent public one
+          // (lib/mediaLinks.ts). Figures above were summed from the raw rows.
+          expenses: await signRows("inv-media", (expenses.data || []) as Record<string, unknown>[], ["photo_url"]),
           expTotals,
           purchases: purchases.data || [],
           wasteByReason,

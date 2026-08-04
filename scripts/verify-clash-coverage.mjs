@@ -44,6 +44,9 @@ const KNOWN_EXEMPT = [
 ];
 
 let problems = 0, valueEdits = 0, covered = 0;
+// Read a repo file, or null when it has moved (which is itself reported as a failure below —
+// a guard that silently skips a file it cannot find is a guard that stops guarding).
+const read = (f) => { try { return fs.readFileSync(f, "utf8"); } catch { return null; } };
 console.log("Clash coverage — value edits must not silently overwrite\n");
 
 for (const file of PANELS) {
@@ -70,6 +73,67 @@ for (const file of PANELS) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// PASS 2 — THE REACT SCREENS (added 2026-08-04, sweep finding F21)
+//
+// Until now this file scanned the three vanilla panels ONLY, and said so in a footnote. A footnote
+// is not a guard: the exit code was 0 while the entire owner + admin surface — every person's PAY,
+// their job, a restaurant's settings — could silently overwrite, because nothing there sent an
+// expectation and no route there read one.
+//
+// The React screens don't go through the outbox, so they can't be matched by URL path the way the
+// panels are. They are matched by the ACTION they send instead, which is how those routes dispatch.
+// Two things must be true for each, and BOTH are checked, because either alone is theatre:
+//   1. the CALL SITE sends what it was editing from (`expect:` → the X-LFH-Expect header), and
+//   2. the ROUTE reads it (`expectClash`), or the header goes nowhere.
+const REACT_VALUE_EDITS = [
+  {
+    file: "components/admin/StaffProfile.tsx",
+    route: "app/api/admin/users/route.ts",
+    // A typed value someone else can also type. `set_permissions` is a dropdown (a toggle whose
+    // second tap is visibly reflected) and `set_active`/`set_pin` are transitions, so they are not
+    // listed — same split as the panel pass above.
+    actions: ["set_job", "set_profile"],
+    // Stated exemptions, judged the same way the panel pass judges its own: a TOGGLE whose second
+    // tap is visibly reflected, and a one-way TRANSITION, are not conflicts.
+    exempt: [
+      { match: /in_payroll:\s*on/, why: "on/off the pay list is a toggle — the second tap is visibly reflected, and the amount itself IS protected" },
+      { match: /left_on:\s*new Date/, why: "marking someone as left is a one-way transition (it also switches the login off), not a value two people type" },
+      { match: /left_on:\s*""/, why: "un-marking a leaver is the undo of that transition — the same reasoning" },
+    ],
+  },
+];
+
+for (const spec of REACT_VALUE_EDITS) {
+  const src = read(spec.file);
+  if (!src) { console.log(`\n  ❌ ${spec.file} — not found (if it moved, update this guard)`); problems++; continue; }
+  const routeSrc = read(spec.route);
+  console.log(`\n${spec.file}  (React — matched by action, not by path)`);
+
+  // (2) first: does the route even read an expectation? If not, every call site below is theatre.
+  const routeReads = !!routeSrc && /expectClash\s*\(/.test(routeSrc);
+  if (routeReads) console.log(`  ✅ ${spec.route} reads the expectation (expectClash)`);
+  else { problems++; console.log(`  ❌ ${spec.route} NEVER CALLS expectClash — an X-LFH-Expect header sent from the screen would be ignored`); }
+
+  // (1) then each call site.
+  const lines = src.split(/\r?\n/);
+  lines.forEach((line, i) => {
+    const act = spec.actions.find((a) => line.includes(`"${a}"`));
+    if (!act) return;
+    valueEdits++;
+    // The expectation is usually the patch() call's SECOND argument, so it can be a few lines down.
+    const window = lines.slice(i, i + 8).join(" ");
+    const ex = (spec.exempt || []).find((e) => e.match.test(line));
+    // Case-INSENSITIVE on purpose: a helper that builds the expectation is usually camelCase
+    // (`profileExpect(...)`), and the first version of this check missed all four of them because
+    // it only looked for a lowercase "expect". A guard that misses the real shape of the fix is a
+    // guard that gets deleted.
+    if (/expect|fields\s*:/i.test(window)) { covered++; console.log(`  ✅ ${spec.file}:${i + 1}  ${act}`); }
+    else if (ex) { console.log(`  ➖ ${spec.file}:${i + 1}  ${act} — exempt: ${ex.why}`); }
+    else { problems++; console.log(`  ❌ ${spec.file}:${i + 1}  ${act} — VALUE EDIT WITH NO EXPECTATION\n       ${line.trim().slice(0, 110)}`); }
+  });
+}
+
 console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${problems} unprotected`);
 
 // BE HONEST ABOUT WHAT THIS DOES NOT SEE. A green tick here has been read as "every value edit in
@@ -77,7 +141,7 @@ console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${pr
 // they are the surfaces whose writes carry X-LFH-Expect through the offline queue. Saying so is
 // the difference between a guard and a false sense of one.
 console.log("\nNot covered by this check (by design — no expectation travels from these yet):");
-console.log("  · the OWNER panel and the ADMIN console (React, plain fetch — not outbox writes)");
+console.log("  · the OWNER panel's own writes (owner/settings, owner/staff — React, plain fetch)");
 console.log("  · public/panels/editor/inventory.js (its own fetch helper)");
 console.log("  · anything writing settings.table_names (table renames) or a bill's customer name");
 console.log("  Widening any of those means routing the write through the panel's api()/outbox first.");
