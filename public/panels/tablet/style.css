@@ -473,6 +473,14 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 .ordctl .talg { padding: 5px 11px; font-size: 12.5px; }
 /* "Avoid" allergen chips read red when ON (semantic), overriding the blue .chip.on. */
 .talg.on { background: rgba(239,68,68,0.18); border-color: rgba(239,68,68,0.6); color: #fca5a5; }
+/* ＋ Other — the chip that OPENS a box to type an allergy, rather than one you switch on.
+   Dashed outline so it reads as "add something", never as an allergy currently set; it has
+   no .on state by design. Covers both chip shapes this panel uses (.talg in the table view
+   and .optchoice in the take-order popup + the cart's whole-order row). */
+.talg.alg-other, .optchoice.alg-other { border-style: dashed; color: var(--gold); font-weight: 600; }
+.talg.alg-other:hover, .optchoice.alg-other:hover { background: rgba(212,165,116,0.12); }
+/* The whole-order avoid row under the cart lines (was a single text box until 2026-08-04). */
+.cart-alg { margin: 10px 0 12px; display: flex; flex-direction: column; gap: 6px; }
 /* STAFF EDIT mode (owner, 2026-06-17): per-dish qty steppers + note; the row gets a
    faint gold wash so it's obvious which order is being edited. */
 .iline.editing { background: rgba(212,165,116,0.06); }

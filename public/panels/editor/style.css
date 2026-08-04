@@ -2435,6 +2435,12 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .to-lbl { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
 .to-alg { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
 .to-alg-chip { cursor: pointer; }
+/* ＋ Other — the chip that OPENS a box to type an allergy, rather than one you switch on.
+   Dashed outline so it reads as "add something", never as an allergy that is currently set;
+   it deliberately has no .on state (tapping it opens a dialog). Same treatment wherever an
+   allergy list appears in this panel (take order, the dish popup, a placed KOT, ✎ Edit dish). */
+.alg-other { border-style: dashed !important; color: var(--gold); font-weight: 600; }
+.alg-other:hover { background: rgba(212, 165, 116, 0.12); }
 .to-note { width: 100%; box-sizing: border-box; padding: 9px 10px; border-radius: 9px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; font-size: 13.5px; resize: vertical; }
 .to-note:focus { outline: none; border-color: var(--gold); }
 .to-foot { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); }
