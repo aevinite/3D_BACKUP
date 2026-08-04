@@ -137,9 +137,31 @@ const echoesCode = /\$\{\s*reason|\breason\b(?!\s*\?)/.test(defaultArm) || !/"[^
   : bad("the over-the-limit wording invites a retry, which raises another limit alert");
 
 // ── 5. the saved-orders queue must never drop an order in silence ───────────────────────────
-/if \(j\.ok === false\) \{ await moveToFailed\(item, reasonMsg\(j\.reason\)\)/.test(outbox)
+// Asserted as the BEHAVIOUR (a duplicate carrying ok:false is moved to the failed list with
+// worded reason) rather than as one exact argument list. The old regex pinned
+// `reasonMsg(j.reason)` character for character, so it went red when that call legitimately
+// gained a second argument — the third time a check in this file has failed a refactor it should
+// have been indifferent to. Match the shape, not the spelling.
+/if \(j\.ok === false\)\s*\{\s*await moveToFailed\(item,\s*reasonMsg\(/.test(outbox)
   ? ok("a duplicate that carries a refusal is shown to the diner, not deleted")
   : bad("a saved order the server refuses still vanishes with no message");
+
+// …and the wording it is shown must be the PAST tense, because by definition it is a saved order
+// being refused later. The two live paths (the cart, the session gate) pass no flag and read in
+// the present tense; every call inside the queue must pass `queued: true`, or a diner is told
+// "please ask your server" about an order they placed twenty minutes ago.
+{
+  // CALL sites only — skip the declaration, whose own parameter list naturally contains no
+  // `queued: true` and was otherwise reported as a fault by a check meant to read calls.
+  const calls = outbox
+    .split(/\r?\n/)
+    .filter((l) => /reasonMsg\(/.test(l) && !/function reasonMsg/.test(l) && !/^\s*(\/\/|\*)/.test(l))
+    .map((l) => l.trim());
+  const bare = calls.filter((c) => !/queued:\s*true/.test(c));
+  bare.length === 0
+    ? ok(`all ${calls.length} refusals in the saved-order queue read in the past tense`)
+    : bad("a saved order's refusal reads like a live one", bare.map((c) => c.slice(0, 70)).join(" · "));
+}
 /tries = \(item\.tries \|\| 0\) \+ 1/.test(outbox) && /SERVER_MAX_TRIES/.test(outbox)
   ? ok("an order the system keeps refusing eventually becomes the diner's decision")
   : bad("the saved-order queue can still retry forever in silence");
