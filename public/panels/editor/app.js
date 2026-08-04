@@ -20,6 +20,19 @@ const ALLERGENS = [
   { slug: "soy", label: "🫘 Soy" },
   { slug: "fish", label: "🐟 Fish" },
 ];
+// The six above are only the COMMON ones. A real kitchen hears "no coriander", "no
+// garlic", "no ice" — so every allergy chip row ends in a ＋ Other chip that opens a
+// box to type one (owner, 2026-08-04: "there should always be other option for
+// allergy … then they will be able to add a new allergy"). A typed one is stored as
+// plain text next to the standard slugs, so it rides the SAME rails: onto the KOT
+// ("— no coriander") and never onto the bill.
+const ALG_STD = ALLERGENS.map((a) => a.slug);
+// Normalise a typed allergy: lowercase, collapse spaces, and strip a leading "no " so
+// "No Garlic" / "no-garlic" / "garlic" all store "garlic" (the UI prepends the "no").
+// (Commas become spaces — a comma is the separator these lists travel in.)
+const normAlg = (s) => String(s || "").replace(/,/g, " ").trim().toLowerCase().replace(/^no[\s-]+/, "").replace(/\s+/g, " ").slice(0, 24);
+// What a chip says: a standard slug shows its emoji + name, a typed one shows 🚫 + the word.
+const algLabel = (slug) => { const a = ALLERGENS.find((x) => x.slug === slug); return a ? a.label : "🚫 " + slug; };
 // Friendly singular names for each tab, used in headings like "New Dish".
 const TAB_LABEL = { items: "Dish", categories: "Category", filters: "Tag", general: "Settings" };
 
@@ -5087,11 +5100,14 @@ function renderEditor() {
     // Per-order allergen chips: optimistic toggle, then persist; the poll reconciles.
     ed.querySelectorAll(".oae-chip[data-alg]").forEach((chip) => {
       chip.onclick = async () => {
-        const id = chip.dataset.alg, slug = chip.dataset.slug;
+        const id = chip.dataset.alg;
         const o = (state.data.orders || []).find((x) => x.id === id);
         if (!o) return;
         const wasAllergies = [...(o.allergies || [])];   // what the screen was showing
         const cur = new Set((o.allergies || []).map((x) => String(x).toLowerCase()));
+        // ＋ Other → ask for the word, then treat it exactly like tapping a standard chip on.
+        let slug = chip.dataset.slug;
+        if (chip.dataset.algOther) { slug = await allergyPrompt(cur); if (!slug) return; }
         if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
         o.allergies = [...cur];          // flip the screen now
         opBegin(id); renderEditor();
@@ -8221,14 +8237,15 @@ function openDishEditModal(itemId, rerender) {
     const std = ALLERGENS.map((a) => `<span class="chip dish-alg-chip ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}">${esc(a.label)}</span>`).join("");
     // Custom allergens are their own chips — tap one to REMOVE it (same as a standard chip).
     const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip dish-alg-chip on" data-slug="${esc(s)}">${esc(labelFor(s))}</span>`).join("");
-    return std + cust;
+    // ＋ Other instead of a text box always sitting there (owner, 2026-08-04: "I don't want
+    // an allergy box, I want an Other option in the listed allergies").
+    return std + cust + `<span class="chip dish-alg-chip alg-other" data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</span>`;
   };
   const wrap = el(`<div class="sx-modal-overlay dish-edit-overlay"><div class="sx-modal dish-edit-modal">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Edit dish · ${esc(item.title)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body">
       <div class="dish-edit-lbl">⚠ Allergies to avoid <span class="muted small">— tap to add or remove</span></div>
       <div class="dish-alg-list"></div>
-      <div class="dish-edit-custom"><input type="text" class="dish-edit-custominput" placeholder="Type a custom allergen — e.g. water" maxlength="24"><button type="button" class="btn small dish-edit-customadd">Add</button></div>
       <div class="dish-edit-lbl" style="margin-top:15px">✎ Note for the kitchen</div>
       <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate"></textarea>
     </div>
@@ -8237,15 +8254,16 @@ function openDishEditModal(itemId, rerender) {
   document.body.appendChild(wrap);
   wrap.querySelector(".dish-edit-note").value = item.note || "";
   const listEl = wrap.querySelector(".dish-alg-list");
-  const input = wrap.querySelector(".dish-edit-custominput");
-  const bindChips = () => listEl.querySelectorAll("[data-slug]").forEach((c) => (c.onclick = () => {
-    const s = c.dataset.slug; working.has(s) ? working.delete(s) : working.add(s); redraw();
-  }));
+  const bindChips = () => {
+    listEl.querySelectorAll("[data-slug]").forEach((c) => (c.onclick = () => {
+      const s = c.dataset.slug; working.has(s) ? working.delete(s) : working.add(s); redraw();
+    }));
+    // ＋ Other → type an allergy the six don't cover; it joins the row as its own chip.
+    const other = listEl.querySelector("[data-alg-other]");
+    if (other) other.onclick = async () => { const v = await allergyPrompt(working); if (v) { working.add(v); redraw(); } };
+  };
   const redraw = () => { listEl.innerHTML = chipsHtml(); bindChips(); };
   redraw();
-  const addCustom = () => { const v = norm(input.value); if (v) working.add(v); input.value = ""; redraw(); input.focus(); };
-  wrap.querySelector(".dish-edit-customadd").onclick = addCustom;
-  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } };
   const close = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = close;
   wrap.querySelector(".dish-edit-cancel").onclick = close;
@@ -8286,7 +8304,6 @@ function openDishEditModal(itemId, rerender) {
       toast("Couldn't save: " + errText(e), "err");
     }
   };
-  setTimeout(() => input.focus(), 30);
 }
 
 // tablePanelParts: build ALL the inner HTML sections for ONE table's full detail
@@ -8463,7 +8480,10 @@ function tablePanelParts(t, host = "float") {
     const orderEditExtras = (o) => {
       if (!editing) return "";
       const aSet = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
-      const chips = ALLERGENS.map((a) => `<span class="chip oae-chip ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("");
+      const chips = ALLERGENS.map((a) => `<span class="chip oae-chip ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("")
+        // Typed allergies (from ＋ Other) sit alongside the standard six and come off the same way.
+        + [...aSet].filter((s) => !ALG_STD.includes(s)).map((s) => `<span class="chip oae-chip on" data-alg="${esc(o.id)}" data-slug="${esc(s)}">${esc(algLabel(s))}</span>`).join("")
+        + `<span class="chip oae-chip alg-other" data-alg="${esc(o.id)}" data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</span>`;
       return `<div class="tp-edit-extras"><div class="tp-edit-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}</div><button class="btn small" data-add-dish-order="${esc(o.id)}">＋ Add dish</button></div>`;
     };
     // Each un-accepted (NEW) order is its own highlighted card with its own Accept —
@@ -8677,6 +8697,47 @@ const pricePrompt = (title, current) => new Promise((resolve) => {
     done(Math.round(v * 100) / 100);
   };
   input.onkeydown = (e) => { if (e.key === "Enter") box.querySelector(".pr-ok").click(); else if (e.key === "Escape") done(null); };
+  ov.onclick = (e) => { if (e.target === ov) done(null); };
+});
+
+// What the ＋ Other chip opens: type an allergy the six standard chips don't cover.
+// Resolves the normalised word, or null if cancelled. Deliberately a small dialog and
+// NOT a box sitting under the chips — the per-dish chip row redraws itself on every
+// tap, which would wipe half-typed text (the same class of silent tap-loss the tap
+// guard exists for). Mirrors pricePrompt so it looks and behaves like the panel's
+// other one-field asks. `already` is the set this row has, so a repeat is caught.
+const allergyPrompt = (already) => new Promise((resolve) => {
+  const ov = document.createElement("div");
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  const box = document.createElement("div");
+  Object.assign(box.style, { width: "min(92vw,360px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
+  box.innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin:0 0 6px">⚠ Add an allergy</div>
+    <div style="font-size:13px;color:var(--muted);margin:0 0 12px">Anything the kitchen must leave out — it prints on the ticket, not the bill.</div>
+    <input class="alg-in" type="text" maxlength="24" placeholder="e.g. coriander" autocomplete="off" autocapitalize="none"
+      style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg,#141009);color:var(--text);font-size:17px;font-weight:700;outline:none" />
+    <div class="alg-err" style="font-size:12px;color:#fca5a5;min-height:16px;margin:6px 2px 0"></div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="alg-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--panel-2);color:var(--text);cursor:pointer">Cancel</button>
+      <button class="alg-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--gold);color:#14110d;cursor:pointer">Add</button>
+    </div>`;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const input = box.querySelector(".alg-in");
+  const errEl = box.querySelector(".alg-err");
+  setTimeout(() => { input.focus(); input.select(); }, 50);
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("editor-allergy", () => done(null)) : null;
+  const done = (val) => { if (backOff) { backOff(); backOff = null; } ov.remove(); resolve(val); };
+  box.querySelector(".alg-cancel").onclick = () => done(null);
+  box.querySelector(".alg-ok").onclick = () => {
+    const v = normAlg(input.value);
+    // Every refusal SAYS why — an Add that just does nothing reads as a broken button.
+    if (!v) { errEl.textContent = "Type what the kitchen should leave out."; return; }
+    if (already && already.has(v)) { errEl.textContent = `“${v}” is already on this list.`; return; }
+    done(v);
+  };
+  input.oninput = () => { errEl.textContent = ""; };
+  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); box.querySelector(".alg-ok").click(); } else if (e.key === "Escape") done(null); };
   ov.onclick = (e) => { if (e.target === ov) done(null); };
 });
 
@@ -8995,7 +9056,15 @@ function openTakeOrder(table, rerender, opts = {}) {
     return `${back}<span class="qo-crumb">${here}</span><span class="qo-count">${sub}</span>`;
   };
   const catChips = () => sections.map((s, i) => `<button class="to-cat ${i === 0 ? "on" : ""}" data-jump="${esc(s.slug)}">${esc(s.name)}</button>`).join("");
-  const algChips = (set, kind, id) => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${set.has(a.slug) ? "on" : ""}" data-alg="${a.slug}" data-kind="${kind}"${id ? ` data-line="${esc(id)}"` : ""}>${esc(a.label)}</span>`).join("");
+  // One allergy row = the six standard chips, then any TYPED ones already on this list
+  // (always "on" — tapping one takes it off again, same as a standard chip), then the
+  // ＋ Other chip that opens the box to type a new one.
+  const algChips = (set, kind, id) => {
+    const at = (slug) => `${slug == null ? "" : `data-alg="${esc(slug)}" `}data-kind="${kind}"${id ? ` data-line="${esc(id)}"` : ""}`;
+    const std = ALLERGENS.map((a) => `<span class="chip to-alg-chip ${set.has(a.slug) ? "on" : ""}" ${at(a.slug)}>${esc(a.label)}</span>`).join("");
+    const cust = [...set].filter((s) => !ALG_STD.includes(s)).map((s) => `<span class="chip to-alg-chip on" ${at(s)}>${esc(algLabel(s))}</span>`).join("");
+    return std + cust + `<span class="chip to-alg-chip alg-other" ${at(null)} data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</span>`;
+  };
   const cartLines = () => cart.length
     ? cart.map((c) => {
         const open = editing.has(c.uid);
@@ -9288,7 +9357,10 @@ function openTakeOrder(table, rerender, opts = {}) {
     if (!l) { if (!(await addOneAsync(id))) return; l = plainLine(id); paintList(); paintCart(); }
     if (!l) return;
     wrap.querySelector(".to-tileedit-overlay")?.remove();
-    const chips = () => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${l.avoid.has(a.slug) ? "on" : ""}" data-alg="${a.slug}">${esc(a.label)}</span>`).join("");
+    // Same row as everywhere else: the six, the typed ones, then ＋ Other.
+    const chips = () => ALLERGENS.map((a) => `<span class="chip to-alg-chip ${l.avoid.has(a.slug) ? "on" : ""}" data-alg="${a.slug}">${esc(a.label)}</span>`).join("")
+      + [...l.avoid].filter((s) => !ALG_STD.includes(s)).map((s) => `<span class="chip to-alg-chip on" data-alg="${esc(s)}">${esc(algLabel(s))}</span>`).join("")
+      + `<span class="chip to-alg-chip alg-other" data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</span>`;
     const ov = el(`<div class="to-tileedit-overlay"><div class="to-tileedit">
       <div class="to-te-head"><b>${esc(l.title)}</b><button class="to-te-x" aria-label="Done">✕</button></div>
       <div class="to-lbl">⚠ Avoid in this dish</div><div class="to-alg to-te-alg">${chips()}</div>
@@ -9300,7 +9372,16 @@ function openTakeOrder(table, rerender, opts = {}) {
     ov.querySelector(".to-te-x").onclick = done;
     ov.querySelector(".to-te-done").onclick = done;
     ov.onclick = (e) => { if (e.target === ov) done(); };
-    ov.querySelectorAll(".to-alg-chip").forEach((chip) => (chip.onclick = () => { const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s); chip.classList.toggle("on", l.avoid.has(s)); }));
+    const algEl = ov.querySelector(".to-te-alg");
+    const bindAlg = () => ov.querySelectorAll(".to-alg-chip").forEach((chip) => (chip.onclick = async () => {
+      // A typed allergy adds or removes a chip, so the row is redrawn; a standard one
+      // just flips on/off in place.
+      if (chip.dataset.algOther) { const v = await allergyPrompt(l.avoid); if (v) { l.avoid.add(v); algEl.innerHTML = chips(); bindAlg(); } return; }
+      const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s);
+      if (!ALG_STD.includes(s)) { algEl.innerHTML = chips(); bindAlg(); return; }
+      chip.classList.toggle("on", l.avoid.has(s));
+    }));
+    bindAlg();
     ov.querySelector(".to-te-note").oninput = (e) => { l.note = e.target.value; };
   }
   function bindCart() {
@@ -9310,7 +9391,12 @@ function openTakeOrder(table, rerender, opts = {}) {
     // Closing a line's editor de-dupes (in case its allergy/note now matches another line).
     linesEl.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = () => { const uid = +b.dataset.edit; if (editing.has(uid)) { editing.delete(uid); dedupe(); } else editing.add(uid); paintList(); paintCart(); }));
     // per-dish allergen chips + per-dish note (no de-dupe mid-edit so lines don't collapse under you)
-    linesEl.querySelectorAll('.to-alg-chip[data-kind="line"]').forEach((chip) => (chip.onclick = () => { const l = byUid(+chip.dataset.line); if (!l) return; const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s); paintList(); paintCart(); }));
+    linesEl.querySelectorAll('.to-alg-chip[data-kind="line"]').forEach((chip) => (chip.onclick = async () => {
+      const l = byUid(+chip.dataset.line); if (!l) return;
+      // ＋ Other → ask for the word first, then add it exactly like a standard chip.
+      if (chip.dataset.algOther) { const v = await allergyPrompt(l.avoid); if (v) { l.avoid.add(v); paintList(); paintCart(); } return; }
+      const s = chip.dataset.alg; l.avoid.has(s) ? l.avoid.delete(s) : l.avoid.add(s); paintList(); paintCart();
+    }));
     linesEl.querySelectorAll(".to-line-note").forEach((inp) => (inp.oninput = () => { const l = byUid(+inp.dataset.line); if (l) l.note = inp.value; }));
     // Tap an open-price line's amount to re-type it before sending.
     linesEl.querySelectorAll("[data-price]").forEach((b) => (b.onclick = async () => {
@@ -9422,10 +9508,20 @@ function openTakeOrder(table, rerender, opts = {}) {
   const search = wrap.querySelector(".to-search");
   search.oninput = () => { q = search.value; paintList(); };
   wrap.querySelector(".to-note").oninput = (e) => { orderNote = e.target.value; };
-  wrap.querySelectorAll('.to-alg-chip[data-kind="order"]').forEach((chip) => (chip.onclick = () => {
-    const s = chip.dataset.alg; orderAvoid.has(s) ? orderAvoid.delete(s) : orderAvoid.add(s);
-    chip.classList.toggle("on", orderAvoid.has(s));
-  }));
+  // The whole-order row. A TYPED allergy adds/removes a whole chip, so that case redraws
+  // the row and rebinds; a standard chip only flips its class, which keeps the common
+  // tap flicker-free. The row lives outside paintCart's markup, hence its own painter.
+  const orderAlgEl = wrap.querySelector(".to-extras .to-alg");
+  function paintOrderAlg() { if (!orderAlgEl) return; orderAlgEl.innerHTML = algChips(orderAvoid, "order"); bindOrderAlg(); }
+  function bindOrderAlg() {
+    wrap.querySelectorAll('.to-alg-chip[data-kind="order"]').forEach((chip) => (chip.onclick = async () => {
+      if (chip.dataset.algOther) { const v = await allergyPrompt(orderAvoid); if (v) { orderAvoid.add(v); paintOrderAlg(); } return; }
+      const s = chip.dataset.alg; orderAvoid.has(s) ? orderAvoid.delete(s) : orderAvoid.add(s);
+      if (!ALG_STD.includes(s)) { paintOrderAlg(); return; }
+      chip.classList.toggle("on", orderAvoid.has(s));
+    }));
+  }
+  bindOrderAlg();
   wrap.querySelector(".tbl-modal-close").onclick = close;
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
 
@@ -10814,11 +10910,14 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
   root.querySelectorAll("[data-edit-dish]").forEach((b) => (b.onclick = () => openDishEditModal(b.dataset.editDish, rerender)));
   // Per-order allergen toggle chips (edit mode): optimistic flip, then persist.
   root.querySelectorAll(".oae-chip[data-alg]").forEach((chip) => (chip.onclick = async () => {
-    const id = chip.dataset.alg, slug = chip.dataset.slug;
+    const id = chip.dataset.alg;
     const o = (state.data.orders || []).find((x) => x.id === id);
     if (!o) return;
     const wasAllergies = [...(o.allergies || [])];   // what the screen was showing
     const cur = new Set((o.allergies || []).map((x) => String(x).toLowerCase()));
+    // ＋ Other → ask for the word, then treat it exactly like tapping a standard chip on.
+    let slug = chip.dataset.slug;
+    if (chip.dataset.algOther) { slug = await allergyPrompt(cur); if (!slug) return; }
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
     o.allergies = [...cur]; if (rerender) rerender(); // flip the screen now
     try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); await loadSessions(); if (rerender) rerender(); }

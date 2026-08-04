@@ -60,6 +60,18 @@ const ALLERGENS = [
   { slug: "soy", label: "🫘 Soy" },
   { slug: "fish", label: "🐟 Fish" },
 ];
+// The six above are only the COMMON ones. Every allergy row on this panel ends in a
+// ＋ Other chip that opens a box to type one ("no coriander", "no ice"), because a real
+// kitchen hears far more than six (owner, 2026-08-04). A typed allergy is stored as plain
+// text beside the standard slugs, so it rides the SAME rails onto the KOT — never the bill.
+const ALG_STD = ALLERGENS.map((a) => a.slug);
+// Normalise a typed allergy: lowercase, collapse spaces, strip a leading "no " so
+// "No Garlic" / "no-garlic" / "garlic" all store "garlic" (the UI prepends the "no").
+// (Commas become spaces: the whole-order list travels as one comma-separated string, so a
+// typed comma would silently split one allergy into two.)
+const normAlg = (s) => String(s || "").replace(/,/g, " ").trim().toLowerCase().replace(/^no[\s-]+/, "").replace(/\s+/g, " ").slice(0, 24);
+// What a chip says: a standard slug shows its emoji + name, a typed one shows 🚫 + the word.
+const algLabel = (slug) => { const a = ALLERGENS.find((x) => x.slug === slug); return a ? a.label : "🚫 " + slug; };
 
 const state = {
   // TWO-TIER FLOOR (mig 101, owner perf 2026-06-27): the GRID renders from the slim per-tile
@@ -295,6 +307,46 @@ const pricePrompt = (title, current) => new Promise((resolve) => {
     done(Math.round(v * 100) / 100);
   };
   input.onkeydown = (e) => { if (e.key === "Enter") box.querySelector(".pr-ok").click(); else if (e.key === "Escape") done(null); };
+  ov.onclick = (e) => { if (e.target === ov) done(null); };
+});
+
+// What the ＋ Other chip opens: type an allergy the six standard chips don't cover.
+// Resolves the normalised word, or null if cancelled. Deliberately a small dialog and NOT
+// a box parked under the chips — the chip rows redraw on every tap, which would wipe
+// half-typed text. Mirrors pricePrompt so it looks like the panel's other one-field asks.
+// `already` is the set this row holds, so a repeat is refused OUT LOUD rather than silently.
+const allergyPrompt = (already) => new Promise((resolve) => {
+  const ov = document.createElement("div");
+  Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "100000", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
+  const box = document.createElement("div");
+  Object.assign(box.style, { width: "min(92vw,360px)", background: "var(--panel)", color: "var(--text)", borderRadius: "16px", padding: "20px", boxShadow: "0 20px 60px rgba(0,0,0,.5)", fontFamily: "system-ui,sans-serif" });
+  box.innerHTML = `
+    <div style="font-size:16px;font-weight:800;margin:0 0 6px">⚠ Add an allergy</div>
+    <div style="font-size:13px;color:var(--muted);margin:0 0 12px">Anything the kitchen must leave out — it prints on the ticket, not the bill.</div>
+    <input class="alg-in" type="text" maxlength="24" placeholder="e.g. coriander" autocomplete="off" autocapitalize="none"
+      style="width:100%;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:17px;font-weight:700;outline:none" />
+    <div class="alg-err" style="font-size:12px;color:#fca5a5;min-height:16px;margin:6px 2px 0"></div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="alg-cancel" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--panel-2);color:var(--text);cursor:pointer">Cancel</button>
+      <button class="alg-ok" style="flex:1;padding:11px;border:0;border-radius:10px;font-weight:700;background:var(--gold);color:#14110d;cursor:pointer">Add</button>
+    </div>`;
+  ov.appendChild(box);
+  document.body.appendChild(ov);
+  const input = box.querySelector(".alg-in");
+  const err = box.querySelector(".alg-err");
+  setTimeout(() => { input.focus(); input.select(); }, 50);
+  let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-allergy", () => done(null)) : null;
+  const done = (val) => { if (backOff) { backOff(); backOff = null; } ov.remove(); resolve(val); };
+  box.querySelector(".alg-cancel").onclick = () => done(null);
+  box.querySelector(".alg-ok").onclick = () => {
+    const v = normAlg(input.value);
+    // Every refusal SAYS why — an Add that just does nothing reads as a broken button.
+    if (!v) { err.textContent = "Type what the kitchen should leave out."; return; }
+    if (already && already.has(v)) { err.textContent = `“${v}” is already on this list.`; return; }
+    done(v);
+  };
+  input.oninput = () => { err.textContent = ""; };
+  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); box.querySelector(".alg-ok").click(); } else if (e.key === "Escape") done(null); };
   ov.onclick = (e) => { if (e.target === ov) done(null); };
 });
 
@@ -1170,7 +1222,9 @@ function openDishEditModal(itemId) {
     const std = ALLERGENS.map((a) => `<span class="chip talg ${working.has(a.slug) ? "on" : ""}" data-slug="${esc(a.slug)}"${orderWide.has(a.slug) ? ' data-orderwide="1"' : ""}>${esc(a.label)}${owTag(a.slug)}</span>`).join("");
     // Custom allergens are their own chips — tap one to REMOVE it (same as a standard chip).
     const cust = [...working].filter((s) => !STD.includes(s)).map((s) => `<span class="chip talg on" data-slug="${esc(s)}"${orderWide.has(s) ? ' data-orderwide="1"' : ""}>${esc(labelFor(s))}${owTag(s)}</span>`).join("");
-    return std + cust;
+    // ＋ Other instead of a text box always sitting there (owner, 2026-08-04: "I don't want
+    // an allergy box, I want an Other option in the listed allergies").
+    return std + cust + `<span class="chip talg alg-other" data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</span>`;
   };
   const ov = document.createElement("div");
   ov.className = "dish-edit-overlay";
@@ -1181,7 +1235,6 @@ function openDishEditModal(itemId) {
       ${item.status === "served" ? `<div class="muted" style="font-size:13px;line-height:1.5;margin:0 0 12px;padding:9px 11px;border:1px solid var(--line);border-radius:9px">This dish is already <b style="color:#4ade80">served</b> — allergens &amp; note are locked now. If it went out by mistake, use <b>↩ Send back to kitchen</b> below.</div>` : ""}
       <div style="font-size:13px;font-weight:700;margin:0 0 8px">⚠ Allergies to avoid <span class="muted small">— tap to add or remove</span></div>
       <div class="dish-alg-list" style="display:flex;flex-wrap:wrap;gap:8px"></div>
-      <div style="display:flex;gap:8px;margin-top:10px"><input type="text" class="dish-edit-custominput" maxlength="24" placeholder="Type a custom allergen — e.g. water" style="flex:1;min-width:0;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px"><button class="btn small dish-edit-customadd">Add</button></div>
       <div style="font-size:13px;font-weight:700;margin:15px 0 6px">✎ Note for the kitchen</div>
       <textarea class="dish-edit-note" rows="2" maxlength="200" placeholder="e.g. less ice, extra chocolate" style="width:100%;box-sizing:border-box;padding:9px 11px;border-radius:9px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;resize:vertical"></textarea>
     </div>
@@ -1190,21 +1243,22 @@ function openDishEditModal(itemId) {
   document.body.appendChild(ov);
   ov.querySelector(".dish-edit-note").value = item.note || "";
   const listEl = ov.querySelector(".dish-alg-list");
-  const input = ov.querySelector(".dish-edit-custominput");
-  const bindChips = () => listEl.querySelectorAll("[data-slug]").forEach((c) => (c.onclick = async () => {
-    const s = c.dataset.slug;
-    if (working.has(s)) {
-      // #4: turning OFF an order-wide avoid clears it from EVERY dish — confirm first.
-      if (orderWide.has(s) && !(await confirmDialog(`"${s}" is set for the WHOLE order. Removing it here takes it off EVERY dish on this order, not just this one. Remove it from all?`, "Remove from all"))) return;
-      working.delete(s);
-    } else working.add(s);
-    redraw();
-  }));
+  const bindChips = () => {
+    listEl.querySelectorAll("[data-slug]").forEach((c) => (c.onclick = async () => {
+      const s = c.dataset.slug;
+      if (working.has(s)) {
+        // #4: turning OFF an order-wide avoid clears it from EVERY dish — confirm first.
+        if (orderWide.has(s) && !(await confirmDialog(`"${s}" is set for the WHOLE order. Removing it here takes it off EVERY dish on this order, not just this one. Remove it from all?`, "Remove from all"))) return;
+        working.delete(s);
+      } else working.add(s);
+      redraw();
+    }));
+    // ＋ Other → type an allergy the six don't cover; it joins the row as its own chip.
+    const other = listEl.querySelector("[data-alg-other]");
+    if (other) other.onclick = async () => { const v = await allergyPrompt(working); if (v) { working.add(v); redraw(); } };
+  };
   const redraw = () => { listEl.innerHTML = chipsHtml(); bindChips(); };
   redraw();
-  const addCustom = () => { const v = norm(input.value); if (v) working.add(v); input.value = ""; redraw(); input.focus(); };
-  ov.querySelector(".dish-edit-customadd").onclick = addCustom;
-  input.onkeydown = (e) => { if (e.key === "Enter") { e.preventDefault(); addCustom(); } };
   let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-dish-edit", () => close()) : null;
   const close = () => { if (backOff) { backOff(); backOff = null; } ov.remove(); };
   ov.querySelector(".dish-edit-close").onclick = close;
@@ -1254,7 +1308,6 @@ function openDishEditModal(itemId) {
       toast("Couldn't save: " + errText(e), false);
     }
   };
-  setTimeout(() => input.focus(), 30);
 }
 
 // ── the table detail panel (view mode) ───────────────────────────────────────
@@ -1436,11 +1489,14 @@ function renderPanel() {
         <button class="btn small danger" data-del-order="${esc(o.id)}">🗑 Delete order${o.kot_no != null ? ` #${esc(o.kot_no)}` : ""}</button>
       </div>`;
     }
-    // Order-wide allergen chips = the 6 standard toggles only, EXACTLY like the
-    // manager's per-order chips. A CUSTOM ("other") allergen is added per-dish via
-    // the "✎ Edit" modal, not here. (owner, 2026-06-18 — mirror the manager)
+    // Order-wide allergen chips: the 6 standard toggles, any TYPED ones already set, and
+    // ＋ Other to add a new one right here — EXACTLY like the manager's per-order chips.
+    // (A typed allergy used to be per-dish only, via the "✎ Edit" modal; owner 2026-08-04
+    // asked for Other on every allergy list, so this row grew one too.)
     const aSet = new Set((Array.isArray(o.allergies) ? o.allergies : []).map((x) => String(x).toLowerCase()));
-    const chips = ALLERGENS.map((a) => `<span class="chip talg ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("");
+    const chips = ALLERGENS.map((a) => `<span class="chip talg ${aSet.has(a.slug) ? "on" : ""}" data-alg="${esc(o.id)}" data-slug="${a.slug}">${esc(a.label)}</span>`).join("")
+      + [...aSet].filter((x) => !ALG_STD.includes(x)).map((x) => `<span class="chip talg on" data-alg="${esc(o.id)}" data-slug="${esc(x)}">${esc(algLabel(x))}</span>`).join("")
+      + `<span class="chip talg alg-other" data-alg="${esc(o.id)}" data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</span>`;
     return `<div class="ordctl ordctl-edit">
       <div class="ordctl-alg"><span class="muted small">⚠ Avoid (all dishes):</span>${chips}</div>
       <div class="ordctl-row">
@@ -1647,15 +1703,21 @@ function renderPanel() {
   // Add a dish to THIS already-placed order: reuse the dish browser in add mode.
   document.querySelectorAll("[data-add-dish]").forEach((b) => (b.onclick = () => { state.ordering = true; state.viewOrder = false; state.addToOrderId = b.dataset.addDish; state.cat = ""; state.dishSearch = ""; state._omTop = 0; state._addedThisVisit = 0; renderPanel(); }));
   // Per-order allergen chips: toggle an allergen on/off for the whole order.
-  document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = () => {
-    const id = chip.dataset.alg, slug = chip.dataset.slug;
+  document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = async () => {
+    const id = chip.dataset.alg;
     const o = (state.data.orders || []).find((x) => x.id === id);
     if (!o) return;
     const wasAllergies = Array.isArray(o.allergies) ? [...o.allergies] : []; // what the screen showed
     const cur = new Set(wasAllergies.map((x) => String(x).toLowerCase()));
+    // ＋ Other → ask for the word, then treat it exactly like tapping a standard chip on.
+    let slug = chip.dataset.slug;
+    if (chip.dataset.algOther) { slug = await allergyPrompt(cur); if (!slug) return; }
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
     o.allergies = [...cur];        // OPTIMISTIC: update local state now so any re-render reflects it
-    chip.classList.toggle("on");   // INSTANT visual feedback — before this it only hit the server, so the tap felt dead ("allergy not clicking")
+    // A standard chip only flips on/off in place (no flicker); a TYPED one adds or removes a
+    // whole chip, so the panel redraws to show it.
+    if (ALG_STD.includes(slug)) chip.classList.toggle("on");  // INSTANT visual feedback — before this it only hit the server, so the tap felt dead ("allergy not clicking")
+    else renderPanel();
     act(() => api("POST", `/orders/${id}/allergies`, { allergies: [...cur] }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }));
   }));
   const shb = $("#shiftTable"); if (shb && s) shb.onclick = () => renderShiftPicker(t, s);
@@ -3194,7 +3256,7 @@ function updateDishAvailability() {
 // (the one quick-add stacks onto); if there's only a customised/sized line, peel one off
 // that. Removing the last of a line drops the line entirely. (owner 2026-07-08)
 function removeOneDish(id) {
-  let idx = state.cart.findIndex((l) => l.id === id && !l.options && !l.allergy && !l.note);
+  let idx = state.cart.findIndex((l) => l.id === id && !l.options && !(l.avoid && l.avoid.length) && !l.note);
   if (idx < 0) idx = state.cart.findIndex((l) => l.id === id);
   if (idx < 0) return;
   const line = state.cart[idx];
@@ -3248,7 +3310,7 @@ function bindDishButtons() {
     // so tapping the dish again starts a fresh plain line instead of bumping the
     // customised one — letting a waiter order "1 no-nuts" AND "1 normal" of the same
     // dish side by side. (owner, 2026-06-16)
-    const line = state.cart.find((l) => l.id === d.id && !l.options && !l.allergy && !l.note);
+    const line = state.cart.find((l) => l.id === d.id && !l.options && !(l.avoid && l.avoid.length) && !l.note);
     if (line) line.qty = Math.min(99, line.qty + 1);
     else state.cart.push({ id: d.id, title: d.title, price: dishPrice(d), qty: 1 });
     // Patch the badge + cart pane in place — a full re-render would reset the browse scroll.
@@ -3274,7 +3336,10 @@ function renderDishOptions(d, editIndex) {
   const sel = {};
   const line = editIndex != null ? state.cart[editIndex] : null;
   if (line && line.options) for (const o of line.options) (sel[o.group] = sel[o.group] || []).push(o.label);
-  state._opt = { d, sel, editIndex, allergy: (line && line.allergy) || "", qty: (line && line.qty) || 1 };
+  // `avoid` is this dish's allergy list (standard slugs + any typed ones) and `note` is free
+  // text for the kitchen. They used to be ONE box, which meant "less ice" and "no nuts" were
+  // indistinguishable; chips + Other keep the allergies structured (owner, 2026-08-04).
+  state._opt = { d, sel, editIndex, avoid: new Set((line && line.avoid) || []), note: (line && line.note) || "", qty: (line && line.qty) || 1 };
   if (window.LFH_BACK && !optBackOff) optBackOff = LFH_BACK.layer("tablet-optpopup", closeDishOptions);
   drawDishOptions();
 }
@@ -3282,6 +3347,15 @@ function closeDishOptions() {
   const ov = document.getElementById("optOverlay"); if (ov) ov.remove();
   state._opt = null;
   if (optBackOff) { optBackOff(); optBackOff = null; }
+}
+// The per-dish allergy row inside the popup: the six standard chips, then any TYPED ones
+// already on this dish (always "on" — tap to take one off), then ＋ Other to add a new one.
+// Same shape as the manager's take-order row, so the two panels teach one habit.
+function optAlgChips() {
+  const av = (state._opt && state._opt.avoid) || new Set();
+  return ALLERGENS.map((a) => `<button class="optchoice ${av.has(a.slug) ? "on" : ""}" data-alg="${esc(a.slug)}">${esc(a.label)}</button>`).join("")
+    + [...av].filter((s) => !ALG_STD.includes(s)).map((s) => `<button class="optchoice on" data-alg="${esc(s)}">${esc(algLabel(s))}</button>`).join("")
+    + `<button class="optchoice alg-other" data-alg="" data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</button>`;
 }
 function drawDishOptions() {
   if (!state._opt) return;
@@ -3308,8 +3382,10 @@ function drawDishOptions() {
       <div class="opt-scroll">
         <div class="muted small">Base ${inr(base)}</div>
         ${groups || ""}
-        <div class="optgroup"><h4>✎ Note / allergy <span class="muted small">· kitchen sees exactly what you type</span></h4>
-          <input type="text" id="optAllergy" class="note allergy" placeholder="e.g. no nuts, less ice" value="${esc(state._opt.allergy || "")}"></div>
+        <div class="optgroup"><h4>⚠ Avoid in this dish <span class="muted small">· tap to add or remove</span></h4>
+          <div class="optchoices opt-alg">${optAlgChips()}</div></div>
+        <div class="optgroup"><h4>✎ Note for this dish <span class="muted small">· kitchen sees exactly what you type</span></h4>
+          <input type="text" id="optNote" class="note allergy" placeholder="e.g. less ice, extra spicy" value="${esc(state._opt.note || "")}"></div>
         <div class="optgroup"><h4>Quantity</h4>
           <div class="opt-qty"><button class="qbtn" id="optMinus" aria-label="Less">−</button><b id="optQ">${qty}</b><button class="qbtn" id="optPlus" aria-label="More">+</button></div></div>
       </div>
@@ -3325,7 +3401,14 @@ function drawDishOptions() {
     sel[g] = multi ? (cur.includes(l) ? cur.filter((x) => x !== l) : [...cur, l]) : (cur.includes(l) ? [] : [l]);
     drawDishOptions();
   }));
-  const al = ov.querySelector("#optAllergy"); if (al) al.oninput = (e) => (state._opt.allergy = e.target.value);
+  const nt = ov.querySelector("#optNote"); if (nt) nt.oninput = (e) => (state._opt.note = e.target.value);
+  // The allergy row: standard chips toggle, ＋ Other asks for a word first. Both redraw the
+  // popup, which is safe — the note's typed value is read into state on every keystroke above.
+  ov.querySelectorAll("[data-alg]").forEach((b) => (b.onclick = async () => {
+    const av = state._opt.avoid;
+    if (b.dataset.algOther) { const v = await allergyPrompt(av); if (v) { av.add(v); drawDishOptions(); } return; }
+    const s = b.dataset.alg; av.has(s) ? av.delete(s) : av.add(s); drawDishOptions();
+  }));
   ov.querySelector("#optMinus").onclick = () => { state._opt.qty = Math.max(1, qty - 1); drawDishOptions(); };
   ov.querySelector("#optPlus").onclick = () => { state._opt.qty = Math.min(99, qty + 1); drawDishOptions(); };
   ov.querySelector("#optClose").onclick = closeDishOptions;
@@ -3335,18 +3418,21 @@ function drawDishOptions() {
       if ((sel[g.name] || []).includes(c.label)) opts.push({ group: g.name, label: c.label, price: Number(c.price) || 0 });
     }
     const unitPrice = base + opts.reduce((s, o) => s + o.price, 0);
-    const allergy = (state._opt.allergy || "").trim();
+    const avoid = [...state._opt.avoid];
+    const noteTxt = (state._opt.note || "").trim();
     const useQty = Math.max(1, state._opt.qty || 1);
-    // ADD-TO-EXISTING-ORDER mode: send straight to the order's add-item endpoint.
-    // The ✎ box travels as a VERBATIM note (kitchen sees exactly what was typed) —
-    // it used to become removed[], which force-prefixed "NO" onto every entry.
+    // ADD-TO-EXISTING-ORDER mode: send straight to the order's add-item endpoint. The
+    // allergies are worded "no X" (they ARE avoids); the note travels VERBATIM, because the
+    // kitchen must see exactly what was typed — "less ice" once printed as "NO LESS ICE"
+    // when the two shared one box.
     if (state.addToOrderId) {
-      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: useQty, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, note: allergy || undefined });
+      const note = [avoid.length ? `⚠ no ${avoid.join(", ")}` : "", noteTxt].filter(Boolean).join(" · ");
+      addDishToOrder(state.addToOrderId, { dishId: d.id, qty: useQty, options: opts.length ? opts.map((o) => ({ group: o.group, label: o.label })) : undefined, note: note || undefined });
       closeDishOptions();
       return;
     }
     const line = { id: d.id, title: d.title, price: unitPrice, qty: useQty, options: opts.length ? opts : undefined,
-      allergy: allergy || undefined };
+      avoid: avoid.length ? avoid : undefined, note: noteTxt || undefined };
     if (editIndex != null && state.cart[editIndex]) state.cart[editIndex] = line;
     else state.cart.push(line);
     closeDishOptions();
@@ -3355,11 +3441,22 @@ function drawDishOptions() {
   };
 }
 
+// The whole-order avoid list. It is STORED as one comma-separated string (`state.allergies`)
+// because that is what both send paths already split and send — the chips are a new face on
+// the same value, not a new shape. Read it as a set, write it back joined.
+const orderAlgSet = () => new Set(String(state.allergies || "").split(",").map((x) => normAlg(x)).filter(Boolean));
+const setOrderAlg = (set) => { state.allergies = [...set].join(", "); };
+function orderAlgChips() {
+  const av = orderAlgSet();
+  return ALLERGENS.map((a) => `<button class="optchoice ${av.has(a.slug) ? "on" : ""}" data-oalg="${esc(a.slug)}">${esc(a.label)}</button>`).join("")
+    + [...av].filter((s) => !ALG_STD.includes(s)).map((s) => `<button class="optchoice on" data-oalg="${esc(s)}">${esc(algLabel(s))}</button>`).join("")
+    + `<button class="optchoice alg-other" data-oalg="" data-alg-other="1" title="Type an allergy that isn't listed">＋ Other</button>`;
+}
 // The "This order" pane — kept EXACTLY as before (owner 2026-07-03: "this order thing is
 // perfect right now"), it just lives in its own scroll region now instead of under the grid.
 function orderCartHtml() {
   const lines = state.cart.map((l, i) => `<div class="cline">
-      <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.allergy ? `<small class="callergy">✎ ${esc(l.allergy)}</small>` : ""}${l.note ? `<small class="copts">✎ ${esc(l.note)}</small>` : ""}</span>
+      <span class="cname">${esc(l.title)}${l.options && l.options.length ? `<small class="copts">${esc(l.options.map((o) => o.label).join(", "))}</small>` : ""}${l.avoid && l.avoid.length ? `<small class="callergy">⚠ no ${esc(l.avoid.join(", "))}</small>` : ""}${l.note ? `<small class="copts">✎ ${esc(l.note)}</small>` : ""}</span>
       <span class="cqty"><button class="qbtn" data-minus="${i}">−</button><b>${l.qty}</b><button class="qbtn" data-plus="${i}">+</button><button class="qbtn edit" data-edit="${i}" title="Size / extras / allergy">✎</button></span>
       <span class="cprice">${inr(l.price * l.qty)}</span>
     </div>`).join("");
@@ -3374,7 +3471,7 @@ function orderCartHtml() {
   return `<div class="cart">
       <h3>This order</h3>
       <div class="cart-lines">${lines || `<div class="muted">Tap dishes to add them.</div>`}</div>
-      <input type="text" id="orderAllergy" class="note allergy" placeholder="⚠ Avoid in ALL dishes — e.g. nuts, dairy" value="${esc(state.allergies || "")}">
+      <div class="cart-alg"><span class="muted small">⚠ Avoid in ALL dishes</span><div class="optchoices opt-alg" id="orderAlg">${orderAlgChips()}</div></div>
       ${foot}
     </div>`;
 }
@@ -3404,12 +3501,19 @@ function updateOrderCart() {
     }
     renderDishOptions(d, +b.dataset.edit);
   }));
-  // ONE box, ALLERGY-only (owner, 2026-07-06). Its text is the whole-order avoid list
-  // applied to every dish ("no X" on each line + "⚠ AVOID" on the KOT) — so it must NOT
-  // be used for free-text notes (a note like "birthday cake" would read as "no birthday
-  // cake"). The label is worded allergen-only to steer waiters away from notes; per-dish
-  // notes go through the ✎ Edit modal instead.
-  const al = c.querySelector("#orderAllergy"); if (al) al.oninput = (e) => (state.allergies = e.target.value);
+  // The whole-order avoid list — CHIPS, not a text box (owner, 2026-08-04). It applies to
+  // every dish ("no X" on each line + "⚠ AVOID" on the KOT), which is exactly why it can't
+  // be free text: "birthday cake" typed here used to read as "no birthday cake". Chips can
+  // only ever hold allergies; a real note goes on the dish through its ✎ popup.
+  c.querySelectorAll("[data-oalg]").forEach((b) => (b.onclick = async () => {
+    const av = orderAlgSet();
+    if (b.dataset.algOther) { const v = await allergyPrompt(av); if (!v) return; av.add(v); }
+    else { const s = b.dataset.oalg; av.has(s) ? av.delete(s) : av.add(s); }
+    setOrderAlg(av);
+    // Redraw the cart pane so the chip's new state (and, for a typed one, the chip itself)
+    // shows. Only the cart pane — the dish browser and its scroll are untouched.
+    updateOrderCart();
+  }));
   // () => sendOrder() — NOT `= sendOrder`: onclick passes the click event, and sendOrder's
   // first argument is the destination table (the quick-order picker calls sendOrder(t)).
   const send = c.querySelector("#sendOrder"); if (send) send.onclick = () => sendOrder();
@@ -3617,13 +3721,12 @@ async function sendOrder(dest) {
     const buildBody = (extra) => Object.assign({
       table: tbl,
       items: state.cart.map((l) => {
-        // The ✎ per-item box travels as a VERBATIM note — the kitchen sees exactly what
-        // the waiter typed ("less ice", "no nuts", "extra spicy"). It used to become a
-        // removed[] list, which force-prefixed "NO" onto every entry ("less ice" printed
-        // as "NO LESS ICE" — owner 2026-07-21). removed[] keeps its real "NO X" wording
-        // for guest allergen tags and the staff allergy-edit modal, which still write it.
-        const typed = (l.allergy || "").trim();
-        const note = [l.note, typed].filter(Boolean).join(" · ");
+        // Two different things, kept apart: this dish's ALLERGY chips are worded "no X"
+        // (they are avoids), while the ✎ note travels VERBATIM — the kitchen sees exactly
+        // what the waiter typed ("less ice", "extra spicy"). They shared one box until
+        // 2026-08-04, which is how "less ice" once printed as "NO LESS ICE".
+        const avoidTxt = (l.avoid && l.avoid.length) ? `⚠ no ${l.avoid.join(", ")}` : "";
+        const note = [avoidTxt, (l.note || "").trim()].filter(Boolean).join(" · ");
         return {
           id: l.id, qty: l.qty,
           // Open-price lines carry the staff-typed price; the server honours it only for a

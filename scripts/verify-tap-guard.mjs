@@ -130,6 +130,46 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   );
 }
 
+// ── 10. The ＋ Other allergy box must never refuse a tap in silence ─────────────────────
+// Added 2026-08-04 with the ＋ Other chip (owner: "there should always be an Other option in
+// the listed allergies"). Its Add button can decline for two reasons — nothing typed, or an
+// allergy already on the list — and both must SAY so. An Add that just does nothing is the
+// dead-button shape this whole file exists to prevent.
+for (const [panel, file] of [["manager", EDITOR], ["tablet", TABLET]]) {
+  const src = read(file);
+  check(
+    `${panel}: the ＋ Other allergy box exists (allergyPrompt)`,
+    /const allergyPrompt\s*=/.test(src),
+    `${file} no longer defines allergyPrompt(). Every allergy chip row ends in ＋ Other, and that\n    chip has nothing to open without it.`,
+  );
+  // Both refusals must write into the box's own error line before returning.
+  const block = (src.match(/const allergyPrompt[\s\S]*?\n\}\);/) || [""])[0];
+  check(
+    `${panel}: ＋ Other says why when nothing was typed`,
+    /if \(!v\) \{[^}]*(err|errEl)\.textContent/.test(block),
+    `In ${file}, allergyPrompt's Add returns on an empty value without setting its error line.\n    A tap that does nothing and says nothing reads as a broken button.`,
+  );
+  check(
+    // `[^{}]*` matters: the message must be INSIDE the duplicate branch's own braces. A looser
+    // pattern happily matched the next textContent further down the function and passed while
+    // the refusal had been deleted — this check was proven to fail only after tightening it.
+    `${panel}: ＋ Other says why when the allergy is already listed`,
+    /already\.has\(v\)\)\s*\{[^{}]*(err|errEl)\.textContent/.test(block),
+    `In ${file}, allergyPrompt drops a duplicate silently. Tell the person it is already on the list.`,
+  );
+  check(
+    `${panel}: cancelling ＋ Other answers the waiting caller`,
+    /alg-cancel"\)\.onclick = \(\) => done\(null\)/.test(block),
+    `In ${file}, allergyPrompt's Cancel must resolve the promise (done(null)). An unresolved dialog\n    leaves the chip row's await hanging forever and that action dies mid-flight.`,
+  );
+  // Every allergy row must OFFER it — a row without ＋ Other is the gap the owner reported.
+  check(
+    `${panel}: every allergy chip row offers ＋ Other`,
+    (src.match(/alg-other/g) || []).length >= 3 && /ALG_STD/.test(src),
+    `${file} has fewer than 3 "alg-other" chips. The rows are: take-order per-dish, take-order\n    whole-order, the dish popup, a placed KOT's avoid row, and ✎ Edit dish — each needs one.`,
+  );
+}
+
 // ── a button you cannot see is a button you cannot tap ─────────────────────────────────
 // 2026-08-03: adding − Discount to the order builder's footer pushed "Place order →" 74px off
 // the right edge of a 360px phone. Nothing caught it — the live check asserted the FOOTER was
