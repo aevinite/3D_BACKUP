@@ -65,6 +65,9 @@ export interface KotDocData {
   allergHtml?: string;
   extraHtml?: string;
   note?: string;
+  /** A reprinted ticket carries the big "*** REPRINT · DUPLICATE ***" banner on top,
+   *  so the kitchen can never mistake a duplicate for a fresh order (owner, 2026-08-04). */
+  reprint?: boolean;
 }
 
 export interface BillIdentity {

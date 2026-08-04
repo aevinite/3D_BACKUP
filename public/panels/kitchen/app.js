@@ -593,11 +593,17 @@ function reprintOrder(id) {
   const o = (state.orders || []).find((x) => x.id === id);
   if (!o) { toast("That order isn't on the board any more."); return; }
   const rows = (state.items || []).filter((it) => it.order_id === id); // empty for legacy orders → printKot falls back to o.items
+  // The big DUPLICATE banner (owner, 2026-08-04) — but ONLY when this ticket already came out
+  // once (printedIds). In a kitchen with no auto-print, this 🖨 button IS the first print, and
+  // branding a first print "DUPLICATE" would be a lie on paper.
+  const dup = printedIds.has(o.id);
   // Say what actually happened. This used to toast "Reprinting…" unconditionally while printKot
   // swallowed every failure, so a cook who tapped 🖨 after a paper jam was told the ticket was on
   // its way and no paper came out.
-  if (printKot(o, rows, state.restaurant)) toast(`Reprinting KOT #${o.kot_no ?? "—"} · ${tlong(o.table_number)}`);
-  else toast(`Couldn't print KOT #${o.kot_no ?? "—"} — check the printer, then try again.`);
+  if (printKot(o, rows, state.restaurant, { reprint: dup })) {
+    if (!dup) printedIds.add(o.id); // a manual FIRST print counts — the next tap is a duplicate
+    toast(`${dup ? "Reprinting (marked DUPLICATE)" : "Printing"} KOT #${o.kot_no ?? "—"} · ${tlong(o.table_number)}`);
+  } else toast(`Couldn't print KOT #${o.kot_no ?? "—"} — check the printer, then try again.`);
 }
 
 // ── the 86 board (sold-out toggles) ──────────────────────────────────────────
@@ -827,7 +833,7 @@ async function loadTables(tables) {
 // printing" mode it prints silently to the default printer. Default OFF — only runs when the
 // admin allowed it AND the owner toggled it on (board.autoPrintKot). Printer-agnostic compact
 // layout (works on an 80mm thermal roll or A4). NO prices — a KOT is for the kitchen, not a bill.
-function printKot(order, itemRows, restaurant) {
+function printKot(order, itemRows, restaurant, opts) {
   try {
     const rname = restDisplayName(restaurant).replace(/\*/g, "") || "Kitchen";
     // The table as the FLOOR knows it — its name when the owner gave it one ("A1"), else
@@ -851,6 +857,9 @@ function printKot(order, itemRows, restaurant) {
       when: when,
       lines: rows,
       allergies: Array.isArray(order.allergies) ? order.allergies : [],
+      // The big "*** REPRINT · DUPLICATE ***" banner — rendered by billdoc.js itself, so a
+      // duplicate looks identical whichever panel asked for it (owner, 2026-08-04).
+      reprint: !!(opts && opts.reprint),
     });
     const ifr = document.createElement("iframe");
     ifr.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
@@ -916,6 +925,93 @@ function notePrintTrouble() {
   if (Date.now() - lastPrintTroubleAt < 60000) return;
   lastPrintTroubleAt = Date.now();
   toast("Kitchen tickets aren't printing — check the printer. Orders are still on the board.");
+  // …and tell the MANAGER, not only whoever is standing at this screen (owner, 2026-08-04:
+  // "if anything happens in the kitchen it should notify the manager"). Rides the offline
+  // outbox, so a report taken with no signal still arrives; the server MERGES repeats
+  // (count+1 on the open row), so a rush with a dead printer is one line on the manager's
+  // floor, never a flood. Auto-resolved by the next successful print.
+  api("POST", "/printer-events", { kind: "auto_fail", note: "Automatic KOT print failed on the kitchen screen" }).catch(() => {});
+}
+
+// ── THE KITCHEN END OF THE DURABLE PRINT QUEUE (mig 269) ─────────────────────────────
+// The manager's "Reprint in kitchen" is a ROW, and this is how it reaches paper. Jobs ride
+// along on the normal /board read (the insert's own breadcrumb triggers one), so a kitchen
+// that was closed or offline prints everything that queued up the moment it is back — no
+// new poll, nothing to time. CLAIM is a deliberate plain fetch (never the outbox): a claim
+// replayed hours later would print a stale ticket behind everyone's back, and a failed
+// claim simply waits for the next board pass. The DONE report does ride the outbox — it is
+// idempotent, and losing it would make the 2-minute reclaim window reprint the ticket.
+const jobsInFlight = new Set();
+async function claimPrintJobs(ids) {
+  const r = await fetch("/api/kitchen" + ridQ("/print-jobs/claim"), {
+    method: "POST", headers: { "Content-Type": "application/json" }, credentials: "same-origin",
+    body: JSON.stringify({ ids }),
+  });
+  if (!r.ok) throw new Error("claim HTTP " + r.status);
+  return (await r.json().catch(() => ({}))).won || [];
+}
+function processPrintJobs(jobs) {
+  // While hidden the browser suppresses iframe printing — leave the jobs queued; the wake
+  // refetch (realtime.js fires every handler on visibilitychange) picks them up.
+  if (!Array.isArray(jobs) || !jobs.length || document.hidden) return;
+  const fresh = jobs.filter((j) => j && j.order && !jobsInFlight.has(j.id));
+  if (!fresh.length) return;
+  fresh.forEach((j) => jobsInFlight.add(j.id));
+  claimPrintJobs(fresh.map((j) => j.id)).then((wonIds) => {
+    const wonSet = new Set(wonIds);
+    // Another kitchen screen won these — the atomic claim is what stops a double print.
+    fresh.filter((j) => !wonSet.has(j.id)).forEach((j) => jobsInFlight.delete(j.id));
+    const mine = fresh.filter((j) => wonSet.has(j.id));
+    let i = 0;
+    const step = () => {   // serialized 400ms apart, same as the auto-print queue
+      const j = mine[i++]; if (!j) return;
+      const okPrint = printKot(j.order, j.items || [], state.restaurant, { reprint: j.reprint !== false });
+      if (!okPrint) notePrintTrouble();
+      api("POST", `/print-jobs/${j.id}/done`, { ok: okPrint, error: okPrint ? undefined : "print call failed on the kitchen screen" })
+        .catch(() => {})
+        .finally(() => jobsInFlight.delete(j.id));
+      if (i < mine.length) setTimeout(step, 400);
+    };
+    step();
+  }).catch(() => fresh.forEach((j) => jobsInFlight.delete(j.id))); // offline/busy — next board pass retries
+}
+
+// ── One-tap printer problem report (owner, 2026-08-04) ──────────────────────────────
+// Paper out, a half-printed ticket, a jam — faults a browser cannot see — reach the
+// manager's floor with one tap. Same overlay discipline as the 86 board: registered as a
+// back layer, closable by ✕/backdrop/back button, and the tap is never swallowed in
+// silence (buttons disable while sending, every outcome toasts).
+let prSheetOff = null;
+function openPrinterSheet() {
+  if (document.getElementById("prSheet")) return;
+  const KINDS = [
+    ["paper_out", "🧻", "Paper roll finished / paper out"],
+    ["half_print", "✂️", "Ticket came out half / cut off"],
+    ["jam", "📄", "Paper jammed / stuck"],
+    ["other", "❓", "Something else is wrong"],
+  ];
+  const ov = document.createElement("div");
+  ov.id = "prSheet"; ov.className = "prsheet-ov";
+  ov.innerHTML = `<div class="prsheet"><div class="prsheet-head"><h3>🖨 Printer problem</h3><button class="btn" data-prclose>✕</button></div>
+    <p class="prsheet-sub">One tap — the manager is told right away.</p>
+    ${KINDS.map(([k, ic, l]) => `<button class="btn prsheet-row" data-prkind="${k}"><span>${ic}</span> ${l}</button>`).join("")}</div>`;
+  document.body.appendChild(ov);
+  const close = () => { ov.remove(); if (prSheetOff) { const off = prSheetOff; prSheetOff = null; off(); } };
+  prSheetOff = window.LFH_BACK ? LFH_BACK.layer("printer-problem", close) : null;
+  ov.querySelector("[data-prclose]").onclick = close;
+  ov.onclick = (e) => { if (e.target === ov) close(); };
+  ov.querySelectorAll("[data-prkind]").forEach((b) => (b.onclick = async () => {
+    if (b.disabled) return;
+    ov.querySelectorAll("[data-prkind]").forEach((x) => (x.disabled = true));
+    try {
+      const r = await api("POST", "/printer-events", { kind: b.dataset.prkind });
+      toast(r && r.queued ? "Saved ✓ — the manager is told the moment you're back online." : "The manager has been told ✓");
+      close();
+    } catch (e2) {
+      ov.querySelectorAll("[data-prkind]").forEach((x) => (x.disabled = false));
+      toast("Couldn't send that — try again. " + (e2.message || ""));
+    }
+  }));
 }
 function printQueue(queue, allItems, restaurant) {
   if (!queue || !queue.length) return;
@@ -1005,6 +1101,10 @@ async function load() {
   state.autoPrintKot = !!data.autoPrintKot;
   state.restaurant = data.restaurant || null;
   state.knownIds = ids;
+  // Reprints the manager sent to THIS kitchen's printer (mig 269) — claim, print with the
+  // DUPLICATE banner, report done. Rides every board read, including the first: a job that
+  // queued while this screen was closed prints the moment it opens.
+  processPrintJobs(data.printJobs);
   // Bound printedIds on a long (24/7 wall-display) service: an order that has LEFT the board
   // (served/cancelled) can never reappear as a new 'received', so forgetting it can't cause a
   // reprint — this stops the Set growing forever. Only prune the ones no longer on the board.
@@ -1060,6 +1160,7 @@ function closeDrawer() {
   if (drawerOff) { const off = drawerOff; drawerOff = null; off(); }
 }
 $("#boardBtn").onclick = openDrawer;
+{ const pb = $("#printerBtn"); if (pb) pb.onclick = openPrinterSheet; }
 // 🚩 Report an issue (subject + optional photo + live voice note) — shared widget.
 { const _ib = document.getElementById("reportIssueBtn"); if (_ib) _ib.onclick = () => { if (window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m) }); }; }
 $("#drawerClose").onclick = closeDrawer;

@@ -1174,3 +1174,15 @@ Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French Hou
 - [x] **A "see it as this manager" tab is now ANSWERED as that manager** — `/api/owner/staff`
   honours `?as=`/`?view=real` like whoami does, so the list drops other managers and the panel
   is told actor `manager`. Guarded by 5 new checks in `npm run verify:access` (26 total).
+## 2026-08-04 — bulletproof printer system (owner)
+- [ ] **Printer problems reach the MANAGER** (and the owner inside Manager mode — same panel):
+  a red strip above the floor + a toast for kitchen printer trouble — paper out, half print,
+  jam (one-tap report on the kitchen board, 🖨❗) and the automatic "tickets aren't printing".
+- [ ] **Every reprint says so in big words**: `*** REPRINT · DUPLICATE ***` banner on top of
+  the ticket, drawn by the ONE shared document (billdoc.js), never by hand.
+- [ ] **Manager's KOT menu → Print / reprint a KOT → pick the KOT → two options**:
+  **Print KOT** (prints right there on the manager's device) / **Reprint KOT — in the kitchen**
+  (a durable print job the kitchen's printer picks up; nothing prints in the manager panel).
+- [ ] **Nothing is ever lost**: jobs queue in the database — kitchen offline/closed prints them
+  the moment it's back; failed prints retry (5 attempts), then surface to the manager with a
+  "Print here instead" fallback; a successful print auto-resolves every open printer problem.

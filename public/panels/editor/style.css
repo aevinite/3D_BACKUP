@@ -3426,3 +3426,15 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 @media (prefers-reduced-motion: reduce) {
   .lrow-skel .sk-thumb::after, .lrow-skel .sk-line::after { animation: none; }
 }
+
+/* ── Printer-trouble strip (mig 269, owner 2026-08-04): the kitchen's printer problems and
+   unprinted reprints, said out loud ABOVE the floor where the manager (and the owner in
+   Manager mode — same panel) can act. Theme tokens only, so both skins read it correctly;
+   the red border is the shared --red both skins define. */
+.prstrip { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 10px; }
+.prstrip-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 9px 12px;
+  border: 1px solid var(--red); border-left-width: 4px; border-radius: 9px; background: var(--panel-2); }
+.prstrip-ico { font-size: 17px; }
+.prstrip-txt { flex: 1 1 240px; font-size: 13px; color: var(--text); font-weight: 600; }
+.prstrip-txt small { display: block; color: var(--muted); font-weight: 500; margin-top: 2px; }
+.prstrip-row .btn { padding: 7px 11px; min-height: 38px; }
