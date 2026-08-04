@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { actLabel, panelChipStyle, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
+import { RemovalDetailModal } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
 
 // One row of the Removals record — same wording as the manager panel's Removals screen
@@ -66,6 +67,7 @@ export default function OwnerAuditLogs() {
 
   // ── Audit (removals) state ────────────────────────────────────────────────
   const [removals, setRemovals] = useState<Removal[] | null>(null);
+  const [removalId, setRemovalId] = useState<number | null>(null);   // which removal is open in full
   const [audErr, setAudErr] = useState<string | null>(null);
   const [audQ, setAudQ] = useState("");
 
@@ -144,19 +146,26 @@ export default function OwnerAuditLogs() {
       {bothOff ? (
         <div className="adm-card"><div className="adm-empty">Audit &amp; logs isn&rsquo;t enabled for your restaurant — contact Aevidine.</div></div>
       ) : view === "audit" && !audDisabled ? (
-        <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} onReload={loadAudit} />
+        <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} onReload={loadAudit} onOpenRemoval={setRemovalId} />
       ) : (
         <ActivityView rows={rows} err={err} level={level} setLevel={setLevel} q={q} setQ={setQ} onReload={loadActivity} onOpen={setDetailRow} />
       )}
 
       {detailRow && <LogDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
+      {/* Click a removal → the whole story: which KOT, every item on it, the totals, the time and
+          day, who did it. The owner SEES everything and changes nothing — /api/owner/audit is
+          GET-only and always answers canRestore:false (owner rule, 2026-08-04). */}
+      {removalId != null && (
+        <RemovalDetailModal id={removalId} base="/api/owner/audit" onClose={() => setRemovalId(null)} />
+      )}
     </>
   );
 }
 
 // ── Audit (removals) ─────────────────────────────────────────────────────────
-function AuditView({ removals, err, q, setQ, onReload }: {
+function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval }: {
   removals: Removal[] | null; err: string | null; q: string; setQ: (v: string) => void; onReload: () => void;
+  onOpenRemoval: (id: number) => void;
 }) {
   // Client-side search over what's on screen (the feed is already capped server-side).
   const needle = q.toLowerCase().trim();
@@ -205,7 +214,13 @@ function AuditView({ removals, err, q, setQ, onReload }: {
             ].filter(Boolean).join(" · ");
             const reason = [r.reason_code ? REMOVAL_REASON[r.reason_code] || r.reason_code : "", r.reason_note || ""].filter(Boolean).join(" — ") || "no reason recorded";
             return (
-              <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: cols }}>
+              <div
+                key={r.id} className="adm-logrow" style={{ gridTemplateColumns: cols, cursor: "pointer" }}
+                role="button" tabIndex={0}
+                title="See exactly what was removed"
+                onClick={() => onOpenRemoval(r.id)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenRemoval(r.id); } }}
+              >
                 <div style={{ minWidth: 0 }}>
                   <span aria-hidden="true" style={{ marginRight: 6 }}>{ico}</span>
                   <b>{label}</b>

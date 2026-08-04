@@ -94,14 +94,64 @@
     return {
       isDefault: isDefault,
       name: s.restaurant_name || (isDefault ? "Little French House" : (r.logo_text || (r.name && r.name.en) || "Restaurant")),
-      address: s.restaurant_address || (isDefault ? "" : DEFAULT_BILL.address),
-      phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : DEFAULT_BILL.phone),
+      // NO INVENTED IDENTITY ON A REAL BILL (2026-08-04). These used to fall back to
+      // DEFAULT_BILL for any restaurant that had not filled its Billing card — so a paying
+      // client's tax invoice carried another company's address and a phone number that does not
+      // exist, beside a real bill number. The GSTIN line below already refused to invent a value,
+      // with a comment saying why; the same reasoning applies here. Empty prints NO line at all.
+      address: s.restaurant_address || "",
+      phone: s.restaurant_phone || (isDefault ? "+91 90999 14418" : ""),
       // NEVER fall back to a placeholder GSTIN — a fake tax number on a real bill is illegal.
       // Empty prints no GSTIN line (the document handles it).
       gstin: s.gstin || "",
       prefix: s.invoice_prefix || "INV",
       footer: s.bill_footer || FOOTERS[r.slug] || (isDefault ? "Merci — see you again soon 🥐" : "Thank you — please visit again"),
       taxLabel: ((s.tax_label || "Tax") + "").trim() || "Tax",
+    };
+  }
+
+  /* billRows(d) — the whole-rupee money rows a bill SHOWS, worked out once so the paper and every
+     screen quote the same figures and every one of them ADDS UP.
+
+     WHY (2026-08-04). Every row here is rounded to whole rupees on its own, while the TOTAL is
+     computed at full precision and only rounded at the end. Those two facts disagree, and on a
+     DISCOUNTED bill they disagree often: replaying this document over whole-rupee subtotals with
+     the discounts the modal offers (5/10/15/20/25/50%) printed rows that contradicted their own
+     TOTAL in 4,508 of 13,806 cases — 32.7%. Undiscounted bills were always fine, which is why it
+     went unnoticed. Two examples off the real numbers:
+       · ₹201, 15% off → Taxable 171 + CGST 5 + SGST 4 = 180, but the TOTAL line said 179.
+       · ₹201, 50% off → Discount −101 against Subtotal 201 and Taxable 101 (201−101 = 100).
+     The amount COLLECTED was always right; it is the arithmetic on a document headed "Tax Invoice"
+     that was wrong, and a guest who adds it up cannot be shown where the rupee went.
+
+     Fixed by making the paper obey its identities by construction, and never by moving money — the
+     TOTAL is passed straight through. 'Taxable value' is DERIVED as subtotal − discount, and a
+     "Round off" row carries whatever the whole-rupee rows cannot express. That row is how every
+     Indian POS bill states this, it is at most a rupee or two, and it is the honest place to put it;
+     the alternative is silently bending one of the GST figures.
+
+     It handles all four shapes this document prints (mig 270/272): plain, with MRP/untaxed lines,
+     tax-inclusive, and inclusive-with-MRP — the additive chain a person reads differs in each, so
+     'base' follows the rows actually shown above the TOTAL. */
+  function billRows(d) {
+    d = d || {};
+    var disc = Number(d.discount) || 0;
+    var inclusive = !!d.taxIncluded;
+    var nontax = Math.round(Number(d.nontax) || 0);
+    var subAmount = Math.round((Number(d.subtotal) || 0) - (Number(d.nontax) || 0));
+    var subtotalShown = nontax > 0 ? subAmount : Math.round(Number(d.subtotal) || 0);
+    var discount = Math.round(disc);
+    var taxable = subtotalShown - discount;
+    var tax = (d.taxRows || []).reduce(function (a, c) { return a + (Math.round(Number(c.amt)) || 0); }, 0);
+    var total = Math.round(parseFloat(d.total) || 0);
+    // What the rows above the TOTAL actually add up to, in the order a person reads them.
+    // Non-inclusive keeps a "Taxable value" restatement when there is a discount; inclusive has
+    // none (the tax is reported below the total, not added), so the chain is subtotal − discount.
+    var base = disc > 0 ? taxable : subtotalShown;
+    return {
+      disc: disc, inclusive: inclusive, subtotal: subtotalShown, discount: discount,
+      taxable: taxable, tax: tax, nontax: nontax, total: total,
+      roundOff: total - (base + (inclusive ? 0 : tax) + nontax),
     };
   }
 
@@ -171,8 +221,8 @@
        discount for this mode (this file formats; it never computes money — see the header). */
     var inclusive = !!d.taxIncluded;
     var discBlock = disc > 0
-      ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(disc) + "</span></div>"
-        + (inclusive ? "" : '<div class="t tx"><span>Taxable value</span><span>' + inr(d.taxable) + "</span></div>")
+      ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(billRows(d).discount) + "</span></div>"
+        + (inclusive ? "" : '<div class="t tx"><span>Taxable value</span><span>' + inr(billRows(d).taxable) + "</span></div>")
       : "";
 
     /* MRP / untaxed lines (mig 270). 'nontax' is the part of the bill GST is NOT charged on —
@@ -186,6 +236,12 @@
     var nontax = Number(d.nontax) || 0;
     var subLabel = nontax > 0 ? "Food subtotal" : "Subtotal";
     var subAmount = nontax > 0 ? (Number(d.subtotal) || 0) - nontax : Number(d.subtotal) || 0;
+    // THE ROWS MUST FOOT TO THE TOTAL (see billRows). Every figure below comes from there, so the
+    // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
+    var R = billRows(d);
+    var roundBlock = R.roundOff !== 0
+      ? '<div class="t"><span>Round off</span><span>' + (R.roundOff < 0 ? "− " : "+ ") + inr(Math.abs(R.roundOff)) + "</span></div>"
+      : "";
     var mrpBlock = nontax > 0
       ? '<div class="t"><span>' + esc(d.mrpLabel || "MRP items") + "</span><span>" + inr(nontax) + "</span></div>"
       : "";
@@ -299,11 +355,12 @@
 + "<colgroup><col><col style=\"width:calc(" + widest.qty + "ch + 8px)\"><col style=\"width:calc(" + widest.rate + "ch + 11px)\"><col style=\"width:calc(" + widest.amt + "ch + 11px)\"></colgroup>\n"
 + '<thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr></thead><tbody>' + rows + "</tbody></table>\n"
 + '<div class="totals">\n'
-+ '  <div class="t"><span>' + subLabel + "</span><span>" + inr(subAmount) + "</span></div>\n"
++ '  <div class="t"><span>' + subLabel + "</span><span>" + inr(R.subtotal) + "</span></div>\n"
 + "  " + discBlock + "\n"
 + "  " + (inclusive ? "" : taxRows) + "\n"
 + "  " + mrpBlock + "\n"
-+ '  <div class="g"><span>TOTAL</span><span>' + inr(d.total) + "</span></div>\n"
++ "  " + roundBlock + "\n"
++ '  <div class="g"><span>TOTAL</span><span>' + inr(R.total) + "</span></div>\n"
 + (inclusive && taxRows
    ? '  <div class="incl"><div class="t"><span>Price includes</span><span></span></div>' + taxRows + "</div>\n"
    : "")
@@ -441,6 +498,7 @@
     billIdentity: billIdentity,
     splitTax: splitTax,
     discPct: discPct,
+    billRows: billRows,
     inr: inr,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = API;

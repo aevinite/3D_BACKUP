@@ -1108,7 +1108,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // issued invoice always carries the customer it was made out to.
       const custSaveT = await saveBillCustomer(sb, rid, b as string, body);
       if (!custSaveT.ok) return err(custSaveT.message, 400);
-      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: null, p_actor: actor?.name || actor?.username || null });
+      // A RE-issue (only possible after a manager voided the invoice) has to say WHY — the
+      // manager's own path captures it and this one hardcoded null, so the append-only invoice
+      // history read "generated · reopened · generated" with the last reason blank.
+      const genReasonT = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReasonT || null, p_actor: actor?.name || actor?.username || null });
       if (error) { if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened.", 409); throw pgError(error); }
       await log("invoice_generate", { detail: `session ${b}`, device_id: dev });
       return ok(Array.isArray(data) ? data[0] : data);
