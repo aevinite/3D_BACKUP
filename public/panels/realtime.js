@@ -162,9 +162,22 @@
     const subscribe = () => {
       if (!sb) return;
       channels.forEach((c) => { try { sb.removeChannel(c); } catch (e) {} });
+      // SCOPE THE SOCKET TO THIS RESTAURANT (mig 267 / sweep F7). Migration 145 added the
+      // combined `topic_rid` column ("<topic>:<restaurant_id>") so a subscriber could filter
+      // SERVER-side to its own restaurant. The guest app has always used it
+      // (lib/useRealtime.ts); these panels never switched — they filtered on the bare topic
+      // and then threw other restaurants' events away in JavaScript (noteEvent, below). The
+      // display was right, but every manager/waiter/kitchen device was being handed a
+      // websocket message for EVERY order, session, tag and log row of EVERY restaurant on
+      // the platform — nine times the traffic it needs today, and it grows with the number of
+      // restaurants rather than with this restaurant's own business. That is the connection
+      // budget the owner asked us to protect.
+      // RT_RID is resolved by getClient() BEFORE this runs, so it is available here. If it is
+      // ever empty (rt-config failed) we fall back to the topic-only filter — worst case is
+      // the old behaviour, never a missed update.
       channels = topicList.map((topic) =>
-        sb.channel("rt:" + topic)
-          .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_events", filter: "topic=eq." + topic },
+        sb.channel(RT_RID ? "rt:" + topic + ":" + RT_RID : "rt:" + topic)
+          .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_events", filter: RT_RID ? "topic_rid=eq." + topic + ":" + RT_RID : "topic=eq." + topic },
             (payload) => {
               metrics.events++; metrics.lastEventAt = Date.now();
               // Delivery latency = now − when the breadcrumb was written. Feeds the

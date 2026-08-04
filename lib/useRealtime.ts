@@ -9,7 +9,11 @@ import { useEffect, useRef } from "react";
 import { createClient, type SupabaseClient, type RealtimeChannel } from "@supabase/supabase-js";
 import { reportRealtime, reportLatency } from "@/lib/connectionStatus";
 
-type Topic = "ops" | "menu";
+// `audit` carries staff_actions only, and exists so the activity log does NOT ride `ops`
+// (mig 267 / sweep F3): an ops breadcrumb with no table_number means "reload the whole
+// floor", and an activity-log row — a login, a menu edit, a tap diagnostic — was making
+// every open staff panel do exactly that. Only the admin console listens to `audit`.
+type Topic = "ops" | "menu" | "audit";
 type Handlers = Partial<Record<Topic, () => void | Promise<void>>>;
 
 // One shared client per tab (the anon url+key are public — same values the guest

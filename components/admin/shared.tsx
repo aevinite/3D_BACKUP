@@ -243,7 +243,10 @@ export const fullWhen = (iso: string) => {
 export function useLivePoll(fn: () => void) {
   const ref = useRef(fn);
   ref.current = fn;
-  useRealtime({ ops: () => ref.current(), menu: () => ref.current() });
+  // `audit` is the admin's own topic for staff_actions (mig 267 / sweep F3). The activity
+  // feed still updates the instant a row is logged; the staff panels no longer reload their
+  // whole floor for it, because they don't subscribe to this topic.
+  useRealtime({ ops: () => ref.current(), menu: () => ref.current(), audit: () => ref.current() });
 }
 
 // useActiveAutoRefresh — gentle periodic refresh for the HEAVY dashboards (owner +
