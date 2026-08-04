@@ -56,7 +56,8 @@
     "verify:tablet": "node scripts/verify-tablet-floor.mjs",
     "verify:manager-behaviour": "node scripts/verify-manager-behaviour.mjs",
     "verify:manager-gates": "node scripts/verify-manager-gates.mjs",
-    "verify:guest": "node scripts/verify-guest.mjs"
+    "verify:guest": "node scripts/verify-guest.mjs",
+    "verify:pointers": "node scripts/verify-doc-pointers.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
