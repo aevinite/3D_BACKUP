@@ -62,8 +62,15 @@
   }
 
   async function load() {
-    var r = await fetch("/api/panel-profile", { cache: "no-store" });
-    me = await r.json();
+    // Shared single-flight with maint.js, which reads this same endpoint at boot (see the helper at
+    // the top of maint.js). It only coalesces CONCURRENT reads and drops the entry the moment it
+    // settles, so the re-read after a save below is still a real, fresh request.
+    if (window.LFH_PROFILE_GET) {
+      me = (await window.LFH_PROFILE_GET()).json;
+    } else {
+      var r = await fetch("/api/panel-profile", { cache: "no-store" });
+      me = await r.json();
+    }
     return me;
   }
 

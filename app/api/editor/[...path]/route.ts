@@ -1382,9 +1382,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // BOTH tiles: the parent says "merged with T7", the child says "access from T6" instead of
       // pretending to be free. Kept OUT of lfh_table_view_summary on purpose: that function is the
       // hot shared read and every change to it has to be re-proven tile by tile.
-      const merges = (await sb.from("table_merges")
+      // SHARED like the floor read above (sweep 2026-08-04). This list is restaurant-wide and
+      // identical in every answer, but it rode on EVERY call including the targeted ?table=N one —
+      // and pollTables() widens each requested table to its whole party and fires one targeted call
+      // per member (realtime allows up to 20 in a window), so one bulk change issued twenty
+      // identical reads of the same handful of rows. The waiter route already shared it under this
+      // exact key; the manager route was the one that didn't. Same 1.5s window, and
+      // invalidateFloor() drops any key ending in the restaurant id, so a just-made merge is never
+      // served stale after a write.
+      const merges = await sharedFloorSummary(`merges:${rid}`, async () => (await sb.from("table_merges")
         .select("parent_table, child_table, merged_at, merged_by")
-        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || [];
+        .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || []);
       return ok({ ...(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] }), merges });
     }
 
@@ -2750,8 +2758,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
     if (a === "orders" && c === "serve-all") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).single());
-
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).single());
+      // A VOIDED TICKET MAY NOT BE SERVED BACK TO LIFE (sweep 2026-08-04). This handler wrote
+      // status='served' with no look at what the order currently is, so a cancelled order handed
+      // to it silently stopped being cancelled — the void vanished from the record and the money
+      // rejoined the bill (isUnpaidBill matches anything not cancelled / not received / not paid).
+      // The ONE sanctioned un-cancel is PATCH /orders/:id → 'received': it is limited to 30
+      // minutes from cancelled_at and writes an Audit row. This path had neither, which made it a
+      // way to un-void a sale with no trace — exactly what the billing-compliance rules forbid.
+      // Refused with a reason a person can act on; the manager panel also filters these out now,
+      // so this is the backstop for every other caller (offline replay, the tablet, a future one).
+      if (cur.status === "cancelled") return err("That ticket was voided — restore it first if it should be served.", 409);
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");

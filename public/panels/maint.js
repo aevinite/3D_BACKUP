@@ -11,6 +11,33 @@
 //
 // Pure vanilla JS, served statically (no build step). Talks to /api/panel-profile,
 // /api/panel-logout and /api/maintenance.
+// ── ONE in-flight read of /api/panel-profile, shared by every module in the page ─────────────
+// TWO different scripts in the SAME document read this endpoint at boot: this file's init() (to
+// build the ⚙️ Settings button and force first-login capture) and myprofile.js's available() (to
+// decide whether the "My profile & pay" button exists at all). Neither knew about the other, so a
+// panel open cost TWO identical requests — measured on the manager panel, 2026-08-04 sweep.
+// This is the same single-flight the editor's own api() already uses for its GETs: concurrent
+// callers share ONE request, and the entry is dropped the instant it settles, so nothing is ever
+// served stale — a later read (after a save, say) still goes to the server. Defined before
+// myprofile.js loads, and that file falls back to a plain fetch if this ever isn't there.
+// It resolves the PARSED body, never the Response: a body can only be read once, so handing the
+// same Response to two callers would let whichever parsed first starve the other.
+// Shape: { ok, status, json }.
+window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
+  var inflight = null;
+  return function profileGet() {
+    if (inflight) return inflight;
+    inflight = (async function () {
+      var r = await fetch("/api/panel-profile", { cache: "no-store" });
+      var j = await r.json().catch(function () { return {}; });
+      return { ok: r.ok, status: r.status, json: j };
+    })();
+    var drop = function () { inflight = null; };
+    inflight.then(drop, drop);
+    return inflight;
+  };
+})();
+
 (function () {
   // ── per-device id (unchanged): rides on every request so the Operation log
   //    can name which physical device acted. Cookie "lfh_panel_device". ──────
@@ -324,9 +351,10 @@
     // silently swallowed once before it could return to the restaurant launcher.
     if (new URLSearchParams(location.search).get("ownermode") === "1") return;
     let res = null;
-    try { res = await fetch("/api/panel-profile", { cache: "no-store" }); } catch {}
+    // the shared single-flight (top of this file) — myprofile.js reads the same endpoint at boot
+    try { res = await window.LFH_PROFILE_GET(); } catch {}
     if (res && res.ok) {
-      profile = await res.json();
+      profile = res.json;
       // { staff: false } → admin super-access / signed-out tab: there is no per-user
       // profile to show, so leave the top bar alone. (The endpoint answers 200 for this
       // now instead of 401, which used to log a red console error on every panel load.)
