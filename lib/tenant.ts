@@ -67,11 +67,15 @@ const STALE_ON_ERROR_MS = 10 * 60 * 1000;
 export async function getRestaurantBySlug(slug: string): Promise<Restaurant | null> {
   const hit = bySlug.get(slug);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
+  // ONE DOOR (mig 282): a SECURITY DEFINER function returns this restaurant's guest slice as one
+  // object — `to_jsonb(row)` minus the permission/ownership block (access_config,
+  // manager_permissions, owner_entitlements, owner_user_id). It used to be a column list read
+  // straight off the table with the public key, which required anon to hold a table-wide read on
+  // `restaurants` and handed every guest the whole Access & permissions tree of every restaurant.
+  // Not a column grant and not a view: both enumerate columns and so must match the list here,
+  // and a mismatch is a hard error. A missing key on an object is just `undefined`.
   const { data, error } = await supabase
-    .from("restaurants")
-    .select("id, slug, name, active, deleted_at, logo_text, hero_title, tagline, accent_color, theme, logo_url")
-    .eq("slug", slug)
-    .maybeSingle();
+    .rpc("lfh_guest_restaurant", { p_slug: slug });
   if (error) {
     // Stand on the last real answer rather than invent one. (It may itself be null — a slug we
     // already know is unknown — and that is fine: it was a real answer, not a failure.)

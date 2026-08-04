@@ -75,6 +75,14 @@ const ANON_ALLOWED = {
   // revoke would have silently broken every guest cart's pricing. Verified by reading the caller.
   lfh_resolve_tax_mode:       "decides a dish's tax mode; called BY lfh_price_order, which is INVOKER (mig 270)",
   lfh_phone10:                "phone-number formatter, pure",
+  // THE TWO DOORS (mig 282). These exist so the guest does NOT need a table-wide read on
+  // `settings` / `restaurants` — they return that restaurant's guest slice as one jsonb object,
+  // `to_jsonb(row)` minus a denylist. They are the narrowest thing on this list, not the widest:
+  // each returns strictly LESS than the table grant they replace. scripts/verify-guest-read.mjs
+  // checks both halves — that they open for a guest AND that they still withhold gstin /
+  // access_config / the rest.
+  lfh_guest_settings:         "the guest menu's own settings, minus the staff-only fields (mig 282)",
+  lfh_guest_restaurant:       "resolve a restaurant from its slug for a guest, minus the permission block (mig 282)",
   lfh_effective_tax_rate:     "the guest cart shows tax; granted on purpose by mig 119:36",
   lfh_session_state:          "the guest's own table state, scoped by their session token",
   lfh_join_session:           "guest joins a table",

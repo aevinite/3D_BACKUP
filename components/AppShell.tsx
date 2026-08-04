@@ -58,11 +58,21 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
       // #1's "site" row. Keying the channel name per restaurant also keeps the realtime
       // topics tenant-scoped (the SaaS rule). Falls back to the #1 default if no rid.
       const rid = restaurantId || DEFAULT_RESTAURANT_ID;
+      // WATCH THE BREADCRUMB, NOT THE SETTINGS ROW (mig 282). This used to subscribe to the
+      // `settings` table itself, which is the ONLY reason the public key still needed a
+      // table-wide read on it — and that read is what handed every guest every restaurant's
+      // gstin and panel config. `rt_emit_settings` already writes a `menu`-topic breadcrumb for
+      // exactly this change (the guest menu's own useRealtime has always used it), so the same
+      // event arrives with nothing sensitive on the wire.
+      //
+      // `topic_rid` (mig 145) is the combined "<topic>:<restaurant_id>", so the filter is applied
+      // SERVER-side and this tab is never handed another restaurant's events. Everything else
+      // here — refresh(), the idle drop, the fallback poll — is unchanged.
       channel = supabase
         .channel("settings-" + rid)
         .on(
           "postgres_changes",
-          { event: "*", schema: "public", table: "settings", filter: "restaurant_id=eq." + rid },
+          { event: "INSERT", schema: "public", table: "realtime_events", filter: "topic_rid=eq.menu:" + rid },
           () => refresh()
         )
         .subscribe();
