@@ -29,7 +29,7 @@ import { setScannedTable } from "@/lib/table";
 import {
   getStoredSession, storeSession, clearStoredSession,
   checkLocation, tableStatus, joinSession, getSessionState, requestAccess,
-  callWaiterSession, setMemberName,
+  callWaiterSession, setMemberName, isSessionTimeout,
 } from "@/lib/session";
 // Offline: save the order on-device and send it automatically when back online.
 import { enqueueGuestOrder } from "@/lib/guestOutbox";
@@ -434,8 +434,13 @@ export default function SessionGate() {
     const st = await tableStatus(p.table, ridRef.current);
     if (st.reason === "blocked") { setStep("blocked"); return; }
     // No answer ≠ "table not open" — don't mislabel a network blip; offer a retry.
+    // And don't GUESS the cause: a timeout means the restaurant's own system didn't answer, so
+    // telling the guest to check their internet sends them to fix something that isn't broken.
+    // (Same rule as the offline page, which used to blame the owner's Wi-Fi on a day it was fine.)
     if (!st.ok) {
-      setNote("We can't reach the café's system right now — check your internet and retry.");
+      setNote(isSessionTimeout(st)
+        ? "The restaurant's system isn't answering right now — this one's on us. Please try again."
+        : "We can't reach the café's system right now — check your internet and retry.");
       setStep("net_error");
       return;
     }

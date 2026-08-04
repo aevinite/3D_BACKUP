@@ -148,5 +148,47 @@ for (const [name, rel] of [["waiter", "app/api/tablet/[...path]/route.ts"], ["ma
     : bad(`${name} parcel still silently drops a line the customer paid for`);
 }
 
+// ── 9. round 2: the rest of the session calls, the claims table, the queue ceiling ──────────
+const sess = readFileSync(join(ROOT, "lib/session.ts"), "utf8");
+/SESSION_TIMEOUT_MS/.test(sess) && /abortSignal\(signal\)/.test(sess)
+  ? ok("every table-session call carries a deadline, not just ordering")
+  : bad("join / approve / leave / cart / waiter-call can still hang forever on a swamped system");
+/typeof AbortSignal\.timeout === "function"/.test(sess)
+  ? ok("…and that deadline is guarded for phones without AbortSignal.timeout")
+  : bad("AbortSignal.timeout is used unguarded in lib/session.ts");
+/reason: "timed_out"/.test(sess)
+  ? ok("a timeout is reported as its own reason, not as a refusal")
+  : bad("a timeout still comes back looking like the restaurant said no");
+/isSessionTimeout\(st\)/.test(gate)
+  ? ok("and the guest is told the restaurant didn't answer, not to check their own internet")
+  : bad("a timeout still blames the guest's connection");
+
+/lfh_prune_action_idempotency/.test(idem)
+  ? ok("the at-most-once claims table is pruned (it grew forever; 87% was dead on 2026-08-04)")
+  : bad("action_idempotency still grows without limit");
+!/setInterval|cron/i.test(idem.split("maybePrune")[1] || "")
+  ? ok("…opportunistically, with no timer doing work on idle data")
+  : bad("pruning was wired to a blind timer");
+
+/MAX_QUEUED/.test(outbox) && /moveToFailed\(oldest/.test(outbox)
+  ? ok("one phone can't queue orders without limit, and the dropped one is shown not deleted")
+  : bad("the diner's queue is still unbounded");
+
+const kitchen = readFileSync(join(ROOT, "public/panels/kitchen/app.js"), "utf8");
+(kitchen.match(/r && r\.queued/g) || []).length >= 3
+  ? ok("the kitchen finally says when a tap was saved rather than sent")
+  : bad("a cook can still tap ✓ with no signal and be told nothing");
+/expect: opts && opts\.expect/.test(kitchen)
+  ? ok("…and its api() can carry an expectation, so a future value edit is protectable")
+  : bad("the kitchen api() still cannot pass `expect`");
+
+const cov = readFileSync(join(ROOT, "scripts/verify-clash-coverage.mjs"), "utf8");
+/Not covered by this check/.test(cov)
+  ? ok("the clash guard states what it does NOT see (it was read as covering everything)")
+  : bad("the clash guard still implies it covers the whole app");
+/buildEditExpect/.test(readFileSync(join(ROOT, "public/panels/editor/app.js"), "utf8"))
+  ? ok("two managers editing one dish no longer overwrite each other silently")
+  : bad("the menu editor still has no expectation — last save wins on a price");
+
 console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

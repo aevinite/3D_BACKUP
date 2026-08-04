@@ -42,11 +42,15 @@ const ridQ = (path) => {
   if (PANEL_AS) path += "&as=" + encodeURIComponent(PANEL_AS);
   return path;
 };
-const api = async (method, path, body) => {
+const api = async (method, path, body, opts) => {
   // Writes go through the offline outbox (sent now if online, else saved + replayed
   // on reconnect, at-most-once). GETs stay a plain fetch. Same contract as before.
   if (method !== "GET" && window.LFH_OUTBOX) {
-    return window.LFH_OUTBOX.send({ base: "/api/kitchen", method, path: ridQ(path), body, panel: "kitchen" });
+    // `expect` travels as X-LFH-Expect so the server can refuse rather than overwrite a change
+    // another screen made in the meantime. The kitchen's writes are all one-way transitions
+    // today (accept / ready / sold-out), so nothing passes it yet — but the parameter has to
+    // EXIST, or a value edit added here later is silently unprotectable and no guard would say so.
+    return window.LFH_OUTBOX.send({ base: "/api/kitchen", method, path: ridQ(path), body, panel: "kitchen", expect: opts && opts.expect });
   }
   let r;
   try {
@@ -309,7 +313,9 @@ function platTicketHtml(p) {
 }
 // Advance a platform order (accept/ready/handed_over), then refresh.
 function platAct(id, status) {
-  api("POST", `/platform/${id}/status`, { status }).then(() => load()).catch((e) => { toast("Failed: " + e.message); load(); });
+  api("POST", `/platform/${id}/status`, { status })
+    .then((r) => { if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; } load(); })
+    .catch((e) => { toast("Failed: " + e.message); load(); });
 }
 
 // INCREMENTAL tile patcher. Given a container and the DESIRED ordered list of tickets
@@ -478,7 +484,11 @@ function markItemReady(id, btn) {
   // ✓ buttons survive and the cook's next rapid tap isn't eaten. (owner, 2026-06-19)
   const o = (state.orders || []).find((x) => x.id === it.order_id);
   if (o && orderPhase(o) === "ready") moveCardToReady(o);
-  api("POST", `/items/${id}/status`, { status: "ready" }).then(() => {
+  api("POST", `/items/${id}/status`, { status: "ready" }).then((r) => {
+    // Saved on this device rather than sent — say so, and skip the reconcile (which would refetch
+    // the board and paint the dish back as still cooking, exactly the "did my tap work?" moment
+    // this panel had no answer for).
+    if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; }
     scheduleReadyReconcile();
     // A ✓ is easy to mis-tap in a rush — give the cook a few seconds to send the
     // dish back to where it was (owner undo bar, 2026-07-22).
@@ -559,7 +569,8 @@ function markOrderReady(orderId) {
       if (card) { const html = ticketHtml(o); const tmp = document.createElement("div"); tmp.innerHTML = html; const fresh = tmp.firstElementChild; if (fresh) { fresh.__kdsHtml = html; card.replaceWith(fresh); } }
     }
   }
-  api("POST", `/orders/${orderId}/ready`).then(() => {
+  api("POST", `/orders/${orderId}/ready`).then((r) => {
+    if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; } // saved on this device, not sent
     scheduleReadyReconcile();
     // Offer a takeback only when we captured per-dish rows to revert (session
     // orders); legacy JSON-item orders have no per-dish id, so we skip the bar there.
@@ -636,7 +647,11 @@ function renderDishes() {
     const id = b.dataset["86"], wasOut = b.dataset.out === "1", nowOut = !wasOut;
     b.disabled = true; set86(id, nowOut);
     try {
-      await api("POST", `/dishes/${id}/sold-out`, { value: nowOut });
+      const r = await api("POST", `/dishes/${id}/sold-out`, { value: nowOut });
+      // SAVED, NOT SENT. This panel was the only one that never said so: the optimistic tile
+      // flipped, nothing reached the server, and a cook could close the tab believing the board
+      // was updated. (The offline bar counts it, but the tap itself said nothing.)
+      if (r && r.queued) toast("Saved ✓ — syncing automatically.");
       const dish = state.dishes.find((d) => d.id === id);
       // No confirm — kitchens move fast — but always an UNDO escape hatch, now the shared
       // ring-card bar (owner, 2026-07-22). The UNDO targets the dish by ID (re-querying the

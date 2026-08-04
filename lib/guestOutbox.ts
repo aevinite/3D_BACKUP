@@ -207,6 +207,12 @@ export async function enqueueGuestOrder(p: {
   const { actionId, ...rest } = p;
   const item: GuestOrder = { id: actionId || uuid(), status: "queued", at: Date.now(), ...rest, restaurantSlug, items: p.items || [], allergies: p.allergies || [] };
   queued.push(item);
+  // Over the ceiling → move the OLDEST to the failed list (never silently delete it): it is the
+  // one least likely to still be wanted, and the diner can see it and decide.
+  while (queued.length > MAX_QUEUED) {
+    const oldest = queued[0];
+    await moveToFailed(oldest, "This one waited too long to send — please order it again if you still want it.");
+  }
   // `persisted: false` = it is queued in memory and WILL send, but it did not reach this phone's
   // storage, so closing the tab loses it. The caller must word its message accordingly rather
   // than promising "we'll send it automatically" for something that can't survive a reload.
@@ -242,6 +248,13 @@ function doPost(item: GuestOrder) {
 // so an order the server kept refusing sat in "Waiting" for the life of the tab with the diner
 // never told and no control to touch. Six rounds of the backoff above is roughly four minutes.
 const SERVER_MAX_TRIES = 6;
+
+// A CEILING ON WHAT ONE PHONE MAY HOLD. Nothing bounded this: a device left with no signal could
+// pile up orders until IndexedDB refused, and the failure would land on the NEWEST order (the one
+// the diner is watching) rather than the oldest. Well above any real basket count — a table that
+// has genuinely placed 25 unsent orders has a different problem — and the OLDEST is dropped first,
+// with the diner told, so nothing disappears quietly.
+const MAX_QUEUED = 25;
 
 export async function flushGuestOutbox() {
   if (flushing) return;                 // the running round schedules the next one itself

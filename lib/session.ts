@@ -130,10 +130,38 @@ type RpcResult = { ok: boolean; reason?: string; [k: string]: unknown };
 // One small helper every wrapper below uses. It calls a database function by
 // name (`fn`) with some arguments (`args`) and always returns a tidy result, so
 // callers can just check `.ok` instead of juggling errors themselves.
+// EVERY session call gets a deadline. Without one, a database that is UP but answering nothing
+// (measured at 30-90 seconds on 2026-07-31) leaves the guest's sheet on "One moment…" forever with
+// no way out — join, approve, leave, the shared cart, calling a waiter, all of them. Ordering was
+// given its own guarded path (lib/menu.ts placeSessionOrderSafe); this covers the rest.
+//
+// 15s matches the staff panels' WRITE_TIMEOUT_MS and the diner's ORDER_TIMEOUT_MS: long enough for
+// a route that makes two or three database calls, short enough that nobody stares at a spinner.
+const SESSION_TIMEOUT_MS = 15000;
+
+// A timeout must read as "we couldn't reach the restaurant", never as "the restaurant said no" —
+// the caller shows a very different screen for each.
+export const isSessionTimeout = (r: RpcResult): boolean => r.reason === "timed_out";
+
 async function rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult> {
-  const { data, error } = await supabase.rpc(fn, args);
+  // AbortSignal.timeout is recent; on an older phone reading it throws, so it is feature-guarded
+  // exactly like the twins in lib/menu.ts and public/panels/outbox.js.
+  let signal: AbortSignal | undefined;
+  try {
+    signal = typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(SESSION_TIMEOUT_MS) : undefined;
+  } catch { signal = undefined; }
+  const { data, error } = signal
+    ? await supabase.rpc(fn, args).abortSignal(signal)
+    : await supabase.rpc(fn, args);
   // Database said no -> report failure with its message.
-  if (error) return { ok: false, reason: error.message };
+  if (error) {
+    // An abort/timeout is not a refusal, and its raw message ("AbortError", "signal is aborted
+    // without reason") means nothing to a guest. Give it a code the UI can word properly.
+    const msg = String((error as { message?: string }).message || "");
+    if (signal?.aborted || /abort/i.test(msg)) return { ok: false, reason: "timed_out" };
+    return { ok: false, reason: error.message };
+  }
   // Got data -> use it; got nothing -> treat as a failure ("empty").
   const result = (data as RpcResult) ?? { ok: false, reason: "empty" };
   // A guest limit tripped entirely inside Postgres (guest_order / waiter_call / join_session) — no

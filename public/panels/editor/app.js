@@ -5613,6 +5613,35 @@ function updateMembCount(filterSlug) {
 // save: send the currently-edited record to the server (create or update), show a
 // toast, reload everything, then re-select the freshly-saved row. Refuses to save
 // if the required key (id or slug) is missing.
+// WHAT THIS SCREEN WAS EDITING FROM, in the shape lib/clash.ts expectClash() reads. Returns null
+// when there is nothing meaningful to compare, which makes the write behave exactly as before.
+//
+// Deliberately SCALARS ONLY. The server compares values as trimmed strings (and arrays as sets),
+// so a JSON column like `options` or `nutrition` would stringify to "[object Object]" on both
+// sides and compare EQUAL no matter what changed — an expectation that can never fire is worse
+// than none, because it reads like protection. Prices, names, slugs and flags are the fields two
+// people actually collide on anyway.
+const EXPECT_TABLE = { items: "menu_items", categories: "categories", filters: "filters" };
+function buildEditExpect(kind, payload, pristineJson) {
+  const table = EXPECT_TABLE[kind];
+  if (!table || !pristineJson) return null;
+  let before;
+  try { before = JSON.parse(pristineJson); } catch (e) { return null; }
+  const id = before.id;
+  if (!id) return null;                                  // no row identity → nothing to compare
+  const fields = {};
+  for (const k of Object.keys(payload)) {
+    if (k === "id" || k === "slug" || k.startsWith("__")) continue;  // identity/control keys, not values
+    const was = before[k];
+    if (was === undefined) continue;                     // a column the baseline didn't carry
+    const t = typeof was;
+    if (was !== null && t !== "string" && t !== "number" && t !== "boolean") continue; // see note above
+    fields[k] = was;
+    if (Object.keys(fields).length >= 8) break;          // the server caps at 8 too
+  }
+  return Object.keys(fields).length ? { table, id, fields } : null;
+}
+
 async function save() {
   // Guard against a double-click / double-submit: a second Save while the first is still
   // in flight would POST again and, for a brand-new dish, mint a SECOND dish (the server
@@ -5638,6 +5667,7 @@ async function save() {
     it.slug = slugify(it.slug);
   }
   if (state.tab === "items" && !it.title) { toast("Give the dish a name first", "err"); return; }
+  // (buildEditExpect is defined just below saveRecord — see the "no silent overwrites" note there.)
   // For a brand-new dish the id is server-generated, so only require it when editing.
   if (!(state.tab === "items" && state.isNew) && !it[keyField]) { toast(`${keyField === "id" ? "ID" : "Slug"} is required`, "err"); return; }
   if (state.tab === "items" && !it.slug) { toast("Slug is required", "err"); return; }
@@ -5670,12 +5700,22 @@ async function save() {
       payload = slim;
     } catch (e) { /* keep the full payload on any diff error */ }
   }
+  // NO SILENT OVERWRITES on a dish / category / filter (owner: "it is for ALL possible options,
+  // anywhere clash should not happen"). Sending only the CHANGED fields already stops a stale form
+  // reverting a field nobody touched — but it does NOT stop two managers editing the SAME field at
+  // once, where the second save simply won last. Telling the server what we were editing FROM lets
+  // it refuse instead, and say what the price says NOW. Baseline = state.selPristine, the same
+  // snapshot the diff above uses.
+  const expect = buildEditExpect(kind, payload, state.isNew ? null : state.selPristine);
   state.saving = true;
   const _saveBtn = document.getElementById("saveBtn");
   if (_saveBtn) { _saveBtn.disabled = true; _saveBtn.textContent = "Saving…"; }
   try {
     const key = recKey(it);
-    const saved = await api("POST", "/" + kind, payload);
+    // Written long-hand (`expect: expect`, not the `{ expect }` shorthand) on purpose: the
+    // coverage guard reads call sites textually, and shorthand is invisible to it — a protection
+    // its own guard can't see is one the next person can delete without anything going red.
+    const saved = await api("POST", "/" + kind, payload, expect ? { expect: expect } : undefined);
     toast("Saved ✓", "ok");
     await loadAll();
     if (state.tab === "general") {
