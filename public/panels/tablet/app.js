@@ -4146,7 +4146,29 @@ if (window.LFH_RT) {
   let _menuHealN = 0;
   setInterval(() => { if ((++_menuHealN % 10) === 0) state._menuStale = true; load().catch(() => {}); }, 60000);
 } else {
-  setInterval(() => load().catch(() => {}), 2000); // fallback poll
+  // NO REALTIME AT ALL (the script failed to load / is blocked). This used to be a flat
+  // `setInterval(load, 2000)` — a fixed two-second beat, from every waiter tablet on the floor,
+  // for as long as the page was open. That is the exact shape CLAUDE.md's rush rule forbids and
+  // that the KITCHEN was already fixed for at 5s: a saturated database is what drops realtime in
+  // the first place, so the moment things get bad every device switches to hammering it in
+  // lockstep and keeps it down. It never backed off, never jittered, and kept polling while the
+  // tab was hidden.
+  //
+  // LFH_RT.catchUp() does exactly this, but we cannot use it: reaching this branch AT ALL means
+  // window.LFH_RT is absent. So the same behaviour, self-contained and small — 2s while reads
+  // succeed, doubling to a minute while they fail, back to quick on the first success, ±20%
+  // jitter so tablets don't share a beat, and nothing at all while the tab is hidden.
+  let _fbStep = 0;
+  const _fbSpread = (ms) => Math.round(ms * (0.8 + Math.random() * 0.4));
+  const _fbTick = async () => {
+    if (document.hidden || navigator.onLine === false) { _fbStep = 0; }      // nothing to catch up on
+    else {
+      try { await load(); _fbStep = 0; }
+      catch (e) { _fbStep = Math.min(_fbStep + 1, 5); }                       // 2s → 4 → 8 … → 60s
+    }
+    setTimeout(_fbTick, _fbSpread(Math.min(2000 * Math.pow(2, _fbStep), 60000)));
+  };
+  setTimeout(_fbTick, 2000);
 }
 // #2: once the offline queue drains (or the connection returns), pull true server state so
 // the optimistic screen reconciles with what actually synced. load() self-guards (seq +
