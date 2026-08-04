@@ -362,6 +362,30 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
     : fail("mig 280 stamps now() — the 90-day retention window would restart on every repair");
 }
 
+// ── A STORED TAX RATE MUST BE ONE THE RESTAURANT IS ACTUALLY ON (found live 2026-08-04) ─────
+// mig 284 derives orders.tax_rate as tax / COALESCE(taxable_base, subtotal) and the readers
+// (billMath, the Z-report, paySplit) then TRUST it over the settings. Driving the deployed site
+// showed 15 rows stamped with rates that are not rates — 0.045 (= 0.05 x (1 - 50/500), i.e. the
+// stored tax had been computed on the DISCOUNTED base) and 0.025836 (tax and base simply disagree).
+// Each one would make billMath quote a wrong total for that bill, and billMath is what the payment
+// sheet asks the manager to collect. mig 287 makes the derivation able to say "I don't know".
+{
+  const m287 = read("supabase/migrations/287_only_stamp_a_rate_we_believe.sql");
+  /CREATE OR REPLACE FUNCTION lfh_plausible_tax_rate/.test(m287)
+    ? ok("a derived tax rate is credibility-checked before it is stored")
+    : fail("mig 287 is missing — an implausible derived rate would be trusted as the bill's rate");
+  /NEW\.tax_rate := v_rate;/.test(m287) && /lfh_plausible_tax_rate\(COALESCE\(NEW\.restaurant_id/.test(m287)
+    ? ok("the stamp leaves the rate NULL when it cannot vouch for it (the reader falls back to settings)")
+    : fail("the stamp writes a rate without checking it is one the restaurant is on");
+  /UPDATE orders o SET tax_rate = NULL/.test(m287)
+    ? ok("rates already written that we do not believe are un-stamped")
+    : fail("mig 287 no longer clears the implausible rates it was written to clear");
+  // and the readers must treat 0 / NULL as "fall back", never as a real rate they found
+  /Number\(o\.tax_rate\) > 0/.test(panel)
+    ? ok("billMath only adopts a POSITIVE stamped rate (0 and NULL fall through to the settings)")
+    : fail("billMath may adopt a 0/NULL stamped rate as though it were charged");
+}
+
 // ── report ───────────────────────────────────────────────────────────────────
 if (!HOOK) for (const m of oks) console.log("  ok   " + m);
 if (fails.length) {
