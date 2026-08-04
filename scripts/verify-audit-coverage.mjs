@@ -334,6 +334,34 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
     : fail("the panel's removal detail does not set __lfhClose — phone Back would leave the panel");
 }
 
+// ── THE BILL TOMBSTONE MUST ACTUALLY LAND (found live 2026-08-04) ───────────────────────────
+// softDeleteOrders built ONE stamp and sent it to both tables. `orders` has archived/archived_at;
+// `sessions` has NEITHER, so every session UPDATE was rejected by PostgREST — and its error was
+// never checked, so it failed in silence. The tombstone had therefore never worked: 138 bills on
+// the live database had every order deleted while the session still read alive. The ledger looked
+// fine because deriveBillState ALSO derives "deleted" from orders.every(deleted) in JS, so the
+// screen was right while sessions.deleted_at — which the 90-day retention, idx_sessions_deleted
+// and the admin's restore all read — stayed NULL. Repaired by mig 280.
+{
+  const sd = read("lib/softDelete.ts");
+  /const sessionStamp = \{/.test(sd) && !/from\("sessions"\)\.update\(orderStamp\)/.test(sd)
+    ? ok("the session tombstone sends only the columns sessions HAS (no archived/archived_at)")
+    : fail("softDeleteOrders sends `archived` to sessions again — the UPDATE is rejected and the bill is never tombstoned");
+  /bill tombstone failed for session/.test(sd)
+    ? ok("a failed bill tombstone THROWS instead of failing silently")
+    : fail("the session tombstone's error is swallowed again — that is how this hid for months");
+  /soft-delete failed/.test(sd)
+    ? ok("a failed order soft-delete throws too")
+    : fail("the order soft-delete's error is unchecked");
+  const mig = read("supabase/migrations/280_the_bill_tombstone_that_never_landed.sql");
+  /HAVING count\(\*\) FILTER \(WHERE o\.deleted_at IS NULL\) = 0/.test(mig)
+    ? ok("mig 280 repairs only bills whose every order is already deleted")
+    : fail("mig 280 is missing or no longer scoped to fully-deleted bills");
+  /max\(o\.deleted_at\)/.test(mig)
+    ? ok("the repaired tombstone takes its time from the ORDERS, so retention runs from the real removal")
+    : fail("mig 280 stamps now() — the 90-day retention window would restart on every repair");
+}
+
 // ── report ───────────────────────────────────────────────────────────────────
 if (!HOOK) for (const m of oks) console.log("  ok   " + m);
 if (fails.length) {

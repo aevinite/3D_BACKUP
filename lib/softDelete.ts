@@ -28,7 +28,16 @@ export async function softDeleteOrders(
 ): Promise<{ deleted: number }> {
   if (!ids.length) return { deleted: 0 };
   const now = nowIso();
-  const stamp = {
+  // THE TOMBSTONE, split in two — because `sessions` HAS NO `archived` COLUMN (2026-08-04).
+  //
+  // One `stamp` object used to be sent to BOTH tables. `orders` has archived/archived_at;
+  // `sessions` does not, so every session UPDATE was rejected by PostgREST — and its result was
+  // never checked, so it failed in silence. The session tombstone has therefore NEVER worked:
+  // found by driving the live site, which turned up 138 bills whose every order is deleted while
+  // the session still reads alive. The admin ledger papered over it by ALSO deriving "deleted"
+  // from `orders.every(deleted)` in JS, so it looked fine on screen while the column that the
+  // 90-day retention and every index depend on stayed null.
+  const orderStamp = {
     deleted_at: now,
     deleted_by: meta.actor ?? null,
     deleted_by_id: meta.actorId ?? null,
@@ -40,6 +49,13 @@ export async function softDeleteOrders(
     archived: true,
     archived_at: now,
   };
+  // Only the columns `sessions` actually has.
+  const sessionStamp = {
+    deleted_at: now,
+    deleted_by: meta.actor ?? null,
+    deleted_by_id: meta.actorId ?? null,
+    delete_reason: (meta.reason || "").trim().slice(0, 200) || null,
+  };
   // Only stamp rows not already deleted (idempotent). Grab their sessions to know
   // which tabs might now be fully deleted.
   const live = (await sb.from("orders").select("id, session_id")
@@ -48,7 +64,8 @@ export async function softDeleteOrders(
   const targetIds = (live || []).map((o) => o.id);
   if (!targetIds.length) return { deleted: 0 };
 
-  await sb.from("orders").update(stamp).eq("restaurant_id", rid).in("id", targetIds);
+  const ordUpd = await sb.from("orders").update(orderStamp).eq("restaurant_id", rid).in("id", targetIds);
+  if (ordUpd.error) throw new Error(`soft-delete failed: ${ordUpd.error.message}`);
 
   // Tombstone any session whose orders are now ALL deleted (a whole-bill delete).
   const sessionIds = [...new Set((live || []).map((o) => o.session_id).filter(Boolean))] as string[];
@@ -56,7 +73,11 @@ export async function softDeleteOrders(
     const remaining = await sb.from("orders").select("id", { count: "exact", head: true })
       .eq("session_id", sid).is("deleted_at", null);
     if ((remaining.count || 0) === 0) {
-      await sb.from("sessions").update(stamp).eq("id", sid).eq("restaurant_id", rid).is("deleted_at", null);
+      const sUpd = await sb.from("sessions").update(sessionStamp).eq("id", sid).eq("restaurant_id", rid).is("deleted_at", null);
+      // NOT swallowed. This is the write that silently failed for months: the ledger's "you can
+      // restore them" promise and the 90-day retention both hang off sessions.deleted_at, and an
+      // unchecked error meant the column stayed null while the screen looked right.
+      if (sUpd.error) throw new Error(`bill tombstone failed for session ${sid}: ${sUpd.error.message}`);
     }
   }
   return { deleted: targetIds.length };
