@@ -1,4 +1,4 @@
--- 287_only_stamp_a_rate_we_believe.sql
+-- 288_only_stamp_a_rate_we_believe.sql (renumbered from 287 — see the note at the foot of this file)
 -- ─────────────────────────────────────────────────────────────────────────────
 -- A DERIVED RATE MUST ONLY BE STORED WHEN IT IS CREDIBLE.
 --
@@ -82,3 +82,14 @@ UPDATE orders o SET tax_rate = NULL
 --   select tax_rate, count(*) from orders where tax_rate is not null group by 1 order by 2 desc;
 
 NOTIFY pgrst, 'reload schema';
+
+-- ── RENUMBERED 287 → 288 (2026-08-04) ────────────────────────────────────────────────────────
+-- Two different migrations were merged as 287 within four minutes of each other by two parallel
+-- sessions: this one and 287_tax_trigger_functions_are_not_callable.sql. They happen to be
+-- disjoint (this file owns lfh_plausible_tax_rate / lfh_stamp_order_tax_rate; the other only
+-- revokes grants on lfh_orders_fill_tax_split / lfh_order_items_fill_tax_mode), so nothing was
+-- broken — but the seeder applies migrations in FILENAME order, not intent order, so a number
+-- shared by two files is a coin toss waiting to matter. `npm run verify:grants` and
+-- `verify:db-parity` both flagged it; renumbering while it is still just a rename is the whole
+-- point of those checks. This file merged later, so this is the one that moved.
+-- scripts/verify-audit-coverage.mjs reads this file by name and was updated in the same commit.

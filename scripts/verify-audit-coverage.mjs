@@ -368,12 +368,12 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
 // showed 15 rows stamped with rates that are not rates — 0.045 (= 0.05 x (1 - 50/500), i.e. the
 // stored tax had been computed on the DISCOUNTED base) and 0.025836 (tax and base simply disagree).
 // Each one would make billMath quote a wrong total for that bill, and billMath is what the payment
-// sheet asks the manager to collect. mig 287 makes the derivation able to say "I don't know".
+// sheet asks the manager to collect. mig 288 makes the derivation able to say "I don't know".
 {
-  const m287 = read("supabase/migrations/287_only_stamp_a_rate_we_believe.sql");
+  const m287 = read("supabase/migrations/288_only_stamp_a_rate_we_believe.sql"); // renumbered from 287 (a second 287 existed)
   /CREATE OR REPLACE FUNCTION lfh_plausible_tax_rate/.test(m287)
     ? ok("a derived tax rate is credibility-checked before it is stored")
-    : fail("mig 287 is missing — an implausible derived rate would be trusted as the bill's rate");
+    : fail("mig 288 is missing — an implausible derived rate would be trusted as the bill's rate");
   /NEW\.tax_rate := v_rate;/.test(m287) && /lfh_plausible_tax_rate\(COALESCE\(NEW\.restaurant_id/.test(m287)
     ? ok("the stamp leaves the rate NULL when it cannot vouch for it (the reader falls back to settings)")
     : fail("the stamp writes a rate without checking it is one the restaurant is on");
