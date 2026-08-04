@@ -628,6 +628,48 @@ function banquetRate() {
   return comps.length ? comps.reduce((a, c) => a + c.rate, 0) / 100 : effRate();
 }
 
+// printTableBill(t): give the guest their bill FROM THE WAITER'S HANDHELD.
+//
+// This panel could do every step of issuing a tax invoice except produce it: take the money, split
+// it, capture the customer, mint a numbered invoice — and then there was no way to print. A table
+// settled entirely from here left the guest with nothing on paper unless a manager opened the
+// manager panel. (T7 sweep, F9.)
+//
+// It builds NO document and decides NO figures of its own: the money and the whole assembly live in
+// /panels/billdoc.js (billMoney → billData → billDocHtml), the same three the manager panel and the
+// admin's preview use. Writing a second assembler here is precisely the fault this sweep removed
+// from the split-payment path, so what this function actually does is small: name the table, and
+// open the window.
+function printTableBill(t) {
+  if (typeof LFH_BILLDOC === "undefined" || !LFH_BILLDOC.billData) { toast("Can't print just now — reload the panel.", false); return; }
+  const os = partyOrders(t).filter((o) => o.status !== "cancelled");
+  if (!os.length) { toast("Nothing on this table to print yet.", false); return; }
+  const sess = sessionOf(t) || {};
+  // The restaurant's own name for the table, and every table of a joined party ("T6 + T7", mig 249).
+  const tnum = String(t == null ? "" : t).trim();
+  const tableDisp = mergeGroupLabel(tnum) || (/^\d+$/.test(tnum) ? (tname(tnum) || "T" + tnum) : (tnum || "—"));
+  const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
+    settings: state.data.settings || {},
+    restaurant: state.data.restaurant || {},
+    orders: os,
+    money: LFH_BILLDOC.billMoney(os, state.data.settings || {}),
+    session: sess,
+    tableDisp,
+    // The logo only prints when the restaurant really uploaded one; an http(s) check because a bad
+    // value would otherwise render a broken image on a guest's bill.
+    logo: /^https?:\/\//i.test(String((state.data.restaurant || {}).logo_url || "")) ? String(state.data.restaurant.logo_url) : "",
+    autoPrint: true,
+  }));
+  // One reusable named window, and nothing here ever closes it — Print and Cancel are the same
+  // event to the page, so closing on afterprint threw the bill away when someone pressed Cancel.
+  const w = window.open("", "lfh_bill_print", "width=380,height=680");
+  if (!w) { toast("Allow pop-ups to print the bill.", false); return; }
+  try { w.document.open(); } catch (e) {}
+  w.document.write(html);
+  w.document.close();
+  try { w.focus(); } catch (e) {}
+}
+
 // tableAgg(t): a tile's display data. For the SELECTED table we still compute from its full
 // slice (state.data) so the detail + optimistic taps stay exact; for every OTHER tile we read
 // the slim summary. Same shape either way so renderFloor doesn't care which tier it got.
@@ -1694,6 +1736,10 @@ function renderPanel() {
            A finished table now simply frees itself when the bill is settled. -->
       ${s && os.length && tshow("tablet_discount") ? `<button class="btn${txray("tablet_discount")}" id="billDiscountBtn">${Number(s.discount) > 0 ? `− Edit bill discount (${inr(s.discount)})` : "− Discount whole bill"}</button>` : ""}
       ${s && os.length && !invoiced && tshow("tablet_invoice") ? `<button class="btn${txray("tablet_invoice")}" id="genInvoiceBtn">🧾 Generate invoice</button>` : ""}
+      <!-- PRINT THE BILL. Deliberately not behind a new switch: it shows the guest exactly what this
+           screen already shows the waiter, so there is nothing extra to permit — and a waiter who
+           can settle a table but cannot hand over its bill is the gap this closes (T7 F9). -->
+      ${s && os.length ? `<button class="btn" id="printBillBtn">🖨 Print bill</button>` : ""}
       ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
       ${s && os.length && a.paid && tshow("tablet_mark_paid") ? `<button class="btn${txray("tablet_mark_paid")}" id="unpayBill" title="Reopen this paid bill (a refund/correction — asks for a reason)">↩ Mark unpaid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
@@ -1829,6 +1875,7 @@ function renderPanel() {
   const ub = $("#unpayBill"); if (ub) ub.onclick = () => markBillUnpaid(t);
   const tgb = $("#tagTable"); if (tgb) tgb.onclick = () => openTagSheet(t);
   const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
+  const pbb = $("#printBillBtn"); if (pbb) pbb.onclick = () => printTableBill(state.table);
   const bdb = $("#billDiscountBtn"); if (bdb && s) bdb.onclick = () => tabletBillDiscount(t);
   const clb = $("#closeTable"); if (clb && s) clb.onclick = () => closeTableAndFree(t);
   { const tob = $("#takeOrder"); if (tob) tob.onclick = () => { state.ordering = true; state.viewOrder = false; state.cart = []; state.allergies = ""; state.cat = ""; state.dishSearch = ""; state._omTop = 0; renderPanel(); }; }

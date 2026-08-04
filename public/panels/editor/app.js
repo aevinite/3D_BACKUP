@@ -2447,29 +2447,12 @@ function mrpPill(line) {
 // separate order rows still exist underneath as the record. Per-order accept/serve/
 // pay become session-level (they reuse the table-wide helpers).
 // Financial-year string for invoice numbers, e.g. "2025-26" (FY starts April).
-function financialYear(when) {
-  // FY of the INVOICE's OWN date, not "today" — reprinting a March invoice after 1 April must
-  // keep its issued year. Falls back to now when no/invalid date is passed (legacy callers).
-  //
-  // That fallback was quietly doing all the work: the three reprint paths (the bill card's print,
-  // the bill modal's Print, and the table-detail print) each built a stand-in session object and
-  // left invoice_at OUT, so every reprint of a RECORDED bill was stamped with TODAY's financial
-  // year. Once the year turned, a March bill reprinted as INV/2026-27/000042 — a second identity
-  // for one sale, colliding with the real 2026-27 invoice 42, in exactly the window when people
-  // come back asking for copies. They pass invoice_at now (the bills endpoint always sent it).
-  const d = when ? new Date(when) : new Date();
-  const base = isNaN(d.getTime()) ? new Date() : d;
-  const y = base.getFullYear();
-  const start = base.getMonth() >= 3 ? y : y - 1;
-  return `${start}-${String(start + 1).slice(2)}`;
-}
+// financialYear(): the FY of the invoice's OWN date — shared, see /panels/billdoc.js.
+function financialYear(when) { return LFH_BILLDOC.financialYear(when); }
 // Display an invoice number: <prefix>/<FY>/<6-digit>, e.g. LFH/2025-26/000042.
 // `when` = the invoice's issue date (invoice_at) so the FY segment is fixed to issue time.
-function invFmt(no, when) {
-  if (no == null) return "";
-  const pfx = (state.data.settings || {}).invoice_prefix || "INV";
-  return `${pfx}/${financialYear(when)}/${String(no).padStart(6, "0")}`;
-}
+// invFmt(): <prefix>/<FY>/<6-digit> — shared, see /panels/billdoc.js.
+function invFmt(no, when) { return LFH_BILLDOC.invFmt(no, when, (state.data.settings || {}).invoice_prefix); }
 // Single source of truth for a bill's money — discount comes off BEFORE tax (GST is
 // charged on the taxable amount). All inputs are DB values (server-priced items,
 // server-clamped discount, configured rate); the frontend never sets a price.
@@ -2478,31 +2461,8 @@ function invFmt(no, when) {
 // SUM of the components' percents (so the manager total and the printed per-tax split can
 // never disagree). Empty/absent → fall back to tax_rate, then 5% — i.e. existing behaviour.
 // Returns { rate (decimal, e.g. 0.05), pct (5), components:[{label,rate%}] }.
-function taxModel(settings) {
-  const s = settings || {};
-  const comps = Array.isArray(s.tax_components) ? s.tax_components
-    .map((c) => ({ label: String(c && c.label || "").trim(), rate: Number(c && c.rate) || 0 }))
-    .filter((c) => c.label && c.rate > 0) : [];
-  // COMPOSITION SCHEME rides on the model, not on a second lookup (mig 270). A composition
-  // restaurant may not pass GST to the diner at all, so every screen that draws a tax line
-  // has to ask the SAME object it already asks for the rate — otherwise one of them keeps
-  // printing "Tax 5%" on a bill that legally cannot carry one
-  // (docs/COMPLIANCE-GUARDRAILS.md §3). The rate is still read normally: it is what an
-  // 'incl' line is un-grossed by, and a restaurant can leave composition again.
-  const composition = priceTaxMode(s) === "composition";
-  // A COMPOSITION RESTAURANT'S RATE IS GENUINELY ZERO (mig 272), not "5% that we then hide".
-  // It cannot legally pass GST to the diner, and hiding a rate while still doing arithmetic
-  // with it is how a bill stops adding up: every `due = total − discount × (1 + rate)` in this
-  // app would over-subtract, so a ₹100 discount would take ₹105 off. Returning 0 here fixes
-  // the due figure, the discount cap and the reports in the one place they all read.
-  if (composition) return { rate: 0, pct: 0, components: [], composition };
-  if (comps.length) {
-    const pct = comps.reduce((a, c) => a + c.rate, 0);
-    return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, composition };
-  }
-  const rate = Number(s.tax_rate) || 0.05;
-  return { rate, pct: Math.round(rate * 10000) / 100, components: [], composition };
-}
+// taxModel(): the ONE tax model, now in /panels/billdoc.js so the waiter panel reads the same one.
+function taxModel(settings) { return LFH_BILLDOC.taxModel(settings || (state.data && state.data.settings) || {}); }
 
 // ─────────── PRICE MODES: GST on top, GST inside, MRP (mig 270) ───────────
 // A dish's price answers one of three questions, and the answer changes the arithmetic:
@@ -2619,84 +2579,15 @@ function billIdentity(settings) {
 // taxable_base = NULL, which means "all of subtotal was taxable" — exactly what those bills
 // charged. Falling back to o.subtotal with nontax 0 reproduces the old arithmetic term for
 // term, which is why no restaurant's number moves the day this ships.
-function billMath(orders) {
-  const live = (orders || []).filter((o) => o.status !== "cancelled");
-  const tm = taxModel(state.data.settings);
-  // THE RATE THIS BILL WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 284) — not whatever the
-  // settings say right now. Two faults came out of re-deriving it:
-  //   · A BANQUET is taxed at its OWN rate (18% where configured, mig 239) and nothing outside the
-  //     banquet screen knew. This function is what the Bills tab shows AND what the payment sheet
-  //     asks the manager to collect, so a ₹100,000 banquet printed a tax invoice for ₹118,000 while
-  //     the sheet said ₹105,000 — the restaurant short ₹13,000 on its biggest sale of the month.
-  //   · Correcting the tax setup re-priced bills that had already been printed and paid, so the
-  //     day-close disagreed with the paper in the guests' hands.
-  // A bill is one party's orders, so they share a rate: take the first stamped one. `> 0` on
-  // purpose — a genuine 0 (composition, mig 272) must fall through to the settings, which also
-  // return 0, rather than being mistaken for "not stamped".
-  const stamped = live.find((o) => Number(o.tax_rate) > 0);
-  const rate = stamped ? Number(stamped.tax_rate) : tm.rate;
-  const r2 = (n) => Math.round(n * 100) / 100;
-  let taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false;
-  for (const o of live) {
-    const sub = parseFloat(o.subtotal) || 0;
-    taxableBase += o.taxable_base == null ? sub : (parseFloat(o.taxable_base) || 0);
-    nontax += o.nontax_amount == null ? 0 : (parseFloat(o.nontax_amount) || 0);
-    // The LOCKED part, tracked apart from "merely untaxed" (mig 272). `nontax` holds both a
-    // sealed bottle sold at MRP (price legally final) AND an ordinary nil-rated good (which
-    // staff may absolutely discount); conflating them refused legitimate discounts. The
-    // column is authoritative; the items are the fallback for a row written by hand or by a
-    // synthetic caller (printParcelReceipt builds one) that never went through the trigger.
-    const lines = Array.isArray(o.items) ? o.items : [];
-    if (o.mrp_amount != null) mrpAmount += parseFloat(o.mrp_amount) || 0;
-    else for (const i of lines) if (i && i.is_mrp) mrpAmount += r2((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1));
-    if (!hasMrp && lines.some((i) => i && i.is_mrp)) hasMrp = true;
-  }
-  taxableBase = r2(taxableBase);
-  nontax = r2(nontax);
-  mrpAmount = r2(mrpAmount);
-  const subtotal = r2(taxableBase + nontax);
-  // WHAT MAY BE DISCOUNTED — the rule stated once (mig 272's lfh_order_discount_base):
-  //   rate > 0 → the taxable base. The discount MUST land on the taxable part or the
-  //              `due = total − discount × (1 + rate)` identity above stops holding.
-  //   rate = 0 → everything except the locked MRP. With no tax, (1 + rate) is 1, so the
-  //              identity survives a discount anywhere; only the MRP lock still bites.
-  // `discountFixed` is the money that stays put whatever the discount is — it is what the
-  // guest still hands over once everything discountable has been taken off.
-  const discountBase = rate > 0 ? taxableBase : Math.max(0, r2(subtotal - mrpAmount));
-  const discountFixed = rate > 0 ? nontax : mrpAmount;
-  const rawDisc = r2(live.reduce((a, o) => a + (parseFloat(o.discount) || 0), 0));
-  const disc = Math.min(Math.max(0, rawDisc), discountBase);
-  // Tax is charged on what is LEFT of the taxable base. With rate 0 this is 0 either way, so
-  // one formula covers both cases and `total = subtotal − discount + tax` holds throughout.
-  const taxable = Math.max(0, r2(taxableBase - Math.min(disc, taxableBase)));
-  const tax = r2(taxable * rate);
-  const total = r2(subtotal - disc + tax);
-  // Components carried through so the printed bill can itemise each named tax — but ONLY when they
-  // actually describe THIS bill's rate. A banquet charged at 18% must not be itemised with the
-  // dine-in "CGST 2.5% + SGST 2.5%" labels: splitTax would hand out the right rupees under
-  // percentages that don't add up to what was charged. On a mismatch, hand back none and let
-  // printBill's 50/50 fallback label them at the real rate.
-  const compPct = (tm.components || []).reduce((a, c) => a + (Number(c.rate) || 0), 0);
-  const compsMatch = (tm.components || []).length > 0 && Math.abs(compPct / 100 - rate) < 0.0001;
-  // composition so a render site can drop the tax line without a second settings lookup.
-  return { subtotal, disc, taxable, rate, tax, total, taxComponents: compsMatch ? tm.components : [],
-           taxableBase, nontax, mrpAmount, discountBase, discountFixed, hasMrp,
-           composition: tm.composition };
-}
+// billMath(): a bill's figures — moved into /panels/billdoc.js (billMoney) so the manager panel,
+// the waiter panel and the printed paper cannot disagree. Proven byte-identical over 27,654
+// generated bills before the move. This is the one-line door; the rules are written down there.
+function billMath(orders) { return LFH_BILLDOC.billMoney(orders, state.data.settings); }
 // The GST sitting INSIDE the MRP lines of a bill. Only meaningful when the restaurant
 // treats MRP as tax-inclusive — under 'none' there is no tax on those lines to name, and
 // saying otherwise on a tax invoice would be a claim the accounts don't support.
-function mrpTaxInside(orders, rate) {
-  let inside = 0;
-  for (const o of (orders || []).filter((x) => x.status !== "cancelled")) {
-    for (const i of (Array.isArray(o.items) ? o.items : [])) {
-      if (!i || !i.is_mrp || i.tax_mode !== "incl") continue;
-      const amt = Math.round((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1) * 100) / 100;
-      inside += amt - Math.round((amt / (1 + rate)) * 100) / 100;
-    }
-  }
-  return Math.round(inside * 100) / 100;
-}
+// mrpTaxInside(): the GST inside MRP lines — shared, see /panels/billdoc.js.
+function mrpTaxInside(orders, rate) { return LFH_BILLDOC.mrpTaxInside(orders, rate); }
 // discPct(m): the discount as a PERCENTAGE of the pre-discount subtotal (owner, 2026-08-01: "in
 // the bill it should show how much percentage of discount you have given — and on the printed bill
 // the percentage should show too"). The app stores a discount as an AMOUNT, so the percentage is
@@ -2726,7 +2617,7 @@ function discPct(subtotal, disc) { return LFH_BILLDOC.discPct(subtotal, disc); }
 // untaxed, so splitting the bill into "food" and "MRP" says nothing and reads as broken — the
 // stack came out as "Food subtotal ₹0 / MRP items ₹880". There, the plain old single Subtotal
 // row is both simpler and truer, so the split is folded away. Everywhere else it stands.
-function mrpPart(m) { return m && m.composition ? 0 : (Number(m && m.nontax) || 0); }
+function mrpPart(m) { return LFH_BILLDOC.mrpPart(m); }
 // roundOffRow(m, cls): the row that makes the SCREEN add up, exactly as the paper does.
 //
 // Every row above is rounded to whole rupees on its own while the total is rounded from full
@@ -4758,120 +4649,38 @@ new MutationObserver(() => {
 // same note — become "Espresso ×2"; anything that differs in ANY of those stays its own line,
 // because it genuinely is a different thing (a different price, a no-onion copy…). KOTs are
 // untouched: the kitchen ticket is a log of what was fired, the bill is what the guest owes.
-function combineBillLines(entries) {
-  const out = [];
-  const at = new Map(); // signature -> index in out
-  for (const e of entries || []) {
-    const sig = [e.title, e.price, JSON.stringify(e.options || null), JSON.stringify(e.removed || null), e.note || ""].join("\u0001"); // a VISIBLE escape, never a raw control byte: adjacent fields must not run together ("Special 1"@50 vs "Special"@150), and an invisible byte here begs to be "fixed" back to ""
-    const i = at.get(sig);
-    if (i == null) { at.set(sig, out.length); out.push(Object.assign({}, e, { qty: Math.max(1, parseInt(e.qty, 10) || 1) })); }
-    else out[i].qty += Math.max(1, parseInt(e.qty, 10) || 1);
-  }
-  return out;
-}
+// combineBillLines(): one bill line per dish — shared, see /panels/billdoc.js.
+function combineBillLines(entries) { return LFH_BILLDOC.combineBillLines(entries); }
 function printBill(t, sess, os, opts = {}) {
-  // A PARCEL prints THIS document, not a layout of its own (owner, 2026-08-02: "the bill
-  // format should be exactly like a KOT bill — just the top changes"). The only difference
-  // is the one header line: it reads "Parcel", with nothing where a table number would go.
-  const parcelBill = !!opts.parcel;
-  const s = state.data.settings || {};
-  const m = billMath(os);
-  const live = os.filter((o) => o.status !== "cancelled");
-  // Item rows: base + each priced add-on as a sub-line (the unit price already includes
-  // add-ons, so base = unit − add-ons → the lines sum to subtotal). Figures are grouped
-  // Indian-style (1,07,880) and every one is measured, so the money columns below can be
-  // sized to THIS bill instead of a fixed guess.
-  // The item lines as they were ordered. Their LAYOUT — the base line, a sub-line per priced
-  // add-on, the measured money columns — belongs to the document itself (/panels/billdoc.js),
-  // so the Access → "Format of…" preview draws the very same rows.
-  // is_mrp is named EXPLICITLY on each line (mig 270) rather than left to ride along inside
-  // the spread: billdoc.js reads `i.is_mrp` to stamp the line "MRP", and a stamp that depends
-  // on a field nobody mentions is one a later refactor of combineBillLines drops in silence.
-  const lines = combineBillLines(live.reduce((a, o) => a.concat(Array.isArray(o.items) ? o.items : []), []))
-    .map((i) => Object.assign({}, i, { is_mrp: !!i.is_mrp }));
-  // White-label identity: ALL the fallback logic lives in billIdentity() (shared with
-  // the Billing settings form, which autofills the same values). The French House
-  // logo applies ONLY to the flagship (#1).
-  const bi = billIdentity(s);
-  // WHO THE BILL IS FOR. Two different things, in priority order:
-  //  1. bill_cust_name / bill_cust_phone — captured at invoice time and stored on the
-  //     bill itself (mig 227). Printing them is the restaurant's own switch
-  //     (settings.bill_customer_print) — the details are always SAVED either way.
-  //  2. customer_name — the guest's own name from their phone / an aggregator buyer.
-  // Blank → the line is hidden, never printed empty.
-  const printCust = s.bill_customer_print !== false;
-  const billCustRow = os.find((o) => (o.bill_cust_name || o.bill_cust_phone)) || {};
-  // Every value below is passed RAW — the shared document escapes on the way in, in one place.
-  const cust = printCust ? (billCustRow.bill_cust_name || (os.find((o) => (o.customer_name || "").toString().trim()) || {}).customer_name || "")
-                         : "";
-  // 10 digits print as "98250 12345" — easier to read back to a guest than one long run.
-  const custPhoneRaw = printCust ? String(billCustRow.bill_cust_phone || "").replace(/\D/g, "") : "";
-  const custPhone = custPhoneRaw.length === 10 ? custPhoneRaw.slice(0, 5) + " " + custPhoneRaw.slice(5) : custPhoneRaw;
-  // Table on the printed bill: the restaurant's OWN name for it when it has one ("A1",
-  // "Patio" — mig 131), because the guest and the waiter both know the table by that name
-  // (owner 2026-07-29: "print acc to the table name … on the KOT as well as the bill").
-  // No name → the old "T5". Non-numeric values (e.g. "Takeaway") are left exactly as entered.
-  const tnum = (t || "").toString().trim();
-  // A joined party's bill names EVERY table it covers — "T6 + T7" (owner rule, mig 249) —
-  // so the paper says out loud that it settles more than one table. ONLY when the caller says
-  // this is the table's LIVE bill (opts.party): mergeGroupLabel reads the merges of RIGHT NOW,
-  // and reprinting yesterday's solo T6 bill while T6 happens to be merged today must not stamp
-  // "T6 + T7" onto a settled tax document (work-checker, 2026-08-03).
-  const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
-  const invNo = sess && sess.invoice_no != null ? invFmt(sess.invoice_no, sess.invoice_at) : "";
-  const billNo = sess && sess.bill_no != null ? sess.bill_no : "";
-  const now = new Date();
-  const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
-  // Tax rows on the printed bill: if the restaurant configured named components
-  // (tax_components → m.taxComponents), itemise EACH (label · its % · its amount, amounts
-  // computed from the taxable value so they sum to m.tax). Otherwise keep the historical
-  // 50/50 CGST+SGST split. (owner, 2026-07-03 — customisable multi-tax on the customer bill.)
-  // LFH_BILLDOC.splitTax() is what makes those lines add up EXACTLY to the tax on the total —
-  // the reasoning is written out there, and sharing it is what stops the preview footing
-  // differently from the paper.
-  const taxComps = (m.taxComponents && m.taxComponents.length)
-    ? m.taxComponents
-    : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
-  // MRP / untaxed lines (mig 270). `m.nontax` is the part of this bill GST is NOT charged on
-  // — a sealed water bottle sold at its printed price. billdoc.js adds it AFTER the tax rows
-  // and renames the first row "Food subtotal" so the column foots; with nothing untaxed
-  // (every restaurant today) it renders nothing and the paper is byte-identical to before.
+  // WHAT GOES ON THE PAPER IS DECIDED ONCE, in /panels/billdoc.js (billData). This function's job is
+  // only the three things the PANEL knows: the restaurant's own logo, what to call this table, and
+  // the window to write into.
   //
-  // The note is written ONLY when tax genuinely IS inside the price — i.e. when the
-  // restaurant declares MRP as tax-inclusive. Printing it under 'none' would be a statement
-  // on a tax invoice that the accounts do not support, so the string is empty there.
-  const mrpInside = String(s.mrp_tax_treatment) === "inclusive" ? mrpTaxInside(live, m.rate) : 0;
-  const mrpNote = mrpInside > 0
-    ? `MRP items carry ${inr(mrpInside)} GST within the price shown.`
-    : "";
-  // A composition-scheme restaurant may not pass GST to the diner, so NO tax line is printed
-  // at all — not a ₹0 one (docs/COMPLIANCE-GUARDRAILS.md §3).
-  const taxRows = m.composition ? [] : LFH_BILLDOC.splitTax(Math.round(m.tax), taxComps);
+  // The assembly used to live right here — which is why the WAITER PANEL could not print a bill at
+  // all: it can take the money, split it, capture the customer and mint a numbered tax invoice, but
+  // the one thing it needed was locked inside the manager panel. Copying it across would have been
+  // a second assembler, exactly the fault removed from the split-payment path. So it moved.
+  const s = state.data.settings || {};
+  // Table on the printed bill: the restaurant's OWN name for it when it has one ("A1", "Patio",
+  // mig 131), because the guest and the waiter both know it by that name. No name → the old "T5".
+  // Non-numeric values (e.g. "Takeaway") are left exactly as entered.
+  // A joined party's bill names EVERY table it covers — "T6 + T7" (mig 249) — but ONLY when the
+  // caller says this is the table's LIVE bill: mergeGroupLabel reads the merges of RIGHT NOW, and
+  // reprinting yesterday's solo T6 bill while T6 happens to be merged today must not stamp
+  // "T6 + T7" onto a settled tax document.
+  const tnum = (t || "").toString().trim();
+  const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
 
-  // ONE DOCUMENT, ONE FILE. The bill's markup used to live right here, and three other screens
-  // each carried their own version of it — so the Access → "Format of…" preview showed the admin
-  // a layout no printer ever produced (owner, 2026-08-02: "whatever the manager panel prints, the
-  // preview should only be that — both should be sync"). The paper is described once now, in
-  // /panels/billdoc.js; this function only decides WHAT goes on it. Nothing about how it looks,
-  // or about how this window behaves, changed.
-  const html = LFH_BILLDOC.billDocHtml({
-    logo: billLogo(),
-    name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
-    invNo, billNo, parcel: parcelBill, tableDisp,
-    dateStr: now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    cust, custPhone,
-    lines,
-    subtotal: m.subtotal, discount: m.disc, discLabel: discPct(mrpPart(m) > 0 ? m.taxableBase : m.subtotal, m.disc),
-    taxable: m.taxable, total: m.total,
-    taxRows,
-    nontax: mrpPart(m), mrpLabel: "MRP items", mrpNote,
-    autoPrint: true,
-  });
-  // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands
-  // the page the SAME afterprint event whether the person pressed Print or pressed Cancel —
-  // there is no flag saying which — so the old "close on afterprint" also threw the bill away
-  // on Cancel, which is the bug he reported. The window now closes only from its own ✕ Close
-  // button, and a NAMED target means the next bill reuses this window instead of piling up.
+  const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
+    settings: s, restaurant: state.data.restaurant || {}, orders: os,
+    money: billMath(os), session: sess || {}, tableDisp,
+    logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
+  }));
+
+  // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands the
+  // page the SAME afterprint event whether the person pressed Print or Cancel — there is no flag
+  // saying which — so the old "close on afterprint" also threw the bill away on Cancel. The window
+  // closes only from its own ✕ Close, and a NAMED target means the next bill reuses it.
   const w = window.open("", "lfh_bill_print", "width=380,height=680");
   if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
   try { w.document.open(); } catch (e) {} // reused window: start from a blank document
@@ -13119,45 +12928,14 @@ const BQ_FIELDS = [
 const BQ_DEFAULT_FIELDS = ["cust_name", "cust_phone", "dish", "pax", "rate", "advance"];
 // Is this restaurant asked for field <k>? Missing/blank config falls back to the
 // simple set, so a restaurant that was never configured still gets a usable bill.
-function bqOn(k) {
-  const f = (state.data.settings || {}).banquet_fields;
-  const list = Array.isArray(f) && f.length ? f : BQ_DEFAULT_FIELDS;
-  return list.indexOf(k) >= 0;
-}
+function bqOn(k) { return LFH_BILLDOC.bqOn(state.data.settings, k); }
 // The paper this restaurant prints on (mig 237). Plain = the app prints the header.
-function bqPaper() {
-  const s = state.data.settings || {};
-  const num = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
-  return {
-    pad: s.banquet_paper === "pad",
-    size: s.banquet_paper_size === "a4" ? "a4" : "a5",
-    top: num(s.banquet_paper_top, 0, 80, 33),
-    bot: num(s.banquet_paper_bot, 0, 50, 14),
-    side: num(s.banquet_paper_side, 2, 25, 6),
-    foot: s.banquet_paper_foot === true,
-    sign: s.banquet_paper_sign !== false,
-    fill: s.banquet_paper_fill !== false,
-  };
-}
+function bqPaper() { return LFH_BILLDOC.bqPaper(state.data.settings); }
 // Indian amount-in-words for the "Bill total (in words)" line.
 const BQ_ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve",
   "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
 const BQ_TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
-function bqWords(amount) {
-  const two = (n) => (n < 20 ? BQ_ONES[n] : BQ_TENS[Math.floor(n / 10)] + (n % 10 ? "-" + BQ_ONES[n % 10] : ""));
-  const three = (n) => (n >= 100 ? BQ_ONES[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " : "") : "") + (n % 100 ? two(n % 100) : "");
-  let n = Math.floor(Math.abs(Number(amount) || 0));
-  if (!n) return "Zero Only";
-  const p = [];
-  const cr = Math.floor(n / 1e7); n %= 1e7;
-  const la = Math.floor(n / 1e5); n %= 1e5;
-  const th = Math.floor(n / 1e3); n %= 1e3;
-  if (cr) p.push(three(cr) + " Crore");
-  if (la) p.push(three(la) + " Lakh");
-  if (th) p.push(three(th) + " Thousand");
-  if (n) p.push(three(n));
-  return p.join(" ").trim() + " Only";
-}
+function bqWords(amount) { return LFH_BILLDOC.bqWords(amount); }
 const bq2 = (n) => (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const bq0 = (n) => Math.round(Number(n) || 0).toLocaleString("en-IN");
 
@@ -13451,18 +13229,7 @@ function bqNewHtml() {
 // service is 5% (CGST 2.5 + SGST 2.5) while a banquet is 18% (CGST 9 + SGST 9) — one
 // restaurant, two rates. settings.banquet_tax_components wins when set; empty falls back
 // to the restaurant's normal tax, so nothing changes for anyone who never sets it.
-function bqTaxModel() {
-  const s = state.data.settings || {};
-  const raw = Array.isArray(s.banquet_tax_components) ? s.banquet_tax_components : [];
-  const comps = raw.map((c) => ({ label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 }))
-    .filter((c) => c.label && c.rate > 0);
-  if (comps.length) {
-    const pct = comps.reduce((a, c) => a + c.rate, 0);
-    return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, own: true };
-  }
-  const tm = taxModel(s);
-  return { rate: tm.rate, pct: tm.pct, components: tm.components, own: false };
-}
+function bqTaxModel() { return LFH_BILLDOC.bqTaxModel(state.data.settings); }
 function bqTaxLabel() {
   const tm = bqTaxModel();
   return tm.components && tm.components.length
@@ -13685,200 +13452,19 @@ function bindBanquet() {
 // gets the shorter form with the tax in the summary. Every figure comes from the
 // bill row (frozen at issue), so a re-print years later is identical.
 function printBanquetBill(b, lines) {
-  const s = state.data.settings || {};
-  const bi = billIdentity(s);
-  const P = bqPaper();
-  const isA4 = P.size === "a4";
-  const W = isA4 ? 210 : 148, H = isA4 ? 297 : 210;
-  const when = new Date(b.issued_at || Date.now());
-  const dstr = when.toLocaleDateString("en-GB").replace(/\//g, "-");
-  const tstr = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toUpperCase().replace(" ", "");
-  const sub = Number(b.subtotal) || 0, disc = Number(b.discount) || 0;
-  const taxAmt = Number(b.tax) || 0, total = Number(b.total) || 0;
-  const recv = Number(b.received) || 0;
-  const bal = Math.round((total - recv) * 100) / 100;
-  const taxable = Math.round((sub - disc) * 100) / 100;
-  // Owner 2026-07-31: "whatever is in the bill I have sent you of banquet, it should be
-  // like that" — a banquet bill ALWAYS prints as a tax invoice with the per-line taxable
-  // value + CGST/SGST columns. The receiver's GSTIN line only shows when there is one.
-  const b2b = true;
-  const hasCustGstin = !!String(b.cust_gstin || "").trim();
-  // named tax components, or the historical CGST+SGST halves; the last one takes the
-  // remainder so the printed lines always foot to the tax on the total.
-  // The split PRINTED on this bill. A saved bill carries its own frozen tax_lines
-  // (mig 239), so re-printing after a rate change can never re-split an old total.
-  const tmB = bqTaxModel();
-  const comps = (tmB.components && tmB.components.length) ? tmB.components
-    : [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }];
-  let taxRows;
-  if (Array.isArray(b.tax_lines) && b.tax_lines.length) {
-    taxRows = b.tax_lines.map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
-  } else {
-    const rateSum = comps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
-    let run = 0;
-    taxRows = comps.map((c, i) => {
-      const amt = i === comps.length - 1 ? Math.round((taxAmt - run) * 100) / 100
-        : Math.round(taxAmt * ((Number(c.rate) || 0) / rateSum) * 100) / 100;
-      run = Math.round((run + amt) * 100) / 100;
-      return { label: c.label, rate: Number(c.rate) || 0, amt };
-    });
-  }
-  const L = (lines || []).map((l) => {
-    const gross = (Number(l.qty) || 0) * (Number(l.price) || 0);
-    return { title: l.title, qty: Number(l.qty) || 0, price: Number(l.price) || 0, gross };
+  // The banquet document itself now lives in /panels/billdoc.js — it was the LAST piece of paper
+  // that still existed twice (the admin's "See the banquet bill" drew its own, and the two had
+  // already parted company over the frozen tax lines and the A4/A5 setup). This function's job is
+  // the window; what goes on the sheet is decided there, once, for every screen.
+  const html = LFH_BILLDOC.banquetDocHtml({
+    bill: b, lines: lines || [],
+    settings: state.data.settings || {},
+    restaurant: state.data.restaurant || {},
+    logo: billLogo(),
   });
-  // per-line taxable value: the bill's discount spread pro-rata so the column foots
-  const grossAll = L.reduce((a, l) => a + l.gross, 0) || 1;
-  L.forEach((l) => { l.taxable = Math.round((l.gross - disc * (l.gross / grossAll)) * 100) / 100; });
-
-  const cols = 5 + taxRows.length * 2;
-  // One <col> per column. Built by concatenation, NOT by joining half-open tags — the
-  // clever join printed a stray "<" on the paper (caught in the print check).
-  const colg = b2b
-    ? `<col style="width:7mm"><col><col style="width:11mm"><col style="width:14mm"><col style="width:19mm">`
-      + taxRows.map(() => `<col style="width:10mm"><col style="width:15mm">`).join("")
-    : `<col style="width:7mm"><col><col style="width:14mm"><col style="width:18mm"><col style="width:22mm">`;
-  const head = b2b
-    ? `<tr><th rowspan="2">Sr</th><th rowspan="2">Item Name</th><th rowspan="2">Qty.</th><th rowspan="2">Rate</th><th rowspan="2">Taxable<br/>Value</th>${taxRows.map((c) => `<th colspan="2">${esc(c.label)}</th>`).join("")}</tr>
-       <tr>${taxRows.map(() => "<th>Rate</th><th>Amount</th>").join("")}</tr>`
-    : `<tr><th>Sr</th><th>Item Name</th><th>Qty.</th><th>Rate</th><th>Amount</th></tr>`;
-  const rows = L.map((l, i) => {
-    const nameCell = `<td class="n">${esc(l.title)}</td>`;
-    if (!b2b) return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.gross)}</td></tr>`;
-    const tds = taxRows.map((c) => `<td class="c">${bq2(c.rate)}%</td><td class="r">${bq2(Math.round(l.taxable * (c.rate / 100) * 100) / 100)}</td>`).join("");
-    return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.taxable)}</td>${tds}</tr>`;
-  }).join("");
-  const fillN = P.fill ? Math.max(0, (isA4 ? 12 : 6) - L.length) : 0;
-  let fill = "";
-  for (let i = 0; i < fillN; i++) fill += `<tr class="fill">${"<td></td>".repeat(cols)}</tr>`;
-  // The reference bill foots its columns INSIDE the table (TOTAL | taxable | each tax),
-  // which is also the proof that the per-line tax columns add up to the summary.
-  const totRow = `<tr class="tot"><td colspan="4" class="r">TOTAL</td><td class="r">${bq2(taxable)}</td>`
-    + taxRows.map((c) => `<td></td><td class="r">${bq2(c.amt)}</td>`).join("") + `</tr>`;
-
-  // Terms box: the advances, the remark, and the function line — each only if present.
-  const terms = [];
-  for (const a of (b.advances || [])) {
-    if (Number(a.amt) > 0) {
-      const d = a.date ? new Date(a.date).toLocaleDateString("en-GB") : "";
-      terms.push(`${esc(String(a.mode || "").toUpperCase())} PAY${d ? " DT." + d : ""} — ${bq0(a.amt)}/-`);
-    }
-  }
-  if (b.remark) terms.push(esc(b.remark));
-  const fnBits = [];
-  if (b.func) fnBits.push(esc(b.func));
-  if (b.fn_date) fnBits.push(new Date(b.fn_date).toLocaleDateString("en-GB") + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
-  if (b.pax) fnBits.push(b.pax + (b.func || b.fn_date ? " pax" : " plates"));
-  const fnLead = fnBits.length && (b.func || b.fn_date) ? "Function: " : "";
-  const toBits = [];
-  if (b.cust_name) toBits.push(`<div class="who">${esc(b.cust_name)}</div>`);
-  if (b.cust_addr) toBits.push(`<div class="adr">${esc(b.cust_addr).split("\n").join("<br/>")}</div>`);
-  const line2 = [b.cust_person, b.cust_phone].filter(Boolean).map(esc).join(" · ");
-  if (line2) toBits.push(`<div class="adr">${line2}</div>`);
-  if (hasCustGstin) toBits.push(`<div style="font-size:7.6pt;margin-top:1.2mm">GSTIN / UID&nbsp;: <b>${esc(b.cust_gstin)}</b></div>`);
-
-  const money = [];
-  money.push(`<div class="ms"><span>Subtotal</span><i>${bq2(sub)}</i></div>`);
-  if (disc > 0) money.push(`<div class="ms"><span>Discount</span><i>− ${bq2(disc)}</i></div><div class="ms"><span>Taxable value</span><i>${bq2(taxable)}</i></div>`);
-  taxRows.forEach((c) => money.push(`<div class="ms"><span>${esc(c.label)} ${c.rate}%</span><i>${bq2(c.amt)}</i></div>`));
-  const roundOff = Math.round((total - (taxable + taxAmt)) * 100) / 100;
-  if (roundOff) money.push(`<div class="ms"><span>Round off</span><i>${(roundOff > 0 ? "+" : "") + bq2(roundOff)}</i></div>`);
-  money.push(`<div class="ms tot"><span>INVOICE TOTAL</span><i>${bq2(total)}</i></div>`);
-  if (recv > 0) {
-    money.push(`<div class="ms bal"><span>Received</span><i>${bq2(recv)}</i></div>`);
-    money.push(`<div class="ms" style="font-weight:700"><span>${bal > 0 ? "Balance due" : "Balance"}</span><i>${bq2(Math.max(0, bal))}</i></div>`);
-  }
-
   const w = window.open("", "_blank", "width=780,height=980");
   if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Tax Invoice ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
-<style>
-  /* A5/A4 sheet print recipe: an EXPLICIT @page size is correct here (unlike the 80mm
-     thermal bill, where forcing a size makes CUPS rotate the job) because the tray
-     really holds this sheet. margin:0 kills the browser's own header/footer. */
-  @page{size:${W}mm ${H}mm;margin:0}
-  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
-  html,body{margin:0;padding:0;background:#fff}
-  .pg{width:${W}mm;min-height:${H}mm;background:#fff;color:#000;position:relative;
-      font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:${isA4 ? 9.4 : 8.2}pt;line-height:1.34}
-  .body{padding:0 ${P.side}mm ${P.bot}mm}
-  .selfhead{text-align:center;padding:${P.pad ? 0 : 4}mm 0 2.2mm;border-bottom:1.1px solid #000;margin-bottom:1.4mm}
-  .selfhead .nm{font-size:${isA4 ? 16 : 14}pt;font-weight:800;letter-spacing:.2px}
-  .selfhead .ad{font-size:7.5pt;line-height:1.34;margin-top:.7mm}
-  .doct{text-align:center;margin:2.4mm 0 2mm}
-  .doct b{font-size:10pt;font-weight:700;letter-spacing:.22em;text-transform:uppercase}
-  table{width:100%;border-collapse:collapse}
-  .bx{border:1px solid #000}
-  .bx td{border:1px solid #000;padding:1.5mm 1.9mm;vertical-align:top}
-  .lbl{font-size:6.7pt;letter-spacing:.09em;text-transform:uppercase;opacity:.7}
-  .who{font-weight:700;font-size:8.7pt;text-transform:uppercase;letter-spacing:.2px;margin-top:.5mm}
-  .adr{font-size:7.5pt;line-height:1.36;margin-top:.5mm}
-  .v{font-weight:700;font-size:8.2pt;white-space:nowrap}
-  .metag{display:grid;grid-template-columns:1fr 1fr;gap:1.4mm 2mm}
-  .terms{font-size:7.4pt;line-height:1.44}
-  table.it{border:1px solid #000;table-layout:fixed;margin-top:0}
-  table.it th,table.it td{border:1px solid #000;padding:1.2mm 1.5mm;font-size:7.7pt}
-  table.it th{font-weight:700;text-align:center;font-size:6.9pt;line-height:1.2}
-  table.it td.n{text-align:left}table.it td.c{text-align:center}
-  table.it td.r{text-align:right;font-variant-numeric:tabular-nums}
-  table.it tr.fill td{height:5.4mm;border-top:0;border-bottom:0}
-  table.it tr.tot td{font-weight:700;border-top:1px solid #000}
-  .footg{display:flex;border:1px solid #000;border-top:0}
-  .footg .fl{flex:1;padding:1.6mm 1.9mm;border-right:1px solid #000;min-width:0}
-  .footg .fr{width:${isA4 ? 74 : 56}mm;padding:1.2mm 1.9mm}
-  .wrd{font-size:7.6pt;line-height:1.38;margin-top:.4mm}
-  .ms{display:flex;justify-content:space-between;gap:2mm;font-size:7.8pt;padding:.5mm 0}
-  .ms.tot{border-top:1px solid #000;margin-top:.9mm;padding-top:1.1mm;font-weight:700;font-size:9.4pt}
-  .ms.bal{border-top:1px dashed #000;margin-top:.9mm;padding-top:1.1mm;font-weight:700}
-  .ms i{font-style:normal;font-variant-numeric:tabular-nums}
-  .stamp{display:inline-block;border:1.1px solid #000;border-radius:1mm;padding:.5mm 2mm;font-size:7.4pt;
-         font-weight:700;letter-spacing:.12em;margin-top:1.4mm}
-  .sign{text-align:right;font-size:7.7pt;margin-top:2.6mm;line-height:1.5}
-  .sign .sp{height:9mm}
-  .pfoot{text-align:center;font-size:7.2pt;margin-top:3mm;line-height:1.45}
-  @media print{tr,.ms,.footg,.bx{break-inside:avoid}thead{display:table-row-group}}
-</style></head><body><div class="pg">
-  <div style="height:${P.pad ? P.top : 0}mm"></div>
-  <div class="body">
-    ${P.pad ? "" : `<div class="selfhead"><div class="nm">${esc(bi.name)}</div>
-      <div class="ad">${esc(bi.address)}${bi.phone ? "<br/>Ph " + esc(bi.phone) : ""}${bi.gstin ? "<br/>GSTIN " + esc(bi.gstin) : ""}</div></div>`}
-    <div class="doct"><b>Tax Invoice</b></div>
-    <table class="bx">
-      <tr>
-        <td style="width:53%"><div class="lbl">Supplier</div><div class="who">${esc(bi.name)}</div>
-          <div class="adr">${esc(bi.address)}</div>
-          ${bi.gstin ? `<div style="font-size:7.5pt;margin-top:1mm">GSTIN&nbsp;: <b>${esc(bi.gstin)}</b></div>` : ""}</td>
-        <td><div class="metag">
-          <div><div class="lbl">Invoice No.</div><div class="v">${esc(b.bill_no || "—")}</div></div>
-          <div><div class="lbl">Dated</div><div class="v">${esc(dstr)}</div></div>
-          ${b.hall ? `<div><div class="lbl">Banq. Name</div><div class="v">${esc(b.hall)}</div></div>` : ""}
-          <div><div class="lbl">Time</div><div class="v">${esc(tstr)}</div></div>
-          ${b.table_number ? `<div><div class="lbl">Table</div><div class="v">${esc(String(b.table_number))}</div></div>` : ""}
-        </div></td>
-      </tr>
-      ${toBits.length || terms.length || fnBits.length ? `<tr>
-        <td>${toBits.length ? `<div class="lbl">Details of receiver (Bill to)</div>${toBits.join("")}`
-             : `<div class="lbl">Bill to</div><div class="adr">Counter booking</div>`}</td>
-        <td><div class="lbl">Terms &amp; conditions</div>
-          ${terms.length ? `<div class="terms" style="margin-top:.6mm">${terms.join("<br/>")}</div>` : ""}
-          ${fnBits.length ? `<div class="terms" style="margin-top:${terms.length ? "1mm" : ".6mm"}">${fnLead}${fnBits.join(" · ")}</div>` : ""}
-          ${!terms.length && !fnBits.length ? `<div class="terms" style="margin-top:.6mm">—</div>` : ""}</td>
-      </tr>` : ""}
-    </table>
-    <table class="it" style="border-top:0"><colgroup>${colg}</colgroup><thead>${head}</thead><tbody>${rows}${fill}${totRow}</tbody></table>
-    <div class="footg">
-      <div class="fl"><div class="lbl">Invoice Total (In Words)</div>
-        <div class="wrd">${esc(bqWords(total))}</div>
-        ${recv > 0 ? `<div class="stamp">${bal > 0 ? "BALANCE DUE " + bq0(bal) : "PAID IN FULL"}</div>` : ""}</div>
-      <div class="fr">${money.join("")}</div>
-    </div>
-    ${P.sign ? `<div class="sign">For <b>${esc(bi.name)}</b><div class="sp"></div>Authorised Signatory</div>` : ""}
-    ${bqOn("by") && b.prepared_by ? `<div style="font-size:7pt;margin-top:1.4mm">Prepared by ${esc(b.prepared_by)}</div>` : ""}
-    ${P.foot ? `<div class="pfoot">${esc(bi.footer)}${bi.gstin ? "<br/>GST No: " + esc(bi.gstin) : ""}</div>` : ""}
-  </div>
-</div>
-<script>setTimeout(function(){print()},350)<\/script>
-</body></html>`);
+  w.document.write(html);
   w.document.close();
 }
 

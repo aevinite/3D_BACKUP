@@ -381,9 +381,12 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
     ? ok("rates already written that we do not believe are un-stamped")
     : fail("mig 287 no longer clears the implausible rates it was written to clear");
   // and the readers must treat 0 / NULL as "fall back", never as a real rate they found
-  /Number\(o\.tax_rate\) > 0/.test(panel)
-    ? ok("billMath only adopts a POSITIVE stamped rate (0 and NULL fall through to the settings)")
-    : fail("billMath may adopt a 0/NULL stamped rate as though it were charged");
+  // The rule MOVED into /panels/billdoc.js (billMoney) on 2026-08-04, when the bill's money and its
+  // assembly were shared so the waiter panel could print at all. The panels are one-line doors onto
+  // it now, so this checks it where it lives.
+  /Number\(o\.tax_rate\) > 0/.test(read("public/panels/billdoc.js"))
+    ? ok("the shared bill money only adopts a POSITIVE stamped rate (0 and NULL fall through to the settings)")
+    : fail("the shared bill money may adopt a 0/NULL stamped rate as though it were charged");
 }
 
 // ── report ───────────────────────────────────────────────────────────────────

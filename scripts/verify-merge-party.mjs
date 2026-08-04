@@ -17,6 +17,7 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
 
 const editor = read("public/panels/editor/app.js");
+const billdoc = read("public/panels/billdoc.js");
 const tablet = read("public/panels/tablet/app.js");
 const editorRoute = read("app/api/editor/[...path]/route.ts");
 const tabletRoute = read("app/api/tablet/[...path]/route.ts");
@@ -39,8 +40,11 @@ check("manager: a targeted poll carries the fresh merges list",
   /latest\.merges/.test(fnBody(editor, "async function pollTables")));
 check("manager: the selected tile counts the party, not one table (tableTileStateFromBoard → partyOrders)",
   /function tableTileStateFromBoard[\s\S]{0,900}partyOrders\(/.test(editor));
-check("manager: the printed bill combines identical dish lines (combineBillLines)",
-  /function combineBillLines/.test(editor) && /combineBillLines\(live\.reduce/.test(editor));
+// combineBillLines MOVED into /panels/billdoc.js on 2026-08-04, together with the rest of the bill
+// assembly, so the WAITER panel could print a bill at all. The behaviour is unchanged and now
+// shared — so this checks it where it lives, and that the shared assembler still applies it.
+check("the printed bill combines identical dish lines (combineBillLines, shared)",
+  /function combineBillLines/.test(billdoc) && /combineBillLines\(live\.reduce/.test(billdoc));
 check("manager: the paper bill names every table of the party — but ONLY on a LIVE bill (a reprint of yesterday's solo bill must not wear today's merge)",
   /const tableDisp = \(opts\.party && mergeGroupLabel\(tnum\)\)/.test(editor)
   && /printBill\(t, ss \|\| \{ invoice_no: null, bill_no: null \}, live\(\), \{ party: true \}/.test(editor));

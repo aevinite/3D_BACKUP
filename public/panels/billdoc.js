@@ -491,6 +491,466 @@
 + "<\/script>";
   }
 
+
+  /* ─────────────────── THE BILL'S MONEY, AND THE DATA THE PAPER NEEDS ───────────────────
+   * Moved here 2026-08-04 so the WAITER PANEL can print a bill at all.
+   *
+   * It could not: it can take the money, split it, capture the customer and mint a numbered tax
+   * invoice — every step of issuing one except producing it — because the whole assembly of a
+   * bill's DATA lived inside the manager panel's printBill(). The obvious shortcut was to write a
+   * second assembler on the tablet, which is precisely the fault this file exists to prevent (and
+   * the one just removed from the split-payment path). So the assembly moved to where the document
+   * already lives, and both panels feed it.
+   *
+   * Everything here is PURE — orders and settings in, figures out, no panel state — which is why
+   * it can be shared at all. The manager's taxModel()/billMath()/combineBillLines() are now
+   * one-line doors onto these, so the existing call sites are untouched.
+   */
+
+  // priceTaxMode / taxModel: the ONE tax model. Mirrors lib/tax.ts and SQL lfh_effective_tax_rate;
+  // a composition-scheme restaurant's rate genuinely IS zero (mig 272), not "5% we then hide".
+  function priceTaxMode(s) { return String((s || {}).price_tax_mode || "excl"); }
+  function taxModel(settings) {
+    var s = settings || {};
+    var comps = Array.isArray(s.tax_components) ? s.tax_components
+      .map(function (c) { return { label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 }; })
+      .filter(function (c) { return c.label && c.rate > 0; }) : [];
+    var composition = priceTaxMode(s) === "composition";
+    if (composition) return { rate: 0, pct: 0, components: [], composition: composition };
+    if (comps.length) {
+      var pct = comps.reduce(function (a, c) { return a + c.rate; }, 0);
+      return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, composition: composition };
+    }
+    var rate = Number(s.tax_rate) || 0.05;
+    return { rate: rate, pct: Math.round(rate * 10000) / 100, components: [], composition: composition };
+  }
+
+  /* combineBillLines(entries): the BILL shows one line per dish, not one per KOT. Grouped by
+     everything a guest can see differ — title, price, options, removals, note — so "Special 1"@50
+     and "Special"@150 can never merge. The separator is a VISIBLE escape written as  rather
+     than a raw byte: adjacent fields must not run together, and an invisible character in the
+     source begs to be "tidied" away to "". */
+  function combineBillLines(entries) {
+    var SEP = "";
+    var out = [], at = {};
+    (entries || []).forEach(function (e) {
+      var sig = [e.title, e.price, JSON.stringify(e.options || null), JSON.stringify(e.removed || null), e.note || ""].join(SEP);
+      var i = at[sig];
+      var qty = Math.max(1, parseInt(e.qty, 10) || 1);
+      if (i == null) { at[sig] = out.length; out.push(Object.assign({}, e, { qty: qty })); }
+      else out[i].qty += qty;
+    });
+    return out;
+  }
+
+  /* mrpTaxInside(orders, rate): the GST sitting INSIDE the MRP lines. Only meaningful when the
+     restaurant treats MRP as tax-inclusive — under 'none' there is no tax on those lines to name,
+     and saying otherwise on a tax invoice is a claim the accounts don't support. */
+  function mrpTaxInside(orders, rate) {
+    var inside = 0;
+    (orders || []).filter(function (x) { return x.status !== "cancelled"; }).forEach(function (o) {
+      (Array.isArray(o.items) ? o.items : []).forEach(function (i) {
+        if (!i || !i.is_mrp || i.tax_mode !== "incl") return;
+        var amt = Math.round((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1) * 100) / 100;
+        inside += amt - Math.round((amt / (1 + rate)) * 100) / 100;
+      });
+    });
+    return Math.round(inside * 100) / 100;
+  }
+
+  /* financialYear / invFmt: the FY of the INVOICE'S OWN date, never "today" — reprinting a March
+     invoice after 1 April must keep its issued year, or one sale ends up with two identities and
+     the reprint collides with the real invoice of that number. */
+  function financialYear(when) {
+    var d = when ? new Date(when) : new Date();
+    var base = isNaN(d.getTime()) ? new Date() : d;
+    var y = base.getFullYear();
+    var start = base.getMonth() >= 3 ? y : y - 1;
+    return start + "-" + String(start + 1).slice(2);
+  }
+  function invFmt(no, when, prefix) {
+    if (no == null) return "";
+    return (prefix || "INV") + "/" + financialYear(when) + "/" + String(no).padStart(6, "0");
+  }
+
+  /* billMoney(orders, settings): a bill's figures, once. Discount comes off BEFORE tax; the tax is
+     charged on the TAXABLE BASE, not the subtotal (migs 270/272 — a bill can carry untaxed MRP
+     lines or prices that already contain the tax); and the rate is the one the ORDER was actually
+     charged at (orders.tax_rate, mig 284) so a banquet is never re-taxed at the dine-in rate and a
+     rate corrected today cannot re-price a bill taken this morning. */
+  function billMoney(orders, settings) {
+    var live = (orders || []).filter(function (o) { return o.status !== "cancelled"; });
+    var tm = taxModel(settings);
+    var stamped = live.find(function (o) { return Number(o.tax_rate) > 0; });
+    var rate = stamped ? Number(stamped.tax_rate) : tm.rate;
+    var r2 = function (n) { return Math.round(n * 100) / 100; };
+    var taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false;
+    live.forEach(function (o) {
+      var sub = parseFloat(o.subtotal) || 0;
+      taxableBase += o.taxable_base == null ? sub : (parseFloat(o.taxable_base) || 0);
+      nontax += o.nontax_amount == null ? 0 : (parseFloat(o.nontax_amount) || 0);
+      var lines = Array.isArray(o.items) ? o.items : [];
+      if (o.mrp_amount != null) mrpAmount += parseFloat(o.mrp_amount) || 0;
+      else lines.forEach(function (i) { if (i && i.is_mrp) mrpAmount += r2((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1)); });
+      if (!hasMrp && lines.some(function (i) { return i && i.is_mrp; })) hasMrp = true;
+    });
+    taxableBase = r2(taxableBase); nontax = r2(nontax); mrpAmount = r2(mrpAmount);
+    var subtotal = r2(taxableBase + nontax);
+    // What may be discounted (mig 272's lfh_order_discount_base): with tax, the taxable base — the
+    // discount MUST land there or the `total − discount × (1 + rate)` identity stops holding. With
+    // no tax, everything except the locked MRP.
+    var discountBase = rate > 0 ? taxableBase : Math.max(0, r2(subtotal - mrpAmount));
+    var discountFixed = rate > 0 ? nontax : mrpAmount;
+    var rawDisc = r2(live.reduce(function (a, o) { return a + (parseFloat(o.discount) || 0); }, 0));
+    var disc = Math.min(Math.max(0, rawDisc), discountBase);
+    var taxable = Math.max(0, r2(taxableBase - Math.min(disc, taxableBase)));
+    var tax = r2(taxable * rate);
+    var total = r2(subtotal - disc + tax);
+    // Components carried through ONLY when they describe THIS bill's rate: a banquet at 18% must
+    // not be itemised with the dine-in CGST 2.5% + SGST 2.5% labels — splitTax would hand out the
+    // right rupees under percentages that do not add up to what was charged.
+    var compPct = (tm.components || []).reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
+    var compsMatch = (tm.components || []).length > 0 && Math.abs(compPct / 100 - rate) < 0.0001;
+    return {
+      subtotal: subtotal, disc: disc, taxable: taxable, rate: rate, tax: tax, total: total,
+      taxComponents: compsMatch ? tm.components : [],
+      taxableBase: taxableBase, nontax: nontax, mrpAmount: mrpAmount,
+      discountBase: discountBase, discountFixed: discountFixed, hasMrp: hasMrp,
+      composition: tm.composition,
+    };
+  }
+  // The untaxed pile AS A BILL SHOULD SHOW IT: on a composition restaurant EVERY line is untaxed,
+  // so splitting into "food" and "MRP" says nothing and reads as broken ("Food subtotal 0 / MRP
+  // items 880"). There the plain single Subtotal row is simpler and truer.
+  function mrpPart(m) { return m && m.composition ? 0 : (Number(m && m.nontax) || 0); }
+
+  /* billData(a): everything the paper needs, assembled once. 'a' is what only the PANEL knows:
+       settings, restaurant, orders, money (billMoney), session, tableDisp, logo, parcel, autoPrint
+     Returns the object billDocHtml() takes, so a caller does:
+       BILLDOC.billDocHtml(BILLDOC.billData({ ... }))
+     and there is exactly one place that decides what goes on a bill. */
+  function billData(a) {
+    a = a || {};
+    var s = a.settings || {};
+    var orders = a.orders || [];
+    var m = a.money || billMoney(orders, s);
+    var live = orders.filter(function (o) { return o.status !== "cancelled"; });
+    var bi = billIdentity(s, a.restaurant || {});
+
+    // WHO THE BILL IS FOR, in priority order: the pair captured at invoice time and stored on the
+    // bill itself (mig 227), else the guest's own name. Printing them is the restaurant's switch;
+    // they are always SAVED either way. Blank hides the line rather than printing it empty.
+    var printCust = s.bill_customer_print !== false;
+    var row = orders.find(function (o) { return o.bill_cust_name || o.bill_cust_phone; }) || {};
+    var named = orders.find(function (o) { return String(o.customer_name || "").trim(); }) || {};
+    var cust = printCust ? (row.bill_cust_name || named.customer_name || "") : "";
+    var phoneRaw = printCust ? String(row.bill_cust_phone || "").replace(/\D/g, "") : "";
+    // 10 digits print as "98250 12345" — easier to read back to a guest than one long run.
+    var custPhone = phoneRaw.length === 10 ? phoneRaw.slice(0, 5) + " " + phoneRaw.slice(5) : phoneRaw;
+
+    var sess = a.session || {};
+    var pct = Math.round(m.rate * 10000) / 100;
+    var taxComps = (m.taxComponents && m.taxComponents.length)
+      ? m.taxComponents
+      : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
+    var inside = String(s.mrp_tax_treatment) === "inclusive" ? mrpTaxInside(live, m.rate) : 0;
+    var now = a.now ? new Date(a.now) : new Date();
+    return {
+      logo: a.logo || "",
+      name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
+      invNo: sess.invoice_no != null ? invFmt(sess.invoice_no, sess.invoice_at, bi.prefix) : "",
+      billNo: sess.bill_no != null ? sess.bill_no : "",
+      parcel: !!a.parcel,
+      tableDisp: a.tableDisp || "—",
+      dateStr: now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      cust: cust, custPhone: custPhone,
+      lines: combineBillLines(live.reduce(function (acc, o) { return acc.concat(Array.isArray(o.items) ? o.items : []); }, [])),
+      subtotal: m.subtotal, discount: m.disc,
+      discLabel: discPct(mrpPart(m) > 0 ? m.taxableBase : m.subtotal, m.disc),
+      taxable: m.taxable, total: m.total,
+      taxRows: m.composition ? [] : splitTax(Math.round(m.tax), taxComps),
+      nontax: mrpPart(m), mrpLabel: "MRP items",
+      mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + (((s.tax_label || "GST") + "").trim() || "GST") : "",
+      autoPrint: a.autoPrint !== false,
+    };
+  }
+
+  // The banquet sheet's own money formatters: 2dp with Indian grouping, and whole numbers.
+  var bq2 = function (n) { return (Math.round((Number(n) || 0) * 100) / 100).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
+  var bq0 = function (n) { return Math.round(Number(n) || 0).toLocaleString("en-IN"); };
+
+  // bqPaper(settings): the banquet sheet setup — A4/A5, margins, pad mode, the fill rows.
+  function bqPaper(settings) {
+  const s = settings || {};
+  const num = (v, lo, hi, d) => { const n = Math.round(Number(v)); return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : d; };
+  return {
+    pad: s.banquet_paper === "pad",
+    size: s.banquet_paper_size === "a4" ? "a4" : "a5",
+    top: num(s.banquet_paper_top, 0, 80, 33),
+    bot: num(s.banquet_paper_bot, 0, 50, 14),
+    side: num(s.banquet_paper_side, 2, 25, 6),
+    foot: s.banquet_paper_foot === true,
+    sign: s.banquet_paper_sign !== false,
+    fill: s.banquet_paper_fill !== false,
+  };
+}
+
+  // bqTaxModel(settings): a banquet is taxed at its OWN rate (mig 239), falling back to the
+  // restaurant's dine-in model when it has set none.
+  function bqTaxModel(settings) {
+  const s = settings || {};
+  const raw = Array.isArray(s.banquet_tax_components) ? s.banquet_tax_components : [];
+  const comps = raw.map((c) => ({ label: String((c && c.label) || "").trim(), rate: Number(c && c.rate) || 0 }))
+    .filter((c) => c.label && c.rate > 0);
+  if (comps.length) {
+    const pct = comps.reduce((a, c) => a + c.rate, 0);
+    return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, own: true };
+  }
+  const tm = taxModel(s);
+  return { rate: tm.rate, pct: tm.pct, components: tm.components, own: false };
+}
+
+
+  // Which optional fields this restaurant asks for on a banquet bill (settings.banquet_fields).
+  // Pure over settings, like the rest of the banquet document.
+  var BQ_DEFAULT_FIELDS = ["cust_name", "cust_phone", "dish", "pax", "rate", "advance"];
+  function bqOn(settings, k) {
+    var f = (settings || {}).banquet_fields;
+    var list = Array.isArray(f) && f.length ? f : BQ_DEFAULT_FIELDS;
+    return list.indexOf(k) >= 0;
+  }
+
+  // Amount in words for the banquet tax invoice — Indian grouping (Crore / Lakh / Thousand).
+  var BQ_ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten", "Eleven", "Twelve",
+    "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
+  var BQ_TENS = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+function bqWords(amount) {
+  const two = (n) => (n < 20 ? BQ_ONES[n] : BQ_TENS[Math.floor(n / 10)] + (n % 10 ? "-" + BQ_ONES[n % 10] : ""));
+  const three = (n) => (n >= 100 ? BQ_ONES[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " : "") : "") + (n % 100 ? two(n % 100) : "");
+  let n = Math.floor(Math.abs(Number(amount) || 0));
+  if (!n) return "Zero Only";
+  const p = [];
+  const cr = Math.floor(n / 1e7); n %= 1e7;
+  const la = Math.floor(n / 1e5); n %= 1e5;
+  const th = Math.floor(n / 1e3); n %= 1e3;
+  if (cr) p.push(three(cr) + " Crore");
+  if (la) p.push(three(la) + " Lakh");
+  if (th) p.push(three(th) + " Thousand");
+  if (n) p.push(three(n));
+  return p.join(" ").trim() + " Only";
+}
+
+
+  /* ───────────────────────── THE BANQUET BILL ─────────────────────────
+   * The third piece of paper, moved here 2026-08-04 — it was the last document that still existed
+   * TWICE. The real one lived in the manager panel; the admin's "See the banquet bill" button drew
+   * its own from scratch, and the two had already parted company: the printer re-uses the bill's
+   * FROZEN tax_lines (mig 239) while the preview recomputed them live, and the printer honours the
+   * A4/A5 paper setup which the preview did not model at all. So an admin could set the banquet card
+   * up, approve what they saw, and the paper came out different — the exact fault that created this
+   * file for the bill and the KOT, still alive in the one document nobody had got to.
+   *
+   * verify:print-format now fingerprints this document too, so a third copy cannot appear.
+   *
+   * a = { bill, lines, settings, restaurant, logo }. Pure: no panel state, returns the HTML.
+   */
+function banquetDocHtml(a) {
+    var b = a.bill || {}, lines = a.lines || [];
+    var s = a.settings || {};
+    var bi = billIdentity(s, a.restaurant || {});
+    var P = bqPaper(s);
+  const isA4 = P.size === "a4";
+  const W = isA4 ? 210 : 148, H = isA4 ? 297 : 210;
+  const when = new Date(b.issued_at || Date.now());
+  const dstr = when.toLocaleDateString("en-GB").replace(/\//g, "-");
+  const tstr = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toUpperCase().replace(" ", "");
+  const sub = Number(b.subtotal) || 0, disc = Number(b.discount) || 0;
+  const taxAmt = Number(b.tax) || 0, total = Number(b.total) || 0;
+  const recv = Number(b.received) || 0;
+  const bal = Math.round((total - recv) * 100) / 100;
+  const taxable = Math.round((sub - disc) * 100) / 100;
+  // Owner 2026-07-31: "whatever is in the bill I have sent you of banquet, it should be
+  // like that" — a banquet bill ALWAYS prints as a tax invoice with the per-line taxable
+  // value + CGST/SGST columns. The receiver's GSTIN line only shows when there is one.
+  const b2b = true;
+  const hasCustGstin = !!String(b.cust_gstin || "").trim();
+  // named tax components, or the historical CGST+SGST halves; the last one takes the
+  // remainder so the printed lines always foot to the tax on the total.
+  // The split PRINTED on this bill. A saved bill carries its own frozen tax_lines
+  // (mig 239), so re-printing after a rate change can never re-split an old total.
+  var tmB = bqTaxModel(s);
+  const comps = (tmB.components && tmB.components.length) ? tmB.components
+    : [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }];
+  let taxRows;
+  if (Array.isArray(b.tax_lines) && b.tax_lines.length) {
+    taxRows = b.tax_lines.map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
+  } else {
+    const rateSum = comps.reduce((a, c) => a + (Number(c.rate) || 0), 0) || 1;
+    let run = 0;
+    taxRows = comps.map((c, i) => {
+      const amt = i === comps.length - 1 ? Math.round((taxAmt - run) * 100) / 100
+        : Math.round(taxAmt * ((Number(c.rate) || 0) / rateSum) * 100) / 100;
+      run = Math.round((run + amt) * 100) / 100;
+      return { label: c.label, rate: Number(c.rate) || 0, amt };
+    });
+  }
+  const L = (lines || []).map((l) => {
+    const gross = (Number(l.qty) || 0) * (Number(l.price) || 0);
+    return { title: l.title, qty: Number(l.qty) || 0, price: Number(l.price) || 0, gross };
+  });
+  // per-line taxable value: the bill's discount spread pro-rata so the column foots
+  const grossAll = L.reduce((a, l) => a + l.gross, 0) || 1;
+  L.forEach((l) => { l.taxable = Math.round((l.gross - disc * (l.gross / grossAll)) * 100) / 100; });
+
+  const cols = 5 + taxRows.length * 2;
+  // One <col> per column. Built by concatenation, NOT by joining half-open tags — the
+  // clever join printed a stray "<" on the paper (caught in the print check).
+  const colg = b2b
+    ? `<col style="width:7mm"><col><col style="width:11mm"><col style="width:14mm"><col style="width:19mm">`
+      + taxRows.map(() => `<col style="width:10mm"><col style="width:15mm">`).join("")
+    : `<col style="width:7mm"><col><col style="width:14mm"><col style="width:18mm"><col style="width:22mm">`;
+  const head = b2b
+    ? `<tr><th rowspan="2">Sr</th><th rowspan="2">Item Name</th><th rowspan="2">Qty.</th><th rowspan="2">Rate</th><th rowspan="2">Taxable<br/>Value</th>${taxRows.map((c) => `<th colspan="2">${esc(c.label)}</th>`).join("")}</tr>
+       <tr>${taxRows.map(() => "<th>Rate</th><th>Amount</th>").join("")}</tr>`
+    : `<tr><th>Sr</th><th>Item Name</th><th>Qty.</th><th>Rate</th><th>Amount</th></tr>`;
+  const rows = L.map((l, i) => {
+    const nameCell = `<td class="n">${esc(l.title)}</td>`;
+    if (!b2b) return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.gross)}</td></tr>`;
+    const tds = taxRows.map((c) => `<td class="c">${bq2(c.rate)}%</td><td class="r">${bq2(Math.round(l.taxable * (c.rate / 100) * 100) / 100)}</td>`).join("");
+    return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.taxable)}</td>${tds}</tr>`;
+  }).join("");
+  const fillN = P.fill ? Math.max(0, (isA4 ? 12 : 6) - L.length) : 0;
+  let fill = "";
+  for (let i = 0; i < fillN; i++) fill += `<tr class="fill">${"<td></td>".repeat(cols)}</tr>`;
+  // The reference bill foots its columns INSIDE the table (TOTAL | taxable | each tax),
+  // which is also the proof that the per-line tax columns add up to the summary.
+  const totRow = `<tr class="tot"><td colspan="4" class="r">TOTAL</td><td class="r">${bq2(taxable)}</td>`
+    + taxRows.map((c) => `<td></td><td class="r">${bq2(c.amt)}</td>`).join("") + `</tr>`;
+
+  // Terms box: the advances, the remark, and the function line — each only if present.
+  const terms = [];
+  for (const a of (b.advances || [])) {
+    if (Number(a.amt) > 0) {
+      const d = a.date ? new Date(a.date).toLocaleDateString("en-GB") : "";
+      terms.push(`${esc(String(a.mode || "").toUpperCase())} PAY${d ? " DT." + d : ""} — ${bq0(a.amt)}/-`);
+    }
+  }
+  if (b.remark) terms.push(esc(b.remark));
+  const fnBits = [];
+  if (b.func) fnBits.push(esc(b.func));
+  if (b.fn_date) fnBits.push(new Date(b.fn_date).toLocaleDateString("en-GB") + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
+  if (b.pax) fnBits.push(b.pax + (b.func || b.fn_date ? " pax" : " plates"));
+  const fnLead = fnBits.length && (b.func || b.fn_date) ? "Function: " : "";
+  const toBits = [];
+  if (b.cust_name) toBits.push(`<div class="who">${esc(b.cust_name)}</div>`);
+  if (b.cust_addr) toBits.push(`<div class="adr">${esc(b.cust_addr).split("\n").join("<br/>")}</div>`);
+  const line2 = [b.cust_person, b.cust_phone].filter(Boolean).map(esc).join(" · ");
+  if (line2) toBits.push(`<div class="adr">${line2}</div>`);
+  if (hasCustGstin) toBits.push(`<div style="font-size:7.6pt;margin-top:1.2mm">GSTIN / UID&nbsp;: <b>${esc(b.cust_gstin)}</b></div>`);
+
+  const money = [];
+  money.push(`<div class="ms"><span>Subtotal</span><i>${bq2(sub)}</i></div>`);
+  if (disc > 0) money.push(`<div class="ms"><span>Discount</span><i>− ${bq2(disc)}</i></div><div class="ms"><span>Taxable value</span><i>${bq2(taxable)}</i></div>`);
+  taxRows.forEach((c) => money.push(`<div class="ms"><span>${esc(c.label)} ${c.rate}%</span><i>${bq2(c.amt)}</i></div>`));
+  const roundOff = Math.round((total - (taxable + taxAmt)) * 100) / 100;
+  if (roundOff) money.push(`<div class="ms"><span>Round off</span><i>${(roundOff > 0 ? "+" : "") + bq2(roundOff)}</i></div>`);
+  money.push(`<div class="ms tot"><span>INVOICE TOTAL</span><i>${bq2(total)}</i></div>`);
+  if (recv > 0) {
+    money.push(`<div class="ms bal"><span>Received</span><i>${bq2(recv)}</i></div>`);
+    money.push(`<div class="ms" style="font-weight:700"><span>${bal > 0 ? "Balance due" : "Balance"}</span><i>${bq2(Math.max(0, bal))}</i></div>`);
+  }
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Tax Invoice ${esc(b.bill_no || "")} — ${esc(bi.name)}</title>
+<style>
+  /* A5/A4 sheet print recipe: an EXPLICIT @page size is correct here (unlike the 80mm
+     thermal bill, where forcing a size makes CUPS rotate the job) because the tray
+     really holds this sheet. margin:0 kills the browser's own header/footer. */
+  @page{size:${W}mm ${H}mm;margin:0}
+  *{box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  html,body{margin:0;padding:0;background:#fff}
+  .pg{width:${W}mm;min-height:${H}mm;background:#fff;color:#000;position:relative;
+      font-family:"Helvetica Neue",Helvetica,Arial,sans-serif;font-size:${isA4 ? 9.4 : 8.2}pt;line-height:1.34}
+  .body{padding:0 ${P.side}mm ${P.bot}mm}
+  .selfhead{text-align:center;padding:${P.pad ? 0 : 4}mm 0 2.2mm;border-bottom:1.1px solid #000;margin-bottom:1.4mm}
+  .selfhead .nm{font-size:${isA4 ? 16 : 14}pt;font-weight:800;letter-spacing:.2px}
+  .selfhead .ad{font-size:7.5pt;line-height:1.34;margin-top:.7mm}
+  .doct{text-align:center;margin:2.4mm 0 2mm}
+  .doct b{font-size:10pt;font-weight:700;letter-spacing:.22em;text-transform:uppercase}
+  table{width:100%;border-collapse:collapse}
+  .bx{border:1px solid #000}
+  .bx td{border:1px solid #000;padding:1.5mm 1.9mm;vertical-align:top}
+  .lbl{font-size:6.7pt;letter-spacing:.09em;text-transform:uppercase;opacity:.7}
+  .who{font-weight:700;font-size:8.7pt;text-transform:uppercase;letter-spacing:.2px;margin-top:.5mm}
+  .adr{font-size:7.5pt;line-height:1.36;margin-top:.5mm}
+  .v{font-weight:700;font-size:8.2pt;white-space:nowrap}
+  .metag{display:grid;grid-template-columns:1fr 1fr;gap:1.4mm 2mm}
+  .terms{font-size:7.4pt;line-height:1.44}
+  table.it{border:1px solid #000;table-layout:fixed;margin-top:0}
+  table.it th,table.it td{border:1px solid #000;padding:1.2mm 1.5mm;font-size:7.7pt}
+  table.it th{font-weight:700;text-align:center;font-size:6.9pt;line-height:1.2}
+  table.it td.n{text-align:left}table.it td.c{text-align:center}
+  table.it td.r{text-align:right;font-variant-numeric:tabular-nums}
+  table.it tr.fill td{height:5.4mm;border-top:0;border-bottom:0}
+  table.it tr.tot td{font-weight:700;border-top:1px solid #000}
+  .footg{display:flex;border:1px solid #000;border-top:0}
+  .footg .fl{flex:1;padding:1.6mm 1.9mm;border-right:1px solid #000;min-width:0}
+  .footg .fr{width:${isA4 ? 74 : 56}mm;padding:1.2mm 1.9mm}
+  .wrd{font-size:7.6pt;line-height:1.38;margin-top:.4mm}
+  .ms{display:flex;justify-content:space-between;gap:2mm;font-size:7.8pt;padding:.5mm 0}
+  .ms.tot{border-top:1px solid #000;margin-top:.9mm;padding-top:1.1mm;font-weight:700;font-size:9.4pt}
+  .ms.bal{border-top:1px dashed #000;margin-top:.9mm;padding-top:1.1mm;font-weight:700}
+  .ms i{font-style:normal;font-variant-numeric:tabular-nums}
+  .stamp{display:inline-block;border:1.1px solid #000;border-radius:1mm;padding:.5mm 2mm;font-size:7.4pt;
+         font-weight:700;letter-spacing:.12em;margin-top:1.4mm}
+  .sign{text-align:right;font-size:7.7pt;margin-top:2.6mm;line-height:1.5}
+  .sign .sp{height:9mm}
+  .pfoot{text-align:center;font-size:7.2pt;margin-top:3mm;line-height:1.45}
+  @media print{tr,.ms,.footg,.bx{break-inside:avoid}thead{display:table-row-group}}
+</style></head><body><div class="pg">
+  <div style="height:${P.pad ? P.top : 0}mm"></div>
+  <div class="body">
+    ${P.pad ? "" : `<div class="selfhead"><div class="nm">${esc(bi.name)}</div>
+      <div class="ad">${esc(bi.address)}${bi.phone ? "<br/>Ph " + esc(bi.phone) : ""}${bi.gstin ? "<br/>GSTIN " + esc(bi.gstin) : ""}</div></div>`}
+    <div class="doct"><b>Tax Invoice</b></div>
+    <table class="bx">
+      <tr>
+        <td style="width:53%"><div class="lbl">Supplier</div><div class="who">${esc(bi.name)}</div>
+          <div class="adr">${esc(bi.address)}</div>
+          ${bi.gstin ? `<div style="font-size:7.5pt;margin-top:1mm">GSTIN&nbsp;: <b>${esc(bi.gstin)}</b></div>` : ""}</td>
+        <td><div class="metag">
+          <div><div class="lbl">Invoice No.</div><div class="v">${esc(b.bill_no || "—")}</div></div>
+          <div><div class="lbl">Dated</div><div class="v">${esc(dstr)}</div></div>
+          ${b.hall ? `<div><div class="lbl">Banq. Name</div><div class="v">${esc(b.hall)}</div></div>` : ""}
+          <div><div class="lbl">Time</div><div class="v">${esc(tstr)}</div></div>
+          ${b.table_number ? `<div><div class="lbl">Table</div><div class="v">${esc(String(b.table_number))}</div></div>` : ""}
+        </div></td>
+      </tr>
+      ${toBits.length || terms.length || fnBits.length ? `<tr>
+        <td>${toBits.length ? `<div class="lbl">Details of receiver (Bill to)</div>${toBits.join("")}`
+             : `<div class="lbl">Bill to</div><div class="adr">Counter booking</div>`}</td>
+        <td><div class="lbl">Terms &amp; conditions</div>
+          ${terms.length ? `<div class="terms" style="margin-top:.6mm">${terms.join("<br/>")}</div>` : ""}
+          ${fnBits.length ? `<div class="terms" style="margin-top:${terms.length ? "1mm" : ".6mm"}">${fnLead}${fnBits.join(" · ")}</div>` : ""}
+          ${!terms.length && !fnBits.length ? `<div class="terms" style="margin-top:.6mm">—</div>` : ""}</td>
+      </tr>` : ""}
+    </table>
+    <table class="it" style="border-top:0"><colgroup>${colg}</colgroup><thead>${head}</thead><tbody>${rows}${fill}${totRow}</tbody></table>
+    <div class="footg">
+      <div class="fl"><div class="lbl">Invoice Total (In Words)</div>
+        <div class="wrd">${esc(bqWords(total))}</div>
+        ${recv > 0 ? `<div class="stamp">${bal > 0 ? "BALANCE DUE " + bq0(bal) : "PAID IN FULL"}</div>` : ""}</div>
+      <div class="fr">${money.join("")}</div>
+    </div>
+    ${P.sign ? `<div class="sign">For <b>${esc(bi.name)}</b><div class="sp"></div>Authorised Signatory</div>` : ""}
+    ${bqOn(s, "by") && b.prepared_by ? `<div style="font-size:7pt;margin-top:1.4mm">Prepared by ${esc(b.prepared_by)}</div>` : ""}
+    ${P.foot ? `<div class="pfoot">${esc(bi.footer)}${bi.gstin ? "<br/>GST No: " + esc(bi.gstin) : ""}</div>` : ""}
+  </div>
+</div>
+<script>setTimeout(function(){print()},350)<\/script>
+</body></html>`;
+}
+
+
   var API = {
     billDocHtml: billDocHtml,
     kotDocHtml: kotDocHtml,
@@ -499,6 +959,19 @@
     splitTax: splitTax,
     discPct: discPct,
     billRows: billRows,
+    taxModel: taxModel,
+    billMoney: billMoney,
+    billData: billData,
+    banquetDocHtml: banquetDocHtml,
+    bqPaper: bqPaper,
+    bqTaxModel: bqTaxModel,
+    bqOn: bqOn,
+    bqWords: bqWords,
+    combineBillLines: combineBillLines,
+    mrpTaxInside: mrpTaxInside,
+    mrpPart: mrpPart,
+    invFmt: invFmt,
+    financialYear: financialYear,
     inr: inr,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
