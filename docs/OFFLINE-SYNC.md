@@ -102,18 +102,36 @@ is covered the day it's written.
   doesn't need it — `lfh_place_order` validates the guest's own token and answers
   `session_closed` itself.
 - It refuses (409 + `{clash:{plain,todo,retryable}}`) when: a **different party** is now on
-  that table (started after the change was made), or the table was **closed/billed** after it —
-  i.e. exactly the cases where applying it would corrupt someone else's bill. It does not try
-  to be a merge engine for every field that might have been
-  changed elsewhere. *(The field-level `X-LFH-Expect` idea was removed — nothing populated
-  it, and a protection that only exists in a comment is worse than none.)*
+  that table (started after the change was made), the table was **closed/billed** after it, or
+  the table is closed and we cannot prove when (a `status='closed'` with no `closed_at`, which a
+  bare SQL close leaves behind) — i.e. exactly the cases where applying it would corrupt someone
+  else's bill. It does not try to be a merge engine for every field that might have been changed
+  elsewhere; that is `expectClash`'s job, below.
+
+### ⚠️ `X-LFH-Expect` IS LIVE — do not delete it
+This paragraph used to say the field-level `X-LFH-Expect` idea "was removed — nothing populated
+it". **That was wrong**, and it was the most dangerous line in this file: a session trusting it
+could have deleted the header from `outbox.js` and switched off first-save-wins across every value
+edit in the app, with every test still green (the coverage script only checks the CALL SITES).
+
+What is actually true:
+- `expectClash()` is `lib/clash.ts:92-141`, called once per panel dispatcher
+  (`tablet:620`, `editor:1563`, `kitchen:180`).
+- Fourteen call sites populate it, and **`npm run verify:clash` fails the build** when a value
+  edit doesn't (`scripts/verify-clash-coverage.mjs`).
+- `CLAUDE.md` → NEW-FEATURE CHECKLIST item 11 makes it mandatory for every new feature.
+- It is sent on **live** writes too, not only replays — two people editing the same dish at the
+  same moment is the common case.
+- Money columns (`discount`, `price`, `payment_status`, `total`) say the value *moved* without
+  repeating the figure: this gate runs before each branch's own permission check, so the sentence
+  must not state a number the person's role isn't shown elsewhere.
 - It **fails open** on any lookup error, and never invents a refusal for an action it can't
   resolve to a table.
 - The panel then shows it in "These changes need you" with the plain reason, what to do, and
   Try-again / Not-needed-anymore. Nothing is silently applied; nothing is silently dropped.
 
 Verify all of the above with **`node scripts/verify-offline.mjs --base http://localhost:PORT`**
-(39 checks). Add `--slow-proxy http://localhost:4099` after starting `node scripts/slow-proxy.mjs`
+(the count grows; run it to see). Add `--slow-proxy http://localhost:4099` after starting `node scripts/slow-proxy.mjs`
 to also cover a **hanging** connection — Chrome's own throttling does NOT reach a service
 worker, so slowing the server is the only truthful way to test that case.
 **Run it against `next build && next start`, not `next dev`** — dev's per-compile chunk URLs
@@ -177,7 +195,10 @@ to an offline-only test — keep online assertions in any test you add here.
       verified headless + via the server route so far).
 - [ ] **Guest: only place-order is queued.** Other guest writes (call waiter, requests, cart
       set) are NOT offline-queued yet — extend `lib/guestOutbox.ts` + a route per action if
-      wanted (same at-most-once pattern).
+      wanted (same at-most-once pattern). Note the rest of `lib/session.ts` still has **no
+      timeout on any RPC**: ordering was moved onto the guarded path
+      (`placeSessionOrderSafe`), but join / approve / leave / cart-merge / waiter-call can still
+      hang on a swamped system. Same treatment, one at a time.
 - [ ] **An offline order shows as "waiting to send", not as a live ticket** (waiter panel
       table detail + a ⏳ mark on the tile). This is deliberate: fabricating a ticket would
       mean fabricating a bill line, and a bill must only ever show what the kitchen really
@@ -194,10 +215,16 @@ to an offline-only test — keep online assertions in any test you add here.
       saved figures. **DECIDED 2026-07-30: 2 hours.**
 - [ ] **New panels/features** must include the connection badge and wire their writes through
       the outbox + `withIdempotency` (see NEW-FEATURE CHECKLIST in CLAUDE.md).
-- [ ] **Duplicate-ack has no body** — a replay that the server already completed returns
-      `{ok:true, duplicate:true}` without the original `order_id`, so the guest tracker can't
-      record that order. Rare (only if the first response was lost); improve by storing the
-      response in `action_idempotency` if it ever matters.
+- [x] **Duplicate-ack carries the original body** (done) — `action_idempotency.result` stores the
+      completed reply, so a duplicate echoes the original `order_id` and the guest tracker can
+      still follow that order (`lib/idempotency.ts`, `lib/guestOutbox.ts`).
+- [x] **A REFUSAL IS NEVER REMEMBERED** (done, and the rule matters more than the fix) — a handler
+      that answers `{ok:false}` inside a **200** used to be stored as "done", so the diner's next
+      tap on the same basket replayed the refusal instead of reaching the kitchen. The decision
+      now lives in `lib/idempotencyRule.ts` → `didSomething(status, body)`: remember it only if
+      the status is under 400 **and** the body doesn't say it refused. Rows written before the fix
+      heal themselves on next use. Guarded by `npm run verify:order-retry`.
+      **If you add a handler that reports a refusal in a 200 body, this is what protects it.**
 - [ ] **Prune `action_idempotency`** — rows accumulate; add a periodic cleanup of rows older
       than a day (index on `created_at` already exists).
 - [ ] Consider surfacing a staff "waiting to sync" drawer entry when a queued action **fails**

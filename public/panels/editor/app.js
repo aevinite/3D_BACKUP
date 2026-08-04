@@ -516,6 +516,13 @@ const errText = (e) => (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))
   ? "no internet right now — this will load when you're back online"
   : (window.LFH_OFF && window.LFH_OFF.isBusyErr && window.LFH_OFF.isBusyErr(e))
   ? "the system is very busy right now — this will come back by itself in a moment"
+  // A CLASH ALREADY CAME WITH A SENTENCE — use it. The server sends
+  // { error: "clash_changed_elsewhere", clash: { plain, todo } }, and `e.message` is the CODE.
+  // Only the QUEUED path rendered `clash.plain`, so a clash on a LIVE write (two people editing
+  // the same dish at the same moment — the common case) showed a manager the words
+  // "clash_changed_elsewhere". See lib/clash.ts.
+  : (e && e.data && e.data.clash && e.data.clash.plain)
+  ? e.data.clash.plain + (e.data.clash.todo ? " " + e.data.clash.todo : "")
   : ((e && e.message) || "unknown error");
 
 const _inflightGET = new Map(); // coalesce concurrent identical GETs into ONE network hit
@@ -1378,9 +1385,20 @@ async function loadStaffTeam() {
 // staffCall: POST/PATCH/DELETE to /api/owner/staff, then always reload the team so the
 // list reflects the server's truth (never trust the optimistic local edit alone — a
 // staff list is small, so a full reload after each action is cheap and simplest).
+// It goes through LFH_OUTBOX like every other write in this panel. It used to be a bare fetch,
+// which meant a staff change made with no signal simply failed (nothing saved, nothing replayed,
+// and the offline bar never knew about it), AND it carried no X-LFH-Action-Id — so a retry after
+// a lost reply could create the same person twice. `base: ""` because the path is already
+// absolute; send() supplies the id, the deadline, the queue and the retry.
 async function staffCall(init) {
   state.staffBusy = true;
   try {
+    if (window.LFH_OUTBOX) {
+      return await window.LFH_OUTBOX.send({
+        base: "", method: init.method || "POST", path: ridQ("/api/owner/staff"),
+        body: init.body ? JSON.parse(init.body) : undefined, panel: "editor", label: "Save staff member",
+      });
+    }
     const r = await fetch(ridQ("/api/owner/staff"), { ...init, headers: { "Content-Type": "application/json", ...(init.headers || {}) } });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
@@ -1626,13 +1644,14 @@ async function saveWaiterTables(userId, tables) {
   if (w) w.assigned_tables = tables.slice();           // optimistic — the grid feels instant
   renderEditor(); repaintSectionPicker(); repaintSectionsModal();
   try {
-    const r = await fetch(ridQ("/api/editor/table-sections"), {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId, tables }),
-    });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(d.error || `Save failed (${r.status})`);
-    if (w && d.user) w.assigned_tables = d.user.assigned_tables || [];
+    // Through the panel's own api() (→ LFH_OUTBOX), like every other write here. As a bare fetch
+    // this was the one change a manager could make with no signal and simply lose: the grid
+    // reverted and the reason was a raw "Failed to fetch".
+    const d = await api("POST", "/table-sections", { user_id: userId, tables });
+    // Saved on this device instead of sent — the optimistic grid above is already right, so keep
+    // it and let the queue deliver. Never overwrite it with a server answer that doesn't exist yet.
+    if (d && d.queued) toast("Saved ✓ — syncing automatically.", "ok");
+    else if (w && d.user) w.assigned_tables = d.user.assigned_tables || [];
   } catch (e) {
     if (w && before) w.assigned_tables = before;       // put it back — never lie about what's saved
     toast(e.message || "Couldn't save that change.", "err");
@@ -5487,9 +5506,18 @@ function bindEditor() {
     const u = state.staffTeam.find((x) => x.id === id);
     if (!(await confirmDialog(`Remove ${u ? (u.name || u.username) : "this person"} for good? This can't be undone.`, "Remove"))) return;
     try {
-      const r = await fetch(ridQ(`/api/owner/staff?id=${encodeURIComponent(id)}`), { method: "DELETE" }); // ridQ: keep the admin's per-tab restaurant pin (appends &rid=)
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || "Request failed");
+      // Through the outbox, like every other write here — see staffCall(). ridQ keeps the
+      // admin's per-tab restaurant pin (appends &rid=), and it is baked into the queued path so
+      // a replay still lands on the right restaurant.
+      const d = window.LFH_OUTBOX
+        ? await window.LFH_OUTBOX.send({ base: "", method: "DELETE", path: ridQ(`/api/owner/staff?id=${encodeURIComponent(id)}`), panel: "editor", label: "Remove staff member" })
+        : await (async () => {
+          const r = await fetch(ridQ(`/api/owner/staff?id=${encodeURIComponent(id)}`), { method: "DELETE" });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok) throw new Error(j.error || "Request failed");
+          return j;
+        })();
+      if (d && d.queued) { toast("Saved ✓ — syncing automatically.", "ok"); return; }
       await loadStaffTeam();
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));

@@ -148,7 +148,11 @@ export default function AdminBills() {
     if (!reason.trim()) { alert("A reason is required to issue a credit note."); return; }
     setBusy(b.sessionId);
     try {
-      const res = await fetch("/api/admin/bills", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "credit_note", sessionId: b.sessionId, amount, reason: reason.trim() }) });
+      // ONE id for this credit note, so a lost reply that gets retried cannot record it twice.
+      // Generated here rather than inside a request helper: a fresh id per attempt would make the
+      // server treat the second send as a brand-new credit note, which is the very thing to stop.
+      const actionId = (globalThis.crypto?.randomUUID?.() as string) || `credit-${b.sessionId}-${amount}-${Date.now()}`;
+      const res = await fetch("/api/admin/bills", { method: "POST", headers: { "Content-Type": "application/json", "X-LFH-Action-Id": actionId }, body: JSON.stringify({ action: "credit_note", sessionId: b.sessionId, amount, reason: reason.trim() }) });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Failed to issue credit note.");
       const r2 = await fetch("/api/admin/bills?trail=" + b.sessionId, { cache: "no-store" });

@@ -813,13 +813,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { items, customer, phone, note, allergies, paid, method } = body || {};
       if (!Array.isArray(items) || !items.length) return err("items required");
       const ids = [...new Set(items.map((i: any) => String(i?.id || "")).filter(Boolean))];
-      const menu = (must(await sb.from("menu_items").select("id,title,price,open_price").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean }[];
+      // `tags` IS NEEDED, not optional. Every other way into an order prices through the shared
+      // server-side pricer, which refuses a dish tagged sold-out — that is why the guest cart, a
+      // table order and ⚡ QO/P all answer "That dish is sold out". Parcel prices itself and had
+      // never read the 86 board, so a takeaway could be taken for a dish the kitchen had just
+      // marked off: a clean "sent", and a ticket nobody can cook, with the customer at the counter.
+      const menu = (must(await sb.from("menu_items").select("id,title,price,open_price,tags").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean; tags?: string[] }[];
       const byId = new Map(menu.map((d) => [String(d.id), d]));
       const picked: { title: string; qty: number; price: number; note?: string }[] = [];
       let total = 0;
       for (const it of items) {
         const d = byId.get(String(it?.id || ""));
-        if (!d) continue;
+        // A dish we can't resolve was SILENTLY DROPPED here — the parcel went through one line
+        // short and the customer paid for something they never got. Every other order path
+        // answers `unknown_item`; so does this one now.
+        if (!d) return err(editErrMsg("unknown_item"), 400);
+        if (Array.isArray(d.tags) && d.tags.includes("sold-out")) return err(`"${d.title}" is sold out — can't add it.`, 400);
         const qty = Math.max(1, Math.min(99, Number(it?.qty) || 1));
         // Open-price dish: staff typed the price at order time — honour it (clamped), don't
         // read the (empty) DB price. A missing/zero price on an open-price line is refused.

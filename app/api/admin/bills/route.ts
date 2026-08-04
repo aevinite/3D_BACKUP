@@ -19,6 +19,8 @@ import { logAction } from "@/lib/oplog";
 import { softDeleteOrders, restoreOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
 import { rollUpBill, type BillSession, type BillOrder, type BillState } from "@/lib/billLedger";
+import { withIdempotency } from "@/lib/idempotency";
+import { invalidateFloor } from "@/lib/floorSummary";
 
 export const dynamic = "force-dynamic";
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
@@ -113,7 +115,13 @@ export async function GET(req: NextRequest) {
 }
 
 // ── Admin soft-delete / restore ANY bill ───────────────────────────────────────
-export async function POST(req: NextRequest) {
+// AT MOST ONCE. `credit_note` calls lfh_issue_credit_note directly, so a double-tap — or a retry
+// after a reply was lost — issued TWO credit notes against one bill (the RPC only refuses once the
+// running total would exceed the bill, so any partial credit could be doubled). Every other money
+// path in the app carries this guard; this was the one that didn't. `delete`/`restore` were always
+// safe by nature (they filter on deleted_at) and are unaffected by wrapping.
+export const POST = withIdempotency(postImpl, "admin");
+async function postImpl(req: NextRequest) {
   if (!(await requireAdmin(req))) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => ({}));
   const action = body?.action;
@@ -146,6 +154,7 @@ export async function POST(req: NextRequest) {
     if (!ids.length) {
       await sb.from("sessions").update({ deleted_at: new Date().toISOString(), deleted_by: "Admin", delete_reason: reason || null }).eq("id", sessionId).is("deleted_at", null);
     }
+    invalidateFloor(rid);
     await logAction("admin", "order_delete", { restaurant_id: rid, table_number: sess.table_number, detail: `admin deleted bill${sess.bill_no ? ` #${sess.bill_no}` : ""}${reason ? ` — ${reason}` : ""}` });
     return NextResponse.json({ ok: true, deleted: res.deleted });
   }
@@ -156,6 +165,7 @@ export async function POST(req: NextRequest) {
     const res = await restoreOrders(rid, ids);
     // Un-tombstone the session itself (covers the no-orders case + belt for the rest).
     await sb.from("sessions").update({ deleted_at: null, deleted_by: null, deleted_by_id: null, delete_reason: null }).eq("id", sessionId);
+    invalidateFloor(rid);
     await logAction("admin", "bill_restore", { restaurant_id: rid, table_number: sess.table_number, detail: `admin restored bill${sess.bill_no ? ` #${sess.bill_no}` : ""}` });
     return NextResponse.json({ ok: true, restored: res.restored });
   }

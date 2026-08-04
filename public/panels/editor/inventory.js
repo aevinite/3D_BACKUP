@@ -33,13 +33,35 @@
   const toastMsg = (m) => { if (typeof window.toast === "function") window.toast(m); };
   const scoped = (p) => (typeof window.ridQ === "function" ? window.ridQ(p) : p);
 
+  // THE SAME TAP MUST CARRY THE SAME ID, or the guard is decoration. A fresh uuid was minted
+  // inside every call, so a double-tap sent two different ids and the server — correctly — ran
+  // two separate stock movements. The id is now derived from what the write actually IS
+  // (method + path + body) and reused for a short window, so a second tap on the same button is
+  // recognised as the same action while a deliberate repeat a minute later is a new one.
+  const RECENT_ACTION_MS = 30000;
+  const recentActions = new Map();
+  function actionIdFor(method, path, body) {
+    const key = method + " " + path + " " + (body ? JSON.stringify(body) : "");
+    const now = Date.now();
+    for (const [k, v] of recentActions) if (now - v.at > RECENT_ACTION_MS) recentActions.delete(k);
+    const hit = recentActions.get(key);
+    if (hit) { hit.at = now; return hit.id; }
+    const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+    recentActions.set(key, { id, at: now });
+    return id;
+  }
+
   async function inv(method, path, body, photoFile) {
     const url = "/api/inventory" + scoped(path);
     const opts = { method, headers: {} };
     if (method !== "GET") {
       // Every write carries an action id so the server's withIdempotency guard makes a
       // network retry / double-tap run at most once (same rule as the ordering paths).
-      opts.headers["X-LFH-Action-Id"] = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+      // A photo upload gets a fresh id every time: two different photos to the same path can't be
+      // told apart by method+path, and treating the second as a duplicate would drop it.
+      opts.headers["X-LFH-Action-Id"] = photoFile
+        ? (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()))
+        : actionIdFor(method, path, body);
       if (photoFile) {
         const fd = new FormData();
         fd.append("payload", JSON.stringify(body || {}));
