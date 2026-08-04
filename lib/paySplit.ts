@@ -17,7 +17,7 @@
 // ============================================================================
 
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { effectiveTaxRate } from "@/lib/tax";
+import { effectiveTaxRate, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 
 export type SplitLeg = { amount: number; method: string; note?: string | null };
 export type SplitResult =
@@ -67,7 +67,7 @@ export async function settleBillInParts(
   // Σsub − Σdisc, tax rounded ONCE over the whole bill. Summing each order's already-
   // rounded total instead drifts ±½ paise per order and can reject parts that exactly
   // equal the printed bill.
-  const set = (await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle()).data || {};
+  const set = (await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle()).data || {};
   const rate = effectiveTaxRate(set);
   const sub = rows.reduce((s, o) => s + (Number(o.subtotal) || 0), 0);
   const disc = rows.reduce((s, o) => s + (Number(o.discount) || 0), 0);

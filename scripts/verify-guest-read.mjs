@@ -83,6 +83,34 @@ if (Array.isArray(orphans) && orphans.length) {
   console.log("  ✓ every public read policy is backed by a real grant");
 }
 
+// ── The other half of the same lesson ────────────────────────────────────────────────────
+// This project's tables follow Supabase's default posture: the anon role holds INSERT/UPDATE/
+// DELETE on ~56 tables and RLS is what actually refuses the write (almost none of them have a
+// write policy at all). That is a normal, working arrangement — the grants are inert — but it
+// has ONE failure mode, and it is silent: if RLS is ever switched off on one of those tables,
+// the grant underneath is suddenly the only thing left, and nothing anywhere would say so.
+// So the invariant worth checking is not "who holds a grant" but "is the gate still on".
+const rls = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
+  method: "POST",
+  headers: { Authorization: `Bearer ${env.SUPABASE_ACCESS_TOKEN}`, "Content-Type": "application/json" },
+  body: JSON.stringify({
+    query: `SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname='public' AND c.relkind='r' AND NOT c.relrowsecurity
+               AND EXISTS (SELECT 1 FROM information_schema.role_table_grants g
+                            WHERE g.table_name=c.relname AND g.table_schema='public'
+                              AND g.grantee='anon' AND g.privilege_type IN ('INSERT','UPDATE','DELETE'))
+             ORDER BY 1`,
+  }),
+});
+const noRls = await rls.json();
+if (Array.isArray(noRls) && noRls.length) {
+  noRls.forEach((t) => fails.push(`${t.relname}: the guest key may write it and RLS is OFF — nothing is refusing the write`));
+  console.log(`  ✗ ${noRls.length} table(s) are guest-writable with RLS switched off`);
+} else {
+  pass++;
+  console.log("  ✓ RLS is on for every table the guest key could write");
+}
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) {
   fails.forEach((f) => console.log("   · " + f));

@@ -60,6 +60,18 @@ export function effectiveTaxPct(raw: TaxSettings): number {
 export type TaxBehaviour = "excl" | "incl" | "exempt";
 export type DishTaxMode = "default" | "excl" | "incl" | "mrp" | "none";
 
+/** THE COLUMNS effectiveTaxRate() NEEDS. Select these — never a hand-written subset.
+ *
+ *  This is a constant rather than a convention because of a real trap: since mig 272 a
+ *  composition-scheme restaurant's rate is 0, and that fact lives in `price_tax_mode`. A query
+ *  that fetches only `tax_rate, tax_components` therefore reads a rate of 5% for a restaurant
+ *  that must charge nothing — and it fails SILENTLY, because the columns it did fetch are
+ *  perfectly valid. Eight call sites had exactly that shape.
+ *
+ *  Guarded by `npm run verify:tax-mode`, which fails when a settings select feeds the tax
+ *  helpers without this column present. */
+export const TAX_SETTINGS_COLUMNS = "tax_rate, tax_components, price_tax_mode";
+
 // NonNullable first, then re-add the nullable arms: TaxSettings already ends in `| null |
 // undefined`, and intersecting a union with an object type distributes over it and drops
 // those arms — which made every caller holding a nullable settings row (lib/menu.ts) stop

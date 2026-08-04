@@ -127,14 +127,19 @@ export function cleanClonedSettings(
   // three start at the migration's own defaults — GST added on top, per-dish modes off, no GST
   // declared on an MRP line — which is exactly today's behaviour for everyone.
   //
-  // NOTE (out of scope, flagged for the owner): tax_components is NOT reset here, even though it
-  // is as tenant-specific as tax_rate directly above it — a cloned restaurant inherits the
-  // template's CGST/SGST rows. Changing that needs the owner's call, because effectiveTaxRate()
-  // prefers components over tax_rate, so blanking them would move a new restaurant onto the 5%
-  // fallback rather than leaving it blank.
   base.price_tax_mode = "excl";
   base.item_tax_modes_allowed = false;
   base.mrp_tax_treatment = "none";
+  // The RATE itself, in both the forms it can take. `tax_rate` is nulled above ("each
+  // restaurant sets its own") — and tax_components is the SAME fact written differently, so
+  // inheriting it was simply inconsistent: effectiveTaxRate() PREFERS components over
+  // tax_rate, which meant a restaurant cloned from an 18% template silently charged 18% while
+  // its own tax_rate read blank. That is the "#1 leaks onto restaurant #2" class aimed
+  // straight at the money.
+  // Blanking both lands the new restaurant on the app's documented 5% fallback — exactly what
+  // a clone got before named components existed, and a number its owner can then set.
+  base.tax_components = [];
+  base.banquet_tax_components = [];
   // service_mode = maintenance switch (true = closed). A new restaurant must open LIVE, never
   // inherit the flagship's maintenance state — else creating a restaurant while #1 is in
   // maintenance would silently ship the new one offline. (mig 004.)

@@ -31,7 +31,7 @@ import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
-import { effectiveTaxRate } from "@/lib/tax";
+import { effectiveTaxRate, TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { waiterTables, allows, normTable, blockedReason, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
@@ -818,9 +818,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // table order and ⚡ QO/P all answer "That dish is sold out". Parcel prices itself and had
       // never read the 86 board, so a takeaway could be taken for a dish the kitchen had just
       // marked off: a clean "sent", and a ticket nobody can cook, with the customer at the counter.
-      const menu = (must(await sb.from("menu_items").select("id,title,price,open_price,tags").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean; tags?: string[] }[];
+      // `tax_mode` so a parcel prices an MRP bottle the same way a table does (mig 270). This
+      // path prices itself instead of calling lfh_price_order, so it must apply that rule by hand.
+      const menu = (must(await sb.from("menu_items").select("id,title,price,open_price,tags,tax_mode").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean; tags?: string[]; tax_mode?: string }[];
       const byId = new Map(menu.map((d) => [String(d.id), d]));
-      const picked: { title: string; qty: number; price: number; note?: string }[] = [];
+      const parcelSet = (await sb.from("settings")
+        .select(`${TAX_SETTINGS_COLUMNS}, item_tax_modes_allowed, mrp_tax_treatment`)
+        .eq("restaurant_id", rid).maybeSingle()).data || {};
+      const picked: { title: string; qty: number; price: number; note?: string; tax_mode?: string; is_mrp?: boolean }[] = [];
       let total = 0;
       for (const it of items) {
         const d = byId.get(String(it?.id || ""));
@@ -840,7 +845,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         } else {
           price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
         }
-        const line: { title: string; qty: number; price: number; note?: string } = { title: d.title, qty, price };
+        const line: { title: string; qty: number; price: number; note?: string; tax_mode?: string; is_mrp?: boolean } = {
+          title: d.title, qty, price,
+          // Resolved and FROZEN onto the line, exactly as lfh_price_order does for a table.
+          tax_mode: resolveTaxMode(d.tax_mode, parcelSet),
+        };
+        if (isMrpDish(d.tax_mode, parcelSet)) line.is_mrp = true;
         const ln = String(it?.note || "").trim().slice(0, 200);
         if (ln) line.note = ln;
         picked.push(line);
@@ -858,9 +868,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // and for every delivery row it already means the final amount; a parcel now agrees.
       // The printed bill takes its subtotal from the LINES (never this stored total, or it would
       // tax it twice), so paper and record land on the same number.
-      const parcelRate = effectiveTaxRate((await sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle()).data || {});
-      const parcelTax = Math.round(total * parcelRate * 100) / 100;
-      total = Math.round((total + parcelTax) * 100) / 100;
+      // The split (mig 270): only the taxable part is taxed, so a sealed bottle sold at the
+      // counter is not taxed any more than the same bottle sold at a table.
+      const parcelSplit = splitBill(picked, parcelSet, 0);
+      total = parcelSplit.total;
 
       const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
       const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -1559,7 +1570,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const drows = (must(await dq.limit(200)) as { id: string; subtotal: number; total: number; discount: number; session_id: string | null }[]) || [];
         const sidSp = openSess?.id || drows.find((o) => o.session_id)?.session_id;
         if (!drows.length || !sidSp) return err("This table has no live bill to split.", 409);
-        const setSp = (await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle()).data || {};
+        const setSp = (await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle()).data || {};
         const rateSp = effectiveTaxRate(setSp);
         // Aggregate rounding — match billMath / the printed bill (see editor route note).
         const taxableSp = Math.max(0, drows.reduce((s, o) => s + (Number(o.subtotal) || 0), 0) - drows.reduce((s, o) => s + (Number(o.discount) || 0), 0));
