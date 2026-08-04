@@ -1512,7 +1512,19 @@ export default function OwnerDashboard() {
         /* A quiet caption under a chart, for saying what it deliberately leaves out. */
         .ow2-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; text-align: right; }
         .ow2-tag { font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--bg); border: var(--border); border-radius: 8px; padding: 3px 9px; white-space: nowrap; }
-        .ow2-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        /* minmax(0,1fr), NOT a bare 1fr. A bare 1fr track means minmax(auto,1fr), and that
+           auto floor is the item's MIN-CONTENT width — so a card holding something with an
+           intrinsic minimum (the heatmap's 430px grid; the payment legend's 220px column beside
+           a 180px donut) pushed its own track wider than the phone instead of letting the card's
+           inner scroller do its job. On the owner's A35 (360px) the main pane measured 496px wide
+           and the Busy-heatmap and Payment-methods cards ran 136px off-screen, taking the
+           heatmap's enlarge button with them, with no horizontal scrollbar to reveal them
+           (owner-panel sweep, 2026-08-04). min-width:0 on the children is the other half of the
+           cure: without it a grid item still refuses to shrink.
+           NOTE: this CSS lives in a template literal — never use backticks in these comments,
+           they close the string and the build fails with "Identifier cannot follow number". */
+        .ow2-two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+        .ow2-two > * { min-width: 0; }
         /* table */
         .hq-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 14px; border-bottom: var(--border); }
         .hq-search { flex: 1 1 220px; display: flex; align-items: center; gap: 9px; border: var(--border); background: var(--bg); border-radius: 9px; padding: 7px 12px; color: var(--muted); }
@@ -1595,7 +1607,7 @@ export default function OwnerDashboard() {
         @media (max-width: 1080px) { :global(.ow2-stats) { grid-template-columns: repeat(3, 1fr) !important; } }
         @media (max-width: 760px) {
           :global(.ow2-stats) { grid-template-columns: repeat(2, 1fr) !important; }
-          .ow2-two, .ow2-callouts { grid-template-columns: 1fr; }
+          .ow2-two, .ow2-callouts { grid-template-columns: minmax(0, 1fr); }
           .hq-table .hide-m { display: none; }
           .hq-table th:nth-child(3), .hq-table td:nth-child(3), .hq-table th:nth-child(6), .hq-table td:nth-child(6) { display: none; }
           .ow2-act .who { display: none; }
