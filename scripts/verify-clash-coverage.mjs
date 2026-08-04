@@ -143,7 +143,12 @@ console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${pr
 console.log("\nNot covered by this check (by design — no expectation travels from these yet):");
 console.log("  · the OWNER panel's own writes (owner/settings, owner/staff — React, plain fetch)");
 console.log("  · public/panels/editor/inventory.js (its own fetch helper)");
-console.log("  · anything writing settings.table_names (table renames) or a bill's customer name");
+console.log("  · a bill's customer name (its capture RPC is idempotent, so a repeat is harmless)");
+// TABLE RENAMES used to be listed here as unprotected. They no longer are: the settings save
+// sends an expectation too (buildEditExpect → `general`), which needed lib/clashCompare.ts to
+// compare OBJECTS by content — every table name lives inside one `table_names` blob, and the old
+// comparator turned every object into "[object Object]", so the check could never have fired.
+console.log("  (table renames and staff pay/permissions WERE listed here — both are protected now.)");
 console.log("  Widening any of those means routing the write through the panel's api()/outbox first.");
 if (problems) {
   console.log(`\n❌ FAIL — wire \`expect: { table, id, fields: { <col>: <oldValue> } }\` at each one, or`);

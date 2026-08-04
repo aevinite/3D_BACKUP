@@ -26,6 +26,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { affectedTables } from "@/lib/tableOfAction";
+// The value comparison lives in its own import-free file so scripts/verify-order-retry.mjs can
+// execute the REAL rule rather than a copy of it. See that file for why objects need handling.
+import { sameValue, isPlainObject } from "@/lib/clashCompare";
 
 // A change is only judged as a REPLAY once it's this old. An online write goes through
 // the same outbox helper (so it carries the same header) but is milliseconds old — this
@@ -140,9 +143,13 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
       // So for a money column the sentence could state a figure the person's own role is not
       // shown anywhere else on their screen. For those, say that it moved and send them to look;
       // for everything else (a note, allergens, a quantity) quote it as before.
-      const plain = QUIET_COLUMNS.has(c)
+      // An OBJECT takes the quiet form too. There is no single value to quote for a jsonb blob —
+      // quoting one produced "it now says something different now", which is both clumsy and
+      // says nothing. Naming the field and sending them to look is the honest version.
+      const quiet = QUIET_COLUMNS.has(c) || isPlainObject(current);
+      const plain = quiet
         ? `Someone else changed ${what} while you had it open.`
-        : `Someone else changed ${what} while you had it open — it now says ${describe(row[c])}.`;
+        : `Someone else changed ${what} while you had it open — it now says ${describe(current)}.`;
       return {
         code: "clash_changed_elsewhere",
         plain,
@@ -162,19 +169,12 @@ const QUIET_COLUMNS = new Set(["discount", "price", "payment_status", "total"]);
 
 // Compare loosely enough that formatting isn't treated as a change: trimmed text, and lists
 // compared as sets (an allergen list's order is not meaningful).
-function sameValue(a: unknown, b: unknown): boolean {
-  const norm = (v: unknown) => (v == null ? "" : String(v).trim());
-  if (Array.isArray(a) || Array.isArray(b)) {
-    const arr = (v: unknown) => (Array.isArray(v) ? v.map((x) => norm(x).toLowerCase()).filter(Boolean).sort() : []);
-    const x = arr(a), y = arr(b);
-    return x.length === y.length && x.every((v, i) => v === y[i]);
-  }
-  return norm(a) === norm(b);
-}
-
 // How to say the current value to a person.
 function describe(v: unknown): string {
   if (Array.isArray(v)) return v.length ? `“no ${v.join(", ")}”` : "nothing to avoid";
+  // An object has no useful one-line value to quote — printing it would put the literal words
+  // "[object Object]" in front of a manager. Say that it moved and send them to look instead.
+  if (isPlainObject(v)) return "something different now";
   const s = v == null ? "" : String(v).trim();
   return s ? `“${s}”` : "nothing";
 }

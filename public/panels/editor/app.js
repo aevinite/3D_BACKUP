@@ -5976,7 +5976,24 @@ function updateMembCount(filterSlug) {
 // sides and compare EQUAL no matter what changed — an expectation that can never fire is worse
 // than none, because it reads like protection. Prices, names, slugs and flags are the fields two
 // people actually collide on anyway.
-const EXPECT_TABLE = { items: "menu_items", categories: "categories", filters: "filters" };
+// `general` = the restaurant's settings row, which is where TABLE RENAMES live. It was left out
+// at first because settings is written partially from several screens and a whole-row expectation
+// would invent clashes — but the expectation only ever covers the fields THIS save is changing, so
+// that risk isn't real: another screen touching a DIFFERENT column is not a clash, and another
+// screen touching the SAME one is exactly the clash we want.
+//
+// Why it matters: every table name lives inside ONE `table_names` object, and the save diffs by
+// top-level key — so renaming a single table sends the whole object. Two managers renaming
+// different tables at the same moment meant the second save silently wiped the first's rename.
+// Keyed by `kind` — the value the save actually passes — NOT by the tab name. The general tab's
+// kind is already "settings" (see `const kind = state.tab === "general" ? "settings" : state.tab`),
+// so a `general:` key here would never match and the expectation would silently never be sent.
+// It was written that way first, and only an end-to-end test caught it: the static check saw the
+// string and went green while nothing was protected.
+const EXPECT_TABLE = { items: "menu_items", categories: "categories", filters: "filters", settings: "settings" };
+// Which column identifies the row. `settings` is keyed by restaurant_id, not by an `id` (it is one
+// row per restaurant) — see COMPARABLE_TABLES in lib/clash.ts, which scopes the lookup the same way.
+const EXPECT_ID_FIELD = { settings: "restaurant_id" };
 // The MONEY fields go first, so the 8-field cap below can never be the reason one of them
 // travels unprotected. `tax_mode` (mig 270) belongs here with `price`: it decides whether the
 // guest is charged ₹280, ₹294 or exactly ₹20 for the same typed number, so two managers
@@ -5988,7 +6005,7 @@ function buildEditExpect(kind, payload, pristineJson) {
   if (!table || !pristineJson) return null;
   let before;
   try { before = JSON.parse(pristineJson); } catch (e) { return null; }
-  const id = before.id;
+  const id = before[EXPECT_ID_FIELD[table] || "id"];
   if (!id) return null;                                  // no row identity → nothing to compare
   const fields = {};
   const keys = Object.keys(payload);
@@ -6000,8 +6017,15 @@ function buildEditExpect(kind, payload, pristineJson) {
     if (k === "id" || k === "slug" || k.startsWith("__")) continue;  // identity/control keys, not values
     const was = before[k];
     if (was === undefined) continue;                     // a column the baseline didn't carry
+    // Scalars, and now PLAIN OBJECTS too. Objects used to be skipped for a good reason: the
+    // server compared values by stringifying them, so every object became "[object Object]" and
+    // two different values read as identical — an expectation that can never fire is worse than
+    // none. lib/clash.ts compares objects by content now (stableJson), so `table_names` and the
+    // rest of the jsonb columns are genuinely protectable. Arrays stay out: they are already
+    // compared as SETS there, which is right for allergens but wrong for an ordered list.
     const t = typeof was;
-    if (was !== null && t !== "string" && t !== "number" && t !== "boolean") continue; // see note above
+    const objectOk = t === "object" && was !== null && !Array.isArray(was);
+    if (was !== null && !objectOk && t !== "string" && t !== "number" && t !== "boolean") continue;
     fields[k] = was;
     if (Object.keys(fields).length >= 8) break;          // the server caps at 8 too
   }
