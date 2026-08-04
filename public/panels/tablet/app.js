@@ -790,6 +790,20 @@ function floorTableList() {
   const extras = Object.keys(tiles)
     .map((k) => parseInt(k, 10))
     .filter((k) => Number.isFinite(k) && k > n)
+    // …AND ONLY WHEN IT ACTUALLY HAS SOMETHING ON IT (T4 sweep, 2026-08-04). The whole reason to
+    // draw a table above the floor plan is that its BILL would otherwise be unreachable — a FREE
+    // one has no bill, so drawing it just puts a phantom table on a waiter's floor and inflates the
+    // "Free" chip. Observed live: six tiles above a 30-table floor, every one reading "Free",
+    // counted into "Free 26". The summary RPC returns a row for an off-plan table (generate_series ∪
+    // open sessions ∪ live orders) and can keep returning it after its session closed or its orders
+    // were archived. A merged member is kept whatever its own row says — its party's money is real
+    // and lives on another tile. ("waiting" is re-presented as free by summaryTile, so both go.)
+    .filter((k) => {
+      const key = String(k);
+      const st = (tiles[key] || {}).state;
+      const occupied = !!st && st !== "free" && st !== "waiting";
+      return occupied || !!mergeParentOf(key) || mergeChildrenOf(key).length > 0;
+    })
     .sort((a, b) => a - b);
   return out.concat(extras);
 }
@@ -1520,7 +1534,11 @@ function renderPanel() {
     // rows land in place with no jump. Falls back to the plain line when there are no dishes.
     const pills = dishN ? `<div class="tpills" style="margin:0 0 10px">${a.nw ? `<span class="tpill nw">${a.nw} new</span>` : ""}${a.ck ? `<span class="tpill ck">${a.ck} cooking</span>` : ""}${a.rd ? `<span class="tpill rd">${a.rd} ready</span>` : ""}${a.sv ? `<span class="tpill sv">${a.sv} served</span>` : ""}</div>` : "";
     const skelRow = (w) => `<div class="iline skelrow"><span class="skel skel-qty"></span><span class="skel skel-name" style="width:${w}%"></span><span class="skel skel-pill"></span></div>`;
-    const load = dishN
+    // NOT `load` — that is the name of this file's module-level refresh function, and a local
+    // const was SHADOWING it inside this branch (T4 sweep, 2026-08-04). Nothing here called it, so
+    // there was no bug; but the next person to add `await load()` to this branch would have awaited
+    // a string (or hit a TDZ error above the declaration) and the failure would have been silent.
+    const loadHtml = dishN
       ? `<div class="ord"><div class="ordh"><span class="left"><span class="skel skel-kot"></span><span class="when" style="display:flex;align-items:center;gap:7px"><span class="tsl-dot"></span> syncing…</span></span></div>${[52, 38, 61, 45].slice(0, Math.min(4, dishN)).map(skelRow).join("")}</div>`
       : `<div class="muted" style="display:flex;align-items:center;gap:8px;padding:6px 0"><span class="tsl-dot"></span> Loading order details…</div>`;
     const payCls = a.unpaid ? "unpaid" : a.paid ? "paid" : "";
@@ -1536,7 +1554,7 @@ function renderPanel() {
         <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${dishN ? `${dishN} dish${dishN === 1 ? "" : "es"}` : "opening…"} · <span class="live">● open</span></div></div>
       </div>
       <div class="detail-body">
-        <div class="sec"><h3>Orders</h3>${unsentBox}${pills}${load}</div>
+        <div class="sec"><h3>Orders</h3>${unsentBox}${pills}${loadHtml}</div>
       </div>
       <div class="dacts">
         ${tshow("tablet_take_orders") ? `<button class="btn primary big${txray("tablet_take_orders")}" id="takeOrder">＋ Take order</button>` : ""}
@@ -1722,7 +1740,7 @@ function renderPanel() {
       ${reqRows ? `<div class="sec"><h3>Requests</h3>${reqRows}</div>` : ""}
       ${joinRows ? `<div class="sec"><h3>Waiting to join</h3>${joinRows}</div>` : ""}
       ${callRows ? `<div class="sec"><h3>Calls</h3>${calls.length > 1 ? `<button class="btn small primary" data-attend-all-calls="${esc(t)}">Attend all (${calls.length})</button>` : ""}${callRows}</div>` : ""}
-      ${s ? `<div class="sec"><h3>Party</h3>${partyRows || `<div class="muted small">No guests joined yet.</div>`}</div>` : ""}
+      ${(s && partyRows) ? `<div class="sec"><h3>Party</h3>${partyRows}</div>` : ""}
       <div class="sec"><h3>Orders</h3>${unsentBox}${(os.filter((o) => o.status === "received").length > 1) ? `<button class="accept accept-all" data-accept-all="${esc(t)}">✓ Accept all &amp; prepare (${os.filter((o) => o.status === "received").length})</button>` : ""}${(os.some((o) => o.status !== "received" && o.status !== "cancelled" && dishRowsOf(o).some((r) => r.fromDb && r.status !== "served"))) ? `<button class="serve-all-btn" data-serve-all="${esc(t)}">🍽️ Serve all</button>` : ""}${orderCards || `<div class="muted">No orders yet.</div>`}${Number(s && s.discount) > 0 ? `<div class="bill-disc-note" style="margin-top:8px;font-size:13px;font-weight:700;color:#f0b232">🏷️ Whole-bill discount − ${inr(s.discount)}${billDiscLbl ? ` (${billDiscLbl})` : ""}${s.discount_note ? ` · ${esc(s.discount_note)}` : ""}</div>` : ""}</div>
     </div>
     <div class="dacts">
@@ -2213,7 +2231,15 @@ function kotOpsOn() {
   return !!set.table_ops_tablet_allowed && tperm("tablet_table_ops") !== "off";
 }
 function renderKotMenu(t, s) {
+  // `movable` is THIS TABLE'S OWN tickets — right for "move a KOT" / "move a dish", because a
+  // ticket belongs to the table it was rung at.
   const movable = ordersOf(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled");
+  // …but SPLITTING IS A WHOLE-BILL ACTION, so it must be gated on the whole PARTY's bill — the
+  // exact rows renderSplitSettle() actually works on (T4 sweep, 2026-08-04). Gating it on
+  // ordersOf(t) greyed "Split the bill" out on a merged CHILD whose party bill was listed in the
+  // popup right behind the menu, with its ₹ due on the tile. Same filter as renderSplitSettle,
+  // deliberately duplicated rather than approximated, so the row and the screen it opens agree.
+  const splittable = partyOrders(t).filter((o) => o.payment_status !== "paid" && o.status !== "cancelled" && o.status !== "received");
   const row = (id, icon, label, sub, on) => `<button class="kotm-row" data-kotop="${id}" ${on ? "" : "disabled"}>
     <span class="kotm-ico">${icon}</span><span class="kotm-txt"><b>${label}</b><small>${sub}</small></span><span class="kotm-chev">›</span></button>`;
   let occupiedOthers = 0;
@@ -2231,7 +2257,7 @@ function renderKotMenu(t, s) {
     // Settings → Bill in the manager panel). It also sits LAST, matching the manager's list: the
     // waiter and the manager must not be offered a different set of operations for one table.
     (!!(state.data.settings || {}).split_bill_enabled
-      ? row("split", "🍴", "Split the bill", "Collect one bill as several payments — equal, custom, or by dish", tshow("tablet_mark_paid") && movable.some((o) => o.status !== "received"))
+      ? row("split", "🍴", "Split the bill", "Collect one bill as several payments — equal, custom, or by dish", tshow("tablet_mark_paid") && splittable.length > 0)
       : "");
   const { dropLayer } = renderPickerShell(`Table ${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
   document.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
@@ -2319,10 +2345,18 @@ function renderMoveItemTarget(t, itemId) {
   const tiles = [];
   for (let i = 1, n = tableCount(); i <= n; i++) {
     if (String(i) === String(t)) continue;
+    // SAME TWO RULES AS EVERY OTHER DESTINATION PICKER (T4 sweep, 2026-08-04). This one offered
+    // every table in the restaurant while its three siblings (renderMoveOrderTarget,
+    // renderMergePicker, renderShiftPicker) all filter by section — so a sectioned waiter was
+    // shown tables the server refuses (it checks BOTH ends of a move), i.e. a button that exists
+    // only to fail. And a merged CHILD was offered even though it has no bill of its own to
+    // receive the dish — the party's money lives on the parent, which is already in this list.
+    if (!inMySection(i)) continue;
+    if (mergeParentOf(i)) continue;
     const st2 = tileState(i);
     tiles.push(`<button class="kotm-tile${tileIsOpen(i) ? " occ" : ""}" data-mvto="${i}"><b>T${i}</b><small>${st2.label}</small></button>`);
   }
-  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Send this dish to which table? (it gets its own new KOT there)</div><div class="kotm-grid">${tiles.join("")}</div>`;
+  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Send this dish to which table? (it gets its own new KOT there)</div><div class="kotm-grid">${tiles.length ? tiles.join("") : `<div class="muted">No other table you serve can take this dish right now.</div>`}</div>`;
   const { dropLayer } = renderPickerShell("Move dish →", bodyHtml, "tablet-moveitem-target", () => renderMoveItemPicker(t));
   document.querySelectorAll("[data-mvto]").forEach((b) => (b.onclick = () => {
     const to = b.dataset.mvto;
@@ -3433,7 +3467,12 @@ function updateDishAvailability() {
     btn.classList.toggle("out", out);
     btn.disabled = out;
     const priceEl = btn.querySelector(".dprice");
-    if (priceEl) priceEl.textContent = out ? "SOLD OUT" : inr(dishPrice(d));
+    // MIRROR dishBtnHtml() EXACTLY, including the open-price case (T4 sweep, 2026-08-04). This
+    // patcher wrote inr(dishPrice(d)) unconditionally, so when a menu change landed while the
+    // waiter was mid-order an as-per-MRP dish's tile stopped saying "Set price" and started
+    // advertising "₹0" — a price the restaurant does not charge. Tapping it still asked for the
+    // price (that reads d.open_price), so only the label lied, which is the worst combination.
+    if (priceEl) priceEl.textContent = out ? "SOLD OUT" : (d.open_price ? "Set price" : inr(dishPrice(d)));
     const editEl = btn.querySelector(".dedit");
     if (editEl) editEl.style.display = out ? "none" : "";
     const slot = btn.querySelector(".dbadge");
@@ -4478,6 +4517,21 @@ if (window.LFH_RT) {
   // load refetches dishes — a safety-net that self-heals a missed realtime `menu` event. (perf 2026-07-20)
   let _menuHealN = 0;
   setInterval(() => { if ((++_menuHealN % 10) === 0) state._menuStale = true; load().catch(() => {}); }, 60000);
+  // THE CATCH-UP POLL — the tablet was the ONLY live panel without it (T4 sweep, 2026-08-04).
+  // When the WebSocket never comes up or dies (a restaurant's wifi blocking WebSockets, a hotel
+  // or office network, a database that dropped its realtime connection), the 60s backstop above
+  // was this panel's only refresh: a guest's order or a dish the kitchen just marked ready could
+  // sit on the waiter's floor unseen for a FULL MINUTE, while the kitchen screen beside it — which
+  // has had this since bug M9, 2026-07-05 — updated in five seconds. The manager panel has it too;
+  // only the tablet was left behind, and nothing on screen said anything was wrong.
+  //
+  // catchUp() is the sanctioned shape and it is the part that matters under load: 5s while the
+  // socket is down AND the reads are getting through (the legitimate blocked-socket case, which
+  // must stay live), doubling to a minute for as long as they FAIL, straight back to quick on the
+  // first success, jittered so twenty tablets never share a beat — never a fixed fast beat aimed at
+  // a database that is already struggling (CLAUDE.md's rush rule 4). It is a complete no-op
+  // whenever realtime is working. load() rejects when its read fails, which is what it backs off on.
+  if (window.LFH_RT.catchUp) window.LFH_RT.catchUp(() => load());
 } else {
   // NO REALTIME AT ALL (the script failed to load / is blocked). This used to be a flat
   // `setInterval(load, 2000)` — a fixed two-second beat, from every waiter tablet on the floor,

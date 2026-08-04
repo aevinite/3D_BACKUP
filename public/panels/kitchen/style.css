@@ -38,6 +38,13 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .clock { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 15px; }
 .btn { background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 9px 14px; font-size: 14px; cursor: pointer; font-family: inherit; }
 .btn:hover { border-color: var(--blue); }
+/* The two buttons whose WORDS drop on a phone are built as an icon span + a word span. The space
+   that used to sit between "▦" and "Wall view" in the markup went with that change, so the desktop
+   label read "▦Wall view" — put the gap back as a margin, which leaves NO stray space when the
+   word is hidden. (Caught by the desktop regression check, T4 sweep 2026-08-04 — the phone fix
+   had quietly cost the desktop a space.) */
+.btn .bi { font-style: normal; }
+.btn .bw { font-style: normal; margin-left: 6px; }
 .btn.danger { background: rgba(239,68,68,0.15); border-color: rgba(239,68,68,0.5); color: #fca5a5; font-weight: 700; }
 
 /* the three columns — fluid, no dead gap (stack on a narrow screen) */
@@ -72,6 +79,14 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .kot { font-size: 24px; font-weight: 900; letter-spacing: 0.5px; }           /* the shoutable number */
 .tbl { font-size: 15px; font-weight: 700; color: var(--blue); }
 .age { margin-left: auto; color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+/* A TICKET THAT HAS BEEN SITTING SAYS SO (T4 sweep, 2026-08-04). A 44-hour-old Cooking ticket
+   rendered in the same small grey text as "5m", so nothing on the board flagged a stuck order.
+   Amber past 30 min, red-and-bold past 2 h. Both skins get a value — the light skin's --muted is
+   a warm brown, so an unstyled warning would have read as ordinary text there. */
+.age.age-warn { color: var(--amber); font-weight: 800; }
+.age.age-late { color: var(--red); font-weight: 800; }
+html[data-theme="light"] .age.age-warn { color: #b45309; }
+html[data-theme="light"] .age.age-late { color: #b91c1c; }
 /* Manual reprint (🖨) — a secondary control, so it's subtle and small; only rendered when KOT
    printing is enabled for the restaurant. Sits after the age in the ticket header. */
 .reprint { margin-left: 8px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 3px 9px; font-size: 14px; line-height: 1; cursor: pointer; flex: 0 0 auto; }
@@ -118,16 +133,20 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
    be silent forever). Shown by app.js ONLY while sound is on but the AudioContext isn't
    running; the tap that dismisses it IS the gesture that unlocks audio. Sits just above
    the toasts so it never covers them. */
+/* A FULL-WIDTH BAR UNDER THE TOP BAR — never a pill floating over the board (T4 sweep,
+   2026-08-04). It is in the normal flow, so it RESERVES its own row and the tickets start
+   below it; the old fixed pill sat on top of a ticket on a phone, and over a ticket's
+   ALL READY button whenever the Cooking column was full (i.e. during a rush). It still
+   cannot be dismissed — a KDS that cannot chime is a real problem and has to keep saying so. */
 .sound-nudge {
-  position: fixed; left: 50%; bottom: calc(74px + var(--sab)); transform: translateX(-50%);
-  z-index: 60; display: inline-flex; align-items: center; gap: 8px;
-  background: var(--amber); color: #201500; border: 0; border-radius: 999px;
-  padding: 12px 22px; font-family: inherit; font-size: 15px; font-weight: 800;
-  cursor: pointer; box-shadow: 0 8px 26px rgba(0,0,0,0.45);
-  animation: nudge-pulse 1.8s ease-in-out infinite;
+  display: block; width: 100%; box-sizing: border-box; border: 0; border-bottom: 1px solid rgba(0,0,0,0.18);
+  background: var(--amber); color: #201500;
+  padding: 11px 18px; font-family: inherit; font-size: 15px; font-weight: 800; text-align: center;
+  cursor: pointer; animation: nudge-pulse 1.8s ease-in-out infinite;
 }
-.sound-nudge:active { transform: translateX(-50%) scale(0.97); }
-@keyframes nudge-pulse { 0%, 100% { box-shadow: 0 8px 26px rgba(0,0,0,0.45); } 50% { box-shadow: 0 10px 30px rgba(230,180,80,0.6); } }
+.sound-nudge:active { filter: brightness(0.95); }
+.sound-nudge[hidden] { display: none; }   /* [hidden] must beat the display above (author rules win) */
+@keyframes nudge-pulse { 0%, 100% { filter: none; } 50% { filter: brightness(1.08); } }
 @media (prefers-reduced-motion: reduce) { .sound-nudge { animation: none; } }
 
 /* toasts (bottom-centre, with the UNDO escape hatch) */
@@ -199,8 +218,25 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
   .top-actions .btn { padding: 9px 11px; min-height: 44px; display: inline-flex; align-items: center; }
   .theme-toggle { width: 44px; height: 44px; }
   /* Leave room at the bottom so the last ticket / "Nothing here" isn't hidden behind the
-     fixed "Tap to enable sound" nudge + toasts on a phone (audit 2026-07-07). */
-  .cols, .wall { padding-bottom: calc(104px + var(--sab)); }
+     toasts on a phone (audit 2026-07-07). Trimmed from 104px: the "Tap to enable sound" nudge
+     no longer floats down here — it is a bar under the top bar that reserves its own row
+     (T4 sweep, 2026-08-04) — so only the toast stack needs clearance. */
+  .cols, .wall { padding-bottom: calc(76px + var(--sab)); }
+  /* The top bar was wrapping to FOUR rows at 360px (brand / Live+clock+bell+86 / printer+wall+
+     flag+moon / Profile), which pushed the first ticket ~300px down a 780px screen. The clock is
+     the one thing here the phone itself already shows on its own status bar, and tighter action
+     padding recovers the rest — the KDS is a board, and the board should have the screen. */
+  .clock { display: none; }
+  .top-actions { gap: 5px; }
+  .top-actions .btn { padding: 8px 9px; font-size: 13px; }
+  /* Icon-only for the two worded buttons: 🚫 and ▦/▭ alone. That is what takes the bar from
+     four rows to two — the meaning stays in title/aria-label, and both keep a 44px target. */
+  .top-actions .btn .bw { display: none; }
+  .top-actions .btn .bi { font-style: normal; }
+  /* …and the brand drops its generic sub-label ("live orders") so its row stops wrapping. The
+     RESTAURANT's own name is the part that must survive a narrow screen — no tenant may lose its
+     branding — so the throwaway words go, exactly as the tablet's top bar already does it. */
+  .brand .sub { display: none; }
   /* Bigger reprint tap target on a phone/greasy tablet. */
   .reprint { min-height: 40px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }

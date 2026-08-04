@@ -82,11 +82,34 @@ const tlong = (t) => (t == null || t === "" ? "Table ?" : (tname(t) || `Table ${
 // still carries its own ticket number.
 const isParcelOrder = (o) => !!o && o.source === "parcel";
 const whereFor = (o, long) => (isParcelOrder(o) ? "PARCEL" : long ? tlong(o && o.table_number) : tshort(o && o.table_number));
+// How old a ticket is, in the words a cook reads. GUARDED against a missing or unparseable
+// timestamp (T4 sweep, 2026-08-04): this used to do the arithmetic blind, so `null` printed
+// "496071h 45m" (the 1970 epoch) and a garbage value printed "NaNh NaNm" — straight into the
+// ticket header, and `NaN` on a staff screen is on verify:live's own leaked-value list. A
+// platform/aggregator ticket is the realistic way in, since its created_at comes from a webhook.
+// Every other date read on this panel is already guarded; this was the one that wasn't.
+const ageMinutes = (ts) => {
+  if (ts == null || ts === "") return null;
+  const t = new Date(ts).getTime();
+  if (!Number.isFinite(t) || t <= 0) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 60000));   // a device clock ahead of the server reads "just now"
+};
 const timeAgo = (ts) => {
-  const m = Math.floor((Date.now() - new Date(ts).getTime()) / 60000);
+  const m = ageMinutes(ts);
+  if (m == null) return "";               // say nothing rather than nonsense
   if (m < 1) return "just now";
   if (m < 60) return m + "m";
   return Math.floor(m / 60) + "h " + (m % 60) + "m";
+};
+// A STUCK TICKET MUST NOT LOOK LIKE A FRESH ONE (T4 sweep, 2026-08-04). The live board carried a
+// Cooking ticket 44 HOURS old and another at 13h, rendered in exactly the same small grey text as
+// "5m" — so a cook scanning the board had no signal that anything had been sitting. These are real
+// tickets on overnight open sessions and must never be hidden; they just have to be visible AS old.
+const AGE_WARN_MIN = 30, AGE_LATE_MIN = 120;
+const ageClass = (ts) => {
+  const m = ageMinutes(ts);
+  if (m == null) return "";
+  return m >= AGE_LATE_MIN ? " age-late" : m >= AGE_WARN_MIN ? " age-warn" : "";
 };
 const toast = (msg, undoFn) => {
   const t = document.createElement("div");
@@ -132,9 +155,19 @@ function updateSoundNudge() {
     if (!soundNudgeEl) {
       soundNudgeEl = document.createElement("button");
       soundNudgeEl.id = "soundNudge"; soundNudgeEl.type = "button"; soundNudgeEl.className = "sound-nudge";
-      soundNudgeEl.textContent = "🔊 Tap to enable sound";
+      soundNudgeEl.textContent = "🔊 Tap to enable sound — new orders are silent";
       soundNudgeEl.onclick = () => { primeAudio(); setTimeout(updateSoundNudge, 250); };
-      (document.body || document.documentElement).appendChild(soundNudgeEl);
+      // IT SITS UNDER THE TOP BAR, IT DOES NOT FLOAT OVER THE BOARD (T4 sweep, 2026-08-04). This
+      // used to be appended to <body> as a fixed, pulsing pill centred near the bottom — so on a
+      // phone it landed on top of a ticket, and on any width a full Cooking column (i.e. a rush)
+      // put it over a ticket and potentially over its ALL READY button. It cannot be dismissed by
+      // design (a silent KDS is a real problem and must keep saying so), which is exactly why it
+      // must not cover anything: inserted in the normal flow it RESERVES its own row and the board
+      // starts below it. Keeping the nudge honest and keeping the board unobstructed are both
+      // required — this is how you get both.
+      const bar = document.querySelector("header.topbar");
+      if (bar && bar.parentNode) bar.parentNode.insertBefore(soundNudgeEl, bar.nextSibling);
+      else (document.body || document.documentElement).appendChild(soundNudgeEl);
     }
     soundNudgeEl.hidden = false;
   } else if (soundNudgeEl) {
@@ -234,7 +267,7 @@ function ticketHtml(o, rows) {
   const tb = TAG_BADGE[o.tag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${o.tag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="${isParcelOrder(o) ? "Parcel — no table" : `Table ${esc(o.table_number)}`}">${esc(whereFor(o, false))}</span>${tagBadge}<span class="age">${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="${isParcelOrder(o) ? "Parcel — no table" : `Table ${esc(o.table_number)}`}">${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageClass(o.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
@@ -307,7 +340,7 @@ function platTicketHtml(p) {
     action = `<button class="big" data-plat-hand="${esc(p.id)}">HANDED OVER</button>`;
   }
   return `<div class="ticket plat plat-${esc(meta.cls)} st-plat-${esc(p.status)}" data-ticket="plat-${esc(p.id)}">
-    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="age">${esc(timeAgo(p.created_at))}</span></div>
+    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="age${ageClass(p.created_at)}"${ageClass(p.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(p.created_at))}</span></div>
     ${p.customer_name ? `<div class="plat-cust-line">${esc(p.customer_name)}</div>` : ""}
     ${lines}${action}</div>`;
 }
@@ -415,7 +448,11 @@ function render() { return view === "wall" ? renderWall() : renderColumns(); }
 function applyView() {
   const wall = view === "wall";
   $("#cols").hidden = wall; $("#wall").hidden = !wall;
-  $("#viewBtn").textContent = wall ? "▭ Columns" : "▦ Wall view";
+  // Set the ICON and the WORD separately — a plain textContent here would wipe the two <i>
+  // spans the phone layout hides the words with (T4 sweep, 2026-08-04).
+  { const b = $("#viewBtn"), ic = b.querySelector(".bi"), w = b.querySelector(".bw");
+    if (ic && w) { ic.textContent = wall ? "▭" : "▦"; w.textContent = wall ? "Columns" : "Wall view"; }
+    else b.textContent = wall ? "▭ Columns" : "▦ Wall view"; }   // fallback if the spans ever go
   if (wall) { $("#list-new").innerHTML = $("#list-cooking").innerHTML = $("#list-ready").innerHTML = ""; }
   else { $("#wall").innerHTML = ""; }
   render();
@@ -472,7 +509,12 @@ function setLocalReady(matches) {
 // debounced reconcile after the taps stop. (owner, 2026-06-18)
 function markItemReady(id, btn) {
   const it = (state.items || []).find((x) => x.id === id);
-  if (!it || it.status === "served") return;
+  // NEVER A SILENT RETURN ON A TAP (owner's rule; T4 sweep, 2026-08-04). The ✓ only renders for a
+  // dish that is still cooking, so this is a defensive path — but a poll or a realtime refetch can
+  // land between the paint and the finger, and then the cook's tap did nothing and SAID nothing,
+  // which is indistinguishable from a broken button and leaves no trace to debug.
+  if (!it) { toast("That dish just changed — refreshing the board."); load().catch(() => {}); return; }
+  if (it.status === "served") { toast(`${it.title || "That dish"} is already served.`); return; }
   const prev = it.status; // remember where it was so a mis-tap can be taken back
   it.status = "ready"; pendingReady.add(id);
   if (btn) { const line = btn.closest(".line"); if (line) { line.classList.add("line-ready"); btn.outerHTML = '<span class="done rdy">ready</span>'; } }
@@ -1210,9 +1252,33 @@ if (window.LFH_RT) {
   // those reads are failing instead of hammering a database that is already struggling at a
   // fixed 5s from every device at once. It is a no-op whenever realtime is working.
   if (window.LFH_RT.catchUp) window.LFH_RT.catchUp(() => load());
-  else setInterval(() => { if (!document.hidden) load().catch(() => {}); }, 5000);
+  else backoffPoll(5000);
 } else {
-  setInterval(() => load().catch(() => {}), 2000); // fallback poll
+  // NO REALTIME AT ALL (realtime.js failed to load, or is blocked). This used to be a flat
+  // `setInterval(load, 2000)` — a fixed two-second whole-board read, from every kitchen screen in
+  // the estate, for as long as the page was open, and it kept firing while the tab was HIDDEN.
+  // That is exactly the shape CLAUDE.md's rush rule 4 forbids, and the reason is that a saturated
+  // database is what drops realtime in the first place: the moment things get bad, every device
+  // switches to hammering it in lockstep and keeps it down. The TABLET's identical branch was
+  // rewritten for this; the kitchen was left behind (T4 sweep, 2026-08-04).
+  backoffPoll(2000);
+}
+// The same behaviour LFH_RT.catchUp() gives, written out here because reaching either caller
+// means catchUp itself is unavailable: quick while the reads succeed, doubling to a minute for as
+// long as they FAIL, straight back to quick on the first success, ±20% jitter so twenty screens
+// never poll on the same beat, and nothing at all while the tab is hidden or the device is offline.
+function backoffPoll(baseMs) {
+  let step = 0;
+  const spread = (ms) => Math.round(ms * (0.8 + Math.random() * 0.4));
+  const tick = async () => {
+    if (document.hidden || navigator.onLine === false) step = 0;   // nothing to catch up on
+    else {
+      try { await load(); step = 0; }
+      catch (e) { step = Math.min(step + 1, 8); }
+    }
+    setTimeout(tick, spread(Math.min(baseMs * Math.pow(2, step), 60000)));
+  };
+  setTimeout(tick, spread(baseMs));
 }
 
 // ── HIERARCHY X-RAY ribbon (Phase 4, 2026-07-06) ─────────────────────────────
