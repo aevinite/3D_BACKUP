@@ -158,6 +158,18 @@ function istKey(d: Date, range: Range): string {
   if (range === "today" || range === "yesterday") return `${p.year}-${p.month}-${p.day} ${p.hour}`;
   return `${p.year}-${p.month}-${p.day}`;
 }
+// An istKey() day/hour key → the same friendly label tsLabel() gives ("4 Aug", "3 PM").
+// `istKey` builds "YYYY-MM-DD" (day grain) or "YYYY-MM-DD HH" (hour grain) IN IST, so pin the
+// parse to +05:30 rather than letting the browser read it as local time.
+function keyLabel(key: string): string {
+  const m = /^(\d{4}-\d{2}-\d{2})(?: (\d{2}))?$/.exec(key);
+  if (!m) return key;
+  const d = new Date(`${m[1]}T${m[2] ?? "00"}:00:00+05:30`);
+  if (Number.isNaN(d.getTime())) return key;
+  return m[2] != null
+    ? d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST })
+    : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
+}
 function expectedBuckets(range: Range): { key: string; label: string; ms: number }[] {
   const now = new Date();
   const out: { key: string; label: string; ms: number }[] = [];
@@ -727,7 +739,11 @@ export default function OwnerDashboard() {
       by.set(k, row);
     }
     const exp = expectedBuckets(globalRange);
-    const keys = exp.length ? exp : Array.from(by.keys()).sort().map((k) => ({ key: k, label: k }));
+    // No expected sequence (week / month / lastmonth / all) → use the buckets we actually got,
+    // but LABEL them like a human date. They used to be labelled with the raw en-CA key, so a
+    // multi-restaurant estate on 4 of the 8 periods read "2026-08-04" under every bar while the
+    // single-restaurant chart beside it said "4 Aug" (owner-panel sweep 2026-08-04).
+    const keys = exp.length ? exp : Array.from(by.keys()).sort().map((k) => ({ key: k, label: keyLabel(k) }));
     const rows = keys.map((e) => {
       const found = by.get(e.key) || {};
       const row: Record<string, unknown> = { label: e.label, __orders: found.__orders || 0 };
@@ -764,7 +780,12 @@ export default function OwnerDashboard() {
     for (let d = 1; d <= maxDay; d++) {
       rows.push({
         label: String(d),
-        cur: d <= todayDom ? (curBy.get(d)?.rev ?? 0) : null, // this month: real up to today, blank for future days
+        // This month: COMPLETE days only. Today is still in progress, so plotting its
+        // part-day beside a full month of history drew the green line diving to the floor —
+        // on the 4th of a month it read as revenue collapsing, not as "the day isn't over"
+        // (owner-panel sweep 2026-08-04). Future days were already blank; today joins them,
+        // and the caption under the chart says today is excluded.
+        cur: d < todayDom ? (curBy.get(d)?.rev ?? 0) : null,
         prev: hasPrev ? (prevBy.get(d) ?? 0) : null,
         __orders: curBy.get(d)?.ord ?? 0,
       });
@@ -1244,7 +1265,10 @@ export default function OwnerDashboard() {
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · all {restCount} restaurants</span></span><span className="ow2-tag">{thisMonthName}</span></div>
               {!pl("month") ? <div className="adm-empty">Loading…</div>
-                : <RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />}
+                : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
+                  {/* Say why the green line stops short — a part-day plotted against full days
+                      looked like a crash (owner-panel sweep 2026-08-04). */}
+                  <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue by category <span className="mut">· all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
@@ -1312,7 +1336,10 @@ export default function OwnerDashboard() {
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName}</span></span><span className="ow2-tag">{thisMonthName}</span></div>
               {!pl("month") ? <div className="adm-empty">Loading…</div>
-                : <RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />}
+                : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
+                  {/* Say why the green line stops short — a part-day plotted against full days
+                      looked like a crash (owner-panel sweep 2026-08-04). */}
+                  <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
@@ -1482,6 +1509,8 @@ export default function OwnerDashboard() {
         :global(.ow2-stats) { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
         .ow2-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
         .ow2-ct .mut { color: var(--muted); font-weight: 500; }
+        /* A quiet caption under a chart, for saying what it deliberately leaves out. */
+        .ow2-note { font-size: 10.5px; color: var(--muted); margin-top: 6px; text-align: right; }
         .ow2-tag { font-size: 10.5px; font-weight: 700; color: var(--muted); background: var(--bg); border: var(--border); border-radius: 8px; padding: 3px 9px; white-space: nowrap; }
         .ow2-two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
         /* table */

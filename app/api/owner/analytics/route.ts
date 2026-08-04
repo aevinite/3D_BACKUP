@@ -383,30 +383,31 @@ export async function GET(req: NextRequest) {
     // An owner may only drill into a restaurant they actually own.
     if (!scope.all && !scope.ids.includes(rid)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
     // Crazy-dashboard extras (mig 127, all rid-scoped + pre-summed):
-    //  · sameHour — this window vs 3 older windows, ALL cut at the same elapsed
-    //    time ("today till 5pm" vs "last Sat till 5pm"): the honest comparison.
-    //  · payTrend — payment-method ₹ per IST day over the last 14 days.
     //  · records — all-time bests (one JSONB row, on-demand only).
-    const fromMs = Date.parse(from);
-    const elapsedMs = Math.max(60_000, Math.min(Date.parse(to), Date.now()) - fromMs);
-    // Comparison window starts must never overlap the current window: day ranges
-    // step back 1 day / 1 week / 4 weeks (weekday-matched); 7d steps whole weeks;
-    // 30d steps whole 30-day blocks.
-    const stepsBack = range === "7d" ? [7, 14, 28] : range === "30d" ? [30, 60, 90] : [1, 7, 28];
-    const sameHourStarts = range === "all" ? [] : [
-      new Date(fromMs).toISOString(),
-      ...stepsBack.map((d) => new Date(fromMs - d * DAY).toISOString()),
-    ];
+    //
+    // GONE, deliberately (owner-panel sweep 2026-08-04): `sameHour`
+    // (lfh_owner_samehour_compare) and `payTrend` (lfh_owner_payment_trend). Both ran on
+    // EVERY cold/refresh compute of a restaurant dashboard — payTrend returned 56 rows on the
+    // demo restaurant — and NOTHING rendered either field: the charts that once did
+    // (SameHourBar, PayTrendStack) had become unreferenced exports. Worse, both sat in the
+    // `throw` loop below, so a failure in a query no screen uses would blank the whole owner
+    // dashboard; the heatmap was explicitly excluded from that loop for exactly this reason.
+    // The RPCs are untouched in the database — re-add the fetch WITH its chart if either view
+    // comes back.
     // Compute-on-view cached like the group scope (owner round-3: "auto calculate…
     // it should show number only, very fast — the live site is already optimized").
     // LIVE bits stay OUTSIDE the cache: open-tables (a now-count) and the unbounded
     // all-time records (fetched once per restaurant on demand).
     const restBase = await cachedOwnerPayload({
+      // Still v5 after `sameHour`/`payTrend` were dropped: the bump rule exists so a stale
+      // snapshot can't serve JSON that is MISSING a field the UI now reads. Here the change is
+      // the other direction — an old snapshot merely carries two extra fields nothing reads —
+      // so a bump would only buy a pointless recompute for every restaurant.
       key: `analytics:v5:rest:${rid}:${rangeKey}:c${compare ? 1 : 0}`,
       force: sp.get("refresh") === "1",
       fingerprint: () => fpWithStaffPay([rid], from, to),
       compute: async () => {
-    const [meta, ts, dishes, cats, hourly, heat, pm, sameHour, payTrend, prevTs] = await Promise.all([
+    const [meta, ts, dishes, cats, hourly, heat, pm, prevTs] = await Promise.all([
       sb.from("restaurants").select("id, slug, name, accent_color, hero_title").eq("id", rid).maybeSingle(),
       sb.rpc("lfh_owner_revenue_timeseries", { p_restaurant_id: rid, p_from: from, p_to: to, p_bucket: bucket }),
       sb.rpc("lfh_owner_dish_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
@@ -414,10 +415,6 @@ export async function GET(req: NextRequest) {
       sb.rpc("lfh_owner_hourly", { p_restaurant_id: rid, p_from: from, p_to: to }),
       sb.rpc("lfh_owner_heatmap", { p_restaurant_id: rid, p_from: heatFrom(from, to), p_to: to }),
       sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to }),
-      sameHourStarts.length
-        ? sb.rpc("lfh_owner_samehour_compare", { p_restaurant_id: rid, p_starts: sameHourStarts, p_elapsed: `${Math.round(elapsedMs / 1000)} seconds` })
-        : Promise.resolve({ data: [], error: null }),
-      sb.rpc("lfh_owner_payment_trend", { p_restaurant_id: rid, p_from: new Date(Date.now() - 14 * DAY).toISOString(), p_to: to }),
       // Previous-period revenue per bucket for the "this period vs previous" overlay. Same
       // grain as the current trend; non-fatal (excluded from the throw loop below).
       prevTsWin
@@ -429,7 +426,7 @@ export async function GET(req: NextRequest) {
     // `heat` is deliberately EXCLUDED — the heatmap is non-fatal (see heatFrom): its error
     // must not throw, or one slow busy-hours grid wedges the whole dashboard. `heat.data ?? []`
     // below degrades to an empty grid.
-    for (const e of [ts, dishes, cats, hourly, pm, sameHour, payTrend]) if (e.error) throw e.error;
+    for (const e of [ts, dishes, cats, hourly, pm]) if (e.error) throw e.error;
 
     const dishRows = (dishes.data ?? []).map((r: Record<string, unknown>) => ({
       title: r.title, qty: Number(r.qty) || 0, revenue: num(r.revenue),
@@ -469,13 +466,6 @@ export async function GET(req: NextRequest) {
       hourly: (hourly.data ?? []).map((r: Record<string, unknown>) => ({ hour: Number(r.hour) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       heatmap: ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({ dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       paymentMethods: (pm.data ?? []).map((r: Record<string, unknown>) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 })),
-      // sameHour rows come back newest-first (window_start DESC) = the order we sent.
-      sameHour: ((sameHour.data ?? []) as Record<string, unknown>[]).map((r) => ({
-        start: r.window_start, revenue: num(r.revenue), orders: Number(r.orders) || 0,
-      })),
-      payTrend: ((payTrend.data ?? []) as Record<string, unknown>[]).map((r) => ({
-        day: r.day, method: String(r.method || "Not recorded"), revenue: num(r.revenue),
-      })),
     };
       },
     });

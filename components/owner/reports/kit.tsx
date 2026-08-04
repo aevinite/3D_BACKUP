@@ -164,7 +164,14 @@ export function Panel({ title, hint, right, children, pad = true, id }: {
 // statement rather than a screenshot of the console. The timestamp is filled on mount
 // (empty on the server + first client paint) to avoid an SSR/CSR hydration mismatch,
 // and refreshed on `beforeprint` so it reflects the moment the sheet is actually made.
-export function PrintHead({ restName, title, period }: { restName: string; title: string; period: string }) {
+/** An ISO instant → "4 Aug 2026, 9:52 pm" in IST (a printed sheet is read in India). */
+const fmtAsOf = (iso: string) => {
+  const t = Date.parse(iso);
+  return Number.isFinite(t)
+    ? new Date(t).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" })
+    : "";
+};
+export function PrintHead({ restName, title, period, asOf }: { restName: string; title: string; period: string; asOf?: string }) {
   const [gen, setGen] = useState("");
   useEffect(() => {
     const stamp = () =>
@@ -181,6 +188,11 @@ export function PrintHead({ restName, title, period }: { restName: string; title
       </div>
       <div className="rs-ph-title">{title}</div>
       <div className="rs-ph-scope">{restName} · {period}</div>
+      {/* "Generated <now>" is when the PAPER was made. These figures come from the snapshot
+          cache, so the sheet also has to say when the NUMBERS were computed — otherwise a
+          current timestamp sits over figures that may be hours old, on a document somebody
+          files (owner-panel sweep 2026-08-04). */}
+      {asOf && <div className="rs-ph-asof">Figures as of {fmtAsOf(asOf)}</div>}
     </div>
   );
 }
@@ -219,6 +231,12 @@ export function ReportsStyles() {
       .rs-custom { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); background: var(--card); border: 1px solid var(--border-c); border-radius: 10px; padding: 3px 8px; }
       .rs-custom .rs-date { border: 1px solid var(--border-c); }
       .rs-actions { display: flex; gap: 8px; margin-left: auto; }
+      /* "Refresh · updated X ago" — the figures on this page come from a saved snapshot, so
+         the page has to say how old they are (owner-panel sweep 2026-08-04). Hidden in print;
+         the printed sheet carries the same age in its masthead instead. */
+      .rs-fresh { display: inline-flex; align-items: center; gap: 8px; }
+      .rs-fresh-t { font-size: 10.5px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+      @media print { .rs-fresh { display: none !important; } }
       .rs-btn { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px; border-radius: 9px; border: 1px solid var(--border-c); background: var(--card); color: var(--text); font-size: 12.5px; font-weight: 700; cursor: pointer; transition: background .15s ease, border-color .15s ease, box-shadow .15s ease; }
       .rs-btn:hover { background: var(--muted2); }
       .rs-btn.cta { background: var(--own-cta); border-color: var(--own-cta); color: #fff; }
@@ -481,6 +499,7 @@ export function ReportsStyles() {
         .rs-ph-gen { font-size: 10.5px; color: #555; font-variant-numeric: tabular-nums; }
         .rs-ph-title { font-size: 23px; font-weight: 800; letter-spacing: -0.02em; margin: 9px 0 2px; color: #111; }
         .rs-ph-scope { font-size: 12.5px; color: #444; font-weight: 600; }
+        .rs-ph-asof { font-size: 10.5px; color: #555; margin-top: 3px; font-variant-numeric: tabular-nums; }
 
         /* KPI tiles, panels and quadrant boxes → clean bordered boxes; no colour
            wash, no shadow, and never split across a page. */
