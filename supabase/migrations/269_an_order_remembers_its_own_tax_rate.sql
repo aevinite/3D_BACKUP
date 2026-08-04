@@ -76,16 +76,12 @@ DROP TRIGGER IF EXISTS trg_stamp_order_tax_rate ON orders;
 CREATE TRIGGER trg_stamp_order_tax_rate BEFORE INSERT ON orders
   FOR EACH ROW EXECUTE FUNCTION lfh_stamp_order_tax_rate();
 
--- ── 2. Backfill what every existing order was charged ────────────────────────
--- Derived only — no money column is touched. Two cases, because the banquet's stored tax was
--- computed on the DISCOUNTED base while everything else used the gross.
-WITH bq AS (SELECT DISTINCT order_id FROM banquet_bills WHERE order_id IS NOT NULL)
-UPDATE orders o SET tax_rate = round(
-  o.tax::numeric / NULLIF(
-    CASE WHEN EXISTS (SELECT 1 FROM bq WHERE bq.order_id = o.id)
-         THEN o.subtotal::numeric - COALESCE(o.discount, 0)::numeric
-         ELSE o.subtotal::numeric END, 0), 6)
-WHERE o.tax_rate IS NULL AND o.tax IS NOT NULL AND COALESCE(o.subtotal, 0) > 0;
+-- ── 2. Backfilling the rate for EXISTING orders is migration 270 ─────────────
+-- Split out on purpose: everything in THIS file is metadata-only and instant (a nullable column
+-- with no default, a trigger, one function replace), so it can be applied to a busy shared
+-- instance safely. The backfill is a single UPDATE across every order row (~400k on backup) and
+-- deserves its own deliberate run. Until it is run, historical rows simply have a NULL rate and
+-- every reader falls back to the restaurant's current setting — exactly today's behaviour.
 
 -- ── 3. The banquet writes a GROSS total, like every other sale ───────────────
 -- Body identical to mig 239 except the two arithmetic lines marked below: the ORDER row now
