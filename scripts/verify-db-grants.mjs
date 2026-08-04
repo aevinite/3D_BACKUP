@@ -107,6 +107,13 @@ const ANON_ALLOWED = {
   lfh_leave_feedback:         "guest rates their order (one per order, enforced by a unique index)",
   lfh_submit_review:          "guest reviews a dish (one per device per dish, unique index)",
   lfh_request_unban:          "a blocked guest asks to be let back in",
+  // Restored by mig 290 after migs 267/281 dropped it on the stated grounds that nothing
+  // called it — lib/session.ts:203 → components/BanGate.tsx has called it all along, so the
+  // guest menu fired a 404 RPC on every load and the "You've been blocked" wall (with its
+  // "leave your number" appeal) could never appear. It must be anon: it IS the guest's own
+  // browser asking. Narrow by construction — it answers only about the calling device's own
+  // device id / phone, returns no other guest's data and no restaurant data, and cannot write.
+  lfh_check_ban:              "the guest menu asks whether THIS device is blocked, on load (mig 290)",
   lfh_send_otp:               "guest phone verification (answers 'disabled' while the feature is off)",
   lfh_verify_otp:             "guest phone verification",
   lfh_request_verification:   "mig-037 verification stub",

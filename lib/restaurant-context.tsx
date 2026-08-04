@@ -23,9 +23,17 @@ export interface RestaurantMeta {
   slug: string;
   /** The restaurant's display name, once resolved (null while resolving / on bare routes). */
   name: string | null;
+  /** False only while a /r/<slug> id is still being looked up. `id` starts at restaurant
+   *  #1 so every widget has something usable immediately, which means a widget that ASKS
+   *  THE SERVER something about "this restaurant" would otherwise ask twice: once about
+   *  #1, once about the real one (BanGate did exactly that — two requests per page load,
+   *  the first about the wrong restaurant). Anything that makes a network call keyed on
+   *  the restaurant should wait for this. Bare routes (/menu, /item) resolve instantly:
+   *  they ARE restaurant #1 by definition. Guest sweep 2026-08-04. */
+  ready: boolean;
 }
 
-const DEFAULT_META: RestaurantMeta = { id: DEFAULT_RESTAURANT_ID, slug: DEFAULT_RESTAURANT_SLUG, name: null };
+const DEFAULT_META: RestaurantMeta = { id: DEFAULT_RESTAURANT_ID, slug: DEFAULT_RESTAURANT_SLUG, name: null, ready: true };
 const RestaurantContext = createContext<RestaurantMeta>(DEFAULT_META);
 
 /** The active restaurant id for the current URL (defaults to restaurant #1). */
@@ -50,6 +58,9 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
 
   const [id, setId] = useState<string>(DEFAULT_RESTAURANT_ID);
   const [name, setName] = useState<string | null>(null);
+  // A tenant route starts NOT ready (its id is still #1's placeholder); a bare route is
+  // ready at once because it genuinely IS restaurant #1.
+  const [ready, setReady] = useState<boolean>(() => !/^\/r\/[^/]+/.test(pathname || ""));
   useEffect(() => {
     let alive = true;
     const m = (pathname || "").match(/^\/r\/([^/]+)/);
@@ -57,13 +68,16 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
     // Reset name so a stale name from the previous restaurant can't flash during
     // the resolve window (the audit's "widget briefly on old tenant" note).
     setName(null);
-    if (!s) { setId(DEFAULT_RESTAURANT_ID); return; }
+    if (!s) { setId(DEFAULT_RESTAURANT_ID); setReady(true); return; }
+    setReady(false);
     getRestaurantBySlug(s)
-      .then((r) => { if (alive) { setId(r?.id || DEFAULT_RESTAURANT_ID); setName(r?.name || null); } })
-      .catch(() => {});
+      // `ready` flips true even when the lookup FAILS: the answer is then "it's #1", and a
+      // widget waiting forever would be worse than one asking about the fallback.
+      .then((r) => { if (alive) { setId(r?.id || DEFAULT_RESTAURANT_ID); setName(r?.name || null); setReady(true); } })
+      .catch(() => { if (alive) setReady(true); });
     return () => { alive = false; };
   }, [pathname]);
 
-  const value = useMemo<RestaurantMeta>(() => ({ id, slug, name }), [id, slug, name]);
+  const value = useMemo<RestaurantMeta>(() => ({ id, slug, name, ready }), [id, slug, name, ready]);
   return <RestaurantContext.Provider value={value}>{children}</RestaurantContext.Provider>;
 }

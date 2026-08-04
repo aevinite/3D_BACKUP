@@ -187,6 +187,26 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 }
 .chef-call:hover { transform: scale(1.15) rotate(10deg); box-shadow: 0 16px 40px var(--accent-glow); }
 .chef-call:active { transform: scale(0.95); }
+/* THE BELL MUST NOT SIT ON A DISH'S ADD BUTTON.
+   On a 360px phone the gallery is two columns and each card's add/customise control is
+   pinned to its own bottom-right — which is exactly where this fixed bell floats, so at
+   rest it covered the right-hand card's button (guest sweep 2026-08-04, seen on both
+   restaurants). Two deterministic parts, no change to the owner's chosen layout:
+     · while the guest is SCROLLING (body.menu-scrolling, set by the menu's own scroll
+       handler) the bell steps aside — it shrinks and drops mostly out of the way — so the
+       control they are scrolling towards is visible and tappable on arrival;
+     · the list gets bottom clearance below, so the LAST row can always be scrolled clear
+       of the bell instead of being permanently pinned under it.
+   Motion is disabled for anyone who asked for reduced motion. */
+body.menu-scrolling .chef-call {
+  transform: translateY(26px) scale(0.72);
+  opacity: 0.45;
+  animation: none;                 /* stop the float so it doesn't fight this */
+  pointer-events: none;            /* and never swallow a tap meant for the card */
+}
+@media (prefers-reduced-motion: reduce) {
+  body.menu-scrolling .chef-call { transform: none; opacity: 0.45; }
+}
 @keyframes chefFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
 
 /* --- OVERLAYS & PANELS --- */
@@ -780,7 +800,27 @@ body.menu-frost .nav {
   font-family: 'Playfair Display'; font-size: 20px; color: var(--text); font-weight: 700;
 }
 .controls-group { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; justify-content: flex-end; }
-.filter-row { display: flex; gap: 6px; align-items: center; overflow-x: auto; scrollbar-width: none; flex: 1; min-width: 0; padding: 8px 2px; }
+/* The chip row already scrolled sideways, but on a 360px phone it just LOOKED broken:
+   the third chip was sliced vertically down the middle by the layout switch beside it,
+   so Top Rated / Low Price / Veg / Non-Veg sat past a hard cut with nothing to suggest
+   more was there. A guest hunting for "Veg only" simply never found it (guest sweep
+   2026-08-04). Two additions, both purely visual:
+     · scroll-snap so the row never RESTS mid-chip — it settles on a whole chip, which is
+       what turns "cut off" into "there's more";
+     · a soft fade at the right edge (mask-image) as the standard "scrolls this way" cue.
+   The fade is drawn only while the row can actually scroll further (data-can-scroll, set
+   by the measuring effect in MenuView), so a wide screen that fits every chip stays
+   crisp, and so does the last chip once the guest reaches the end. */
+.filter-row {
+  display: flex; gap: 6px; align-items: center; overflow-x: auto; scrollbar-width: none;
+  flex: 1; min-width: 0; padding: 8px 2px;
+  scroll-snap-type: x proximity;
+  scroll-padding-left: 2px;
+}
+.filter-row > .filter-chip { scroll-snap-align: start; }
+.filter-row[data-can-scroll="1"] {
+  mask-image: linear-gradient(to right, #000 0, #000 calc(100% - 26px), transparent 100%);
+}
 .filter-row::-webkit-scrollbar { display: none; }
 .chip-divider { width: 1px; height: 22px; align-self: center; flex: none; margin: 0 4px; background: rgba(212,165,116,0.3); border-radius: 1px; }
 
@@ -932,6 +972,17 @@ body.menu-frost .nav {
 
 /* --- ITEMS --- */
 .items-container { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+/* Bottom clearance for the floating call-waiter bell (and the mini-cart bar when the
+   guest has something in their order). Without it the FINAL row's add button sat
+   permanently under the bell with nowhere left to scroll — the one case a guest could not
+   solve by nudging the list (guest sweep 2026-08-04). Phones only: the bell is far from
+   the grid on a wide screen. */
+@media (max-width: 700px) {
+  #main-scroll > .cat-groups > .cat-group:last-child .items-container,
+  #main-scroll > .items-container:last-child {
+    padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  }
+}
 /* Gallery grid is fluid: 2-up on a phone, more columns as the screen widens —
    instead of being locked at exactly 2 columns (which became 2 giant cards on
    desktop). minmax(150px) keeps it 2-up at phone widths and fills in extra

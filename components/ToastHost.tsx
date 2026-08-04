@@ -144,8 +144,14 @@ export default function ToastHost() {
           {/* The footer: a "tap to view" hint for tappable tickets, else a sign-off.
               Only French House (#1) signs off in French; other restaurants get a
               neutral "thank you" so a sushi/taco/Indian brand doesn't say "merci"
-              (audit fix bug #5). */}
-          <div className="toast-foot">{t.href || t.event ? "tap to view →" : signOff}</div>
+              (audit fix bug #5).
+              A REFUSAL gets no sign-off. "Please enter your table number first.
+              · thank you ·" thanks the diner for a mistake they haven't fixed yet,
+              which reads as the app not understanding what just happened (guest sweep
+              2026-08-04). Errors keep the torn-receipt rule above and end there. */}
+          {(t.href || t.event || t.variant !== "error") && (
+            <div className="toast-foot">{t.href || t.event ? "tap to view →" : signOff}</div>
+          )}
         </button>
       ))}
     </div>
