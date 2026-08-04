@@ -6751,8 +6751,18 @@ function askRemovalReason(what) {
       sync(); if (code === "other") note.focus();
     }));
     note.addEventListener("input", sync);
-    const off = (typeof LFH_BACK !== "undefined" && LFH_BACK) ? LFH_BACK.layer("removal-reason", () => done(null)) : null;
-    function done(v) { if (off) off(); wrap.remove(); resolve(v); }
+    // ONE BACK LAYER, AND IT ANSWERS THE CALLER (sweep 2026-08-04).
+    // This overlay wears `.sx-modal-overlay`, which wireOverlayBack()'s MutationObserver already
+    // watches — so registering a layer here TOO gave one dialog two layers. The observer's runs
+    // LAST (its callback is delivered at the end of the task), so it sat on top, and its closer is
+    // `elm.__lfhClose ? elm.__lfhClose() : elm.remove()`. With no __lfhClose that was a bare
+    // remove(): the box vanished, done() never ran, and the `await askRemovalReason(...)` every
+    // caller is sitting on NEVER SETTLED — the action died mid-flight, and the leftover manual layer
+    // then ate the person's next Back press with nothing on screen to explain it. Exactly the
+    // "never leave a promise unresolved" rule (the tablet's #confirmOverlay had the same shape).
+    // So: no manual layer, and __lfhClose is the one closer — the observer now cancels it properly.
+    function done(v) { wrap.remove(); resolve(v); }
+    wrap.__lfhClose = () => done(null);
     wrap.querySelector(".rr-cancel").onclick = () => done(null);
     wrap.querySelector(".rr-x").onclick = () => done(null);
     wrap.onclick = (e) => { if (e.target === wrap) done(null); };
@@ -6792,6 +6802,15 @@ function mergeGroupLabel(t) {
 }
 // Plain words for the merge-aware refusals the table-ops RPCs answer with (mig 264) — a person
 // reading "party_merged" learns nothing; these say what to do instead.
+//
+// THIS MAP MUST COVER EVERY CODE THE RPCs CAN ANSWER WITH (sweep 2026-08-04). Merge and move-a-KOT
+// are mapped SERVER-side (mergeErrMsg / moveErrMsg in the editor route, returned as a 409 with
+// prose), but **shift is not** — `sessions/:id/shift` returns the RPC's json straight through, so
+// this map is the only translator on that path. It was missing three of the codes
+// lfh_staff_shift_table actually returns, and both shift call sites fall back to `|| r.reason` —
+// so a manager who opened Change table just as another device closed that party read the words
+// "Couldn't shift: session_closed". Every code below is one the RPC can really return; if you add
+// a reason to any of those functions, add its sentence here in the same commit.
 const KOT_REASON_TEXT = {
   party_merged: "this party spans merged tables — unmerge first, then move it",
   merged_child: "that table is joined with another and shares its bill — unmerge it first",
@@ -6800,6 +6819,12 @@ const KOT_REASON_TEXT = {
   source_invoiced: "this bill is already invoiced — void it first",
   order_paid: "that KOT is already paid — settled money doesn't move",
   same_table: "that's the same bill it is on now",
+  // …the three that used to reach a person as a raw code, all from lfh_staff_shift_table:
+  no_session: "that table's party is gone — refresh and try again",
+  session_closed: "this table has already been closed — refresh and try again",
+  bad_table: "that isn't a valid table number",
+  // merge's own "the target has nobody on it" (mapped server-side too, kept so both agree)
+  target_not_open: "that table has no party — use Change table to move there instead",
 };
 
 // IS THIS TABLE BUSY? — answered by exactly what the FLOOR SHOWS, never by the raw server state
@@ -6880,7 +6905,9 @@ async function closeFinishedTable(t) {
     await loadSessions();
     toast(`${tableLabel(t)} closed — the bill is saved in Bills`, "ok");
   } catch (e) {
-    toast("Could not close: " + e.message, "err");
+    // errText(), not e.message: a busy server or a dropped connection must read as itself here
+    // (this panel already has that translator) — never "TimeoutError: The operation was aborted".
+    toast("Could not close: " + errText(e), "err");
   }
 }
 // setSessAutoApprove: turn on/off "let new joiners in automatically" for a table.
@@ -7476,8 +7503,13 @@ function floorTileHtml(i) {
   // A MERGED CHILD IS NOT A FREE TABLE (owner, 2026-08-01: "on the table number seven it should be
   // completely written, merge with six … access from six"). Its party lives on the parent, so it has
   // no session of its own and the summary calls it free — which is exactly the lie he caught. Here
-  // it wears its own state: addressed to its parent, no ＋ Take order and no bill button (both
-  // belong to the table that holds the bill), and tapping it opens its detail, where Unmerge lives.
+  // it wears its own state: the chip naming every other table in the party, its PARTY's progress
+  // line, and tapping it opens its detail, where Unmerge lives.
+  // (An earlier version of this comment claimed a child shows "no ＋ Take order and no bill button".
+  // It does show both, and that is right — `isEmpty` is false for a child, and an order punched at
+  // T7 joins the party's one bill (migs 250/264), which is what a waiter standing at T7 wants; the
+  // bill button carries `mergedTo` so it opens the bill's real home. The comment was describing
+  // behaviour the code never had — corrected in the 2026-08-04 sweep so nobody "fixes" it away.)
   // ROW 3 for a merged pair. The child's whole row is the message; the parent keeps its progress
   // line and gains a chip naming what it carries, in the accent colour so it reads as a state and
   // not as decoration.
@@ -7497,7 +7529,15 @@ function floorTileHtml(i) {
   // The child shows the SAME live line as the table it is merged with — same party, same food, so
   // "4/6 served" belongs on both tiles — with the MERGED wording under it.
   const statusRow = mergedTo
-    ? `${pTot > 0 ? `<div class="ft-line" title="${esc(pTile.label || "")}"><span class="ft-linenum">${esc(pCounts.sv)}/${esc(pTot)} served</span>${pStrip}</div>` : ""}`
+    ? (pTot > 0
+      ? `<div class="ft-line" title="${esc(pTile.label || "")}"><span class="ft-linenum">${esc(pCounts.sv)}/${esc(pTot)} served</span>${pStrip}</div>`
+      // A JOINED TABLE WITH NOTHING ORDERED YET STILL GETS A ROW 3 (sweep 2026-08-04). This branch
+      // used to render an empty string, so a child whose party had no dishes on it (just merged, or
+      // everything cancelled) came out as a number, a merge chip and dead space — the exact "blank
+      // row read as a broken tile" the plain branch below exists to prevent. Worse, `.ft-line` is
+      // what carries `margin-top:auto`, so without it the chip floated up and the tile stopped
+      // lining up with its neighbours. It says what it is instead.
+      : `<div class="ft-line ft-line-plain" title="Joined party — nothing ordered yet"><span class="ft-linenum">Joined</span></div>`)
     : cTot > 0
     ? `<div class="ft-line" title="${esc(label)}${meta ? " · " + esc(meta) : ""}"><span class="ft-linenum">${esc(servedTxt)}</span>${strip}</div>`
     // No dishes yet (free, or a party sitting with nothing ordered): there is no progress to draw,
@@ -8089,9 +8129,24 @@ function bindFloorDelegation() {
       // builder they aren't allowed to use (and the server refuses it regardless).
       const ft = tile.dataset.floorTable;
       if (mergeParentOf(ft)) openFloatingTable(ft);          // merged child → its detail, where Unmerge is
-    else if (tableTileState(ft).st === "free" && takeOrdersAllowed()) openTakeOrder(ft, null);
+      else if (tableTileState(ft).st === "free" && takeOrdersAllowed()) openTakeOrder(ft, null);
       else openFloatingTable(ft);
     }
+  });
+  // A TILE SAYS IT IS A BUTTON, SO IT HAS TO BEHAVE LIKE ONE (sweep 2026-08-04). Every tile renders
+  // `role="button" tabindex="0"`, which puts all ~300 of them in the tab order and promises a
+  // keyboard can use them — but the only handler was the click above, so Enter and Space did
+  // nothing. Worse, the panel's global shortcut handler reads a bare 1-9 as "jump to the Nth tab",
+  // so a keyboard user on the floor got silence from Enter and got thrown off the screen by a digit.
+  // Delegated on the same stable ancestor for the same reason (a patched tile keeps working), and it
+  // routes through the SAME click path, so tap and key can never drift apart.
+  ed.addEventListener("keydown", (e) => {
+    if (state.tab !== "tables") return;
+    if (e.key !== "Enter" && e.key !== " " && e.key !== "Spacebar") return;
+    const tile = e.target.closest && e.target.closest("[data-floor-table]");
+    if (!tile || e.target.closest("button")) return;   // a real button inside the tile handles itself
+    e.preventDefault();                                 // Space must not scroll the floor
+    tile.click();
   });
 }
 
@@ -10824,7 +10879,7 @@ function openMoveItemPicker(t) {
       const to = tb.dataset.mvto; closeM();
       try {
         const r = await api("POST", `/order-items/${itemId}/move`, { to });
-        if (r && r.ok === false) { toast("Couldn't move: " + (r.reason || "rejected"), "err"); return; }
+        if (r && r.ok === false) { toast("Couldn't move: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
         toast(`Dish moved to table ${to} (new KOT)`, "ok");
       } catch (e) { toast("Failed: " + e.message, "err"); }
     }));
@@ -10854,7 +10909,7 @@ function openMergePicker(t, sess) {
     closeM();
     try {
       const r = await api("POST", `/sessions/${sess.id}/merge`, { to });
-      if (r && r.ok === false) { toast("Couldn't merge: " + (r.reason || "rejected"), "err"); return; }
+      if (r && r.ok === false) { toast("Couldn't merge: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
       toast(`Merged into table ${to} — one bill`, "ok");
       // Fresh tiles + merges list first, then follow the table the SERVER kept (the lowest
       // number holds the bill — not always the one that was tapped). Same fix as the desktop
@@ -10905,7 +10960,7 @@ function openMoveKotPicker(t) {
       const to = tb.dataset.moveto; closeM();
       try {
         const r = await api("POST", `/orders/${orderId}/move`, { to });
-        if (r && r.ok === false) { toast("Couldn't move: " + (r.reason || "rejected"), "err"); return; }
+        if (r && r.ok === false) { toast("Couldn't move: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
         toast(`KOT moved to table ${to}`, "ok");
         // Both tables repaint via the RPC's breadcrumbs (targeted refetch) — no manual reload.
       } catch (e) { toast("Failed: " + e.message, "err"); }
@@ -11523,7 +11578,17 @@ async function acceptTableOrders(t) {
   // no request — the "Accept doesn't work" bug. The /accept endpoint flips received
   // item rows → preparing regardless of order status, so this is safe. (2026-06-26)
   const recv = partyOrders(t).filter((o) => o.status !== "cancelled" && orderItemRows(o).some((r) => r.status === "received"));
-  if (!recv.length) return;
+  // NEVER RETURN ON A TAP WITHOUT A TRACE (owner rule; sweep 2026-08-04). The ✓ quick-accept only
+  // exists while the SUMMARY tile says hasNew, but the line above reads the slice we just forced
+  // fresh — so if a waiter accepted this order on the tablet a second earlier, `recv` is empty and
+  // this used to return with nothing on screen at all. He taps again. Still nothing. The button
+  // reads as dead and there is no trace anywhere that he tried. Say it, and put the stale tile
+  // back in step with the truth it just showed.
+  if (!recv.length) {
+    toast(`Nothing new to accept on ${tableLabel(t)} — the tile was out of date`, "err");
+    await pollTables([String(t)]);
+    return;
+  }
   const snap = recv.flatMap((o) => snapReceived(o)); // for the takeback
   // OPTIMISTIC: tile flips to "Preparing" instantly, server told in background.
   recv.forEach((o) => { o.status = "preparing"; flipOrderItems(o, "received", "preparing"); opBegin(o.id); });
@@ -11544,10 +11609,30 @@ async function acceptTableOrders(t) {
 }
 // Serve EVERY order on a table at once (the table-wide "mark all served").
 // OPTIMISTIC like accept: every dish row flips to served on screen first.
+//
+// ⚠️ A CANCELLED TICKET IS NOT SERVEABLE (sweep 2026-08-04). This used to hand EVERY row of
+// partyOrders(t) to /serve-all with no status filter — and a cancelled order is still in that
+// list, because cancelling sets status='cancelled' and deliberately leaves `archived` false
+// (which is exactly why every DISPLAY path here filters cancelled separately: liveOs,
+// newOrdersN, anyUnservedAccepted, liveOsEnd). The endpoint had no guard either, so one tap
+// of 🍽️ Serve all wrote status='served' onto a VOIDED ticket: it stopped being a void, isUnpaidBill
+// matched it again, and its money went straight back onto the guest's bill — with no audit row and
+// no 30-minute window, unlike the one sanctioned un-cancel (PATCH /orders/:id → 'received').
+// The waiter panel already filtered this correctly; the manager panel was the outlier.
+// Filter the same three things the tablet does, and the server now refuses a cancelled order too.
 async function serveAllOrders(t) {
   await ensurePartySlices(t); // a merged party's other tables are separate slices
-  const orders = partyOrders(t);
-  if (!orders.length) return;
+  const all = partyOrders(t);
+  const orders = all.filter((o) => o.status !== "cancelled" && o.status !== "received"
+    && orderItemRows(o).some((r) => r.status !== "served"));
+  // A tap is never dropped in silence (owner rule): the button is drawn from the tile's summary,
+  // which can be a beat behind, so "nothing left to serve" must SAY so and put the tile back in
+  // step with the truth — not return with an untouched screen and no explanation.
+  if (!orders.length) {
+    toast(all.length ? `Nothing left to serve on ${tableLabel(t)}` : `${tableLabel(t)} has nothing to serve`, "err");
+    await pollTables([String(t)]);
+    return;
+  }
   const snap = orders.flatMap((o) => snapServable(o));
   orders.forEach((o) => { o.status = "served"; flipOrderItems(o, null, "served"); opBegin(o.id); });
   floorOpsInFlight++;
@@ -11573,7 +11658,13 @@ async function serveAllOrders(t) {
 async function attendTableCalls(t) {
   await ensureTableSlice(t); // the call rows for a non-selected table aren't cached otherwise
   const cs = callsForTable(t);
-  if (!cs.length) return;
+  // A tap always leaves a trace (owner rule; sweep 2026-08-04) — the 🔔 comes from the summary
+  // tile, so another device answering the call first left this returning in total silence.
+  if (!cs.length) {
+    toast(`No open calls on ${tableLabel(t)} any more`, "err");
+    await pollTables([String(t)]);
+    return;
+  }
   // OPTIMISTIC: the call emojis leave the tile instantly (detail panel reads state.data.calls).
   const before = state.data.calls || [];
   const beforeSummary = state.summary;
@@ -11582,9 +11673,17 @@ async function attendTableCalls(t) {
   patchSummaryTileAttend(t); // instant tile feedback (grid reads state.summary, not the board)
   floorOpsInFlight++;
   loadSessions(true);
+  // ONE IDEMPOTENT RELEASE, like every sibling quick-action (sweep 2026-08-04). This function used
+  // to decrement floorOpsInFlight inline in the try AND again in the catch, so anything throwing
+  // after the first decrement (pollTables → reconcileBoard → renderEditor all run synchronously in
+  // that awaited chain) took the counter to -1. It is only ever tested for truthiness, and !(-1) is
+  // false — so from then on EVERY poll fetched the floor and threw the result away: the tiles quietly
+  // stop being live, with no error, until some other balanced action brings the counter back to 0.
+  let released = false;
+  const release = () => { if (!released) { released = true; floorOpsInFlight--; } };
   try {
     for (const c of cs) await api("PATCH", "/calls/" + c.id, { resolved: true });
-    floorOpsInFlight--; await pollTables([String(t)]); // clears the tile's call emoji from the summary
+    release(); await pollTables([String(t)]); // clears the tile's call emoji from the summary
     const callIds = [...ids];
     if (window.LFH_UNDO) LFH_UNDO.show({
       message: `${callIds.length} call${callIds.length > 1 ? "s" : ""} attended`,
@@ -11594,7 +11693,8 @@ async function attendTableCalls(t) {
     });
     else toast("Attended", "ok");
   }
-  catch (e) { floorOpsInFlight--; state.data.calls = before; state.summary = beforeSummary; await pollTables([String(t)]); toast("Failed: " + e.message, "err"); }
+  catch (e) { release(); state.data.calls = before; state.summary = beforeSummary; await pollTables([String(t)]); toast("Failed: " + errText(e), "err"); }
+  finally { release(); }
 }
 // RST: clear a finished table's orders off the floor but KEEP the table open for a new round.
 // restartTable: clear the round, keep the table. NO LONGER REACHED FROM THE MANAGER UI — its
@@ -11604,7 +11704,7 @@ async function attendTableCalls(t) {
 async function restartTable(t) {
   await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
   const ids = ordersForTable(t).map((o) => o.id);
-  if (!ids.length) return;
+  if (!ids.length) { toast(`${tableLabel(t)} has nothing to clear`, "err"); return; } // never silent
   if (!(await confirmDialog(`Restart Table ${t}? Its orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))) return;
   // OPTIMISTIC after the confirm: the tile resets instantly, server follows.
   // Orders become SERVED + archived (the round is done; they stay as real,

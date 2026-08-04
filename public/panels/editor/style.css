@@ -1034,7 +1034,15 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    its dragged pixel width instead of going full-width on a narrow screen. Sticky
    stops making sense once the panel is stacked BELOW the grid instead of beside
    it, so it reverts to a normal flowed block here. */
-@media (max-width: 1040px) { .floor-wrap { flex-direction: column; margin-right: 0; } .floor-side { width: 100% !important; flex: none !important; margin-top: 0; position: static; max-height: none; overflow-y: visible; } }
+/* `align-items: stretch` is the pair to `flex-direction: column` here, and it is load-bearing
+   (sweep 2026-08-04). `.floor-wrap` sets `align-items: flex-start` for the side-by-side desktop
+   layout; once the wrap becomes a COLUMN, flex-start stops meaning "top" and starts meaning
+   "as wide as your content" — so `.floor-main` sized itself to the tile grid's max-content (930px
+   on an A35) instead of to the screen, and no `min-width: 0` or `overflow-x` on the grid could ever
+   engage, because the grid was never asked to be narrower than its content. Stretch pins the pane
+   to the screen width, which is what lets the grid below scroll sideways instead of overflowing
+   into a clipped box. */
+@media (max-width: 1040px) { .floor-wrap { flex-direction: column; align-items: stretch; margin-right: 0; } .floor-side { width: 100% !important; flex: none !important; margin-top: 0; position: static; max-height: none; overflow-y: visible; } }
 
 /* TRUE TWO-PANE SCROLL (desktop side-by-side only, ≥1041px) — owner 2026-07-06.
    Before: the tile grid (.floor-main) and the right panel (.floor-side) shared ONE
@@ -1203,8 +1211,20 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    stronger mix; the gradient shape, the direction and the dark theme are all untouched. */
 html[data-theme="light"] .ftile {
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 32%, var(--panel)), var(--panel) 82%); }
+/* THE THREE KITCHEN STATES GET THE SAME LIFT (sweep 2026-08-04). Served and waiting were raised to
+   58% here; new / preparing / on-the-pass were left at the generic 32% — and those are the three a
+   kitchen actually runs on. Since the tile no longer PRINTS its state ("the tile's own colour
+   already says the state, which is exactly his point"), that colour is carrying the whole meaning
+   on its own, so it cannot be the faintest thing on the tile. Measured in the light skin at a 57px
+   tile: Free painted srgb(0.81 0.80 0.78) and Preparing srgb(0.78 0.88 1.00), 82% of both fading to
+   pure white — a step small enough that a busy table and a free one read the same from arm's length.
+   No new value invented: this is the 58% he already approved for the other two ("make it somewhat
+   more visible — not too much — keep the gradient"), applied to the states that were missed. */
 html[data-theme="light"] .ftile.ft-bill,
-html[data-theme="light"] .ftile.ft-waiting {
+html[data-theme="light"] .ftile.ft-waiting,
+html[data-theme="light"] .ftile.ft-new,
+html[data-theme="light"] .ftile.ft-prep,
+html[data-theme="light"] .ftile.ft-ready {
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 58%, var(--panel)), var(--panel) 84%); }
 /* The status block sits ON that tint, so it needs a touch more of its own or it disappears into it. */
 html[data-theme="light"] .ft-status {
@@ -1292,7 +1312,7 @@ html[data-theme="light"] .ft-status {
   0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 40%, transparent), 0 0 12px color-mix(in srgb, var(--c) 20%, transparent); }
   50%      { box-shadow: 0 0 0 2px color-mix(in srgb, var(--c) 70%, transparent), 0 0 22px color-mix(in srgb, var(--c) 42%, transparent); }
 }
-.ft-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; }
+.ft-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; flex: 0 0 auto; }
 /* Sized in cqw (% of the TILE's own width, see container-type on .ftile) so a tile the
    admin made small stays readable and in proportion instead of clipping its own text.
    Each clamp keeps the old fixed size as the MAXIMUM, so a normal/large tile looks
@@ -1448,7 +1468,17 @@ html[data-theme="light"] .ft-status {
    with the small square icons (accept / bill) tucked on the right. Everything is sized in
    cqw (% of the TILE's own width) so shrinking a tile shrinks the CONTROLS, and the tile
    stays the same square shape instead of the button spilling over its edge. */
+/* ⚠️ flex-shrink:0 IS LOAD-BEARING (sweep 2026-08-04). The tile is a fixed-height flex COLUMN
+   (aspect-ratio 1/1), and this row was shrinkable — so on a dense floor the four rows didn't fit
+   and the browser collapsed this one to **0×0**. Measured on the owner's A35 at the default 12 per
+   row: every ＋ Take order and every ✓ accept on the whole floor computed to 0 wide and 0 tall, and
+   "0/3 served" went with them, leaving a tile that was a number, a seat count and a 3px bar. A
+   zero-sized button is a dead button — you cannot tap it and nothing tells you why.
+   `flex: 0 0 auto` makes the controls keep their real size and lets the tile grow instead
+   (`.ftile` is `min-height: fit-content`, so it is allowed to). `.ft-top` gets the same treatment
+   for the same reason — the table NUMBER is the one thing that may never disappear. */
 .ft-act { display: flex; align-items: stretch; gap: clamp(3px, 3.4cqw, 6px); margin-top: clamp(5px, 6cqw, 9px);
+  flex: 0 0 auto;                     /* never let a dense floor squeeze the controls to nothing */
   min-width: 0; overflow: hidden; }   /* a control can never cross the tile's edge, at any density */
 .ft-take { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center;
   gap: clamp(2px, 2.6cqw, 5px); cursor: pointer; font: inherit; font-weight: 700;
@@ -1968,15 +1998,36 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   .floor-head .floor-stats { order: 3; flex: 0 0 100%; flex-wrap: nowrap; overflow-x: auto; }
   .floor-head .fstat { flex: 0 0 auto; }
   .floor-head .floor-legend { order: 4; flex: 0 0 100%; }
-  /* KEEP THE COLUMN COUNT, KEEP THE TILE READABLE. The grid is always exactly --per-row columns
-     of `minmax(0,1fr)`, so it fits whatever it is given — and until now what it was given was the
-     HEADER's width. Pinning the header to one screen removed that stretch, which shrank a
-     9-per-row floor to 33px circles with no table number left on them, and "the table number and
-     its colour always stay" is the rule the tile is built on. So the floor keeps its own honest
-     minimum instead of inheriting one by accident: 9 columns stay 9 columns (his number is his
-     number — he said so twice), they are just tappable, and the floor scrolls sideways when his
-     number needs more room than the phone has. Phone only; desktop sizing is untouched. */
-  .ftile-grid { min-width: calc(var(--per-row, 6) * 62px); }
+  /* KEEP THE COLUMN COUNT, KEEP THE TILE READABLE — AND KEEP EVERY TABLE REACHABLE.
+     His number is his number (he said so twice), so on a phone the floor does NOT drop columns to
+     fit: 12 columns stay 12 columns and the floor scrolls sideways instead.
+     ⚠️ THAT SCROLL HAD TO BE MADE REAL (sweep 2026-08-04). This rule used to be
+     `min-width: calc(var(--per-row) * 62px)` on the assumption — written in the comment right
+     here — that "the floor scrolls sideways when his number needs more room than the phone has".
+     It did not. `.editor:has(.floor-wrap)` is `overflow-x: hidden` (unconditionally, further up
+     this file) and so is `html, body` in this same phone block, so the 744px-wide grid was simply
+     CLIPPED: on an A35 at the default 12 per row, tables 7–12 and 19–24 were drawn and then thrown
+     away — measured, and no swipe, no scrollLeft and no scrollIntoView could reach them, so ~40% of
+     the restaurant did not exist on the owner's own phone (and on that day 8 of the 10 BUSY tables
+     were in the hidden columns, leaving a floor that read almost entirely "Free").
+     The fix keeps his column count and makes the promised scroller exist, on the GRID itself — not
+     on an ancestor, because `.editor` owning an x-scroll would force its y-axis to `auto` too and
+     take the phone's normal page scroll away (per the CSS spec), and because the header is a
+     SIBLING above the grid, so it stays put with no sticky trick needed.
+     `minmax(72px, 1fr)` is what makes the row overflow (and 72px is the smallest tile that still
+     fits all four of its rows — see .ft-act's flex-shrink note). */
+  .ftile-grid {
+    min-width: 0;                                  /* never push the box wider than the screen */
+    grid-template-columns: repeat(var(--per-row, 6), minmax(72px, 1fr));
+    overflow-x: auto;                              /* THE grid scrolls sideways, nothing above it */
+    overscroll-behavior-x: contain;                /* a sideways swipe must not navigate back */
+    padding-bottom: 4px;                           /* room for the scrollbar under the last row */
+    scrollbar-width: thin;
+  }
+  /* Say there is more floor to the right — a scroller nobody can see is a scroller nobody uses
+     (the phone dish strip shows its bar for the same reason). */
+  .ftile-grid::-webkit-scrollbar { height: 5px; }
+  .ftile-grid::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--gold) 42%, transparent); border-radius: 999px; }
 }
 
 /* ---- tiles: rounder, lift on hover, a clear ring when selected ---- */

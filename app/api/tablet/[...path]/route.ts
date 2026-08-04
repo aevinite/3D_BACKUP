@@ -1285,8 +1285,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // orders/:id/serve-all — mark EVERY dish on one order served in a single call
     // (the table-wide "Serve all" fans these out, one per order). Mirrors the editor.
     if (a === "orders" && c === "serve-all") {
-      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("orders").select("items,status").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That order isn't there anymore — refresh.", 404);
+      // A VOIDED TICKET MAY NOT BE SERVED BACK TO LIFE (sweep 2026-08-04). This panel's client
+      // already filters cancelled orders out of its Serve-all fan-out, but hiding is never the only
+      // guard — the endpoint has to refuse too, or an offline replay / a future caller can still
+      // write status='served' onto a cancelled order and quietly put its money back on the bill
+      // with no audit row. Same refusal as the manager route.
+      if (cur.status === "cancelled") return err("That ticket was voided — restore it first if it should be served.", 409);
       const items = Array.isArray(cur.items) ? cur.items.map((i: any) => ({ ...i, status: "served" })) : [];
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
