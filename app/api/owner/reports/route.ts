@@ -20,7 +20,7 @@ import { signRows } from "@/lib/mediaLinks";
 import { ownerScope } from "@/lib/ownerScope";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
-import { effectiveTaxPct } from "@/lib/tax";
+import { effectiveTaxPct, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollLadder, inventoryLadder } from "@/lib/tableTags";
 
@@ -352,7 +352,7 @@ export async function GET(req: NextRequest) {
       // Tax model for the split — single restaurant only (per-tenant config).
       let tax = null;
       if (rid) {
-        const st = await sb.from("settings").select("tax_components, tax_rate").eq("restaurant_id", rid).maybeSingle();
+        const st = await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle();
         if (st.error) throw st.error;
         const comps = (Array.isArray(st.data?.tax_components) ? st.data!.tax_components : [])
           .map((c: Row) => ({ label: String(c?.label ?? "").trim(), rate: Number(c?.rate) || 0 }))

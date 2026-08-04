@@ -26,7 +26,7 @@ import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { mergeParentTable } from "@/lib/tableMerge";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { raiseIssue } from "@/lib/issues";
-import { effectiveTaxRate, taxComponents } from "@/lib/tax";
+import { effectiveTaxRate, taxComponents, TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { openTableSession } from "@/lib/openSession";
 import { softDeleteOrders } from "@/lib/softDelete";
@@ -1141,7 +1141,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
-        sb.from("settings").select("tax_rate,tax_components,restaurant_name,gstin,invoice_prefix").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, gstin, invoice_prefix`).eq("restaurant_id", rid).maybeSingle(),
       ]);
       const set = (must(setQ) || {}) as any;
       // Effective rate = sum of named tax components (CGST/SGST/…), else the fallback
@@ -1242,7 +1242,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const set = (must(await sb.from("settings").select("tax_rate,tax_components,restaurant_name,gstin").eq("restaurant_id", rid).maybeSingle()) || {}) as any;
+      const set = (must(await sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, gstin`).eq("restaurant_id", rid).maybeSingle()) || {}) as any;
       const rate = effectiveTaxRate(set);
       const comps = taxComponents(set);
       const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -1438,7 +1438,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // anyway, so a restaurant with a bigger menu silently lost dishes from the dish→category
         // map that feeds Top dishes and the menu matrix. (sweep 2026-08-04)
         sb.from("menu_items").select("id,title,category").eq("restaurant_id", rid).limit(5000),
-        sb.from("settings").select("tax_rate,tax_components,platform_channels").eq("restaurant_id", rid).maybeSingle(),
+        sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, platform_channels`).eq("restaurant_id", rid).maybeSingle(),
         // Upper bound too: on "yesterday" today's orders are somebody else's day, and leaving
         // them out is fewer rows read as well as the right answer (egress rule).
         sb.from("aggregator_orders").select("source,total,status,created_at").eq("restaurant_id", rid).gte("created_at", since.toISOString()).lt("created_at", until.toISOString()).limit(5000),
@@ -2141,9 +2141,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const ids = [...new Set(items.map((i: any) => String(i?.id || "")).filter(Boolean))];
       // `tags` so the 86 board is honoured here too — parcel prices itself instead of going
       // through the shared server-side pricer, so it has to make the same two refusals by hand.
-      const menu = (must(await sb.from("menu_items").select("id,title,price,open_price,tags").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean; tags?: string[] }[];
+      // `tax_mode` so a parcel prices an MRP bottle the same way a table does (mig 270).
+      // Parcel deliberately prices itself instead of calling lfh_price_order, so every rule
+      // that pricer applies has to be applied here BY HAND — the 86 board below, and now the
+      // three price behaviours. A parcel is a taxable sale like any other; a sealed bottle
+      // sold at the counter is no more taxable than the same bottle sold at a table.
+      const menu = (must(await sb.from("menu_items").select("id,title,price,open_price,tags,tax_mode").eq("restaurant_id", rid).in("id", ids)) || []) as { id: string; title: string; price: unknown; open_price?: boolean; tags?: string[]; tax_mode?: string }[];
       const byId = new Map(menu.map((d) => [String(d.id), d]));
-      const picked: { title: string; qty: number; price: number; note?: string }[] = [];
+      // The tax posture is read ONCE, before the loop, because every line needs it.
+      const parcelSet = (await sb.from("settings")
+        .select(`${TAX_SETTINGS_COLUMNS}, item_tax_modes_allowed, mrp_tax_treatment`)
+        .eq("restaurant_id", rid).maybeSingle()).data || {};
+      const picked: { title: string; qty: number; price: number; note?: string; tax_mode?: string; is_mrp?: boolean }[] = [];
       let total = 0;
       for (const it of items) {
         const d = byId.get(String(it?.id || ""));
@@ -2161,7 +2170,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         } else {
           price = Number(String(d.price).replace(/[^0-9.]/g, "")) || 0;
         }
-        const line: { title: string; qty: number; price: number; note?: string } = { title: d.title, qty, price };
+        const line: { title: string; qty: number; price: number; note?: string; tax_mode?: string; is_mrp?: boolean } = {
+          title: d.title, qty, price,
+          // Resolved and FROZEN onto the line, exactly as lfh_price_order does for a table.
+          tax_mode: resolveTaxMode(d.tax_mode, parcelSet),
+        };
+        if (isMrpDish(d.tax_mode, parcelSet)) line.is_mrp = true;
         const ln = String(it?.note || "").trim().slice(0, 200);
         if (ln) line.note = ln;
         picked.push(line);
@@ -2179,25 +2193,33 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // and for every delivery row it already means the final amount; a parcel now agrees.
       // The printed bill takes its subtotal from the LINES (never this stored total, or it would
       // tax it twice), so paper and record land on the same number.
-      const parcelRate = effectiveTaxRate((await sb.from("settings").select("tax_rate,tax_components").eq("restaurant_id", rid).maybeSingle()).data || {});
+      // The split (mig 270): only the taxable part of the parcel is taxed, and a discount may
+      // not eat a locked MRP price — the same two rules a table's bill obeys.
+      const parcelSplit0 = splitBill(picked, parcelSet, 0);
       // ── DISCOUNT, BEFORE TAX (owner, 2026-08-03 — the ⚡ QO/P builder can now give one) ──
       // The same order the whole app uses (lib/billMath): discount comes off the SUBTOTAL, and
       // tax is charged on what is left. Taking it off the tax-inclusive total instead would
       // over-credit by discount×rate — the 2026-07-06 bug, and on a tax tool it would also
       // understate the tax collected. Clamped to the food value and re-checked against this
       // role's %-cap here, because a client number is a request and never the ruling.
-      const parcelSub = total;
+      // What a discount may work on: NOT the whole subtotal any more, because part of it can
+      // be a price that is legally final. Refused OUT LOUD when it is too big — never trimmed
+      // in silence, which would hand back a bill the person did not ask for.
+      const parcelDiscBase = parcelSplit0.discountBase;
       let parcelDisc = 0;
       const rawPDisc = Number(body?.discount);
       if (Number.isFinite(rawPDisc) && rawPDisc > 0) {
         if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
         const pcap = await discountCapPct(rid, discountRole(g.user?.role));
-        if (overDiscountCap(rawPDisc, parcelSub, pcap)) return err(`That discount is over your ${pcap}% limit — ask the owner.`, 403);
-        parcelDisc = Math.round(Math.min(Math.max(rawPDisc, 0), parcelSub) * 100) / 100;
+        if (overDiscountCap(rawPDisc, parcelDiscBase, pcap)) return err(`That discount is over your ${pcap}% limit — ask the owner.`, 403);
+        if (rawPDisc > parcelDiscBase + 0.005) {
+          return err(parcelSplit0.mrpAmount > 0
+            ? `Most you can take off this parcel is ₹${parcelDiscBase.toFixed(2)} — the other ₹${parcelSplit0.mrpAmount.toFixed(2)} is MRP items, whose price is final.`
+            : `Most you can take off this parcel is ₹${parcelDiscBase.toFixed(2)}.`, 400);
+        }
+        parcelDisc = Math.round(Math.max(rawPDisc, 0) * 100) / 100;
       }
-      const parcelTaxable = Math.round((parcelSub - parcelDisc) * 100) / 100;
-      const parcelTax = Math.round(parcelTaxable * parcelRate * 100) / 100;
-      total = Math.round((parcelTaxable + parcelTax) * 100) / 100;
+      total = splitBill(picked, parcelSet, parcelDisc).total;
 
       const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
       const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;

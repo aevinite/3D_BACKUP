@@ -322,5 +322,47 @@ console.log("\n── 11. TYPESCRIPT ↔ SQL PARITY — the panel and the databa
   check("restored after the sweep: rate", back[0].t, 0.05);
 }
 
+console.log("\n── 12. NO NARROW SETTINGS SELECT — the silent way to get the rate wrong ──");
+{
+  // Since a composition restaurant's rate is 0 and that fact lives in `price_tax_mode`, a
+  // query fetching only `tax_rate, tax_components` reads 5% for a restaurant that must charge
+  // nothing — and it fails silently, because the columns it DID fetch are perfectly valid.
+  // Eight call sites had exactly that shape. This is a static check because the failure has
+  // no runtime symptom until a restaurant is switched to composition.
+  const { readdirSync, readFileSync, statSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const offenders = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir)) {
+      if (e === "node_modules" || e === ".next" || e.startsWith(".")) continue;
+      const p = join(dir, e);
+      if (statSync(p).isDirectory()) { walk(p); continue; }
+      if (!/\.(ts|tsx)$/.test(e)) continue;
+      const src = readFileSync(p, "utf8");
+      // Any settings select that names tax_rate must also carry price_tax_mode — or, better,
+      // be the shared constant.
+      const re = /\.select\(\s*(["'`])([^"'`]*tax_rate[^"'`]*)\1\s*\)/g;
+      let m;
+      while ((m = re.exec(src))) {
+        if (!/price_tax_mode/.test(m[2])) {
+          offenders.push(`${p.replace(root + "/", "")} → select("${m[2].slice(0, 60)}…")`);
+        }
+      }
+    }
+  };
+  walk(join(root, "app"));
+  walk(join(root, "lib"));
+  walk(join(root, "components"));
+  if (offenders.length) {
+    offenders.forEach((o) => fails.push(`narrow settings select: ${o}`));
+    console.log(`  ✗ ${offenders.length} settings select(s) fetch the rate without price_tax_mode`);
+    offenders.forEach((o) => console.log("      " + o));
+  } else {
+    pass++;
+    console.log("  ✓ every settings select that reads the rate also reads price_tax_mode");
+  }
+}
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { fails.forEach((f) => console.log("   · " + f)); process.exit(1); }
