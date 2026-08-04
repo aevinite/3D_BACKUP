@@ -16,6 +16,12 @@ class ModelLoader {
   private loaded = new Map<string, string>();
   // The one URL we are downloading right this moment (or null if idle).
   private inFlight: string | null = null;
+  // A handle on that download so it can be CALLED OFF. Clearing the queue was never
+  // enough on its own: a restaurant with 3D switched off still finished whichever GLB
+  // had already started, because the menu can only learn the real switch value one beat
+  // after mount (guest sweep 2026-08-04). ~2 MB per fresh page load, for a feature the
+  // restaurant does not have.
+  private inFlightAbort: AbortController | null = null;
   // The waiting line of URLs still to download, in order.
   private queue: string[] = [];
   // Everyone who asked to be told when something changes (so they can re-render).
@@ -140,6 +146,20 @@ class ModelLoader {
     this.start(); // kick off downloading if we aren't already
   }
 
+  // STOP EVERYTHING — used when a restaurant turns out to have 3D switched off. Empties
+  // the waiting line and calls off the download already in flight, so no model bytes are
+  // spent on a feature that is not enabled. An aborted fetch lands in pump()'s catch,
+  // which treats it as one failed attempt; that is harmless because nothing will re-queue
+  // it while the switch is off, and if 3D is on again later the retry path is unchanged.
+  stopAll() {
+    this.queue = [];
+    if (this.inFlightAbort) {
+      try { this.inFlightAbort.abort(); } catch {}
+      this.inFlightAbort = null;
+    }
+    this.notify();
+  }
+
   // Jump certain models to the FRONT of the line — e.g. when a guest opens a
   // specific dish, we want its model first. Same de-duplicating rules as above.
   prioritize(urls: string[]) {
@@ -191,11 +211,17 @@ class ModelLoader {
       if (this.loaded.has(url)) continue; // someone else already grabbed it
       if (this.failed.has(url)) continue; // already given up on this one
       this.inFlight = url; // mark this as the one currently downloading
+      // A fresh controller per download, so stopAll() can call off exactly this one.
+      // AbortController is guarded the same way the order deadline is (lib/menu.ts):
+      // reading it on an old phone must never break a download that would have worked.
+      let ac: AbortController | null = null;
+      try { ac = typeof AbortController !== "undefined" ? new AbortController() : null; } catch { ac = null; }
+      this.inFlightAbort = ac;
       this.notify();
       let ok = false; // did this download succeed?
       try {
         // Actually fetch the file. "cors"/"omit" = cross-site read, no cookies sent.
-        const res = await fetch(url, { mode: "cors", credentials: "omit" });
+        const res = await fetch(url, { mode: "cors", credentials: "omit", ...(ac ? { signal: ac.signal } : {}) });
         if (res.ok) {
           // Turn the downloaded bytes into a blob, then a local blob: URL the
           // <model-viewer> can read instantly — this is the "download once" magic.
@@ -213,6 +239,7 @@ class ModelLoader {
         console.warn("Model preload failed", url, e);
       }
       this.inFlight = null; // we're no longer downloading this one
+      this.inFlightAbort = null;
       if (ok) {
         // Success: forget any past failed attempts and announce it loaded.
         this.attempts.delete(url);

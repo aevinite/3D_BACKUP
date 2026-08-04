@@ -168,7 +168,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       // view), don't leave the guest with a dead tap — clear the filters so the
       // full grouped menu is back, then scroll to it on the next paint (bug #12).
       if (sc && !sec) {
-        if (chefOnly || favOnly || currentDiet || currentSort) {
+        if (chefActive || favActive || dietActive || currentSort) {
           setChefOnly(false); setFavOnly(false); setCurrentDiet(""); setCurrentSort("");
           setTimeout(() => scrollToCategory(slug), 80);
         }
@@ -354,6 +354,43 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     } catch {}
   }, [layout, currentSort, currentDiet, searchQuery, closedCats, chefOnly, favOnly]);
 
+  // THE FILTER CHIPS' "there's more this way" CUE.
+  // The row has always scrolled sideways, but on the owner's 360px phone the third chip
+  // was sliced down the middle by the layout switch and the rest (Top Rated, Low Price,
+  // Veg, Non-Veg) sat past a hard cut with no hint they existed — so the veg filter was
+  // effectively unreachable on a phone (guest sweep 2026-08-04). This stamps
+  // data-can-scroll="1" only while there IS more to the right, which is what draws the
+  // fade in globals.css. Dropping it at the end keeps the last chip crisp.
+  // Measured, not assumed: it reads the real box, so it stays correct for any language's
+  // chip widths and any set of switched-on chips.
+  useEffect(() => {
+    const row = document.querySelector<HTMLElement>(".filter-row");
+    if (!row) return;
+    const sync = () => {
+      const more = row.scrollWidth - row.clientWidth - row.scrollLeft > 4;
+      row.setAttribute("data-can-scroll", more ? "1" : "0");
+    };
+    sync();
+    row.addEventListener("scroll", sync, { passive: true });
+    // The chip set changes with the switches, and the widths change with the language,
+    // so watch the box itself rather than guessing when to re-measure.
+    let ro: ResizeObserver | undefined;
+    try {
+      ro = new ResizeObserver(sync);
+      ro.observe(row);
+      for (const c of Array.from(row.children)) ro.observe(c);
+    } catch {}
+    window.addEventListener("resize", sync);
+    return () => {
+      row.removeEventListener("scroll", sync);
+      window.removeEventListener("resize", sync);
+      ro?.disconnect();
+    };
+    // Re-attach when the row is rebuilt (a search hides it) or its chips change.
+    // `searchQuery`, not the folded `q` — `q` is derived further down the component, so
+    // naming it here would read a const before it is initialised and crash the render.
+  }, [searchQuery, features.favorites, features.diet_filter, loaded, menuData.length]);
+
   // If the data hasn't arrived within a moment, reveal the skeleton.
   // (Wait 200ms first; if it's still loading, show the grey placeholder boxes.
   // cleanup cancels that timer if we leave early.)
@@ -375,6 +412,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // pages keep the brand's normal frosted bar.
     document.body.classList.add("menu-frost");
     let raf = 0;
+    // While the guest is scrolling, mark the body so the floating call-waiter bell steps
+    // aside (see body.menu-scrolling in globals.css). On a phone the bell floats exactly
+    // where each card pins its add button, so it was covering the control the guest was
+    // scrolling towards. The flag clears ~450ms after the last scroll tick.
+    let scrollIdle: ReturnType<typeof setTimeout> | undefined;
+    const markScrolling = () => {
+      document.body.classList.add("menu-scrolling");
+      clearTimeout(scrollIdle);
+      scrollIdle = setTimeout(() => document.body.classList.remove("menu-scrolling"), 450);
+    };
     // SCROLL-SPY (Petpooja-style): work out which category section sits under
     // the sticky header right now. The chips highlight + follow automatically
     // (Coffee → Beverages → … as the guest scrolls the "All" view).
@@ -403,6 +450,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     };
     // Runs every time the guest scrolls.
     const onScroll = () => {
+      markScrolling(); // let the bell step aside off the cards' add buttons
       // Don't save on every single scroll tick — wait for the next animation
       // frame, so we save at most once per frame (gentler on performance).
       cancelAnimationFrame(raf);
@@ -454,7 +502,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       el.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(raf);
       clearInterval(tick);
+      clearTimeout(scrollIdle);
       document.body.classList.remove("menu-frost");
+      document.body.classList.remove("menu-scrolling"); // never strand the bell hidden
     };
   }, []);
 
@@ -514,8 +564,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     let cancelled = false;
     getFeatures(restaurantId).then((feats) => {
       if (cancelled) return;
-      // Switched off: make sure nothing queued optimistically is still pending, then stop.
-      if (feats.model3d === false) { modelLoader.setQueue([], [], [], []); return; }
+      // Switched off: stop everything. setQueue([],[],[],[]) only emptied the WAITING LINE,
+      // so whichever GLB had already started still finished downloading — ~2 MB on every
+      // fresh page load for a feature this restaurant does not have (guest sweep
+      // 2026-08-04). stopAll() also calls off the download in flight.
+      if (feats.model3d === false) { modelLoader.stopAll(); return; }
       queuePreloads();
     });
     return () => { cancelled = true; };
@@ -582,6 +635,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // fall back to "no filter" when the matching switch is off.
   const favActive = favOnly && features.favorites !== false;
   const dietActive = features.diet_filter === false ? "" : currentDiet;
+  // Same guard for Chef's Special, which was missing it. Its chip is hidden when the admin
+  // switches `chip_chef-special` off, but the restored `lfh_menu_chef=1` kept narrowing the
+  // grid — so a returning guest saw a partial menu with no visible chip to turn off
+  // (guest sweep 2026-08-04). All three saved filters now fall back to "no filter".
+  const chefActive = chefOnly && (features as Record<string, boolean>)["chip_chef-special"] !== false;
 
   // Decide which dishes to show. The menu is always the full grouped view; the
   // filter chips (which STACK) narrow it. .filter keeps only the dishes where
@@ -590,7 +648,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // While searching, match the query (name / category / alias).
     if (q && !matchesSearch(item)) return false;
     // Chef's Special filter: only dishes carrying the "chef-special" tag.
-    if (chefOnly && !item.tags.includes("chef-special")) return false;
+    if (chefActive && !item.tags.includes("chef-special")) return false;
     // Favorites filter: only the dishes this guest hearted.
     if (favActive && !favorites.includes(item.id)) return false;
     // Diet filter: hide non-veg when "veg" is on, and vice versa.
@@ -608,7 +666,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     ? menuData
         .filter((i) =>
           matchesSearch(i) &&
-          !(chefOnly && !i.tags.includes("chef-special")) &&
+          !(chefActive && !i.tags.includes("chef-special")) &&
           !(favActive && !favorites.includes(i.id)) &&
           !(dietActive === "veg" && !i.veg) &&
           !(dietActive === "non-veg" && i.veg)
@@ -946,7 +1004,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             // hearted, or Chef's Special before any dish is tagged) — show a
             // friendly hint instead of a blank screen.
             <div className="fav-empty" role="status">
-              {favOnly ? (
+              {favActive ? (
                 <>
                   <div className="fav-howto" aria-hidden="true">
                     <div className="fav-howto-card">

@@ -5,6 +5,7 @@
 // The table number never appears in the address bar, so editing the URL can only
 // produce the friendly invalid-code page below — never a different table's menu.
 // The URL stays /q/<code> (no redirect that would re-expose ?table=N).
+import { cache } from "react";
 import type { Metadata } from "next";
 import MenuView from "@/components/MenuView";
 import { getRestaurantBySlug } from "@/lib/tenant";
@@ -15,7 +16,15 @@ export const dynamic = "force-dynamic";
 
 // One indexed single-row read (unique code) + the same tenant resolution the
 // normal /r/<slug>/menu page does.
-async function resolveCode(codeRaw: string) {
+//
+// WRAPPED IN React `cache()` because BOTH generateMetadata and the page component call
+// it for the same request, and these are supabaseAdmin calls, which Next does not dedupe
+// the way it dedupes `fetch`. That made every scan of a printed table sticker cost two
+// code lookups + two restaurant lookups instead of one each — on the hottest guest entry
+// point there is (guest sweep 2026-08-04). `cache()` is per-request, so two different
+// diners never share a result. The tenant route avoids this already because
+// getRestaurantBySlug and getSettings are themselves cached.
+const resolveCode = cache(async function resolveCode(codeRaw: string) {
   const code = String(codeRaw || "").trim().toUpperCase();
   if (!/^[A-Z0-9]{6,16}$/.test(code)) return null;
   const row = (await supabaseAdmin
@@ -40,7 +49,7 @@ async function resolveCode(codeRaw: string) {
   const settings = await getSettings(r.id);
   if (!settings.menuEnabled) return null;
   return { r, slug: rest.slug, table: row.table_number, settings };
-}
+});
 
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }): Promise<Metadata> {
   const { code } = await params;

@@ -49,7 +49,12 @@ export default function ModelToastHost() {
       // is on its page right now. #1 keeps the bare link (no ?r=), unchanged.
       const slug = tenantSlug();
       const rParam = slug && slug !== DEFAULT_RESTAURANT_SLUG ? `&r=${encodeURIComponent(slug)}` : "";
-      const qs = entry.slug ? `?from=${encodeURIComponent(entry.slug)}${rParam}` : "";
+      // Carry the browsing category too. The dish→viewer link already does this so the
+      // viewer's Back returns to the SAME list the guest came from (bug #17); arriving
+      // via this ticket used to lose it, and the dish page's prev/next arrows then walked
+      // the dish's own category instead (guest sweep 2026-08-04).
+      const cParam = entry.cat ? `&cat=${encodeURIComponent(entry.cat)}` : "";
+      const qs = entry.slug ? `?from=${encodeURIComponent(entry.slug)}${rParam}${cParam}` : "";
       // Fire the app's one toast event with a tappable "view in 3D" ticket.
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
         message: `${entry.title} in 3D`,

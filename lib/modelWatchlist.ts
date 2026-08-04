@@ -12,6 +12,12 @@ interface WatchEntry {
   folder: string;
   title: string;
   slug?: string;
+  // Which category the guest was browsing when they asked for 3D. The "3D is ready"
+  // ticket links back into the viewer, and the viewer's own Back link needs this to
+  // return to the SAME list the guest came from — without it the dish page's prev/next
+  // arrows walk the dish's own category instead (the bug #17 the dish→viewer path
+  // already fixed; the notification path had been left behind). Guest sweep 2026-08-04.
+  cat?: string;
   smallUrl?: string;
   optimizedUrl?: string;
 }

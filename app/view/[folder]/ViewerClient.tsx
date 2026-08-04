@@ -16,6 +16,7 @@ import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon 
 import { formatPrice, getCurrency, getLanguage, setLanguage, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format"; // money formatting
 import { useBackClose } from "@/lib/backStack"; // phone back button closes overlays first
 import { useFeatures, getFeatures } from "@/lib/features"; // per-restaurant feature switches (3D / currency / languages)
+import { useTranslation } from "@/lib/i18n"; // this screen's own labels, in the guest's language
 
 // Describes the "config.json" file each dish folder has — the 3D model URLs,
 // the title/subtitle/stats, and the hotspot "tags" pinned onto the model.
@@ -71,6 +72,7 @@ function parseFrontView(
 
 // The 3D viewer component. `folder` tells us which dish's model + config to load.
 export default function ViewerClient({ folder }: { folder: string }) {
+  const t = useTranslation(); // this screen's labels in the guest's chosen language
   // The pieces of memory this screen keeps:
   const [config, setConfig] = useState<PublicConfig | null>(null);  // the loaded config.json
   const [loading, setLoading] = useState(true);          // still loading the config?
@@ -194,10 +196,26 @@ export default function ViewerClient({ folder }: { folder: string }) {
     return () => window.removeEventListener("lfh:currency-changed", readCur);
   }, [features.currency, features.languages]);
 
+  // Is this dish flagged sold-out? Read once so the button and the handler agree.
+  // The menu card and the dish page BOTH refuse a sold-out dish; this screen was the
+  // one add path that did not, so a guest could put an unavailable dish on their bill
+  // from 3D and only be told at Place Order (guest sweep 2026-08-04).
+  const soldOut = ((menuItem?.tags as string[] | undefined) || []).includes("sold-out");
+
   // Open the SAME confirm popup the dish-detail page uses (qty picker + total),
   // handled by the globally-mounted OrderConfirmModal.
   const addToOrder = () => {
     if (!menuItem) return;
+    // Belt-and-braces, exactly like ItemClient's addToCart: the button below is
+    // already disabled, and this stops a sold-out dish reaching the cart anyway.
+    if (soldOut) {
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+        message: `${menuItem.title} isn't available right now`,
+        subtitle: "please pick something else, or ask a member of staff",
+        kicker: "3D view", variant: "error",
+      } }));
+      return;
+    }
     window.dispatchEvent(
       new CustomEvent("lfh:open-order-confirm", {
         detail: {
@@ -311,6 +329,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
         folder,
         title: config.title || folder,
         slug: fromSlug || undefined,
+        cat: fromCat || undefined, // so the ready-ticket's viewer keeps the guest's list (bug #17)
         smallUrl: small,
         optimizedUrl: opt,
       });
@@ -347,7 +366,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // function, which we return so React stops listening when we leave.
     const unsub = modelLoader.subscribe(apply);
     return unsub;
-  }, [config, folder, fromSlug, dbModel, features.model3d]);
+  }, [config, folder, fromSlug, fromCat, dbModel, features.model3d]);
 
   // Wire up what happens once the 3D model element is on the page: when it
   // finishes loading, hide the spinner, slide in the bar, and play the reveal.
@@ -702,7 +721,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
     return (
       <div className="viewer-wrapper">
         <div id="load">
-          <InfinityLoader label="Loading 3D Model" size={110} />
+          <InfinityLoader label={t.loading3d} size={110} />
         </div>
       </div>
     );
@@ -734,7 +753,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
           the "taking longer" / failed overlay). */}
       {loaderVisible && !showTryAgain && !loadFailed && (
         <div id="load">
-          <InfinityLoader label="Loading 3D Model" size={110} />
+          <InfinityLoader label={t.loading3d} size={110} />
         </div>
       )}
 
@@ -766,17 +785,17 @@ export default function ViewerClient({ folder }: { folder: string }) {
       {/* The top bar: Back on the left, the AR button on the right. */}
       <div id="topbar">
         <Link href={backHref} className="tbtn back-btn">
-          <i className="fas fa-arrow-left"></i> Back
+          <i className="fas fa-arrow-left"></i> {t.back}
         </Link>
         <div className="top-btns">
           <button className="tbtn ar-btn" onClick={handleLaunchAR}>
-            <i className="fas fa-cube"></i> AR View
+            <i className="fas fa-cube"></i> {t.arView}
           </button>
         </div>
       </div>
 
       {/* The "triple-tap to replay" hint; the "show" class fades it in/out. */}
-      <div id="dbl-hint" className={hintVisible ? "show" : ""}>👆 Triple-tap to replay</div>
+      <div id="dbl-hint" className={hintVisible ? "show" : ""}>👆 {t.tripleTapReplay}</div>
 
       {/* The actual 3D model element — only once we have a config AND a chosen
           model file. We pass the chosen file in as modelUrl. */}
@@ -801,25 +820,28 @@ export default function ViewerClient({ folder }: { folder: string }) {
         <div className="srow">
           <div>
             <div className="sv" id="stat-cal">{menuItem?.nutrition.calories || config?.stats?.calories || "—"}</div>
-            <div className="sl">Calories</div>
+            <div className="sl">{t.cal}</div>
           </div>
           <div>
             <div className="sv" id="stat-pro">{menuItem?.nutrition.protein || config?.stats?.protein || "—"}</div>
-            <div className="sl">Protein</div>
+            <div className="sl">{t.protein}</div>
           </div>
           <div>
             <div className="sv" id="stat-carb">{menuItem?.nutrition.carbs || config?.stats?.carbs || "—"}</div>
-            <div className="sl">Carbs</div>
+            <div className="sl">{t.carbs}</div>
           </div>
           <div>
             <div className="sv" id="stat-price">{menuItem ? showPrice(menuItem.price) : config?.stats?.price || "—"}</div>
-            <div className="sl">Price</div>
+            <div className="sl">{t.price}</div>
           </div>
         </div>
-        {/* Add-to-order button (disabled until the menu item loads) and the
-            "i" button that opens the full details sheet. */}
+        {/* Add-to-order button (disabled until the menu item loads, and while the dish
+            is sold out — matching the menu card's "Not available" pill and the dish
+            page's disabled button) and the "i" button that opens the details sheet. */}
         <div className="brow">
-          <button className="badd" onClick={addToOrder} disabled={!menuItem}>🛒 Add to Order</button>
+          <button className="badd" onClick={addToOrder} disabled={!menuItem || soldOut}>
+            {soldOut ? `🚫 ${t.notAvailable}` : `🛒 ${t.addToOrder}`}
+          </button>
           <button className="binfo" onClick={() => setShowInfo(true)} aria-label="Dish details">ℹ</button>
         </div>
       </div>
@@ -835,11 +857,20 @@ export default function ViewerClient({ folder }: { folder: string }) {
               <i className="fas fa-times"></i>
             </button>
             <div className="vinfo-title">{menuItem.title}</div>
-            <div className="vinfo-meta">{menuItem.rating} ★ · {showPrice(menuItem.price)}</div>
+            {/* The rating follows the SAME two conditions as the menu card and the dish
+                page: the restaurant must have ratings switched on, AND the dish must have
+                real reviews. This sheet used to print it unconditionally, so a
+                ratings-off restaurant still showed stars, and a dish with no reviews
+                showed a bare "★ · ₹550" (an empty rating reads as a broken widget).
+                Guest sweep 2026-08-04. */}
+            <div className="vinfo-meta">
+              {features.ratings && (menuItem.reviewCount ?? 0) > 0 ? `${menuItem.rating} ★ · ` : ""}
+              {showPrice(menuItem.price)}
+            </div>
             {menuItem.longDescription && <p className="vinfo-desc">{menuItem.longDescription}</p>}
             {menuItem.ingredients.length > 0 && (
               <>
-                <div className="vinfo-label">Ingredients</div>
+                <div className="vinfo-label">{t.ingredients}</div>
                 <div className="vinfo-chips">
                   {menuItem.ingredients.map((ing, i) => (
                     <span key={i} className="vinfo-chip">{ing.emoji} {ing.name}</span>
@@ -847,9 +878,14 @@ export default function ViewerClient({ folder }: { folder: string }) {
                 </div>
               </>
             )}
-            {menuItem.allergens.length > 0 && (
+            {/* Allergens follow the restaurant's allergy switch, exactly as the dish page
+                (ItemClient) and the cart already do. This sheet ignored it, so a restaurant
+                that had switched the allergy feature OFF still published allergen claims
+                through the 3D route — the one guest surface nobody thinks to check
+                (guest sweep 2026-08-04). */}
+            {features.allergies && menuItem.allergens.length > 0 && (
               <>
-                <div className="vinfo-label">Contains</div>
+                <div className="vinfo-label">{t.contains}</div>
                 <div className="vinfo-chips">
                   {menuItem.allergens.map((a) => (
                     <span key={a} className="vinfo-chip warn">{allergenIcon(a)} {allergenLabel(a)}</span>

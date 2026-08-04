@@ -57,6 +57,17 @@ export interface Translations {
   reviews: string;
   prepTime: string;
   newDish: string; // badge for dishes with no real reviews yet
+  // The 3D viewer's own chrome. It was the ONE guest screen still hardcoded in
+  // English while the menu and dish page around it translated, so a Hindi or
+  // Korean diner met a wall of English the moment they opened 3D (guest sweep
+  // 2026-08-04). "contains" is shared with the dish page's allergen heading.
+  loading3d: string;
+  arView: string;
+  addToOrder: string;
+  back: string;
+  contains: string;
+  tripleTapReplay: string;
+  notAvailable: string; // a sold-out dish's button label, shared by the dish page and 3D view
 }
 
 // The dictionary itself: one complete set of phrases per language code.
@@ -112,6 +123,13 @@ const translations: Record<LanguageCode, Translations> = {
     review: "review",
     reviews: "reviews",
     prepTime: "Prep",
+    loading3d: "Loading 3D model",
+    arView: "AR View",
+    addToOrder: "Add to Order",
+    back: "Back",
+    contains: "Contains",
+    tripleTapReplay: "Triple-tap to replay",
+    notAvailable: "Not available",
   },
   de: {
     greeting: "GUTEN ABEND",
@@ -163,6 +181,13 @@ const translations: Record<LanguageCode, Translations> = {
     review: "Bewertung",
     reviews: "Bewertungen",
     prepTime: "Prep",
+    loading3d: "3D-Modell wird geladen",
+    arView: "AR-Ansicht",
+    addToOrder: "Zur Bestellung",
+    back: "Zurück",
+    contains: "Enthält",
+    tripleTapReplay: "Dreimal tippen zum Wiederholen",
+    notAvailable: "Nicht verfügbar",
   },
   fr: {
     greeting: "BONSOIR",
@@ -214,6 +239,13 @@ const translations: Record<LanguageCode, Translations> = {
     review: "avis",
     reviews: "avis",
     prepTime: "Prép",
+    loading3d: "Chargement du modèle 3D",
+    arView: "Vue RA",
+    addToOrder: "Ajouter à la commande",
+    back: "Retour",
+    contains: "Contient",
+    tripleTapReplay: "Triple-tapez pour rejouer",
+    notAvailable: "Non disponible",
   },
   ar: {
     greeting: "مساء الخير",
@@ -265,6 +297,13 @@ const translations: Record<LanguageCode, Translations> = {
     review: "تقييم",
     reviews: "تقييمات",
     prepTime: "وقت",
+    loading3d: "جارٍ تحميل المجسم ثلاثي الأبعاد",
+    arView: "عرض الواقع المعزز",
+    addToOrder: "أضف إلى الطلب",
+    back: "رجوع",
+    contains: "يحتوي على",
+    tripleTapReplay: "انقر ثلاث مرات للإعادة",
+    notAvailable: "غير متوفر",
   },
   hi: {
     greeting: "शुभ संध्या",
@@ -316,6 +355,13 @@ const translations: Record<LanguageCode, Translations> = {
     review: "समीक्षा",
     reviews: "समीक्षाएं",
     prepTime: "समय",
+    loading3d: "3D मॉडल लोड हो रहा है",
+    arView: "AR व्यू",
+    addToOrder: "ऑर्डर में जोड़ें",
+    back: "पीछे",
+    contains: "इसमें है",
+    tripleTapReplay: "दोहराने के लिए तीन बार टैप करें",
+    notAvailable: "उपलब्ध नहीं",
   },
   ko: {
     greeting: "안녕하세요",
@@ -367,6 +413,13 @@ const translations: Record<LanguageCode, Translations> = {
     review: "리뷰",
     reviews: "리뷰",
     prepTime: "시간",
+    loading3d: "3D 모델 불러오는 중",
+    arView: "AR 보기",
+    addToOrder: "주문에 추가",
+    back: "뒤로",
+    contains: "포함 성분",
+    tripleTapReplay: "세 번 탭하여 다시 재생",
+    notAvailable: "판매 종료",
   },
 };
 

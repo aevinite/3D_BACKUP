@@ -554,6 +554,14 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // so any dish with >20 reviews showed a different star average + count here than
   // on the card (audit fix 2026-07-06). We still fall back to the on-screen list
   // when there's no aggregate yet, and bump the count if this guest just posted one.
+  // Does THIS restaurant have any 3D dish at all? The greyed "3D preview unavailable"
+  // button is deliberate on the flagship (owner, 2026-06-10: it tells a diner 3D previews
+  // exist here, just not for this dish). On a restaurant with NO 3D dishes it advertises
+  // nothing and reads as broken on every single dish page — Aangan has ~199 of them
+  // (guest sweep 2026-08-04). `allItems` is this restaurant's own list, so this is a free
+  // in-memory check; while it is still loading we fall back to showing the button only for
+  // a dish that genuinely has a model.
+  const restaurantHas3d = allItems.some((it) => it.is4d);
   const aggCount = item.reviewCount ?? 0;
   const aggAvg = parseFloat(item.rating) || 0;
   const reviewCount = Math.max(aggCount, localReviews.length);
@@ -794,7 +802,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
               unless the allergy feature is switched off for this restaurant. */}
           {features.allergies && descExpanded && item.allergens.length > 0 && (
             <>
-              <div className="ing-inside-label">Contains</div>
+              <div className="ing-inside-label">{t.contains}</div>
               <div className="allergens-list">
                 {item.allergens.map((a) => (
                   <span key={a} className="allergen-chip">{allergenIcon(a)} {allergenLabel(a)}</span>
@@ -812,7 +820,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
               Add to Cart — matching the menu card, so you can't order one here. */}
           {(item.tags || []).includes("sold-out") ? (
             <button className="btn btn-gold" disabled style={{ opacity: 0.5, cursor: "not-allowed" }}>
-              <i className="fas fa-ban"></i> Not available
+              <i className="fas fa-ban"></i> {t.notAvailable}
             </button>
           ) : (
             <button className="btn btn-gold" onClick={addToCart}>
@@ -824,7 +832,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
               (2026-06-10): it tells guests 3D previews are a feature of this
               menu, just not ready for this dish yet. Do not remove it.
               (Both vanish only when the whole 3D FEATURE is switched off.) */}
-          {features.model3d && (item.is4d && item.modelFolder ? (
+          {features.model3d && (restaurantHas3d || (item.is4d && item.modelFolder)) && (item.is4d && item.modelFolder ? (
             <button id="view-3d-btn" className="btn btn-cyan" onClick={goToViewer}>
               <i className="fas fa-cube"></i> {t.viewIn3D}
             </button>
@@ -883,7 +891,11 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
             className={`review-tab-btn ${reviewTab === "reviews" ? "active" : ""}`}
             onClick={() => setReviewTab("reviews")}
           >
-            💬 {t.tabReviews} ({localReviews.length})
+            {/* The SAME authoritative count the star row shows. `localReviews` is capped at
+                20 rows by getItemReviews, so a dish with 35 reviews used to read
+                "(35 reviews)" beside the stars and "Reviews (20)" here, on one screen
+                (guest sweep 2026-08-04). */}
+            💬 {t.tabReviews} ({reviewCount})
           </button>
         </div>
 

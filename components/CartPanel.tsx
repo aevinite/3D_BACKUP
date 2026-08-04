@@ -155,7 +155,18 @@ export default function CartPanel() {
   // the server's per-line LEAST(99, …) clamp — otherwise the cart quoted (and the
   // guest expected) more than the kitchen would ever receive (audit fix 2026-07-06).
   const increment = (idx: number) => {
-    if (cart[idx].qty >= 99) return; // already at the max the server accepts
+    if (cart[idx].qty >= 99) {
+      // SAY SO. This used to be a bare `return`: the bill screen's "+" simply stopped
+      // responding at the ceiling while the menu card's "+" explained itself, so the
+      // same limit was spelled out in one place and silent in the other — and the
+      // silent one was the bill (guest sweep 2026-08-04). Same wording as FoodCard.
+      window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+        message: "Maximum 99 per dish",
+        subtitle: "that's the most we can add to one line",
+        kicker: "your order", duration: 1400,
+      } }));
+      return;
+    }
     const next = [...cart];
     next[idx] = { ...next[idx], qty: next[idx].qty + 1 };
     commit(next);
