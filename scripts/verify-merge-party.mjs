@@ -71,19 +71,16 @@ for (const route of [["editor", editorRoute], ["tablet", tabletRoute]]) {
     // pay-split exists in both; unpay/customer-capture are tablet-shaped — check what exists.
     // Anchored to the TABLES handler ('a === "tables" && c === …') so e.g. the platform
     // board's own "pay" action can never satisfy — or fail — a table check.
-    const key = `a === "tables" && c === "${a}"`;
-    const i = src.indexOf(key);
+    const i = src.indexOf(`a === "tables" && c === "${a}"`);
     if (i < 0) continue;
-    // The window is THIS handler — from here to wherever the NEXT tables handler starts —
-    // not a fixed number of characters. It used to be `i + 800`, and on 2026-08-04 a
-    // permission check added to `tables/:t/restart` pushed its mergeParentTable() call to
-    // +892: the resolver was still right there, correctly commented, and the guard failed
-    // anyway. A guard that cries wolf trains you to ignore it. Bounding by the next handler
-    // also makes it STRICTER than any bigger fixed number would: with a flat 2000 the tablet
-    // route's `pay-split` (whose next handler starts at +983) could have passed on its
-    // NEIGHBOUR's call.
-    const next = src.indexOf(`a === "tables" && c === "`, i + key.length);
-    const body = src.slice(i, next > 0 ? next : undefined);
+    // Slice to the START OF THE NEXT tables handler, not a fixed byte count. A hard 800-char
+    // window silently became wrong the moment a handler grew: `restart` gained a permission
+    // comment, which pushed its mergeParentTable() call past the cut-off and turned this red
+    // while the behaviour was untouched. A guard that fails for a reason that isn't the fault
+    // it names costs the same trust as one that passes for the wrong reason — and it trains
+    // people to ignore the output.
+    const next = src.indexOf(`a === "tables" && c === "`, i + 10);
+    const body = src.slice(i, next > i ? next : i + 4000);
     check(`${name} route: tables/:t/${a} resolves a merged child to its parent`, /mergeParentTable\(/.test(body));
   }
 }

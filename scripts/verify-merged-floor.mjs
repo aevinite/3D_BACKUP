@@ -104,9 +104,19 @@ await pay.click({ force: true }); await p.waitForTimeout(2500);
 const cash = fr.locator('button:has-text("Cash")').first();
 if (await cash.count()) { await cash.click({ force: true }); await p.waitForTimeout(10000); }
 st = await snap();
-check("mark paid → nothing left on the party", PARTY.every((t) => !st.by[t]), JSON.stringify(st.by));
-check("mark paid → all 4 unmerged", st.merges.length === 0, "still live: " + st.merges.join());
-check("mark paid → all 4 tables freed", PARTY.every((t) => !st.open.includes(t)), "open " + st.open.join());
+// A TABLE IS NEVER ENDED BY THE APP (mig 254, owner 2026-08-02: "all the serve has been done
+// and all the mark-as-paid has been done … the table restarts. I don't want that"). These three
+// checks were written the same day and still asserted the OLD auto-close behaviour — that
+// paying made the party vanish, unmerge and free its tables. That behaviour was deliberately
+// DELETED: a paid party is usually still sitting there finishing their coffee, and the manager
+// frees the table with the ✓ Close control when they actually leave.
+// So the rule to hold the line on now is the opposite one: paying settles the money and
+// changes NOTHING about who is sitting where.
+check("mark paid → the whole party is paid", PARTY.every((t) => (st.by[t] || "").endsWith("/paid")), JSON.stringify(st.by));
+check("mark paid → the party stays ONE bill until someone closes it", st.merges.length > 0, "merges: " + st.merges.join());
+// Only the PARTY HEAD holds an open session — a merged child is served by its parent's, which
+// is the whole point of a merge. So "nothing ended itself" means the head is still open.
+check("mark paid → no table ended itself (mig 254)", st.open.includes(PARTY[0]), "open " + st.open.join());
 check("mark paid → the 3 separate tables STILL open and unpaid", SOLO.every((t) => st.open.includes(t) && st.by[t] === "received/pending"), SOLO.map((t) => t + ":" + st.by[t]).join(" "));
 // a separate table's own flow must still work end to end
 await p.reload({ waitUntil: "networkidle" }); await p.waitForTimeout(5000);
