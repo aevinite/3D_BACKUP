@@ -177,6 +177,71 @@ function busyError(why: string): BusyError {
   return e;
 }
 
+// A deadline on every order, WITHOUT assuming the browser can make one. `AbortSignal.timeout`
+// is recent; on an older phone reading it throws, which was caught and mis-reported as "the
+// restaurant is busy" — so a diner on a perfectly good connection was told their order had been
+// saved for later. The staff twin has always guarded it (public/panels/outbox.js); now this does.
+function orderDeadline(): AbortSignal | undefined {
+  try {
+    return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+      ? AbortSignal.timeout(ORDER_TIMEOUT_MS)
+      : undefined;
+  } catch { return undefined; }
+}
+
+type OrderReply = { ok?: boolean; reason?: string; item?: string; order_id?: string; retry?: boolean; duplicate?: boolean };
+
+/**
+ * THE ONE WAY a guest order reaches the server, for BOTH the QR path and a table session.
+ *
+ * Everything that makes an order safe lives here so neither path can drift from the other again:
+ * the at-most-once id, the deadline, and the rule that "the restaurant could not take this"
+ * (a dropped request, a timeout, a 5xx) is a BUSY error the caller saves and re-sends, while a
+ * refusal (sold out, table closed, over the limit) is a plain error the diner must see.
+ *
+ * The session path used to skip all of this — it called the RPC straight from the browser with no
+ * id and no timeout, so a lost reply placed the order twice and a busy system lost it entirely.
+ */
+async function postGuestOrder(body: Record<string, unknown>, actionId: string): Promise<string> {
+  let res: Response;
+  try {
+    res = await fetch("/api/guest/place-order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-LFH-Action-Id": actionId },
+      body: JSON.stringify(body),
+      signal: orderDeadline(),
+    });
+  } catch {
+    // Couldn't reach the restaurant (dropped, timed out). NOT a refusal — the caller saves
+    // it on the device and sends it automatically, exactly as it does when offline.
+    throw busyError("could not reach the restaurant");
+  }
+  const j = (await res.json().catch(() => null)) as OrderReply | null;
+  if (res.status === 409 && j?.retry) throw busyError("the restaurant is still handling this one");
+  // The server is up but can't take it right now (it is busy, or its database didn't answer).
+  // Also not a refusal: same treatment as being offline. The server's own words never travel —
+  // it sends a code, and the diner-facing wording lives in lib/guestOutbox.ts reasonMsg().
+  if (res.status >= 500) throw busyError("the restaurant's system is very busy");
+  if (!res.ok || !j?.ok || !j.order_id) {
+    throw new Error(`Order failed: ${j?.reason || "unknown"}${j?.item ? ` (${j.item})` : ""}`);
+  }
+  return j.order_id;
+}
+
+/**
+ * Place a TABLE SESSION order (the guest is in a dining session, identity = their session token).
+ *
+ * Identical safety to the QR path: it goes through our own route so the at-most-once guard
+ * applies, carries a deadline, and classes a busy system as "save it and send it". `restaurantId`
+ * is passed only so a limit alert is raised about the RIGHT restaurant — the order itself is
+ * still placed purely from the token.
+ */
+export async function placeSessionOrderSafe(
+  token: string, items: unknown[], allergies: string[], restaurantId: string, actionId: string,
+): Promise<string> {
+  return postGuestOrder({ mode: "session", token, restaurantId, items, allergies }, actionId);
+}
+
 // Returns the new order's id. We generate the id on the client so the guest's
 // device can follow ONLY its own order later (the table is insert-only for the
 // public, so we can't read the id back via .select()).
@@ -186,31 +251,10 @@ export async function createOrder(o: OrderInput, restaurantId: string = DEFAULT_
   // and the guest taps again, the SAME actionId makes the server place it ONCE and
   // echo the original order_id back — no more double order / double charge.
   if (actionId) {
-    let res: Response;
-    try {
-      res = await fetch("/api/guest/place-order", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-LFH-Action-Id": actionId },
-        body: JSON.stringify({ mode: "public", table: o.tableNumber || "", restaurantId, items: o.items, allergies: o.allergies }),
-        // A DEADLINE, for the same reason the staff panels have one: an overloaded database
-        // answers nothing at all (measured 30-90s), and without this the diner watches a
-        // spinner forever with the order neither placed nor saved.
-        signal: AbortSignal.timeout(ORDER_TIMEOUT_MS),
-      });
-    } catch {
-      // Couldn't reach the restaurant (dropped, timed out). NOT a refusal — the caller saves
-      // it on the device and sends it automatically, exactly as it does when offline.
-      throw busyError("could not reach the restaurant");
-    }
-    const j = (await res.json().catch(() => null)) as { ok?: boolean; reason?: string; item?: string; order_id?: string; retry?: boolean } | null;
-    if (res.status === 409 && j?.retry) throw new Error("Order failed: sync_in_progress");
-    // The server is up but can't take it right now (it is busy, or its database didn't
-    // answer). Also not a refusal: same treatment as being offline.
-    if (res.status >= 500) throw busyError(j?.reason || "the restaurant's system is very busy");
-    if (!res.ok || !j?.ok || !j.order_id) {
-      throw new Error(`Order failed: ${j?.reason || "unknown"}${j?.item ? ` (${j.item})` : ""}`);
-    }
-    return j.order_id;
+    return postGuestOrder(
+      { mode: "public", table: o.tableNumber || "", restaurantId, items: o.items, allergies: o.allergies },
+      actionId,
+    );
   }
   // Call the server function that prices and stores the order. It returns the
   // new order's id (the SERVER generates it) so the device can poll its status.

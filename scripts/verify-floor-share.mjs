@@ -130,6 +130,23 @@ for (const r of ROUTES) {
   }
 }
 
+// EVERY OTHER ROUTE THAT CHANGES THE FLOOR must drop the snapshot too — even the ones that never
+// READ it. The list above only covered the two panels that do both, so the kitchen route (a ✓ on a
+// dish moves a tile to "Ready"), the guest's own order route and an admin bill delete/restore all
+// wrote to the floor for a year with nothing to notice. A guard that only looks where the fix
+// already is cannot catch the next one, so this list is by "does it change what a tile says".
+const WRITE_ROUTES = [
+  { file: "app/api/kitchen/[...path]/route.ts", panel: "kitchen", what: "a ✓ moves a tile to Ready" },
+  { file: "app/api/guest/place-order/route.ts", panel: "guest order", what: "a diner's order lands on a table" },
+  { file: "app/api/admin/bills/route.ts", panel: "admin bills", what: "deleting or restoring a bill changes the tile" },
+];
+for (const r of WRITE_ROUTES) {
+  const src = read(r.file);
+  if (!src) { check(`${r.panel} route found`, false, r.file); continue; }
+  check(`${r.panel}: its writes drop the floor snapshot`, /invalidateFloor\(/.test(src),
+    /invalidateFloor\(/.test(src) ? "" : `${r.what} — without this a device can read a floor older than its own action`);
+}
+
 // PROPERTY 4 — a restricted reader must narrow a COPY, never the shared object.
 // narrowSummary() mutates what it is given, so the value handed to it may not be the one
 // sharedFloorSummary returned. The tablet is the only narrowing caller today; if another

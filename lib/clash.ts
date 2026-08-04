@@ -120,9 +120,17 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
     for (const c of cols) {
       if (sameValue((fields as Record<string, unknown>)[c], row[c])) continue;
       const what = want?.label || readable(c);
+      // QUOTING THE CURRENT VALUE IS THE USEFUL PART — but this gate deliberately runs once at
+      // the top of the dispatcher, BEFORE the per-action permission check inside each branch.
+      // So for a money column the sentence could state a figure the person's own role is not
+      // shown anywhere else on their screen. For those, say that it moved and send them to look;
+      // for everything else (a note, allergens, a quantity) quote it as before.
+      const plain = QUIET_COLUMNS.has(c)
+        ? `Someone else changed ${what} while you had it open.`
+        : `Someone else changed ${what} while you had it open — it now says ${describe(row[c])}.`;
       return {
         code: "clash_changed_elsewhere",
-        plain: `Someone else changed ${what} while you had it open — it now says ${describe(row[c])}.`,
+        plain,
         todo: "Your change was NOT saved. Look at what it says now and redo yours if it's still right.",
         retryable: false,
       };
@@ -132,6 +140,10 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
     return null; // fail open
   }
 }
+
+// Money columns: the refusal says a value MOVED without repeating the figure, because this gate
+// runs before the per-action permission check (see where it's used).
+const QUIET_COLUMNS = new Set(["discount", "price", "payment_status", "total"]);
 
 // Compare loosely enough that formatting isn't treated as a change: trimmed text, and lists
 // compared as sets (an allergen list's order is not meaningful).
@@ -225,6 +237,21 @@ export async function replayClash(
           code: "clash_new_party",
           plain: `Table ${t} has a different party now — this was for the guests who were sitting there when you did it.`,
           todo: `Nothing was applied. If it's still needed, do it again for table ${t} as it is now.`,
+          retryable: false,
+        };
+      }
+
+      // CLOSED, BUT WE CAN'T PROVE WHEN. `closed_at` is set by the close trigger, but CLAUDE.md
+      // names two real paths that don't go through it — "a script's bare UPDATE sessions SET
+      // status='closed'" and a hand-run SQL fix. Those left `closed_at` null, so `closed` was 0,
+      // so the test below could never fire and a saved change was applied to a CLOSED table.
+      // With no timestamp there is no way to show the person acted first, and the safe answer to
+      // "I can't tell" is to ask a human — never to write to a table that has been settled.
+      if (isClosed && !closed) {
+        return {
+          code: "clash_table_closed",
+          plain: `Table ${t} has been closed and billed since you did this.`,
+          todo: `Nothing was applied. If these dishes were served, add them to a new bill for table ${t}.`,
           retryable: false,
         };
       }

@@ -611,8 +611,10 @@ export default function CartPanel() {
       // offline paths. Computed BEFORE the offline branch on purpose: an online attempt
       // that committed but lost its reply, then retried after the phone dropped offline,
       // now replays under the SAME id instead of a fresh one — so the server places it
-      // ONCE, never twice (audit fix 2026-07-08). Any edit to the cart makes a new key.
-      const sig = JSON.stringify({ t: tableTrim, i: itemsS });
+      // ONCE, never twice (audit fix 2026-07-08). Any edit to the cart makes a new key —
+      // INCLUDING the allergy list, which was missing from the key, so adding "no peanuts" and
+      // trying again re-used the previous attempt's identity.
+      const sig = JSON.stringify({ t: tableTrim, i: itemsS, a: allergies });
       if (!orderKeyRef.current || orderKeyRef.current.sig !== sig) {
         const rid = (globalThis.crypto?.randomUUID?.() as string) || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         orderKeyRef.current = { sig, id: rid };
@@ -620,8 +622,14 @@ export default function CartPanel() {
       // OFFLINE: save the order on-device and send it automatically on reconnect
       // (at-most-once via the guest outbox, using the SAME key as the online path).
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
-        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Saved — will send when you're back online", subtitle: "we'll send it automatically", kicker: "offline", icon: "📴", variant: "success" } }));
+        const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
+        // ONLY promise durability when the phone actually stored it. When storage refuses
+        // (private browsing, no room), the order is real and WILL send — but it lives in memory
+        // only, so closing the tab loses it, and saying "we'll send it automatically" would be a
+        // promise this page can't keep.
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: q.persisted
+          ? { message: "Saved — will send when you're back online", subtitle: "we'll send it automatically", kicker: "offline", icon: "📴", variant: "success" }
+          : { message: "Saved — keep this page open", subtitle: "it sends the moment you're back online", kicker: "offline", icon: "📴", variant: "success" } }));
         orderKeyRef.current = null; // a fresh order next time
         setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
         window.dispatchEvent(new Event("lfh:cart-updated"));
@@ -677,8 +685,13 @@ export default function CartPanel() {
       // broken menu — 800 orders in the same minute are all kept, then drained in order.
       if (isServerBusy(err) && orderKeyRef.current) {
         try {
-          await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: orderItems(), allergies: allergyPayload(), track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
-          window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Saved — sending your order now", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" } }));
+          // Their `orderItems()` / `allergyPayload()` helpers (they replaced the inline builders
+          // on main) + this branch's honest wording: only promise durability when the phone
+          // actually stored it.
+          const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: orderItems(), allergies: allergyPayload(), track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
+          window.dispatchEvent(new CustomEvent("lfh:toast", { detail: q.persisted
+            ? { message: "Saved — sending your order now", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" }
+            : { message: "Saved — keep this page open", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" } }));
           orderKeyRef.current = null;
           setCart([]); saveCart([]); setTableNumber(""); setDeclared([]); setOtherAllergy(""); setOtherOpen(false);
           window.dispatchEvent(new Event("lfh:cart-updated"));

@@ -44,6 +44,8 @@ const CAP_MODULE_GATE: Record<string, (rid: string) => Promise<{ effective: bool
   tablet_parcel: parcelLadder,
 };
 
+import { withIdempotency } from "@/lib/idempotency";
+
 export const dynamic = "force-dynamic";
 
 // Roles an owner/manager may CREATE (never 'owner' — only the admin assigns owners).
@@ -412,14 +414,18 @@ async function target(s: Extract<Scope, { ok: true }>, id: string) {
   return { u, acc };
 }
 
-export async function POST(req: NextRequest) {
+// AT MOST ONCE. The manager panel's staff writes now travel through its offline queue like every
+// other write there, so a replay after a lost reply must not create the same person twice (or
+// re-run a reset/disable). No X-LFH-Action-Id header → passes straight through, unchanged.
+export const POST = withIdempotency(postImpl, "owner");
+async function postImpl(req: NextRequest): Promise<Response> {
   const s = await scope(req); if (!s.ok) return s.resp;
   let body: any = {}; try { body = await req.json(); } catch {}
 
   // ── Record a payment (salary / advance / bonus / overtime / reimbursement / deduction) ──
   // Append-only: nothing here can ever edit or delete an existing entry (see void_payment).
   if (String(body?.action || "") === "record_payment") {
-    const t = await target(s, String(body?.staff_id || "")); if ("err" in t) return t.err;
+    const t = await target(s, String(body?.staff_id || "")); if (t.err) return t.err;
     if (!t.acc.canRecordPay) return bad("Your owner hasn't given managers permission to record staff payments.", 403);
     // Opt-in gate (mig 221): no payment can exist for someone the owner hasn't put on the pay
     // list. Enforced HERE, not just hidden in the UI, so the expense totals can never include
@@ -499,7 +505,8 @@ export async function POST(req: NextRequest) {
   return ok({ ok: true, id: data!.id, name: display, role, restaurant_id: rid, password });
 }
 
-export async function PATCH(req: NextRequest) {
+export const PATCH = withIdempotency(patchImpl, "owner");
+async function patchImpl(req: NextRequest): Promise<Response> {
   const s = await scope(req); if (!s.ok) return s.resp;
   let body: any = {}; try { body = await req.json(); } catch {}
   const id = String(body?.id || ""); const action = String(body?.action || "");
@@ -510,7 +517,7 @@ export async function PATCH(req: NextRequest) {
   // set_own_pay  — may this person see their own pay in their panel (owner/admin only)
   // void_payment — cancel a ledger entry WITH a reason; the row stays, struck through
   if (action === "set_profile" || action === "set_job" || action === "set_own_pay") {
-    const t = await target(s, id); if ("err" in t) return t.err;
+    const t = await target(s, id); if (t.err) return t.err;
     if (action === "set_profile") {
       if (!t.acc.canEditProfile) return bad("Your owner hasn't given managers permission to edit staff profiles.", 403);
       const patch = body?.profile;
@@ -562,7 +569,7 @@ export async function PATCH(req: NextRequest) {
   // them counting as an expense and stops new payments — the same "never delete money"
   // discipline as a cancelled entry.
   if (action === "set_payroll") {
-    const t = await target(s, id); if ("err" in t) return t.err;
+    const t = await target(s, id); if (t.err) return t.err;
     if (!t.acc.canEditJobPay) return bad("Only the owner can change who is on the pay list.", 403);
     if (typeof body?.in_payroll !== "boolean") return bad("`in_payroll` must be true or false.");
     const on = body.in_payroll;
@@ -582,7 +589,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (action === "void_payment") {
-    const t = await target(s, String(body?.staff_id || "")); if ("err" in t) return t.err;
+    const t = await target(s, String(body?.staff_id || "")); if (t.err) return t.err;
     if (!t.acc.canRecordPay) return bad("Your owner hasn't given managers permission to change staff payments.", 403);
     const payId = String(body?.payment_id || "");
     const reason = String(body?.reason || "").trim().slice(0, 200);
@@ -745,7 +752,8 @@ export async function PATCH(req: NextRequest) {
   return bad("Unknown action.");
 }
 
-export async function DELETE(req: NextRequest) {
+export const DELETE = withIdempotency(deleteImpl, "owner");
+async function deleteImpl(req: NextRequest) {
   const s = await scope(req); if (!s.ok) return s.resp;
   // A MANAGER can never DELETE a login (owner, 2026-08-02: "it can disable the user, it
   // can't delete the user"). Disabling is their tool — it keeps the row, the name and the

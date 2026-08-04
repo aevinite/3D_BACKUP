@@ -133,6 +133,13 @@ const api = async (method, path, body, opts) => {
 const isQueued = (r) => !!(r && r.queued === true);
 // Accurate whether offline (syncs on reconnect) or online-with-a-pending-queue (syncs now).
 const OFFLINE_SAVED_MSG = "Saved ✓ — syncing automatically.";
+// WHAT TO SHOW A WAITER for a failed write. A clash arrives as
+// { error: "clash_changed_elsewhere", clash: { plain, todo } } — `e.message` is the CODE, so a
+// clash on a LIVE write (two people on the same dish at once, the common case) read as
+// "clash_changed_elsewhere". Only the queued path ever rendered the sentence. See lib/clash.ts.
+const errText = (e) => (e && e.data && e.data.clash && e.data.clash.plain)
+  ? e.data.clash.plain + (e.data.clash.todo ? " " + e.data.clash.todo : "")
+  : ((e && e.message) || "unknown error");
 // `ms` (optional) for the rare message that must not slip past someone — a conflict with
 // another device needs longer than the usual 2.6s glance. Always dismissible via the ✕.
 const toast = (msg, ok = true, ms) => {
@@ -320,7 +327,7 @@ async function actGated(method, path, body, opts = {}) {
     if (typeof opts.onSuccess === "function") { try { opts.onSuccess(); } catch (e) {} }
     else if (opts.toast) toast(opts.toast);
   } catch (e) {
-    toast("Failed: " + e.message, false);
+    toast("Failed: " + errText(e), false);
   }
 }
 
@@ -1224,7 +1231,7 @@ function openDishEditModal(itemId) {
         toast(clash.plain + " " + clash.todo, false, 9000);
         return;
       }
-      toast("Couldn't save: " + e.message, false);
+      toast("Couldn't save: " + errText(e), false);
     }
   };
   setTimeout(() => input.focus(), 30);
@@ -1540,9 +1547,9 @@ function renderPanel() {
         message: "Call attended",
         sub: c ? `Table ${c.table_number} · ${c.note || "call"} — tap undo` : "Tap undo to put the call back",
         icon: "🔔",
-        onUndo: () => api("POST", `/calls/${id}/reopen`).then(() => load()).catch((e) => { toast("Undo failed: " + e.message, false); load(); }),
+        onUndo: () => api("POST", `/calls/${id}/reopen`).then(() => load()).catch((e) => { toast("Undo failed: " + errText(e), false); load(); }),
       });
-    } catch (e) { toast("Failed: " + e.message, false); }
+    } catch (e) { toast("Failed: " + errText(e), false); }
   }));
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
   document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
@@ -1569,9 +1576,9 @@ function renderPanel() {
         message: `${ids.length} call${ids.length > 1 ? "s" : ""} attended`,
         sub: `Table ${tbl} · tap undo to put them back`,
         icon: "🔔",
-        onUndo: () => Promise.all(ids.map((id) => api("POST", `/calls/${id}/reopen`))).then(() => load()).catch((e) => { toast("Undo failed: " + e.message, false); load(); }),
+        onUndo: () => Promise.all(ids.map((id) => api("POST", `/calls/${id}/reopen`))).then(() => load()).catch((e) => { toast("Undo failed: " + errText(e), false); load(); }),
       });
-    } catch (e) { toast("Failed: " + e.message, false); }
+    } catch (e) { toast("Failed: " + errText(e), false); }
   }));
   // Discount: shown only when the manager enables it for the tablet (General settings
   // → tablet_discount = on/pin; default off = no button). tabletDiscount() applies
@@ -1690,7 +1697,7 @@ async function closeTableAndFree(t) {
       }
       return;
     }
-    toast("Failed: " + e.message, false);
+    toast("Failed: " + errText(e), false);
   }
 }
 
@@ -1734,7 +1741,7 @@ async function advanceDish(id, cur, forceNext) {
         });
       }
     })
-    .catch((e) => { toast("Failed: " + e.message, false); load(); });
+    .catch((e) => { toast("Failed: " + errText(e), false); load(); });
 }
 
 // Bulk order actions (accept / serve-all) the OPTIMISTIC way — flip the orders +
@@ -1832,7 +1839,7 @@ function undoServe(snap) {
   if (!state.ordering) renderPanel();
   return Promise.all(snap.map((s) => api("POST", `/items/${s.id}/status`, { status: s.prev })))
     .then(() => scheduleServeReconcile())
-    .catch((e) => { toast("Undo failed: " + e.message, false); load(); });
+    .catch((e) => { toast("Undo failed: " + errText(e), false); load(); });
 }
 
 function flipOrders(orderIds, { from, to, orderStatus }) {
@@ -1871,7 +1878,7 @@ function optimisticAccept(orderIds) {
         });
       }
     })
-    .catch((e) => { toast("Failed: " + e.message, false); load(); });
+    .catch((e) => { toast("Failed: " + errText(e), false); load(); });
 }
 function optimisticServeAll(orderIds) {
   if (!orderIds.length) return;
@@ -1893,7 +1900,7 @@ function optimisticServeAll(orderIds) {
         });
       }
     })
-    .catch((e) => { toast("Failed: " + e.message, false); load(); });
+    .catch((e) => { toast("Failed: " + errText(e), false); load(); });
 }
 
 // Shift the WHOLE party to another free table. Optimistic: move the tiles/labels
@@ -2187,7 +2194,7 @@ async function runOptimistic(mutate, fn, onSuccess) {
   // is unchanged, so load() would short-circuit on an unchanged signature and LEAVE the optimistic
   // change (e.g. an order shown moved away) on screen until the next poll. Clearing lastSig forces
   // load() to re-apply server truth and repaint immediately. (audit 2026-07-09)
-  catch (e) { state.table = prevTable; lastSig = null; toast("Failed: " + e.message, false); }
+  catch (e) { state.table = prevTable; lastSig = null; toast("Failed: " + errText(e), false); }
   await load();   // load() already repaints if anything changed — no second render (that was the extra flash)
   // Run the success hook AFTER reconcile, so it can read the freshly-loaded state
   // (e.g. the settle-undo bar checks whether the table auto-closed on pay).
@@ -2204,7 +2211,7 @@ const act = async (fn) => {
     // "Failed: clash_changed_elsewhere".
     const clash = e && e.data && e.data.clash;
     if (clash) { toast(clash.plain, false, 9000); load().catch(() => {}); return; }
-    toast("Failed: " + e.message, false);
+    toast("Failed: " + errText(e), false);
   }
 };
 
@@ -2716,7 +2723,7 @@ function openTagSheet(t) {
           if (!okd) { revert(); return; } // PIN cancelled
         }
         toast(done);
-      } catch (e) { revert(); toast("Failed: " + e.message, false); }
+      } catch (e) { revert(); toast("Failed: " + errText(e), false); }
     })();
   }));
 }
@@ -2986,7 +2993,7 @@ async function addDishToOrder(orderId, payload) {
     toast(isQueued(r) ? "Dish saved ✓ — adds when you're back online" : "Dish added ✓");
     await load();  // offline → no-ops; the tally + toast are the feedback until reconnect
     if (state.addToOrderId) renderOrderMode(); else if (!state.ordering) renderPanel();
-  } catch (e) { toast("Failed: " + e.message, false); }
+  } catch (e) { toast("Failed: " + errText(e), false); }
   finally {
     addingDishKeys.delete(key);
     // Flush any taps that arrived mid-flight, as ONE accumulated add (keeps the same dish
@@ -3628,7 +3635,7 @@ async function sendOrder(dest) {
     toast(wasQuick ? `Sent to ${tableLabel(tbl)}! Kitchen ticket #${r.kot_no}` : `Sent! Kitchen ticket #${r.kot_no}`);
     finishSent();
     await load(); renderPanel();
-  } catch (e) { toast("Failed: " + e.message, false); }
+  } catch (e) { toast("Failed: " + errText(e), false); }
   finally {
     sendingOrder = false;
     const b = document.getElementById("sendOrder");

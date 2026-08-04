@@ -21,7 +21,7 @@
 // code, useCallback reuses a function between re-draws.
 import { useCallback, useEffect, useRef, useState } from "react";
 // Reads the restaurant's settings (location rules, whether sessions are on, etc.).
-import { getSettings, type Settings } from "@/lib/menu";
+import { getSettings, placeSessionOrderSafe, isServerBusy, type Settings } from "@/lib/menu";
 // Lets us set the "default table" hint used by the cart and call-waiter.
 import { setScannedTable } from "@/lib/table";
 // All the server helpers for the dining-session flow: store/read/clear the saved
@@ -29,7 +29,7 @@ import { setScannedTable } from "@/lib/table";
 import {
   getStoredSession, storeSession, clearStoredSession,
   checkLocation, tableStatus, joinSession, getSessionState, requestAccess,
-  placeSessionOrder, callWaiterSession, setMemberName,
+  callWaiterSession, setMemberName,
 } from "@/lib/session";
 // Offline: save the order on-device and send it automatically when back online.
 import { enqueueGuestOrder } from "@/lib/guestOutbox";
@@ -151,6 +151,9 @@ export default function SessionGate() {
   const pollAlive = useRef(false); // is a backoff poll currently running?
   const accessReqRef = useRef(false); // guards against stacking duplicate waiter-call requests (bug #18)
   const settled = useRef(false); // whether we've already reported how this action ended
+  // The at-most-once key for the basket being placed, so an online attempt and anything saved
+  // for later are ONE action to the server. Cleared on success (next basket = new order).
+  const orderKeyRef = useRef<{ sig: string; id: string } | null>(null);
   const joining = useRef(false); // blocks DOUBLE-TAPS on the join buttons (a second tap while one join is in flight would create a duplicate membership)
   const reqBusy = useRef(false); // blocks DOUBLE-TAPS on "Request a waiter" — a 2nd tap while the first request is in flight would POST twice (sweep C4)
   const videoRef = useRef<HTMLVideoElement | null>(null); // the camera preview on the scan screen
@@ -236,6 +239,27 @@ export default function SessionGate() {
   // ── perform the queued action once the session is ready ────────────────────
   // Now that we're in the session, actually do the job: place the order or call
   // the waiter, then report success/failure and close.
+  // WHY an order was refused, in words a diner can act on. This whole path used to answer every
+  // refusal with the same flat "Couldn't place order", which tells someone nothing about whether
+  // to remove a dish, call a waiter, or simply wait — while the QR path named the dish.
+  const orderFailMsg = (reason?: string, raw?: string): string => {
+    switch (reason) {
+      case "sold_out": {
+        const dish = (raw?.match(/\(([^)]+)\)/) || [])[1];
+        return dish ? `Sold out: ${dish} — please remove it` : "A dish just sold out — please remove it";
+      }
+      case "staff_priced_item": return "One dish needs a member of staff — please ask your server";
+      case "unknown_item": return "A dish is no longer on the menu — please remove it";
+      case "session_closed": return "This table has been closed — please ask your server";
+      case "not_approved": return "You're not approved to order on this table yet";
+      case "otp_required": return "Please confirm your phone number first";
+      case "invalid_token": return "Your table session has expired — please scan again";
+      case "rate_limited": return "Too many orders in a row — please wait a moment";
+      case "empty_order": return "There's nothing in your order";
+      default: return "Couldn't place order — please try again";
+    }
+  };
+
   // Actually send the order to the kitchen (nickname already ensured by act()).
   // Split out from act() so the nickname screen can resume here after the guest
   // types their name.
@@ -247,23 +271,63 @@ export default function SessionGate() {
     // Only the item lines + allergies travel to the server — no prices. The
     // server prices the whole bill itself (see lfh_place_order).
     const pl = p.payload as { items: unknown[]; allergies: string[]; track?: { tableNumber?: string; total?: number; itemCount?: number; items?: { title: string; qty: number }[] } };
-    // OFFLINE: save the order on-device and send it automatically on reconnect
-    // (at-most-once via the guest outbox). The online path below is unchanged.
-    if (typeof navigator !== "undefined" && navigator.onLine === false) {
-      await enqueueGuestOrder({ mode: "session", token: s.token, items: pl.items, allergies: pl.allergies || [], track: pl.track });
+    const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
+    // ONE at-most-once key for this basket, shared by the online attempt AND anything saved for
+    // later — the same rule the QR path has had since 2026-07-08. Without it, an order that
+    // COMMITTED but whose reply was lost was sent again under a fresh identity and placed TWICE
+    // on one bill. Held in a ref keyed by the basket, so editing the basket earns a new key and
+    // a successful send clears it.
+    const sig = JSON.stringify({ i: pl.items, a: pl.allergies || [] });
+    if (!orderKeyRef.current || orderKeyRef.current.sig !== sig) {
+      orderKeyRef.current = { sig, id: (globalThis.crypto?.randomUUID?.() as string) || `${Date.now()}-${Math.random().toString(16).slice(2)}` };
+    }
+    const actionId = orderKeyRef.current.id;
+    // Saving it on the phone, whether because there is no signal or because the restaurant's
+    // system can't take it this second. Both use the SAME key as the attempt above.
+    const saveForLater = async (offline: boolean) => {
+      const q = await enqueueGuestOrder({ mode: "session", token: s.token, restaurantId: rid, items: pl.items, allergies: pl.allergies || [], track: pl.track, actionId });
+      orderKeyRef.current = null;
       fireDone({ ok: true, action: "order", queued: true });
-      toast("Saved — will send when you're back online", "offline");
+      toast(
+        q.persisted
+          ? (offline ? "Saved — will send when you're back online" : "Saved — sending your order now")
+          : "Saved on this page — keep it open until it sends",
+        offline ? "offline" : "order",
+      );
+      close();
+    };
+    // OFFLINE: save the order on-device and send it automatically on reconnect.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) { await saveForLater(true); return; }
+
+    let orderId: string;
+    try {
+      orderId = await placeSessionOrderSafe(s.token, pl.items, pl.allergies || [], rid, actionId);
+    } catch (err) {
+      // THE RESTAURANT COULDN'T TAKE IT THIS SECOND (swamped, or the reply never came). Not a
+      // refusal, so do exactly what being offline does — this path used to have no such story at
+      // all: it sat on "One moment…" with no deadline and then lost the order outright.
+      if (isServerBusy(err)) {
+        try { await saveForLater(false); return; }
+        catch { /* couldn't even save → fall through to the honest message below */ }
+      }
+      // A REAL REFUSAL. Say WHICH, instead of the one flat "Couldn't place order" this path
+      // showed for every reason there is — the QR path has always named the dish or the table.
+      const msg = String((err as Error)?.message || "");
+      const reason = (msg.match(/Order failed: ([a-z_]+)/) || [])[1];
+      if (reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "order" }); setStep("blocked"); return; }
+      toast(orderFailMsg(reason, msg), "order", "error");
+      fireDone({ ok: false, reason, action: "order" });
       close();
       return;
     }
-    const r = await placeSessionOrder(s.token, pl.items, pl.allergies || []);
     // Every completion below MUST carry action:"order" so the cart's onDone listener
     // recognises it and re-enables the "Place Order" button. Omitting it on the
     // blocked/failed paths left the button stuck on "Placing…" until a page reload,
     // and left a stale listener that duplicated the next order (audit fix 2026-07-08).
-    if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "order" }); setStep("blocked"); return; } // table was blocked by staff
-    if (r.ok) { fireDone({ ok: true, action: "order", orderId: r.order_id }); toast("Order placed", "to the kitchen"); close(); } // success
-    else { toast("Couldn't place order", "order", "error"); fireDone({ ok: false, reason: r.reason, action: "order" }); close(); } // failed
+    orderKeyRef.current = null; // placed → the next basket is a new order
+    fireDone({ ok: true, action: "order", orderId });
+    toast("Order placed", "to the kitchen");
+    close();
   }, [close]);
 
   const act = useCallback(async () => {

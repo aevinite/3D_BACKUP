@@ -17,7 +17,7 @@
 // time is dominated by heavy analytics query time, not connection latency).
 import { useState } from "react";
 import { useConnection, latencyTier, LATENCY_FRESH_MS } from "@/lib/connectionStatus";
-import { useGuestOutbox, dismissGuestFailed, type GuestOrder } from "@/lib/guestOutbox";
+import { useGuestOutbox, dismissGuestFailed, retryGuestFailed, type GuestOrder } from "@/lib/guestOutbox";
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the popover first
 
 type View = {
@@ -163,6 +163,11 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
               {box.failed.map((o) => (
                 <span key={o.id} className="lfh-conn-row">
                   <span className="lfh-conn-row-t"><b>{orderLabel(o)}</b><small className="err">{o.error} · {fmtAgo(o.at)}</small></span>
+                  {/* Try again comes FIRST, and it is the point: the only control here used to be
+                      "Dismiss", i.e. throw the order away. An order that failed for a reason that
+                      has since passed (the system was busy, the dish came back) could not be sent
+                      without building the whole basket again. */}
+                  <button className="lfh-conn-go" onClick={() => retryGuestFailed(o.id)}>Try again</button>
                   <button className="lfh-conn-x" onClick={() => dismissGuestFailed(o.id)}>Dismiss</button>
                 </span>
               ))}
@@ -238,6 +243,8 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
         .lfh-conn-row-t small.err { color: #fca5a5; opacity: 1; }
         .lfh-conn-pill { font-size: 10.5px; font-weight: 800; padding: 3px 8px; border-radius: 999px; background: rgba(34,197,94,.16); color: #86efac; flex: 0 0 auto; }
         .lfh-conn-x { border: 0; border-radius: 8px; padding: 6px 10px; font-size: 11.5px; font-weight: 700; cursor: pointer; background: #64748b; color: #fff; flex: 0 0 auto; }
+        /* The action we want tapped, so it carries the colour; Dismiss stays grey beside it. */
+        .lfh-conn-go { border: 0; border-radius: 8px; padding: 6px 10px; font-size: 11.5px; font-weight: 700; cursor: pointer; background: #16a34a; color: #fff; flex: 0 0 auto; }
         .lfh-conn-pop-ok { font-size: 11.5px; opacity: 0.6; border-top: 1px solid var(--line, rgba(127,127,127,.14)); padding-top: 10px; }
 
         @media (prefers-reduced-motion: reduce) {

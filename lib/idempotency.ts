@@ -15,6 +15,9 @@
 // a helper table hiccuped.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+// The "was anything actually changed?" rule lives in its own import-free file so the guard
+// (scripts/verify-order-retry.mjs) can execute the REAL rule instead of a copy. See it for why.
+import { didSomething, storedIsRefusal } from "@/lib/idempotencyRule";
 
 // A claimed-but-not-completed row older than this is treated as a crashed attempt
 // and allowed to run again (otherwise a server crash mid-write would wedge that
@@ -36,7 +39,22 @@ async function begin(actionId: string, panel: string): Promise<Claim> {
     if ((ins.error as { code?: string }).code === "23505") {
       const row = await sb.from("action_idempotency").select("done, created_at, result").eq("action_id", actionId).single();
       if (row.error || !row.data) return { state: "fresh" }; // can't read it → fail open
-      if (row.data.done) return { state: "done", result: (row.data as { result?: unknown }).result ?? null }; // completed → duplicate (echo stored result)
+      if (row.data.done) {
+        const stored = (row.data as { result?: unknown }).result ?? null;
+        // SELF-HEALING for rows written before didSomething() existed: a refusal that was
+        // wrongly marked done would otherwise keep replaying forever (the diner's basket could
+        // never be sent again). Drop it and let the handler run — it changed nothing, so there
+        // is nothing to protect.
+        if (storedIsRefusal(stored)) {
+          // Reuse the row as a fresh claim (rather than deleting it) so this attempt is still
+          // protected against a concurrent duplicate while it runs.
+          await sb.from("action_idempotency")
+            .update({ done: false, result: null, created_at: new Date().toISOString() })
+            .eq("action_id", actionId);
+          return { state: "fresh" };
+        }
+        return { state: "done", result: stored }; // completed → duplicate (echo stored result)
+      }
       const age = Date.now() - new Date(row.data.created_at as string).getTime();
       if (age > STALE_MS) {
         // Stale in-flight claim (likely a crashed attempt) → take it over.
@@ -93,7 +111,7 @@ export function withIdempotency<C>(
     // caller) to store for future duplicates.
     let body: unknown = null;
     try { body = await res.clone().json(); } catch { /* non-JSON response → store nothing */ }
-    await finish(actionId, res.status < 400, body);
+    await finish(actionId, didSomething(res.status, body), body);
     return res;
   };
 }
