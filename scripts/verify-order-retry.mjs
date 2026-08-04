@@ -140,8 +140,11 @@ const gate = readFileSync(join(ROOT, "components/SessionGate.tsx"), "utf8");
 for (const [name, rel] of [["waiter", "app/api/tablet/[...path]/route.ts"], ["manager", "app/api/editor/[...path]/route.ts"]]) {
   const src = readFileSync(join(ROOT, rel), "utf8");
   const parcel = src.slice(src.indexOf('a === "parcel"'), src.indexOf('a === "parcel"') + 3000);
-  /select\("id,title,price,open_price,tags"\)/.test(parcel)
-    ? ok(`${name} parcel reads the sold-out board`)
+  // Test the PROPERTY, not an exact column list: this asserted the literal
+  // select("id,title,price,open_price,tags") and went red the moment another change legitimately
+  // added `tax_mode` to it. A guard that fails on a correct edit is one people delete.
+  /\.select\("[^"]*\btags\b[^"]*"\)/.test(parcel) && /includes\("sold-out"\)/.test(parcel)
+    ? ok(`${name} parcel reads the sold-out board and refuses`)
     : bad(`${name} parcel can still take an order for a sold-out dish`);
   /if \(!d\) return err\(editErrMsg\("unknown_item"\), 400\)/.test(parcel)
     ? ok(`${name} parcel refuses a dish it can't resolve instead of dropping the line`)
@@ -189,6 +192,42 @@ const cov = readFileSync(join(ROOT, "scripts/verify-clash-coverage.mjs"), "utf8"
 /buildEditExpect/.test(readFileSync(join(ROOT, "public/panels/editor/app.js"), "utf8"))
   ? ok("two managers editing one dish no longer overwrite each other silently")
   : bad("the menu editor still has no expectation — last save wins on a price");
+
+// ── 10. two people editing the same thing (the comparator that makes it possible) ───────────
+// The REAL comparator, bundled and executed — lib/clashCompare.ts imports nothing, which is why
+// it can be. A guard that re-implements the rule it checks proves nothing about what ships.
+const CMP = join(ROOT, "node_modules/.cache/verify-order-retry-cmp.mjs");
+execFileSync("npx", ["esbuild", "lib/clashCompare.ts", "--bundle", "--platform=node", "--format=esm",
+  `--outfile=${CMP}`, "--log-level=warning"], { cwd: ROOT, stdio: "inherit" });
+const { sameValue } = await import(pathToFileURL(CMP).href);
+const cmpCases = [
+  ["two different rename maps are told apart", { "3": "A1" }, { "5": "Patio" }, false],
+  ["the same map in another key order is equal", { "3": "A1", "5": "P" }, { "5": "P", "3": "A1" }, true],
+  ["one edited rename is a change", { "3": "A1" }, { "3": "A2" }, false],
+  ["null vs empty object invents no clash", null, {}, true],
+  ["allergen lists still compare as sets", ["nuts", "egg"], ["egg", "nuts"], true],
+];
+for (const [name, a, b, want] of cmpCases) {
+  sameValue(a, b) === want ? ok(name) : bad(name, `got ${sameValue(a, b)}, expected ${want}`);
+}
+const clashSrc = readFileSync(join(ROOT, "lib/clash.ts"), "utf8");
+/from "@\/lib\/clashCompare"/.test(clashSrc)
+  ? ok("the clash gate uses that comparator (not a private copy)")
+  : bad("lib/clash.ts has drifted back to its own value comparison");
+/isPlainObject\(v\)\) return "something different now"/.test(clashSrc)
+  ? ok("an object's clash message never prints [object Object]")
+  : bad("a manager could be shown the words [object Object]");
+const ed = readFileSync(join(ROOT, "public/panels/editor/app.js"), "utf8");
+// Assert the map is keyed by the value the save ACTUALLY passes. `kind` is "settings" for the
+// general tab, so a `general:` key here matches nothing and the expectation is never sent — which
+// is exactly what happened first, and this check went green on the string while nothing was
+// protected. Only an end-to-end save caught it. So: key present AND kind derived the same way.
+/EXPECT_TABLE = \{[^}]*\bsettings: "settings"/.test(ed) && /state\.tab === "general" \? "settings"/.test(ed)
+  ? ok("table renames are protected — two managers can no longer overwrite each other")
+  : bad("the settings expectation is keyed on a value `kind` never takes — nothing is protected");
+/EXPECT_ID_FIELD/.test(ed)
+  ? ok("…and the settings row is identified by restaurant_id, as the server expects")
+  : bad("the settings expectation would name the wrong id column");
 
 console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

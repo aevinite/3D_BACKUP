@@ -10,6 +10,7 @@ import { signRows } from "@/lib/mediaLinks";
 import { ownerScope, inScope, type OwnerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
+import { withIdempotency } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -101,7 +102,13 @@ export async function PATCH(req: NextRequest) {
   return NextResponse.json({ ok: true });
 }
 
-export async function POST(req: NextRequest) {
+// AT MOST ONCE. Nothing in the app POSTs here today — the real path a panel uses is raiseIssue()
+// from the tablet/kitchen routes, which are wrapped. But this endpoint DOES insert an issue row,
+// so the day someone wires a button to it, a double-tap or a retry after a lost reply would post
+// the same complaint twice. Wrapping an insert costs nothing when no header is sent (it passes
+// straight through) and removes the trap in advance. (Found by the skipped-phase audit 2026-08-04.)
+export const POST = withIdempotency(postImpl, "owner");
+async function postImpl(req: NextRequest) {
   let scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const gatedC = await gateIssuesScope(scope);
