@@ -539,17 +539,19 @@ export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID):
 }
 
 async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Settings> {
-  // Explicit column list = exactly what this function maps below (egress rule) —
-  // and the guest no longer receives staff-only fields (gstin, tax, invoice
-  // prefix, phone…) that `*` was silently shipping to every menu visitor.
+  // ONE DOOR (mig 282). This used to select a column list straight off the `settings` table with
+  // the public key, which meant anon needed a table-wide read — and every restaurant's gstin,
+  // address, phone and panel config came with it. It now asks a SECURITY DEFINER function that
+  // returns the guest's slice as one object: `to_jsonb(row)` minus a denylist.
+  //
+  // WHY A FUNCTION AND NOT A COLUMN GRANT OR A VIEW. Both of those ENUMERATE the allowed
+  // columns, so they must stay in lockstep with the list here — and code and migrations do not
+  // deploy together. That exact mismatch 500'd every guest menu on 2026-08-04 (a column grant
+  // listed 19 columns while this select asked for 22). Reading keys off an object cannot do
+  // that: a key the function does not return is `undefined`, and every mapping below already
+  // has a default for that. It degrades instead of breaking.
   const { data, error } = await supabase
-    .from("settings")
-    // price_tax_mode / item_tax_modes_allowed / mrp_tax_treatment are the mig-269 price
-    // behaviours. They are guest-safe (they describe what a printed price MEANS, which the
-    // guest is entitled to know) and cost three tiny columns on a row we already read.
-    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components, price_tax_mode, item_tax_modes_allowed, mrp_tax_treatment, google_review_url, google_review_mode, menu_enabled, menu_default_layout, menu_default_mode, menu_languages, menu_currencies")
-    .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
-    .maybeSingle();
+    .rpc("lfh_guest_settings", { p_restaurant_id: restaurantId }); // one row per restaurant (079)
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
   // Small helper: turn a value into a number, or null if it's blank/not a number.
   const num = (v: unknown): number | null => (v === null || v === undefined || v === "" || isNaN(Number(v)) ? null : Number(v));
