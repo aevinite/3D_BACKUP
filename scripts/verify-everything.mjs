@@ -1262,8 +1262,21 @@ phase("pick a free table and a real dish to order", async () => {
   LIVE.dish = dishes[0];
   const open = await dbGet(`sessions?select=table_number&restaurant_id=eq.${FH.id}&status=eq.open`);
   const taken = new Set(open.map((s) => Number(s.table_number)));
-  for (let t = 20; t <= 60; t++) if (!taken.has(t)) { LIVE.table = t; break; }
-  ok(LIVE.table, "no free table number to test on");
+  // STAY ON THE FLOOR PLAN. This scanned a hard-coded 20..60 and stopped at the first table with
+  // no open session — without ever asking how many tables this restaurant HAS. On a busy shared
+  // database (a sweep day, where other lanes leave test sessions on tables 20-30) it ran off the
+  // end and picked 31 on a 30-table floor, so the server rightly answered "Table 31 doesn't exist
+  // (this place has 30 tables)" and EIGHT later phases failed in a row — the order, its money, its
+  // KOT number, the waiter tile, the manager summary, the per-table slice and the kitchen move.
+  // Eight red lines about a table that was never real, which is exactly how a genuine finding gets
+  // buried. The product was correct every time; the picker was not. (T4, 2026-08-05.)
+  const cap = Number(((await dbGet(`settings?select=table_count&restaurant_id=eq.${FH.id}`))[0] || {}).table_count) || 0;
+  ok(cap > 0, "this restaurant has no table_count, so there is no floor to test on");
+  // Walk DOWN from the top of the floor plan: it keeps the old intent (prefer a high table, which
+  // the demo restaurant's other tests don't use) while still finding table 16 when a sweep day has
+  // left open sessions on 17-30 — which is exactly the state that produced the phantom table 31.
+  for (let t = cap; t >= 1; t--) if (!taken.has(t)) { LIVE.table = t; break; }
+  ok(LIVE.table, `all ${cap} tables already have an open session — close one, or raise this restaurant's table count, before re-running`);
 });
 phase("the manager panel opens with the floor visible", async () => {
   const s2 = await screen("manager", "/manager", { settle: 4200 });
