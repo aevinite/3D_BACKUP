@@ -193,8 +193,11 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
    rest it covered the right-hand card's button (guest sweep 2026-08-04, seen on both
    restaurants). Two deterministic parts, no change to the owner's chosen layout:
      · while the guest is SCROLLING (body.menu-scrolling, set by the menu's own scroll
-       handler) the bell steps aside — it shrinks and drops mostly out of the way — so the
-       control they are scrolling towards is visible and tappable on arrival;
+       handler) the bell steps aside — it shrinks and drops out of the card's control
+       corner — so the button they are scrolling towards is visible and tappable on
+       arrival. It KEEPS its own pointer-events on purpose: making it tap-through would
+       send a tap aimed at the bell into a dish card instead, trading one wrong target
+       for another;
      · the list gets bottom clearance below, so the LAST row can always be scrolled clear
        of the bell instead of being permanently pinned under it.
    Motion is disabled for anyone who asked for reduced motion. */
@@ -202,7 +205,6 @@ body.menu-scrolling .chef-call {
   transform: translateY(26px) scale(0.72);
   opacity: 0.45;
   animation: none;                 /* stop the float so it doesn't fight this */
-  pointer-events: none;            /* and never swallow a tap meant for the card */
 }
 @media (prefers-reduced-motion: reduce) {
   body.menu-scrolling .chef-call { transform: none; opacity: 0.45; }

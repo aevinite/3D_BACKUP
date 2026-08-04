@@ -140,7 +140,6 @@ export default function ToastHost() {
           </div>
           {/* The small subtitle line, only if we have one */}
           {t.subtitle && <div className="toast-sub">{t.subtitle}</div>}
-          <div className="toast-rule" aria-hidden="true" />
           {/* The footer: a "tap to view" hint for tappable tickets, else a sign-off.
               Only French House (#1) signs off in French; other restaurants get a
               neutral "thank you" so a sushi/taco/Indian brand doesn't say "merci"
@@ -148,9 +147,13 @@ export default function ToastHost() {
               A REFUSAL gets no sign-off. "Please enter your table number first.
               · thank you ·" thanks the diner for a mistake they haven't fixed yet,
               which reads as the app not understanding what just happened (guest sweep
-              2026-08-04). Errors keep the torn-receipt rule above and end there. */}
+              2026-08-04). The closing torn-receipt rule travels WITH the footer, so a
+              refusal doesn't end on a dangling dashed line. */}
           {(t.href || t.event || t.variant !== "error") && (
-            <div className="toast-foot">{t.href || t.event ? "tap to view →" : signOff}</div>
+            <>
+              <div className="toast-rule" aria-hidden="true" />
+              <div className="toast-foot">{t.href || t.event ? "tap to view →" : signOff}</div>
+            </>
           )}
         </button>
       ))}
