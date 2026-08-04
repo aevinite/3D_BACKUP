@@ -112,3 +112,26 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
 export function inScope(scope: OwnerScope, restaurantId: string): boolean {
   return scope.all || scope.ids.includes(restaurantId);
 }
+
+// The CONCRETE restaurant-id list for a scope. A real owner already has one; the admin's
+// all-restaurants view needs every id, and that read must be PAGED.
+//
+// Three routes (khata / customers / ratings) each had their own copy doing a bare
+// `select("id")` with no limit and no paging. PostgREST caps the rows it returns, so past
+// that cap the admin's all-restaurants Pay Later / Customers / Ratings views silently
+// dropped restaurants — the identical bug the reports route's allRestaurantIds() was written
+// to page around ("a flat .limit(100) silently dropped every restaurant past the 100th").
+// ONE helper now, so a fourth copy can't drift (found by the 2026-08-04 owner-panel sweep).
+export async function scopedRestaurantIds(scope: OwnerScope): Promise<string[]> {
+  if (!scope.all) return scope.ids;
+  const ids: string[] = [];
+  const PAGE = 1000;
+  for (let offset = 0; ; offset += PAGE) {
+    const r = await sb.from("restaurants").select("id").order("id").range(offset, offset + PAGE - 1);
+    if (r.error) break;                       // partial list beats no list on a transient read error
+    const batch = (r.data ?? []).map((x) => x.id as string);
+    ids.push(...batch);
+    if (batch.length < PAGE) break;
+  }
+  return ids;
+}

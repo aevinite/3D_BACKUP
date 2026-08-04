@@ -38,6 +38,10 @@ export type ReportData = {
   scopeName: string;
   periodLabel: string;
   generatedAt: string;
+  // Restaurants whose figures could NOT be read for this period. The gatherer used to throw
+  // on the first failure and blank the whole statement; it now drops the restaurant and names
+  // it here so the document admits the gap instead of quietly under-reporting (2026-08-04).
+  omitted?: string[];
   group: {
     revenue: number; orders: number; paidOrders: number; avg: number;
     prevRevenue: number | null;
@@ -49,12 +53,21 @@ export type ReportData = {
   };
   restaurants: ReportRestaurant[];
 };
-export type ExportTable = { title: string; head: string[]; rows: (string | number)[][] };
+// `cols` (OPTIONAL) states what each column IS, so a printed cell never has to be guessed
+// from the wording of its header. Builders that don't set it keep the old header heuristic,
+// so nothing existing changes. It exists because guessing was wrong twice on the Team & pay
+// sheet: none of "Salary" / "Advance" / "Total paid" / "Still owed" matched the money words,
+// so every amount printed with no ₹ — and "Rate" (a monthly salary in rupees) matched the
+// PERCENT rule, so ₹42,000 printed as "42000%" (found 2026-08-04).
+export type ExportCol = "text" | "money" | "num" | "pct";
+export type ExportTable = { title: string; head: string[]; rows: (string | number)[][]; cols?: ExportCol[] };
 
 const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
 const nfmt = (n: number) => Math.round(n).toLocaleString("en-IN");
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) + "%" : "—");
-const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// Tolerates null/undefined too — a `label` coming out of settings JSON is not guaranteed
+// to be a string, and esc() throwing would take the whole printed report with it.
+const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 // The money-flow calculation (owner, 2026-07-27): show the WHOLE journey from gross
 // sales to money in hand as one visible calculation — every cut named, every subtotal
@@ -68,6 +81,12 @@ function billingRows(b: BillingDetails): [string, string][] {
     rows.push(["Gross sales — everything billed, before tax", inr(b.gross)]);
     rows.push(["Less : discounts given to guests", "− " + inr(b.discount)]);
     rows.push(["= Taxable amount (gross − discounts)", inr(b.gross - b.discount)]);
+    // NOT escaped here on purpose. `c.label` is owner-editable (settings.tax_components), so it
+    // does need escaping — but billingTableHtml() below already runs esc() over every label it
+    // renders, and these same rows also feed the CSV/Excel builders, where HTML entities would be
+    // literal text in the cell. Escaping here as well produced a visible "CGST &lt;2.5%&gt;" on
+    // the printed sheet (caught by node_modules/.cache test during the 2026-08-04 sweep fixes —
+    // the finding was real for the .xls builders, and wrong for this one). Escape AT the sink.
     for (const c of b.taxComponents) rows.push([`Add : ${c.label} collected`, "+ " + inr(c.amount)]);
     rows.push([b.taxComponents.length ? "Add : total GST collected" : "Add : GST collected", "+ " + inr(b.taxTotal)]);
     // computed (not b.net): group-level `net` is summed from a different, created_at-attributed
@@ -139,7 +158,7 @@ function weekdayHtml(daily: DailyRow[], grain: string): string {
   const best = rows.reduce((a, b) => (b.net / b.days > a.net / a.days ? b : a), rows[0]);
   return `<h3>Day-of-week performance</h3>
   <table><thead><tr><th>Weekday</th><th class="r">Days</th><th class="r">Avg net / day</th><th class="r">Total net</th><th class="r">Orders</th></tr></thead><tbody>
-    ${rows.map((r) => `<tr${r.name === best.name ? ' style="font-weight:700"' : ""}><td>${r.name}${r.name === best.name ? " ★" : ""}</td><td class="r">${r.days}</td><td class="r">${inr(r.net / r.days)}</td><td class="r">${inr(r.net)}</td><td class="r">${nfmt(r.orders)}</td></tr>`).join("")}
+    ${rows.map((r) => `<tr${r.name === best.name ? ' style="font-weight:700"' : ""}><td>${esc(r.name)}${r.name === best.name ? " ★" : ""}</td><td class="r">${r.days}</td><td class="r">${inr(r.net / r.days)}</td><td class="r">${inr(r.net)}</td><td class="r">${nfmt(r.orders)}</td></tr>`).join("")}
   </tbody></table>`;
 }
 // Dayparts — breakfast/lunch/evening/dinner/late-night split from the hourly pattern.
@@ -165,7 +184,7 @@ function daypartsHtml(hourly: { hour: number; orders: number; revenue: number }[
   const total = rows.reduce((a, r) => a + r.revenue, 0);
   return `<h3>Dayparts — when the money comes in</h3>
   <table><thead><tr><th>Daypart</th><th class="r">Orders</th><th class="r">Revenue</th><th class="r">Share</th></tr></thead><tbody>
-    ${rows.map((r) => `<tr><td>${r.name}</td><td class="r">${nfmt(r.orders)}</td><td class="r">${inr(r.revenue)}</td><td class="r">${pct(r.revenue, total)}</td></tr>`).join("")}
+    ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td class="r">${nfmt(r.orders)}</td><td class="r">${inr(r.revenue)}</td><td class="r">${pct(r.revenue, total)}</td></tr>`).join("")}
   </tbody></table>`;
 }
 // Menu-engineering tag (Lightspeed-style 2×2): popularity (qty) × unit price medians.
@@ -226,8 +245,13 @@ function categoriesHtml(cats: { category: string; qty: number; revenue: number }
 export function buildReportHtml(d: ReportData): string {
   const multi = d.restaurants.length > 1;
   const g = d.group;
+  // ESCAPE AT THE SINK. The `hint` of the "Total GST" tile is the joined tax-component
+  // LABELS, which the owner types themselves (settings.tax_components) — so a line named
+  // `CGST <2.5%>` went into the printed document raw and broke the tile (found 2026-08-04).
+  // Every one of the three slots is escaped here rather than at the call sites, so a future
+  // tile can't reintroduce it. Callers pass already-formatted money/text, never HTML.
   const kv = (label: string, value: string, hint?: string) =>
-    `<div class="kv"><div class="kv-l">${label}</div><div class="kv-v">${value}</div>${hint ? `<div class="kv-h">${hint}</div>` : ""}</div>`;
+    `<div class="kv"><div class="kv-l">${esc(label)}</div><div class="kv-v">${esc(value)}</div>${hint ? `<div class="kv-h">${esc(hint)}</div>` : ""}</div>`;
 
   const inHand = moneyInHand(g.billing);
   const extremes = dayExtremes(d.restaurants);
@@ -321,6 +345,8 @@ export function buildReportHtml(d: ReportData): string {
   .gen { font-size: 10.5px; color: #6b7f78; }
   h1 { font-size: 24px; margin: 14px 0 2px; letter-spacing: -0.02em; }
   .scope { color: #4b615a; font-size: 13px; margin-bottom: 6px; }
+  /* An incomplete statement must SAY it is incomplete, on the paper itself. */
+  .omit { margin: 10px 0 0; padding: 8px 11px; border: 1.5px solid #b45309; border-radius: 6px; background: #fff7ed; color: #7c2d12; font-size: 11px; }
   h2 { font-size: 15px; margin: 26px 0 10px; color: #0f766e; border-bottom: 1px solid #d9e5e1; padding-bottom: 5px; }
   h3 { font-size: 11.5px; margin: 16px 0 7px; text-transform: uppercase; letter-spacing: .05em; color: #4b615a; }
   .kvgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; }
@@ -346,6 +372,7 @@ export function buildReportHtml(d: ReportData): string {
   <div class="mast"><span class="brand">Aevidine · Restaurant OS</span><span class="gen">Generated ${esc(d.generatedAt)}</span></div>
   <h1>Business performance report</h1>
   <div class="scope">${esc(d.scopeName)} · ${esc(d.periodLabel)}</div>
+  ${d.omitted?.length ? `<div class="omit"><b>Incomplete:</b> ${esc(d.omitted.join(", "))} could not be read for this period, so ${d.omitted.length === 1 ? "it is" : "they are"} NOT included in any total below. Try again, or run ${d.omitted.length === 1 ? "that restaurant" : "those restaurants"} on their own.</div>` : ""}
   ${summary}
   ${comparison}
   ${slowSection}
@@ -366,6 +393,10 @@ export function buildReportTables(d: ReportData): ExportTable[] {
   const out: ExportTable[] = [];
   const gDaily = mergedDaily(d.restaurants);
   const activeDays = gDaily.filter((x) => x.orders > 0).length;
+  if (d.omitted?.length) out.push({
+    title: "INCOMPLETE — these restaurants could not be read and are NOT in any total below",
+    head: ["Restaurant"], rows: d.omitted.map((n) => [n]),
+  });
   out.push({
     title: `Aevidine business performance report — ${d.scopeName} — ${d.periodLabel} — generated ${d.generatedAt}`,
     head: ["Metric", "Value"],

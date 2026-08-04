@@ -6,9 +6,9 @@
 //   Manage — the same inventory engine the manager panel uses, embedded (invonly),
 //   so the owner can enter bills/counts/waste/expenses themselves.
 // No polling: the snapshot cache serves opens; ↻ forces a live recompute.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { asSuffix } from "@/lib/ownerPin";
-import { useOwnerSkin, useSkinFrame } from "./useOwnerSkin";
+import { useOwnerSkin, useEmbedFrame } from "./useOwnerSkin";
 
 type Summary = { stockValue: number; itemCount: number; lowCount: number; negativeCount: number; purchases: number; waste: number; expenses: number };
 type ExpenseRow = { id: string; category: string; title: string; amount: number; expense_date: string; note: string | null; photo_url: string | null; created_by: string | null; voided_at: string | null; void_reason: string | null };
@@ -39,7 +39,11 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
   const [view, setView] = useState<"overview" | "manage">("overview");
   // Live cockpit skin → the embedded Manage panel, by message (never via src: that reloads it).
   const liveSkin = useOwnerSkin(skin);
-  const { frame, bornSkin, onLoad } = useSkinFrame(liveSkin);
+  // Mounted IMPERATIVELY (useEmbedFrame) so the frame adds NO browser-history entry — a JSX
+  // <iframe> does, which swallowed a Back press on this page (found 2026-08-04).
+  const bornSkin = useRef(liveSkin).current;
+  const embedSrc = `/panels/editor/index.html?rid=${encodeURIComponent(rid)}&invonly=1&skin=${bornSkin}`;
+  const mount = useEmbedFrame(embedSrc, liveSkin, [rid, view]);
   const [month, setMonth] = useState(() => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 7));
   const [data, setData] = useState<Payload | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -87,9 +91,7 @@ export default function OwnerInventory({ restaurants, initial, skin }: {
       {view === "manage" ? (
         // The manager panel's inventory engine, scoped to this restaurant. Identical
         // behaviour in both panels; the API enforces powers per call regardless.
-        <iframe key={rid} ref={frame} onLoad={onLoad}
-          src={`/panels/editor/index.html?rid=${encodeURIComponent(rid)}&invonly=1&skin=${bornSkin}`}
-          title="Manage inventory" style={{ width: "100%", height: "calc(100vh - 170px)", border: "none", borderRadius: 12 }} />
+        <div ref={mount} style={{ width: "100%", height: "calc(100vh - 170px)", borderRadius: 12, overflow: "hidden", display: "flex" }} />
       ) : (
         <>
           <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "10px 0", flexWrap: "wrap" }}>

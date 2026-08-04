@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { canonPayMethod } from "@/components/owner/Charts";
-import type { ExportTable } from "@/components/owner/ownerReportDoc";
+import type { ExportTable, ExportCol } from "@/components/owner/ownerReportDoc";
 
 // Paise only when the amount actually has them (the CGST/SGST halves of an odd tax total),
 // so equal rates print as equal halves; whole-rupee amounts stay clean.
@@ -31,7 +31,41 @@ type Totals = Omit<MoneyRow, "bucket">;
 type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean } | null;
 type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; bucket?: string;
   // Team & pay carries its own shapes (mig 220/221) alongside the shared `rows`.
-  people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[] };
+  people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[];
+  // Inventory & stock (mig 227) — the five sub-tabs share one payload shape.
+  summary?: InvSummary; coverage?: InvCoverage; costDataFrom?: string | null;
+  merged?: boolean; perRestaurant?: InvPerRest[];
+  dishes?: InvDish[]; items?: InvItem[]; vendors?: InvVendor[];
+  series?: InvSeries[]; expenses?: InvExpense[]; waste?: InvWaste[] };
+
+// The inventory shapes, mirrored from components/owner/reports/InventoryReports.tsx so the
+// export can't drift from what the screen renders.
+type InvSummary = {
+  stockValue: number; stockItems: number; lowCount: number; negativeCount: number;
+  purchases: number; purchaseCount: number; actualUsed: number; wasted: number; wasteCount: number;
+  expenses: number; corrections: number; theoreticalCost: number; foodCostPct: number | null;
+};
+type InvCoverage = { totalRevenue: number; coveredRevenue: number; totalDishes: number; coveredDishes: number; mappedRecipes: number; menuDishes: number; pct: number };
+type InvItem = {
+  id: string; name: string; category: string; baseUom: string; buyUom: string; factor: number;
+  onHandBase: number; onHandVal: number; parQty: number | null;
+  boughtBase: number; boughtVal: number; usedBase: number; usedVal: number;
+  wastedBase: number; wastedVal: number; adjustBase: number; adjustVal: number;
+};
+type InvDish = { slug: string; title: string; price: number; qtySold: number; revenue: number; plateCost: number; costTotal: number; ingredients: number; marginPct: number | null };
+type InvPerRest = { name: string; stockValue: number; purchases: number; expenses: number; wasted: number; theoreticalCost: number };
+type InvVendor = { vendor: string; bills: number; amount: number; isCash: boolean };
+type InvSeries = { bucket: string; purchased: number; used: number; wasted: number };
+type InvExpense = { category: string; title: string; amount: number; expense_date: string; note: string | null; created_by: string | null; voided_at: string | null; void_reason: string | null };
+type InvWaste = { item_id: string; qty_base: number; reason: string; note: string | null; unit_cost_snap: number; waste_date: string; created_by: string | null; voided_at: string | null };
+
+// Same wording the Inventory report shows on screen, so a printed sheet reads identically.
+const EXP_LABELS: Record<string, string> = { breakage: "Breakage", repair: "Repair", utilities: "Utilities", cleaning: "Cleaning", supplies: "Supplies", rent: "Rent", transport: "Transport", misc: "Other" };
+const WASTE_LABELS: Record<string, string> = { spoiled: "Spoiled", burnt: "Burnt", spilled: "Spilled", expired: "Expired", staff_meal: "Staff meal", complimentary: "On the house", other: "Other" };
+const INV_KINDS = new Set(["invstock", "invpurchases", "invusage", "invwaste", "invexpenses"]);
+// Round to 2dp for quantities (they are fractional) — amounts stay whole rupees like
+// everywhere else in these exports.
+const q2 = (n: number) => Math.round((Number(n) || 0) * 100) / 100;
 
 export type SectionMeta = { label: string; kind: string };
 export type SectionCtx = {
@@ -73,7 +107,10 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
     const cash = (data.cashRows ?? []) as { bucket: string; paid_out: number; people: number; entries: number }[];
     const out: ExportTable[] = [{
       title: `${title} — who you paid`,
+      // Every amount here is RUPEES, including "Rate" (a monthly salary) — which the old
+      // header guess read as a percentage and printed as "42000%".
       head: ["Person", "Role", "Rate", "Salary", "Advance", "Bonus / OT / other", "Total paid", "Advance left", "Last paid"],
+      cols: ["text", "text", "money", "money", "money", "money", "money", "money", "text"],
       rows: people.map((r) => [r.name, r.designation || (r.role === "tablet" ? "waiter" : r.role),
         r.pay_amount ? Math.round(r.pay_amount) : "", Math.round(r.salary), Math.round(r.advance),
         Math.round(r.bonus + r.overtime + r.other), Math.round(r.paid), Math.round(r.advanceOutstanding),
@@ -82,12 +119,14 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
     if (months.length) out.push({
       title: `${title} — what each month was worth`,
       head: ["Month", "On pay list", "Team cost", "Paid for it", "Still owed"],
+      cols: ["text", "num", "money", "money", "money"],
       rows: months.map((m) => [new Date(m.bucket).toLocaleDateString("en-IN", { month: "long", year: "numeric", timeZone: "Asia/Kolkata" }),
         m.people, Math.round(m.expected), Math.round(m.paid), Math.round(m.owed)]),
     });
     if (cash.length) out.push({
       title: `${title} — money out, by day`,
       head: ["Day", "Paid out", "People", "Entries"],
+      cols: ["text", "money", "num", "num"],
       rows: cash.map((r) => [c.bucketLabel(r.bucket, grain), Math.round(r.paid_out), r.people, r.entries]),
     });
     return out;
@@ -96,10 +135,122 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
     const rows = (data.rows ?? []) as { name: string; role: string; designation: string | null; active: boolean; daysActive: number; hours: number; orders: number; value: number; tables: number; sittings: number; discount: number; ratings: number; avgRating: number | null; paid: number }[];
     return [{
       title, head: ["Person", "Role", "Days worked", "Hours on shift", "Orders punched", "Value punched", "Tables", "Sittings", "Discount given", "Ratings", "Avg rating", "Paid"],
+      cols: ["text", "text", "num", "num", "num", "money", "num", "num", "money", "num", "text", "money"],
       rows: rows.map((r) => [r.name + (r.active ? "" : " (disabled)"), r.designation || (r.role === "tablet" ? "waiter" : r.role),
         r.daysActive, r.hours, r.orders, Math.round(r.value), r.tables, r.sittings, Math.round(r.discount),
         r.ratings, r.avgRating ?? "", Math.round(r.paid)]),
     }];
+  }
+  // ── INVENTORY & STOCK (mig 227) ────────────────────────────────────────────────────
+  // These five kinds had NO branch, so every one of them fell through to the empty "—"
+  // table below: Export → CSV/Excel and Print each produced a document with a title and
+  // nothing in it. That is the identical defect found and fixed for Team & pay on
+  // 2026-07-31 (see the note above) — inventory landed after that fix and was missed.
+  // Found by the 2026-08-04 owner-panel sweep.
+  //
+  // Every view leads with the SAME summary band the screen shows, so a printed stock sheet
+  // stands on its own, then adds that view's own detail table.
+  if (INV_KINDS.has(meta.kind)) {
+    const s = data.summary, cov = data.coverage;
+    const out: ExportTable[] = [];
+    if (s) {
+      const band: (string | number)[][] = [
+        ["Stock on the shelf", Math.round(s.stockValue)],
+        ["Ingredients tracked", s.stockItems],
+        ["Running low", s.lowCount],
+        ["Below zero", s.negativeCount],
+        ["Bought in this period", Math.round(s.purchases)],
+        ["Purchase bills", s.purchaseCount],
+        ["Ingredients used (recipe cost)", Math.round(s.theoreticalCost)],
+        ["Ingredients used (stock ledger)", Math.round(s.actualUsed)],
+        ["Wasted", Math.round(s.wasted)],
+        ["Waste entries", s.wasteCount],
+        ["Other expenses", Math.round(s.expenses)],
+        ["Count corrections", Math.round(s.corrections)],
+        ["Food cost %", s.foodCostPct == null ? "not enough recipes mapped" : `${s.foodCostPct.toFixed(1)}%`],
+      ];
+      if (cov) band.push(
+        ["Sales covered by a recipe", Math.round(cov.coveredRevenue)],
+        ["Sales in this period", Math.round(cov.totalRevenue)],
+        ["Recipes mapped", `${cov.mappedRecipes} of ${cov.menuDishes} dishes`],
+      );
+      out.push({ title, head: ["Figure", "Value"], cols: ["text", "text"], rows: band });
+    }
+    if (data.merged && data.perRestaurant?.length) {
+      out.push({
+        title: `${title} — by restaurant`,
+        head: ["Restaurant", "On the shelf", "Bought", "Expenses", "Wasted", "Recipe cost of sales"],
+        cols: ["text", "money", "money", "money", "money", "money"],
+        rows: data.perRestaurant.map((r) => [r.name, Math.round(r.stockValue), Math.round(r.purchases), Math.round(r.expenses), Math.round(r.wasted), Math.round(r.theoreticalCost)]),
+      });
+    }
+    const items = data.items ?? [];
+    if (meta.kind === "invstock" && items.length) {
+      out.push({
+        title: `${title} — every ingredient`,
+        head: ["Ingredient", "Category", "On hand", "Unit", "Value on shelf", "Par level", "Bought", "Used", "Wasted", "Corrections"],
+        cols: ["text", "text", "num", "text", "money", "num", "num", "num", "num", "money"],
+        rows: items.map((i) => [i.name, i.category || "", q2(i.onHandBase / (i.factor || 1)), i.buyUom,
+          Math.round(i.onHandVal), i.parQty == null ? "" : q2(i.parQty / (i.factor || 1)),
+          q2(i.boughtBase / (i.factor || 1)), q2(i.usedBase / (i.factor || 1)),
+          q2(i.wastedBase / (i.factor || 1)), Math.round(i.adjustVal)]),
+      });
+    }
+    if (meta.kind === "invpurchases" && (data.vendors?.length || data.series?.length)) {
+      if (data.vendors?.length) out.push({
+        title: `${title} — by supplier`,
+        head: ["Supplier", "Bills", "Amount", "Paid in cash"],
+        cols: ["text", "num", "money", "text"],
+        rows: data.vendors.map((v) => [v.vendor, v.bills, Math.round(v.amount), v.isCash ? "yes" : "no"]),
+      });
+      if (data.series?.length) out.push({
+        title: `${title} — day by day`,
+        head: ["Period", "Bought", "Used", "Wasted"],
+        cols: ["text", "money", "money", "money"],
+        rows: data.series.map((r) => [c.bucketLabel(r.bucket, grain), Math.round(r.purchased), Math.round(r.used), Math.round(r.wasted)]),
+      });
+    }
+    if (meta.kind === "invusage") {
+      if (data.dishes?.length) out.push({
+        title: `${title} — cost per dish`,
+        head: ["Dish", "Sold", "Sales", "Price each", "Ingredient cost each", "Ingredient cost total", "Margin %", "Ingredients"],
+        cols: ["text", "num", "money", "money", "money", "money", "text", "num"],
+        rows: data.dishes.map((d) => [d.title, d.qtySold, Math.round(d.revenue), Math.round(d.price),
+          q2(d.plateCost), Math.round(d.costTotal), d.marginPct == null ? "" : `${d.marginPct.toFixed(1)}%`, d.ingredients]),
+      });
+      if (items.length) out.push({
+        title: `${title} — what left the shelf`,
+        head: ["Ingredient", "Used", "Unit", "Cost of what was used", "Corrections"],
+        cols: ["text", "num", "text", "money", "money"],
+        rows: items.map((i) => [i.name, q2(i.usedBase / (i.factor || 1)), i.buyUom, Math.round(i.usedVal), Math.round(i.adjustVal)]),
+      });
+    }
+    if (meta.kind === "invwaste" && data.waste?.length) {
+      const nameOf = new Map(items.map((i) => [i.id, i]));
+      out.push({
+        title: `${title} — every waste entry`,
+        head: ["Date", "Ingredient", "Quantity", "Unit", "Reason", "Value", "Logged by", "Note", "Cancelled"],
+        cols: ["text", "text", "num", "text", "text", "money", "text", "text", "text"],
+        rows: data.waste.map((w) => {
+          const it = nameOf.get(w.item_id);
+          return [w.waste_date, it?.name || "—", q2(w.qty_base / (it?.factor || 1)), it?.buyUom || "",
+            WASTE_LABELS[w.reason] || w.reason, Math.round(w.qty_base * w.unit_cost_snap),
+            w.created_by || "", w.note || "", w.voided_at ? "yes" : ""];
+        }),
+      });
+    }
+    if (meta.kind === "invexpenses" && data.expenses?.length) {
+      out.push({
+        title: `${title} — the expense book`,
+        head: ["Date", "Kind", "What it was", "Amount", "Written by", "Note", "Cancelled", "Why cancelled"],
+        cols: ["text", "text", "text", "money", "text", "text", "text", "text"],
+        rows: data.expenses.map((e) => [e.expense_date, EXP_LABELS[e.category] || e.category, e.title,
+          Math.round(e.amount), e.created_by || "", e.note || "", e.voided_at ? "yes" : "", e.void_reason || ""]),
+      });
+    }
+    // A restaurant that has the module on but has entered nothing yet gets the summary band
+    // alone rather than a blank sheet — an honest "here is the period, it is all zero".
+    return out.length ? out : [{ title, head: ["Figure", "Value"], rows: [["Nothing recorded in this period", 0]] }];
   }
   return [{ title, head: ["—"], rows: [] }];
 }
@@ -109,12 +260,12 @@ export function sectionHtml(c: SectionCtx): string {
   const tables = sectionTables(c);
   const gen = new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" });
   const isMoney = c.meta.kind === "money" || c.meta.kind === "daysummary";
-  // Format each numeric cell by what its COLUMN HEADER says, not its index — the tables have
-  // different shapes (money table vs the tax-split table vs breakdowns), so an index-based
-  // guess mis-rendered the split's rate/amount. Money headers → ₹ (paise-aware); "Rate" → N%;
-  // everything else numeric → plain count.
-  const fmtCell = (cell: string | number, head: string): string => {
+  // A cell is formatted by what its column IS. `t.cols[i]` says so explicitly; only tables
+  // that don't declare it fall back to the old header-wording guess (kept so the compiled
+  // statement's tables, built elsewhere, render exactly as before).
+  const fmtCell = (cell: string | number, head: string, col?: ExportCol): string => {
     if (typeof cell !== "number") return esc(String(cell));
+    if (col) return col === "money" ? inr(cell) : col === "pct" ? `${cell}%` : col === "num" ? nfmt(cell) : esc(String(cell));
     const h = head.toLowerCase();
     if (/rate|%/.test(h)) return `${cell}%`;
     if (/gross|gst|tax|discount|net|revenue|collected|lost|sales|value/.test(h)) return inr(cell);
@@ -123,7 +274,7 @@ export function sectionHtml(c: SectionCtx): string {
   const tableHtml = (t: ExportTable) => `
     <h3>${esc(t.title.split(" — ")[1] ? t.title.split(" — ").slice(1).join(" · ") : t.title)}</h3>
     <table><thead><tr>${t.head.map((h, i) => `<th${i > 0 ? ' class="r"' : ""}>${esc(h)}</th>`).join("")}</tr></thead>
-    <tbody>${t.rows.map((r, ri) => `<tr${ri === t.rows.length - 1 && isMoney && String(r[0]).startsWith("Total") ? ' class="tot"' : ""}>${r.map((cell, i) => `<td${i > 0 ? ' class="r"' : ""}>${i === 0 ? esc(String(cell)) : fmtCell(cell, String(t.head[i] ?? ""))}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    <tbody>${t.rows.map((r, ri) => `<tr${ri === t.rows.length - 1 && isMoney && String(r[0]).startsWith("Total") ? ' class="tot"' : ""}>${r.map((cell, i) => `<td${i > 0 ? ' class="r"' : ""}>${i === 0 ? esc(String(cell)) : fmtCell(cell, String(t.head[i] ?? ""), t.cols?.[i])}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
   return `<!doctype html><html><head><meta charset="utf-8"/><title>${esc(c.meta.label)} · ${esc(c.restName)} · ${esc(c.periodLabel)}</title>
 <style>
   *{box-sizing:border-box} body{font-family:-apple-system,"Segoe UI",Inter,Roboto,sans-serif;color:#10231c;margin:0;padding:34px 40px 50px;font-size:12.5px;line-height:1.5}
@@ -149,12 +300,19 @@ export function sectionHtml(c: SectionCtx): string {
 
 // Open the print document for a section — exported so the page can print AFTER its
 // ask-the-date dialog (owner 2026-07-26: print asks/confirms the date first).
-export function printSection(ctx: SectionCtx) {
+//
+// Returns FALSE when the browser refused the pop-up, so the caller can SAY so. It used to
+// `return` on a null window, which meant a blocked pop-up made the Print button do nothing
+// at all with no trace — the "a tap must never vanish in silence" rule (found 2026-08-04).
+export function printSection(ctx: SectionCtx): boolean {
   const w = window.open("", "_blank");
-  if (!w) return;
+  if (!w) return false;
   w.document.write(sectionHtml(ctx));
   w.document.close();
+  return true;
 }
+/** The one wording used everywhere a print pop-up is refused. */
+export const POPUP_BLOCKED = "Your browser blocked the print window. Allow pop-ups for this site, then tap Print again.";
 
 // ── the Print / CSV / Excel dropdown for a section ────────────────────────────
 // `onPrintClick` (optional) replaces the immediate print with the page's ask-first flow.
@@ -167,11 +325,19 @@ export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx
     const close = (e: MouseEvent) => { if (!(e.target as HTMLElement | null)?.closest?.(".rs-exp")) setOpen(false); };
     document.addEventListener("click", close); return () => document.removeEventListener("click", close);
   }, [open]);
+  // A refused / failed export must SAY so — see POPUP_BLOCKED above.
+  const [note, setNote] = useState<string | null>(null);
   const dl = (blob: Blob, name: string) => { const u = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = u; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(u), 4000); };
   const csvEsc = (v: string | number) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const doCsv = () => { const t = sectionTables(ctx); dl(new Blob(["﻿" + t.map((x) => [x.title, x.head.map(csvEsc).join(","), ...x.rows.map((r) => r.map(csvEsc).join(","))].join("\n")).join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`); };
-  const doXls = () => { const t = sectionTables(ctx); const html = `<html><head><meta charset="utf-8"></head><body>` + t.map((x) => `<h3>${x.title}</h3><table border="1"><tr>${x.head.map((h) => `<th>${h}</th>`).join("")}</tr>${x.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</table>`).join("<br/>") + `</body></html>`; dl(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`); };
-  const doPrint = () => (onPrintClick ? onPrintClick() : printSection(ctx));
+  // Excel is an HTML table in disguise, so every title/header/cell must be ESCAPED — an
+  // unescaped `&` or `<` in a dish or supplier name corrupted the sheet (found 2026-08-04).
+  const doXls = () => { const t = sectionTables(ctx); const html = `<html><head><meta charset="utf-8"></head><body>` + t.map((x) => `<h3>${esc(x.title)}</h3><table border="1"><tr>${x.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr>${x.rows.map((r) => `<tr>${r.map((cell) => `<td>${esc(String(cell))}</td>`).join("")}</tr>`).join("")}</table>`).join("<br/>") + `</body></html>`; dl(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`); };
+  const doPrint = () => {
+    setNote(null);
+    if (onPrintClick) { onPrintClick(); return; }
+    if (!printSection(ctx)) setNote(POPUP_BLOCKED);
+  };
   return (
     <span className="rs-exp" style={{ position: "relative", display: "inline-flex" }}>
       <button className="rs-btn" onClick={() => setOpen((o) => !o)} disabled={!ready} aria-haspopup="menu" aria-expanded={open}>
@@ -184,6 +350,16 @@ export function SectionExport({ ctx, filename, onPrintClick }: { ctx: SectionCtx
               <i className={`fas ${ic}`} style={{ width: 16, color: "var(--accent)" }} aria-hidden /> {lb}
             </button>
           ))}
+        </span>
+      )}
+      {note && (
+        <span role="status" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 91, width: 250,
+          background: "var(--card)", border: "1px solid var(--adm-warn, #d97706)", borderRadius: 10, padding: "9px 11px",
+          fontSize: 11.5, fontWeight: 600, lineHeight: 1.45, color: "var(--text)", boxShadow: "0 14px 34px rgba(0,0,0,.35)" }}>
+          <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-warn, #d97706)", marginRight: 6 }} aria-hidden />
+          {note}
+          <button onClick={() => setNote(null)} aria-label="Dismiss"
+            style={{ display: "block", marginTop: 7, background: "none", border: "none", padding: 0, font: "inherit", fontSize: 11, fontWeight: 700, color: "var(--accent)", cursor: "pointer" }}>OK</button>
         </span>
       )}
     </span>

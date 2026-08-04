@@ -5,7 +5,7 @@
 // columns, .in(restaurant_id), .limit, one cheap head-count for the true total.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, type OwnerScope } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 
@@ -15,11 +15,10 @@ export const dynamic = "force-dynamic";
 const COLS = "restaurant_id, phone, name, blocked, visits, consent, first_seen_at, last_seen_at";
 const REPEAT_MIN = 2; // visits >= 2 = a returning customer (real count, not a time heuristic)
 
-async function scopedIds(scope: OwnerScope): Promise<string[]> {
-  if (!scope.all) return scope.ids;
-  const r = await sb.from("restaurants").select("id");
-  return (r.data || []).map((x) => x.id as string);
-}
+// The concrete id list for this scope. Shared helper (lib/ownerScope) because the
+// admin all-restaurants read must be PAGED — three local copies each dropped restaurants
+// past PostgREST's row cap (found 2026-08-04).
+const scopedIds = scopedRestaurantIds;
 
 export async function GET(req: NextRequest) {
   let scope = await ownerScope(req);

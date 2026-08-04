@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useOwnerSkin, useSkinFrame } from "./useOwnerSkin";
+import { useRef, useState } from "react";
+import { useOwnerSkin, useEmbedFrame } from "./useOwnerSkin";
 
 // Owner panel → Menu (2026-07-25). Hosts the SAME menu editor the manager panel uses
 // (public/panels/editor, menu-only mode) inside the owner cockpit, scoped to the picked
@@ -26,8 +26,13 @@ export default function OwnerMenuEditor({
   // The cockpit's light/dark toggle reaches this embed LIVE (2026-08-03) — by message, so
   // the editor never reloads mid-edit. See components/owner/useOwnerSkin.ts.
   const liveSkin = useOwnerSkin(skin);
-  const { frame, bornSkin, onLoad } = useSkinFrame(liveSkin);
+  // Mounted IMPERATIVELY (useEmbedFrame): a JSX <iframe> makes the browser record a history
+  // entry, so the phone's Back button was swallowed once per mount — and `key={rid}` meant
+  // every restaurant switch added another (found 2026-08-04). The `?skin=` in the src is only
+  // ever the skin the frame was BORN with; live changes travel by postMessage.
+  const bornSkin = useRef(liveSkin).current;
   const src = `/panels/editor/index.html?rid=${encodeURIComponent(rid)}&menuonly=1&skin=${bornSkin}`;
+  const mount = useEmbedFrame(src, liveSkin, [rid]);
   const many = restaurants.length > 1;
 
   return (
@@ -42,13 +47,14 @@ export default function OwnerMenuEditor({
           </select>
         </div>
       )}
-      <iframe key={rid} ref={frame} src={src} title="Menu editor" className="ome-frame" onLoad={onLoad} />
+      <div ref={mount} className="ome-mount" />
       <style>{`
         /* Break out of the owner content padding / centered max-width — only on this page. */
         .adm-main:has(.ome-full){ padding:0 !important; overflow:hidden !important; }
         .owx-wrap:has(.ome-full){ max-width:none !important; margin:0 !important; height:100% !important; }
         .ome-full{ height:100%; display:flex; flex-direction:column; min-height:0; }
-        .ome-frame{ flex:1 1 auto; width:100%; border:0; display:block; background:var(--bg, #0a0c10); }
+        .ome-mount{ flex:1 1 auto; min-height:0; display:flex; }
+        .ome-mount .emb-frame{ flex:1 1 auto; width:100%; border:0; display:block; background:var(--bg, #0a0c10); }
         .ome-switch{ display:flex; align-items:center; gap:9px; padding:9px 16px;
           border-bottom:1px solid var(--line, #1d2430); font-size:13px; font-weight:600; color:var(--muted, #9aa4b6); }
         .ome-switch select{ font:inherit; font-weight:700; color:var(--text, #e6ebf3);

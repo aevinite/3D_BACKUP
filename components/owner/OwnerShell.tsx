@@ -208,15 +208,20 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // dashboard's own overview fetch on a hard load (no duplicate read). It refreshes on
   // the same activity-gated 60s cadence as the dashboard so the sidebar's "revenue today"
   // no longer drifts stale against the live cards (audit 2026-07-07).
-  const [myRests, setMyRests] = useState<{ id: string; name: string; accentColor: string; revenueToday: number }[]>([]);
+  // `reportsOff` = the admin has taken Reports away for that restaurant, so /api/owner/overview
+  // deliberately sends ZERO revenue for it. Carry the flag: showing the zero as if it were a
+  // real figure made a trading restaurant look dead (found 2026-08-04 — the API set the flag,
+  // its own comment said "the client greys them", and no client read it).
+  const [myRests, setMyRests] = useState<{ id: string; name: string; accentColor: string; revenueToday: number; reportsOff?: boolean }[]>([]);
   const refreshMyRests = useCallback(() => {
     const scp = ridPin ? `&scope=${ridPin}${asSuffix()}` : "";
     return fetchOwnerOverview(scp)
       .then((j) => {
         const list = (j as { restaurants?: unknown })?.restaurants;
         if (!Array.isArray(list)) return;
-        setMyRests(list.map((r: { id: string; name: string; accentColor?: string; revenueToday?: number }) => ({
+        setMyRests(list.map((r: { id: string; name: string; accentColor?: string; revenueToday?: number; reportsOff?: boolean }) => ({
           id: r.id, name: r.name, accentColor: r.accentColor || "#34d399", revenueToday: r.revenueToday || 0,
+          reportsOff: r.reportsOff === true,
         })));
       })
       .catch(() => {});
@@ -343,7 +348,9 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                 <button key={r.id} className="rrow" onClick={() => openRestaurant(r.id)} title={`Open ${r.name}`}>
                   <span className="sw" style={{ background: r.accentColor }} aria-hidden="true" />
                   <span className="nm">{r.name}</span>
-                  <span className="rv">{inr(r.revenueToday)}</span>
+                  <span className="rv">{r.reportsOff
+                    ? <span title="Reports are switched off for this restaurant, so its takings aren't shown here." style={{ opacity: .6 }}>hidden</span>
+                    : inr(r.revenueToday)}</span>
                 </button>
               ))}
             </div>
@@ -451,7 +458,9 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                         onClick={() => { setRestOpen(false); openRestaurant(r.id); }} title={`Open ${r.name}`}>
                         <span className="sw" style={{ background: r.accentColor }} aria-hidden="true" />
                         <span className="nm">{r.name}</span>
-                        <span className="rv">{inr(r.revenueToday)}</span>
+                        <span className="rv">{r.reportsOff
+                    ? <span title="Reports are switched off for this restaurant, so its takings aren't shown here." style={{ opacity: .6 }}>hidden</span>
+                    : inr(r.revenueToday)}</span>
                       </button>
                     ))}
                   </div>

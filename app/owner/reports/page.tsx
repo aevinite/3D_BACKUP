@@ -33,7 +33,7 @@ import {
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
 import { readSnap, writeSnap } from "@/lib/ownerSnap";
-import { SectionExport, printSection } from "@/components/owner/reports/sectionExport";
+import { SectionExport, printSection, POPUP_BLOCKED } from "@/components/owner/reports/sectionExport";
 
 type Range = "today" | "yesterday" | "7d" | "30d" | "month" | "lastmonth" | "12m" | "fy" | "all" | "custom";
 const RANGES: { k: Range; label: string }[] = [
@@ -523,6 +523,11 @@ export default function OwnerReports() {
   const [pdFrom, setPdFrom] = useState("");                // dialog's from/to (ranged reports)
   const [pdTo, setPdTo] = useState("");
   const [printWhenReady, setPrintWhenReady] = useState(false);
+  // printSection() answers FALSE when the browser refused the pop-up. This page always routes
+  // Print through its own ask-the-date dialog, so it — not SectionExport — is the place that has
+  // to say so; without this the Print button did nothing at all, silently (found 2026-08-04).
+  const [printErr, setPrintErr] = useState<string | null>(null);
+  const tryPrint = (ctx: Parameters<typeof printSection>[0]) => { setPrintErr(printSection(ctx) ? null : POPUP_BLOCKED); };
   const openPrintAsk = () => {
     setPdDay(day);
     const w = rangeDates(range, cFrom, cTo);
@@ -531,12 +536,13 @@ export default function OwnerReports() {
   };
   const confirmPrint = () => {
     setPrintAsk(false);
+    setPrintErr(null);
     if (isDayKind) {
-      if (pdDay === day) { if (exportCtx) printSection(exportCtx); return; }
+      if (pdDay === day) { if (exportCtx) tryPrint(exportCtx); return; }
       setDay(pdDay); setPrintWhenReady(true);
     } else {
       const cur = rangeDates(range, cFrom, cTo);
-      if (pdFrom === cur.from && pdTo === cur.to) { if (exportCtx) printSection(exportCtx); return; }
+      if (pdFrom === cur.from && pdTo === cur.to) { if (exportCtx) tryPrint(exportCtx); return; }
       setRange("custom"); setCFrom(pdFrom); setCTo(pdTo); setPrintWhenReady(true);
     }
   };
@@ -546,7 +552,7 @@ export default function OwnerReports() {
   useEffect(() => {
     if (!printWhenReady || !exportCtx || entry?.loading || !extrasSettled) return;
     setPrintWhenReady(false);
-    printSection(exportCtx);
+    tryPrint(exportCtx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printWhenReady, data, entry?.loading, extrasSettled]);
   useBackClose("owner-print-ask", printAsk, () => setPrintAsk(false));
@@ -629,6 +635,14 @@ export default function OwnerReports() {
         )}
       </div>
 
+      {printErr && (
+        <div className="rs-note" role="status" style={{ display: "flex", alignItems: "center", gap: 9, margin: "0 0 12px",
+          border: "1px solid var(--adm-warn, #d97706)", borderRadius: 10, padding: "9px 12px", color: "var(--text)" }}>
+          <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-warn, #d97706)" }} aria-hidden />
+          <span style={{ flex: 1 }}>{printErr}</span>
+          <button className="rs-btn" onClick={() => setPrintErr(null)}>OK</button>
+        </div>
+      )}
       {/* Sub-tab strip — the merge (owner 2026-07-26): one report, several views, no hop. */}
       {sel && subTabs.length > 0 && (
         <div className="rs-subtabs" role="tablist" aria-label={`${REPORTS[sel].label} views`}>

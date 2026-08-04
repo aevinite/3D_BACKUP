@@ -11,6 +11,26 @@ import type { ReportData, ReportPayments } from "@/components/owner/ownerReportD
 const IST = "Asia/Kolkata";
 type Pay = { method: string; revenue: number; orders: number };
 
+// Run an async job over a list with a CONCURRENCY CAP, preserving order. A bare
+// Promise.all over the list fired 2 requests PER RESTAURANT at once — 30 simultaneous
+// snapshot-cache reads on a 15-restaurant estate, any of which can cold-compute. That is
+// exactly the "a handful of expensive reads landing together" shape that took the database
+// down on 2026-07-31; the reports route has capped its own fan-out at 8 since the
+// 2026-07-07 audit and this one was never given the same treatment (found 2026-08-04).
+async function mapLimit<I, O>(items: I[], limit: number, fn: (item: I) => Promise<O>): Promise<O[]> {
+  const out = new Array<O>(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i]);
+    }
+  }));
+  return out;
+}
+const CONCURRENCY = 4;   // 4 restaurants in flight = at most 8 requests, matching the route's cap
+
 export type GatherOpts = {
   restaurants: { id: string; name: string; slug?: string }[];
   activeRid: string | null;   // one restaurant, or null for the whole scope
@@ -23,12 +43,19 @@ export type GatherOpts = {
 export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
   const scp = o.scopePin ? `&scope=${o.scopePin}${o.asSuffix}` : "";
   const list = o.activeRid ? o.restaurants.filter((r) => r.id === o.activeRid) : o.restaurants;
-  const perRest = await Promise.all(list.map(async (r) => {
+  // DEGRADE GRACEFULLY. This used to `throw` inside the mapped function, which rejected the
+  // whole Promise.all — so ONE restaurant's analytics timing out threw away the other
+  // fourteen good sections and the owner got "Couldn't build the report" instead of a report
+  // with one gap (found 2026-08-04). A failed restaurant is now returned as `null`, dropped
+  // below, and named in `failed` so the document can say which ones are missing. Only when
+  // EVERY restaurant fails do we surface the error — matching the reports route's own rule.
+  const failed: string[] = [];
+  const gathered = await mapLimit(list, CONCURRENCY, async (r) => {
     const [a, m] = await Promise.all([
-      fetch(`/api/owner/analytics?${o.periodQs}&rid=${r.id}&compare=1${scp}`, { cache: "no-store" }).then((x) => x.json()),
+      fetch(`/api/owner/analytics?${o.periodQs}&rid=${r.id}&compare=1${scp}`, { cache: "no-store" }).then((x) => x.json()).catch((e) => ({ error: String(e?.message || e) })),
       fetch(`/api/owner/reports?type=sales&${o.periodQs}&rid=${r.id}${scp}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null),
     ]);
-    if (a.error) throw new Error(a.error);
+    if (a.error) { failed.push(r.name); return null; }
     const hour = [...(a.hourly ?? [])].sort((x: { orders: number }, y: { orders: number }) => y.orders - x.orders)[0];
     const t = m && !m.error ? m.totals : null;
     const comps: { label: string; amount: number }[] = (m && !m.error && m.tax?.components ? m.tax.components : [])
@@ -68,7 +95,12 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
       daily, dailyGrain: grain,
       hourly: (a.hourly ?? []) as { hour: number; orders: number; revenue: number }[],
     };
-  }));
+  });
+  const perRest = gathered.filter((x): x is NonNullable<typeof x> => x !== null);
+  // Only a TOTAL failure is an error — one bad restaurant must not blank the whole statement.
+  if (!perRest.length && list.length) {
+    throw new Error(`Couldn't read any restaurant's figures for this period (${failed.join(", ") || "all failed"}). Try a shorter period, or one restaurant at a time.`);
+  }
   const totalRev = perRest.reduce((s, r) => s + r.revenue, 0);
   perRest.forEach((r) => { r.share = totalRev ? r.revenue / totalRev : 0; });
   perRest.sort((a, b) => b.revenue - a.revenue);
@@ -95,6 +127,8 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
   for (const r of perRest) for (const c of r.billing.taxComponents) gc.set(c.label, (gc.get(c.label) || 0) + c.amount);
   return {
     scopeName: o.activeRid ? (list[0]?.name ?? "Restaurant") : `All ${list.length} restaurants`,
+    // Named on the document so a missing restaurant is VISIBLE, never a silent gap.
+    omitted: failed.length ? failed : undefined,
     periodLabel: o.periodLabel,
     generatedAt: new Date().toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST }),
     group: {

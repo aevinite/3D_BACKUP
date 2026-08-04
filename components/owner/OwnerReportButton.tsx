@@ -6,6 +6,7 @@
 import { useState } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { buildReportHtml, buildReportTables, type ReportData, type ExportTable } from "@/components/owner/ownerReportDoc";
+import { POPUP_BLOCKED } from "@/components/owner/reports/sectionExport";
 
 const DAY_MS = 86400000;
 const GREEN = "#34d399";
@@ -22,6 +23,7 @@ const pad2 = (n: number) => String(n).padStart(2, "0");
 export function ReportMenu({ gather, filename }: { gather: (qs: string, label: string) => Promise<ReportData>; filename: string }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);   // a refused/failed export must SAY so
   const [period, setPeriod] = useState("30d");
   const today = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
   const [dFrom, setDFrom] = useState(new Date(Date.now() + 5.5 * 3600_000 - 29 * DAY_MS).toISOString().slice(0, 10));
@@ -50,10 +52,14 @@ export function ReportMenu({ gather, filename }: { gather: (qs: string, label: s
     const parts = tables.map((t) => [t.title, t.head.map(escCsv).join(","), ...t.rows.map((r) => r.map(escCsv).join(","))].join("\n"));
     download(new Blob(["\ufeff" + parts.join("\n\n")], { type: "text/csv;charset=utf-8" }), `${filename}.csv`);
   };
+  // Excel here is an HTML table in disguise, so every title / header / cell must be ESCAPED —
+  // an unescaped `&` or `<` in a restaurant, dish or supplier name corrupted the sheet
+  // (found 2026-08-04). CSV was already correct via escCsv.
+  const xEsc = (v: string | number) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const asExcel = (tables: ExportTable[]) => {
     const html = `<html><head><meta charset="utf-8"></head><body>` + tables.map((t) =>
-      `<h3>${t.title}</h3><table border="1"><tr>${t.head.map((h) => `<th>${h}</th>`).join("")}</tr>` +
-      t.rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("") + `</table>`).join("<br/>") + `</body></html>`;
+      `<h3>${xEsc(t.title)}</h3><table border="1"><tr>${t.head.map((h) => `<th>${xEsc(h)}</th>`).join("")}</tr>` +
+      t.rows.map((r) => `<tr>${r.map((c) => `<td>${xEsc(c)}</td>`).join("")}</tr>`).join("") + `</table>`).join("<br/>") + `</body></html>`;
     download(new Blob([html], { type: "application/vnd.ms-excel" }), `${filename}.xls`);
   };
   const custom = period === "custom";
@@ -68,7 +74,12 @@ export function ReportMenu({ gather, filename }: { gather: (qs: string, label: s
   const run = async (kind: "print" | "csv" | "xls") => {
     if (busy || !customOk) return;
     setBusy(true);
+    setNote(null);
     const tab = kind === "print" ? window.open("", "_blank") : null;
+    // A BLOCKED pop-up used to end the whole thing in silence: `tab` was null, so neither the
+    // success path nor the catch had anywhere to write and the button simply un-busied. Say so
+    // instead — "a tap must never vanish in silence" (found 2026-08-04).
+    if (kind === "print" && !tab) { setNote(POPUP_BLOCKED); setBusy(false); return; }
     if (tab) tab.document.write("<title>Preparing report…</title><body style='font-family:sans-serif;padding:40px;color:#333'>Preparing your report…</body>");
     try {
       const data = await gather(qs, label);
@@ -76,8 +87,12 @@ export function ReportMenu({ gather, filename }: { gather: (qs: string, label: s
       else if (kind === "csv") asCsv(buildReportTables(data));
       else if (kind === "xls") asExcel(buildReportTables(data));
       setOpen(false);
-    } catch {
+    } catch (e) {
+      // …and a failed DOWNLOAD (csv/xls) had no surface at all, since there was no tab to
+      // write the apology into. Both kinds now report back in the dialog.
+      const msg = e instanceof Error ? e.message : String(e);
       if (tab) { tab.document.open(); tab.document.write("<body style='font-family:sans-serif;padding:40px'>Couldn't build the report — close this tab and try again.</body>"); tab.document.close(); }
+      else setNote(`Couldn't build the report — ${msg}`);
     } finally { setBusy(false); }
   };
   return (
@@ -160,7 +175,9 @@ export function ReportMenu({ gather, filename }: { gather: (qs: string, label: s
               </div>
             )}
             <footer>
-              <span className="owrp-hint">{busy ? "Compiling your report…" : `Report for: ${label}`}</span>
+              <span className="owrp-hint">{note
+                ? <span style={{ color: "var(--adm-warn, #d97706)", fontWeight: 700 }}><i className="fas fa-triangle-exclamation" style={{ marginRight: 5 }} aria-hidden />{note}</span>
+                : busy ? "Compiling your report…" : `Report for: ${label}`}</span>
               <span className="owrp-btns">
                 <button className="adm-btn" disabled={busy || !customOk} onClick={() => run("print")}><i className={`fas ${busy ? "fa-spinner fa-spin" : "fa-print"}`} aria-hidden="true" /> Print</button>
                 <button className="adm-btn" disabled={busy || !customOk} onClick={() => run("csv")}><i className="fas fa-file-csv" aria-hidden="true" /> CSV</button>
