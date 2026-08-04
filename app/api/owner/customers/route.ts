@@ -8,6 +8,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
+import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 // visits/consent added by Customer CRM (mig 212): a REAL repeat count + the DPDP
@@ -170,5 +171,17 @@ export async function DELETE(req: NextRequest) {
   await sb.from("customer_devices").delete().eq("restaurant_id", restaurantId).eq("phone", phone);
   const del = await sb.from("customers").delete().eq("restaurant_id", restaurantId).eq("phone", phone).select("phone");
   if (del.error) return NextResponse.json({ error: del.error.message }, { status: 500 });
+  // THE ONLY IRREVERSIBLE ERASE IN THE OWNER PANEL, AND IT WAS UNRECORDED (sweep 2026-08-04). This
+  // hard-deletes the guest, their visit history and their devices — three tables, no tombstone, no
+  // restore. (That is correct for a "erase my data" request under DPDP; sales rows are untouched and
+  // stay under the CGST soft-delete rule.) But the FACT that it happened has to be traceable, or a
+  // guest vanishing from the list is indistinguishable from a bug — and with several co-owners
+  // nobody could say who did it. Only the last 4 digits are recorded: the log must not become a
+  // second copy of the number the owner just asked us to erase.
+  await logAction("owner", "customer_erase", {
+    restaurant_id: restaurantId,
+    actor: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
+    detail: `erased guest record ending ${phone.slice(-4)} (${(del.data || []).length} row(s)) + their visits and devices`,
+  });
   return NextResponse.json({ ok: true, erased: (del.data || []).length });
 }

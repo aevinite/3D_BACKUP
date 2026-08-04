@@ -12,6 +12,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sendOwnerAlert, alertText } from "@/lib/alerts";
+import { clientIp } from "@/lib/loginThrottle";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,14 @@ export async function POST(req: NextRequest) {
 
     // Device id from the per-panel cookie (set by /panels/maint.js). The rate cap keys on it.
     const device = req.cookies.get("lfh_panel_device")?.value || null;
+    // THE CAP MUST APPLY WHETHER OR NOT THERE IS A COOKIE (sweep 2026-08-04). This endpoint is
+    // PUBLIC, and the flood cap below used to sit inside `if (device)`. A caller with no cookie was
+    // therefore uncapped: every request wrote a level:'error' row, so the admin's Logs and Repair
+    // board could be filled with rows that look like a restaurant in trouble and push the real
+    // errors off the first page — the same "a board full of non-faults is a board nobody reads"
+    // reasoning the errlog noise filter was built on. The IP is derived server-side (never from the
+    // body) and is only ever used as this counter's key.
+    const capKey = device || `ip:${clientIp(req)}`;
 
     if (kind === "taps") {
       const detail = String(body.detail || "").slice(0, 1500);
@@ -48,13 +57,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true });
     }
 
-    // kind === "error": per-device flood cap (protects the DB; no new table).
-    if (device) {
+    // kind === "error": per-device (or per-IP) flood cap (protects the DB; no new table).
+    {
       const sinceIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       const { data } = await sb
         .from("staff_actions")
         .select("id")
-        .eq("device_id", device)
+        .eq("device_id", capKey)
         .eq("action", "client_error")
         .gte("created_at", sinceIso)
         .limit(MAX_ERRORS_PER_DEVICE_10MIN);
@@ -66,8 +75,10 @@ export async function POST(req: NextRequest) {
     const message = String(body.message || "client error").slice(0, 300);
     const where = String(body.where || "").slice(0, 120);
     const detail = (where ? `${message} @ ${where}` : message).slice(0, 500);
+    // Written under capKey, not `device` — the cap counts rows by device_id, so a cookie-less
+    // caller's rows must carry the same key or the cap would count zero of them forever.
     await sb.from("staff_actions").insert({
-      panel, action: "client_error", detail, device_id: device, level: "error",
+      panel, action: "client_error", detail, device_id: capKey, level: "error",
       ...(rid !== null ? { restaurant_id: rid } : { restaurant_id: null }),
     });
 

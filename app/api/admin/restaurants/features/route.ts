@@ -23,6 +23,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +90,11 @@ export async function POST(req: NextRequest) {
 
   // Make sure the restaurant exists, and grab its slug (used as the settings `id`
   // when we have to create the row — matches the demo seeder's convention).
+  // A FEATURE FLIP IS AUDITED (sweep 2026-08-04). These three routes wrote a per-restaurant switch
+  const audit = () => logAction("admin", "feature_flip", {
+    restaurant_id: restaurant_id as string, device_id: deviceIdFrom(req),
+    detail: `guest feature "${key}" → ${value === true ? "on" : "off"}`,
+  });
   const rest = await sb.from("restaurants").select("id, slug").eq("id", restaurant_id).maybeSingle();
   if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
@@ -104,6 +110,7 @@ export async function POST(req: NextRequest) {
     // Row exists → just update its features JSONB, scoped by restaurant_id.
     const r = await sb.from("settings").update({ features }).eq("restaurant_id", restaurant_id).select("features").maybeSingle();
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+    await audit();
     return NextResponse.json({ features: { ...FEATURE_DEFAULTS, ...(r.data?.features as Record<string, boolean> || features) } });
   }
 
@@ -115,5 +122,6 @@ export async function POST(req: NextRequest) {
   const newRow = { ...base, id: rest.data.slug, restaurant_id, features };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select("features").maybeSingle();
   if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });
+  await audit();
   return NextResponse.json({ features: { ...FEATURE_DEFAULTS, ...(ins.data?.features as Record<string, boolean> || features) }, created: true });
 }

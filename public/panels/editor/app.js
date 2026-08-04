@@ -5834,6 +5834,14 @@ const PANEL_LABEL = { editor: "Manager", manager: "Manager", kitchen: "Kitchen",
 // reading their own Activity log saw raw database keys (`order_item_qty`, `invoice_void`,
 // `menu_delete`) between the readable lines (found 2026-08-03).
 const OP_ACTION_LABELS = {
+  // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
+  // A code with no label here prints as a raw database key on a person's screen (verify:audit
+  // catches it), so the label lands in the SAME commit as the logAction call.
+  access_change: "Changed access & permissions", retention_change: "Changed log retention",
+  feature_flip: "Changed a guest feature", staff_feature: "Changed a staff feature",
+  google_review: "Changed the Google review link", module_toggle: "Turned a module on/off",
+  customer_erase: "Erased a guest's record", issue_raised: "Raised a complaint",
+  rating_handled: "Handled a rating",
   order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
   table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",

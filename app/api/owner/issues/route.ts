@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, inScope, type OwnerScope } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
+import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -88,6 +89,12 @@ export async function PATCH(req: NextRequest) {
     : { status, resolved_at: null, resolved_by: null };
   const { error } = await sb.from("issues").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // The issue ROW already carries resolved_by/at, so this was never untraceable — it just never
+  // reached the unified Activity log (sweep 2026-08-04).
+  await logAction("owner", status === "resolved" ? "issue_resolved" : "issue_reopened", {
+    restaurant_id: issue.restaurant_id, actor: who,
+    detail: status === "resolved" ? "marked a complaint resolved" : "reopened a complaint",
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -113,5 +120,9 @@ export async function POST(req: NextRequest) {
     raised_role: (scope.all || scope.admin) ? "admin" : "owner",
   });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  await logAction("owner", "issue_raised", {
+    restaurant_id: rid, actor: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
+    detail: `raised: ${subject.slice(0, 80)}`,
+  });
   return NextResponse.json({ ok: true });
 }

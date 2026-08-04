@@ -62,6 +62,14 @@ export function panelChipStyle(panel: string | null | undefined): React.CSSPrope
 //   • never render `ACT_LABEL[x] || x` — call actLabel(x), which prettifies an unknown code into
 //     "Order item qty" rather than leaking `order_item_qty` onto a person's screen.
 export const ACT_LABEL: Record<string, string> = {
+  // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
+  // A code with no label here prints as a raw database key on a person's screen (verify:audit
+  // catches it), so the label lands in the SAME commit as the logAction call.
+  access_change: "Changed access & permissions", retention_change: "Changed log retention",
+  feature_flip: "Changed a guest feature", staff_feature: "Changed a staff feature",
+  google_review: "Changed the Google review link", module_toggle: "Turned a module on/off",
+  customer_erase: "Erased a guest's record", issue_raised: "Raised a complaint",
+  rating_handled: "Handled a rating",
   order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
   table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",

@@ -34,6 +34,7 @@
     "verify:offline": "node scripts/verify-offline.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
+    "check:current": "node scripts/check-folder-current.mjs",
     "verify:floor": "node scripts/verify-floor-share.mjs",
     "verify:merge": "node scripts/verify-merge-party.mjs",
     "check:floor-timeouts": "node scripts/check-floor-timeouts.mjs",

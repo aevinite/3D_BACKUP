@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
+import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -116,5 +117,14 @@ export async function PATCH(req: NextRequest) {
   if (hasNote) patch.staff_note = body.note.trim().slice(0, 1000) || null;
   const { error } = await sb.from("feedback").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // The feedback ROW already carries acknowledged_by/at, so this was never untraceable — but it
+  // never reached the unified Activity log, so "what did the owner do today?" left it out. One line
+  // so the log tells the whole story (sweep 2026-08-04).
+  await logAction("owner", "rating_handled", {
+    restaurant_id: row.restaurant_id, actor: who,
+    detail: [hasAck ? (body.acknowledged ? "acknowledged a rating" : "un-acknowledged a rating") : null,
+             hasNote ? (patch.staff_note ? "wrote a reply note" : "cleared the reply note") : null]
+      .filter(Boolean).join(" · "),
+  });
   return NextResponse.json({ ok: true });
 }

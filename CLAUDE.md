@@ -356,12 +356,26 @@ the separate editor repo were DELETED (preserved in `reference/` + the
 
 ## Security gate (2026-06-13)
 
-Only **/admin** (+ `/api/admin/*`) is protected: `middleware.ts` redirects to
-`/staff-login` without a valid cookie; `/api/staff-login` stores a hashed
-`ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`). The guest menu AND the other staff
-panels (/editor /kitchen /tablet) are currently OPEN (owner's call) — RE-LOCK them
-in the middleware matcher before any public hosting. `ADMIN_PASSWORD` is in
-`.env.local` (must also be set in the Vercel project env for the gate to work in prod).
+**⚠️ THERE IS NO `middleware.ts` — this section described it until 2026-08-04 and it does not
+exist** (nor a Next 16 `proxy.ts`). Anyone auditing the login gate by looking for that file finds
+nothing and may conclude the gate is missing. It isn't; it MOVED, and the per-route shape is
+deliberate — env vars are reliable in the Node runtime, which the edge middleware could not promise
+(that is why `lib/staffAuth.ts`'s own comment says the admin gate runs in "layout + /api/admin
+routes"). What actually guards what, verified route by route in the 2026-08-04 API sweep:
+
+- **`/aevinite` (the admin console)** — `app/aevinite/layout.tsx` checks `tokenIsValid` server-side.
+- **`/api/admin/**`** — every one of the 43 route files checks `tokenIsValid` (usually via a local
+  `admin(req)` / `requireAdmin(req)` helper), and in every handler the gate call precedes any
+  database call. `/api/staff-login` stores the hashed `ADMIN_PASSWORD` cookie (`lib/staffAuth.ts`).
+- **`/api/{editor,kitchen,tablet,inventory}/**`** — `requireRole()` (`lib/userAuth.ts`), which ALSO
+  re-checks the per-restaurant panel entitlement and the recycle bin on **every request** (30s
+  cache), so switching a panel off cuts an already-open tab instead of only blocking new logins.
+- **`/api/owner/**`** — `ownerScope()` (`lib/ownerScope.ts`); null → 401.
+- **Deliberately public:** `/api/health`, `/api/blocked`, `/api/log/client-error`,
+  `/api/guest/limit-hit`, `/api/r/<slug>/menu-data`, and the guest menu itself.
+
+`ADMIN_PASSWORD` is in `.env.local` (must also be set in the Vercel project env for the gate to
+work in prod). **If you re-introduce a middleware, update this section in the same commit.**
 
 ## Feature switches (migration 035)
 
@@ -1027,6 +1041,49 @@ not "missing" — calling one with an empty body will fool you, as it fooled me.
 
 **Do not fix the cap by hammering it.** The waste is real and worth fixing properly (54% of the
 quota is PR previews); the owner has been shown the options and it is his call.
+
+### 📥 THE MAC FOLDER MUST NEVER FALL BEHIND BACKUP-1 (owner, 2026-08-04 — ABSOLUTE, EVERY SESSION)
+
+The owner's freshness ladder, in his own order. Each rung is **never newer** than the one above it:
+
+| rung | what | how it gets current |
+|---|---|---|
+| **1 · newest** | **this Mac folder** (`/Users/aevinite/Documents/Projects/backup_Menu`) | where work is written — must be rebased on `origin/main` |
+| 2 | **backup-1 `main`** (`aevinite/3D_BACKUP`) | a merged PR |
+| 3 | **backup-1 site** (3-d-backup.vercel.app) | a deploy |
+| 4 | **backup-2** (3d-backup-2.vercel.app) | an uploaded clean checkout of `main` |
+| 5 · last | **AV live** | the asked-first release ritual |
+
+**WHY THIS RULE EXISTS.** On 2026-08-04 a ten-terminal sweep audited this folder and every terminal
+was reading code **105 commits old** (folder at PR #705, `origin/main` at #762). Whole features were
+missing from disk — `lib/panelFailure.ts` and the busy-database read fallback did not exist here — so
+the sweep reported gaps that had been fixed days earlier, and "passes" that were passing on dead code.
+It cost a full sweep. **A stale folder does not announce itself: nothing is red, the app runs, the
+findings just aren't about the real product.**
+
+- **CHECK BEFORE YOU AUDIT, PLAN, OR CLAIM ANYTHING IS BROKEN.** `npm run check:current` (or
+  `git fetch origin && git status -sb`). Behind by even a few commits → say so in chat and get
+  current FIRST. **Never open a finding, write a plan, or tell the owner something is broken from a
+  folder that is behind** — re-verify against `origin/main` first. That is the whole lesson.
+- **"MAKE IT LIVE" NOW INCLUDES BRINGING THIS FOLDER UP TO DATE.** When the owner says "make it
+  live / deploy / push it", the ritual is: merge → **pull this folder to the merged `main`** → deploy
+  backup-1 → (then backup-2 / AV live as separately asked). The folder is never left behind after a
+  release.
+- **SYNCING IS NOT `git pull` IN A SHARED FOLDER.** Many sessions live here, each holding small
+  uncommitted edits. Before syncing: `git status --porcelain` — if files you don't recognise are
+  modified, they are **another live session's unshipped work. Leave them untouched, do NOT stash,
+  commit or revert them,** and do not sync until those sessions have landed their work (ask the
+  owner to let them finish). On 2026-08-04, 15 of 16 uncommitted files collided with the incoming
+  commits — pulling would have forced conflict resolution in code the syncing session did not write.
+- **CANNOT SYNC RIGHT NOW? WORK IN A WORKTREE INSTEAD, off `origin/main`** — never switch the shared
+  folder's branch under another session (`git worktree add -b <branch> .claude/worktrees/<name>
+  origin/main`, then a real `npm install` in it). That is how this rule itself was written.
+- **A worktree is only as fresh as the moment you made it.** Between PR #758 and #762, four of this
+  sweep's own findings were fixed by another session. Re-`git fetch` and re-check a finding before
+  you fix it, or you will "fix" something already fixed and conflict with the session that did it.
+- Guarded by **`npm run check:current`** (`scripts/check-folder-current.mjs`): prints how far behind
+  the folder is, names the uncommitted files that would collide with a sync, and exits non-zero when
+  the folder is behind. Read-only — it never fetches destructively and never touches the working tree.
 
 ## Deployment (ONE target now)
 

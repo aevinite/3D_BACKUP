@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
@@ -37,5 +38,11 @@ export async function POST(req: NextRequest) {
     : await sb.from("settings").update({ service_mode: on }).eq("id", "site").select("service_mode");
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
   if (!r.data?.length) return NextResponse.json({ error: "Restaurant not found." }, { status: 404 });
+  // Same record as the manager-side route (sweep 2026-08-04) — stopping every guest from ordering
+  // must be traceable whichever panel did it. `rid` is null for the legacy flagship row.
+  await logAction("admin", on ? "maintenance_on" : "maintenance_off", {
+    restaurant_id: rid ?? undefined, actor: "admin", device_id: deviceIdFrom(req),
+    detail: on ? "admin took the guest menu OFFLINE" : "admin put the guest menu back online",
+  });
   return NextResponse.json({ maintenance: (r.data[0] || {}).service_mode === true });
 }

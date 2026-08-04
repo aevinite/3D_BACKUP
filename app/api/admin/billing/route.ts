@@ -34,6 +34,9 @@ type Billing = {
   restaurant_id: string; plan: string | null; status: string; amount: number | null;
   currency: string; cycle: string; started_on: string | null; next_due_on: string | null; notes: string | null;
 };
+// Exactly the fields the Billing type declares — i.e. everything the page renders and nothing more.
+// Kept next to the type so the two can't drift: add a field there, add it here.
+const BILLING_COLS = "restaurant_id, plan, status, amount, currency, cycle, started_on, next_due_on, notes";
 export async function GET(req: NextRequest) {
   if (!(await admin(req))) return bad("unauthorized", 401);
   const rid = new URL(req.url).searchParams.get("restaurant_id");
@@ -59,7 +62,11 @@ export async function GET(req: NextRequest) {
     // Live restaurants only (bug H4, 2026-07-06): a binned restaurant must not appear
     // as a billable row in the SaaS billing table.
     sb.from("restaurants").select("id, name, slug, active").is("deleted_at", null).order("name"),
-    sb.from("restaurant_billing").select("*"),
+    // Named columns + a bound (sweep 2026-08-04). This whole-platform read had no .eq(), no column
+    // list and no .limit() — the only read in the admin tree missing all three. One row per
+    // restaurant makes it small today, but it grows with exactly the number this product is built
+    // to increase. BILLING_COLS is the list the page renders.
+    sb.from("restaurant_billing").select(BILLING_COLS).limit(2000),
     sb.from("restaurant_payments").select("restaurant_id, amount").gte("paid_on", yearStart).limit(5000),
   ]);
   for (const q of [restQ, billingQ, yearPaymentsQ]) if (q.error) return bad(q.error.message, 500);

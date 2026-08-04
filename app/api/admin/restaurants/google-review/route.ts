@@ -12,6 +12,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +57,11 @@ export async function POST(req: NextRequest) {
   // A Google mode needs a destination — refuse to arm it with no link (else the guest CTA 404s).
   if (mode !== "off" && !norm.url) return NextResponse.json({ error: "Add the Google review link before choosing a Google mode." }, { status: 400 });
 
+  // A FEATURE FLIP IS AUDITED (sweep 2026-08-04). These three routes wrote a per-restaurant switch
+  const audit = () => logAction("admin", "google_review", {
+    restaurant_id: restaurant_id as string, device_id: deviceIdFrom(req),
+    detail: `Google review link ${norm.url ? "set" : "cleared"} · mode ${mode}`,
+  });
   const rest = await sb.from("restaurants").select("id, slug").eq("id", restaurant_id).maybeSingle();
   if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
@@ -67,6 +73,7 @@ export async function POST(req: NextRequest) {
   if (cur.data) {
     const r = await sb.from("settings").update(patch).eq("restaurant_id", restaurant_id).select("google_review_url, google_review_mode").maybeSingle();
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+    await audit();
     const d = r.data as { google_review_url?: string | null; google_review_mode?: string | null } | null;
     return NextResponse.json({ url: d?.google_review_url ?? null, mode: normalizeMode(d?.google_review_mode) });
   }
@@ -77,6 +84,7 @@ export async function POST(req: NextRequest) {
   const newRow = { ...base, id: rest.data.slug, restaurant_id, ...patch };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select("google_review_url, google_review_mode").maybeSingle();
   if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });
+  await audit();
   const d = ins.data as { google_review_url?: string | null; google_review_mode?: string | null } | null;
   return NextResponse.json({ url: d?.google_review_url ?? null, mode: normalizeMode(d?.google_review_mode), created: true });
 }
