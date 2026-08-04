@@ -108,3 +108,75 @@ export function splitTax(
  *  is nothing to show. Derived in ONE place so the paper and every screen quote the same figure. */
 export function discPct(subtotal: number, disc: number): string;
 export function inr(v: number | string): string;
+
+// ── the bill's MONEY and the assembly of its data (moved here 2026-08-04) ────────────────────
+// The waiter panel could do every step of issuing a tax invoice except produce it, because the
+// whole assembly lived inside the manager panel. Both panels feed these now, so there is one
+// place that decides a bill's figures and one place that decides what goes on the paper.
+
+export interface BillMoney {
+  subtotal: number; disc: number; taxable: number; rate: number; tax: number; total: number;
+  taxComponents: { label: string; rate: number }[];
+  taxableBase: number; nontax: number; mrpAmount: number;
+  discountBase: number; discountFixed: number; hasMrp: boolean; composition: boolean;
+}
+export interface TaxModel {
+  rate: number; pct: number;
+  components: { label: string; rate: number }[];
+  composition: boolean;
+}
+
+/** The ONE tax model: named components sum to the rate, else the fallback, else 5% — and a
+ *  composition-scheme restaurant's rate genuinely IS zero (mig 272). */
+export function taxModel(settings: Record<string, unknown>): TaxModel;
+/** A bill's figures. Discount BEFORE tax, tax on the TAXABLE BASE (not the subtotal), at the rate
+ *  the order was actually charged at (orders.tax_rate, mig 284). */
+export function billMoney(orders: Record<string, unknown>[], settings: Record<string, unknown>): BillMoney;
+/** Everything the paper needs, assembled once. Pass what only the panel knows. */
+export function billData(a: {
+  settings?: Record<string, unknown>;
+  restaurant?: Record<string, unknown>;
+  orders?: Record<string, unknown>[];
+  money?: BillMoney;
+  session?: Record<string, unknown>;
+  tableDisp?: string;
+  logo?: string;
+  parcel?: boolean;
+  autoPrint?: boolean;
+  now?: string | number | Date;
+}): BillDocData;
+/** One bill line per dish, not one per KOT. */
+export function combineBillLines(entries: BillDocLine[]): BillDocLine[];
+/** The GST sitting INSIDE tax-inclusive MRP lines. */
+export function mrpTaxInside(orders: Record<string, unknown>[], rate: number): number;
+/** The untaxed pile as a bill should show it — 0 on a composition restaurant, where splitting
+ *  "food" from "MRP" says nothing and reads as broken. */
+export function mrpPart(m: BillMoney | null | undefined): number;
+/** <prefix>/<FY>/<6-digit>. The FY is the INVOICE'S OWN — a March bill reprinted in April keeps
+ *  its year, or one sale ends up with two identities. */
+export function invFmt(no: number | null | undefined, when?: string | null, prefix?: string): string;
+export function financialYear(when?: string | null): string;
+
+// ── the banquet bill: the third piece of paper, and the last that existed twice ──────────────
+/** The banquet tax invoice. `bill` is a banquet_bills row (its frozen tax_lines are used when
+ *  present, so a re-print years later cannot be re-split by a rate that changed since). */
+export function banquetDocHtml(a: {
+  bill: Record<string, unknown>;
+  lines: { title?: string; qty?: number; price?: number }[];
+  settings?: Record<string, unknown>;
+  restaurant?: Record<string, unknown>;
+  logo?: string;
+}): string;
+export function bqPaper(settings: Record<string, unknown>): {
+  pad: boolean; size: "a4" | "a5"; top: number; bot: number; side: number;
+  foot: boolean; sign: boolean; fill: boolean;
+};
+export function bqTaxModel(settings: Record<string, unknown>): TaxModel & { own: boolean };
+export function bqOn(settings: Record<string, unknown>, k: string): boolean;
+export function bqWords(amount: number): string;
+/** The rows a bill SHOWS, in whole rupees, made to reconcile to the TOTAL (a "Round off" row
+ *  carries what whole rupees cannot express). Never changes what is charged. */
+export function billRows(d: BillDocData): {
+  disc: number; inclusive: boolean; subtotal: number; discount: number;
+  taxable: number; tax: number; nontax: number; total: number; roundOff: number;
+};

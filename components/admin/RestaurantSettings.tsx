@@ -322,67 +322,53 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // Uses exactly what this card is set to: the ticked fields, the number series, the banquet tax
   // rows (or the menu's rate when none are set), and the restaurant's own header. An event is
   // invented so the layout can be judged without booking one.
+  // ── SEE THE BANQUET BILL — the REAL document, not a drawing of one ──────────────────────────
+  // This used to build its own page from scratch, and the two had already parted company: the
+  // printer re-uses the bill's FROZEN tax_lines (mig 239) while this recomputed them live, and the
+  // printer honours the A4/A5 paper setup which this did not model at all. So an admin could set the
+  // banquet card up, approve what they saw, and the paper came out different — the exact fault that
+  // created /panels/billdoc.js for the bill and the KOT, still alive in the one document nobody had
+  // got to (T7 sweep, F27).
+  //
+  // It now invents an EVENT and hands it to the very function the manager panel prints from, fed by
+  // the fields on this form — so unsaved edits still show, and what is previewed is what prints.
   const previewBanquet = () => {
-    const money = (n: number) => Math.round(n).toLocaleString("en-IN");
-    const esc = (v: string) => v.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
     const plates = 120, rate = 850;
     const sub = plates * rate;
     const rows = banquetTaxOf(draft);
-    const lines = (rows.length ? rows : comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0)
-      .map((c) => ({ label: String(c.label), rate: Number(c.rate) })))
-      .map((c) => ({ label: c.label, rate: c.rate, amt: (sub * c.rate) / 100 }));
-    const taxTotal = lines.reduce((a, l) => a + l.amt, 0);
-    // Only the fields this restaurant actually asks for appear — that is the whole point of the
-    // tick list above, so the preview has to honour it or it teaches the wrong thing.
-    const SAMPLE: Record<string, string> = {
-      host_name: "Mehta family", host_phone: "98250 12345", event_type: "Wedding reception",
-      event_date: "14 Aug 2026", guests: String(plates), hall: "Banquet hall 1",
-      company_name: "Mehta Textiles Pvt Ltd", company_gstin: "24ABCDE1234F1Z5",
-      company_address: "12 Ring Road, Ahmedabad 380015", advance: "25,000", notes: "Jain menu for 20",
-    };
-    const shown = bqFields.map((k) => {
-      const f = BANQUET_FIELDS.find((x) => x.key === k);
-      return f && SAMPLE[k] ? `<div class="kv"><span>${esc(f.label)}</span><b>${esc(SAMPLE[k])}</b></div>` : "";
-    }).join("");
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Banquet bill preview</title><style>
-      *{box-sizing:border-box}
-      body{font:12.5px/1.6 ui-sans-serif,system-ui,sans-serif;width:520px;margin:18px auto;color:#111;background:#fff}
-      .logo{display:block;max-width:130px;max-height:64px;margin:0 auto 8px;object-fit:contain}
-      h1{font-size:19px;text-align:center;margin:0 0 2px}
-      .sub{text-align:center;font-size:11px;color:#444;margin:0}
-      .tag{text-align:center;margin:10px 0 14px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:#666}
-      hr{border:0;border-top:1px solid #ccc;margin:12px 0}
-      .kv{display:flex;justify-content:space-between;gap:16px;padding:3px 0;border-bottom:1px dotted #ddd}
-      .kv span{color:#555}
-      table{width:100%;border-collapse:collapse;margin-top:10px}
-      th{text-align:left;font-size:11px;border-bottom:1.5px solid #111;padding:0 0 5px}
-      td{padding:6px 0;border-bottom:1px solid #eee} .r{text-align:right}
-      .tot{display:flex;justify-content:space-between;padding:3px 0}
-      .grand{font-weight:800;font-size:16px;border-top:2px solid #111;margin-top:6px;padding-top:7px}
-      .foot{text-align:center;margin-top:16px;font-size:11px;color:#444}
-      .stamp{text-align:center;margin-top:16px;font-size:10.5px;color:#a00;border:1px dashed #a00;padding:6px}
-      @media print { .stamp { display:none } }
-    </style></head><body>
-      ${logoUrl ? `<img class="logo" src="${esc(logoUrl)}" onerror="this.style.display='none'">` : ""}
-      <h1>${esc(String(draft.restaurant_name || restaurant.name || "Restaurant"))}</h1>
-      ${draft.restaurant_address ? `<div class="sub">${esc(String(draft.restaurant_address))}</div>` : ""}
-      ${draft.gstin ? `<div class="sub">GSTIN: ${esc(String(draft.gstin))}</div>` : ""}
-      <div class="tag">Banquet bill · ${esc(bqSample)}</div>
-      ${shown || '<div class="sub">No fields ticked — the bill would show only the totals.</div>'}
-      <table><tr><th>Description</th><th class="r">Plates</th><th class="r">Rate</th><th class="r">Amount</th></tr>
-        <tr><td>Event catering — set menu</td><td class="r">${plates}</td><td class="r">${money(rate)}</td><td class="r">${money(sub)}</td></tr>
-      </table>
-      <hr>
-      <div class="tot"><span>Subtotal</span><span>${money(sub)}</span></div>
-      ${lines.map((l) => `<div class="tot"><span>${esc(l.label)} ${l.rate}%</span><span>${money(l.amt)}</span></div>`).join("")}
-      ${lines.length ? "" : '<div class="tot"><span>Tax</span><span>not set</span></div>'}
-      <div class="tot grand"><span>TOTAL</span><span>₹${money(sub + taxTotal)}</span></div>
-      <div class="foot">${esc(String(draft.bill_footer || "Thank you"))}</div>
-      <div class="stamp">SAMPLE — invented event, your real fields, numbering and tax. Not a real bill; this box never prints.</div>
-    </body></html>`;
-    const w = window.open("", "_blank", "width=580,height=760");
+    const live = (rows.length ? rows : comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0)
+      .map((c) => ({ label: String(c.label), rate: Number(c.rate) })));
+    const rateSum = live.reduce((a, l) => a + Number(l.rate || 0), 0);
+    const taxTotal = Math.round(((sub * rateSum) / 100) * 100) / 100;
+    // The split the SHEET will carry, frozen the way a real issued bill freezes it, so the preview
+    // cannot drift from the paper the way it just did.
+    let run = 0;
+    const taxLines = live.map((l, i) => {
+      const amt = i === live.length - 1 ? Math.round((taxTotal - run) * 100) / 100
+        : Math.round(((sub * Number(l.rate || 0)) / 100) * 100) / 100;
+      run = Math.round((run + amt) * 100) / 100;
+      return { label: l.label, rate: Number(l.rate || 0), amt };
+    });
+    const html = BILLDOC.banquetDocHtml({
+      bill: {
+        bill_no: bqSample, issued_at: new Date().toISOString(),
+        subtotal: sub, discount: 0, tax: taxTotal, total: Math.round((sub + taxTotal) * 100) / 100,
+        received: 25000, tax_lines: taxLines,
+        // The invented event — only the fields this restaurant actually ticked reach the sheet,
+        // because that is the whole point of the tick list above.
+        cust_name: "Mehta family", cust_phone: "98250 12345", func: "Wedding reception",
+        fn_date: "2026-08-14", pax: plates, rate, hall: "Banquet hall 1",
+        cust_gstin: "24ABCDE1234F1Z5", cust_addr: "12 Ring Road, Ahmedabad 380015",
+        remark: "Jain menu for 20", prepared_by: "Aevidine",
+      },
+      lines: [{ title: "Event catering — set menu", qty: plates, price: rate }],
+      settings: draft, restaurant: restForDoc(), logo: logoUrl,
+    });
+    const w = window.open("", "lfh_banquet_preview", "width=820,height=980");
     if (!w) { setErr("Allow pop-ups to preview the banquet bill."); return; }
+    try { w.document.open(); } catch { /* reused window: start blank */ }
     w.document.write(html); w.document.close();
+    try { w.focus(); } catch { /* already in front */ }
   };
 
   // ── QR helpers ────────────────────────────────────────────────────────────

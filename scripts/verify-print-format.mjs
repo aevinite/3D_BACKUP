@@ -53,6 +53,11 @@ const SURFACES = [
 const COPIES = [
   { what: "the kitchen ticket", mark: /\.kl \.q\{|<div class="h">\$\{esc\(|>KITCHEN TICKET<\/h2>|<div class="h">.*KITCHEN TICKET/ },
   { what: "the bill", mark: /<div class="kind">Tax Invoice<\/div>|<th class="r">Amt<\/th>|\.totals\{margin-top/ },
+  // The BANQUET sheet, fingerprinted from 2026-08-04. It was the last document that still existed
+  // twice — the manager printed one, the admin's "See the banquet bill" drew another, and they had
+  // already parted company over the frozen tax lines and the A4/A5 paper setup. Its own markup is
+  // recognisable by the amount-in-words row and the Authorised Signatory block.
+  { what: "the banquet bill", mark: /class="wrd"|<div class="sign">For |<th rowspan="2">Sr<\/th>/ },
 ];
 for (const file of SURFACES) {
   const src = read(file);
@@ -267,6 +272,40 @@ typeof BILLDOC.billRows === "function"
     ? ok("an unconfigured restaurant prints no GSTIN, no address and no phone (rather than a fake one)")
     : bad("a bill can still print an invented address/phone/GSTIN",
       `got address="${bi.address}" phone="${bi.phone}" gstin="${bi.gstin}" — an empty value prints no line, which is the honest thing`);
+}
+
+// ── 9. ONE ASSEMBLER, AND THE WAITER CAN PRINT (2026-08-04) ───────────────────────────────
+// The waiter panel could do every step of issuing a tax invoice EXCEPT produce it: take the money,
+// split it, capture the customer, mint a numbered invoice — and then no way to print, because the
+// assembly of a bill's DATA lived inside the manager panel's printBill(). A table settled entirely
+// from the handheld left the guest with nothing on paper. The obvious shortcut was a second
+// assembler on the tablet, which is the fault this whole file exists to prevent.
+for (const fn of ["billMoney", "billData", "taxModel", "combineBillLines", "banquetDocHtml"]) {
+  if (typeof BILLDOC[fn] === "function") ok(`${DOC} exports ${fn}()`);
+  else bad(`${DOC} does not export ${fn}()`, "both panels assemble their bills through these");
+}
+{
+  const ed = read("public/panels/editor/app.js");
+  const tb = read("public/panels/tablet/app.js");
+  /LFH_BILLDOC\.billData\(/.test(ed)
+    ? ok("the manager panel assembles its bill through the shared billData()")
+    : bad("the manager panel assembles its own bill data again", "that is what locked the waiter panel out of printing");
+  /LFH_BILLDOC\.billData\(/.test(tb)
+    ? ok("the WAITER panel can print a bill, through the same assembler")
+    : bad("the waiter panel cannot print a bill", "it can mint a numbered invoice but not produce it — the gap this closed");
+  /printTableBill/.test(tb) && /id="printBillBtn"/.test(tb)
+    ? ok("and the button is actually on the waiter's bill screen")
+    : bad("the waiter panel has no Print bill button", "the function without the button is no use to anyone");
+  // the money math must exist ONCE — the panels are doors onto it
+  /function billMath\(orders\) \{ return LFH_BILLDOC\.billMoney/.test(ed)
+    ? ok("the manager's billMath() is a one-line door onto the shared money rule")
+    : bad("the manager panel computes bill money itself again", "two money rules is how the screen and the paper drifted");
+  /LFH_BILLDOC\.banquetDocHtml\(/.test(ed)
+    ? ok("the manager prints the shared banquet document")
+    : bad("the manager draws its own banquet bill again");
+  /BILLDOC\.banquetDocHtml\(/.test(read("components/admin/RestaurantSettings.tsx"))
+    ? ok("the admin's banquet preview renders the REAL document")
+    : bad("the admin's banquet preview draws its own sheet again", "an admin would approve a layout no printer produces");
 }
 
 console.log(fails
