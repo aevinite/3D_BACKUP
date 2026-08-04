@@ -6649,8 +6649,11 @@ function flipOrderItems(o, from, to) {
 // party, a settled bill ends it (see maybeAutoSettle). Nothing in the panel opens or
 // closes a table by hand any more, so those three functions — and the floor's
 // "⬆ Open all / ⬇ Close all" card — were removed rather than left as dead buttons.
-// The server endpoints (/sessions/open, /sessions/close-all) still exist and still work;
-// they simply have no caller in this panel. summaryTableOpen() below stays: it answers
+// /sessions/close-all and /sessions/open-all are now GONE from the server too (owner,
+// 2026-08-04: "remove that option completely") — mig 268 drops both RPCs and the route
+// handlers went with them, so the bulk close cannot be reached from anywhere. The single
+// /sessions/open endpoint stays: the waiter tablet still seats a table by hand.
+// summaryTableOpen() below stays: it answers
 // "is anyone sitting here?", which the KOT/shift-table pickers still need.
 // summaryTableOpen(t): is table t currently OPEN, per the slim summary? A tile is open
 // when it has a summary entry whose state is anything but 'free' or 'req' (those two mean

@@ -29,6 +29,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) => Object.fromEntries(t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
@@ -68,6 +69,11 @@ const ANON_ALLOWED = {
   lfh_place_order_public:     "guest orders from a table QR with no session (mig 264 re-grants it explicitly)",
   lfh_price_order:            "the guest cart prices itself server-side; SECURITY INVOKER (mig 253 reasons about this)",
   lfh_nice_usd:               "formatter called BY lfh_price_order, which is INVOKER — revoking it breaks guest pricing",
+  // Added 2026-08-04 the day this guard shipped, and it is the trap above proving itself: mig 270
+  // created lfh_resolve_tax_mode with Supabase's default anon grant, this check went red, and the
+  // right answer was NOT to revoke it — lfh_price_order (SECURITY INVOKER, anon) calls it, so a
+  // revoke would have silently broken every guest cart's pricing. Verified by reading the caller.
+  lfh_resolve_tax_mode:       "decides a dish's tax mode; called BY lfh_price_order, which is INVOKER (mig 270)",
   lfh_phone10:                "phone-number formatter, pure",
   lfh_effective_tax_rate:     "the guest cart shows tax; granted on purpose by mig 119:36",
   lfh_session_state:          "the guest's own table state, scoped by their session token",
@@ -199,11 +205,27 @@ async function checkDb(label, env) {
     categories: "the guest menu's category strip",
     filters: "the guest menu's filter chips",
     menu_items: "the guest menu itself",
-    restaurants: "tenant resolution from a slug — ⚠ the row also carries access_config; sweep F9 proposes narrowing this to guest-facing columns",
-    settings: "the guest's live settings subscription (mig 013) — ⚠ the row also carries gstin; sweep F9",
+    restaurants: "tenant resolution from a slug; narrowed to 11 guest-facing COLUMNS — F9 narrowing was REVERTED by mig 274; see mig 281 for why",
+    settings: "the guest's live settings subscription (mig 013); narrowed to 20 guest-facing COLUMNS — F9 narrowing was REVERTED by mig 274; see mig 281 for why",
     reviews: "dish reviews are public by design",
     realtime_events: "breadcrumbs; each panel/guest filters to its own restaurant via topic_rid",
   };
+  // 6b. THE GUEST READ IS DELIBERATELY *NOT* CHECKED BY COLUMN HERE — read this before adding it.
+  //     The sweep (F9) found that the guest menu key can read every restaurant's `settings` and
+  //     `restaurants` row WHOLE, gstin and access_config included. That finding is real. The fix
+  //     attempted for it — narrowing anon's SELECT to a column list — TOOK EVERY GUEST MENU DOWN
+  //     on the backup site, because a column grant in the database has to stay in lockstep with a
+  //     column list in the code and the two do not deploy together: mig 270 had added three
+  //     columns to lib/menu.ts's own read, the grant listed the older 19, and PostgREST answered
+  //     42501. Mig 274 restored the whole-table grant; mig 281 records the full post-mortem.
+  //
+  //     So there is no column assertion here on purpose. The guard that belongs to this question
+  //     is scripts/verify-guest-read.mjs, which asks it the only way that cannot be fooled: with
+  //     the ANON key, over HTTP, the way a guest asks. Run that, not a list of columns someone
+  //     believed the app reads. If F9 is ever re-attempted it should be a guest-facing VIEW or
+  //     RPC — one object the server owns — not a grant that a future migration can silently
+  //     invalidate.
+
   const noRls = await q(env, `
     SELECT c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname='public' AND c.relkind='r' AND NOT c.relrowsecurity ORDER BY 1`);
@@ -241,6 +263,50 @@ function checkMigrations() {
        + `. Two files sharing a number apply in filename order, not intent order. Renumber the new one.`);
   } else {
     pass(`no new duplicate migration numbers (${dups.length} historical pairs, all verified disjoint)`);
+  }
+
+  // THE COLLISION THAT ACTUALLY BITES (sweep F13). The 18 historical pairs are harmless — checked
+  // object-by-object, they touch nothing in common. What is NOT harmless is a parked branch
+  // holding a DIFFERENT file under a number main already uses: merging it later gives two
+  // unrelated migrations one number, and the applier tie-breaks on the FILENAME, not on intent.
+  // On 2026-08-04 a worktree held `254_where_the_money_came_from.sql` while main's 254 was
+  // `254_no_table_ends_itself.sql`. Catch it now, while renumbering is a rename.
+  // Find the MAIN checkout, not this one: run from a worktree, `root/.claude/worktrees` does not
+  // exist and the check would silently pass — the exact quiet-skip that let F4's two cron jobs go
+  // missing for months. `git rev-parse --git-common-dir` points at the main repo's .git from
+  // anywhere, so the check works wherever it is run from, and SAYS SO if it truly cannot look.
+  let wtRoot = join(root, ".claude", "worktrees");
+  try {
+    const common = execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: root, encoding: "utf8" }).trim();
+    const mainRoot = dirname(common.startsWith("/") ? common : join(root, common));
+    wtRoot = join(mainRoot, ".claude", "worktrees");
+  } catch { /* not a git checkout — fall back to the relative guess */ }
+  let checkedAny = false;
+  const clashes = [];
+  try {
+    for (const wt of readdirSync(wtRoot)) {
+      let names;
+      try { names = readdirSync(join(wtRoot, wt, "supabase", "migrations")).filter((f) => f.endsWith(".sql")); }
+      catch { continue; }
+      checkedAny = true;
+      for (const f of names) {
+        const n = f.slice(0, 3);
+        const here = byNum[n];
+        if (here && !here.includes(f)) clashes.push(`${wt}/${f} vs main's ${here.join(" + ")}`);
+      }
+    }
+  } catch { /* no worktrees dir — nothing to check */ }
+  if (clashes.length) {
+    // A NOTICE, not a failure — deliberately. The colliding file belongs to ANOTHER branch, so
+    // this checkout cannot fix it, and a guard that goes red for work you don't own is a guard
+    // people learn to ignore. It is printed loudly every run so whoever merges that branch sees
+    // it while renumbering is still just a rename.
+    console.log("  ⚠ a parked worktree holds a migration numbered the same as a DIFFERENT one here:");
+    for (const c of clashes) console.log("      " + c);
+    console.log("      Renumber it in that worktree BEFORE it is merged — afterwards the two apply");
+    console.log("      in filename order, not intent order. (Notice only: it is not this branch's file.)");
+  } else if (checkedAny) {
+    pass("no parked worktree holds a migration number that would collide on merge");
   }
 
   // A migration that swallows its own failure is how the two cron jobs went missing for months.
