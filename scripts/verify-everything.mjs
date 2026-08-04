@@ -2320,6 +2320,27 @@ phase("the clash guard exists and is enforced by a script", async () => {
   ok(existsSync(join(ROOT, "lib/clash.ts")), "lib/clash.ts is gone");
   ok(existsSync(join(ROOT, "scripts/verify-clash-coverage.mjs")), "the clash-coverage guard script is gone");
 });
+// THE ORDERING & OFFLINE PIPELINE, actually run — not just "the file exists".
+// Its 48 checks cover the faults that cost real food and money: a refused order that could never
+// be re-placed, a table-session order placed twice or lost when the system was busy, a parcel
+// taken for a sold-out dish, a saved order deleted without telling the diner, two managers
+// overwriting each other. Until this ran here, those protections were only checked when a person
+// happened to type the command — which is not a guard, it is a hope.
+phase("the ordering & offline protections still hold", async () => {
+  const guard = join(ROOT, "scripts/verify-order-retry.mjs");
+  ok(existsSync(guard), "scripts/verify-order-retry.mjs is gone — the ordering pipeline has no guard");
+  if (!existsSync(guard)) return;
+  let out = "";
+  try {
+    out = execFileSync(process.execPath, [guard], { cwd: ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  } catch (e) {
+    out = String((e && (e.stdout || "")) + (e && (e.stderr || "")));
+    const failed = out.split("\n").filter((l) => l.includes("❌")).slice(0, 6).join(" | ");
+    ok(false, `verify:order-retry failed — ${failed || "see npm run verify:order-retry"}`);
+    return;
+  }
+  ok(/✅ \d+ passed, 0 failed/.test(out), `verify:order-retry did not finish clean — run: npm run verify:order-retry`);
+});
 phase("the connection light is on every panel", async () => {
   for (const p of ["editor", "kitchen", "tablet"]) {
     const html = srcOf(`public/panels/${p}/index.html`);

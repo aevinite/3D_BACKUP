@@ -16,17 +16,43 @@
 //
 // Nothing here touches a database, a deployed site or a login: it runs the real shipped files
 // against a local stub, so it can never add load or raise one of the app's own limits.
-import { readFileSync, mkdirSync } from "node:fs";
+//   node scripts/verify-order-retry.mjs --hook   # PostToolUse mode (reads the tool call on stdin)
+//
+// --hook is what makes these fixes STICK. Without it this file is 48 checks nobody runs: a future
+// session can undo any of them and nothing goes red until a person happens to type the command.
+// In hook mode it stays silent unless a file in this pipeline was just edited, then exits 2 with
+// the failures so the editing session is told immediately. It derives the checkout root from the
+// edited file's path, so it is correct inside a git worktree.
+import { readFileSync, mkdirSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+const HOOK = process.argv.includes("--hook");
+// The files these 48 checks are about. Editing one of them re-runs the guard; editing anything
+// else costs nothing. Keep this in step with the files the checks actually read.
+const WATCHED = /[/\\](lib[/\\](menu|session|guestOutbox|idempotency|idempotencyRule|clash|clashCompare)\.ts|components[/\\](CartPanel|SessionGate|ConnectionBadge)\.tsx|app[/\\]api[/\\]guest[/\\]place-order[/\\]route\.ts|public[/\\]panels[/\\](outbox\.js|editor[/\\]app\.js|kitchen[/\\]app\.js|tablet[/\\]app\.js))$/;
+
+let ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+if (HOOK) {
+  let raw = "";
+  try { raw = readFileSync(0, "utf8"); } catch { process.exit(0); }
+  let payload = {};
+  try { payload = JSON.parse(raw || "{}"); } catch { process.exit(0); }
+  const file = String(payload?.tool_input?.file_path || payload?.tool_response?.filePath || "").replace(/\\/g, "/");
+  if (!WATCHED.test(file)) process.exit(0);                       // not our business
+  // Work out which checkout the edit was in (this may be a worktree, not the main folder).
+  const m = file.match(/^(.*)\/(lib|components|app|public)\//);
+  if (m && existsSync(join(m[1], "package.json"))) ROOT = m[1];
+  // A guard must never break someone's edit: if this checkout predates the pipeline, go quiet.
+  if (!existsSync(join(ROOT, "lib/idempotencyRule.ts"))) process.exit(0);
+}
+
 let pass = 0, fail = 0;
-const ok = (m) => { pass++; console.log(`  ✅ ${m}`); };
+const ok = (m) => { pass++; if (!HOOK) console.log(`  ✅ ${m}`); };
 const bad = (m, extra) => { fail++; console.log(`  ❌ ${m}${extra ? ` — ${extra}` : ""}`); };
 
-console.log("\nA refused order must still be placeable\n");
+if (!HOOK) console.log("\nA refused order must still be placeable\n");
 
 // ── 1. the rule itself — the REAL function, bundled and executed ────────────────────────────
 // Bundled rather than re-implemented or regex-matched: a guard that reasons about a copy of the
@@ -35,9 +61,19 @@ mkdirSync(join(ROOT, "node_modules/.cache"), { recursive: true });
 const OUT = join(ROOT, "node_modules/.cache/verify-order-retry-idem.mjs");
 // lib/idempotencyRule.ts imports NOTHING, so this bundle reaches no database, no Next runtime
 // and no environment at all — which is exactly why the rule lives in its own file.
-execFileSync("npx", ["esbuild", "lib/idempotencyRule.ts", "--bundle", "--platform=node", "--format=esm",
-  "--alias:@=.", `--outfile=${OUT}`, "--log-level=warning"], { cwd: ROOT, stdio: "inherit" });
-const { didSomething } = await import(pathToFileURL(OUT).href);
+// A GUARD MUST NEVER BREAK SOMEONE'S EDIT. If esbuild can't run here (no node_modules yet, a
+// half-installed checkout, no network), a thrown exception would fail the hook and block the edit
+// with a stack trace — punishing a person for an unrelated problem. Go quiet instead; a normal
+// `npm run verify:order-retry` still reports it loudly.
+let didSomething;
+try {
+  execFileSync("npx", ["esbuild", "lib/idempotencyRule.ts", "--bundle", "--platform=node", "--format=esm",
+    "--alias:@=.", `--outfile=${OUT}`, "--log-level=warning"], { cwd: ROOT, stdio: HOOK ? "ignore" : "inherit" });
+  ({ didSomething } = await import(pathToFileURL(OUT).href));
+} catch (e) {
+  if (HOOK) process.exit(0);
+  throw e;
+}
 
 const cases = [
   ["a placed order is remembered", 200, { ok: true, order_id: "abc" }, true],
@@ -197,9 +233,15 @@ const cov = readFileSync(join(ROOT, "scripts/verify-clash-coverage.mjs"), "utf8"
 // The REAL comparator, bundled and executed — lib/clashCompare.ts imports nothing, which is why
 // it can be. A guard that re-implements the rule it checks proves nothing about what ships.
 const CMP = join(ROOT, "node_modules/.cache/verify-order-retry-cmp.mjs");
-execFileSync("npx", ["esbuild", "lib/clashCompare.ts", "--bundle", "--platform=node", "--format=esm",
-  `--outfile=${CMP}`, "--log-level=warning"], { cwd: ROOT, stdio: "inherit" });
-const { sameValue } = await import(pathToFileURL(CMP).href);
+let sameValue;
+try {
+  execFileSync("npx", ["esbuild", "lib/clashCompare.ts", "--bundle", "--platform=node", "--format=esm",
+    `--outfile=${CMP}`, "--log-level=warning"], { cwd: ROOT, stdio: HOOK ? "ignore" : "inherit" });
+  ({ sameValue } = await import(pathToFileURL(CMP).href));  // see the note above: never break an edit
+} catch (e) {
+  if (HOOK) process.exit(0);
+  throw e;
+}
 const cmpCases = [
   ["two different rename maps are told apart", { "3": "A1" }, { "5": "Patio" }, false],
   ["the same map in another key order is equal", { "3": "A1", "5": "P" }, { "5": "P", "3": "A1" }, true],
@@ -229,5 +271,7 @@ const ed = readFileSync(join(ROOT, "public/panels/editor/app.js"), "utf8");
   ? ok("…and the settings row is identified by restaurant_id, as the server expects")
   : bad("the settings expectation would name the wrong id column");
 
-console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
-process.exit(fail ? 1 : 0);
+if (!HOOK || fail) console.log(`\n${fail ? "❌" : "✅"} ${pass} passed, ${fail} failed`);
+if (HOOK && fail) console.log("\nThe ordering & offline pipeline just lost a protection. Re-run: npm run verify:order-retry");
+// Hook mode exits 2 so the editing session is told; a normal run exits 1 for CI/scripts.
+process.exit(fail ? (HOOK ? 2 : 1) : 0);
