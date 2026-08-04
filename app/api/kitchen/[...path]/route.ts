@@ -132,7 +132,35 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (platL.effective) { if (kOn("zomato")) kSources.add("zomato"); if (kOn("swiggy")) kSources.add("swiggy"); if (kOn("website")) kSources.add("takeaway"); }
       if (parcL.effective) kSources.add("parcel");
       const platformRows = ((must(platform) || []) as { source?: string }[]).filter((r) => kSources.has(String(r.source)));
+      // ── PRINT JOBS WAITING FOR THIS KITCHEN SCREEN (mig 269) ──────────────────────
+      // The durable reprint queue: the manager's "Reprint in kitchen" is a row, and this
+      // ride-along is how it reaches the printer — on the very board read the insert's
+      // breadcrumb already triggers, so there is NO new poll and nothing to time. A job
+      // 'printing' for over 2 minutes is offered again: that means a tab died mid-print
+      // (closed, crashed, power), and abandoning it silently would lose the ticket.
+      // Orders + item rows ride along too (only when jobs exist — the common board read
+      // pays nothing): a reprint may be for a KOT that has LEFT the active board (served),
+      // so the panel's own state cannot be trusted to still hold it.
+      const staleIso = new Date(Date.now() - 120000).toISOString();
+      const jobs = (await sb.from("print_jobs")
+        .select("id, order_id, reprint, attempts, status, created_at")
+        .eq("restaurant_id", rid).eq("kind", "kot")
+        .or(`status.eq.queued,and(status.eq.printing,claimed_at.lt.${staleIso})`)
+        .order("created_at").limit(10)).data || [];
+      let printJobs: unknown[] = [];
+      if (jobs.length) {
+        const oids = [...new Set(jobs.map((j) => j.order_id).filter(Boolean))] as string[];
+        const [jo, ji] = await Promise.all([
+          sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items").in("id", oids).eq("restaurant_id", rid),
+          sb.from("order_items").select("id, order_id, title, qty, note, options, removed").in("order_id", oids).eq("restaurant_id", rid).order("created_at"),
+        ]);
+        const byId = new Map(((jo.data || []) as { id: string }[]).map((o) => [o.id, o]));
+        printJobs = jobs
+          .map((j) => ({ ...j, order: byId.get(j.order_id as string) || null, items: ((ji.data || []) as { order_id: string }[]).filter((r) => r.order_id === j.order_id) }))
+          .filter((j) => j.order); // an order deleted since the request has nothing to print
+      }
       return ok({
+        printJobs,
         orders: live.orders, items: live.items, dishes: must(dishes),
         platform: platformRows,
         platformAccept: !!(must(settings) || {}).kitchen_can_accept_platform,
@@ -341,6 +369,66 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const row = must(await sb.from("menu_items").update({ tags }).eq("id", b).eq("restaurant_id", rid).select());
       await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { ...adminMark, detail: b, device_id: dev, restaurant_id: rid });
       return ok(row[0] || null);
+    }
+
+    // ── print-jobs/claim — atomically win the queued jobs this screen is about to print ──
+    // (mig 269). The single UPDATE with a status filter IS the lock: with two kitchen tabs
+    // open, the second one's update matches zero rows, so a ticket can never print twice.
+    // A 'printing' row whose claim is over 2 minutes old is winnable again — its tab died.
+    if (a === "print-jobs" && b === "claim") {
+      const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]).map(String).slice(0, 20) : [];
+      if (!ids.length) return ok({ won: [] });
+      const staleIso = new Date(Date.now() - 120000).toISOString();
+      const won = must(await sb.from("print_jobs")
+        .update({ status: "printing", claimed_at: nowIso() })
+        .in("id", ids).eq("restaurant_id", rid)
+        .or(`status.eq.queued,and(status.eq.printing,claimed_at.lt.${staleIso})`)
+        .select("id"));
+      return ok({ won: (won || []).map((r: { id: string }) => r.id) });
+    }
+
+    // ── print-jobs/:id/done — the printed/failed report closes the loop ──────────────
+    // ok:true also RESOLVES every open printer problem: a sheet of paper coming out is the
+    // one proof the printer works, so the manager's warning clears itself (the auto-solve
+    // the owner asked for, 2026-08-04). ok:false re-queues with a counted attempt; after 5
+    // the job parks as 'failed', which is what the manager's floor strip surfaces.
+    if (a === "print-jobs" && c === "done") {
+      const okPrint = !!(body && body.ok === true);
+      if (okPrint) {
+        must(await sb.from("print_jobs").update({ status: "done", done_at: nowIso(), error: null }).eq("id", b).eq("restaurant_id", rid));
+        await sb.from("printer_events").update({ status: "resolved", resolved_at: nowIso() }).eq("restaurant_id", rid).eq("status", "open");
+        return ok({ ok: true });
+      }
+      const cur = must(await sb.from("print_jobs").select("attempts").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That print job is gone.", 404);
+      const attempts = (cur.attempts || 0) + 1;
+      must(await sb.from("print_jobs").update({
+        status: attempts >= 5 ? "failed" : "queued",
+        attempts, claimed_at: null,
+        error: String(body?.error || "print failed").slice(0, 300),
+      }).eq("id", b).eq("restaurant_id", rid));
+      return ok({ ok: true, attempts });
+    }
+
+    // ── printer-events — a printer problem, reported by a person or by the code ──────
+    // One tap in the kitchen (paper out / half print / jam — the faults a browser
+    // genuinely cannot see) or the automatic 'auto_fail' when a print call throws. An
+    // already-open event of the same kind is MERGED (count+1), never duplicated — a rush
+    // with a dead printer must not bury the manager's floor in rows.
+    if (a === "printer-events" && path.length === 1) {
+      const kinds = ["paper_out", "half_print", "jam", "other", "auto_fail"];
+      const kind = String(body?.kind || "");
+      if (!kinds.includes(kind)) return err("invalid problem kind");
+      const note = typeof body?.note === "string" ? body.note.trim().slice(0, 300) : null;
+      const by = g.user?.name || g.user?.username || "Kitchen";
+      const open = must(await sb.from("printer_events").select("id, count").eq("restaurant_id", rid).eq("status", "open").eq("kind", kind).limit(1));
+      if (open && open.length) {
+        must(await sb.from("printer_events").update({ count: (open[0].count || 1) + 1, last_at: nowIso(), ...(note ? { note } : {}) }).eq("id", open[0].id).eq("restaurant_id", rid));
+      } else {
+        must(await sb.from("printer_events").insert({ restaurant_id: rid, kind, note, reported_by: by }));
+      }
+      await logAction("kitchen", "printer_problem", { ...adminMark, detail: kind, device_id: dev, restaurant_id: rid });
+      return ok({ ok: true });
     }
 
     return err("unknown POST endpoint", 404);

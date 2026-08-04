@@ -284,6 +284,10 @@
 + "      .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}\n"
 + "      .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}\n"
 + "      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}\n"
+// The duplicate banner (owner, 2026-08-04: "reprint … like duplicate in big words on top").
+// Big, bordered, uppercase — a reprinted ticket must be impossible to mistake for a fresh
+// order on a rushed pass. One ink, one weight family, same 66mm discipline as everything else.
++ "      .rp{text-align:center;font-weight:700;font-size:18px;letter-spacing:2px;border:3px double #000;padding:5px 2px;margin:0 0 6px;text-transform:uppercase}\n"
 + "      @page{margin:0}\n"
 + "      @media print{body{margin:0 !important;padding:2mm 5mm 4mm !important}.kl,.meta,.al{break-inside:avoid;page-break-inside:avoid}}\n"
 + (o.note ? kotBarCss() : "")
@@ -292,6 +296,10 @@
 // sticky bar ride up over the last line — it hid the allergy box, which is the one line on a
 // KOT nobody may miss.
 + kotBarHtml(o.note)
+// A REPRINT is branded as one, in big words, at the very top of the paper (owner,
+// 2026-08-04) — the kitchen must never mistake a duplicate for a fresh order. The flag,
+// not free text, so every panel's reprint looks identical.
++ (o.reprint ? '      <div class="rp">*** Reprint · Duplicate ***</div>\n' : "")
 + '      <div class="h">' + esc(o.rname || "Kitchen") + "<br>" + esc(o.head || "KITCHEN TICKET") + "</div>\n"
 + '      <div class="meta"><span>KOT #' + esc(String(o.kot)) + "</span><span>" + esc(o.tableLabel || "") + "</span></div>\n"
 + '      <div class="meta"><span>' + esc(o.when || "") + "</span></div>\n"

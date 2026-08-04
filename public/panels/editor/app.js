@@ -6198,7 +6198,7 @@ async function loadSessions(fromPoll) {
       if (seq !== dataSeq) return; // a newer refresh started — drop this stale snapshot
       // Take the summary unless a floor action's save is still travelling (same shield the
       // board used) — or a refresh landing mid-action would flicker an optimistic tile back.
-      if (!floorOpsInFlight) state.summary = summary;
+      if (!floorOpsInFlight) { state.summary = summary; noticePrinterNews(); }
       // Merge EVERY open-detail table's full slice into the board/data caches (the rest of the
       // board is no longer fetched whole). The detail's ordersForTable/itemsForOrder read these.
       if (!floorOpsInFlight) sels.forEach((t, i) => mergeTableSlice(t, slices[i][0], slices[i][1], slices[i][2]));
@@ -7608,7 +7608,7 @@ function floorHtml() {
   // wrapped in ONE element on purpose: left loose in a wrapping flex row they came apart the
   // moment the row wrapped (an iPad put both at the far LEFT of line two — the placement the
   // owner rejected on 2026-08-02). As a pair with `margin-left:auto` they stay together, right.
-  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view <span class="sub">· live</span></h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${planNote}${gridHtml}${parcelStripHtml()}</div>`;
+  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view <span class="sub">· live</span></h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridHtml}${parcelStripHtml()}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",
@@ -7869,6 +7869,20 @@ function bindFloor() {
   { const sb = ed.querySelector("#floorSections"); if (sb) sb.onclick = () => openSectionsModal(); }
   // (No Open all / Close all bindings — the buttons no longer exist; see bulkCard.)
   { const kb = ed.querySelector("#floorKot"); if (kb) kb.onclick = () => openKotTablePicker(); }
+  // Printer-trouble strip (mig 269): ✓ Resolved closes the event/job; "Print here instead"
+  // prints a stuck reprint on THIS device and dismisses the kitchen job. Both refetch the
+  // floor so the strip reflects the truth it just changed.
+  ed.querySelectorAll("[data-prok]").forEach((b) => (b.onclick = async () => {
+    if (b.disabled) return;
+    b.disabled = true;
+    const i = b.dataset.prok.indexOf(":"), kind = b.dataset.prok.slice(0, i), id = b.dataset.prok.slice(i + 1);
+    try {
+      await api("POST", kind === "event" ? `/printer-events/${id}/resolve` : `/print-jobs/${id}/dismiss`, {});
+      toast("Marked resolved ✓", "ok");
+      await pollOrders();
+    } catch (e) { b.disabled = false; toast("Failed: " + e.message, "err"); }
+  }));
+  ed.querySelectorAll("[data-prhere]").forEach((b) => (b.onclick = () => printJobHere(b.dataset.prhere, b)));
   // (No Blocked-card / docked-detail / resizer / float-out bindings — the right-hand panel
   // and everything that lived in it are gone. A table opens as a popup, full stop.)
   // Every floating card: wire its own detail actions (through the SAME bindTablePanel every
@@ -9787,7 +9801,7 @@ function tableOpsOn() {
 // glance. Phones keep the step-by-step sheets (openKotMenu below). This is the
 // STANDING pattern for every future multi-step popup on desktop.
 // What each KOT operation actually does — shown as the hover tooltip on its row.
-const KOT_TIPS = {"shift": "Moves this whole party — every order, waiter call and the bill — onto an empty table. The old table frees up instantly and the guests' phones follow automatically.", "merge": "Joins this party with another table's party: everything combines into ONE bill on the other table (discounts add up too). Use it when two groups decide to sit together.", "movekot": "Sends ONE order (one kitchen ticket) to another table's bill — for when a single order was punched on the wrong table. Both bills recalculate themselves.", "moveitem": "Sends a single dish to another table. It gets its own new kitchen ticket there, and both bills re-price automatically. A 2-plate line moves both plates.", "split": "Collect one bill as several payments: equal shares, custom amounts, or assign dishes per person. The shares must add up to the bill — the system checks.", "reprint": "Prints an order's kitchen ticket again on the thermal printer — for a lost or unreadable ticket. Nothing changes on the bill."};
+const KOT_TIPS = {"shift": "Moves this whole party — every order, waiter call and the bill — onto an empty table. The old table frees up instantly and the guests' phones follow automatically.", "merge": "Joins this party with another table's party: everything combines into ONE bill on the other table (discounts add up too). Use it when two groups decide to sit together.", "movekot": "Sends ONE order (one kitchen ticket) to another table's bill — for when a single order was punched on the wrong table. Both bills recalculate themselves.", "moveitem": "Sends a single dish to another table. It gets its own new kitchen ticket there, and both bills re-price automatically. A 2-plate line moves both plates.", "split": "Collect one bill as several payments: equal shares, custom amounts, or assign dishes per person. The shares must add up to the bill — the system checks.", "reprint": "Prints an order's kitchen ticket again — either right here on this device, or sent to the KITCHEN's own printer, where it comes out marked DUPLICATE in big letters. Nothing changes on the bill."};
 
 // ── HOVER TOOLTIPS (owner, 2026-07-23): hovering ANY button that carries a title/
 // data-tip shows a styled bubble describing what it does ("how it works"). One host
@@ -9846,7 +9860,7 @@ function openKotColumns(t, sess) {
     { id: "merge", icon: "🪢", label: "Merge tables", sub: "One table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
     { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "One order moves", on: movable.length > 0, why: "no movable KOT" },
     { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
-    { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
+    { id: "reprint", icon: "🖨️", label: "Print / reprint a KOT", sub: "Here, or in the kitchen", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
     // LAST, and only when the restaurant has switched it on (owner, 2026-08-01: "split a bill
     // should be on the last"). Sitting mid-list it was one mis-tap from a half-settled table.
     ...(splitBillOn() ? [{ id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" }] : []),
@@ -9909,12 +9923,17 @@ function openKotColumns(t, sess) {
       }).join("");
       return { title: "Which dish moves? (a multi-plate line moves whole)", html: groups };
     }
-    if (sel1 === "reprint") return { title: "Reprint which KOT?", html: ordersForTable(t).filter((o) => o.status !== "cancelled").map((o) => kotCard(o, "goprint")).join("") };
+    if (sel1 === "reprint") return { title: "Which KOT?", html: ordersForTable(t).filter((o) => o.status !== "cancelled").map((o) => kotCard(o, "pickprint")).join("") };
     return null;
   };
   const col3 = () => {
     if (sel1 === "movekot" && sel2) return { title: "Send that KOT to which table?", html: tiles(allTables(), "gokot", (i) => (summaryTableOpen(i) ? "joins bill" : "free")) };
     if (sel1 === "moveitem" && sel2) return { title: "Send that dish to which table? (new KOT there)", html: tiles(allTables(), "goitem", (i) => (summaryTableOpen(i) ? "joins bill" : "free")) };
+    // The owner's two-option print step (2026-08-04): PRINT = here, on this device;
+    // REPRINT = a durable job the KITCHEN's printer picks up, branded DUPLICATE on paper.
+    if (sel1 === "reprint" && sel2) return { title: "Print it where?", html:
+      `<button class="kotm-row" data-printhere><span class="kotm-ico">🖨</span><span class="kotm-txt"><b>Print KOT</b><small>Prints here, on this device</small></span></button>
+       <button class="kotm-row" data-printkitchen><span class="kotm-ico">👨‍🍳</span><span class="kotm-txt"><b>Reprint KOT — in the kitchen</b><small>Comes out of the kitchen printer, marked DUPLICATE</small></span></button>` };
     return null;
   };
 
@@ -9963,9 +9982,16 @@ function openKotColumns(t, sess) {
     }));
     colsEl.querySelectorAll("[data-pickkot]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickkot; render(); }));
     colsEl.querySelectorAll("[data-pickitem]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickitem; render(); }));
-    colsEl.querySelectorAll("[data-goprint]").forEach((b) => (b.onclick = () => {
-      const o = ordersForTable(t).find((x) => x.id === b.dataset.goprint);
+    colsEl.querySelectorAll("[data-pickprint]").forEach((b) => (b.onclick = () => { sel2 = b.dataset.pickprint; render(); }));
+    colsEl.querySelectorAll("[data-printhere]").forEach((b) => (b.onclick = () => {
+      const o = ordersForTable(t).find((x) => x.id === sel2);
       if (o) { printKotTicket(o); done(`KOT #${o.kot_no ?? "—"} sent to print`); }
+    }));
+    colsEl.querySelectorAll("[data-printkitchen]").forEach((b) => (b.onclick = async () => {
+      const o = ordersForTable(t).find((x) => x.id === sel2);
+      if (!o) return;
+      closeM();
+      await sendKotToKitchen(o);
     }));
     // panel 3 executors
     colsEl.querySelectorAll("[data-gokot]").forEach((b) => (b.onclick = () => run("POST", `/orders/${sel2}/move`, { to: b.dataset.gokot }, `KOT moved to table ${b.dataset.gokot}`)));
@@ -10045,7 +10071,7 @@ function openKotMenu(t, sess) {
     { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "Send one order to another table's bill", on: movable.length > 0, why: "no movable KOT" },
     // Only DB-backed dish rows (kind "session") can move — legacy JSON lines have no row id.
     { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves — it gets its own new KOT there", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
-    { id: "reprint", icon: "🖨️", label: "Reprint a KOT", sub: "Print an order's kitchen ticket again", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
+    { id: "reprint", icon: "🖨️", label: "Print / reprint a KOT", sub: "Here, or on the kitchen's printer", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
     // Same order and the same switch as the desktop list above — a phone must not offer a
     // different set of operations from the screen next to it.
     ...(splitBillOn() ? [{ id: "split", icon: "🍴", label: "Split the bill", sub: "Equal · custom amounts · by dish", on: movable.some((o) => o.status !== "received"), why: "nothing settleable" }] : []),
@@ -10120,26 +10146,123 @@ function printKotTicket(o) {
     }));
   } catch (e) { /* printing must NEVER break the panel */ }
 }
+// "Reprint in kitchen" — the reprint becomes a durable job (mig 269): the kitchen screen
+// claims it, prints it with the big DUPLICATE banner, and reports back. NOTHING prints on
+// this device (owner, 2026-08-04: "I don't want it reprinted in the manager panel"). If the
+// kitchen never picks it up (screen closed, printer dead), the floor strip says so and
+// offers "Print here instead" — the ticket can never just vanish.
+async function sendKotToKitchen(o) {
+  try {
+    const r = await api("POST", "/print-jobs", { order_id: o.id });
+    if (r && r.queued) toast("Saved ✓ — the kitchen prints it the moment you're back online.", "ok");
+    else toast(`KOT #${o.kot_no ?? "—"} sent to the kitchen printer — it comes out marked DUPLICATE.`, "ok");
+  } catch (e) { toast("Couldn't send it to the kitchen: " + e.message, "err"); }
+}
 function openReprintKotPicker(t) {
   document.querySelector(".reprint-overlay")?.remove();
   const os = ordersForTable(t).filter((o) => o.status !== "cancelled");
   if (!os.length) { toast("No KOTs on this table", "err"); return; }
-  const rowsH = os.map((o) => {
-    const nd = orderItemRows(o).reduce((s, r) => s + (parseInt(r.qty, 10) || 1), 0);
-    return `<button class="btn" data-reprint="${esc(o.id)}" style="display:flex;justify-content:space-between;width:100%;margin:0 0 8px;padding:11px 14px"><span><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b> · ${nd} dish${nd === 1 ? "" : "es"}</span><span>🖨️</span></button>`;
-  }).join("");
+  let picked = null; // two steps on a phone: WHICH KOT → WHERE does it print
   const wrap = el(`<div class="sx-modal-overlay reprint-overlay"><div class="sx-modal" style="max-width:420px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🖨️ Reprint a KOT — ${esc(tableLabel(t))}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
-    <div class="dish-edit-body" style="padding:10px 14px 14px">${rowsH}</div></div></div>`);
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🖨️ Print / reprint a KOT — ${esc(tableLabel(t))}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="dish-edit-body" style="padding:10px 14px 14px"></div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = closeM;
   wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
-  wrap.querySelectorAll("[data-reprint]").forEach((b) => (b.onclick = () => {
-    const o = os.find((x) => x.id === b.dataset.reprint);
-    closeM();
-    if (o) { printKotTicket(o); toast(`KOT #${o.kot_no ?? "—"} sent to print`, "ok"); }
-  }));
+  const bodyEl = wrap.querySelector(".dish-edit-body");
+  const render = () => {
+    if (!picked) {
+      bodyEl.innerHTML = os.map((o) => {
+        const nd = orderItemRows(o).reduce((s, r) => s + (parseInt(r.qty, 10) || 1), 0);
+        return `<button class="btn" data-reprint="${esc(o.id)}" style="display:flex;justify-content:space-between;width:100%;margin:0 0 8px;padding:11px 14px"><span><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b> · ${nd} dish${nd === 1 ? "" : "es"}</span><span>›</span></button>`;
+      }).join("");
+      bodyEl.querySelectorAll("[data-reprint]").forEach((b) => (b.onclick = () => { picked = os.find((x) => x.id === b.dataset.reprint) || null; render(); }));
+      return;
+    }
+    bodyEl.innerHTML = `<div class="muted" style="font-size:12px;margin:0 2px 8px">KOT #${picked.kot_no != null ? esc(picked.kot_no) : "—"} — print it where?</div>
+      <button class="btn" data-printhere style="display:flex;gap:10px;align-items:center;width:100%;margin:0 0 8px;padding:12px 14px"><span>🖨</span><span style="text-align:left"><b>Print KOT</b><br><small>Prints here, on this device</small></span></button>
+      <button class="btn" data-printkitchen style="display:flex;gap:10px;align-items:center;width:100%;margin:0 0 8px;padding:12px 14px"><span>👨‍🍳</span><span style="text-align:left"><b>Reprint KOT — in the kitchen</b><br><small>Comes out of the kitchen printer, marked DUPLICATE</small></span></button>
+      <button class="btn" data-printback style="width:100%">‹ Back</button>`;
+    bodyEl.querySelector("[data-printback]").onclick = () => { picked = null; render(); };
+    bodyEl.querySelector("[data-printhere]").onclick = () => { const o = picked; closeM(); printKotTicket(o); toast(`KOT #${o.kot_no ?? "—"} sent to print`, "ok"); };
+    bodyEl.querySelector("[data-printkitchen]").onclick = async () => { const o = picked; closeM(); await sendKotToKitchen(o); };
+  };
+  render();
+}
+
+// ── PRINTER TROUBLE ON THE MANAGER'S FLOOR (mig 269, owner 2026-08-04) ────────────────
+// The kitchen's printer problems land HERE, where someone can act: a one-tap report from
+// the kitchen (paper out / half print / jam), the automatic "tickets aren't printing"
+// event, and any reprint job the kitchen never picked up. The strip sits above the table
+// grid; the owner's Manager mode embeds this same panel, so the owner sees the identical
+// warning with zero extra wiring. Everything self-heals: a successful kitchen print
+// resolves the events server-side, and the strip disappears on the next floor read.
+const PRINTER_KIND_TEXT = {
+  paper_out: "Paper roll finished / paper out",
+  half_print: "A ticket came out half-printed / cut off",
+  jam: "Paper jammed in the printer",
+  other: "Printer problem reported",
+  auto_fail: "Kitchen tickets aren't printing",
+};
+let seenPrinterKeys = null; // null until the first summary — an already-open problem shows in the strip without a boot-time toast storm
+function printerAlerts() {
+  const pr = (state.summary && state.summary.printer) || null;
+  if (!pr) return [];
+  const out = [];
+  for (const e of pr.events || []) out.push({
+    key: "ev:" + e.id, id: e.id, kind: "event", icon: "🖨",
+    text: `${PRINTER_KIND_TEXT[e.kind] || "Printer problem"} — kitchen${e.reported_by ? " · " + e.reported_by : ""}${(e.count || 1) > 1 ? ` · ×${e.count}` : ""}`,
+    at: e.last_at,
+  });
+  for (const j of pr.stuck || []) out.push({
+    key: "job:" + j.id, id: j.id, kind: "job", icon: "🧾",
+    text: `A reprint (KOT #${j.kot_no ?? "—"}${j.table_number != null ? " · " + tableLabel(j.table_number) : ""}) hasn't printed in the kitchen${j.status === "failed" ? ` — it failed ${j.attempts} times` : " — is the kitchen screen open?"}`,
+    at: j.created_at,
+  });
+  return out;
+}
+function printerStripHtml() {
+  const list = printerAlerts();
+  if (!list.length) return "";
+  return `<div class="prstrip">` + list.map((a) => `<div class="prstrip-row">
+    <span class="prstrip-ico">${a.icon}</span><span class="prstrip-txt">${esc(a.text)}<small>${esc(timeAgo(a.at))}</small></span>
+    ${a.kind === "job" ? `<button class="btn" data-prhere="${esc(a.id)}">🖨 Print here instead</button>` : ""}
+    <button class="btn" data-prok="${esc(a.kind)}:${esc(a.id)}">✓ Resolved</button>
+  </div>`).join("") + `</div>`;
+}
+// Toast NEW problems the moment a floor read carries them (realtime makes that near-instant);
+// history never toasts on boot, and a problem only toasts once however many polls repeat it.
+function noticePrinterNews() {
+  const list = printerAlerts();
+  const keys = new Set(list.map((a) => a.key));
+  if (seenPrinterKeys) for (const a of list) if (!seenPrinterKeys.has(a.key)) toast(a.icon + " " + a.text, "err");
+  seenPrinterKeys = keys;
+}
+// "Print here instead" — the honest fallback when the kitchen can't print: fetch the job's
+// order fresh (it may have left the live board long ago), print it on THIS device with the
+// DUPLICATE banner, and dismiss the kitchen job so it stops being offered there.
+async function printJobHere(id, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api("GET", `/print-jobs/${id}`);
+    const o = r.order || {};
+    const rows = (r.items && r.items.length) ? r.items : (Array.isArray(o.items) ? o.items : []);
+    printTicketHtml(kotTicketHtml({
+      title: `KOT ${o.kot_no ?? "—"}`,
+      rname: (state.data.restaurant || {}).name || "Kitchen",
+      head: "KITCHEN TICKET",
+      kot: o.kot_no ?? "—",
+      tableLabel: tablePrintLabel(o.table_number),
+      when: o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+      lines: rows,
+      allergies: Array.isArray(o.allergies) ? o.allergies : [],
+      reprint: r.job ? r.job.reprint !== false : true,
+    }));
+    await api("POST", `/print-jobs/${id}/dismiss`, {});
+    toast("Printed here ✓ — the kitchen job is closed.", "ok");
+    await pollOrders();
+  } catch (e) { if (btn) btn.disabled = false; toast("Couldn't print it here: " + e.message, "err"); }
 }
 
 // SPLIT-SETTLE (mig 176) — collect ONE bill as several payment legs. Three ways to cut
@@ -11759,7 +11882,7 @@ async function pollOrders(opts) {
     return;
   }
   if (seq !== dataSeq) return; // a newer loader started — this poll snapshot is stale
-  if (!floorOpsInFlight) state.summary = summary; // don't clobber an optimistic tile mid-action
+  if (!floorOpsInFlight) { state.summary = summary; noticePrinterNews(); } // don't clobber an optimistic tile mid-action
   state.boardLoaded = true;
 
   // Orders tab → also pull the full order/call lists it renders (merged, optimistic-safe).

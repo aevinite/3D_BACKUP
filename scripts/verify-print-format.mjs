@@ -117,6 +117,26 @@ for (const [doc, needle, label] of RULES) {
   if (doc.includes(needle)) ok(label);
   else bad(`${label} — the rule is gone`, `expected to find: ${needle}`);
 }
+// ── THE REPRINT BANNER (mig 269, owner 2026-08-04: "duplicate in big words on top") ──────
+// One flag, drawn by the shared document only: a reprinted ticket carries the big bordered
+// banner ABOVE everything; a fresh ticket must never carry it (a first print branded
+// "DUPLICATE" would be a lie on paper).
+const kotDup = BILLDOC.kotDocHtml({ rname: "Test", kot: 7, tableLabel: "A5", lines: [], reprint: true });
+if (/<div class="rp">[^<]*Reprint[^<]*Duplicate[^<]*<\/div>/i.test(kotDup)) ok("a reprinted ticket carries the REPRINT · DUPLICATE banner");
+else bad("the reprint banner is gone from the shared ticket", 'kotDocHtml({ reprint: true }) must render <div class="rp">…Reprint · Duplicate…</div>');
+if (kotDup.indexOf('class="rp"') < kotDup.indexOf('class="h"')) ok("the banner sits ABOVE the ticket header — 'in big words on top'");
+else bad("the reprint banner is not at the top of the ticket", "the owner asked for it on top, above everything");
+if (/font-size:1[6-9]px/.test(kotDup) && /\.rp\{[^}]*text-transform:uppercase/.test(kotDup)) ok("the banner is big and uppercase");
+else bad("the banner is no longer big/uppercase", "the .rp rule should keep ≥16px + text-transform:uppercase");
+if (!/class="rp"/.test(kot)) ok("a fresh ticket carries no duplicate banner");
+else bad("a FRESH ticket now prints the DUPLICATE banner", "reprint:false/absent must render a clean ticket");
+// Nobody draws the banner by hand: the flag is the only way to a duplicate ticket.
+// (The markup fingerprint, not the words — panels legitimately SAY "duplicate" in toasts.)
+for (const file of SURFACES) {
+  if (/class="rp"/.test(read(file))) bad(`${file} draws its own duplicate banner`, "pass reprint:true to the shared document instead");
+}
+ok("no surface draws its own duplicate banner");
+
 // A KOT IS FOR THE KITCHEN, NOT A BILL: it must never carry money.
 if (!/₹|Subtotal|TOTAL/.test(kot)) ok("the kitchen ticket carries no prices");
 else bad("the kitchen ticket now shows money", "a KOT is for the kitchen — prices belong on the bill only");

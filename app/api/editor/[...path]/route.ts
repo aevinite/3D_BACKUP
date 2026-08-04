@@ -1254,7 +1254,35 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // still updates the instant its order lands.
       const { data, error } = tbl
         ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
-        : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
+        : await sharedFloorSummary(`floor:${rid}`, async () => {
+            const r = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null });
+            // PRINTER TROUBLE RIDES THE FLOOR READ (mig 269, owner 2026-08-04): open printer
+            // problems + reprints nobody printed (queued/printing past 90s, or failed out of
+            // retries). Inside the SHARED closure on purpose — a dozen devices polling
+            // together still cost these two indexed few-row reads ONCE, and every write
+            // already drops the snapshot, so a report or a resolve shows on the next read.
+            // A targeted ?table= refetch never pays for this (printer state isn't per-table).
+            if (!r.error && r.data) {
+              const staleIso = new Date(Date.now() - 90000).toISOString();
+              const [ev, stuck] = await Promise.all([
+                sb.from("printer_events").select("id, kind, note, count, reported_by, last_at")
+                  .eq("restaurant_id", rid).eq("status", "open").order("last_at", { ascending: false }).limit(5),
+                sb.from("print_jobs").select("id, order_id, status, attempts, created_at, requested_by, error")
+                  .eq("restaurant_id", rid).eq("kind", "kot")
+                  .or(`status.eq.failed,and(status.eq.queued,created_at.lt.${staleIso}),and(status.eq.printing,created_at.lt.${staleIso})`)
+                  .order("created_at").limit(5),
+              ]);
+              let jobs = (stuck.data || []) as Record<string, unknown>[];
+              if (jobs.length) {
+                const oids = [...new Set(jobs.map((j) => j.order_id).filter(Boolean))] as string[];
+                const os = (await sb.from("orders").select("id, kot_no, table_number").in("id", oids).eq("restaurant_id", rid)).data || [];
+                const byId = new Map(os.map((x) => [x.id, x]));
+                jobs = jobs.map((j) => ({ ...j, kot_no: byId.get(j.order_id as string)?.kot_no ?? null, table_number: byId.get(j.order_id as string)?.table_number ?? null }));
+              }
+              (r.data as Record<string, unknown>).printer = { events: ev.data || [], stuck: jobs };
+            }
+            return r;
+          });
       if (error) throw new Error(error.message);
       // WHICH TABLES ARE SERVED AS ONE PARTY (mig 249). A handful of rows, restaurant-scoped, live
       // ones only — small enough to ride along with every floor read, and the floor needs it on
@@ -1265,6 +1293,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         .select("parent_table, child_table, merged_at, merged_by")
         .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || [];
       return ok({ ...(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] }), merges });
+    }
+
+    // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
+    // One-off read on the manager's click, never polled. The order may have left the live
+    // board long ago (a served KOT is exactly what gets reprint requests), so its rows are
+    // fetched fresh rather than trusted to the panel's state.
+    if (path[0] === "print-jobs" && path.length === 2) {
+      const job = must(await sb.from("print_jobs").select("id, order_id, reprint, status").eq("id", path[1]).eq("restaurant_id", rid).maybeSingle());
+      if (!job) return err("That print job is gone.", 404);
+      const [o, items] = await Promise.all([
+        sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items").eq("id", job.order_id).eq("restaurant_id", rid).maybeSingle(),
+        sb.from("order_items").select("id, order_id, title, qty, note, options, removed").eq("order_id", job.order_id).eq("restaurant_id", rid).order("created_at"),
+      ]);
+      if (!o.data) return err("That KOT's order is gone.", 404);
+      return ok({ job, order: o.data, items: items.data || [] });
     }
 
     if (p === "sessions") {
@@ -3347,6 +3390,45 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const banTarget = [table ? `table ${table}` : "", phone ? "a phone" : "", device ? "a device" : "", memberId ? "a guest" : ""].filter(Boolean).join(", ") || "a guest";
       await log("editor", "blocklist_add", { restaurant_id: rid, detail: `banned ${banTarget}${body.reason ? ` · ${String(body.reason).slice(0, 60)}` : ""}`, device_id: dev });
       return ok(row || null);
+    }
+
+    // ── PRINT RELIABILITY (mig 269, owner 2026-08-04) ────────────────────────────────
+    // BEFORE the generic /:kind upsert below — that block answers every unknown
+    // single-segment POST itself (404 "unknown kind"), so anything after it is unreachable.
+    // print-jobs — "Reprint in kitchen": the manager's reprint becomes a ROW the kitchen
+    // screen claims and prints (with the DUPLICATE banner). Nothing prints here. Rides the
+    // outbox + withIdempotency like every editor write, so a reprint tapped offline reaches
+    // the kitchen exactly once when the connection returns.
+    if (a === "print-jobs" && path.length === 1) {
+      const orderId = String(body?.order_id || "");
+      if (!orderId) return err("Missing order id — refresh and try again.");
+      const o = must(await sb.from("orders").select("id, status, kot_no").eq("id", orderId).eq("restaurant_id", rid).maybeSingle());
+      if (!o) return err("That KOT isn't on this restaurant's board any more.", 404);
+      if (o.status === "cancelled") return err("That KOT was cancelled — there is nothing to reprint.");
+      must(await sb.from("print_jobs").insert({
+        restaurant_id: rid, kind: "kot", order_id: orderId, reprint: true,
+        requested_by: actorName || "Manager",
+      }));
+      await log("editor", "kot_reprint_sent", { order_id: orderId, detail: `KOT #${o.kot_no ?? "—"}`, device_id: dev, restaurant_id: rid });
+      return ok({ ok: true });
+    }
+
+    // print-jobs/:id/dismiss — the manager handled a stuck/failed reprint another way
+    // (usually "Print here instead"), so it must stop being offered to the kitchen AND
+    // stop showing as a problem. Only live states can be dismissed; 'done' stays done.
+    if (a === "print-jobs" && c === "dismiss") {
+      must(await sb.from("print_jobs").update({ status: "dismissed", done_at: nowIso() })
+        .eq("id", b).eq("restaurant_id", rid).in("status", ["queued", "printing", "failed"]));
+      return ok({ ok: true });
+    }
+
+    // printer-events/:id/resolve — the manager says the printer problem is handled.
+    // (The other resolver is automatic: any successful kitchen print closes all open events.)
+    if (a === "printer-events" && c === "resolve") {
+      must(await sb.from("printer_events").update({ status: "resolved", resolved_at: nowIso() })
+        .eq("id", b).eq("restaurant_id", rid).eq("status", "open"));
+      await log("editor", "printer_problem_resolved", { detail: b, device_id: dev, restaurant_id: rid });
+      return ok({ ok: true });
     }
 
     // generic upsert: POST /:kind  (items | categories | filters | settings)
