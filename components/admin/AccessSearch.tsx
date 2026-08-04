@@ -63,6 +63,11 @@ const SYNONYMS: Record<string, string> = {
   inventory: "inventory stock recipe expense wastage vendor purchase count cogs",
   bill: "bill invoice receipt gst tax legal",
   bill_gstin: "gstin gst number tax id",
+  // GST and prices (mig 270). Nobody types "price tax mode" — they type "inclusive", "does the
+  // price include tax", or the thing that made them look: a water bottle sold at MRP.
+  price_tax_mode: "gst tax inclusive exclusive included price includes tax no gst composition scheme flat rate on top",
+  item_tax_modes: "mrp water bottle packaged sealed per dish tax gst different item level override",
+  mrp_tax_treatment: "mrp gst inside price water bottle packaged sealed no gst inclusive maximum retail price",
   bill_name: "legal name business name",
   bill_address: "address bill address",
   mark_86: "sold out 86 unavailable finished",

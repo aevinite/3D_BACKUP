@@ -1391,9 +1391,21 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
   // ── TAX / GST ──
   if (bk === "tax") {
     if (!t) return <EmptyCard text="No taxable sales in this period yet." />;
-    const taxable = t.subtotal - t.discount;                       // the value tax is charged on
-    const actualPct = taxable ? (t.tax / taxable) * 100 : 0;       // rate the numbers actually realised
+    // Sales net of discount. Once a restaurant sells MRP / nil-rated items (mig 270) this is
+    // NOT all taxable, so a GST return needs it split — taxable supplies and exempt supplies
+    // are different boxes on the form.
+    const netSales = t.subtotal - t.discount;
     const configuredPct = data.tax?.effectivePct ?? null;         // the rate that's set up
+    // The taxable value is recoverable exactly from the tax itself: tax = taxable × rate.
+    // That needs no extra column and no rollup change, and it stays right when a period mixes
+    // taxed and untaxed lines. With no rate configured (composition scheme) nothing is taxable.
+    const taxableDerived = configuredPct ? t.tax / (configuredPct / 100) : 0;
+    // Legacy/no-MRP periods: the derived figure equals netSales, so this is a no-op for them.
+    const taxable = configuredPct ? Math.min(taxableDerived, netSales) : netSales;
+    const exempt = Math.max(0, Math.round((netSales - taxable) * 100) / 100);
+    const actualPct = taxable ? (t.tax / taxable) * 100 : 0;       // rate the numbers actually realised
+    // With the exempt part accounted for, a REMAINING mismatch is a genuine data problem
+    // worth flagging — it is no longer just "there were some untaxed items".
     const rateOk = configuredPct == null || Math.abs(actualPct - configuredPct) < 0.5;
     const avgTaxPerBill = t.paidOrders ? t.tax / t.paidOrders : 0;
     const comps = data.tax?.components ?? [];
@@ -1403,7 +1415,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     // row's displayed total, and two equal rates never differ by a paisa.
     const filingRows = (comps.length ? mrows.filter((r) => r.tax > 0) : []).map((r) => ({
       bucket: r.bucket,
-      taxable: r.subtotal - r.discount,
+      // Same derivation as the KPI above — the filing table must show the TAXABLE value, not
+      // total sales, or a period containing MRP items overstates the box it is filed under.
+      taxable: configuredPct
+        ? Math.min(r.tax / (configuredPct / 100), r.subtotal - r.discount)
+        : r.subtotal - r.discount,
       tax: Math.round(r.tax),
       parts: splitTax(comps.map((c) => c.rate), Math.round(r.tax)),
     }));
@@ -1414,7 +1430,12 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
       <>
         <div className="rs-kpis">
           <Stat label="Tax collected" tone="accent" icon="fa-landmark" big value={inr(t.tax)} sub={`${nfmt(t.paidOrders)} paid bills`} spark={mrows.map((r) => r.tax)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
-          <Stat label="Taxable sales" tone="accent" icon="fa-cart-shopping" value={inr(taxable)} sub="subtotal − discount" />
+          <Stat label="Taxable sales" tone="accent" icon="fa-cart-shopping" value={inr(taxable)}
+            sub={exempt > 0 ? "the part GST was charged on" : "subtotal − discount"} />
+          {exempt > 0 && (
+            <Stat label="Exempt / MRP sales" tone="info" icon="fa-bottle-water" value={inr(exempt)}
+              sub="sold with no GST — file separately" />
+          )}
           <Stat label="Effective rate" tone={rateOk ? "good" : "warn"} icon="fa-percent" value={`${actualPct.toFixed(2)}%`}
             sub={configuredPct != null ? (rateOk ? `matches the set ${configuredPct}%` : `set rate is ${configuredPct}%`) : "tax ÷ taxable sales"} />
           <Stat label="Tax per bill" tone="info" icon="fa-receipt" value={inr(avgTaxPerBill)} sub="average" />

@@ -32,10 +32,14 @@ type Row = { id: string; created_at: string; session_id?: string | null; [k: str
 // public/panels/{tablet,kitchen}/app.js before locking: drop a rendered column here and that
 // panel silently breaks (and boardSig wouldn't repaint it either). `edited_at` is intentionally
 // NOT listed — neither panel renders a "✎ Edited" badge today (CLAUDE.md's claim is stale).
+// (269/271) taxable_base, nontax_amount and mrp_amount ride along because the waiter panel
+// shows a due and caps a discount from these rows. Without them it has to ESTIMATE the taxable
+// part as "all of it", which is right until a bill contains an MRP bottle and then quietly
+// isn't — three numerics on an already-fetched row, no extra round-trip.
 const ORDER_COLS =
-  "id, created_at, session_id, table_number, status, payment_status, total, discount, discount_note, kot_no, member_id, allergies, items";
+  "id, created_at, session_id, table_number, status, payment_status, total, discount, discount_note, kot_no, member_id, allergies, items, taxable_base, nontax_amount, mrp_amount";
 const ITEM_COLS =
-  "id, order_id, title, qty, status, note, options, removed, added_allergens, removed_flag, unit_price, created_at";
+  "id, order_id, title, qty, status, note, options, removed, added_allergens, removed_flag, unit_price, created_at, tax_mode, is_mrp";
 
 // ACTIVE order statuses for the KITCHEN board. orders.status is only ever
 // {received, preparing, served, cancelled} — there is NO 'ready' order status ('ready'

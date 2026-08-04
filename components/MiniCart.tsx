@@ -98,6 +98,13 @@ export default function MiniCart() {
 
   // Sum the lines in the DISPLAY currency (each converted + snapped first,
   // add-ons minor-rounded) — this matches the bill's subtotal to the rupee.
+  //
+  // TAX MODES (mig 270): nothing here needs to change, and that is deliberate. This pill shows
+  // the SUBTOTAL only — it never names a line, never says "MRP", and never claims to be the
+  // amount payable — so a tax-inclusive or MRP line cannot be mislabelled by it. The three
+  // behaviours only alter what is ADDED on top, which is the bill panel's job (CartPanel).
+  // If this pill is ever changed to show a TOTAL, it must go through splitBill() in lib/tax.ts,
+  // never subtotal × rate — that formula charges GST on a price that already contains it.
   const dispSubtotal = lines.reduce((s, l) => s + unitDisplay(l.usd, l.addons, currency || undefined) * l.qty, 0);
   const price = currency ? formatAmount(dispSubtotal, currency) : `$${dispSubtotal.toFixed(2)}`;
   return (

@@ -439,6 +439,16 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 .inm { flex: 1; min-width: 0; font-size: 14px; }
 /* per-dish line price, sits between the name and the status pill */
 .iprice { font-size: 13px; font-weight: 700; color: #e8dcc8; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* MRP stamp (mig 270) — a locked, final price: no tax is added to it and no discount comes off
+   it. Outlined rather than filled, and in the muted colour, because it is a fact about the price
+   and NOT a warning; it must read the same in the dark and light skins, so it borrows the theme's
+   own line/muted variables instead of a fixed colour (a hardcoded one goes invisible in light). */
+.mrp-tag {
+  display: inline-block; margin-right: 6px; padding: 0 5px;
+  font-size: 9.5px; font-weight: 800; letter-spacing: .08em; line-height: 15px;
+  color: var(--muted); border: 1px solid var(--line); border-radius: 4px;
+  vertical-align: middle; white-space: nowrap;
+}
 /* The status/serve/edit/delete cluster is ONE container so narrow phones can move it to
    its own row (see the max-width media query below) without touching the markup. */
 .iacts { display: inline-flex; align-items: center; gap: 10px; }

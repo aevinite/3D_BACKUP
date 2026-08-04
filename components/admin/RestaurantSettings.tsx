@@ -15,6 +15,13 @@ import { BANQUET_FIELDS, BANQUET_LOCKED, BANQUET_PRESETS, banquetBillNo, banquet
 // kitchen board print from. Both previews on this screen render it, so a format approved here
 // cannot come out of the printer looking like something else (owner, 2026-08-02).
 import BILLDOC from "@/public/panels/billdoc.js";
+// The restaurant's REAL rate, by the one rule the whole app uses (named components if it has
+// them, else its own flat rate, else 5%). The worked examples under the price-mode choice are
+// only useful if they are this restaurant's arithmetic, not a made-up 5%.
+import { effectiveTaxRate } from "@/lib/tax";
+// THE sample bill — the same builder the Access screen's "Format of KOT bills" preview uses, so
+// the two previews of one document cannot disagree.
+import { billPreviewHtml } from "@/lib/billPreview";
 
 type Rest = { id: string; slug: string; name: string };
 type TaxComp = { label: string; rate: number | string };
@@ -24,6 +31,10 @@ type Draft = Record<string, unknown>;
 const KEYS = [
   "tax_label", "restaurant_name", "restaurant_address", "restaurant_phone", "gstin",
   "invoice_prefix", "bill_footer", "tax_components", "tax_rate",
+  // GST and prices (mig 270). These three save themselves the moment they are picked, but they
+  // MUST still be listed here: the dirty-diff and the Save patch are both built from this array,
+  // so a key missing from it looks editable and then quietly saves nothing.
+  "price_tax_mode", "item_tax_modes_allowed", "mrp_tax_treatment",
   "bill_customer_required", "bill_customer_print",
   "sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m",
   "table_count", "table_seats", "table_names",
@@ -291,37 +302,15 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   // printer looking different ("both should be sync"). It now renders /panels/billdoc.js — the
   // one file the manager panel prints from — fed by the fields on this form, so unsaved edits
   // still show and what is previewed is genuinely what prints.
+  //
+  // …and as of mig 270 it does not even build its own FIGURES. It used to compute the tax from
+  // this component's own copy of the rows, which meant it knew nothing about the price modes
+  // added on the very screen it sits on: a restaurant switched to the composition scheme would
+  // have been shown a bill with CGST/SGST rows it may not legally print. billPreviewHtml is the
+  // one place those sums live, it takes a settings object, and the UNSAVED DRAFT is a settings
+  // object — so unsaved edits still show and there is no second copy left to drift.
   const previewBill = () => {
-    const lines = [
-      { title: "Paneer Butter Masala", qty: 2, price: 360, options: [{ label: "Extra gravy", price: 40 }] },
-      { title: "Garlic Naan", qty: 4, price: 85, options: [{ label: "Butter", price: 15 }] },
-      { title: "Fresh Lime Soda", qty: 2, price: 120 },
-    ];
-    const subtotal = lines.reduce((a, l) => a + l.qty * l.price, 0);
-    const discount = 50;
-    const taxable = subtotal - discount;
-    const used = comps.filter((c) => String(c?.label || "").trim() && Number(c?.rate) > 0);
-    const rateSum = used.reduce((a, c) => a + Number(c.rate), 0);
-    const taxWhole = Math.round((taxable * rateSum) / 100);
-    const bi = BILLDOC.billIdentity(draft, restForDoc());
-    const html = BILLDOC.billDocHtml({
-      logo: logoUrl,
-      name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
-      invNo: `${bi.prefix}/2026-27/000042`,
-      billNo: 42,
-      tableDisp: sampleTableLabel("T5"),
-      dateStr: new Date().toLocaleDateString("en-IN") + " " + new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
-      cust: draft.bill_customer_print === false ? "" : "Riya Sharma",
-      custPhone: draft.bill_customer_print === false ? "" : "98250 12345",
-      lines,
-      subtotal, discount,
-      discLabel: BILLDOC.discPct(subtotal, discount),
-      taxable,
-      total: taxable + taxWhole,
-      taxRows: BILLDOC.splitTax(taxWhole, used.map((c) => ({ label: String(c.label), rate: Number(c.rate) }))),
-      autoPrint: false,
-      note: "A sample bill — invented customer and items, your real header, taxes and footer. This is the exact page the manager panel prints.",
-    });
+    const html = billPreviewHtml(draft, "bill", restForDoc());
     const w = window.open("", "lfh_bill_preview", "width=420,height=700");
     if (!w) { setErr("Allow pop-ups to preview the bill."); return; }
     try { w.document.open(); } catch { /* reused window: start blank */ }
@@ -534,11 +523,42 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       </label>
     );
   };
-  const boolToggle = (label: string, k: string, on: boolean) => (
+  // `auto` = this switch is a discrete control, so it saves itself on the same debounce the
+  // number pickers use. Left off, it behaves exactly as before (the Save bar owns it) — the two
+  // customer switches below keep that behaviour, so no existing call site changes.
+  const boolToggle = (label: string, k: string, on: boolean, opts: { auto?: boolean } = {}) => (
     <button type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={!loadOk || busy}
-      onClick={() => set(k, !on)} title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
+      onClick={() => { set(k, !on); if (opts.auto) autoSave(k, !on); }}
+      title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
       <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
     </button>
+  );
+  // A pick-one question where each answer needs a WORKED EXAMPLE under it. A <select> can't
+  // carry that — and these three answers change what every bill means, so the explanation has
+  // to be visible while choosing, not hidden behind an opened drop-down. Same visual grammar as
+  // the banquet tick list further down (bordered row, bold answer, muted line beneath), and it
+  // saves itself on pick like the other discrete controls.
+  const choiceCards = (k: string, cur: string, opts: { value: string; label: string; ex: string }[]) => (
+    <div style={{ display: "grid", gap: 8, maxWidth: 560 }}>
+      {opts.map((o) => (
+        <label key={o.value} style={{
+          display: "flex", gap: 10, alignItems: "flex-start", cursor: loadOk && !busy ? "pointer" : "default",
+          border: "var(--border)", borderRadius: 9, padding: "9px 11px", opacity: loadOk ? 1 : 0.6,
+          background: cur === o.value ? "color-mix(in srgb, var(--accent) 9%, transparent)" : "transparent",
+        }}>
+          <input type="radio" name={`${k}-${restaurant.id}`} checked={cur === o.value} disabled={!loadOk || busy}
+            style={{ marginTop: 3 }}
+            onChange={() => { set(k, o.value); autoSave(k, o.value); }} />
+          <span>
+            <b style={{ fontSize: 13 }}>{o.label}</b>
+            <span className="adm-muted" style={{ display: "block", fontSize: 11.5, lineHeight: 1.45 }}>{o.ex}</span>
+          </span>
+        </label>
+      ))}
+      <span style={{ ...hintStyle, display: "block", color: autoSaved === k ? "var(--adm-ok, #16a34a)" : "var(--muted)", fontWeight: autoSaved === k ? 700 : 400 }}>
+        {autoSaved === k ? "✓ Saved" : "Saves on its own"}
+      </span>
+    </div>
   );
 
   const comps = (Array.isArray(draft.tax_components) ? draft.tax_components : []) as TaxComp[];
@@ -546,6 +566,22 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
   const taxWord = String(draft.tax_label || "Tax").trim() || "Tax";
   const setComp = (i: number, key: "label" | "rate", v: string) =>
     set("tax_components", comps.map((c, j) => (j === i ? { ...c, [key]: v } : c)));
+
+  // ── GST and prices (mig 270) ──────────────────────────────────────────────
+  // The examples underneath each answer use THIS restaurant's configured rate, worked out by
+  // the same helper the bill uses. A generic "5%" example on a 12% restaurant is a worked
+  // example that teaches the wrong number.
+  const gstRate = effectiveTaxRate(draft);
+  const rup = (n: number) => {
+    const v = Math.round(n * 100) / 100;
+    return "₹" + v.toLocaleString("en-IN", { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 });
+  };
+  const EG = 280;                                   // one ordinary dish, so the sum is easy to follow
+  const egNet = Math.round((EG / (1 + gstRate)) * 100) / 100;
+  const priceMode = ["excl", "incl", "composition"].includes(String(draft.price_tax_mode))
+    ? String(draft.price_tax_mode) : "excl";
+  const itemModes = draft.item_tax_modes_allowed === true;
+  const mrpMode = String(draft.mrp_tax_treatment) === "inclusive" ? "inclusive" : "none";
 
   // Banquet bill (mig 237): the field list this restaurant is asked to fill, and a
   // live preview of the next bill number in the chosen style.
@@ -668,6 +704,52 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             </div>
           </details>
         </div>
+
+        {/* ── GST AND PRICES (mig 270, owner 2026-08-04) ─────────────────────────
+            "The price I type for a dish — does GST get added on top of it, or is it already
+            inside?" Everything on a bill follows this one answer, so it sits ABOVE the tax rows
+            it governs. All three are admin-only: no owner and no manager screen offers them. */}
+        <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>GST and prices</h3>
+        <p className="hint">
+          What the prices typed into this restaurant&apos;s menu <b>mean</b>. The bill, the guest&apos;s cart
+          and the reports all follow this one answer, so they can never show different totals.
+          Examples use this restaurant&apos;s own rate ({Math.round(gstRate * 10000) / 100}%).
+        </p>
+        {choiceCards("price_tax_mode", priceMode, [
+          { value: "excl", label: "GST is added on top", ex: `A ${rup(EG)} dish becomes ${rup(EG * (1 + gstRate))} on the bill. This is how it works today.` },
+          { value: "incl", label: "The price already includes GST", ex: `A ${rup(EG)} dish stays ${rup(EG)} (${rup(egNet)} + ${rup(EG - egNet)} GST). The guest pays the price on the menu.` },
+          { value: "composition", label: "Composition scheme — no GST shown", ex: "No GST line is shown to the diner at all. Nothing is added to any price." },
+        ])}
+        {priceMode === "composition" && (
+          <p className="hint" style={{ marginTop: 8, borderLeft: "3px solid var(--adm-danger, #dc2626)", paddingLeft: 10 }}>
+            <b>Every bill loses its tax line.</b> A composition-scheme restaurant pays a flat rate itself and may
+            not charge GST to a diner, so no tax row prints on any bill and nothing is added to a price. Only pick
+            this if the restaurant really is registered under the composition scheme.
+          </p>
+        )}
+
+        <div style={{ display: "grid", gap: 8, maxWidth: 560, marginTop: 14 }}>
+          {boolToggle("Let individual dishes differ from this", "item_tax_modes_allowed", itemModes, { auto: true })}
+          <span className="adm-muted" style={{ fontSize: 11.5, lineHeight: 1.45 }}>
+            Needed for MRP items like sealed water bottles, whose printed price is final. <b>Off</b> — where every
+            restaurant starts — means every dish follows the setting above and a dish&apos;s own tax choice is ignored
+            completely, not just hidden.
+          </span>
+        </div>
+
+        {itemModes && (
+          <div style={{ marginTop: 14 }}>
+            <h3 style={{ margin: "0 0 4px", fontSize: 13.5 }}>MRP items</h3>
+            <p className="hint">
+              How an MRP line is treated underneath. <b>The guest pays the same either way</b> — never a rupee above
+              the printed MRP. This only decides what the restaurant declares.
+            </p>
+            {choiceCards("mrp_tax_treatment", mrpMode, [
+              { value: "none", label: "No GST on MRP items", ex: "The line carries no GST at all — nothing is added to the printed price and nothing is declared on it." },
+              { value: "inclusive", label: "GST is inside the MRP price", ex: "The GST is taken out of the MRP and declared. The guest still pays exactly the MRP; this is the cleaner one for the books." },
+            ])}
+          </div>
+        )}
 
         <h3 style={{ margin: "18px 0 4px", fontSize: 13.5 }}>Tax lines on the print</h3>
         <p className="hint">

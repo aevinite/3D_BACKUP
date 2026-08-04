@@ -1129,6 +1129,62 @@ function triSel(label, path, val) {
     </select></div>`;
 }
 
+// taxModeExample(mode, price, settings): the ONE line under the "GST on this price" picker
+// that says, in money, what the choice does — "Guest pays ₹294.00 — ₹280 + ₹14 GST at 5%".
+// It is a requirement, not decoration (owner, 2026-08-04): "on top / inside / MRP" are three
+// abstractions that all sound reasonable, and the only way to be sure which one you want is to
+// see what the guest hands over. Computed from the restaurant's REAL rate and the price
+// actually typed in the box above, so it is this dish's answer, not an illustration.
+// Two decimals here (not the whole-rupee inr()) because the whole point is showing where the
+// paise land; the bill itself still rounds the way it always has.
+function taxModeExample(mode, price, settings) {
+  const s = settings || {};
+  const tm = taxModel(s);
+  const r2 = (n) => Math.round(n * 100) / 100;
+  const m2 = (n) => "₹" + r2(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const typed = parseFloat(String(price == null ? "" : price).replace(/[^0-9.]/g, ""));
+  const amt = Number.isFinite(typed) && typed > 0 ? typed : 100; // nothing typed yet → a round ₹100
+  if (tm.composition) return `This restaurant is on the composition scheme, so no GST reaches the guest — they pay exactly ${m2(amt)}.`;
+  const behaviour = resolveTaxMode(mode, s);
+  if (behaviour === "exempt") return `Guest pays exactly ${m2(amt)} — nothing is added.`;
+  if (behaviour === "incl") {
+    const net = r2(amt / (1 + tm.rate));
+    return `Guest pays ${m2(amt)} — ${m2(net)} + ${m2(amt - net)} GST is already inside it.`;
+  }
+  const tax = r2(amt * tm.rate);
+  return `Guest pays ${m2(amt + tax)} — ${m2(amt)} + ${m2(tax)} GST at ${tm.pct}%.`;
+}
+
+// taxModeField(it): the "GST on this price" picker, directly under the Price box (mig 270).
+//
+// IT IS BUILT ONLY WHEN THE ADMIN HAS TURNED PER-DISH MODES ON. Not disabled, not greyed —
+// ABSENT. That is this project's access rule ("unreachable = absent, no greyed-out ghosts"),
+// and here it is also the only honest shape: while settings.item_tax_modes_allowed is false
+// the server IGNORES a dish's tax_mode entirely (lfh_resolve_tax_mode returns the
+// restaurant's own mode whatever the dish says), so a dropdown would be a control that saves
+// a value nothing reads — exactly the dead switch the 2026-07-31 access rebuild deleted 45 of.
+//
+// The caller wraps it in data-menu-part="edit_price" with the open-price switch, because this
+// decides what the guest pays every bit as much as the number above it: whoever may not change
+// a price may not change this either, and the server drops both keys together.
+function taxModeField(it) {
+  const s = state.data.settings || {};
+  if (!itemTaxModesAllowed(s)) return "";
+  const cur = String(it.tax_mode || "default");
+  const OPTS = [
+    ["default", "Default — whatever this restaurant does"],
+    ["excl", "On top — GST is added to this price"],
+    ["incl", "Inside — this price already includes GST"],
+    ["mrp", "MRP — the printed price, nothing is ever added"],
+    ["none", "None — no GST on this dish at all"],
+  ];
+  return `<div class="field span-2 tax-mode-field">
+    <label>GST on this price</label>
+    <select data-path="tax_mode" id="taxModeSel">${OPTS.map(([v, t]) => `<option value="${esc(v)}" ${cur === v ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>
+    <span class="hint tax-mode-eg" id="taxModeEg">${esc(taxModeExample(cur, it.price, s))}</span>
+  </div>`;
+}
+
 // catSelect: a drop-down listing every category, used to pick a dish's category.
 function catSelect(val) {
   const opts = state.data.categories
@@ -1233,6 +1289,11 @@ function formItems(it) {
           Price box does, and the server drops both together. The hint moves inside the wrapper
           so hiding the switch can't leave its explanation behind on its own. */""}
     <div data-menu-part="edit_price">
+      ${/* "GST on this price" lives with the price, not in a tax card of its own: it is the
+            second half of the same question ("what does this dish cost the guest?"), and
+            putting it here means the one permission that hides a price hides it too. It
+            renders NOTHING while the admin has per-dish modes switched off. */""}
+      ${taxModeField(it)}
       <div style="margin-top:14px">${toggle("💰 Open price — staff type the price at order time", "open_price", it.open_price)}</div>
       <span class="hint">For as-per-MRP / market-price items (a soft-drink can, mineral water…). When on, the tablet shows “Set price” and the waiter enters the amount each time — the Price field above is ignored, and the dish is hidden from the guest menu.</span>
     </div>
@@ -2364,6 +2425,16 @@ function dishNoTag(title) {
   return d && d.dish_no != null ? ` <span class="dish-no">#${esc(String(d.dish_no))}</span>` : "";
 }
 
+// mrpPill(line): the small "MRP" stamp beside a dish name on any money screen (mig 270).
+// It reads the FROZEN flag on the sold line (`is_mrp`), never the dish's current setting —
+// a bill from last week must keep saying what it said when it was issued, the same rule the
+// banquet bill's frozen tax_lines follow. The stamp is the promise a person can check: this
+// price is final, nothing below the line adds to it. It matches the .mrpt stamp the printed
+// bill carries (public/panels/billdoc.js), so screen and paper say the same word.
+function mrpPill(line) {
+  return line && line.is_mrp ? ` <span class="mrp-pill" title="Maximum Retail Price — this price is final; no tax is added to it">MRP</span>` : "";
+}
+
 // (Removed 2026-07-06: the old single-order `orderCardHtml` was DEAD — nothing called it,
 // the live Bills list renders exclusively through `mergedOrderCardHtml` (discount-BEFORE-tax
 // via billMath). The dead copy still computed the total as `o.total − o.discount`, i.e.
@@ -2405,12 +2476,90 @@ function taxModel(settings) {
   const comps = Array.isArray(s.tax_components) ? s.tax_components
     .map((c) => ({ label: String(c && c.label || "").trim(), rate: Number(c && c.rate) || 0 }))
     .filter((c) => c.label && c.rate > 0) : [];
+  // COMPOSITION SCHEME rides on the model, not on a second lookup (mig 270). A composition
+  // restaurant may not pass GST to the diner at all, so every screen that draws a tax line
+  // has to ask the SAME object it already asks for the rate — otherwise one of them keeps
+  // printing "Tax 5%" on a bill that legally cannot carry one
+  // (docs/COMPLIANCE-GUARDRAILS.md §3). The rate is still read normally: it is what an
+  // 'incl' line is un-grossed by, and a restaurant can leave composition again.
+  const composition = priceTaxMode(s) === "composition";
+  // A COMPOSITION RESTAURANT'S RATE IS GENUINELY ZERO (mig 272), not "5% that we then hide".
+  // It cannot legally pass GST to the diner, and hiding a rate while still doing arithmetic
+  // with it is how a bill stops adding up: every `due = total − discount × (1 + rate)` in this
+  // app would over-subtract, so a ₹100 discount would take ₹105 off. Returning 0 here fixes
+  // the due figure, the discount cap and the reports in the one place they all read.
+  if (composition) return { rate: 0, pct: 0, components: [], composition };
   if (comps.length) {
     const pct = comps.reduce((a, c) => a + c.rate, 0);
-    return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps };
+    return { rate: pct / 100, pct: Math.round(pct * 100) / 100, components: comps, composition };
   }
   const rate = Number(s.tax_rate) || 0.05;
-  return { rate, pct: Math.round(rate * 10000) / 100, components: [] };
+  return { rate, pct: Math.round(rate * 10000) / 100, components: [], composition };
+}
+
+// ─────────── PRICE MODES: GST on top, GST inside, MRP (mig 270) ───────────
+// A dish's price answers one of three questions, and the answer changes the arithmetic:
+//   'excl'   — the price is net; GST is ADDED on top.               (the default, today)
+//   'incl'   — the price already CONTAINS GST; it is pulled out.
+//   'exempt' — no GST at all; the price is final.                   (MRP items, nil-rated)
+//
+// These four functions are the panel's copy of lib/tax.ts, which is itself the copy of
+// lfh_resolve_tax_mode() (migration 270). All three MUST agree, case for case and in the
+// same ORDER — the server prices the order, but this panel draws the bill card, the popup
+// and the paper, so a disagreement is four different totals for one meal (the "cosmetic
+// multi-tax" bug this codebase already learned in 2026-07-04).
+function priceTaxMode(settings) {
+  const v = String((settings || {}).price_tax_mode || "excl");
+  return v === "incl" || v === "composition" ? v : "excl";
+}
+// Are PER-DISH overrides switched on for this restaurant? Admin-only, and OFF everywhere by
+// default (owner, 2026-08-04: "off this for all restaurant for now"). While it is off a
+// dish's own setting is ignored COMPLETELY — not merely hidden — which is why the dish
+// form builds no control at all rather than a greyed one.
+function itemTaxModesAllowed(settings) { return (settings || {}).item_tax_modes_allowed === true; }
+// A dish's stored choice → the behaviour a LINE actually gets, for this restaurant, now.
+function resolveTaxMode(dishMode, settings) {
+  const s = settings || {};
+  if (priceTaxMode(s) === "composition") return "exempt";
+  const restaurant = priceTaxMode(s) === "incl" ? "incl" : "excl";
+  if (!itemTaxModesAllowed(s)) return restaurant;
+  const m = String(dishMode == null ? "default" : dishMode);
+  if (m === "excl" || m === "incl") return m;
+  if (m === "none") return "exempt";
+  if (m === "mrp") return String(s.mrp_tax_treatment) === "inclusive" ? "incl" : "exempt";
+  return restaurant;
+}
+// Does this dish wear the "MRP" stamp? Purely presentational — the money comes from
+// resolveTaxMode() — but the stamp is the promise that the price is FINAL, so it shows for
+// an MRP dish under BOTH treatments (the guest pays the printed price either way).
+function isMrpDish(dishMode, settings) {
+  return String(dishMode || "") === "mrp" && itemTaxModesAllowed(settings);
+}
+// The ONE place a list of un-placed lines (the ⚡ QO/P cart) turns into a taxable/untaxed
+// split. Rounding is PER LINE, to match lfh_split_items_tax — a bill's lines are what a
+// person checks against the paper. Placed orders don't come through here: they carry the
+// split the server froze onto them (orders.taxable_base / nontax_amount).
+function splitCartLines(lines, settings) {
+  const rate = taxModel(settings).rate;
+  let taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false;
+  for (const ln of lines || []) {
+    const unit = parseFloat(String(ln && ln.price != null ? ln.price : "").toString().replace(/[^0-9.]/g, "")) || 0;
+    const qty = Math.max(1, parseInt(ln && ln.qty, 10) || 1);
+    const amt = Math.round(unit * qty * 100) / 100;
+    const mode = resolveTaxMode(ln && ln.tax_mode, settings);
+    // The LOCKED part is only a real MRP dish (mig 272) — a nil-rated dish is untaxed but
+    // perfectly discountable, and treating the two the same refused legitimate discounts.
+    if (isMrpDish(ln && ln.tax_mode, settings)) { hasMrp = true; mrpAmount += amt; }
+    if (mode === "exempt") nontax += amt;
+    else if (mode === "incl") taxableBase += Math.round((amt / (1 + rate)) * 100) / 100;
+    else taxableBase += amt;
+  }
+  return {
+    taxableBase: Math.round(taxableBase * 100) / 100,
+    nontax: Math.round(nontax * 100) / 100,
+    mrpAmount: Math.round(mrpAmount * 100) / 100,
+    hasMrp,
+  };
 }
 // taxLabel(): the word the ON-SCREEN merged tax line uses ("Tax 5%"). Owner-editable per
 // restaurant (settings.tax_label, mig 125); the PRINTED bill instead itemises the named
@@ -2444,17 +2593,84 @@ function billLogo() {
 function billIdentity(settings) {
   return LFH_BILLDOC.billIdentity(settings || state.data.settings || {}, state.data.restaurant || {});
 }
+// A bill is now TWO piles of money, not one (mig 270):
+//   taxableBase — the net value GST is charged on (an 'incl' line already un-grossed)
+//   nontax      — MRP / nil-rated lines, whose price is FINAL and never taxed or discounted
+// subtotal is their sum, so `subtotal + tax = total` still holds and every one of this
+// function's ~20 call sites keeps reading the same three fields it always did.
+//
+// WHY THE DISCOUNT IS CAPPED AT taxableBase, and why that is the load-bearing line here:
+// the whole app answers "what is still due?" with `due = total − discount × (1 + rate)`
+// (lfh_table_view_summary, lfh_floor_state, khata, lib/sessionClose.ts…). That identity
+// only survives the split while the discount can't reach into the untaxed pile:
+//   total − d×(1+rate) = (taxableBase − d)×(1+rate) + nontax
+// So the cap is not a nicety — uncap it and forty money call sites start disagreeing with
+// the paper. It is ALSO the legal half: an MRP price is final, and selling below it via a
+// bill discount is as wrong as selling above it (mig 270's own reasoning).
+//
+// LEGACY IS THE COMMON CASE AND MUST BE BYTE-IDENTICAL. An order placed before mig 270 has
+// taxable_base = NULL, which means "all of subtotal was taxable" — exactly what those bills
+// charged. Falling back to o.subtotal with nontax 0 reproduces the old arithmetic term for
+// term, which is why no restaurant's number moves the day this ships.
 function billMath(orders) {
   const live = (orders || []).filter((o) => o.status !== "cancelled");
-  const subtotal = live.reduce((a, o) => a + (parseFloat(o.subtotal) || 0), 0);
-  const disc = live.reduce((a, o) => a + (parseFloat(o.discount) || 0), 0);
-  const taxable = Math.max(0, subtotal - disc);
   const tm = taxModel(state.data.settings);
   const rate = tm.rate;
-  const tax = Math.round(taxable * rate * 100) / 100;
-  const total = Math.round((taxable + tax) * 100) / 100;
-  // components carried through so the printed bill can itemise each named tax.
-  return { subtotal, disc, taxable, rate, tax, total, taxComponents: tm.components };
+  const r2 = (n) => Math.round(n * 100) / 100;
+  let taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false;
+  for (const o of live) {
+    const sub = parseFloat(o.subtotal) || 0;
+    taxableBase += o.taxable_base == null ? sub : (parseFloat(o.taxable_base) || 0);
+    nontax += o.nontax_amount == null ? 0 : (parseFloat(o.nontax_amount) || 0);
+    // The LOCKED part, tracked apart from "merely untaxed" (mig 272). `nontax` holds both a
+    // sealed bottle sold at MRP (price legally final) AND an ordinary nil-rated good (which
+    // staff may absolutely discount); conflating them refused legitimate discounts. The
+    // column is authoritative; the items are the fallback for a row written by hand or by a
+    // synthetic caller (printParcelReceipt builds one) that never went through the trigger.
+    const lines = Array.isArray(o.items) ? o.items : [];
+    if (o.mrp_amount != null) mrpAmount += parseFloat(o.mrp_amount) || 0;
+    else for (const i of lines) if (i && i.is_mrp) mrpAmount += r2((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1));
+    if (!hasMrp && lines.some((i) => i && i.is_mrp)) hasMrp = true;
+  }
+  taxableBase = r2(taxableBase);
+  nontax = r2(nontax);
+  mrpAmount = r2(mrpAmount);
+  const subtotal = r2(taxableBase + nontax);
+  // WHAT MAY BE DISCOUNTED — the rule stated once (mig 272's lfh_order_discount_base):
+  //   rate > 0 → the taxable base. The discount MUST land on the taxable part or the
+  //              `due = total − discount × (1 + rate)` identity above stops holding.
+  //   rate = 0 → everything except the locked MRP. With no tax, (1 + rate) is 1, so the
+  //              identity survives a discount anywhere; only the MRP lock still bites.
+  // `discountFixed` is the money that stays put whatever the discount is — it is what the
+  // guest still hands over once everything discountable has been taken off.
+  const discountBase = rate > 0 ? taxableBase : Math.max(0, r2(subtotal - mrpAmount));
+  const discountFixed = rate > 0 ? nontax : mrpAmount;
+  const rawDisc = r2(live.reduce((a, o) => a + (parseFloat(o.discount) || 0), 0));
+  const disc = Math.min(Math.max(0, rawDisc), discountBase);
+  // Tax is charged on what is LEFT of the taxable base. With rate 0 this is 0 either way, so
+  // one formula covers both cases and `total = subtotal − discount + tax` holds throughout.
+  const taxable = Math.max(0, r2(taxableBase - Math.min(disc, taxableBase)));
+  const tax = r2(taxable * rate);
+  const total = r2(subtotal - disc + tax);
+  // components carried through so the printed bill can itemise each named tax;
+  // composition so a render site can drop the tax line without a second settings lookup.
+  return { subtotal, disc, taxable, rate, tax, total, taxComponents: tm.components,
+           taxableBase, nontax, mrpAmount, discountBase, discountFixed, hasMrp,
+           composition: tm.composition };
+}
+// The GST sitting INSIDE the MRP lines of a bill. Only meaningful when the restaurant
+// treats MRP as tax-inclusive — under 'none' there is no tax on those lines to name, and
+// saying otherwise on a tax invoice would be a claim the accounts don't support.
+function mrpTaxInside(orders, rate) {
+  let inside = 0;
+  for (const o of (orders || []).filter((x) => x.status !== "cancelled")) {
+    for (const i of (Array.isArray(o.items) ? o.items : [])) {
+      if (!i || !i.is_mrp || i.tax_mode !== "incl") continue;
+      const amt = Math.round((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1) * 100) / 100;
+      inside += amt - Math.round((amt / (1 + rate)) * 100) / 100;
+    }
+  }
+  return Math.round(inside * 100) / 100;
 }
 // discPct(m): the discount as a PERCENTAGE of the pre-discount subtotal (owner, 2026-08-01: "in
 // the bill it should show how much percentage of discount you have given — and on the printed bill
@@ -2463,6 +2679,47 @@ function billMath(orders) {
 // waiter panel and the guest's own bill needed the same figure and were about to round it their
 // own way. This is the one-line door onto it; the rule itself is written down once.
 function discPct(subtotal, disc) { return LFH_BILLDOC.discPct(subtotal, disc); }
+
+// The middle of a bill's totals stack — subtotal, discount, tax, MRP — for the two `.bm-trow`
+// popups (the record's bill modal and the live bill preview). Written ONCE because the two
+// used to carry identical copies, and a totals stack that exists twice is a totals stack that
+// will foot differently on one of the two screens.
+//
+// Three rules it encodes, all of them the same ones public/panels/billdoc.js prints on paper:
+//  · the MRP row goes AFTER tax and BEFORE the grand total — it is added, never taxed;
+//  · with MRP present the first row is "Food subtotal" and shows only the taxable part, so
+//    the column FOOTS (food − discount = taxable value, taxable + tax + MRP = total). A
+//    "Subtotal 880" above a "Taxable value 720" with an ₹80 discount between them reads as
+//    an arithmetic error even when it isn't;
+//  · a composition-scheme restaurant prints NO tax line at all — it may not pass GST to the
+//    diner (docs/COMPLIANCE-GUARDRAILS.md §3) — so the row is dropped, not shown as ₹0.
+// With no MRP lines (every restaurant today) this renders exactly the three rows it always did.
+// The same three-to-four rows for the CARD stacks (`.ord-sub` / `.ord-disc`) — the live Live
+// card and the Previous-bills record card, which render the same receipt in two moods. Same
+// rules as mrpTotalsRows above; only the class names differ.
+// The untaxed pile AS A BILL SHOULD SHOW IT. On a composition-scheme restaurant EVERY line is
+// untaxed, so splitting the bill into "food" and "MRP" says nothing and reads as broken — the
+// stack came out as "Food subtotal ₹0 / MRP items ₹880". There, the plain old single Subtotal
+// row is both simpler and truer, so the split is folded away. Everywhere else it stands.
+function mrpPart(m) { return m && m.composition ? 0 : (Number(m && m.nontax) || 0); }
+function ordTotalsRows(m) {
+  const nontax = mrpPart(m);
+  const foodSub = nontax > 0 ? m.taxableBase : m.subtotal;
+  const rows = [`<div class="ord-sub"><span>${nontax > 0 ? "Food subtotal" : "Subtotal"}</span><span>${inr(foodSub)}</span></div>`];
+  if (m.disc > 0) rows.push(`<div class="ord-disc">Discount${discPct(foodSub, m.disc) ? ` (${discPct(foodSub, m.disc)})` : ""}<span>− ${inr(m.disc)}</span></div>`);
+  if (m.tax > 0 && !m.composition) rows.push(`<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(m.rate * 10000) / 100}%</span><span>${inr(m.tax)}</span></div>`);
+  if (nontax > 0) rows.push(`<div class="ord-sub"><span>MRP items</span><span>${inr(nontax)}</span></div>`);
+  return rows.join("");
+}
+function mrpTotalsRows(m, pct) {
+  const nontax = mrpPart(m);
+  const foodSub = nontax > 0 ? m.taxableBase : m.subtotal;
+  const rows = [`<div class="bm-trow"><span>${nontax > 0 ? "Food subtotal" : "Subtotal"}</span><span>${inr(foodSub)}</span></div>`];
+  if (m.disc > 0) rows.push(`<div class="bm-trow disc"><span>Discount${discPct(foodSub, m.disc) ? ` (${discPct(foodSub, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div>`);
+  if (m.tax > 0 && !m.composition) rows.push(`<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>`);
+  if (nontax > 0) rows.push(`<div class="bm-trow"><span>MRP items</span><span>${inr(nontax)}</span></div>`);
+  return rows.join("");
+}
 
 // The item lines of a merged bill, shared by the LIVE card and the RECORD card (Previous
 // bills renders the SAME receipt UI as Live since 2026-08-03 — one card design, two moods).
@@ -2481,7 +2738,7 @@ function ordItemsHtml(g) {
       if (allerg.length) parts.push(`<span class="ol-no">NO ${allerg.map((r) => esc(r)).join(", NO ").toUpperCase()}</span>`);
       if (i.note) parts.push("“" + esc(i.note) + "”");
       const opts = parts.length ? `<div class="ord-line-opts">${parts.join(" · ")}</div>` : "";
-      return `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${opts}</div>`;
+      return `<div class="ord-line"><span class="ol-name">${esc(i.title)}${dishNoTag(i.title)}${mrpPill(i)}</span><span class="ol-qty">×${esc(i.qty)}</span><span class="ol-price">${inr(parseFloat(i.price) || 0)}</span>${opts}</div>`;
     }).join("");
     // No always-on allergen toggle chips here any more (owner, 2026-06-17) — each
     // dish line already shows its "NO X" removals, and adding/removing an allergen
@@ -2548,9 +2805,7 @@ function mergedOrderCardHtml(g) {
     </div>
     <small class="ord-when">${esc(when)}${g.length > 1 ? ` · ${g.length} orders merged` : ""}</small>
     <div class="ord-items">${items}</div>
-    <div class="ord-sub"><span>Subtotal</span><span>${inr(_m.subtotal)}</span></div>
-    ${disc > 0 ? `<div class="ord-disc">Discount${discPct(_m.subtotal, disc) ? ` (${discPct(_m.subtotal, disc)})` : ""}<span>− ${inr(disc)}</span></div>` : ""}
-    ${_m.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(_m.rate * 10000) / 100}%</span><span>${inr(_m.tax)}</span></div>` : ""}
+    ${ordTotalsRows(_m)}
     <div class="ord-total"><span>Total</span><span>${inr(total)}</span></div>
     <div class="ord-actions">${billBtns}${stage}${freeBtn}</div>
   </div>`;
@@ -2891,10 +3146,7 @@ function billRecordCardHtml(b) {
   const liveOrders = g.filter((o) => o.status !== "cancelled");
   const itemsHtml = liveOrders.length ? ordItemsHtml(liveOrders)
     : `<div class="ord-line"><span class="ol-name ord-cancel-note">This bill was cancelled — no charge.</span></div>`;
-  const moneyRows = liveOrders.length ? `
-    <div class="ord-sub"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-    ${m.disc > 0 ? `<div class="ord-disc">Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}<span>− ${inr(m.disc)}</span></div>` : ""}
-    ${m.tax > 0 ? `<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(m.rate * 10000) / 100}%</span><span>${inr(m.tax)}</span></div>` : ""}` : "";
+  const moneyRows = liveOrders.length ? ordTotalsRows(m) : "";
   return `<div class="card ord-card ${cls} ${b.paid ? "is-paid" : ""} ord-record" data-bill-open="${esc(b.key)}" role="button" tabindex="0" title="Open this bill">
     <div class="ord-top">
       ${kots.length ? `<span class="kot-chip" title="Kitchen tickets">#${esc(kots[0])}${kots.length > 1 ? ` +${kots.length - 1}` : ""}</span>` : ""}
@@ -3014,7 +3266,7 @@ function openBillModal(key) {
   const lines = liveOrders.length
     ? liveOrders.map((o) => (o.items || []).map((i) => {
         const det = itemDetailLine(i);
-        return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-line-right"><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span>${i.id ? `<button type="button" class="bm-edit-item" data-bm-edit-item="${esc(i.id)}" title="Edit allergies &amp; note">✎</button>` : ""}</span></div>`;
+        return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${mrpPill(i)}${det}</span><span class="bm-line-right"><span class="bm-pr">${inr(parseFloat(i.price) || 0)}</span>${i.id ? `<button type="button" class="bm-edit-item" data-bm-edit-item="${esc(i.id)}" title="Edit allergies &amp; note">✎</button>` : ""}</span></div>`;
       }).join("")).join("")
     : `<div class="bm-line bm-cancelled"><span class="bm-nm">This bill was cancelled — no charge.</span></div>`;
   // Restore is only offered while EVERY order in this bill is still inside its
@@ -3034,9 +3286,7 @@ function openBillModal(key) {
       <div class="bm-sub">${esc(o0.customer_name || "")}${o0.created_at ? " · " + esc(new Date(o0.created_at).toLocaleString()) : ""}</div>
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
-        <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div>` : ""}
-        ${m.tax > 0 ? `<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
+        ${mrpTotalsRows(m, pct)}
         <div class="bm-trow grand"><span>Total</span><span>${inr(m.total)}</span></div>
       </div>
       <div class="bm-actions">
@@ -4478,7 +4728,11 @@ function printBill(t, sess, os, opts = {}) {
   // The item lines as they were ordered. Their LAYOUT — the base line, a sub-line per priced
   // add-on, the measured money columns — belongs to the document itself (/panels/billdoc.js),
   // so the Access → "Format of…" preview draws the very same rows.
-  const lines = combineBillLines(live.reduce((a, o) => a.concat(Array.isArray(o.items) ? o.items : []), []));
+  // is_mrp is named EXPLICITLY on each line (mig 270) rather than left to ride along inside
+  // the spread: billdoc.js reads `i.is_mrp` to stamp the line "MRP", and a stamp that depends
+  // on a field nobody mentions is one a later refactor of combineBillLines drops in silence.
+  const lines = combineBillLines(live.reduce((a, o) => a.concat(Array.isArray(o.items) ? o.items : []), []))
+    .map((i) => Object.assign({}, i, { is_mrp: !!i.is_mrp }));
   // White-label identity: ALL the fallback logic lives in billIdentity() (shared with
   // the Billing settings form, which autofills the same values). The French House
   // logo applies ONLY to the flagship (#1).
@@ -4522,6 +4776,21 @@ function printBill(t, sess, os, opts = {}) {
   const taxComps = (m.taxComponents && m.taxComponents.length)
     ? m.taxComponents
     : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
+  // MRP / untaxed lines (mig 270). `m.nontax` is the part of this bill GST is NOT charged on
+  // — a sealed water bottle sold at its printed price. billdoc.js adds it AFTER the tax rows
+  // and renames the first row "Food subtotal" so the column foots; with nothing untaxed
+  // (every restaurant today) it renders nothing and the paper is byte-identical to before.
+  //
+  // The note is written ONLY when tax genuinely IS inside the price — i.e. when the
+  // restaurant declares MRP as tax-inclusive. Printing it under 'none' would be a statement
+  // on a tax invoice that the accounts do not support, so the string is empty there.
+  const mrpInside = String(s.mrp_tax_treatment) === "inclusive" ? mrpTaxInside(live, m.rate) : 0;
+  const mrpNote = mrpInside > 0
+    ? `MRP items carry ${inr(mrpInside)} GST within the price shown.`
+    : "";
+  // A composition-scheme restaurant may not pass GST to the diner, so NO tax line is printed
+  // at all — not a ₹0 one (docs/COMPLIANCE-GUARDRAILS.md §3).
+  const taxRows = m.composition ? [] : LFH_BILLDOC.splitTax(Math.round(m.tax), taxComps);
 
   // ONE DOCUMENT, ONE FILE. The bill's markup used to live right here, and three other screens
   // each carried their own version of it — so the Access → "Format of…" preview showed the admin
@@ -4536,9 +4805,10 @@ function printBill(t, sess, os, opts = {}) {
     dateStr: now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
     cust, custPhone,
     lines,
-    subtotal: m.subtotal, discount: m.disc, discLabel: discPct(m.subtotal, m.disc),
+    subtotal: m.subtotal, discount: m.disc, discLabel: discPct(mrpPart(m) > 0 ? m.taxableBase : m.subtotal, m.disc),
     taxable: m.taxable, total: m.total,
-    taxRows: LFH_BILLDOC.splitTax(Math.round(m.tax), taxComps),
+    taxRows,
+    nontax: mrpPart(m), mrpLabel: "MRP items", mrpNote,
     autoPrint: true,
   });
   // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands
@@ -4723,32 +4993,43 @@ async function openGstReport() {
       const compRows = (d.components && d.components.length)
         ? d.components.map((c) => `<div class="tp-bl"><span>${esc(c.label)} (${c.rate}%)</span><b>${inr(c.amount)}</b></div>`).join("")
         : `<div class="tp-bl"><span>GST (${d.ratePct}%)</span><b>${inr(t.tax)}</b></div>`;
-      const dayRows = (d.days || []).map((r) => `<tr><td>${esc(r.date)}</td><td style="text-align:right">${r.bills}</td><td style="text-align:right">${inr(r.taxable)}</td><td style="text-align:right">${inr(r.tax)}</td><td style="text-align:right">${inr(r.gross)}</td></tr>`).join("");
+      // MRP / nil-rated turnover only appears when there IS any (mig 270): it is real money
+      // sold and must be declared as turnover, but it carries no GST, so putting it in the
+      // taxable column would file output tax the restaurant never collected. Its own column
+      // is what keeps the filing honest AND keeps the month footing — taxable + GST + MRP =
+      // total. A restaurant not using per-dish modes sees the table exactly as before.
+      const anyMrp = (Number(t.mrp) || 0) > 0;
+      const dayRows = (d.days || []).map((r) => `<tr><td>${esc(r.date)}</td><td style="text-align:right">${r.bills}</td><td style="text-align:right">${inr(r.taxable)}</td><td style="text-align:right">${inr(r.tax)}</td>${anyMrp ? `<td style="text-align:right">${inr(r.mrp || 0)}</td>` : ""}<td style="text-align:right">${inr(r.gross)}</td></tr>`).join("");
       wrap.querySelector("#gstBody").innerHTML = `
         <div class="tp-bill" style="margin-bottom:12px">
           ${d.restaurant && d.restaurant.gstin ? `<div class="tp-bl"><span>GSTIN</span><b>${esc(d.restaurant.gstin)}</b></div>` : `<div class="tp-bl" style="color:var(--muted)"><span>GSTIN</span><b>not set — add it in Settings</b></div>`}
           <div class="tp-bl"><span>Bills (paid)</span><b>${t.bills || 0}</b></div>
           <div class="tp-bl"><span>Taxable sales</span><b>${inr(t.taxable)}</b></div>
           ${compRows}
+          ${anyMrp ? `<div class="tp-bl"><span>MRP / nil-rated (no GST)</span><b>${inr(t.mrp)}</b></div>` : ""}
           <div class="tp-bl grand"><span>Total (incl. GST)</span><span class="tp-bl-amt">${inr(t.gross)}</span></div>
         </div>
         <div class="muted small" style="margin-bottom:8px">${esc(d.note || "")}</div>
-        ${dayRows ? `<table class="gst-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left">Day</th><th style="text-align:right">Bills</th><th style="text-align:right">Taxable</th><th style="text-align:right">GST</th><th style="text-align:right">Total</th></tr></thead><tbody>${dayRows}</tbody></table>` : `<div class="empty">No paid bills in this month.</div>`}`;
+        ${dayRows ? `<table class="gst-table" style="width:100%;border-collapse:collapse;font-size:13px"><thead><tr><th style="text-align:left">Day</th><th style="text-align:right">Bills</th><th style="text-align:right">Taxable</th><th style="text-align:right">GST</th>${anyMrp ? `<th style="text-align:right">MRP</th>` : ""}<th style="text-align:right">Total</th></tr></thead><tbody>${dayRows}</tbody></table>` : `<div class="empty">No paid bills in this month.</div>`}`;
     } catch (e) { wrap.querySelector("#gstBody").innerHTML = `<div class="empty">Couldn't load: ${esc(e.message)}</div>`; }
   };
   wrap.querySelector("#gstMonth").onchange = load;
   wrap.querySelector("#gstCsv").onclick = () => {
     if (!last) return;
     const t = last.totals || {};
+    const anyMrpCsv = (Number(t.mrp) || 0) > 0;
     const rows = [
       ["GST report", last.restaurant && last.restaurant.name || "", last.month],
       ["GSTIN", last.restaurant && last.restaurant.gstin || "(not set)"],
       [],
-      ["Day", "Bills", "Taxable", "GST", "Total"],
-      ...(last.days || []).map((r) => [r.date, r.bills, r.taxable, r.tax, r.gross]),
+      // The MRP column is in the spreadsheet whenever the month has any (mig 270) — the
+      // accountant is the one person who most needs to see WHICH turnover carried no GST,
+      // and a total that doesn't foot is what makes them phone the restaurant.
+      ["Day", "Bills", "Taxable", "GST", ...(anyMrpCsv ? ["MRP (no GST)"] : []), "Total"],
+      ...(last.days || []).map((r) => [r.date, r.bills, r.taxable, r.tax, ...(anyMrpCsv ? [r.mrp || 0] : []), r.gross]),
       [],
-      ["TOTAL", t.bills || 0, t.taxable || 0, t.tax || 0, t.gross || 0],
-      ...(last.components || []).map((c) => [`${c.label} (${c.rate}%)`, "", "", c.amount, ""]),
+      ["TOTAL", t.bills || 0, t.taxable || 0, t.tax || 0, ...(anyMrpCsv ? [t.mrp || 0] : []), t.gross || 0],
+      ...(last.components || []).map((c) => [`${c.label} (${c.rate}%)`, "", "", c.amount, ...(anyMrpCsv ? [""] : []), ""]),
     ];
     // CSV formula-injection guard: a cell starting with = + - @ is prefixed with ' so a spreadsheet
     // can't execute it as a formula (same guard the owner exports use).
@@ -4794,6 +5075,12 @@ ${row("Gross (subtotal)", inr(di.gross))}
 ${row("Discounts", "− " + inr(di.discount))}
 ${row("Taxable value", inr(di.taxable))}
 ${row("Tax (CGST + SGST)", inr(di.tax))}
+${/* MRP / nil-rated turnover on its own line (mig 270) so the column still FOOTS on paper:
+     taxable + tax + MRP = net sales. Money that carries no GST must never be added into the
+     taxable value — that would declare output tax the restaurant never collected — and it
+     must never be left out either, or the day's takings wouldn't reconcile. Hidden when
+     there is none, which is every restaurant not using per-dish modes. */""}
+${di.mrp > 0 ? row("MRP / nil-rated (no GST)", inr(di.mrp)) : ""}
 ${row("Net sales", inr(di.net), true)}
 ${row("Paid bills", di.paidCount + " · " + inr(di.paidNet))}
 ${row("Unpaid bills", di.unpaidCount + " · " + inr(di.unpaidNet))}
@@ -5424,6 +5711,25 @@ function bindEditor() {
   // Kitchen settings: "Preview a sample KOT" test-print button.
   { const kb = document.getElementById("kotPreviewBtn"); if (kb) kb.onclick = previewSampleKOT; }
 
+  // "GST on this price" (mig 270): keep the worked example under the picker true to BOTH
+  // boxes it depends on — the mode AND the price typed above it. A stale example is worse
+  // than none: it would show ₹294 while the box says ₹500 and quietly teach the wrong rule.
+  // Re-rendering the whole form on each keystroke would take the caret with it, so only this
+  // one line is rewritten. (Both listeners are additional — the [data-path] binder above has
+  // already stored the value by the time these run.)
+  {
+    const eg = document.getElementById("taxModeEg");
+    const sel = document.getElementById("taxModeSel");
+    const priceBox = ed.querySelector('[data-path="price"]');
+    if (eg && sel) {
+      const repaint = () => {
+        eg.textContent = taxModeExample(sel.value, priceBox ? priceBox.value : (state.sel || {}).price, state.data.settings);
+      };
+      sel.addEventListener("change", repaint);
+      if (priceBox) priceBox.addEventListener("input", repaint);
+    }
+  }
+
   // ---- "User setting" card (Settings tab): the manager's own team ----
   if (state.tab === "general" && !state.staffLoaded) loadStaffTeam();
 
@@ -5643,6 +5949,12 @@ function updateMembCount(filterSlug) {
 // than none, because it reads like protection. Prices, names, slugs and flags are the fields two
 // people actually collide on anyway.
 const EXPECT_TABLE = { items: "menu_items", categories: "categories", filters: "filters" };
+// The MONEY fields go first, so the 8-field cap below can never be the reason one of them
+// travels unprotected. `tax_mode` (mig 270) belongs here with `price`: it decides whether the
+// guest is charged ₹280, ₹294 or exactly ₹20 for the same typed number, so two managers
+// flipping it at once is precisely the clash the expectation exists to catch — and the field
+// nobody would notice had lost its guard, because the price itself would still look right.
+const EXPECT_FIRST = ["price", "tax_mode", "open_price"];
 function buildEditExpect(kind, payload, pristineJson) {
   const table = EXPECT_TABLE[kind];
   if (!table || !pristineJson) return null;
@@ -5651,7 +5963,12 @@ function buildEditExpect(kind, payload, pristineJson) {
   const id = before.id;
   if (!id) return null;                                  // no row identity → nothing to compare
   const fields = {};
-  for (const k of Object.keys(payload)) {
+  const keys = Object.keys(payload);
+  keys.sort((a, b) => {
+    const ia = EXPECT_FIRST.indexOf(a), ib = EXPECT_FIRST.indexOf(b);
+    return (ia < 0 ? EXPECT_FIRST.length : ia) - (ib < 0 ? EXPECT_FIRST.length : ib);
+  });
+  for (const k of keys) {
     if (k === "id" || k === "slug" || k.startsWith("__")) continue;  // identity/control keys, not values
     const was = before[k];
     if (was === undefined) continue;                     // a column the baseline didn't carry
@@ -6787,8 +7104,10 @@ function orderItemRows(o) {
   const rows = itemsForOrder(o.id);
   // Carry options/removed/note through so the table panel can show the full
   // customization (what the guest chose, what to leave out) — not just the name.
-  if (rows.length) return rows.map((it) => ({ kind: "session", id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0, added: it.added_allergens, removedFlag: it.removed_flag }));
-  return (o.items || []).map((it, idx) => ({ kind: "legacy", orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0 }));
+  // is_mrp rides along from order_items (mig 270) so every screen that lists a dish can wear
+  // the MRP stamp — the flag is FROZEN on the sold line, so a reprint says what it said then.
+  if (rows.length) return rows.map((it) => ({ kind: "session", id: it.id, title: it.title, qty: it.qty, status: it.status, options: it.options, removed: it.removed, note: it.note, price: Number(it.unit_price) || 0, added: it.added_allergens, removedFlag: it.removed_flag, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
+  return (o.items || []).map((it, idx) => ({ kind: "legacy", orderId: o.id, idx, title: it.title, qty: it.qty, status: it.status || "received", options: it.options, removed: it.removed, note: it.note, price: Number(it.price) || 0, is_mrp: !!it.is_mrp, tax_mode: it.tax_mode }));
 }
 
 // What the guest tapped, as an emoji for the tile / call list.
@@ -8197,7 +8516,7 @@ function itemRowHtml(row, editing = false) {
   // ✎− on the dish NAME when an allergen was REMOVED after the order was placed
   // (we flag that something was removed without naming the gone item).
   const remMark = row.removedFlag ? ` <span class="alg-removed" title="An allergen was removed after the order was placed">✎−</span>` : "";
-  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}${remMark}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div>${editRow}</div>`;
+  return `<div class="sx-item${editing ? " editing" : ""}"><span class="sx-item-qty">×${esc(row.qty)}</span><div class="sx-item-info"><span class="sx-item-name">${esc(row.title)}${dishNoTag(row.title)}${mrpPill(row)}${remMark}</span>${itemDetailLine(row)}</div>${priceTag}<div class="sx-item-acts"><span class="ord-pill ${esc(row.status)}">${esc(STLABEL[row.status] || row.status)}</span>${serveBtn}${delBtn}</div>${editRow}</div>`;
 }
 
 // openDishEditModal: ONE editor for a single placed dish — toggle which allergens to
@@ -8577,10 +8896,15 @@ function tablePanelParts(t, host = "float") {
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
   // Breakdown from billMath (same rate + discount-before-tax rule as the printed bill),
   // NOT the stored per-order subtotal/tax columns (tax there is a flat 5%, pre-discount).
-  const sumSub = mBill.subtotal;
+  // MRP lines (mig 270) split this stack in two: the first row shows only the TAXABLE part
+  // and renames to "Food subtotal", and an "MRP items" row lands after tax and before the
+  // grand total — so the column adds up on screen the same way it adds up on the paper. A
+  // composition-scheme restaurant shows no tax row at all (it may not charge the diner GST).
+  const sumNontax = mrpPart(mBill);
+  const sumSub = sumNontax > 0 ? mBill.taxableBase : mBill.subtotal;
   const sumTax = mBill.tax;
   const sumDisc = mBill.disc;
-  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>Subtotal</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount${discPct(sumSub, sumDisc) ? ` (${discPct(sumSub, sumDisc)})` : ""}</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 ? `<div class="tp-bl"><span>${esc(taxLabel())}</span><b>${inr(sumTax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
+  const billSec = os.length ? `<div class="sx-sec"><div class="sx-sec-h">Bill${sess && sess.bill_no != null ? ` <span class="sub">· bill #${esc(sess.bill_no)}</span>` : ""}</div><div class="tp-bill">${sumSub > 0 ? `<div class="tp-bl"><span>${sumNontax > 0 ? "Food subtotal" : "Subtotal"}</span><b>${inr(sumSub)}</b></div>` : ""}${sumDisc > 0 ? `<div class="tp-bl disc"><span>Discount${discPct(sumSub, sumDisc) ? ` (${discPct(sumSub, sumDisc)})` : ""}</span><b>− ${inr(sumDisc)}</b></div>` : ""}${sumTax > 0 && !mBill.composition ? `<div class="tp-bl"><span>${esc(taxLabel())}</span><b>${inr(sumTax)}</b></div>` : ""}${sumNontax > 0 ? `<div class="tp-bl"><span>MRP items</span><b>${inr(sumNontax)}</b></div>` : ""}<div class="tp-bl grand"><span>${due > 0 ? "Total due" : "Total"}</span><span class="tp-bl-amt">${inr(due > 0 ? due : billTotal)}</span></div></div></div>` : "";
 
   // The PRIMARY table-wide action: accept everything that's new, else serve everything
   // that's cooked. (Per-order Accept stays on each new card; per-dish Serve on each row.)
@@ -8818,7 +9142,7 @@ async function openBillPreview(t) {
   // their quantities summed — the same rule the printed bill uses (combineBillLines).
   const lines = combineBillLines(os.flatMap((o) => orderItemRows(o))).map((i) => {
     const det = itemDetailLine(i);
-    return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${det}</span><span class="bm-line-right"><span class="bm-pr">${inr((parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1))}</span></span></div>`;
+    return `<div class="bm-line"><span class="bm-nm">${esc(i.title)} <span class="bm-q">×${esc(i.qty)}</span>${mrpPill(i)}${det}</span><span class="bm-line-right"><span class="bm-pr">${inr((parseFloat(i.price) || 0) * (parseInt(i.qty, 10) || 1))}</span></span></div>`;
   }).join("");
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
@@ -8827,9 +9151,7 @@ async function openBillPreview(t) {
       <div class="bm-sub">${esc(sess && sess.customer_name ? sess.customer_name : "")}${anyUnpaid ? "" : " · paid"}</div>
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
-        <div class="bm-trow"><span>Subtotal</span><span>${inr(m.subtotal)}</span></div>
-        ${m.disc > 0 ? `<div class="bm-trow disc"><span>Discount${discPct(m.subtotal, m.disc) ? ` (${discPct(m.subtotal, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div>` : ""}
-        ${m.tax > 0 ? `<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>` : ""}
+        ${mrpTotalsRows(m, pct)}
         <div class="bm-trow grand"><span>${anyUnpaid ? "Total due" : "Total"}</span><span>${inr(m.total)}</span></div>
       </div>
       <div class="bm-actions">
@@ -8952,7 +9274,10 @@ function openTakeOrder(table, rerender, opts = {}) {
   const qtyIn = (id) => cart.filter((c) => c.id === id).reduce((s, c) => s + c.qty, 0);
   // Tapping a dish adds to its PLAIN line only — a line carrying an allergy or note is a
   // distinct variant and is never grown by a tap (fixes "add plain → lands on the dairy one").
-  const addOne = (id) => { const l = plainLine(id); if (l) { l.qty = Math.min(99, l.qty + 1); return; } const d = dishes.find((x) => x.id === id); if (d) cart.push({ uid: ++uidSeq, id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "", avoid: new Set() }); };
+  // tax_mode rides on the cart line (mig 270) so the discount modal can cap on the TAXABLE
+  // part of a cart that has not been placed yet. Without it an MRP bottle in the basket would
+  // look discountable here and be refused by the server a second later.
+  const addOne = (id) => { const l = plainLine(id); if (l) { l.qty = Math.min(99, l.qty + 1); return; } const d = dishes.find((x) => x.id === id); if (d) cart.push({ uid: ++uidSeq, id, title: d.title, price: parseFloat(d.price) || 0, qty: 1, note: "", avoid: new Set(), tax_mode: d.tax_mode }); };
   // Open-price (as-per-MRP) dish: the menu carries NO price, so the manager types it at
   // order time. A first tap opens the price pad; later taps just grow the existing line
   // (the price is already set — tap the line's ₹ to change it). (2026-07-29)
@@ -8963,7 +9288,7 @@ function openTakeOrder(table, rerender, opts = {}) {
       if (l) { l.qty = Math.min(99, l.qty + 1); return true; }
       const p = await pricePrompt(d.title);
       if (p == null) return false;
-      cart.push({ uid: ++uidSeq, id, title: d.title, price: p, qty: 1, note: "", avoid: new Set(), open_price: true });
+      cart.push({ uid: ++uidSeq, id, title: d.title, price: p, qty: 1, note: "", avoid: new Set(), open_price: true, tax_mode: d.tax_mode });
       return true;
     }
     addOne(id);
@@ -9087,10 +9412,33 @@ function openTakeOrder(table, rerender, opts = {}) {
   // Parcel (takeaway) is stored & charged at the item subtotal — same as every other
   // Platform order (Zomato/Swiggy rows carry no tax line); dine-in keeps the tax-inclusive quote.
   const cartSub = () => cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0);
-  // The held discount can never be worth more than the food: emptying the cart after typing
-  // ₹200 off must not leave ₹200 of discount attached to a ₹50 order.
-  const discOf = () => Math.round(Math.min(Math.max(discAmount, 0), cartSub()) * 100) / 100;
-  const estTotal = () => { const sub = Math.max(0, cartSub() - discOf()); if (parcel) return inr(sub); const rate = (taxModel(state.data.settings) || {}).rate || 0; return inr(sub + Math.round(sub * rate * 100) / 100); };
+  // The cart's taxable/untaxed split (mig 270), by the SAME rule the server prices it by.
+  // A parcel carries no tax line at all, so its whole value is the discountable base — the
+  // split only means something for a dine-in ticket.
+  const cartSplit = () => splitCartLines(cart, state.data.settings);
+  // The held discount can never be worth more than the TAXABLE food: emptying the cart after
+  // typing ₹200 off must not leave ₹200 of discount attached to a ₹50 order, and it may never
+  // eat into an MRP line, whose price is final (same cap the server applies).
+  // Same cap rule as billMath / mig 272: with tax, only the taxable base may be discounted;
+  // with no tax, everything except the locked MRP lines. A parcel carries no tax line at all.
+  const discCap = () => {
+    if (parcel) return cartSub();
+    const sp = cartSplit();
+    const rate = (taxModel(state.data.settings) || {}).rate || 0;
+    return rate > 0 ? sp.taxableBase : Math.max(0, Math.round((sp.taxableBase + sp.nontax - sp.mrpAmount) * 100) / 100);
+  };
+  const discOf = () => Math.round(Math.min(Math.max(discAmount, 0), discCap()) * 100) / 100;
+  const estTotal = () => {
+    if (parcel) return inr(Math.max(0, cartSub() - discOf()));
+    const sp = cartSplit();
+    const rate = (taxModel(state.data.settings) || {}).rate || 0;
+    const d = discOf();
+    // The SAME one formula billMath uses — subtotal − discount + tax, with tax charged on
+    // what is left of the taxable base. It stays right when the rate is 0 and the discount
+    // has landed on the untaxed part, which a `taxable + tax + untaxed` shape would not.
+    const taxable = Math.max(0, sp.taxableBase - Math.min(d, sp.taxableBase));
+    return inr(Math.round((sp.taxableBase + sp.nontax - d + Math.round(taxable * rate * 100) / 100) * 100) / 100);
+  };
   // May THIS person discount? Same power the table detail's − Discount button is gated by
   // (XRAY_CONTROLS → [data-disc] → give_discounts). Checked in JS, not left to the x-ray
   // observer, because this modal lives on document.body — outside the panel the observer
@@ -9534,10 +9882,19 @@ function openTakeOrder(table, rerender, opts = {}) {
   const discBtn = wrap.querySelector(".to-disc-btn");
   if (discBtn) discBtn.onclick = () => {
     const rate = parcel ? 0 : ((taxModel(state.data.settings) || {}).rate || 0);
+    // The synthetic bill now carries the SPLIT, not just a subtotal (mig 270), so the modal
+    // caps on the taxable part and refuses out loud when someone tries to discount an MRP
+    // line — the same answer the server would give a moment later, given before the tap
+    // instead of after it. A parcel has no tax and no split: its whole value is taxable base.
+    const sp = parcel ? { taxableBase: cartSub(), nontax: 0, mrpAmount: 0 } : cartSplit();
+    const cap = discCap();
     openDiscountModal(
       { discount: discOf(), discount_note: discNote },
       null, null,
-      { rate, subtotal: cartSub(), disc: discOf() },
+      { rate, subtotal: Math.round((sp.taxableBase + sp.nontax) * 100) / 100, disc: discOf(),
+        taxableBase: sp.taxableBase, nontax: sp.nontax, mrpAmount: sp.mrpAmount,
+        discountBase: cap, discountFixed: Math.round((sp.taxableBase + sp.nontax - cap) * 100) / 100,
+        composition: taxModel(state.data.settings).composition },
       true,                                   // whole-bill: nothing else on this order to preserve
       { onApply: (amount, note) => { discAmount = amount; discNote = note; paintCart(); } },
     );
@@ -10639,13 +10996,33 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   // already on OTHER orders of the same table (bm = billMath(os), passed by the caller;
   // billTotal is kept only for legacy callers that don't pass bm).
   const rate = bm ? bm.rate : taxModel(state.data.settings).rate;
-  const subtotal = bm ? bm.subtotal : ((Number(order.total) || 0) / (1 + rate) + current);
+  // THE DISCOUNT IS CAPPED AT THE TAXABLE BASE, NOT THE WHOLE SUBTOTAL (mig 270). An MRP line
+  // is a price that is legally FINAL — selling below it via a bill discount is as wrong as
+  // selling above it — and the identity every panel computes "due" from
+  // (due = total − discount × (1 + rate)) only holds while the discount stays inside the
+  // taxable pile. So the untaxed money is carried alongside, added back at the end, and
+  // simply never offered as something to discount. On a bill with no MRP lines (every
+  // restaurant today) taxableBase IS the subtotal, so this is the old number exactly.
+  // capBase = what may be discounted at all; fixedPart = the money that stays put whatever
+  // the discount is (see billMath — with tax it is the untaxed lines, without tax it is only
+  // the locked MRP). Legacy callers that pass no `bm` fall back to the old derivation, which
+  // is the all-taxable case and therefore unchanged.
+  const capBase = bm
+    ? (bm.discountBase != null ? bm.discountBase : (bm.taxableBase != null ? bm.taxableBase : bm.subtotal))
+    : ((Number(order.total) || 0) / (1 + rate) + current);
+  const nontax = bm ? (bm.discountFixed != null ? bm.discountFixed : (Number(bm.nontax) || 0)) : 0;
   // wholeBill (manager bill discount): the amount passed IS the whole-bill discount (stored on the
   // session, split server-side), so there is no "other orders' discount" to preserve — discount the
   // full pre-tax bill. Legacy per-order callers keep the old "subtract other orders" behaviour.
   const otherDisc = wholeBill ? 0 : (bm ? Math.max(0, bm.disc - current) : 0);
-  const base = Math.max(0, round2(subtotal - otherDisc)); // pre-tax base THIS modal discounts
-  const payFor = (d) => round2(Math.max(0, base - clamp(d, 0, base)) * (1 + rate)); // what the customer pays
+  const base = Math.max(0, round2(capBase - otherDisc)); // the part THIS modal may discount
+  const payFor = (d) => round2(Math.max(0, base - clamp(d, 0, base)) * (1 + rate) + nontax); // what the customer pays
+  // WORDING MUST MATCH THE REASON. The undiscountable part is not always MRP: it is the
+  // untaxed lines when tax applies, and only the locked MRP when it doesn't. Saying "MRP" over
+  // a nil-rated dish would send a manager looking for a bottle that isn't on the bill, so the
+  // message names MRP only when there genuinely is some.
+  const lockedMrp = bm ? (Number(bm.mrpAmount) || 0) : 0;
+  const lockedNote = lockedMrp > 0 ? inr(lockedMrp) : inr(nontax);
   const total = payFor(0); // the table total BEFORE this order's discount (shown as "Bill total")
   const maxDisc = base;    // can't discount more than the food (pre-tax) base
   // ONE interface, no mode toggle (owner, 2026-07-03): a Percent and an Amount(₹) field,
@@ -10686,7 +11063,8 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
           </label>
         </div>
       </div>
-      <div class="disc-hint muted small">Change any one of the three — the other two follow.</div>
+      <div class="disc-cap-msg" id="discCapMsg" role="status" hidden></div>
+      <div class="disc-hint muted small">Change any one of the three — the other two follow.${nontax > 0 ? ` The % is off the discountable part only — ${lockedNote} of this bill ${lockedMrp > 0 ? "is MRP items, whose price is final" : "carries no GST"}.` : ""}</div>
       <label class="dish-edit-lbl" style="margin-top:14px">Reason <span class="muted small">(optional, shows on the bill)</span></label>
       <input type="text" class="dish-edit-custominput" id="discNoteInput" maxlength="200" placeholder="e.g. loyalty, comp, manager approval">
     </div>
@@ -10723,18 +11101,52 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   // the same guard). While a box is empty or nonsense, the old discount stands and Apply waits.
   const setBlank = (blank) => { applyBtn.disabled = blank; applyBtn.style.opacity = blank ? ".5" : ""; };
 
-  // Edit % → derive amount (off the pre-tax base). Edit amount → derive %. Edit "they pay" →
-  // work backward to the discount: pay is tax-INCLUSIVE, so the pre-tax discount is
-  // base − pay/(1+rate). All clamp so the discount can't exceed the food's pre-tax value
-  // (beyond which they'd just pay ₹0).
-  pctInput.oninput = () => { const p = clamp(parseFloat(pctInput.value), 0, 100); discAmount = round2((base * p) / 100); setBlank(false); paint("pct"); };
-  amtInput.oninput = () => { discAmount = clamp(parseFloat(amtInput.value), 0, maxDisc); setBlank(false); paint("amt"); };
+  // A REFUSAL IS SHOWN, NEVER A SILENT TRIM (the "a user's tap must never vanish in silence"
+  // rule). Typing more than the bill can carry used to be clamped with NOTHING on screen: the
+  // figure changed under the finger and the person could not tell whether the panel had heard
+  // them or was broken. Now the modal shakes once and says what the real maximum is — and
+  // names MRP as the reason when that is what set the floor, because "why can't I take ₹200
+  // off a ₹250 bill?" has a real answer and hiding it is what makes staff distrust the screen.
+  const capMsg = wrap.querySelector("#discCapMsg");
+  let nudgeT = null;
+  const capLine = () => `Most you can take off this bill is ${inr(maxDisc)}`
+    + (nontax > 0
+        ? ` — the other ${lockedNote} ${lockedMrp > 0 ? "is MRP items, whose price is final" : "carries no GST and can't be discounted"}.`
+        : ".");
+  const clearRefusal = () => { if (!capMsg.hidden) { capMsg.hidden = true; capMsg.textContent = ""; } };
+  const refuse = (msg) => {
+    capMsg.textContent = msg;
+    capMsg.hidden = false;
+    wrap.classList.remove("disc-nudge");
+    void wrap.offsetWidth;                 // restart the shake on a second refusal in a row
+    wrap.classList.add("disc-nudge");
+    clearTimeout(nudgeT);
+    nudgeT = setTimeout(() => wrap.classList.remove("disc-nudge"), 320);
+  };
+
+  // Edit % → derive amount (off the pre-tax TAXABLE base). Edit amount → derive %. Edit "they
+  // pay" → work backward to the discount: pay is tax-INCLUSIVE and includes the untaxed MRP
+  // money, so the pre-tax discount is base − (pay − MRP)/(1+rate). All clamp so the discount
+  // can't exceed the taxable food value, and anything above that is refused OUT LOUD.
+  pctInput.oninput = () => {
+    const typed = parseFloat(pctInput.value);
+    if (Number.isFinite(typed) && typed > 100) refuse("100% is the most — that is the whole taxable value."); else clearRefusal();
+    const p = clamp(typed, 0, 100); discAmount = round2((base * p) / 100); setBlank(false); paint("pct");
+  };
+  amtInput.oninput = () => {
+    const typed = parseFloat(amtInput.value);
+    if (Number.isFinite(typed) && typed > maxDisc + 0.004) refuse(capLine()); else clearRefusal();
+    discAmount = clamp(typed, 0, maxDisc); setBlank(false); paint("amt");
+  };
   payInput.oninput = () => {
     const raw = payInput.value.trim();
     const p = parseFloat(raw);
     if (raw === "" || !(p >= 0)) { setBlank(true); return; }   // leave the discount exactly as it was
     setBlank(false);
-    discAmount = clamp(round2(base - clamp(p, 0, total) / (1 + rate)), 0, maxDisc);
+    const floor = payFor(maxDisc);   // the least this bill can ever be = its untaxed (MRP) part
+    if (p < floor - 0.004) refuse(`The least this bill can be is ${inr(floor)}`
+      + (lockedMrp > 0 ? " — MRP items are a final price." : nontax > 0 ? " — the rest carries no GST and can't be discounted." : ".")); else clearRefusal();
+    discAmount = clamp(round2(base - (clamp(p, floor, total) - nontax) / (1 + rate)), 0, maxDisc);
     paint("pay");
   };
   // On blur, snap the field the user was typing in to the CLAMPED value — while typing we
@@ -10747,7 +11159,7 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   // The pay box already holds the full bill, so clicking it must SELECT that figure — otherwise
   // "make it 800" on a ₹817 bill types 817800 and the manager has to clear it first.
   payInput.onfocus = () => payInput.select();
-  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { discAmount = round2((base * Number(c.dataset.pct)) / 100); setBlank(false); paint(); }));
+  wrap.querySelectorAll(".disc-pct-pick").forEach((c) => (c.onclick = () => { clearRefusal(); discAmount = round2((base * Number(c.dataset.pct)) / 100); setBlank(false); paint(); }));
   paint();
 
   const close = () => wrap.remove();

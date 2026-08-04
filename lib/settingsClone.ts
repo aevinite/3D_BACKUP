@@ -120,6 +120,21 @@ export function cleanClonedSettings(
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;
+  // GST and prices (mig 270) — a new restaurant must NOT inherit another's tax posture. Copying
+  // the template's price_tax_mode is the "#1 leaks onto restaurant #2" class in its most
+  // expensive form: a brand-new restaurant born on 'composition' would print no tax line at all,
+  // and one born on 'incl' would quietly declare GST out of prices its owner typed as net. So all
+  // three start at the migration's own defaults — GST added on top, per-dish modes off, no GST
+  // declared on an MRP line — which is exactly today's behaviour for everyone.
+  //
+  // NOTE (out of scope, flagged for the owner): tax_components is NOT reset here, even though it
+  // is as tenant-specific as tax_rate directly above it — a cloned restaurant inherits the
+  // template's CGST/SGST rows. Changing that needs the owner's call, because effectiveTaxRate()
+  // prefers components over tax_rate, so blanking them would move a new restaurant onto the 5%
+  // fallback rather than leaving it blank.
+  base.price_tax_mode = "excl";
+  base.item_tax_modes_allowed = false;
+  base.mrp_tax_treatment = "none";
   // service_mode = maintenance switch (true = closed). A new restaurant must open LIVE, never
   // inherit the flagship's maintenance state — else creating a restaurant while #1 is in
   // maintenance would silently ship the new one offline. (mig 004.)

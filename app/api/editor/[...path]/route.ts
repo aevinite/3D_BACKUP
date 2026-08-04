@@ -409,6 +409,30 @@ async function invoiceLockedByItem(itemId: string): Promise<boolean> {
   return it?.order_id ? invoiceLockedByOrder(it.order_id) : false;
 }
 
+// ── WHAT A DISCOUNT MAY WORK ON (mig 270 + 271) ──────────────────────────────────────────
+// The server's copy of lfh_order_discount_base, written here so a whole BILL can be capped in
+// one pass instead of one RPC round-trip per order. It must stay identical to the SQL and to
+// billMath() in the manager panel — three copies of a money rule is how a bill starts
+// disagreeing with itself, so the rule is stated the same way in all three:
+//   rate > 0 → the TAXABLE base. Anything else breaks `due = total − discount × (1 + rate)`,
+//              which the floor tiles, khata, sessionClose and every report compute from.
+//   rate = 0 → subtotal minus the LOCKED MRP. With no tax the identity survives a discount
+//              anywhere, and only a legally-final price stays out of reach. Note `nontax` is
+//              NOT the lock: a nil-rated dish is untaxed but perfectly discountable (mig 272).
+// NULL columns mean "placed before this feature": fully taxable, no MRP — exactly what those
+// orders were, so no existing restaurant's cap moves.
+type OrderMoney = { subtotal?: number | null; taxable_base?: number | null; mrp_amount?: number | null };
+function discountBaseOf(o: OrderMoney, rate: number): number {
+  const sub = Number(o?.subtotal) || 0;
+  if (rate > 0) return o?.taxable_base == null ? sub : (Number(o.taxable_base) || 0);
+  return Math.max(0, sub - (Number(o?.mrp_amount) || 0));
+}
+/** The columns effectiveTaxRate() needs — one small row, read only on a discount write. */
+async function taxSettings(restaurantId: string) {
+  return (await sb.from("settings").select("tax_rate,tax_components,price_tax_mode")
+    .eq("restaurant_id", restaurantId).maybeSingle()).data || {};
+}
+
 // Friendly message for a staff-edit RPC's { ok:false, reason } (shared by the
 // edit-qty / edit-note / add-item / delete endpoints).
 const editErrMsg = (reason?: string) =>
@@ -876,7 +900,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // customer_name: that is a SYNTHETIC field the enrichment below attaches from
       // session_members, not a column. The no-param floor read keeps select("*") — the live
       // board renders every column and RT_VOLATILE/boardSig depend on the full row shape.
-      const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
+      // taxable_base + nontax_amount ride along (mig 270): billMath() splits a bill into the
+      // part GST is charged on and the untaxed MRP part, and a Bills record fetched without
+      // them falls back to "all of subtotal was taxable" — which would print a DIFFERENT total
+      // on a record card than the live floor and the paper show for the same bill.
+      const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,taxable_base,nontax_amount,mrp_amount,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
       let oq = sb.from("orders").select(billsMode ? BILLS_COLS : "*").eq("restaurant_id", rid);
       if (wantsWindow) oq = oq.gte("created_at", windowStartIso);
       const histQ = sp.get("history") ? (sp.get("q") || "").trim() : "";
@@ -1098,7 +1126,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // stays complete even if PostgREST's db-max-rows is configured below 1000 (a fixed +1000
       // step would break early and undercount there). Hard cap the loop as a safety belt.
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status,tip")
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,discount,status,payment_status,tip")
           .eq("restaurant_id", rid).gte("created_at", since)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
         orders.push(...page);
@@ -1129,13 +1157,33 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const key = o.session_id || ("solo:" + o.id);
         (groups.get(key) || (groups.set(key, []), groups.get(key)!)).push(o);
       }
-      let gross = 0, disc = 0, taxable = 0, tax = 0, net = 0;
+      // THE TAXABLE FIGURE IS THE TAXABLE BASE, NOT THE SUBTOTAL (mig 270). A bill can now
+      // carry MRP / nil-rated lines that are never taxed and never discounted, so taxing the
+      // whole subtotal would declare output tax on money no guest was charged it on. The MRP
+      // turnover gets its OWN line instead, and gross keeps meaning "everything sold" — so the
+      // day still reconciles to the rupee: gross − discount = taxable, taxable + tax + mrp = net.
+      // Legacy rows (taxable_base NULL) fall back to subtotal with mrp 0, which is exactly what
+      // those bills charged, so yesterday's Z-report is unchanged.
+      //
+      // The two MRP treatments sort themselves out here with no branch, which is the point of
+      // freezing the behaviour on the line: under mrp_tax_treatment='inclusive' an MRP line
+      // resolves to 'incl', so its net sits INSIDE taxable_base and the GST pulled out of it is
+      // already counted as tax collected; under 'none' it resolves to 'exempt', lands in
+      // nontax_amount, and contributes no tax at all. The report never has to ask which.
+      let gross = 0, disc = 0, taxable = 0, tax = 0, net = 0, mrp = 0;
       let paidCount = 0, paidNet = 0, unpaidCount = 0, unpaidNet = 0; // counts are BILLS, not orders
       for (const g of groups.values()) {
-        const sub = g.reduce((a, o) => a + (Number(o.subtotal) || 0), 0);
-        const d = g.reduce((a, o) => a + (Number(o.discount) || 0), 0);
-        const tx = Math.max(0, sub - d), t = r2(tx * rate), tot = r2(tx + t);
-        gross += sub; disc += d; taxable += tx; tax += t; net += tot;
+        const base = g.reduce((a, o) => a + (o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0)), 0);
+        const nontax = g.reduce((a, o) => a + (Number(o.nontax_amount) || 0), 0);
+        const sub = r2(base + nontax);
+        // Capped exactly the way every discount door caps it (discountBaseOf / mig 272): on
+        // the taxable base when tax applies, else on everything but the locked MRP.
+        const cap = g.reduce((a, o) => a + discountBaseOf(o, rate), 0);
+        const d = Math.min(g.reduce((a, o) => a + (Number(o.discount) || 0), 0), cap);
+        // One formula for both cases — subtotal − discount + tax — so a zero-rate (composition)
+        // day, where the discount can land outside the taxable base, still adds up.
+        const tx = Math.max(0, base - Math.min(d, base)), t = r2(tx * rate), tot = r2(sub - d + t);
+        gross += sub; disc += d; taxable += tx; tax += t; net += tot; mrp += nontax;
         // A bill counts as collected only when EVERY order on it is paid (a table settles in
         // one go — Mark paid pays the whole table — so this matches real behaviour).
         if (g.every((o) => o.payment_status === "paid")) { paidCount++; paidNet += tot; }
@@ -1153,6 +1201,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       return ok({
         date: new Date().toLocaleDateString(), since,
         dineIn: { orderCount, bills: groups.size, gross: r2(gross), discount: r2(disc), taxable: r2(taxable), tax: r2(tax), net: r2(net),
+          // MRP / nil-rated turnover, shown as its own line so the day's takings still add up
+          // on the page: taxable + tax + mrp = net. 0 for every restaurant not using it.
+          mrp: r2(mrp),
           paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled, tips },
         platform: { count: platActive.length, revenue: platRevenue },
         invoicesGenerated: (must(invQ) || []).length,
@@ -1179,7 +1230,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Complete read (page past PostgREST's ~1000-row cap) so a busy month isn't undercounted.
       const orders: any[] = [];
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,discount,status,payment_status,created_at")
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,discount,status,payment_status,created_at")
           .eq("restaurant_id", rid).eq("payment_status", "paid").neq("status", "cancelled")
           .gte("created_at", startIso).lt("created_at", endIso)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
@@ -1193,20 +1244,35 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const r2 = (n: number) => Math.round(n * 100) / 100;
       const istDay = (iso: string) => new Date(new Date(iso).getTime() + 5.5 * 3600e3).toISOString().slice(0, 10);
       // Group orders into BILLS by session (per-bill tax = printed-bill parity), remembering each bill's IST day.
-      const bills = new Map<string, { sub: number; disc: number; day: string }>();
+      // THE TAXABLE VALUE IS THE TAXABLE BASE, NOT THE SUBTOTAL (mig 270). A filing that
+      // declares output tax on MRP / nil-rated turnover is wrong in the direction that costs
+      // the restaurant money, so those lines are carried separately and reported on their own
+      // row — the month still foots (taxable + tax + mrp = gross). Legacy rows have
+      // taxable_base NULL and fall back to subtotal with no MRP, so past months are unchanged.
+      // Under mrp_tax_treatment='inclusive' an MRP line resolves to 'incl' and its GST is
+      // already inside `tax` here; under 'none' it is exempt and contributes none. No branch
+      // is needed because the behaviour was frozen onto the line when it was sold.
+      const bills = new Map<string, { base: number; nontax: number; cap: number; disc: number; day: string }>();
       for (const o of orders) {
         const key = o.session_id || ("solo:" + o.id);
-        const b = bills.get(key) || { sub: 0, disc: 0, day: istDay(o.created_at) };
-        b.sub += Number(o.subtotal) || 0; b.disc += Number(o.discount) || 0; b.day = istDay(o.created_at);
+        const b = bills.get(key) || { base: 0, nontax: 0, cap: 0, disc: 0, day: istDay(o.created_at) };
+        b.base += o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0);
+        b.nontax += Number(o.nontax_amount) || 0;
+        b.cap += discountBaseOf(o, rate);
+        b.disc += Number(o.discount) || 0; b.day = istDay(o.created_at);
         bills.set(key, b);
       }
-      const byDay = new Map<string, { taxable: number; tax: number; gross: number; bills: number }>();
-      let taxable = 0, tax = 0, gross = 0;
+      const byDay = new Map<string, { taxable: number; tax: number; mrp: number; gross: number; bills: number }>();
+      let taxable = 0, tax = 0, gross = 0, mrp = 0;
       for (const b of bills.values()) {
-        const tx = Math.max(0, b.sub - b.disc), t = r2(tx * rate), tot = r2(tx + t);
-        taxable += tx; tax += t; gross += tot;
-        const d = byDay.get(b.day) || { taxable: 0, tax: 0, gross: 0, bills: 0 };
-        d.taxable += tx; d.tax += t; d.gross += tot; d.bills += 1; byDay.set(b.day, d);
+        // Capped exactly the way every discount door caps it (discountBaseOf / mig 272), and
+        // totalled with the one formula subtotal − discount + tax, so a zero-rate month adds up.
+        const dsc = Math.min(b.disc, b.cap);
+        const tx = Math.max(0, b.base - Math.min(dsc, b.base)), t = r2(tx * rate);
+        const tot = r2(b.base + b.nontax - dsc + t);
+        taxable += tx; tax += t; gross += tot; mrp += b.nontax;
+        const d = byDay.get(b.day) || { taxable: 0, tax: 0, mrp: 0, gross: 0, bills: 0 };
+        d.taxable += tx; d.tax += t; d.mrp += b.nontax; d.gross += tot; d.bills += 1; byDay.set(b.day, d);
       }
       // CGST/SGST must add back to the SAME total tax shown (and thus to the grand total). The
       // total tax is summed with PER-BILL rounding; computing each component off the whole-month
@@ -1226,9 +1292,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         restaurant: { name: set.restaurant_name || "Little French House", gstin: set.gstin || "" },
         ratePct: Math.round(rate * 10000) / 100,
         components,
-        totals: { bills: bills.size, taxable: r2(taxable), tax: r2(tax), gross: r2(gross) },
-        days: [...byDay.entries()].sort().map(([date, v]) => ({ date, taxable: r2(v.taxable), tax: r2(v.tax), gross: r2(v.gross), bills: v.bills })),
-        note: "Paid dine-in bills only (this restaurant's own sales; excludes Zomato/Swiggy). Discount applied before tax.",
+        totals: { bills: bills.size, taxable: r2(taxable), tax: r2(tax), mrp: r2(mrp), gross: r2(gross) },
+        days: [...byDay.entries()].sort().map(([date, v]) => ({ date, taxable: r2(v.taxable), tax: r2(v.tax), mrp: r2(v.mrp), gross: r2(v.gross), bills: v.bills })),
+        note: "Paid dine-in bills only (this restaurant's own sales; excludes Zomato/Swiggy). Discount applied before tax."
+          + (mrp > 0 ? " MRP / nil-rated turnover is listed separately — no GST is charged on it." : ""),
       });
     }
 
@@ -2029,9 +2096,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const rawDisc = Number(body?.discount);
       if (placedId && Number.isFinite(rawDisc) && rawDisc > 0) {
         if (!(await managerCan(g, rid, "give_discounts"))) return permDenied("give discounts");
-        const row = (await sb.from("orders").select("subtotal, session_id, discount").eq("id", placedId).eq("restaurant_id", rid).single()).data as
-          { subtotal?: number; session_id?: string | null; discount?: number } | null;
-        const base = Number(row?.subtotal) || 0;
+        const row = (await sb.from("orders").select("subtotal, taxable_base, mrp_amount, session_id, discount").eq("id", placedId).eq("restaurant_id", rid).single()).data as
+          (OrderMoney & { session_id?: string | null; discount?: number }) | null;
+        // The same cap as every other discount door (mig 270 + 271) — a quick order containing
+        // an MRP bottle must not be the one way round a price that is legally final.
+        const base = discountBaseOf(row || {}, effectiveTaxRate(await taxSettings(rid)));
         const cap = await discountCapPct(rid, discountRole(g.user?.role));
         if (overDiscountCap(rawDisc, base, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403);
         const note = String(body?.discountNote || "").slice(0, 200) || null;
@@ -2483,12 +2552,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (await invoiceLockedByOrder(b)) return err(LOCKED_MSG, 409);
       // .eq(restaurant_id, rid) is the only tenant boundary (sb is service-role, RLS bypassed) —
       // a foreign order id can't be discounted.
-      const cur = must(await sb.from("orders").select("subtotal, session_id").eq("id", b).eq("restaurant_id", rid).single());
+      const cur = must(await sb.from("orders").select("subtotal, taxable_base, mrp_amount, session_id").eq("id", b).eq("restaurant_id", rid).single());
       const raw = Number(body && body.amount);
+      // WHAT A DISCOUNT MAY WORK ON — the rule stated once (mig 272's lfh_order_discount_base):
+      //   rate > 0 → the TAXABLE base. The `due = total − discount × (1 + rate)` identity every
+      //              panel computes from only holds while the discount stays in the taxable pile.
+      //   rate = 0 → everything except the locked MRP. With no tax, (1 + rate) is 1, so the
+      //              identity survives a discount anywhere; only a legally-final price is locked.
+      // NULL columns = an order placed before mig 270/271 = fully taxable, no MRP — which is
+      // what those orders were, so nothing moves for an existing restaurant. The panel hides
+      // the impossible amount; this is the guard behind it.
+      const discRate = effectiveTaxRate(await taxSettings(rid));
+      const discBase = discountBaseOf(cur as OrderMoney, discRate);
       // Per-role %-cap (owner 2026-07-24): refuse a discount over this actor's configured limit
       // (non-breaking — no cap → no block). Admin (g.user null) is uncapped.
-      { const cap = await discountCapPct(rid, discountRole(g.user?.role)); const base0 = Number(cur.subtotal) || 0;
-        if (Number.isFinite(raw) && overDiscountCap(Math.max(raw, 0), base0, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403); }
+      { const cap = await discountCapPct(rid, discountRole(g.user?.role));
+        if (Number.isFinite(raw) && overDiscountCap(Math.max(raw, 0), discBase, cap)) return err(`That discount is over your ${cap}% limit — ask the owner.`, 403); }
       const note = String((body && body.note) || "").slice(0, 200) || null;
       // WHOLE-BILL (session) discount path — the FIX for the "discount shrinks when marked paid"
       // bug (2026-07-08). A table's discount is conceptually on the whole BILL, but the manager
@@ -2516,7 +2595,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         });
       };
       if (cur.session_id) {
-        const amount = Number.isFinite(raw) ? Math.max(raw, 0) : 0;
+        // Capped at the BILL's taxable base (mig 270). lfh_staff_bill_discount splits the
+        // amount across the session's unpaid orders and clamps each to its own SUBTOTAL, which
+        // predates the split and would let a discount eat an MRP line. Clamping here, before
+        // the RPC, is what keeps the cap true for the whole bill; on a bill with nothing
+        // untaxed the two numbers are identical, so no existing restaurant sees a change.
+        const sib = (must(await sb.from("orders").select("subtotal, taxable_base, mrp_amount, status").eq("session_id", cur.session_id).eq("restaurant_id", rid)) || []) as
+          (OrderMoney & { status?: string })[];
+        const billBase = sib.reduce((acc, o) => acc + (o.status === "cancelled" ? 0 : discountBaseOf(o, discRate)), 0);
+        const amount = Number.isFinite(raw) ? Math.round(Math.min(Math.max(raw, 0), billBase) * 100) / 100 : 0;
         const res = must(await sb.rpc("lfh_staff_bill_discount", { p_session: cur.session_id, p_amount: amount, p_note: note }));
         await log("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `bill discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
         // The RPC clamps + splits across the bill's unpaid orders, so record what it actually
@@ -2525,9 +2612,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         return ok({ ok: true, discount: (res && (res as { discount?: number }).discount) ?? amount });
       }
       // Legacy standalone order (no table session): keep the per-order write, capped at its OWN
-      // pre-tax subtotal (a lone order can't carry more discount than its food value).
-      const billCap = Number(cur.subtotal) || 0;
-      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), billCap) : 0;
+      // pre-tax TAXABLE base (a lone order can't carry more discount than its taxable food
+      // value, and an MRP line inside it is a final price — mig 270).
+      const amount = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), discBase) : 0;
       must(await sb.from("orders").update({ discount: amount, discount_note: note }).eq("id", b).eq("restaurant_id", rid));
       await log("manager", "order_discount", { restaurant_id: rid, order_id: b, detail: amount > 0 ? `discount ₹${amount}${note ? ` · ${note}` : ""}` : "discount removed", device_id: dev });
       await auditDiscount(amount, b, null);
@@ -3454,7 +3541,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // WHICH FIELDS EACH PART OWNS. Everything not claimed by a narrower part belongs to
         // "Edit dish info" — so a column added later lands in the CONSERVATIVE bucket rather
         // than in a hole nobody gates.
-        const PRICE_KEYS = ["price", "open_price"];
+        // tax_mode (mig 270) belongs to "Change a price": it decides whether the typed number
+        // is net, gross or final, so it moves what the guest pays exactly as the price does.
+        // Whoever may not change a price may not change this either.
+        const PRICE_KEYS = ["price", "open_price", "tax_mode"];
         const D3_KEYS = ["is4d", "model_folder", "model_small_url", "model_optimized_url"];
         const OPT_KEYS = ["options"];
         // 3D and Customisation are stripped on a CREATE too — a part that is off must not be
@@ -3761,6 +3851,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             return err("Enter a valid price — a number like 1299 or 129.99.", 400);
           }
           body.price = String(Math.round(n * 100) / 100);
+        }
+        // tax_mode (mig 270). Two guards, and the second is the one that matters:
+        //   · an unknown value is REFUSED here rather than left to the CHECK constraint, which
+        //     would come back as a raw 23514 and a 500 the manager can do nothing with;
+        //   · while the ADMIN has per-dish modes switched off for this restaurant, the key is
+        //     DROPPED. The form builds no control in that state, but hiding is never the only
+        //     guard (docs/ACCESS-MODEL.md) — and a stored value nothing reads looks granted
+        //     and isn't: flip the master switch on a year later and every dish would silently
+        //     start behaving the way somebody set it while the feature was off.
+        if ("tax_mode" in body) {
+          const TAX_MODES = ["default", "excl", "incl", "mrp", "none"];
+          const allowed = (await sb.from("settings").select("item_tax_modes_allowed").eq("restaurant_id", rid).maybeSingle()).data?.item_tax_modes_allowed === true;
+          if (!allowed) delete body.tax_mode;
+          else if (!TAX_MODES.includes(String(body.tax_mode ?? ""))) {
+            return err("Pick one of: Default, On top, Inside, MRP, None.", 400);
+          }
         }
         // menu_items.id is the GLOBAL primary key. A bare slug-as-id would let a save
         // silently OVERWRITE another restaurant's (or this restaurant's own existing)

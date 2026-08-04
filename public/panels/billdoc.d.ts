@@ -8,6 +8,8 @@ export interface BillDocLine {
   /** Unit price INCLUDING its priced add-ons — the document works the base price back out. */
   price?: number | string;
   options?: { label?: string; price?: number }[];
+  /** true = this line wears the "MRP" stamp beside its name — its price is FINAL (mig 270). */
+  is_mrp?: boolean;
 }
 
 export interface BillDocTaxRow {
@@ -35,8 +37,18 @@ export interface BillDocData {
   discount?: number;
   discLabel?: string;
   taxable?: number;
+  /** Tax rows. An EMPTY array means no tax line at all — a composition-scheme restaurant. */
   taxRows?: BillDocTaxRow[];
   total?: number;
+  /** MRP / untaxed lines (mig 270) — the part of the bill GST is NOT charged on. 0 or absent
+   *  renders exactly as before; above 0 the first row becomes "Food subtotal" and this amount
+   *  is added AFTER the tax rows, so the column still foots. */
+  nontax?: number;
+  /** The wording of that row. Defaults to "MRP items". */
+  mrpLabel?: string;
+  /** One printed line under the totals explaining the untaxed part. Only rendered when
+   *  `nontax` is above 0, and it must only claim tax is inside the price when it really is. */
+  mrpNote?: string;
   /** true = the page opens the print dialog by itself (a real print, not a preview). */
   autoPrint?: boolean;
   /** A line of explanation in the screen-only toolbar. Never printed. */

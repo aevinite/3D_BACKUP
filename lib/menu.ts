@@ -10,8 +10,10 @@
 
 // Grab the shared database connection we set up in supabase.ts.
 import { supabase } from "./supabase";
-// Single source of truth for the restaurant's effective tax rate.
-import { effectiveTaxRate } from "./tax";
+// Single source of truth for the restaurant's effective tax rate AND for the three price
+// behaviours (GST on top / GST inside / never taxed — migration 270). Never re-implement
+// either rule here: a second copy is how the cart, the bill and the paper start disagreeing.
+import { effectiveTaxRate, priceTaxMode, itemTaxModesAllowed, type DishTaxMode } from "./tax";
 import { DEFAULT_RESTAURANT_ID } from "./tenant";
 
 // The shape of one dish in the app. Every field a menu card / detail page might
@@ -45,6 +47,11 @@ export interface MenuItem {
   searchAlias: string; // hidden synonyms for search (e.g. "caesar, healthy")
   options: OptionGroup[]; // per-dish customization (size, milk, extras…)
   openPrice: boolean; // price is entered by staff at order time (as-per-MRP / market price)
+  // Does THIS dish's typed price already contain GST, or is it never taxed at all?
+  // 'default' = follow the restaurant (mig 270). The dish's own answer is IGNORED unless the
+  // admin switched per-dish modes on for this restaurant — resolveTaxMode() in lib/tax.ts is
+  // the only thing that decides, so never branch on this field by hand.
+  taxMode: DishTaxMode;
 }
 
 // A customization group the owner defines and the guest picks from.
@@ -122,6 +129,9 @@ function mapRow(row: any, agg?: RatingAgg): MenuItem {
     // so code that loops over options never breaks.
     options: Array.isArray(row.options) ? row.options : [],
     openPrice: !!row.open_price,
+    // A column that wasn't selected (or a row from before mig 270) reads as "default" —
+    // i.e. "follow the restaurant", which is exactly the pre-269 behaviour.
+    taxMode: (["excl", "incl", "mrp", "none"].includes(String(row.tax_mode)) ? row.tax_mode : "default") as DishTaxMode,
   };
 }
 
@@ -314,7 +324,9 @@ export async function getOrderStatus(
 // them off the grid read (and its realtime refetch) cuts egress on the hot path;
 // mapRow fills any omitted field with a safe default, so nothing breaks.
 export const CARD_COLUMNS =
-  "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, description, tags, allergens, search_alias, options, open_price, sort_order, restaurant_id";
+  // tax_mode rides along (mig 270): the cart has to know whether a printed price already
+  // contains GST before it can quote an honest total, and it is one short text column.
+  "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, description, tags, allergens, search_alias, options, open_price, tax_mode, sort_order, restaurant_id";
 
 // The slugs of the categories this restaurant currently has switched ON.
 //
@@ -473,6 +485,16 @@ export interface Settings {
   // cart uses this so the quoted GST matches the actual bill (was hardcoded 5%). Only
   // the single number is exposed to guests, never the component labels/GSTIN.
   taxRate: number;
+  // ── the three price behaviours (migration 270) ─────────────────────────────
+  // Are the prices typed into the menu NET (GST added on top), GROSS (GST already inside),
+  // or untaxable entirely (a composition-scheme restaurant may not charge the diner GST)?
+  priceTaxMode: "excl" | "incl" | "composition";
+  // Master switch, admin-only, FALSE everywhere by default: while it is off a dish's own
+  // tax_mode is ignored completely and every line follows priceTaxMode.
+  itemTaxModesAllowed: boolean;
+  // How an MRP line is treated underneath. Both answers charge the guest the same (never a
+  // rupee over MRP); they differ only in what the restaurant declares as output tax.
+  mrpTaxTreatment: "none" | "inclusive";
   // Per-restaurant Google review link (owner 2026-07-09). When set, the guest sees a
   // "loved it? review us on Google" nudge after a HIGH dish rating; null = feature off.
   // A PUBLIC link, so it's guest-safe to expose (unlike gstin/phone).
@@ -522,7 +544,10 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
   // prefix, phone…) that `*` was silently shipping to every menu visitor.
   const { data, error } = await supabase
     .from("settings")
-    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components, google_review_url, google_review_mode, menu_enabled, menu_default_layout, menu_default_mode, menu_languages, menu_currencies")
+    // price_tax_mode / item_tax_modes_allowed / mrp_tax_treatment are the mig-269 price
+    // behaviours. They are guest-safe (they describe what a printed price MEANS, which the
+    // guest is entitled to know) and cost three tiny columns on a row we already read.
+    .select("bubbles_enabled, service_mode, table_count, sessions_enabled, require_location, require_otp, geo_lat, geo_lng, geo_radius_m, features, tax_rate, tax_components, price_tax_mode, item_tax_modes_allowed, mrp_tax_treatment, google_review_url, google_review_mode, menu_enabled, menu_default_layout, menu_default_mode, menu_languages, menu_currencies")
     .eq("restaurant_id", restaurantId)   // one settings row per restaurant (079)
     .maybeSingle();
   if (error) throw new Error(`Failed to load settings: ${error.message}`);
@@ -548,6 +573,14 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
       ? Object.fromEntries(Object.entries(data.features as Record<string, unknown>).filter(([, v]) => typeof v === "boolean")) as Record<string, boolean>
       : {},
     taxRate: effectiveTaxRate(data),
+    // Read through lib/tax.ts, never off the raw column: those helpers hold the defaults
+    // (unknown/missing → 'excl', modes OFF, MRP untaxed) that keep a pre-269 row behaving
+    // exactly as it does today.
+    // `data ?? {}` because the mode helpers take a settings ROW (a restaurant with no row at
+    // all lands on their defaults — 'excl', modes off — which is exactly today's behaviour).
+    priceTaxMode: priceTaxMode(data ?? {}),
+    itemTaxModesAllowed: itemTaxModesAllowed(data ?? {}),
+    mrpTaxTreatment: String((data as { mrp_tax_treatment?: unknown } | null)?.mrp_tax_treatment) === "inclusive" ? "inclusive" : "none",
     googleReviewUrl: data && typeof data.google_review_url === "string" && data.google_review_url.trim() ? data.google_review_url.trim() : null,
     // Default 'off' for any restaurant that hasn't been switched on (and for a missing row).
     googleReviewMode: (data && ["google", "google_plus_normal", "google_after_normal"].includes(String(data.google_review_mode)))
@@ -562,6 +595,31 @@ async function fetchSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Prom
     menuCurrencies: strList(data?.menu_currencies, ["INR"]),
   };
 }
+
+// The shape lib/tax.ts reads (it speaks the DATABASE's column names, because the same
+// helpers are used server-side on raw settings rows). This adapter is the ONE place the
+// guest's camelCase Settings is translated into it — so a component never hand-builds the
+// object and never accidentally leaves a field out (a missing field silently means "off").
+export type TaxRules = {
+  tax_rate: number;
+  price_tax_mode: "excl" | "incl" | "composition";
+  item_tax_modes_allowed: boolean;
+  mrp_tax_treatment: "none" | "inclusive";
+};
+export function taxRulesOf(s: Settings): TaxRules {
+  return {
+    // taxRate is ALREADY the effective decimal (components summed, or the flat rate, or 5%),
+    // so handing it over as tax_rate makes effectiveTaxRate() return exactly the same number.
+    tax_rate: s.taxRate,
+    price_tax_mode: s.priceTaxMode,
+    item_tax_modes_allowed: s.itemTaxModesAllowed,
+    mrp_tax_treatment: s.mrpTaxTreatment,
+  };
+}
+/** The rules a restaurant has before its settings have loaded: today's behaviour, exactly. */
+export const DEFAULT_TAX_RULES: TaxRules = {
+  tax_rate: 0.05, price_tax_mode: "excl", item_tax_modes_allowed: false, mrp_tax_treatment: "none",
+};
 
 // A text[] column → a clean string list, never empty (an empty list would leave the menu
 // with no language to render labels in, or no currency to price in).

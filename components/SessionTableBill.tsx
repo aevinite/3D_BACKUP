@@ -35,11 +35,25 @@ interface SItem {
   options?: { label?: string }[] | null;
   removed?: string[] | null;
   note?: string | null;
+  // Presentational only (mig 270): this dish was sold at a FINAL, locked price (an MRP
+  // bottle) so no GST is added to it. It is read off the server's own frozen ticket lines
+  // (orders[].items[].is_mrp), never decided here — see mrpTitles() below.
+  isMrp?: boolean;
 }
+// One frozen line of a placed order's ticket (orders.items). lfh_price_order writes the
+// resolved tax behaviour onto every line at order time; we only read the MRP stamp.
+interface STicketLine { title?: string | null; is_mrp?: boolean | null }
+interface SOrder { items?: STicketLine[] | null }
 // The money totals for the whole table. `discount` is the whole-bill reduction staff
 // applied (0 if none); tax/total are already computed discount-BEFORE-tax by the server
 // (lfh_session_state, mig 126) so they equal the printed/paid bill.
-interface SBill { subtotal: number; discount?: number; tax: number; total: number; }
+//
+// EVERY number here is the SERVER's. Nothing on this screen recomputes money — the guest's
+// copy of a bill must be the same arithmetic the paper and the payment use, and a client-side
+// figure is a second opinion nobody can reconcile. The untaxed (MRP) part of the bill is read
+// under BOTH the names the RPC has used for it, and the "MRP items" row simply doesn't appear
+// on a server that sends neither: inventing that number here is forbidden outright.
+interface SBill { subtotal: number; discount?: number; tax: number; total: number; nontax?: number; nontax_amount?: number }
 
 // Turns the short status codes into friendly words shown on the little pills.
 // "received" reads "Awaiting accept" so the guest knows the order is placed but the
@@ -59,6 +73,9 @@ export default function SessionTableBill() {
   const [members, setMembers] = useState(0); // how many people are sharing this table
   const [calls, setCalls] = useState<{ note?: string | null }[]>([]); // active (unattended) waiter calls for this table
   const [currency, setCurrency] = useState<CurrencyMeta | null>(null); // which currency to display
+  // Composition scheme (mig 270): this restaurant may not pass GST to the diner at all, so a
+  // GST row must not appear on their copy of the bill.
+  const [composition, setComposition] = useState(false);
   // Holds the session token. A ref (not state) because changing it shouldn't redraw.
   const tokenRef = useRef<string | null>(null);
 
@@ -75,7 +92,11 @@ export default function SessionTableBill() {
     (async () => {
       // Ask the server: is the dining-session system even turned on?
       let enabled = false;
-      try { enabled = (await getSettings(restaurantId)).sessionsEnabled; } catch {}
+      try {
+        const s = await getSettings(restaurantId);
+        enabled = s.sessionsEnabled;
+        setComposition(s.priceTaxMode === "composition");
+      } catch {}
       // Do we have a saved session on this device?
       const s = getStoredSession();
       if (!alive || !enabled || !s) return; // not in session mode → stay hidden
@@ -114,7 +135,20 @@ export default function SessionTableBill() {
         setTable(sess?.table_number || "");
         // The guest never sees "ready" (a staff-only stage) — show a ready dish as
         // "preparing" (still cooking) until it's actually served (owner, 2026-06-14).
-        setItems(((st.items as SItem[]) || []).map((i) => ((i.status as string) === "ready" ? { ...i, status: "preparing" } : i)));
+        // Which dish titles were sold at a locked MRP price, taken from the server's own
+        // frozen ticket lines. Title is the only key the two lists share (order_items has no
+        // menu_item_id) — the same match migration 270's own trigger uses, and safe for the
+        // same reason: two lines with one title in one order came from one dish.
+        const mrpTitles = new Set(
+          ((st.orders as SOrder[]) || []).flatMap((o) => (Array.isArray(o?.items) ? o.items : []))
+            .filter((ln) => ln && ln.is_mrp === true)
+            .map((ln) => String(ln.title || "")),
+        );
+        setItems(((st.items as SItem[]) || []).map((i) => {
+          const row = (i.status as string) === "ready" ? { ...i, status: "preparing" as const } : { ...i };
+          row.isMrp = mrpTitles.has(String(row.title || ""));
+          return row;
+        }));
         setBill((st.bill as SBill) || null);
         setMembers(Array.isArray(st.members) ? (st.members as unknown[]).length : 0);
         // Active waiter calls for the table, so the live status shows "waiter called"
@@ -207,6 +241,11 @@ export default function SessionTableBill() {
               <div key={it.id} className="stb-item">
                 <span className="stb-item-name">
                   {it.title} <span className="stb-qty">×{it.qty}</span>
+                  {/* A locked, final price — nothing is added to it, nothing comes off it.
+                      Saying so is what makes this dish carrying no GST read as correct. */}
+                  {it.isMrp && (
+                    <span className="stb-item-detail" title="Maximum Retail Price — this price is final, no tax is added">MRP</span>
+                  )}
                   {it.options && it.options.length > 0 && (
                     <span className="stb-item-detail">{it.options.map((o) => o.label).filter(Boolean).join(", ")}</span>
                   )}
@@ -220,7 +259,14 @@ export default function SessionTableBill() {
             ))}
           </div>
           {/* The money breakdown, only shown once the server sends totals. */}
-          {bill && (
+          {bill && (() => {
+          // The untaxed (MRP) part of this table's bill, exactly as the server sent it —
+          // under either name the RPC has used. Absent ⇒ 0 ⇒ the row is simply not drawn.
+          // Under the composition scheme EVERY line is untaxed, so the server's "untaxed" figure
+          // is simply the whole bill — calling that "MRP items" would be a plain lie about why
+          // there is no GST. The row belongs to a MIXED bill only.
+          const nontax = composition ? 0 : Number(bill.nontax ?? bill.nontax_amount) || 0;
+          return (
             <div className="bill-rows stb-bill">
               <div className="bill-line"><span>Subtotal</span><span>{show(Number(bill.subtotal) || 0)}</span></div>
               {Number(bill.discount) > 0 && (
@@ -233,10 +279,23 @@ export default function SessionTableBill() {
                   <span>− {show(Number(bill.discount) || 0)}</span>
                 </div>
               )}
-              <div className="bill-line"><span>GST</span><span>{show(Number(bill.tax) || 0)}</span></div>
+              {/* MRP / exempt money on this bill — shown ONLY when the SERVER sends the split
+                  (lfh_session_state, mig 271). No split in the payload → no row; the
+                  alternative (adding it up here) would be inventing a bill line. */}
+              {nontax > 0 && (
+                <div className="bill-line"><span>MRP items (no GST)</span><span>{show(nontax)}</span></div>
+              )}
+              {/* A composition-scheme restaurant may not pass GST to the diner, so no GST row is
+                  printed on their copy. It is hidden only when the server AGREES (tax is 0) — if
+                  the server still charged tax, hiding the row would hide a real charge that is
+                  inside the total below, and that is worse than an unexpected line. */}
+              {!(composition && !(Number(bill.tax) > 0)) && (
+                <div className="bill-line"><span>GST</span><span>{show(Number(bill.tax) || 0)}</span></div>
+              )}
               <div className="bill-line grand"><span>Table total</span><span>{show(Number(bill.total) || 0)}</span></div>
             </div>
-          )}
+          );
+          })()}
           {/* Bottom summary: a single clear line of what the table left out, so the
               kitchen's exclusions are confirmed at a glance for this order. */}
           {excluded.length > 0 && (
