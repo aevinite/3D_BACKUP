@@ -342,7 +342,12 @@ console.log("\n── 12. NO NARROW SETTINGS SELECT — the silent way to get th
       const src = readFileSync(p, "utf8");
       // Any settings select that names tax_rate must also carry price_tax_mode — or, better,
       // be the shared constant.
-      const re = /\.select\(\s*(["'`])([^"'`]*tax_rate[^"'`]*)\1\s*\)/g;
+      // Scoped to `from("settings")` on purpose. Since migration 284 the ORDERS table has its
+      // own `tax_rate` column (an order remembers the rate it was billed at), so a bare search
+      // for "tax_rate" in any select flags perfectly correct order queries. The rule being
+      // enforced is narrower than it first looks: it is about reading the RESTAURANT's tax
+      // posture, and that lives in one table.
+      const re = /\.from\(\s*["'`]settings["'`]\s*\)[\s\S]{0,200}?\.select\(\s*(["'`])([^"'`]*tax_rate[^"'`]*)\1\s*\)/g;
       let m;
       while ((m = re.exec(src))) {
         if (!/price_tax_mode/.test(m[2])) {
