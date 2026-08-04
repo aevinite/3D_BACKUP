@@ -15,11 +15,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { requireRole } from "@/lib/userAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
 // Resolve the acting restaurant for a manager/admin request, or return the HTTP error to send.
-async function scope(req: NextRequest, forWrite = false): Promise<{ rid: string } | { error: NextResponse }> {
+async function scope(req: NextRequest, forWrite = false): Promise<{ rid: string; who: string } | { error: NextResponse }> {
   const g = await requireRole(req, "manager");
   if (!g.ok) {
     // transient = auth lookup failed (DB blip) → 503 so the client retries instead of logging out.
@@ -47,7 +48,8 @@ async function scope(req: NextRequest, forWrite = false): Promise<{ rid: string 
       return { error: NextResponse.json({ error: "Taking the menu down isn't switched on for you — ask your admin." }, { status: 403 }) };
     }
   }
-  return { rid };
+  // WHO is taking the menu down — the owner/manager's own name, or "admin" for the super-user.
+  return { rid, who: g.user ? (g.user.name || g.user.username) : "admin" };
 }
 
 export async function GET(req: NextRequest) {
@@ -65,5 +67,13 @@ export async function POST(req: NextRequest) {
   const on = body?.on === true;
   const r = await sb.from("settings").update({ service_mode: on }).eq("restaurant_id", s.rid).select("service_mode");
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  // TAKING THE MENU DOWN STOPS EVERY GUEST ORDERING, AND IT WAS UNRECORDED (sweep 2026-08-04).
+  // Guests see "we'll be right back", the owner asks who did it, and there was no answer anywhere.
+  // The write is properly GATED already (Access -> Menu -> "Put menu on maintenance" + the `who`
+  // rung above) — it was only the record that was missing.
+  await logAction("manager", on ? "maintenance_on" : "maintenance_off", {
+    restaurant_id: s.rid, actor: s.who, device_id: deviceIdFrom(req),
+    detail: on ? `${s.who} took the guest menu OFFLINE` : `${s.who} put the guest menu back online`,
+  });
   return NextResponse.json({ maintenance: (r.data?.[0] || {}).service_mode === true });
 }

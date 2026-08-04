@@ -12,6 +12,7 @@ import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { menuTag } from "@/lib/menuDataServer";
 import {
@@ -279,6 +280,21 @@ export async function POST(req: NextRequest) {
   if (Object.keys(setPatch).length) {
     try { revalidateTag(menuTag(rid), "max"); } catch { /* the revalidate window is the backstop */ }
   }
+
+  // A PERMISSION CHANGE IS THE ONE THING THAT MOST NEEDS A RECORD (sweep 2026-08-04). This is the
+  // single endpoint behind the whole Access & permissions screen — grants, section entitlements,
+  // per-panel caps, module rungs, guest features — and it logged nothing. So a manager losing a
+  // capability overnight, or a whole rung moving, had no who-and-when anywhere in the product.
+  //
+  // The detail names the GROUPS that moved rather than dumping the patch: the body is a nested
+  // shape and a wall of JSON in the Activity log's "What" column is unreadable (the same lesson as
+  // the invoice row that printed a session uuid). Best-effort and last — a logging failure must
+  // never fail a save that already succeeded.
+  const touched = Object.keys(patch).filter((k) => patch[k] && typeof patch[k] === "object" ? Object.keys(patch[k]).length : patch[k] !== undefined);
+  await logAction("admin", "access_change", {
+    restaurant_id: rid, device_id: deviceIdFrom(req),
+    detail: `access & permissions saved — ${touched.length ? touched.join(", ") : "no group named"}`,
+  }).catch(() => { /* the save stands either way */ });
 
   return NextResponse.json({ ok: true });
 }

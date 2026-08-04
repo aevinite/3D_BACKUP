@@ -3024,7 +3024,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       patch.served_at = status === "served" ? nowIso() : null;
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select());
       const item = updated[0];
-      if (item && item.order_id) {
+      // Same fix as the kitchen's items/:id/status (sweep 2026-08-04): the scoped update matches no
+      // row when the dish has gone, and answering `ok(null)` with HTTP 200 is a tap that vanished —
+      // no caller checks for a null body. Say it plainly instead.
+      if (!item) return err("That dish isn't on this order any more — refresh and try again.", 404);
+      if (item.order_id) {
         const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id).eq("restaurant_id", rid));
         const total = rows.length;
 
@@ -3034,7 +3038,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const orderStatus = total > 0 && served === total ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: orderStatus }).eq("id", item.order_id).eq("restaurant_id", rid);
       }
-      return ok(item || null);
+      // Serving a dish is a floor action a person is accountable for, and it was unlogged here while
+      // the waiter tablet's identical action has been logged since 2026-07-29.
+      await log("editor", "item_status", { restaurant_id: rid, order_id: item.order_id ?? null, detail: status, device_id: dev });
+      return ok(item);
     }
 
     // requests/:id/resolve

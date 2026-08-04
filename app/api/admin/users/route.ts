@@ -170,7 +170,15 @@ export async function PATCH(req: NextRequest) {
   const id = String(body?.id || "");
   const action = String(body?.action || "");
   if (!id) return bad("Missing user id.");
-  const u = (await sb.from("staff_users").select("*").eq("id", id).limit(1)).data?.[0];
+  // NAMED COLUMNS, NOT `*` (sweep 2026-08-04). `staff_users` holds password_hash, and this handler
+  // never needs it — `select("*")` pulled every person's password hash into route memory on every
+  // profile edit, one spread away from reaching a response body. These are exactly the fields the
+  // branches below read (`pin_hash` for the PIN state, `token_version` for the invalidation bump);
+  // password_hash is deliberately absent, so it cannot leak from here even by accident.
+  const u = (await sb.from("staff_users")
+    .select(`id, username, name, role, active, restaurant_id, permissions, pin_hash, token_version,
+             can_self_reset, can_self_set_pin, ${PROFILE_COLS}`)
+    .eq("id", id).limit(1)).data?.[0] as Record<string, any> | undefined;
   if (!u) return bad("User not found.", 404);
   // Owners keep a DIFFERENT lifecycle (multi-restaurant, primary/co-owner handoff), so the
   // account itself — role, name, active, delete — is still changed only on the Owners page.

@@ -24,8 +24,14 @@ export async function POST(req: NextRequest) {
   // Staff login FIRST (a device can hold both cookies — see requireRole's note), else admin.
   let staff = null;
   try { staff = await userFromCookie(req.cookies.get(USER_COOKIE)?.value); } catch { /* treat as not-staff */ }
-  const isAdmin = tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
+  // `await` MATTERS HERE and its absence made this gate a no-op (sweep 2026-08-04). tokenIsValid is
+  // async, so `const isAdmin = tokenIsValid(…)` is a Promise — always truthy — which made `!isAdmin`
+  // always false and the 401 below UNREACHABLE. Anyone could reach the upload; the only thing left
+  // in the way was panelRestaurantId needing a `?rid=`, which a caller supplies themselves.
+  const isAdmin = await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
   if (!staff && !isAdmin) return bad("Not authorised — please log in.", 401);
+  // A signed-in staff member is scoped to their OWN restaurant by panelRestaurantId. Only the admin
+  // may name one — and only the admin's cookie makes `?rid=` mean anything (see lib/panelScope.ts).
 
   const rid = panelRestaurantId(req, { user: staff });
   if (!rid) return bad("No restaurant scope — open this panel from the admin console.", 400);

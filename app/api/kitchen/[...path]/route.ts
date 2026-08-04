@@ -279,7 +279,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Scoped by rid so a foreign dish id can't be advanced (service-role bypasses RLS).
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id"));
       const item = updated[0];
-      if (item && item.order_id) {
+      // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS (sweep 2026-08-04). The update is scoped by
+      // rid, so it matches no row when the dish is gone — a stale board, a KOT the manager just
+      // cancelled, another restaurant's id. This used to fall through to `ok({ ok: true })`: the cook
+      // saw the dish go green and the waiter never saw it. The sibling accept/ready branches above
+      // have always 404'd here; this is the same answer, in the same words a person can act on.
+      if (!item) return err("That dish isn't on this restaurant's board any more — refresh and try again.", 404);
+      if (item.order_id) {
         const rows = must(await sb.from("order_items").select("status").eq("order_id", item.order_id).eq("restaurant_id", rid));
 
         const served = rows.filter((r: any) => r.status === "served").length;
@@ -288,6 +294,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
         await sb.from("orders").update({ status: overall }).eq("id", item.order_id).eq("restaurant_id", rid);
       }
+      // Moving ONE dish along is the kitchen's most frequent action and it was the only one here with
+      // no record — so "who marked this ready, and when?" had no answer, and a cook's own Activity
+      // under-counted their shift. Every sibling action in this file already logs.
+      await logAction("kitchen", "item_status", { ...adminMark, order_id: item.order_id ?? null, detail: status, device_id: dev, restaurant_id: rid });
       return ok({ ok: true });
     }
 

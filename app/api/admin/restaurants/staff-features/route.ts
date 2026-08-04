@@ -9,6 +9,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,11 @@ export async function POST(req: NextRequest) {
   if (!isUuid(restaurant_id)) return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
   if (!STAFF_FEATURE_KEYS.includes(key)) return NextResponse.json({ error: "unknown staff feature" }, { status: 400 });
 
+  // A FEATURE FLIP IS AUDITED (sweep 2026-08-04). These three routes wrote a per-restaurant switch
+  const audit = () => logAction("admin", "staff_feature", {
+    restaurant_id: restaurant_id as string, device_id: deviceIdFrom(req),
+    detail: `staff feature "${key}" → ${value === true ? "on" : "off"}`,
+  });
   const rest = await sb.from("restaurants").select("id, slug").eq("id", restaurant_id).maybeSingle();
   if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
@@ -48,6 +54,7 @@ export async function POST(req: NextRequest) {
   if (cur.data) {
     const r = await sb.from("settings").update({ [key]: value === true }).eq("restaurant_id", restaurant_id).select(STAFF_FEATURE_KEYS.join(", ")).maybeSingle();
     if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+    await audit();
     const flags: Record<string, boolean> = {};
     for (const k of STAFF_FEATURE_KEYS) flags[k] = !!(r.data as Record<string, unknown> | null)?.[k];
     return NextResponse.json({ flags });
@@ -60,6 +67,7 @@ export async function POST(req: NextRequest) {
   const newRow = { ...base, id: rest.data.slug, restaurant_id, [key]: value === true };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select(STAFF_FEATURE_KEYS.join(", ")).maybeSingle();
   if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });
+  await audit();
   const flags: Record<string, boolean> = {};
   for (const k of STAFF_FEATURE_KEYS) flags[k] = !!(ins.data as Record<string, unknown> | null)?.[k];
   return NextResponse.json({ flags, created: true });

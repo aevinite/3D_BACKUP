@@ -10,6 +10,7 @@ import { ownerScope } from "@/lib/ownerScope";
 import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@/lib/ownerEntitlements";
 import { USER_COOKIE, userFromCookie, hashSecret, verifySecret } from "@/lib/userAuth";
 import { MODULE_DEFS } from "@/lib/accessModel";
+import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
@@ -105,6 +106,13 @@ export async function PATCH(req: NextRequest) {
   if (!s[def.control]) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
   const { error } = await sb.from("settings").update({ [def.enabled]: enabled }).eq("restaurant_id", rid);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // A module turning itself off changes what a whole panel offers, and nothing recorded it — so with
+  // two co-owners nobody could say who flipped it (sweep 2026-08-04). Unlike issues/ratings there is
+  // no in-row stamp to fall back on: the settings column holds only the value.
+  await logAction("owner", "module_toggle", {
+    restaurant_id: rid, actor: scope.admin ? "admin" : (("ownerId" in scope && scope.ownerId) || "owner"),
+    detail: `${def.label} → ${enabled ? "on" : "off"}`,
+  });
   return NextResponse.json({ ok: true });
 }
 
@@ -137,6 +145,14 @@ export async function POST(req: NextRequest) {
     .update({ password_hash: hash, token_version: (row.token_version || 0) + 1 })
     .eq("id", owner.id);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  // Bumping token_version ends EVERY session on this account, so the visible symptom is "everyone
+  // got logged out" with nothing to explain it. app/api/panel-profile already logs its equivalent
+  // self-change as `password_change`; this one didn't (sweep 2026-08-04).
+  await logAction("owner", "password_change", {
+    restaurant_id: owner.restaurant_id ?? undefined,
+    actor: owner.name || owner.username, actor_id: owner.id,
+    detail: `${owner.name || owner.username} changed their own password (all their sessions ended)`,
+  });
   // token_version bumped → the current cookie no longer validates; the client re-logs in.
   return NextResponse.json({ ok: true, reauth: true });
 }
