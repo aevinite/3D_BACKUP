@@ -389,6 +389,29 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
     : fail("the shared bill money may adopt a 0/NULL stamped rate as though it were charged");
 }
 
+// ── AND THE TOMBSTONE HOLDS WHOEVER DID THE DELETING (mig 291) ───────────────────────────────
+// mig 280 fixed the APP's delete path and repaired 138 bills. Asking the database again hours later
+// found 37 MORE in the same state — every order deleted, the session still reading alive — with
+// deleted_by and delete_reason both null, which the app path never leaves. They came from scripts
+// stamping deleted_at directly through the service role. To the admin the symptom is identical: the
+// bill is invisible to the ledger and cannot be put back. So the rule moved onto the row change
+// itself, exactly as mig 232 did for closing a table.
+{
+  const m291 = read("supabase/migrations/291_a_fully_deleted_bill_tombstones_itself.sql");
+  /CREATE TRIGGER trg_tombstone_fully_deleted_bill/.test(m291)
+    ? ok("a fully-deleted bill tombstones itself, whoever wrote the delete")
+    : fail("mig 291 is missing — a script or a hand-run UPDATE would hide a bill from the admin ledger again");
+  /AFTER UPDATE OF deleted_at ON orders/.test(m291)
+    ? ok("...on the row change itself, not in a caller that can be bypassed")
+    : fail("the tombstone rule is not on the orders row change — a direct write would skip it");
+  /WHEN \(NEW\.deleted_at IS NOT NULL AND OLD\.deleted_at IS NULL\)/.test(m291)
+    ? ok("and it only fires when a delete actually happens (an ordinary edit costs nothing)")
+    : fail("the trigger fires on every order update — that is a cost on the hot path");
+  /max\(o\.deleted_at\)/.test(m291)
+    ? ok("its repair dates the tombstone from the ORDERS, so retention runs from the real removal")
+    : fail("mig 291's repair stamps now() — the 90-day window would restart on every repair");
+}
+
 // ── report ───────────────────────────────────────────────────────────────────
 if (!HOOK) for (const m of oks) console.log("  ok   " + m);
 if (fails.length) {
