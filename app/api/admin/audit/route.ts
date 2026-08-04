@@ -27,6 +27,36 @@ export async function GET(req: NextRequest) {
   // ?q= free-text search over the dish title, the person and the typed reason.
   const qText = (url.searchParams.get("q") || "").trim().slice(0, 80);
 
+  // ── ?detail=<id> — ONE removal, in full (owner, 2026-08-04) ─────────────────────────────────
+  // Click a row and see how it was: which KOT, every item on it with its quantity and price, the
+  // totals, the customer, the time and day, who did it and from which restaurant. `meta` holds the
+  // item-by-item snapshot (lib/removalAudit.ts), so it is fetched lazily rather than riding along
+  // with 200 list rows — the same shape as the bill ledger's ?trail=.
+  //
+  // `canRestore` tells the UI whether to offer putting it back. TRUE only here, on the admin's own
+  // route: the owner's identical view (/api/owner/audit) returns false and has no write path at
+  // all. Only the admin changes anything; everyone else can look (owner rule, 2026-08-04).
+  const detailId = url.searchParams.get("detail");
+  if (detailId) {
+    if (!/^\d+$/.test(detailId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
+    const one = (await sb.from("deletion_audit")
+      .select(`${COLS}, session_id, order_id, item_id, device_id, meta`)
+      .eq("id", Number(detailId)).limit(1)).data?.[0] as Record<string, unknown> | undefined;
+    if (!one) return NextResponse.json({ error: "not found" }, { status: 404 });
+    const rn = one.restaurant_id
+      ? (await sb.from("restaurants").select("name").eq("id", String(one.restaurant_id)).maybeSingle()).data?.name ?? null
+      : null;
+    // Is the thing it describes still restorable? A soft-deleted order can be put back; a
+    // cancellation or a menu-item removal is a different kind of correction. Answered from the
+    // live row so the button is never offered for something that cannot be undone.
+    let restorable = false;
+    if (one.kind === "order_deleted" && one.order_id) {
+      const live = (await sb.from("orders").select("deleted_at").eq("id", String(one.order_id)).maybeSingle()).data as { deleted_at?: string | null } | null;
+      restorable = !!live?.deleted_at;
+    }
+    return NextResponse.json({ removal: { ...one, restaurant_name: rn }, canRestore: restorable });
+  }
+
   let q = sb.from("deletion_audit").select(COLS).order("at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (qText) {

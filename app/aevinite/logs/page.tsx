@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { actLabel, panelChipStyle, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
+import { RemovalDetailModal } from "@/components/admin/RemovalDetail";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
@@ -91,6 +92,7 @@ export default function AdminLogs() {
   const [ops, setOps] = useState<Action[] | null>(null);
   const [cust, setCust] = useState<CustData | null>(null);
   const [aud, setAud] = useState<Removal[] | null>(null);
+  const [removalId, setRemovalId] = useState<number | null>(null);   // which removal is open in full
   // Error flags so a failed fetch shows a retry instead of an eternal "Loading…"
   // (bug #7, 2026-07-06 — the catch used to swallow errors and never clear the sentinel).
   const [opsErr, setOpsErr] = useState(false);
@@ -281,7 +283,7 @@ export default function AdminLogs() {
       {tab === "ops"
         ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} onResolve={markResolved} />
         : tab === "aud"
-        ? <AudTable rows={aud} err={audErr} onRetry={loadAud} scopedName={scopedName || null} />
+        ? <AudTable rows={aud} err={audErr} onRetry={loadAud} scopedName={scopedName || null} onOpenRemoval={setRemovalId} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
 
       {/* Cleanup confirm — a shared modal (phone Back + Escape + focus-trap via useAdminModal). */}
@@ -293,6 +295,14 @@ export default function AdminLogs() {
           onCancel={() => setPending(null)}
           onConfirm={runCleanup}
         />
+      )}
+
+      {/* Click a removal → the whole story: which KOT, every item on it, the totals, the time and
+          day, who did it and at which restaurant. Admin-only extra: the button to put a deleted
+          bill back. The OWNER sees the identical panel from /api/owner/audit, which is GET-only and
+          never offers that button (owner rule, 2026-08-04: they can see everything, change nothing). */}
+      {removalId != null && (
+        <RemovalDetailModal id={removalId} base="/api/admin/audit" onClose={() => setRemovalId(null)} onRestored={loadAud} />
       )}
     </>
   );
@@ -400,7 +410,7 @@ function OpsTable({ rows, err, onRetry, scopedName, onSendToClaude, onResolve }:
 
 // The Removals record — every restaurant's deletion_audit rows, with the restaurant named
 // on each row so "All restaurants" is never ambiguous.
-function AudTable({ rows, err, onRetry, scopedName }: { rows: Removal[] | null; err: boolean; onRetry: () => void; scopedName: string | null }) {
+function AudTable({ rows, err, onRetry, scopedName, onOpenRemoval }: { rows: Removal[] | null; err: boolean; onRetry: () => void; scopedName: string | null; onOpenRemoval: (id: number) => void }) {
   const cols = "1.4fr 1fr auto";
   if (err) return <div className="adm-empty">Couldn&rsquo;t load the removals record. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={onRetry}>Retry</button></div>;
   if (rows === null) return <SkelList rows={6} label="Loading removals" />;
@@ -420,7 +430,13 @@ function AudTable({ rows, err, onRetry, scopedName }: { rows: Removal[] | null; 
         ].filter(Boolean).join(" · ");
         const reason = [r.reason_code ? REMOVAL_REASON[r.reason_code] || r.reason_code : "", r.reason_note || ""].filter(Boolean).join(" — ") || "no reason recorded";
         return (
-          <div key={r.id} className="adm-logrow" style={{ gridTemplateColumns: cols }}>
+          <div
+            key={r.id} className="adm-logrow" style={{ gridTemplateColumns: cols, cursor: "pointer" }}
+            role="button" tabIndex={0}
+            title="See exactly what was removed"
+            onClick={() => onOpenRemoval(r.id)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenRemoval(r.id); } }}
+          >
             <div style={{ minWidth: 0 }}>
               <span aria-hidden="true" style={{ marginRight: 6 }}>{ico}</span>
               <b>{label}</b>

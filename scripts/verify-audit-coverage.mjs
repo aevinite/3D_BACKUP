@@ -272,6 +272,68 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
     : fail("the Repair Kit voids without p_actor — the invoice history records who as NULL");
 }
 
+// ── AN AUDIT ROW MUST BE OPENABLE, AND SAY WHAT WAS ON IT (owner, 2026-08-04) ───────────────
+// "Click and view the full — how it was and what he changed, which KOT he deleted and what was the
+// item, with time, day, everything, who has done it, with restaurant." The Audit recorded a deleted
+// bill's VALUE and its table and NOTHING about what was on it, so "Bill deleted · Table 6 · ₹1,150"
+// could not be checked or argued with. And nothing was clickable on any of the three screens.
+{
+  const audit = read("lib/removalAudit.ts");
+  /async function snapshotOrder/.test(audit) && /if \(a\.orderId && !\("was" in meta\)\)/.test(audit)
+    ? ok("a removal snapshots the order it removes (kot, items, totals) into meta.was")
+    : fail("removals no longer capture what was on the bill — the Audit goes back to recording only an amount");
+  /items: items\.slice\(0, 60\)/.test(audit)
+    ? ok("the snapshot is capped, and says so when it truncates")
+    : fail("the item snapshot is uncapped — one huge order would bloat every audit row");
+  /return null;   \/\/ the removal already happened/.test(audit)
+    ? ok("a failed snapshot never undoes the removal it was describing")
+    : fail("snapshotOrder can throw into the removal path — gathering evidence must never fail the action");
+
+  // All three surfaces must offer the detail, and it must be LAZY (the snapshot never rides along
+  // with a 200-row list — that is the whole-board read the egress rules forbid).
+  for (const [file, what] of [
+    ["app/api/admin/audit/route.ts", "the admin audit route"],
+    ["app/api/owner/audit/route.ts", "the owner audit route"],
+    ["app/api/editor/[...path]/route.ts", "the manager audit endpoint"],
+  ]) {
+    /searchParams\.get\("detail"\)|nextUrl\.searchParams\.get\("detail"\)/.test(read(file))
+      ? ok(`${what} serves one removal in full on ?detail=`)
+      : fail(`${what} has no ?detail= — an audit row cannot be opened there`);
+  }
+  const adminAudit = read("app/api/admin/audit/route.ts");
+  const ownerAudit = read("app/api/owner/audit/route.ts");
+  !/^const COLS[^\n]*meta/m.test(adminAudit) && !/^const COLS[^\n]*meta/m.test(ownerAudit)
+    ? ok("the audit LIST still does not carry meta (the snapshot is fetched only on a click)")
+    : fail("the audit list now ships every snapshot — that is a whole-board read on a screen nobody has opened");
+
+  // ONLY THE ADMIN CHANGES ANYTHING. The owner sees the identical evidence and gets no write path.
+  /canRestore: false/.test(ownerAudit)
+    ? ok("the owner's removal detail never offers a restore")
+    : fail("the owner route may now offer canRestore — only the admin puts a bill back (owner rule)");
+  !/export async function (POST|PATCH|PUT|DELETE)/.test(ownerAudit)
+    ? ok("the owner audit route is GET-only — the owner can look and change nothing")
+    : fail("the owner audit route grew a write handler — the owner must not be able to change a record");
+  !/export async function (POST|PATCH|PUT|DELETE)/.test(adminAudit)
+    ? ok("restoring still goes through the audited bill-ledger path, not a second door on the audit view")
+    : fail("the admin audit route grew its own write path — keep the one audited restore in /api/admin/bills");
+
+  // One shape on every screen, and the panel's copy registers with the back-stack like every overlay.
+  const shared = read("components/admin/RemovalDetail.tsx");
+  /export function RemovalDetail\(/.test(shared) && /export function RemovalDetailModal\(/.test(shared)
+    ? ok("admin and owner render ONE shared removal-detail component")
+    : fail("the removal detail is no longer shared — two copies drift, which is how one row reads two ways");
+  /useBackClose\("removal-detail"/.test(shared)
+    ? ok("the removal detail closes on a phone's Back instead of leaving the page")
+    : fail("the removal detail is not registered with the back-stack (CLAUDE.md rule for every overlay)");
+  const panel = read("public/panels/editor/app.js");
+  /async function openRemovalDetail\(/.test(panel) && /data-au-open/.test(panel)
+    ? ok("the manager panel's audit rows open the same full record")
+    : fail("the manager panel's audit rows are not clickable — the owner asked for it on every screen");
+  /wrap\.__lfhClose = close;/.test(panel.slice(panel.indexOf("async function openRemovalDetail")))
+    ? ok("the panel's removal detail answers the hardware Back button")
+    : fail("the panel's removal detail does not set __lfhClose — phone Back would leave the panel");
+}
+
 // ── report ───────────────────────────────────────────────────────────────────
 if (!HOOK) for (const m of oks) console.log("  ok   " + m);
 if (fails.length) {

@@ -1730,6 +1730,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "audit") {
       if (!(await canViewLogs(g, rid))) return permDenied("view the removals record");
       if (!(await logPartAllowed(g, rid, "removals"))) return permDenied("view the removals record");
+      // ?detail=<id> — ONE removal, in full (owner, 2026-08-04): which KOT, every item on it with
+      // its quantity and price, the totals, the customer, the time and day, and who did it. `meta`
+      // carries the snapshot (lib/removalAudit.ts) and is fetched lazily, so the LIST payload is
+      // unchanged — 100 snapshots for rows nobody opened would be the whole-board read the egress
+      // rules exist to prevent. Scoped by restaurant like the list, so a manager can only ever open
+      // their own restaurant's removal. READ-ONLY: nothing here can put a bill back — that is the
+      // admin's alone.
+      const detailId = String(req.nextUrl.searchParams.get("detail") || "");
+      if (detailId) {
+        if (!/^\d+$/.test(detailId)) return err("bad id", 400);
+        const one = must(await sb.from("deletion_audit")
+          .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount,session_id,order_id,item_id,device_id,meta")
+          .eq("id", Number(detailId)).eq("restaurant_id", rid).limit(1)) as Record<string, unknown>[] | null;
+        if (!one || !one.length) return err("That record isn't for this restaurant.", 404);
+        return ok(one[0]);
+      }
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
       const rows = must(await sb.from("deletion_audit")
         .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount")
