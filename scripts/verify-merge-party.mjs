@@ -71,9 +71,19 @@ for (const route of [["editor", editorRoute], ["tablet", tabletRoute]]) {
     // pay-split exists in both; unpay/customer-capture are tablet-shaped — check what exists.
     // Anchored to the TABLES handler ('a === "tables" && c === …') so e.g. the platform
     // board's own "pay" action can never satisfy — or fail — a table check.
-    const i = src.indexOf(`a === "tables" && c === "${a}"`);
+    const key = `a === "tables" && c === "${a}"`;
+    const i = src.indexOf(key);
     if (i < 0) continue;
-    const body = src.slice(i, i + 800);
+    // The window is THIS handler — from here to wherever the NEXT tables handler starts —
+    // not a fixed number of characters. It used to be `i + 800`, and on 2026-08-04 a
+    // permission check added to `tables/:t/restart` pushed its mergeParentTable() call to
+    // +892: the resolver was still right there, correctly commented, and the guard failed
+    // anyway. A guard that cries wolf trains you to ignore it. Bounding by the next handler
+    // also makes it STRICTER than any bigger fixed number would: with a flat 2000 the tablet
+    // route's `pay-split` (whose next handler starts at +983) could have passed on its
+    // NEIGHBOUR's call.
+    const next = src.indexOf(`a === "tables" && c === "`, i + key.length);
+    const body = src.slice(i, next > 0 ? next : undefined);
     check(`${name} route: tables/:t/${a} resolves a merged child to its parent`, /mergeParentTable\(/.test(body));
   }
 }
