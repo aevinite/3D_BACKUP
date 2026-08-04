@@ -63,7 +63,20 @@ await F.waitForSelector(".tile[data-t]", { timeout: 30000 });
 await page.waitForTimeout(1800);                    // settings + floor summary settle
 
 const shot = (n) => (SHOTS ? page.screenshot({ path: `${SHOTS}/${n}.png` }) : Promise.resolve());
-const vis = (sel) => F.evaluate((s) => { const e = document.querySelector(s); return !!e && e.offsetParent !== null; }, sel).catch(() => false);
+// IS IT REALLY ON SCREEN? `offsetParent !== null` is the usual shorthand and it is WRONG for a
+// fixed-position element — the spec says offsetParent is null for those — and this panel's order
+// screen, settings sheet and table picker are all `position: fixed`. So every `vis()` on them
+// answered "not visible" while they were covering the whole panel: the reset helper did nothing,
+// and "the order screen closes again" passed without the screen ever closing. Measure the box and
+// the computed styles instead (2026-08-04).
+const vis = (sel) => F.evaluate((s) => {
+  const e = document.querySelector(s);
+  if (!e) return false;
+  const cs = getComputedStyle(e);
+  if (cs.display === "none" || cs.visibility === "hidden" || Number(cs.opacity) === 0) return false;
+  const r = e.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}, sel).catch(() => false);
 // A picker (Change table / Move a KOT / the KOT menu) REUSES the .detail-pop card and its own
 // hook is the ✕ .picker-back. Telling them apart matters: reading "the discount button isn't
 // there" off a picker is a claim about the wrong screen.
@@ -93,6 +106,38 @@ const freshPanel = async () => {
   await f.waitForSelector(".tile[data-t]", { timeout: 30000 });
   await page.waitForTimeout(1600);
   return f;
+};
+
+// EVERY SECTION STARTS ON THE FLOOR. Each block opens something — a builder, a popup, a
+// picker, the drawer, the settings sheet — and any one left up covers the panel, so the NEXT
+// block's first tap lands on it and waits for a control that will never be clickable. Three
+// separate flakes in this file were that, dressed differently, before this existed.
+const resetToFloor = async () => {
+  // Driven through the panel's OWN exits rather than by hunting for buttons: the order screen
+  // has two states and only one of them has #omExit (the review screen's back button is
+  // #voBack), so a click-based reset silently waited out a 30s timeout per attempt on the
+  // other. A reset is plumbing — it may use the app's exit functions; the ASSERTIONS never do.
+  for (let i = 0; i < 4; i++) {
+    const state = await F.evaluate(() => {
+      const onScreen = (e) => { if (!e) return false; const c = getComputedStyle(e); if (c.display === "none" || c.visibility === "hidden" || Number(c.opacity) === 0) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
+      const seen = (s) => onScreen(document.querySelector(s));
+      if (seen(".set-overlay")) { document.querySelector(".set-overlay .set-close").click(); return "settings"; }
+      if (seen(".qdest-overlay")) { document.querySelector(".qdest-overlay .qdest-x").click(); return "dest"; }
+      if (seen(".tbl-drawer.open")) { document.querySelector(".tbl-drawer .dw-close").click(); return "drawer"; }
+      if (seen(".om.lite")) { try { exitOrderMode(); } catch { const b = document.querySelector("#omExit, #voBack"); if (b) b.click(); } return "order"; }
+      if (seen(".picker-back")) { document.querySelector(".picker-back").click(); return "picker"; }
+      if (seen(".detail-pop")) { document.querySelector(".detail-pop #detailClose").click(); return "popup"; }
+      return "floor";
+    }).catch(() => "unknown");
+    if (state === "floor") return true;
+    await page.waitForTimeout(700);
+  }
+  // LAST RESORT: reload. A screen that won't close is not something a later section should
+  // have to cope with, and a reload is the one move that always lands on a bare floor. Cheap
+  // (~4s) and it cannot fail quietly the way a click on a button that isn't there does.
+  console.log("  ..   a screen wouldn't close — reloading the panel to get back to the floor");
+  F = await freshPanel();
+  return !(await vis(".om.lite")) && !(await vis(".detail-pop")) && !(await vis(".set-overlay"));
 };
 
 // ── 1 · the minimal top bar ───────────────────────────────────────────────────
@@ -137,32 +182,49 @@ for (const [w, h, tag] of [[1194, 834, "tablet 1194px"], [1024, 768, "iPad 1024p
   await page.waitForTimeout(800);
   const m = await F.evaluate(() => {
     const tiles = [...document.querySelectorAll(".tile")];
-    const t = tiles.find((x) => !/t-merged/.test(x.className) && /t-prep|t-new|t-bill|t-done/.test(x.className)) || tiles[0];
+    // Measure a tile that HAS dishes, so the progress bar is one this tile really draws.
+    const busy = tiles.find((x) => !/t-merged/.test(x.className) && /t-prep|t-new|t-bill/.test(x.className));
+    const t = busy || tiles[0];
     const cs = getComputedStyle(t);
     const seen = (sel) => { const e = t.querySelector(sel); return !!e && getComputedStyle(e).display !== "none"; };
+    // THE BAR IS MEASURED, NOT MERELY LOOKED FOR. This used to read
+    // `seen(".tstrip") || !t.querySelector(".tstrip")`, which is true when the bar is there
+    // AND true when it is absent — an assertion that could not fail (caught in review,
+    // 2026-08-04). A drawn bar has real width and real height; that is the claim.
+    const barEl = busy ? t.querySelector(".tstrip") : null;
+    const barBox = barEl ? barEl.getBoundingClientRect() : null;
     const doc = document.documentElement;
+    const nameEl = document.getElementById("restName");
     return {
       outer: Math.round(t.getBoundingClientRect().width),
       content: Math.round(t.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)),
-      num: seen(".tnum"), bar: seen(".tstrip") || !t.querySelector(".tstrip"),
+      num: seen(".tnum"),
+      hadBusy: !!busy,
+      barW: barBox ? Math.round(barBox.width) : -1,
+      barH: barBox ? Math.round(barBox.height) : -1,
       clip: tiles.filter((x) => x.scrollHeight > x.clientHeight + 1).length,
       ovf: doc.scrollWidth > doc.clientWidth + 1,
       firstTop: Math.round(tiles[0].getBoundingClientRect().top),
       onScreen: tiles.filter((x) => x.getBoundingClientRect().bottom <= window.innerHeight).length,
-      rest: (() => { const n = document.getElementById("restName"); return !!n && n.offsetParent !== null && n.textContent.trim() !== ""; })(),
-      qo: (() => { const q = document.getElementById("quickOrderBtn"); return !!q && q.offsetParent !== null; })(),
+      // TRUNCATION, not emptiness. "not empty" passed happily on "little Fren…" — the very
+      // fault this check was written for (caught in review, 2026-08-04).
+      name: nameEl ? { text: nameEl.textContent.trim(), cut: nameEl.scrollWidth > nameEl.clientWidth + 1, w: Math.round(nameEl.clientWidth), need: nameEl.scrollWidth } : null,
+      qo: (() => { const onScreen = (e) => { if (!e) return false; const c = getComputedStyle(e); if (c.display === "none" || c.visibility === "hidden" || Number(c.opacity) === 0) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; }; return onScreen(document.getElementById("quickOrderBtn")); })(),
     };
   });
   expect(m.clip === 0, `${tag}: no tile clips (tile ${m.outer}px, ${m.content}px inside)`);
   expect(m.num, `${tag}: the table number survives`);
-  expect(m.bar, `${tag}: the progress bar survives`);
+  if (m.hadBusy) expect(m.barW > 8 && m.barH >= 2, `${tag}: a busy tile's progress bar is really drawn (${m.barW}×${m.barH}px)`);
+  else ok(`${tag}: no busy tile on the floor to measure a progress bar on`);
   expect(!m.ovf, `${tag}: the page does not scroll sideways`);
   expect(m.qo, `${tag}: ⚡ Quick order is reachable`);
   // The floor must GET the screen — the owner's words were "as big as possible".
   if (w <= 420) {
     expect(m.firstTop <= 200, `${tag}: the first tile starts ${m.firstTop}px down (≤200)`);
     expect(m.onScreen >= 6, `${tag}: ${m.onScreen} tiles visible without scrolling (≥6)`);
-    expect(m.rest, `${tag}: the restaurant's own name is still on the bar`);
+    expect(m.name && !m.name.cut, m.name
+      ? `${tag}: the restaurant's own name fits WHOLE on the bar — "${m.name.text}" (${m.name.w}px for ${m.name.need}px)`
+      : `${tag}: the restaurant name element is missing from the bar`);
   }
   await shot(`floor-${w}`);
 }
@@ -183,26 +245,47 @@ await page.waitForTimeout(700);
   // are 0 in a headless desktop browser — so setting them, awaiting, then measuring reads
   // whatever won the race and this check flip-flopped between 46px and 12px. A style change
   // followed by a layout read in the same task cannot be raced.
-  const measureInsets = (sel) => F.evaluate((s) => {
+  // WHAT ACTUALLY SITS LOW, not a fixed list that lives at the top. The first version named
+  // ☰ / ⚡ / the filter chips — all of which are ~100px from the TOP — and skipped the last
+  // tile because it was below the fold, so its `under` array was empty by construction and
+  // the headline claim could never fail (caught in review, 2026-08-04). Now it scrolls to the
+  // very bottom and judges whatever is genuinely down there: the LAST VISIBLE tile, plus any
+  // control the panel is showing.
+  const measureInsets = (sel, opts = {}) => F.evaluate(({ s, scrollFirst }) => {
     const SAT = 47, SAB = 34, root = document.documentElement;
     const prevT = root.style.getPropertyValue("--safe-t"), prevB = root.style.getPropertyValue("--safe-b");
     root.style.setProperty("--safe-t", SAT + "px");
     root.style.setProperty("--safe-b", SAB + "px");
+    // INSETS FIRST, THEN SCROLL. Applying them grows the page by the reserved band, so a scroll
+    // taken beforehand ends up exactly that far short of the new bottom — which read as "the
+    // last tile is 35px under the home bar" when it was the measurement that was stale.
+    if (scrollFirst) { void root.offsetHeight; window.scrollTo(0, document.body.scrollHeight); }
     const cs = getComputedStyle(document.querySelector(s));               // forces a sync recalc
-    const out = { padT: parseFloat(cs.paddingTop), padB: parseFloat(cs.paddingBottom), under: [] };
-    const vh = window.innerHeight;
-    for (const q of ["#hamburger", "#quickOrderBtn", ".fnav", ".tile:last-of-type", "#sendOrder", ".om-viewpill"]) {
-      const el = document.querySelector(q);
-      if (!el || !el.offsetParent) continue;
+    const out = { padT: parseFloat(cs.paddingTop), padB: parseFloat(cs.paddingBottom), under: [], judged: [] };
+    const vh = window.innerHeight, band = vh - SAB;
+    const judge = (label, el) => {
+      const onScreen = (e) => { if (!e) return false; const c = getComputedStyle(e); if (c.display === "none" || c.visibility === "hidden" || Number(c.opacity) === 0) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; }; if (!onScreen(el)) return;
       const r = el.getBoundingClientRect();
-      if (r.bottom > vh - SAB + 1 && r.top < vh) out.under.push(`${q} (bottom ${Math.round(r.bottom)} of ${vh}; the band starts at ${vh - SAB})`);
+      if (r.bottom <= 0 || r.top >= vh) return;                           // genuinely off screen
+      out.judged.push(`${label}@${Math.round(r.bottom)}`);
+      if (r.bottom > band + 1) out.under.push(`${label} (bottom ${Math.round(r.bottom)} of ${vh}; the band starts at ${band})`);
+    };
+    // the LOWEST tile that is actually on screen after scrolling to the end
+    const onScreen = [...document.querySelectorAll(".tile")].filter((t) => { const r = t.getBoundingClientRect(); return r.top < vh && r.bottom > 0; });
+    if (onScreen.length) judge(`lowest visible tile (T${onScreen[onScreen.length - 1].dataset.t})`, onScreen[onScreen.length - 1]);
+    for (const q of ["#hamburger", "#quickOrderBtn", ".fnav", "#sendOrder", ".om-viewpill", ".detail-pop #closeTable", ".detail-pop #payBill", ".dw-btn.danger"]) {
+      judge(q, document.querySelector(q));
     }
     root.style.setProperty("--safe-t", prevT); root.style.setProperty("--safe-b", prevB);
+    if (scrollFirst) window.scrollTo(0, 0);
     return out;
-  }, sel);
+  }, { s: sel, scrollFirst: !!opts.scrollFirst });
 
-  const floorIn = await measureInsets(".layout");
-  expect(floorIn.under.length === 0, floorIn.under.length ? `controls sit under the home bar / nav bar: ${floorIn.under.join(", ")}` : "nothing a finger needs sits under the iPhone home bar / Samsung nav bar");
+  const floorIn = await measureInsets(".layout", { scrollFirst: true });
+  // The check has to have LOOKED at something low, or "nothing is under the bar" is a claim
+  // about an empty list.
+  expect(floorIn.judged.length >= 2, `the inset check actually measured what's on screen (${floorIn.judged.join(" ") || "nothing"})`);
+  expect(floorIn.under.length === 0, floorIn.under.length ? `controls sit under the home bar / nav bar: ${floorIn.under.join(", ")}` : `nothing a finger needs sits under the iPhone home bar / Samsung nav bar (judged ${floorIn.judged.join(" ")})`);
   expect(floorIn.padB >= 34, `the floor reserves the bottom inset (${Math.round(floorIn.padB)}px ≥ 34)`);
   const barIn = await measureInsets(".topbar");
   expect(barIn.padT >= 47, `the top bar clears the notch (${Math.round(barIn.padT)}px ≥ 47)`);
@@ -216,8 +299,10 @@ await page.waitForTimeout(700);
     expect(om.padT >= 47, `the order screen clears the notch (${Math.round(om.padT)}px ≥ 47)`);
     expect(om.under.length === 0, om.under.length ? `order-screen controls under the band: ${om.under.join(", ")}` : "the order screen's own controls clear the band too");
     await shot("safe-area-order");
-    await F.click("#omExit");
-    await page.waitForTimeout(800);
+    // …and leave the screen as we found it, provably: a builder left open covers the panel and
+    // every later section's first tap lands on it instead of the control it wanted.
+    await resetToFloor();
+    expect(!(await vis(".om.lite")), "the order screen closes again after being measured");
   }
   await page.setViewportSize({ width: 1194, height: 834 });
   await page.waitForTimeout(700);
@@ -225,8 +310,9 @@ await page.waitForTimeout(700);
 
 // ── 5 · BOTH SKINS: no label may sink into its background ─────────────────────
 const flipTheme = async () => {
+  await resetToFloor();
   await F.click("#hamburger");
-  await F.waitForSelector(".tbl-drawer.open", { timeout: 6000 });
+  await F.waitForSelector(".tbl-drawer.open", { timeout: 8000 });
   await F.click("#dwTheme");
   await page.waitForTimeout(700);
   await F.click(".tbl-drawer .dw-close");
@@ -271,6 +357,7 @@ await flipTheme();
 await measureSkin();
 await flipTheme();                                   // leave the skin as we found it
 
+expect(await resetToFloor(), "back on the floor before the merged-tile check");
 // ── 5b · A MERGED TABLE OPENS ITS PARTY, it never starts a new order ──────────
 // A joined table has no session of its own, so its own summary row reads "free". Taking that
 // at face value sent a tap on T7 (merged into T6) into a brand-new order and left the waiter
@@ -299,6 +386,7 @@ await flipTheme();                                   // leave the skin as we fou
   }
 }
 
+expect(await resetToFloor(), "back on the floor before the popup checks");
 // ── 6 · the table popup: KOT operations on TOP, money + close at the bottom ───
 const busyT = await F.evaluate(() => {
   const t = [...document.querySelectorAll(".tile")].find((x) => !/t-free/.test(x.className));
@@ -315,6 +403,33 @@ else {
     return !!(ops && body && ops.getBoundingClientRect().top < body.getBoundingClientRect().top);
   });
   expect(opsAbove, "popup: the KOT / table-operations row sits ABOVE the orders");
+  // THE ACTIONS ARE ON SCREEN WITHOUT SCROLLING, on the busiest table the floor has. A long
+  // order used to push ＋ Take order / 💳 Mark bill paid / ✕ Close table ~1100px below the fold
+  // on a phone, and no check noticed because Playwright scrolls an element into view before it
+  // clicks (caught in review, 2026-08-04 — the third time this panel buried its primary action).
+  // Measured at 360px, where it actually hurts.
+  {
+    await page.setViewportSize({ width: 360, height: 780 });
+    await page.waitForTimeout(900);
+    const reach = await F.evaluate(() => {
+      const card = document.querySelector(".detail-pop");
+      if (!card) return null;
+      const vis = (sel) => {
+        const el = card.querySelector(sel);
+        const onScreen = (e) => { if (!e) return false; const c = getComputedStyle(e); if (c.display === "none" || c.visibility === "hidden" || Number(c.opacity) === 0) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; }; if (!onScreen(el)) return null;
+        const r = el.getBoundingClientRect(), c = card.getBoundingClientRect();
+        return { inCard: r.bottom <= c.bottom + 1 && r.top >= c.top - 1, bottom: Math.round(r.bottom), cardBottom: Math.round(c.bottom) };
+      };
+      const body = card.querySelector(".detail-body");
+      return { take: vis("#takeOrder"), close: vis("#closeTable"), bodyScrolls: body ? body.scrollHeight > body.clientHeight : false, content: body ? body.scrollHeight : 0 };
+    });
+    if (reach && reach.take) expect(reach.take.inCard, `360px: ＋ Take order is reachable without scrolling (its bottom ${reach.take.bottom} vs the card's ${reach.take.cardBottom}; ${reach.content}px of orders above it)`);
+    if (reach && reach.close) expect(reach.close.inCard, `360px: ✕ Close table is reachable without scrolling (its bottom ${reach.close.bottom} vs the card's ${reach.close.cardBottom})`);
+    if (reach) expect(reach.bodyScrolls || reach.content < 600, "360px: it is the ORDERS that scroll inside the card, not the card past its own buttons");
+    await shot("popup-360-reach");
+    await page.setViewportSize({ width: 1194, height: 834 });
+    await page.waitForTimeout(800);
+  }
   const opsTxt = (await F.textContent(".detail-pop .phead-ops").catch(() => "")) || "";
   expect(/KOT|Move|Table type/i.test(opsTxt), `popup: its top row carries the table operations (${opsTxt.replace(/\s+/g, " ").trim()})`);
   await shot("table-popup");
@@ -376,6 +491,7 @@ else {
   expect(await vis("#tiles"), "…with the floor still there");
 }
 
+expect(await resetToFloor(), "back on the floor before the ☰ menu checks");
 // ── 7 · ☰ → ⚙️ Settings → Log out; no parcel on the tablet ────────────────────
 await F.click("#hamburger");
 await F.waitForSelector(".tbl-drawer.open", { timeout: 6000 });
@@ -383,11 +499,46 @@ expect(!(await F.$("#dwParcel")), "☰ menu: no parcel entry (parcels are a mana
 expect(await vis("#dwSettings"), "☰ menu: ⚙️ Settings");
 await F.click("#dwSettings");
 await F.waitForSelector(".set-overlay", { timeout: 6000 });
-expect(await vis('.set-overlay a[href="/api/panel-logout"]'), "Settings holds Log out");
+// LOG OUT IS A REAL BUTTON, IN BOTH SKINS. It shipped as a browser-default hyperlink —
+// 55×18px, underlined, #0000EE, about 1.9:1 against the dark panel — because the .dw-btn look
+// was scoped to .tbl-drawer and this sheet is mounted outside it. The old check only asked
+// `offsetParent !== null`, which an invisible link satisfies (caught in review, 2026-08-04).
+{
+  const lo = await F.evaluate(() => {
+    const el = document.querySelector('.set-overlay a[href="/api/panel-logout"]');
+    if (!el) return null;
+    const lum = (c) => { let m = (c.match(/[\d.]+/g) || [0, 0, 0]).map(Number); if (/^color\(/.test(c)) m = m.map((x) => x * 255); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]; };
+    const contrastNow = () => {
+      const cs = getComputedStyle(el);
+      let bgEl = el, bg = cs.backgroundColor;
+      while (bgEl && (bg === "rgba(0, 0, 0, 0)" || bg === "transparent")) { bgEl = bgEl.parentElement; bg = bgEl ? getComputedStyle(bgEl).backgroundColor : "rgb(255,255,255)"; }
+      return Math.abs(lum(cs.color) - lum(bg));
+    };
+    // BOTH SKINS, in one synchronous pass. The default hyperlink this shipped as was #0000EE:
+    // perfectly readable on the LIGHT panel (Δ194) and about 1.9:1 on the DARK one — so a check
+    // that only measures whichever skin happens to be active would have called it fine.
+    const root = document.documentElement, was = root.getAttribute("data-theme");
+    const per = {};
+    for (const skin of ["light", "dark"]) { root.setAttribute("data-theme", skin); per[skin] = contrastNow(); }
+    if (was) root.setAttribute("data-theme", was); else root.removeAttribute("data-theme");
+    const cs = getComputedStyle(el), r = el.getBoundingClientRect();
+    return { h: Math.round(r.height), w: Math.round(r.width), radius: parseFloat(cs.borderTopLeftRadius) || 0, weight: cs.fontWeight, per };
+  });
+  expect(!!lo, "Settings holds Log out");
+  if (lo) {
+    expect(lo.h >= 40, `Log out is a real touch target (${lo.w}×${lo.h}px, ≥40 tall)`);
+    expect(lo.radius >= 6 && Number(lo.weight) >= 600, `Log out wears the panel's button look, not a browser default (radius ${lo.radius}, weight ${lo.weight})`);
+    const faint = Object.entries(lo.per).filter(([, d]) => d < 40).map(([s, d]) => `${s} Δ${Math.round(d)}`);
+    expect(faint.length === 0, faint.length
+      ? `Log out sinks into the panel — ${faint.join(", ")} (need Δ40 in BOTH skins)`
+      : `Log out is readable in BOTH skins (light Δ${Math.round(lo.per.light)}, dark Δ${Math.round(lo.per.dark)})`);
+  }
+}
 await shot("settings");
 await F.click(".set-overlay .set-close");
 await page.waitForTimeout(600);
 
+expect(await resetToFloor(), "back on the floor before the live order loop");
 // ── 8 · ⚡ QUICK ORDER: build first, pick the table LAST — and that pick sends ──
 // This is the only part that writes, so --read-only stops here. The order it places is put
 // back by CLOSING the table (never deleted — an issued bill may not be erased).
@@ -395,8 +546,40 @@ if (READ_ONLY) {
   ok("read-only run: the live order → serve → pay → close loop was not walked (by design)");
 } else {
   let loopOk = false, why = "";
+  // EVERY ATTEMPT PUTS ITS TABLE BACK, including the ones that give up half way. Before this,
+  // each `soft(...) ; continue` abandoned a table that already had a real order on it (possibly
+  // accepted, served and PAID), so a bad run could leave three orphaned parties on the demo
+  // floor while the file header claimed it cleaned up after itself (caught in review,
+  // 2026-08-04). Closing is the only correct way back — an order gets a bill number on insert,
+  // so deleting it is refused by the issued-bill rule, and rightly.
+  const opened = new Set();
+  const sweepUp = async () => {
+    for (const t of [...opened]) {
+      try {
+        const sid = await page.evaluate(async ([base, tbl]) => {
+          const r = await fetch(`${base}/api/tablet/state?table=${encodeURIComponent(tbl)}`, { headers: { "Content-Type": "application/json" } });
+          if (!r.ok) return null;
+          const j = await r.json();
+          const s = (j.sessions || []).find((x) => String(x.table_number) === String(tbl) && x.status !== "closed");
+          return s ? s.id : null;
+        }, [BASE, t]);
+        if (!sid) { opened.delete(t); continue; }
+        await page.evaluate(async ([base, id]) => {
+          await fetch(`${base}/api/tablet/sessions/${id}/close`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ force: true }) });
+        }, [BASE, sid]);
+        console.log(`  ..   swept up: closed the test party on table ${t}`);
+        opened.delete(t);
+      } catch (e) { console.log(`  ..   could NOT sweep up table ${t}: ${e.message} — close it by hand`); }
+    }
+  };
+  try {
   for (let attempt = 1; attempt <= 3 && !loopOk; attempt++) {
     const soft = (m) => { why = m; console.log(`  ..   attempt ${attempt}: ${m}`); };
+    // START FROM A KNOWN SCREEN. An earlier section opens the order builder to measure it, and
+    // if its ← back didn't land (or a live refresh reopened it) the builder covers the whole
+    // panel — so this section's first tap hit `.om-head` and waited 30s for a button that was
+    // never going to be clickable. Never assume the screen the last block left behind.
+    if (!(await resetToFloor())) { soft("a screen was stuck open before this attempt"); continue; }
     await F.click("#quickOrderBtn");
     await F.waitForSelector(".om.lite", { timeout: 10000 });
     if (attempt === 1) expect((await F.textContent(".om.lite .om-head h2")).includes("Quick order"), "⚡ Quick order opens the dish browser with NO table chosen yet");
@@ -408,13 +591,30 @@ if (READ_ONLY) {
     if (attempt === 1) expect(/CHOOSE TABLE/i.test(sendTxt), `the send button asks for the table (${sendTxt.trim()})`);
     await F.click("#sendOrder");
     await F.waitForSelector(".qdest-overlay .qdest-t", { timeout: 8000 });
-    if (attempt === 1) { ok("the table picker IS the second step (no confirm on top of it)"); await shot("quick-dest"); }
+    if (attempt === 1) {
+      ok("the table picker IS the second step (no confirm on top of it)");
+      // EVERY DESTINATION IT OFFERS MUST BE SENDABLE. It used to list floorTableList(), which
+      // includes tables numbered above the floor plan (they appear so their money stays
+      // reachable) — and the server refuses those as a destination, so a stray row made the
+      // picker offer "Table 9234792" and the send failed (2026-08-04).
+      const offered = await F.evaluate(() => ({ nums: [...document.querySelectorAll("[data-qdest]")].map((b) => Number(b.dataset.qdest)) }));
+      // `state` is a top-level const in a classic script: it is reachable as a bare identifier
+      // but NOT as window.state — reading it through window gave undefined, the fallback said
+      // "12 tables", and the check accused a picker that was right (its own bug, minutes old).
+      const count = await F.evaluate(() => Math.max(1, parseInt(((state.data.settings || {}).table_count), 10) || 12));
+      const offPlan = offered.nums.filter((x) => !Number.isFinite(x) || x < 1 || x > count);
+      expect(offPlan.length === 0, offPlan.length
+        ? `the picker offers ${offPlan.length} table(s) the server will refuse: ${offPlan.join(", ")} (the floor plan is 1..${count})`
+        : `every table the picker offers is on the floor plan (1..${count}, ${offered.nums.length} shown)`);
+      await shot("quick-dest");
+    }
     // pick a FREE table as high up the floor as possible (another session's suite works the low ones)
     const destT = await F.evaluate(() => {
       const free = [...document.querySelectorAll(".qdest-t:not(.busy)")];
       const b = free.length ? free[free.length - 1] : document.querySelector(".qdest-t");
       return b && b.dataset.qdest;
     });
+    opened.add(destT);                    // from here on, this table is OURS to put back
     await F.click(`.qdest-t[data-qdest="${destT}"]`);
     const toast = await F.waitForSelector(".toast", { timeout: 20000 }).then((t) => t.textContent()).catch(() => "");
     if (!/Kitchen ticket|Sent/i.test(toast || "")) { soft(`the order did not report as sent (${(toast || "no toast").trim()})`); continue; }
@@ -457,7 +657,13 @@ if (READ_ONLY) {
     const finClip = await F.evaluate((x) => { const e = document.querySelector(`.tile[data-t="${x}"]`); return e ? { sh: e.scrollHeight, ch: e.clientHeight } : null; }, destT);
     expect(finClip && finClip.sh <= finClip.ch + 1, finClip ? `the finished tile fits its own controls (${finClip.sh}px in ${finClip.ch}px)` : "could not measure the finished tile");
     await tileClose.click();
-    if (!(await F.waitForSelector("#confirmOverlay:not([hidden])", { timeout: 8000 }).catch(() => null))) { bad("closing a table fired with NO confirm — that breaks the two-step rule"); break; }
+    if (!(await F.waitForSelector("#confirmOverlay:not([hidden])", { timeout: 8000 }).catch(() => null))) {
+      bad("closing a table on the TABLET fired with no confirm. Deliberate? The manager's identical ⏻ is one tap "
+        + "(owner, 2026-08-02) and the tablet asks because his newer word named this panel and the mis-tap on a "
+        + "~22px tile control (2026-08-03). If he has since asked for one tap here too, change this check WITH the "
+        + "panel — don't just delete it.");
+      break;
+    }
     ok("closing a table asks a confirm first (its second step)");
     await F.click("#confirmYes");
     let cls = "?";
@@ -468,9 +674,16 @@ if (READ_ONLY) {
     }
     if (!/t-free/.test(cls)) { soft(`table ${destT} did not go free after the close (${cls})`); continue; }
     ok(`table ${destT} is free again — order → serve → pay → close all worked, and the test table is put back`);
+    opened.delete(destT);                 // the app closed it for real; nothing left to sweep
     loopOk = true;
   }
+  } finally {
+    // Runs whether the loop finished, gave up, or threw — no test order is ever left sitting
+    // on a demo table.
+    await sweepUp();
+  }
   if (!loopOk) bad(`the order → serve → pay → close loop never completed in 3 attempts (last: ${why})`);
+  expect(opened.size === 0, opened.size ? `left ${opened.size} test table(s) open: ${[...opened].join(", ")}` : "every table this run touched was put back");
 }
 
 expect(errors.length === 0, errors.length ? `page errors: ${errors.join(" | ")}` : "no page errors anywhere in the walk");

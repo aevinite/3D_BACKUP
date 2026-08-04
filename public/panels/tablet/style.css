@@ -34,9 +34,20 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 .top-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 /* ⚡ Quick order — the one always-there action on the bar (build first, table last). */
 .qo-top { display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; border: 0; border-radius: 11px; padding: 10px 14px; font: inherit; font-weight: 800; font-size: 13.5px; cursor: pointer; white-space: nowrap; -webkit-tap-highlight-color: transparent; }
+.qo-top i { font-style: normal; }
 .qo-top:hover { filter: brightness(1.05); }
 .qo-top:active { transform: scale(.96); }
 .qo-top[hidden] { display: none; }
+/* THE TENANT'S NAME WINS THE BAR (fixed 2026-08-04). This 116px button left the restaurant's
+   own name 69px on a 360px phone — "little Fren…" — and no tenant may lose its branding to a
+   control. On a narrow phone the ⚡ keeps only its bolt (title + aria-label still say "Quick
+   order"), handing ~80px back to the name, which needs ~140px. 430px is where the full label
+   still fits, so the trim starts just under it. */
+@media (max-width: 430px) {
+  .qo-top .qo-word { display: none; }
+  .qo-top { min-width: 44px; justify-content: center; padding: 10px; font-size: 17px; }
+  .brand .rest-name { font-size: 12.5px; padding: 2px 8px; }
+}
 /* Which restaurant this panel is scoped to (multi-tenant). Truncates so it can
    never push the top-bar actions off-screen at narrow (~390px) widths. Hidden
    when empty (name not loaded yet). */
@@ -563,14 +574,23 @@ html[data-theme="light"] .inm .alg-removed{ color:#b45309; }
 .tbl-drawer .dw-prof { font-size: 13px; color: var(--muted); }
 .tbl-drawer .dw-name { font-size: 19px; font-weight: 800; color: var(--text); }
 .tbl-drawer .dw-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
-.tbl-drawer .dw-btn { display: block; width: 100%; box-sizing: border-box; text-align: center; padding: 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; margin-top: auto; }
-.tbl-drawer .dw-btn.danger { border-color: #7f1d1d; color: #fca5a5; }
+/* NOT scoped to .tbl-drawer (fixed 2026-08-04). It used to be, and when the ⚙️ Settings sheet
+   was added it reused the same class from OUTSIDE the drawer — so the sheet's "Log out" got
+   none of this and fell back to a browser default hyperlink: 55×18px, underlined, #0000EE,
+   which over the dark panel is ~1.9:1 contrast. The one way out of the panel was effectively
+   invisible. A shared look must not depend on where it happens to be mounted.
+   `a.dw-btn` needs the text-align/decoration reset that a <button> gets for free. */
+.dw-btn { display: block; width: 100%; box-sizing: border-box; text-align: center; padding: 13px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; text-decoration: none; }
+.tbl-drawer .dw-btn { margin-top: auto; }
+.dw-btn.danger { border-color: #7f1d1d; color: #fca5a5; }
+html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c; }
+.dw-btn:hover { border-color: var(--gold); }
 /* The [hidden] attribute must WIN over this display:block — same rule as
    .confirm-overlay[hidden] above. app.js correctly sets bqBtn.hidden = true when
    banquet isn't entitled, but an author `display:block` overrides the UA's
    [hidden]{display:none}, so the dead "🎪 Banquet billing" button still showed
    (and only errored "not enabled" when tapped). */
-.tbl-drawer .dw-btn[hidden] { display: none; }
+.dw-btn[hidden] { display: none; }
 
 @media (max-width: 760px) {
   .hamburger { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 12px; font-size: 19px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -742,12 +762,13 @@ body.om-mode #tabletClose { display: none; }
 body:has(.om.lite) #tabletClose,
 body:has(.opt-overlay) #tabletClose { display: none; }
 
-/* Table detail on a PHONE only: one natural scroll, actions below the orders list. */
-@media (max-width: 760px) {
-  body.tbl-open #panel { overflow-y: auto; }
-  body.tbl-open #panel .detail-body { flex: none; overflow: visible; }
-  body.tbl-open #panel .dacts { background: transparent; border-top: 0; padding: 12px 0 0; }
-}
+/* (These three rules made the phone's table detail ONE natural scroll — from when a phone got a
+   full-screen detail instead of the popup. The detail has been a popup at every width since
+   2026-07-05, and on 2026-08-04 the middle rule was found actively UNDOING the popup's
+   body-only scroll on exactly the screen that needs it most: it reset .detail-body to
+   flex:none/overflow:visible, so a phone went back to burying ＋ Take order and ✕ Close table
+   under a long order. `body.tbl-open` is still set, so they were live. Deleted, not kept
+   "just in case" — a rule for a layout that no longer exists is a trap.) */
 
 /* ── Take-order redesign (mobile), 2026-07-05 ──────────────────────────────────
    Per-dish ✎ (quantity/allergy popup), the floating "View order" pill, and the
@@ -800,13 +821,22 @@ body:has(.detail-pop) .layout { grid-template-columns: 1fr; }   /* floor fills; 
 #panel:has(.detail-pop) { position: fixed; inset: 0; z-index: 48; display: flex; align-items: center; justify-content: center;
   margin: 0; border: 0; border-radius: 0; min-height: 0; max-height: none; overflow: hidden; padding: 16px;
   background: rgba(4,8,18,.5); -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px); }
-.detail-pop { position: relative; z-index: 1; width: min(560px, 94vw); max-height: 88dvh; overflow-y: auto;
-  -webkit-overflow-scrolling: touch; background: var(--panel); color: var(--text); border: 1px solid var(--line);
-  border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.5); padding: 12px 16px calc(30px + var(--sab));
+/* THE ORDERS SCROLL, THE ACTIONS DO NOT (fixed 2026-08-04). The card used to scroll as ONE
+   block, so on a 360px phone a busy table's ~1900px of dish rows pushed ＋ Take order, 💳 Mark
+   bill paid and ✕ Close table about 1100px below the fold — and the automated suite never
+   noticed, because Playwright scrolls an element into view before clicking it. (Third time
+   this panel has buried its primary action: 2026-07-05, 2026-08-03, now.)
+   The card is now a fixed-height flex column whose BODY is the only scroll region — exactly
+   what the manager's floating card does — so the header, the KOT row, the actions and the bill
+   bar are always on screen however long the order is. */
+.detail-pop { position: relative; z-index: 1; width: min(560px, 94vw); height: auto; max-height: 88dvh; overflow: hidden;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line);
+  border-radius: 16px; box-shadow: 0 24px 64px rgba(0,0,0,.5); padding: 12px 16px calc(14px + var(--sab));
   display: flex; flex-direction: column; }
 .detail-pop .backtop { display: none; }                          /* "↑ Tables" makes no sense in a popup */
-.detail-pop .detail-body { flex: none; overflow: visible; padding: 12px 0; }
-.detail-pop .dacts { background: transparent; border-top: 1px solid var(--line); padding: 12px 0 0; margin-top: 8px; }
+.detail-pop .detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain; padding: 12px 0; }
+.detail-pop .dacts, .detail-pop .foot { flex: 0 0 auto; }
 .detail-pop .phead { padding: 0 58px 10px 0; }   /* right room so the header clears the pinned ✕ */
 /* ✕ STAYS pinned to the popup's top-right while you scroll the popup (owner 2026-07-05):
    sticky in the scrolling card, right-aligned, above the content. */

@@ -6,7 +6,7 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=6bf75337">
+  <link rel="stylesheet" href="style.css?v=1fd7e8eb">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -22,7 +22,9 @@
     <!-- The RESTAURANT's name is the part that must survive a narrow screen (no tenant may
          wear another's branding), so the generic word is what drops on a phone — not the name. -->
     <div class="brand"><span class="brand-word">🧑‍🍳 Tables</span> <span id="restName" class="rest-name"></span></div>
-    <div class="top-actions"><button id="quickOrderBtn" class="qo-top" type="button" hidden style="display:none">⚡ Quick order</button><button id="reportIssueBtn" class="theme-toggle" type="button" title="Report an issue" aria-label="Report an issue">🚩</button><button id="themeToggle" class="theme-toggle" type="button"></button></div>
+    <!-- The words drop on a narrow phone (CSS), leaving the ⚡ — the restaurant's own name needs
+         that room more than the label does, and the button keeps its title/aria-label. -->
+    <div class="top-actions"><button id="quickOrderBtn" class="qo-top" type="button" title="Quick order — build it first, choose the table last" aria-label="Quick order" hidden style="display:none"><i class="qo-bolt">⚡</i><i class="qo-word">Quick order</i></button><button id="reportIssueBtn" class="theme-toggle" type="button" title="Report an issue" aria-label="Report an issue">🚩</button><button id="themeToggle" class="theme-toggle" type="button"></button></div>
   </header>
 
   <main class="layout">
