@@ -1,4 +1,4 @@
--- 281_tax_trigger_functions_are_not_callable.sql
+-- 287_tax_trigger_functions_are_not_callable.sql
 --
 -- Migration 270 added two TRIGGER functions and, against this project's own standing rule
 -- (mig 038: "a new Postgres function is PUBLIC-executable by default"), never revoked them.
