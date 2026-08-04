@@ -52,6 +52,23 @@ check("the day-sheet cache key carries the date",
   /range === "day" \? `day:\$\{sp\.get\("date"\)\}`/.test(reportsRoute),
   "two different days would share one snapshot row");
 
+console.log("\n── 1b. BETWEEN MIDNIGHT AND 5AM, 'TODAY' IS STILL LAST NIGHT'S SHIFT ──");
+// The T5 re-run at 00:29 IST: the day sheet defaulted to the NEW calendar date, whose business
+// day has not started, so it showed ₹0 "Today" while the dashboard tile beside it read ₹46,935
+// for the shift still in progress. The server was right; the picker's default was a calendar date.
+check("the day picker's 'Today' is the BUSINESS date",
+  /const istToday = \(\) => new Date\(Date\.now\(\) \+ 5\.5 \* 3600_000 - BIZ_H \* 3600_000\)/.test(reportsPage),
+  "a calendar date makes the sheet read 0 between midnight and 5am");
+check("'Yesterday' steps back from the business date too",
+  /const yesterdayIso = \(\) => new Date\(Date\.now\(\) \+ 5\.5 \* 3600_000 - BIZ_H \* 3600_000 - 86_400_000\)/.test(reportsPage),
+  "otherwise Yesterday lands on the shift that is still open");
+check("a CUSTOM range still has the CALENDAR date as its ceiling",
+  /const istCalToday = \(\)/.test(reportsPage) && (reportsPage.match(/max=\{istCalToday\(\)\}/g) || []).length === 2,
+  "a GST filing period is calendar-based; the custom pickers must still reach today's date");
+check("the two DAY pickers keep the business ceiling",
+  (reportsPage.match(/max=\{istToday\(\)\}/g) || []).length === 2,
+  "you cannot file a day sheet for a shift that has not started");
+
 console.log("\n── 2. NEVER PRESENT A SAVED FIGURE AS A LIVE ONE ──");
 // The page rendered a snapshot of ₹12,285 while the live figure was ₹38,640, with no age and
 // no way to ask for the truth. The dashboard has done this correctly since mig 196.

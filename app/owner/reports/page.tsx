@@ -60,18 +60,38 @@ const rangeLabel = (r: Range) => RANGES.find((x) => x.k === r)?.label ?? r;
 // said ₹38,640 / 111 orders and every other screen said ₹30,324 / 90 for the same "today"
 // (owner-panel sweep). `range=day` is the business day, so they agree now.
 const DAY_KINDS = new Set<DataKind>(["daysummary"]);
-const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
-const yesterdayIso = () => new Date(Date.now() + 5.5 * 3600_000 - 86_400_000).toISOString().slice(0, 10);
+// "Today" on a restaurant's day sheet is the BUSINESS day, which starts at 05:00 IST — not the
+// calendar date. Between midnight and 5am the calendar has already rolled over while the shift
+// has not: at 00:29 IST the day sheet defaulted to the NEW calendar date, whose business day has
+// not begun, and showed ₹0 "Today" while the dashboard tile beside it read ₹46,935 for the
+// business day still in progress (the T5 re-run caught this at 00:29 IST — the same disagreement
+// the range=day fix removed, reappearing at the other end). Stepping back the 5-hour offset
+// before taking the IST date makes "Today" mean the shift you are actually working.
+const BIZ_H = 5;
+const istToday = () => new Date(Date.now() + 5.5 * 3600_000 - BIZ_H * 3600_000).toISOString().slice(0, 10);
+/** The plain IST CALENDAR date — the ceiling for a CUSTOM range, which is calendar-based
+ *  (a GST filing period is). Between midnight and 5am this is one day ahead of the business
+ *  date, and a custom range must still be allowed to include it. */
+const istCalToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+const yesterdayIso = () => new Date(Date.now() + 5.5 * 3600_000 - BIZ_H * 3600_000 - 86_400_000).toISOString().slice(0, 10);
 
-// The IST calendar dates a named range covers — used to PREFILL the print ask-dialog's
-// from/to. Mirrors the server's windowFor() at day granularity (to = today for "…to now").
+// The IST dates a named range covers — used to PREFILL the print ask-dialog's from/to.
+// Mirrors the server's windowFor() at day granularity (to = today for "…to now").
+//
+// TWO CLOCKS, deliberately. `today`/`yesterday` are BUSINESS days on the server (05:00 IST), so
+// they prefill from the business date. Every other range is aligned to IST CALENDAR midnights on
+// the server (7d/30d step whole calendar days; month/fy are filing periods), so those prefill
+// from the calendar date — mixing the two would print a 6-day span for "7 days" between midnight
+// and 5am.
 function rangeDates(r: Range, cFrom: string, cTo: string): { from: string; to: string } {
-  const today = istToday();
+  const bizToday = istToday();                                        // 05:00-IST business day
+  const calToday = new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
+  const today = calToday;
   const ist = new Date(Date.now() + 5.5 * 3600_000);
   const iso = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
   const y = ist.getUTCFullYear(), m = ist.getUTCMonth();
   switch (r) {
-    case "today": return { from: today, to: today };
+    case "today": return { from: bizToday, to: bizToday };
     case "yesterday": { const yd = yesterdayIso(); return { from: yd, to: yd }; }
     case "7d": return { from: new Date(Date.now() + 5.5 * 3600_000 - 6 * 86_400_000).toISOString().slice(0, 10), to: today };
     case "30d": return { from: new Date(Date.now() + 5.5 * 3600_000 - 29 * 86_400_000).toISOString().slice(0, 10), to: today };
@@ -688,7 +708,7 @@ export default function OwnerReports() {
           <div className="rs-custom">
             <input type="date" className="rs-date" value={cFrom} max={cTo} onChange={(e) => setCFrom(e.target.value)} aria-label="From date" />
             <i className="fas fa-arrow-right" aria-hidden />
-            <input type="date" className="rs-date" value={cTo} min={cFrom} max={istToday()} onChange={(e) => setCTo(e.target.value)} aria-label="To date" />
+            <input type="date" className="rs-date" value={cTo} min={cFrom} max={istCalToday()} onChange={(e) => setCTo(e.target.value)} aria-label="To date" />
           </div>
         )}
         {/* How old are the figures on screen, and how to ask for live ones. Sits next to the
@@ -766,7 +786,7 @@ export default function OwnerReports() {
                   <div className="rs-custom" style={{ marginBottom: 14 }}>
                     <input type="date" className="rs-date" value={pdFrom} max={pdTo} onChange={(e) => setPdFrom(e.target.value)} aria-label="Print from date" />
                     <i className="fas fa-arrow-right" aria-hidden />
-                    <input type="date" className="rs-date" value={pdTo} min={pdFrom} max={istToday()} onChange={(e) => setPdTo(e.target.value)} aria-label="Print to date" />
+                    <input type="date" className="rs-date" value={pdTo} min={pdFrom} max={istCalToday()} onChange={(e) => setPdTo(e.target.value)} aria-label="Print to date" />
                   </div>
                 </>
               )}
