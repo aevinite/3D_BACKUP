@@ -32,7 +32,7 @@ import { openTableSession } from "@/lib/openSession";
 import { softDeleteOrders } from "@/lib/softDelete";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { settleBillInParts } from "@/lib/paySplit";
+import { settleBillInParts, reverseSplitLegs } from "@/lib/paySplit";
 import { clampPerRow } from "@/lib/floorLayout";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
@@ -905,7 +905,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // part GST is charged on and the untaxed MRP part, and a Bills record fetched without
       // them falls back to "all of subtotal was taxable" — which would print a DIFFERENT total
       // on a record card than the live floor and the paper show for the same bill.
-      const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,taxable_base,nontax_amount,mrp_amount,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
+      const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
       let oq = sb.from("orders").select(billsMode ? BILLS_COLS : "*").eq("restaurant_id", rid);
       // A DELETED BILL LEAVES THIS PANEL ENTIRELY (owner, 2026-08-04: "it will show only to
       // admin — it will delete from manager and stuff like that").
@@ -1145,7 +1145,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // stays complete even if PostgREST's db-max-rows is configured below 1000 (a fixed +1000
       // step would break early and undercount there). Hard cap the loop as a safety belt.
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,discount,status,payment_status,tip")
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,tip")
           .eq("restaurant_id", rid).gte("created_at", since)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
         orders.push(...page);
@@ -1197,11 +1197,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const sub = r2(base + nontax);
         // Capped exactly the way every discount door caps it (discountBaseOf / mig 272): on
         // the taxable base when tax applies, else on everything but the locked MRP.
-        const cap = g.reduce((a, o) => a + discountBaseOf(o, rate), 0);
+        // THE RATE THIS BILL WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 284), not the rate
+        // configured right now. Re-deriving it meant an admin correcting the tax at 6pm made the
+        // 11pm day-close disagree with every bill already handed to a guest, and it re-taxed a
+        // BANQUET (its own 18%, mig 239) at the dine-in rate — reporting ₹5,000 of tax on a
+        // banquet that charged ₹18,000. `rate` stays the fallback for rows from before the column.
+        const stamped = g.find((o) => Number(o.tax_rate) > 0);
+        const gRate = stamped ? Number(stamped.tax_rate) : rate;
+        const cap = g.reduce((a, o) => a + discountBaseOf(o, gRate), 0);
         const d = Math.min(g.reduce((a, o) => a + (Number(o.discount) || 0), 0), cap);
         // One formula for both cases — subtotal − discount + tax — so a zero-rate (composition)
         // day, where the discount can land outside the taxable base, still adds up.
-        const tx = Math.max(0, base - Math.min(d, base)), t = r2(tx * rate), tot = r2(sub - d + t);
+        const tx = Math.max(0, base - Math.min(d, base)), t = r2(tx * gRate), tot = r2(sub - d + t);
         gross += sub; disc += d; taxable += tx; tax += t; net += tot; mrp += nontax;
         // A bill counts as collected only when EVERY order on it is paid (a table settles in
         // one go — Mark paid pays the whole table — so this matches real behaviour).
@@ -1249,7 +1256,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Complete read (page past PostgREST's ~1000-row cap) so a busy month isn't undercounted.
       const orders: any[] = [];
       for (let from = 0, guard = 0; guard < 500; guard++) {
-        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,discount,status,payment_status,created_at")
+        const page = (must(await sb.from("orders").select("id,session_id,subtotal,taxable_base,nontax_amount,mrp_amount,tax_rate,discount,status,payment_status,created_at")
           .eq("restaurant_id", rid).eq("payment_status", "paid").neq("status", "cancelled")
           .gte("created_at", startIso).lt("created_at", endIso)
           .order("created_at", { ascending: true }).range(from, from + 999)) as any[] | null) || [];
@@ -2386,10 +2393,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // platform/:id/pay — collect a "pay on pickup" parcel (or any unpaid takeaway) at handover.
     // Scoped ownership check first (the set is service-role, so this eq() pair is the fence).
     if (a === "platform" && c === "pay") {
-      const owns = must(await sb.from("aggregator_orders").select("id,total,source").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { total?: number; source?: string } | null;
+      const owns = must(await sb.from("aggregator_orders").select("id,total,source,paid").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { total?: number; source?: string; paid?: boolean } | null;
       if (!owns) return err("That order isn't for this restaurant.", 404);
       if (!(await platformOrParcelCan(g, rid, owns.source))) return permDenied("collect this order");
-      const method = String((body && body.method) || "cash").slice(0, 20);
+      // ALREADY COLLECTED → say so instead of re-stamping it. Paying twice used to move paid_at
+      // and overwrite the method, quietly rewriting how the money came in.
+      if (owns.paid) return err("This one is already marked collected.", 409);
+      // VALIDATED against the same list every table settle uses (2026-08-04). This accepted any
+      // string up to 20 characters, so a typo or a stale client could write a payment method that
+      // appears in no breakdown — while a table settle has always been checked.
+      const rawMethod = String((body && body.method) || "Cash").trim();
+      const method = (PAYMENT_METHODS as readonly string[]).find((m) => m.toLowerCase() === rawMethod.toLowerCase());
+      if (!method) return err("Pick how it was paid.", 400);
       const up = await sb.from("aggregator_orders").update({ paid: true, paid_at: new Date().toISOString(), payment_method: method }).eq("id", b).eq("restaurant_id", rid);
       if (up.error) throw new Error(up.error.message);
       await log("manager", "parcel_collect", { restaurant_id: rid, detail: `₹${owns.total ?? 0} · ${method}`, device_id: dev });
@@ -2547,14 +2562,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const { ids, all } = body || {};
       // Reason the manager typed (owner 2026-07-23 — deletes must carry a why for the bill audit).
       const delReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
-      let deletable: string[]; let kept: number;
+      // Small enough that the audit writes below always complete inside one request.
+      const CLEAR_ALL_BATCH = 300;
+      let deletable: string[]; let kept: number; let moreToClear = false;
       if (all) {
         // Scoped read: fetch ONLY the deletable rows (unpaid OR cancelled) that aren't
         // ALREADY soft-deleted, so a "clear all" never re-picks tombstoned rows and never
         // scans the whole orders table; cap at 5000 as a safety bound. The count of KEPT
         // paid bills comes from a rows-free head count (no row egress).
-        const del = must(await sb.from("orders").select("id").eq("restaurant_id", rid).is("deleted_at", null).or("payment_status.neq.paid,status.eq.cancelled").limit(5000)) as { id: string }[];
-        deletable = del.map((o) => o.id);
+        // ONE BATCH THAT ALWAYS FINISHES (2026-08-04). The cap was 5000, and every one of those
+        // needed its own Audit row — a few thousand sequential RPCs inside one request, which on a
+        // busy restaurant simply died part-way: some orders tombstoned, some bills left reading
+        // "Running", and a Removals record that was incomplete for the one kind of removal that
+        // most needs to be complete. A bounded batch is finishable and repeatable; the response
+        // says how many are left so the panel can offer another tap.
+        const del = must(await sb.from("orders").select("id").eq("restaurant_id", rid).is("deleted_at", null).or("payment_status.neq.paid,status.eq.cancelled").limit(CLEAR_ALL_BATCH + 1)) as { id: string }[];
+        deletable = del.slice(0, CLEAR_ALL_BATCH).map((o) => o.id);
+        moreToClear = del.length > CLEAR_ALL_BATCH;
         const keptQ = await sb.from("orders").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).is("deleted_at", null).eq("payment_status", "paid").neq("status", "cancelled");
         kept = keptQ.count || 0;
       } else if (Array.isArray(ids) && ids.length) {
@@ -2573,17 +2597,25 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const res = deletable.length ? await softDeleteOrders(rid, deletable, { actor: actorName, actorId: g.user?.id ?? null, reason: delReason }) : { deleted: 0 };
       await log("editor", "orders_delete", { restaurant_id: rid, detail: (all ? `cleared all freed records (${res.deleted})` : `deleted ${res.deleted} bill(s)`) + (delReason ? ` — ${delReason}` : ""), device_id: dev });
       // One Audit row per bill, written server-side (was the browser's job — see removalAudit.ts).
-      for (const oid of deletable) {
-        const w = worthOf.get(oid);
-        await recordRemoval({
-          rid, kind: "order_deleted",
-          reason: { code: typeof body?.reason_code === "string" ? body.reason_code : null, note: delReason || null },
-          user: g.user, deviceId: dev, orderId: oid, sessionId: w?.session_id ?? null,
-          tableNumber: w?.table_number ?? null, amount: w?.total ?? null,
-          meta: all ? { cleared_all: true, bills_in_batch: deletable.length } : { bills_in_batch: deletable.length },
-        });
+      // In bounded PARALLEL, not one after another: strictly sequential meant a clear-all of a few
+      // hundred bills spent most of the request waiting on round-trips. recordRemoval never throws,
+      // so a batch cannot fail here — it reports itself as an error-level activity row instead.
+      const AUDIT_CONCURRENCY = 8;
+      for (let i = 0; i < deletable.length; i += AUDIT_CONCURRENCY) {
+        await Promise.all(deletable.slice(i, i + AUDIT_CONCURRENCY).map((oid) => {
+          const w = worthOf.get(oid);
+          return recordRemoval({
+            rid, kind: "order_deleted",
+            reason: { code: typeof body?.reason_code === "string" ? body.reason_code : null, note: delReason || null },
+            user: g.user, deviceId: dev, orderId: oid, sessionId: w?.session_id ?? null,
+            tableNumber: w?.table_number ?? null, amount: w?.total ?? null,
+            meta: all ? { cleared_all: true, bills_in_batch: deletable.length } : { bills_in_batch: deletable.length },
+          });
+        }));
       }
-      return ok({ ok: true, deleted: res.deleted, kept });
+      // `moreToClear` lets the panel say "300 cleared, more to go" and offer another tap, instead of
+      // implying it got everything.
+      return ok({ ok: true, deleted: res.deleted, kept, moreToClear });
     }
 
     // orders/:id/discount | accept | serve-all | item
@@ -4131,6 +4163,25 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
         if (tooOld(cur.paid_at)) return err("This bill was marked paid more than 30 minutes ago and can no longer be reverted.", 409);
         const reason = String((body && body.revert_reason) || "").trim();
         if (!reason) return err("Reverting a PAID bill needs a reason (refund/correction).", 409);
+        // A SPLIT settle's payment LEGS have to be reversed here too (mig 285). This path never
+        // touched session_payments at all, so after a manager undid a split the trail went on
+        // saying "₹200 UPI + ₹200 cash collected" against a bill now marked unpaid — while the
+        // waiter panel's twin hard-DELETED them. One shared helper, one behaviour, nothing erased.
+        if (cur.session_id) {
+          try {
+            const legs = await reverseSplitLegs(sb, {
+              rid, sessionId: cur.session_id, since: new Date(Date.now() - RESTORE_WINDOW_MS).toISOString(),
+              actor: actorName, reason,
+            });
+            if (legs.reversed) await log("editor", "payment_legs_reversed", {
+              restaurant_id: rid, order_id: id,
+              detail: `${legs.reversed} leg(s) · ₹${legs.amount} · ${reason}`, device_id: deviceIdFrom(req),
+            });
+          } catch (e) {
+            // The person must know the trail could not be corrected — never silent.
+            return err(e instanceof Error ? e.message : "Couldn't reverse the split payment record.", 500);
+          }
+        }
         await log("editor", "payment_revert", { restaurant_id: rid, order_id: id, detail: reason, device_id: deviceIdFrom(req) });
         // Un-booking collected money belongs in the Audit, not only in the activity log — it is
         // the same question ("who took money off this bill, and why?"). The reason is already

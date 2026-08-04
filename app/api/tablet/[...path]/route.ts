@@ -28,7 +28,7 @@ import { worthLogging, pgError } from "@/lib/dbRefusal";
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
 import { PAYMENT_METHODS } from "@/lib/payments";
-import { settleBillInParts } from "@/lib/paySplit";
+import { settleBillInParts, reverseSplitLegs, badSplitShape } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
 import { effectiveTaxRate, TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
@@ -1561,33 +1561,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Ladder-gated on top of tablet_mark_paid; Σ legs is re-checked server-side.
       const splits = Array.isArray(body?.splits) ? body.splits : null;
       if (splits) {
+        // ONE MONEY PATH (2026-08-04). This branch used to carry a full SECOND implementation of
+        // the split arithmetic — its own validation, its own order read, its own aggregate
+        // rounding, its own ±0.02 gate, its own session_payments insert — sitting a couple of
+        // hundred lines from the dedicated tables/:t/pay-split handler that already called the
+        // shared lib/paySplit.ts. Whose own header says why: "a money path that exists twice is a
+        // money path that drifts." It had already drifted — neither copy accounted for the MRP /
+        // tax-inclusive columns (migs 270/272), and only the shared one has now been taught to.
+        //
+        // The stricter permission is KEPT: the extra tablet_table_ops gate below is what this
+        // route always required on top of tablet_mark_paid (already checked above), so delegating
+        // does not loosen anything.
         if (actor && !(await tableOpsTabletAllowed(rid))) return err("Table & KOT operations aren't enabled for the tablet here.", 403); // actor null = admin (X-ray)
         const gs = recordPin(await tabletPerm("tablet_table_ops", req, body, rid, actor)); if (!gs.allow) return gs.resp;
-        if (splits.length < 2 || splits.length > 12) return err("Give at least two split shares (max 12).");
-        for (const s of splits) {
-          if (!(Number(s?.amount) > 0)) return err("Every split share needs an amount above zero.");
-          if (!PAYMENT_METHODS.includes(s?.method)) return err("invalid payment method in a split share");
-        }
-        let dq = sb.from("orders").select("id,subtotal,total,discount,session_id")
-          .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
-        dq = openSess ? dq.eq("session_id", openSess.id) : dq.eq("table_number", t).eq("archived", false);
-        const drows = (must(await dq.limit(200)) as { id: string; subtotal: number; total: number; discount: number; session_id: string | null }[]) || [];
-        const sidSp = openSess?.id || drows.find((o) => o.session_id)?.session_id;
-        if (!drows.length || !sidSp) return err("This table has no live bill to split.", 409);
-        const setSp = (await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle()).data || {};
-        const rateSp = effectiveTaxRate(setSp);
-        // Aggregate rounding — match billMath / the printed bill (see editor route note).
-        const taxableSp = Math.max(0, drows.reduce((s, o) => s + (Number(o.subtotal) || 0), 0) - drows.reduce((s, o) => s + (Number(o.discount) || 0), 0));
-        const dueSp = Math.round((taxableSp + Math.round(taxableSp * rateSp * 100) / 100) * 100) / 100;
-        const sumSp = splits.reduce((s: number, x: { amount: number }) => s + Number(x.amount), 0);
-        if (Math.abs(sumSp - dueSp) > 0.02) return err(`The shares add up to ₹${sumSp.toFixed(2)} but the bill due is ₹${dueSp.toFixed(2)} — they must match.`, 409);
-        const insSp = await sb.from("session_payments").insert(splits.map((s: { amount: number; method: string; note?: string }) => ({
-          session_id: sidSp, restaurant_id: rid, amount: Math.round(Number(s.amount) * 100) / 100,
-          method: String(s.method), note: String(s.note || "").slice(0, 200) || null,
-        })));
-        if (insSp.error) return err(insSp.error.message, 500);
-        payUpdate.payment_method = "Split";
-        payUpdate.payment_note = (`${splits.length}-way split: ` + splits.map((s: { amount: number; method: string }) => `₹${Number(s.amount).toFixed(0)} ${s.method}`).join(" + ")).slice(0, 200);
+        const shape = badSplitShape(splits);
+        if (shape) return err(shape, 400);
+        const rSp = await settleBillInParts(sb, { rid, table: t, splits });
+        if (!rSp.ok) return err(rSp.message, rSp.status);
+        await log("bill_split", { table_number: t, detail: rSp.note.slice(0, 120), device_id: dev });
+        invalidateFloor(rid);
+        return ok({ ok: true, count: rSp.count, due: rSp.due });
       } else if (body && body.payment_method !== undefined) {
         if (!PAYMENT_METHODS.includes(body.payment_method)) return err("invalid payment_method");
         payUpdate.payment_method = body.payment_method;
@@ -1789,10 +1782,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const otherIds = paid.filter((o) => o.payment_method !== ON_THE_HOUSE_METHOD).map((o) => o.id);
       if (otherIds.length) must(await sb.from("orders").update(base).in("id", otherIds).eq("restaurant_id", rid).select("id"));
       if (onHouseIds.length) must(await sb.from("orders").update({ ...base, discount: 0, discount_note: null }).in("id", onHouseIds).eq("restaurant_id", rid).select("id"));
-      // A split settle recorded payment LEGS in session_payments — drop the ones from the
-      // settle we just undid so the money trail doesn't double-count. A plain pay has none;
-      // older legs are outside the grace window and left alone.
-      await sb.from("session_payments").delete().eq("session_id", openSess.id).eq("restaurant_id", rid).gte("created_at", cutoff);
+      // A split settle recorded payment LEGS in session_payments. They are REVERSED, not deleted
+      // (mig 285): this used to be a hard DELETE, which erased the only record of what had been
+      // collected and in what parts — while the manager panel's twin left the legs standing and
+      // went on claiming the money was in. One shared helper now, so both read the same.
+      const legs = await reverseSplitLegs(sb, {
+        rid, sessionId: openSess.id, since: cutoff,
+        actor: actor?.name || actor?.username || null,
+        reason: String((body && body.reason) || "undo settle (within the 30-minute window)").slice(0, 200),
+      });
       // The quick undo bar sends no reason; the explicit "Mark unpaid" button sends one
       // (a refund/correction) — record it for the money-accountability trail either way.
       const reason = String((body && body.reason) || "").trim().slice(0, 120);

@@ -69,15 +69,24 @@ export async function softDeleteOrders(
 
   // Tombstone any session whose orders are now ALL deleted (a whole-bill delete).
   const sessionIds = [...new Set((live || []).map((o) => o.session_id).filter(Boolean))] as string[];
-  for (const sid of sessionIds) {
-    const remaining = await sb.from("orders").select("id", { count: "exact", head: true })
-      .eq("session_id", sid).is("deleted_at", null);
-    if ((remaining.count || 0) === 0) {
-      const sUpd = await sb.from("sessions").update(sessionStamp).eq("id", sid).eq("restaurant_id", rid).is("deleted_at", null);
+  // TWO QUERIES, NOT TWO PER SESSION (2026-08-04). This was a count query AND an update for every
+  // session touched — so "clear all freed records" on a busy restaurant fired hundreds of
+  // sequential round-trips inside one request and could die part-way, leaving orders deleted while
+  // their bills still read as running. One read finds the sessions that still have live orders;
+  // everything else in the batch is tombstoned in a single update.
+  if (sessionIds.length) {
+    const stillLive = (await sb.from("orders").select("session_id")
+      .in("session_id", sessionIds).is("deleted_at", null).eq("restaurant_id", rid)).data as
+      { session_id: string | null }[] | null;
+    const busy = new Set((stillLive || []).map((o) => o.session_id).filter(Boolean) as string[]);
+    const toTombstone = sessionIds.filter((sid) => !busy.has(sid));
+    if (toTombstone.length) {
+      const sUpd = await sb.from("sessions").update(sessionStamp)
+        .in("id", toTombstone).eq("restaurant_id", rid).is("deleted_at", null);
       // NOT swallowed. This is the write that silently failed for months: the ledger's "you can
       // restore them" promise and the 90-day retention both hang off sessions.deleted_at, and an
       // unchecked error meant the column stayed null while the screen looked right.
-      if (sUpd.error) throw new Error(`bill tombstone failed for session ${sid}: ${sUpd.error.message}`);
+      if (sUpd.error) throw new Error(`bill tombstone failed: ${sUpd.error.message}`);
     }
   }
   return { deleted: targetIds.length };
