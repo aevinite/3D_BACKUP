@@ -19,6 +19,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
+import { expectClash, clashJson } from "@/lib/clash";
 import { signRows, signOne } from "@/lib/mediaLinks";
 import { logAction } from "@/lib/oplog";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
@@ -325,6 +326,20 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
   const path = (await ctx.params).path || [];
   const actor = actorOf(g);
   const actorId = g.user?.id || null;
+
+  // ── NO SILENT OVERWRITES (owner, 2026-07-30) ────────────────────────────────
+  // This route had no clash gate at all, which made the whole module an exception to the
+  // rule — and stock-taking is the single most likely place in the product for two people to
+  // change the same thing at the same time. A count is normally done by two people at once
+  // (one in the walk-in, one in the dry store) and `POST /counts/:id/line` upserts on
+  // (count_id, item_id): whoever saved second silently won, then `submit` posted a
+  // count_adjust movement against that surviving figure. The stock was wrong and neither
+  // person was told. Same one-line gate as the three staff panels; a call site opts in by
+  // sending what it was editing FROM (see public/panels/editor/inventory.js).
+  {
+    const overwrite = await expectClash(req, rid);
+    if (overwrite) return clashJson(overwrite);
+  }
 
   try {
     // ── expenses: the broken-lamp flow ─────────────────────────────────────────

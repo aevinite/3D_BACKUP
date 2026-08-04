@@ -52,6 +52,20 @@ export default function OfflineShell() {
         const onVisible = () => { if (document.visibilityState === "visible") reg.update().catch(() => {}); };
         document.addEventListener("visibilitychange", onVisible);
         offVisible = () => document.removeEventListener("visibilitychange", onVisible);
+
+        // ASK THE WORKER TO SAVE THIS PAGE. The worker can only store a page whose navigation it
+        // HANDLED, and the first navigation to any URL happens before it controls this client — so
+        // the page a person is looking at right now was not saved, and going offline and reloading
+        // showed "this screen hasn't been opened on this device yet". Verified on the deployed
+        // site: the shell only appeared from the SECOND visit. One request, skipped entirely when
+        // the page is already stored (the worker checks), and only once we are controlled.
+        const warm = () => {
+          navigator.serviceWorker.controller?.postMessage({ type: "LFH_WARM_SHELL", url: location.href });
+        };
+        if (navigator.serviceWorker.controller) warm();
+        // A brand-new registration claims the client a moment later, so wait for that instead of
+        // giving up — this is exactly the first-ever visit the fix is for.
+        else navigator.serviceWorker.addEventListener("controllerchange", warm, { once: true });
       } catch {
         /* registration failing must never break the page — we simply stay online-only */
       }

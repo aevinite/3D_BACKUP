@@ -31,7 +31,7 @@
  */
 // BUMP THIS whenever /offline.html changes. The page is precached at install, so devices
 // keep serving the OLD copy from the old cache until new cache names force a re-precache.
-const VERSION = "v7"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out.
+const VERSION = "v8"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out. v8: the page you're ON is saved on the FIRST visit, and the offline page's re-checks are jittered.
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -193,6 +193,36 @@ self.addEventListener("message", (e) => {
     self.skipWaiting(); // a fresh deploy takes over now, not next time the tab closes
   } else if (type === "LFH_PING") {
     if (e.source) e.source.postMessage({ type: "LFH_PONG", version: VERSION });
+  } else if (type === "LFH_WARM_SHELL") {
+    // SAVE THE PAGE THAT IS ALREADY OPEN.
+    //
+    // handleNav() is the only thing that writes to SHELL, and it only runs for a navigation this
+    // worker HANDLED. The very first navigation to a page is served by the network before the
+    // worker controls the client, so that page's HTML was never stored — and the layer's whole
+    // promise is "the HTML of pages you've already visited, so the app still opens".
+    //
+    // Measured on the deployed site: after one visit to a guest menu, SHELL held the item pages'
+    // RSC keys but NOT the menu document. Go offline and reload and you got the branded "this
+    // screen hasn't been opened on this device yet" page — for a screen that was on the diner's
+    // phone a second earlier. That is the commonest offline moment there is: scan the QR, walk to
+    // a table with thick walls, pull to refresh. Same for a waiter opening a panel for the first
+    // time on a new device.
+    //
+    // So once the page is up and controlled, it asks us to fetch and store its own URL. Cheap
+    // (one request, only when the shell is genuinely missing), never on the critical path, and it
+    // stores the same key handleNav would have.
+    const url = e.data && e.data.url;
+    if (url) e.waitUntil((async () => {
+      try {
+        const key = new URL(url, self.location.origin).href;
+        if (new URL(key).origin !== self.location.origin) return;
+        const cache = await caches.open(SHELL);
+        if (await cache.match(key, { ignoreVary: true })) return; // already saved — do nothing
+        const res = await fetch(key, { credentials: "same-origin" });
+        // Same rule as handleNav: only a real rendered page, never a redirect or an error.
+        if (res && res.ok && res.status === 200 && res.type !== "opaqueredirect") await putStamped(SHELL, key, res);
+      } catch { /* best-effort: being unable to pre-save must never affect the page */ }
+    })());
   }
 });
 

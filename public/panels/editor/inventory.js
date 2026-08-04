@@ -33,35 +33,55 @@
   const toastMsg = (m) => { if (typeof window.toast === "function") window.toast(m); };
   const scoped = (p) => (typeof window.ridQ === "function" ? window.ridQ(p) : p);
 
-  // THE SAME TAP MUST CARRY THE SAME ID, or the guard is decoration. A fresh uuid was minted
-  // inside every call, so a double-tap sent two different ids and the server — correctly — ran
-  // two separate stock movements. The id is now derived from what the write actually IS
-  // (method + path + body) and reused for a short window, so a second tap on the same button is
-  // recognised as the same action while a deliberate repeat a minute later is a new one.
-  const RECENT_ACTION_MS = 30000;
-  const recentActions = new Map();
-  function actionIdFor(method, path, body) {
-    const key = method + " " + path + " " + (body ? JSON.stringify(body) : "");
-    const now = Date.now();
-    for (const [k, v] of recentActions) if (now - v.at > RECENT_ACTION_MS) recentActions.delete(k);
-    const hit = recentActions.get(key);
-    if (hit) { hit.at = now; return hit.id; }
-    const id = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
-    recentActions.set(key, { id, at: now });
-    return id;
+  // ONE TAP = ONE ACTION, AND TWO TAPS = TWO ACTIONS. Both halves matter, and getting the
+  // second one wrong is expensive here because these writes are stock and money.
+  //
+  // The first version minted a fresh uuid inside every call, so an accidental double-tap became
+  // two stock movements (the save buttons are not disabled while the request is in flight, and
+  // every movement's own dedupe key is built from the row the handler has just INSERTED — so it
+  // cannot recognise a second insert). The fix for that was to derive the id from the write's
+  // CONTENT and reuse it for 30 seconds. That closed the double-tap and opened something worse:
+  // two DELIBERATE identical entries inside the window silently became one. Two ₹500 cash
+  // expenses logged back to back recorded ₹500 and said "Expense recorded" twice; two 1 kg trays
+  // of the same tomatoes binned recorded one, so stock stayed a kilo too high.
+  //
+  // So dedupe on CONCURRENCY, not on content-over-time: an identical write that arrives while
+  // the first is STILL IN FLIGHT is the double-tap, and it is dropped. Once the first has
+  // finished, an identical write is a person doing the same thing again and gets its own id.
+  const inFlight = new Set();
+  const flightKey = (method, path, body) => method + " " + path + " " + (body ? JSON.stringify(body) : "");
+  const newActionId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()));
+
+  // Every write gets a deadline, like every other write in the app (public/panels/outbox.js,
+  // lib/menu.ts). This helper had none, so an overloaded database that answers nothing left the
+  // person's tap on a spinner with no result and no trace. Guarded because reading
+  // AbortSignal.timeout throws on an older phone.
+  const INV_TIMEOUT_MS = 15000;
+  function invDeadline() {
+    try {
+      return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(INV_TIMEOUT_MS) : undefined;
+    } catch (e) { return undefined; }
   }
 
-  async function inv(method, path, body, photoFile) {
+  async function inv(method, path, body, photoFile, extra) {
     const url = "/api/inventory" + scoped(path);
     const opts = { method, headers: {} };
+    let key = null;
     if (method !== "GET") {
-      // Every write carries an action id so the server's withIdempotency guard makes a
-      // network retry / double-tap run at most once (same rule as the ordering paths).
-      // A photo upload gets a fresh id every time: two different photos to the same path can't be
-      // told apart by method+path, and treating the second as a duplicate would drop it.
-      opts.headers["X-LFH-Action-Id"] = photoFile
-        ? (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()))
-        : actionIdFor(method, path, body);
+      // The double-tap guard: an IDENTICAL write already in flight is the second tap of one
+      // gesture, so refuse it here rather than let it become a second stock movement. It is not
+      // a dropped tap — the first one is being carried out and the person sees its result.
+      key = flightKey(method, path, body);
+      if (inFlight.has(key)) throw new Error("Already saving that — one moment.");
+      inFlight.add(key);
+      // Every write carries an action id so the server's withIdempotency guard makes a network
+      // retry run at most once. A FRESH id per call on purpose: see the note above — an id reused
+      // across time is what silently merged two deliberate entries into one.
+      opts.headers["X-LFH-Action-Id"] = newActionId();
+      // WHAT THE SCREEN WAS EDITING FROM, when the caller says. The server refuses instead of
+      // overwriting someone else's change and tells this person what it says now (lib/clash.ts).
+      if (extra && extra.expect) opts.headers["X-LFH-Expect"] = JSON.stringify(extra.expect);
       if (photoFile) {
         const fd = new FormData();
         fd.append("payload", JSON.stringify(body || {}));
@@ -71,11 +91,22 @@
         opts.headers["Content-Type"] = "application/json";
         opts.body = JSON.stringify(body);
       }
+      opts.signal = invDeadline();
     }
-    const res = await fetch(url, opts);
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error || res.statusText);
-    return json;
+    try {
+      const res = await fetch(url, opts);
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // A clash carries the server's plain sentence — show THAT, not a status code, so the
+        // person reads "someone else changed the counted quantity" and can look.
+        const e = new Error((json && json.clash && json.clash.plain) || (json && json.error) || res.statusText);
+        e.status = res.status; e.data = json;
+        throw e;
+      }
+      return json;
+    } finally {
+      if (key) inFlight.delete(key);
+    }
   }
 
   // Purchase-unit display: balances live in base units; people think in kg/L/pc.
@@ -314,7 +345,16 @@
         if (isNew && $("#ipOpening", pop).value !== "") payload.opening_qty = Number($("#ipOpening", pop).value) * Number($("#ipFactor", pop).value || 1);
         if (!isNew) payload.active = $("#ipActive", pop).checked;
         try {
-          await inv("POST", isNew ? "/items" : "/items/" + it.id, payload);
+          // An EXISTING ingredient is the classic "two managers, one item" collision — its name,
+          // pack size and reorder levels are all typed values someone else can be typing too. Send
+          // what this form was opened on, so the second save is refused and told, not silently
+          // preferred. A NEW ingredient has no row to overwrite, so it needs no expectation.
+          await inv("POST", isNew ? "/items" : "/items/" + it.id, payload, null, isNew ? undefined : {
+            expect: { table: "inv_items", id: it.id, fields: {
+              name: String(it.name || ""),
+              purchase_factor: Number(it.purchase_factor),
+            } },
+          });
           toastMsg(isNew ? "Ingredient added" : "Saved");
           closePop();
           await reloadItems();
@@ -569,9 +609,18 @@
         if (val === "") { S.count.lines.delete(itemId); return; }
         const buyQty = Number(val);
         if (!Number.isFinite(buyQty) || buyQty < 0) return toastMsg("Enter a number");
+        // WHAT THIS SCREEN BELIEVED THE LINE SAID, read BEFORE we overwrite the map below.
+        // A count is normally done by two people at once and the row is one per (count, item),
+        // upserted on save — so without this the second save silently won and the other
+        // person's figure vanished into the stock adjustment with nobody told.
+        // Nothing typed here yet → null, which the gate compares as "the line was empty".
+        const was = S.count.lines.get(itemId);
+        const wasCounted = was === undefined || was === "" ? null : Number(was) * Number(it.purchase_factor);
         S.count.lines.set(itemId, val);
         try {
-          await inv("POST", `/counts/${S.count.id}/line`, { item_id: itemId, counted_base: buyQty * Number(it.purchase_factor) });
+          await inv("POST", `/counts/${S.count.id}/line`, { item_id: itemId, counted_base: buyQty * Number(it.purchase_factor) }, null, {
+            expect: { table: "inv_count_lines", where: { count_id: S.count.id, item_id: itemId }, fields: { counted_base: wasCounted } },
+          });
           $("#ccSavedNote").textContent = "saved ✓";
           setTimeout(() => { const n = $("#ccSavedNote"); if (n) n.textContent = ""; }, 1500);
         } catch (e) { toastMsg("⚠️ " + e.message); }

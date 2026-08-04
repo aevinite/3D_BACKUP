@@ -88,6 +88,21 @@ for (const file of PANELS) {
 //   2. the ROUTE reads it (`expectClash`), or the header goes nowhere.
 const REACT_VALUE_EDITS = [
   {
+    // INVENTORY (added 2026-08-04, sweep finding F4). This module was listed in the footnote at
+    // the bottom of this file as "not covered — its own fetch helper", and that footnote was the
+    // whole problem: a stock count is the likeliest two-people-at-once edit in the product (the
+    // count sheet is shared by design) and `POST /counts/:id/line` upserts on (count_id, item_id),
+    // so the second person to save silently won and `submit` adjusted stock to their figure.
+    // Matched by ACTION like the React screens below, because inventory.js posts by path+body
+    // rather than through the panels' api().
+    file: "public/panels/editor/inventory.js",
+    route: "app/api/inventory/[...path]/route.ts",
+    patterns: [
+      { re: /inv\("POST",\s*`\/counts\/\$\{[^}]+\}\/line`/, name: "save a stock-count line" },
+      { re: /inv\("POST",\s*isNew \? "\/items" : "\/items\/"/, name: "save an ingredient" },
+    ],
+  },
+  {
     file: "components/admin/StaffProfile.tsx",
     route: "app/api/admin/users/route.ts",
     // A typed value someone else can also type. `set_permissions` is a dropdown (a toggle whose
@@ -115,10 +130,14 @@ for (const spec of REACT_VALUE_EDITS) {
   if (routeReads) console.log(`  ✅ ${spec.route} reads the expectation (expectClash)`);
   else { problems++; console.log(`  ❌ ${spec.route} NEVER CALLS expectClash — an X-LFH-Expect header sent from the screen would be ignored`); }
 
-  // (1) then each call site.
+  // (1) then each call site. `actions` are matched as quoted strings (how the React screens send
+  // an action name); `patterns` are matched as regexes, which is what a panel written with
+  // template literals needs — `api("POST", `/counts/${id}/line`)` contains no quoted action, so
+  // the string form silently matched NOTHING and the file looked covered when it was not.
   const lines = src.split(/\r?\n/);
   lines.forEach((line, i) => {
-    const act = spec.actions.find((a) => line.includes(`"${a}"`));
+    const act = (spec.actions || []).find((a) => line.includes(`"${a}"`))
+      || (spec.patterns || []).map((p) => (p.re.test(line) ? p.name : null)).find(Boolean);
     if (!act) return;
     valueEdits++;
     // The expectation is usually the patch() call's SECOND argument, so it can be a few lines down.
@@ -142,8 +161,11 @@ console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${pr
 // the difference between a guard and a false sense of one.
 console.log("\nNot covered by this check (by design — no expectation travels from these yet):");
 console.log("  · the OWNER panel's own writes (owner/settings, owner/staff — React, plain fetch)");
-console.log("  · public/panels/editor/inventory.js (its own fetch helper)");
 console.log("  · a bill's customer name (its capture RPC is idempotent, so a repeat is harmless)");
+// INVENTORY used to be listed here, and being listed here was never a defence: a shared stock-count
+// sheet is the likeliest silent overwrite in the whole product, and it sat under this footnote while
+// `POST /counts/:id/line` upserted last-wins. It is checked ABOVE now — both of its value edits, and
+// that its route actually reads the expectation.
 // TABLE RENAMES used to be listed here as unprotected. They no longer are: the settings save
 // sends an expectation too (buildEditExpect → `general`), which needed lib/clashCompare.ts to
 // compare OBJECTS by content — every table name lives inside one `table_names` blob, and the old

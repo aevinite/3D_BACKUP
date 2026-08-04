@@ -178,7 +178,14 @@
         }
         if (fast) wait = 5000;
         $("hint").textContent = "Checking again in " + Math.round(wait / 1000) + "s...";
-        setTimeout(function () { wait = Math.min(wait * 2, 60000); cycle(false); }, wait);
+        // ±25% JITTER, like every other retry in the app. The doubling below already bounds the
+        // rate, but a bare doubling is still a LOCKSTEP: when the server (not the internet) is
+        // what is down, every device in the restaurant lands on this page within a second of the
+        // others and then checks in unison at 5s, 10s, 20s… — synchronised waves at exactly the
+        // moment the thing needs a quiet gap. Each device now rolls its own delay, so the same
+        // number of checks arrive spread out instead of pulsing.
+        var jittered = Math.round(wait * (0.75 + Math.random() * 0.5));
+        setTimeout(function () { wait = Math.min(wait * 2, 60000); cycle(false); }, jittered);
       };
       // The catch is not decoration: if a check ever threw, `checking` would stay true and
       // this page would never look again — a screen that recovers from nothing, which is the

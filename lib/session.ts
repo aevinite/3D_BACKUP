@@ -263,11 +263,14 @@ export const setSessionCart = (token: string, cart: unknown[]) => rpc("lfh_set_c
 // isn't clobbered. Returns the merged cart to adopt. See SessionCartSync.
 export const mergeSessionCart = (token: string, added: unknown[], removed: unknown[], qty: unknown[]) =>
   rpc("lfh_merge_cart", { p_token: token, p_added: added, p_removed: removed, p_qty: qty });
-// Place the whole table's order. We send ONLY the item lines (id + qty + chosen
-// options) and any allergy notes — NEVER prices. The server looks up every price
-// from menu_items and decides the bill itself, so the totals can't be tampered with.
-export const placeSessionOrder = (token: string, items: unknown[], allergies: string[]) =>
-  rpc("lfh_place_order", { p_token: token, p_items: items, p_allergies: allergies });
+// placeSessionOrder() USED TO LIVE HERE and is deliberately gone (2026-08-04).
+//
+// It called lfh_place_order straight from the browser with NO at-most-once id and NO deadline, so
+// a lost reply placed the order twice and a busy system lost it entirely. That was fixed by routing
+// the session order through our own endpoint — lib/menu.ts → placeSessionOrderSafe(), which every
+// caller now uses (components/SessionGate.tsx). The old export had zero callers left but sat here
+// looking like the way to place a table's order, one line away from reintroducing both bugs.
+// If you need to place a session order: placeSessionOrderSafe(token, items, allergies, rid, actionId).
 // Call a waiter from within a live session, with a reason (e.g. "need help").
 export const callWaiterSession = (token: string, reason: string) =>
   rpc("lfh_call_waiter", { p_token: token, p_reason: reason });

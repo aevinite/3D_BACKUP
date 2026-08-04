@@ -117,10 +117,24 @@ const missing = SERVER_CODES.filter((c) => !worded.has(c));
 missing.length === 0
   ? ok(`all ${SERVER_CODES.length} refusal codes have words a diner can read`)
   : bad("a refusal would show as a machine word", missing.join(", "));
-// And an UNKNOWN code must never be echoed verbatim.
-/default: return "Couldn't send this order/.test(outbox)
+// And an UNKNOWN code must never be echoed verbatim. Checked as a PROPERTY of the default arm
+// rather than by matching one exact sentence: the old test looked for the literal
+// `default: return "Couldn't send this order`, so it went red the moment that arm legitimately
+// grew a second wording (a live refusal reads differently from one refused hours later, off the
+// saved queue) even though nothing about the rule had changed. What actually matters is that the
+// arm returns WORDS and cannot interpolate the code it was given.
+const defaultArm = (outbox.match(/default: return ([^\n]+)/) || [])[1] || "";
+const echoesCode = /\$\{\s*reason|\breason\b(?!\s*\?)/.test(defaultArm) || !/"[^"]{12,}"/.test(defaultArm);
+!echoesCode
   ? ok("an unrecognised code falls back to plain words, never the code itself")
-  : bad("reasonMsg() still echoes whatever the server sent");
+  : bad("reasonMsg() still echoes whatever the server sent", defaultArm.slice(0, 80));
+
+// The refusal a diner must NEVER be told to retry: doing so trips the same per-table limit again
+// and fires another alert at the owner about a guest who did what the app said. This is the one
+// wording in the file with a consequence outside the phone, so it gets its own check.
+/case "rate_limited": return "[^"]*wait/.test(outbox)
+  ? ok("an over-the-limit order says WAIT, not 'try again'")
+  : bad("the over-the-limit wording invites a retry, which raises another limit alert");
 
 // ── 5. the saved-orders queue must never drop an order in silence ───────────────────────────
 /if \(j\.ok === false\) \{ await moveToFailed\(item, reasonMsg\(j\.reason\)\)/.test(outbox)
@@ -168,9 +182,22 @@ const gate = readFileSync(join(ROOT, "components/SessionGate.tsx"), "utf8");
 /isServerBusy\(err\)/.test(gate)
   ? ok("a swamped system saves the session order instead of losing it")
   : bad("a busy system still loses a table-session order outright");
-/orderFailMsg\(/.test(gate)
+// A session refusal must turn the CODE into specific words. Originally this asserted the name of
+// a private helper (`orderFailMsg`) that lived in the gate — but that helper was one of THREE
+// copies of the same switch, and the copy on the busiest path (the QR cart) knew only two codes
+// and told everyone else to "try again". They are one shared mapper now (reasonMsg in
+// lib/guestOutbox.ts), so check the PROPERTY — the gate reads a refusal code and words it —
+// rather than the name of whichever function happens to do it.
+/reasonMsg\(\s*reason|orderFailMsg\(/.test(gate) && /refusalOf\(|Order failed:/.test(gate)
   ? ok("a session refusal says which dish or which reason")
   : bad("every session refusal still reads 'Couldn't place order'");
+
+// …and so must the QR cart, which is the path that used to answer "please try again" for every
+// reason it did not know — including over-the-limit, where retrying raises another owner alert.
+const cart = readFileSync(join(ROOT, "components/CartPanel.tsx"), "utf8");
+/reasonMsg\(/.test(cart) && !/\/sold_out\/i\.test/.test(cart)
+  ? ok("the QR cart words every refusal from the shared list, not two hand-matched strings")
+  : bad("the QR cart still pattern-matches the error text and lumps the rest into 'try again'");
 
 // ── 8. parcel honours the 86 board and never drops a line ───────────────────────────────────
 for (const [name, rel] of [["waiter", "app/api/tablet/[...path]/route.ts"], ["manager", "app/api/editor/[...path]/route.ts"]]) {

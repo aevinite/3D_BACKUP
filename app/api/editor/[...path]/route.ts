@@ -4095,8 +4095,22 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
     if (emptyIdSegment(id)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
 
+    // ── OFFLINE REPLAY CLASH + NO SILENT OVERWRITES ───────────────────────────────
+    // The SAME two gates postImpl runs, and they belong here just as much. PATCH was left out
+    // when they were written, yet the manager panel queues PATCHes through the outbox exactly
+    // like POSTs — "mark this bill paid", "un-pay it", "archive the table", "restore it to the
+    // live floor". So a change saved on a device with no signal was replayed twenty minutes
+    // later with nothing checking whether the ground had moved: a bill that another device had
+    // since settled and closed could be re-opened as unpaid (the thing lib/clash.ts's own
+    // header calls what must never happen), and an `archived: true` could land on the NEW
+    // party's live order. A live write carries no replay marker, so this costs it nothing.
+    const clash = await replayClash(req, rid, a, id, path[2], body as Record<string, unknown> | null);
+    if (clash) return clashJson(clash);
+    const overwrite = await expectClash(req, rid);
+    if (overwrite) return clashJson(overwrite);
+
     if (a === "orders" && id) {
-       
+
       const patch: any = {};
       if (body.status !== undefined) {
         if (!ORDER_STATUSES.includes(body.status)) return err("invalid status");
@@ -4287,6 +4301,17 @@ async function deleteImpl(req: NextRequest, ctx: Ctx) {
     const [a, id] = path;
     // "undefined"/"null"/"NaN" id → clean 400 (a truthy string would slip past `&& id` below).
     if (emptyIdSegment(id)) return err("Missing id — please refresh and try again.");
+
+    // ── OFFLINE REPLAY CLASH ──────────────────────────────────────────────────────
+    // Same reasoning as PATCH above: `api("DELETE", …)` goes through the outbox too, so a
+    // "delete this bill" tapped with no signal is replayed later. Without this gate it was
+    // applied to whatever that table looks like NOW — including a table that has since been
+    // closed, billed and reseated. A deletion is the least reversible thing in this file
+    // (it is a soft delete, but it still takes a bill off the floor and out of Today), so
+    // "the ground moved, ask a person" is the only safe answer.
+    // No expectClash here: a DELETE names a row, it does not carry a value it edited FROM.
+    const clash = await replayClash(req, rid, a, id, path[2], null);
+    if (clash) return clashJson(clash);
 
     if (a === "orders" && id) {
       // Bill deletion is owner-gated (least-privilege) + always logged — same rule as the

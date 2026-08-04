@@ -252,7 +252,17 @@
     // NOT be sent directly ahead of them — that let a fresh "Mark paid" commit before a
     // queued discount, settling the bill at the wrong amount. Append to the queue and kick
     // a flush so it replays in order behind the pending ones.
-    if (queued.length) { await enqueue(item, "behind"); flush(); return { ok: true, queued: true, action_id: item.id }; }
+    //
+    // `failed` COUNTS TOO, and leaving it out re-opened the very bug this guard exists for.
+    // A change that is retryable but has run out of automatic attempts (six timed-out rounds on
+    // a flaky connection) moves to the "Needs you" list and OUT of `queued` — so the queue looked
+    // empty and the next write went straight to the server. Real sequence: a discount times out
+    // into Needs-you, "Mark paid" then commits at the FULL amount, and the person taps Try again
+    // on the discount afterwards, applying it to an already-settled bill. Anything still owed to
+    // this table has to clear before a later change to it can be sent.
+    if (queued.length || failed.some(function (f) { return f.retryable !== false; })) {
+      await enqueue(item, "behind"); flush(); return { ok: true, queued: true, action_id: item.id };
+    }
 
     let res;
     try {
@@ -426,12 +436,28 @@
   }
 
   // ── manual controls for the "waiting to sync" UI ────────────────────────────
+  // Put every RETRYABLE failure back. Two things this deliberately does not do:
+  //  · it no longer re-sends a clash (`retryable: false`). The server said the ground moved, so
+  //    sending the identical change again cannot help — it just fails a second time and the row
+  //    reappears looking like the app is stuck. Those stay put until a person redoes them.
+  //  · it no longer leaves the attempt counters at their ceiling. Clearing only `status`/`error`
+  //    meant a re-queued item had already spent its six network / six busy / three auth rounds,
+  //    so it was ejected again after ONE attempt and "Try again" looked broken.
   async function retryFailed() {
     if (!failed.length) return;
-    const items = failed.splice(0, failed.length);
-    for (const it of items) { it.status = "queued"; it.error = undefined; queued.push(it); await idbPut(it); }
+    const again = failed.filter(function (x) { return x.retryable !== false; });
+    if (!again.length) return;
+    failed = failed.filter(function (x) { return x.retryable === false; });
+    for (const it of again) { resetTries(it); queued.push(it); await idbPut(it); }
     notify();
     flush();
+  }
+
+  // One place that says what "a fresh go" means, so the two retry entry points can't drift.
+  function resetTries(it) {
+    it.status = "queued";
+    it.error = undefined; it.plain = undefined; it.todo = undefined;
+    it.tries = 0; it.netTries = 0; it.busyTries = 0; it.authTries = 0;
   }
   async function dismiss(id) { await removeItem(id); notify(); }
   // Retry ONE specific change from the "Needs you" sheet (the old retryFailed() put the
@@ -440,9 +466,10 @@
     const it = failed.filter((x) => x.id === id)[0];
     if (!it) return;
     failed = failed.filter((x) => x.id !== id);
-    // Reset the attempt counter too: a person choosing "Try again" is asking for a fresh
-    // go, not for the one attempt left over from the automatic retries.
-    it.status = "queued"; it.error = undefined; it.plain = undefined; it.todo = undefined; it.tries = 0;
+    // Reset EVERY attempt counter: a person choosing "Try again" is asking for a fresh go, not
+    // for the one attempt left over from the automatic retries. It used to clear `tries` alone,
+    // which left the three newer counters (network / busy / signed-out) at their ceiling.
+    resetTries(it);
     queued.push(it);
     await idbPut(it);
     notify();
