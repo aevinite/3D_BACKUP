@@ -2450,6 +2450,13 @@ function mrpPill(line) {
 function financialYear(when) {
   // FY of the INVOICE's OWN date, not "today" — reprinting a March invoice after 1 April must
   // keep its issued year. Falls back to now when no/invalid date is passed (legacy callers).
+  //
+  // That fallback was quietly doing all the work: the three reprint paths (the bill card's print,
+  // the bill modal's Print, and the table-detail print) each built a stand-in session object and
+  // left invoice_at OUT, so every reprint of a RECORDED bill was stamped with TODAY's financial
+  // year. Once the year turned, a March bill reprinted as INV/2026-27/000042 — a second identity
+  // for one sale, colliding with the real 2026-27 invoice 42, in exactly the window when people
+  // come back asking for copies. They pass invoice_at now (the bills endpoint always sent it).
   const d = when ? new Date(when) : new Date();
   const base = isNaN(d.getTime()) ? new Date() : d;
   const y = base.getFullYear();
@@ -2702,6 +2709,25 @@ function discPct(subtotal, disc) { return LFH_BILLDOC.discPct(subtotal, disc); }
 // stack came out as "Food subtotal ₹0 / MRP items ₹880". There, the plain old single Subtotal
 // row is both simpler and truer, so the split is folded away. Everywhere else it stands.
 function mrpPart(m) { return m && m.composition ? 0 : (Number(m && m.nontax) || 0); }
+// roundOffRow(m, cls): the row that makes the SCREEN add up, exactly as the paper does.
+//
+// Every row above is rounded to whole rupees on its own while the total is rounded from full
+// precision, so a discounted bill's stack contradicted its own Total about a third of the time —
+// on paper AND here, identically, which is why staff could not explain the missing rupee to a
+// guest either. The rule lives once, in billdoc.js (billRows), and the printed bill and both of
+// these stacks read it, so a bill never reads two ways. Renders nothing when it is not needed.
+function roundOffRow(m, cls) {
+  if (!m || typeof LFH_BILLDOC === "undefined" || !LFH_BILLDOC.billRows) return "";
+  const nontax = mrpPart(m);
+  const foodSub = nontax > 0 ? m.taxableBase : m.subtotal;
+  const R = LFH_BILLDOC.billRows({
+    subtotal: (Number(foodSub) || 0) + nontax, nontax,
+    discount: m.disc, total: m.total,
+    taxRows: m.composition ? [] : [{ amt: m.tax }],
+  });
+  if (!R.roundOff) return "";
+  return `<div class="${cls}"><span>Round off</span><span>${R.roundOff < 0 ? "− " : "+ "}${inr(Math.abs(R.roundOff))}</span></div>`;
+}
 function ordTotalsRows(m) {
   const nontax = mrpPart(m);
   const foodSub = nontax > 0 ? m.taxableBase : m.subtotal;
@@ -2709,6 +2735,7 @@ function ordTotalsRows(m) {
   if (m.disc > 0) rows.push(`<div class="ord-disc">Discount${discPct(foodSub, m.disc) ? ` (${discPct(foodSub, m.disc)})` : ""}<span>− ${inr(m.disc)}</span></div>`);
   if (m.tax > 0 && !m.composition) rows.push(`<div class="ord-sub"><span>${esc(taxLabel())} ${Math.round(m.rate * 10000) / 100}%</span><span>${inr(m.tax)}</span></div>`);
   if (nontax > 0) rows.push(`<div class="ord-sub"><span>MRP items</span><span>${inr(nontax)}</span></div>`);
+  { const ro = roundOffRow(m, "ord-sub"); if (ro) rows.push(ro); }
   return rows.join("");
 }
 function mrpTotalsRows(m, pct) {
@@ -2718,6 +2745,7 @@ function mrpTotalsRows(m, pct) {
   if (m.disc > 0) rows.push(`<div class="bm-trow disc"><span>Discount${discPct(foodSub, m.disc) ? ` (${discPct(foodSub, m.disc)})` : ""}</span><span>− ${inr(m.disc)}</span></div>`);
   if (m.tax > 0 && !m.composition) rows.push(`<div class="bm-trow"><span>${esc(taxLabel())} ${pct}%</span><span>${inr(m.tax)}</span></div>`);
   if (nontax > 0) rows.push(`<div class="bm-trow"><span>MRP items</span><span>${inr(nontax)}</span></div>`);
+  { const ro = roundOffRow(m, "bm-trow"); if (ro) rows.push(ro); }
   return rows.join("");
 }
 
@@ -3231,7 +3259,7 @@ function printBillFromKey(key) {
     : pool.filter((o) => o.session_id === key);
   if (!g.length) { toast("Couldn't load that bill to print", "err"); return; }
   const o0 = g[0];
-  printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
+  printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no, invoice_at: o0.invoice_at }, g);
 }
 // Expand one bill into a modal: full item list + totals + Print / Restore / Close.
 // May the current viewer DELETE a bill? Admin + owner always (higherView); a real manager
@@ -3328,7 +3356,7 @@ function openBillModal(key) {
   document.addEventListener("keydown", onEsc);
   wrap.onclick = (e) => { if (e.target === wrap) close(); };
   wrap.querySelector("[data-bm-close]").onclick = close;
-  wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, g);
+  wrap.querySelector("[data-bm-print]").onclick = () => printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no, invoice_at: o0.invoice_at }, g);
   const restoreBtn = wrap.querySelector("[data-bm-restore]");
   if (restoreBtn) restoreBtn.onclick = async () => { close(); await restoreBill(g); };
   // Delete a CANCELLED bill permanently (owner 2026-07-24). deleteOrders() itself REQUIRES a
@@ -5461,7 +5489,7 @@ function renderEditor() {
         const os = ordersInGroup(btn.dataset.printGroup);
         if (!os.length) return;
         const o0 = os[0];
-        printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no }, os);
+        printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no, invoice_at: o0.invoice_at }, os);
       };
     });
     ed.querySelectorAll("[data-sess-del]").forEach((btn) => {
@@ -6250,6 +6278,12 @@ const OP_ACTION_LABELS = {
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
   order_cancel: "Cancelled the KOT", order_uncancel: "Un-cancelled the KOT", order_tip: "Recorded a tip",
+  // Print reliability (mig 269). Added with the feature but never labelled, so these three rendered
+  // as their raw codes on the admin, owner and manager log screens — the "MAP[x] || x leaks the key"
+  // fault the Activity-log rule exists to prevent. verify:audit was already red on main for this.
+  kot_reprint_sent: "Re-sent a kitchen ticket to the printer",
+  printer_problem: "Printer problem reported",
+  printer_problem_resolved: "Printer problem resolved",
   order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",
   khata_park: "Parked the bill on khata", khata_collect: "Collected a khata payment",
   audit_record_failed: "Audit record FAILED",
@@ -6691,7 +6725,7 @@ function auditHtml() {
         r.bill_no != null ? "Bill #" + esc(r.bill_no) : "", r.invoice_no ? "Invoice " + esc(r.invoice_no) : "",
         r.item_title ? esc(r.item_title) + (r.qty > 1 ? " ×" + esc(r.qty) : "") : "",
         r.amount != null ? inr(parseFloat(r.amount) || 0) : ""].filter(Boolean).join(" · ");
-      return `<div class="au-row">
+      return `<div class="au-row" data-au-open="${esc(r.id)}" role="button" tabindex="0" title="See exactly what was removed">
         <span class="au-ico" title="${esc(label)}">${ico}</span>
         <div class="au-mid"><b>${esc(label)}</b><span class="au-bits">${bits || "—"}</span>
           <span class="au-reason">${esc(reasonTxt(r))}</span></div>
@@ -6706,7 +6740,84 @@ function bindAudit() {
     const n = document.getElementById("auQ"); if (n) { n.focus(); try { n.setSelectionRange(at, at); } catch {} } };
   const r = document.getElementById("auRefresh");
   if (r) r.onclick = () => { state.audit = null; renderEditor(); loadAudit(); };
+  // Click a row → the whole story (owner, 2026-08-04: "click and view the full — how it was and
+  // what he changed, which KOT he deleted and what was the item, with time, day, everything").
+  document.querySelectorAll("[data-au-open]").forEach((el2) => {
+    const open = () => openRemovalDetail(el2.dataset.auOpen);
+    el2.onclick = open;
+    el2.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } };
+  });
 }
+
+// openRemovalDetail(id): the full record for ONE removal, in the same order and wording as the
+// admin's and the owner's panels (components/admin/RemovalDetail.tsx) so nobody is shown a
+// different story depending on which screen they opened.
+//
+// The item-by-item snapshot lives in `meta.was` and is fetched ONLY on a click — the list read is
+// unchanged, because 200 snapshots for rows nobody opened is exactly the whole-board read the
+// egress rules forbid. READ-ONLY: nothing here can put a bill back; that is the admin's alone.
+async function openRemovalDetail(id) {
+  if (!id) return;
+  let d;
+  try { d = await api("GET", "/audit?detail=" + encodeURIComponent(id)); }
+  catch (e) { toast("Couldn't open that record: " + ((e && e.message) || e), "err"); return; }
+  const m = (d && d.meta) || {};
+  const w = m.was || null;
+  const items = (w && Array.isArray(w.items)) ? w.items : [];
+  const row = (k, v) => v == null || v === "" ? "" : `<div class="au-d-row"><span>${esc(k)}</span><b>${v}</b></div>`;
+  const whenLong = (iso) => { if (!iso) return ""; try { const x = new Date(iso);
+    return esc(x.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })
+      + " · " + x.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })); } catch { return esc(iso); } };
+  const optTxt = (o) => Array.isArray(o) ? o.map((x) => typeof x === "string" ? x : ((x && x.label) || "")).filter(Boolean).join(", ") : "";
+  const label = (AUDIT_KIND[d.kind] || ["•", d.kind])[1];
+  const lines = items.map((it) => {
+    const qty = parseInt(it.qty, 10) || 1, unit = parseFloat(it.price) || 0;
+    const opts = optTxt(it.options), rem = Array.isArray(it.removed) ? it.removed.filter(Boolean).join(", ") : "";
+    return `<div class="au-d-item"><span>${esc(it.title || "—")}`
+      + (opts ? `<small>+ ${esc(opts)}</small>` : "")
+      + (rem ? `<small class="au-d-no">no ${esc(rem)}</small>` : "")
+      + (it.note ? `<small><i>“${esc(it.note)}”</i></small>` : "")
+      + `</span><span class="au-d-q">×${esc(qty)}</span><span class="au-d-amt">${inr(unit * qty)}</span></div>`;
+  }).join("");
+  const html = `<div class="sx-modal-overlay au-detail-overlay"><div class="sx-modal au-detail">
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>What exactly was removed</h3>
+      <button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="au-d-body">
+      <div class="au-d-head">What happened</div>
+      ${row("What", esc(label))}
+      ${row("When", whenLong(d.at))}
+      ${row("Who", esc(d.actor || "—") + (d.actor_role ? ` · ${esc(d.actor_role)}` : ""))}
+      ${row("Reason", esc(reasonTxt(d)))}
+      ${d.amount != null ? row("Value removed", inr(parseFloat(d.amount) || 0)) : ""}
+      <div class="au-d-head">Which ticket / bill</div>
+      ${row("Kitchen ticket", (w && w.kot_no != null ? w.kot_no : d.kot_no) != null ? "KOT #" + esc((w && w.kot_no != null ? w.kot_no : d.kot_no)) : "—")}
+      ${row("Bill number", (w && w.bill_no != null ? w.bill_no : d.bill_no) != null ? "#" + esc((w && w.bill_no != null ? w.bill_no : d.bill_no)) : "—")}
+      ${row("Invoice", (w && w.invoice_no) || d.invoice_no ? esc((w && w.invoice_no) || d.invoice_no) : "not invoiced")}
+      ${row("Table", (w && w.table_number) || d.table_number ? "Table " + esc((w && w.table_number) || d.table_number) : "no table (walk-in / parcel)")}
+      ${w && w.ordered_at ? row("Ordered at", whenLong(w.ordered_at)) : ""}
+      ${w && w.customer ? row("Customer", esc(w.customer) + (w.customer_phone ? ` · ${esc(w.customer_phone)}` : "")) : ""}
+      <div class="au-d-head">What was on it${w && w.item_count != null ? ` · ${esc(w.item_count)} line${w.item_count === 1 ? "" : "s"}` : ""}</div>
+      ${lines ? `<div class="au-d-items">${lines}</div>`
+        : d.item_title ? `<div class="au-d-items"><div class="au-d-item"><span>${esc(d.item_title)}</span><span class="au-d-q">×${esc(d.qty || 1)}</span><span class="au-d-amt"></span></div></div>`
+        : `<div class="au-d-none">No item list was kept for this record — it was made before the Audit started snapshotting what it removes. Newer removals carry the full list.</div>`}
+      ${w && (w.subtotal != null || w.total != null) ? `<div class="au-d-head">What the bill said</div>
+        ${w.subtotal != null ? row("Subtotal", inr(w.subtotal)) : ""}
+        ${parseFloat(w.discount) > 0 ? row("Discount", "− " + inr(w.discount) + (w.discount_note ? ` · ${esc(w.discount_note)}` : "")) : ""}
+        ${w.tax != null ? row(taxLabel(), inr(w.tax)) : ""}
+        ${w.total != null ? row("Total", inr(w.total)) : ""}
+        ${row("State when removed", esc(w.status || "—") + (w.payment_status ? ` · ${w.payment_status === "paid" ? "was PAID" : "unpaid"}` : "") + (w.payment_method ? ` · ${esc(w.payment_method)}` : ""))}
+        ${Array.isArray(w.allergies) && w.allergies.length ? row("Allergies", esc(w.allergies.join(", "))) : ""}` : ""}
+      <div class="au-d-note">This is a record — nothing here can be changed. Only an Aevidine admin can put a deleted bill back.</div>
+    </div>
+  </div></div>`;
+  const wrap = el(html);
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.__lfhClose = close;                     // hardware Back closes THIS, not the panel
+  wrap.querySelector(".tbl-modal-close").onclick = close;
+  wrap.onclick = (e) => { if (e.target === wrap) close(); };
+}
+
 
 // Every table served as one party with t (t included), and every live order across them. Whole-party
 // actions — Serve all, Mark paid, Accept all — must use these, or they silently touch ONE table of a

@@ -907,6 +907,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // on a record card than the live floor and the paper show for the same bill.
       const BILLS_COLS = "id,session_id,table_number,status,payment_status,payment_method,paid_at,created_at,items,subtotal,total,taxable_base,nontax_amount,mrp_amount,discount,discount_note,kot_no,allergies,archived,archived_at,cancelled_at,khata_at,deleted_at";
       let oq = sb.from("orders").select(billsMode ? BILLS_COLS : "*").eq("restaurant_id", rid);
+      // A DELETED BILL LEAVES THIS PANEL ENTIRELY (owner, 2026-08-04: "it will show only to
+      // admin — it will delete from manager and stuff like that").
+      //
+      // It did not. `softDeleteOrders` stamps `deleted_at` AND `archived`, and the manager's
+      // buckets read `archived` as "freed" — so a deleted bill simply moved from Live into the
+      // Bills record and sat there, fully readable, printable and restorable by the very person
+      // who deleted it. The panel has never referenced `deleted_at` at all, so the only place this
+      // can be enforced is here, which is also the right place: a stale panel or a direct call
+      // cannot see round it.
+      //
+      // Deliberately NOT applied to /stats, /zreport or the GST report: a deleted bill still counts
+      // in the day's takings and the tax return (docs/COMPLIANCE-GUARDRAILS.md — "Z-report includes
+      // voids/deletes"). Hiding a sale from the OPERATOR is a permissions decision; hiding it from
+      // the RECORDS is the illegal one. Only the working list is filtered.
+      oq = oq.is("deleted_at", null);
       if (wantsWindow) oq = oq.gte("created_at", windowStartIso);
       const histQ = sp.get("history") ? (sp.get("q") || "").trim() : "";
       if (histQ) {
@@ -1747,7 +1762,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           .eq("restaurant_id", rid).order("joined_at", { ascending: false }).limit(500)
       );
       const customers = must(await sb.from("customers").select("*").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
-      const blocklist = must(await sb.from("blocklist").select("*").eq("restaurant_id", rid).order("blocked_at", { ascending: false }));
+      // The blocklist read had NO limit at all. Columns named to match what the panel renders
+      // (b.id / b.phone / b.table_number / b.reason) plus member_id, which unblocking needs.
+      const blocklist = must(await sb.from("blocklist").select("id, phone, table_number, member_id, reason, blocked_at").eq("restaurant_id", rid).order("blocked_at", { ascending: false }).limit(500));
       const orders = must(await sb.from("orders").select("member_id, total, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(3000));
       const calls = must(await sb.from("waiter_calls").select("member_id, note, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(3000));
       return ok({ members, customers, blocklist, orders, calls });
@@ -1815,6 +1832,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (p === "audit") {
       if (!(await canViewLogs(g, rid))) return permDenied("view the removals record");
       if (!(await logPartAllowed(g, rid, "removals"))) return permDenied("view the removals record");
+      // ?detail=<id> — ONE removal, in full (owner, 2026-08-04): which KOT, every item on it with
+      // its quantity and price, the totals, the customer, the time and day, and who did it. `meta`
+      // carries the snapshot (lib/removalAudit.ts) and is fetched lazily, so the LIST payload is
+      // unchanged — 100 snapshots for rows nobody opened would be the whole-board read the egress
+      // rules exist to prevent. Scoped by restaurant like the list. READ-ONLY: nothing here can put
+      // a bill back — that is the admin's alone.
+      const detailId = String(req.nextUrl.searchParams.get("detail") || "");
+      if (detailId) {
+        if (!/^\d+$/.test(detailId)) return err("bad id", 400);
+        const one = must(await sb.from("deletion_audit")
+          .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount,session_id,order_id,item_id,device_id,meta")
+          .eq("id", Number(detailId)).eq("restaurant_id", rid).limit(1)) as Record<string, unknown>[] | null;
+        if (!one || !one.length) return err("That record isn't for this restaurant.", 404);
+        return ok(one[0]);
+      }
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
       const rows = must(await sb.from("deletion_audit")
         .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount")

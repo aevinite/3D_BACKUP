@@ -226,6 +226,114 @@ if (/selector: "\[data-cancel-order\]", flag: "void_bills"/.test(panel))
   fail("the panel hides ✕ Cancel behind void_bills again — the button would vanish for every restaurant on the default");
 else ok("the panel shows ✕ Cancel without the void_bills power");
 
+// ── A DELETED BILL LEAVES THE PANEL, BUT NEVER THE RECORDS (owner, 2026-08-04) ─────────────
+// "It will show only to admin — it will delete from manager and stuff like that." It did not:
+// softDeleteOrders stamps deleted_at AND archived, the manager's buckets read archived as
+// "freed", so a deleted bill simply moved into the Bills record and stayed readable, printable
+// and restorable by whoever deleted it. The panel has never referenced deleted_at at all.
+{
+  const editorRoute = read("app/api/editor/[...path]/route.ts");
+  // The working list hides them...
+  /let oq = sb\s*\n?\s*\.?from\("orders"\)[\s\S]{0,400}?oq\.is\("deleted_at", null\)|oq = oq\.is\("deleted_at", null\)/.test(editorRoute)
+    ? ok("the manager's bills/board read hides a deleted bill (only the admin ledger shows it)")
+    : fail("the manager panel can see deleted bills again — add .is(\"deleted_at\", null) to the /orders read");
+  // ...but the RECORDS must still contain them. Hiding a sale from the OPERATOR is a permissions
+  // decision; hiding it from the day-close or the tax return is the illegal one.
+  const zSlice = editorRoute.slice(editorRoute.indexOf('if (p === "zreport")'), editorRoute.indexOf('if (p === "gst-report")'));
+  zSlice && !/deleted_at/.test(zSlice)
+    ? ok("the Z-report still counts deleted bills (a delete may never shrink the day's takings)")
+    : fail("the Z-report now filters deleted bills — docs/COMPLIANCE-GUARDRAILS.md requires voids and deletes to be included");
+  // Only the admin can put one back, and must be able to find it whatever its age.
+  const ledger = read("app/api/admin/bills/route.ts");
+  /stateFilter === "deleted"\)\s*sq = sq\.not\("deleted_at", "is", null\)/.test(ledger)
+    ? ok("the admin ledger asks the DATABASE for deleted bills (not the newest page, then sieved)")
+    : fail("the admin ledger filters deleted bills inside a window again — a bill deleted yesterday becomes unreachable");
+  /"before"|nextBefore/.test(ledger) && /searchParams\.get\("from"\)/.test(ledger)
+    ? ok("the admin ledger can page and date-filter back to any bill")
+    : fail("the admin ledger lost its date window / paging cursor — the 90-day restore stops being reachable");
+  /A reason is required to delete a bill/.test(ledger)
+    ? ok("the admin's own bill delete requires a reason, like every other removal")
+    : fail("the admin can delete a bill with no reason — the Removals record would say \"no reason recorded\" for the strongest delete in the product");
+}
+
+// ── THE REPAIR KIT IS A MONEY PATH TOO ─────────────────────────────────────────────────────
+// It was the last one recording only to the activity log, so an admin voiding or removing
+// someone's bill was invisible on the Audit screen the OWNER and the MANAGER actually read.
+{
+  const repair = read("app/api/admin/repair/route.ts");
+  /recordRemoval\(\{[\s\S]{0,300}kind: "invoice_voided"/.test(repair)
+    ? ok("the Repair Kit's void reaches the Audit (Removals), not just the activity log")
+    : fail("the Repair Kit can void a bill with no Audit row — the owner's Removals view would not show it");
+  /recordRemoval\(\{[\s\S]{0,300}kind: "order_deleted"/.test(repair)
+    ? ok("the Repair Kit's delete reaches the Audit (Removals) too")
+    : fail("the Repair Kit can delete a bill with no Audit row");
+  /p_actor: "Admin \(repair\)"/.test(repair)
+    ? ok("a Repair Kit void names its actor in the append-only invoice history")
+    : fail("the Repair Kit voids without p_actor — the invoice history records who as NULL");
+}
+
+// ── AN AUDIT ROW MUST BE OPENABLE, AND SAY WHAT WAS ON IT (owner, 2026-08-04) ───────────────
+// "Click and view the full — how it was and what he changed, which KOT he deleted and what was the
+// item, with time, day, everything, who has done it, with restaurant." The Audit recorded a deleted
+// bill's VALUE and its table and NOTHING about what was on it, so "Bill deleted · Table 6 · ₹1,150"
+// could not be checked or argued with. And nothing was clickable on any of the three screens.
+{
+  const audit = read("lib/removalAudit.ts");
+  /async function snapshotOrder/.test(audit) && /if \(a\.orderId && !\("was" in meta\)\)/.test(audit)
+    ? ok("a removal snapshots the order it removes (kot, items, totals) into meta.was")
+    : fail("removals no longer capture what was on the bill — the Audit goes back to recording only an amount");
+  /items: items\.slice\(0, 60\)/.test(audit)
+    ? ok("the snapshot is capped, and says so when it truncates")
+    : fail("the item snapshot is uncapped — one huge order would bloat every audit row");
+  /return null;   \/\/ the removal already happened/.test(audit)
+    ? ok("a failed snapshot never undoes the removal it was describing")
+    : fail("snapshotOrder can throw into the removal path — gathering evidence must never fail the action");
+
+  // All three surfaces must offer the detail, and it must be LAZY (the snapshot never rides along
+  // with a 200-row list — that is the whole-board read the egress rules forbid).
+  for (const [file, what] of [
+    ["app/api/admin/audit/route.ts", "the admin audit route"],
+    ["app/api/owner/audit/route.ts", "the owner audit route"],
+    ["app/api/editor/[...path]/route.ts", "the manager audit endpoint"],
+  ]) {
+    /searchParams\.get\("detail"\)|nextUrl\.searchParams\.get\("detail"\)/.test(read(file))
+      ? ok(`${what} serves one removal in full on ?detail=`)
+      : fail(`${what} has no ?detail= — an audit row cannot be opened there`);
+  }
+  const adminAudit = read("app/api/admin/audit/route.ts");
+  const ownerAudit = read("app/api/owner/audit/route.ts");
+  !/^const COLS[^\n]*meta/m.test(adminAudit) && !/^const COLS[^\n]*meta/m.test(ownerAudit)
+    ? ok("the audit LIST still does not carry meta (the snapshot is fetched only on a click)")
+    : fail("the audit list now ships every snapshot — that is a whole-board read on a screen nobody has opened");
+
+  // ONLY THE ADMIN CHANGES ANYTHING. The owner sees the identical evidence and gets no write path.
+  /canRestore: false/.test(ownerAudit)
+    ? ok("the owner's removal detail never offers a restore")
+    : fail("the owner route may now offer canRestore — only the admin puts a bill back (owner rule)");
+  !/export async function (POST|PATCH|PUT|DELETE)/.test(ownerAudit)
+    ? ok("the owner audit route is GET-only — the owner can look and change nothing")
+    : fail("the owner audit route grew a write handler — the owner must not be able to change a record");
+  !/export async function (POST|PATCH|PUT|DELETE)/.test(adminAudit)
+    ? ok("restoring still goes through the audited bill-ledger path, not a second door on the audit view")
+    : fail("the admin audit route grew its own write path — keep the one audited restore in /api/admin/bills");
+
+  // One shape on every screen, and the panel's copy registers with the back-stack like every overlay.
+  const shared = read("components/admin/RemovalDetail.tsx");
+  /export function RemovalDetail\(/.test(shared) && /export function RemovalDetailModal\(/.test(shared)
+    ? ok("admin and owner render ONE shared removal-detail component")
+    : fail("the removal detail is no longer shared — two copies drift, which is how one row reads two ways");
+  /useBackClose\("removal-detail"/.test(shared)
+    ? ok("the removal detail closes on a phone's Back instead of leaving the page")
+    : fail("the removal detail is not registered with the back-stack (CLAUDE.md rule for every overlay)");
+  const panel = read("public/panels/editor/app.js");
+  /async function openRemovalDetail\(/.test(panel) && /data-au-open/.test(panel)
+    ? ok("the manager panel's audit rows open the same full record")
+    : fail("the manager panel's audit rows are not clickable — the owner asked for it on every screen");
+  /wrap\.__lfhClose = close;/.test(panel.slice(panel.indexOf("async function openRemovalDetail")))
+    ? ok("the panel's removal detail answers the hardware Back button")
+    : fail("the panel's removal detail does not set __lfhClose — phone Back would leave the panel");
+}
+
 // ── report ───────────────────────────────────────────────────────────────────
 if (!HOOK) for (const m of oks) console.log("  ok   " + m);
 if (fails.length) {

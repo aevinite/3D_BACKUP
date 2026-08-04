@@ -3438,6 +3438,33 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 .au-who small { font-size: 11px; color: var(--muted); }
 @media (max-width: 560px) { .au-row { flex-wrap: wrap; } .au-who { text-align: left; flex-direction: row; gap: 8px; } }
 
+/* A removal row is CLICKABLE now — it opens the full record (owner, 2026-08-04). Give it the
+   affordance, or a row that responds to a tap looks like one that shouldn't have. */
+.au-row[data-au-open] { cursor: pointer; transition: border-color .14s ease, background .14s ease; }
+.au-row[data-au-open]:hover,
+.au-row[data-au-open]:focus-visible { border-color: color-mix(in srgb, var(--gold) 45%, var(--line));
+  background: color-mix(in srgb, var(--gold) 5%, var(--panel-2)); outline: none; }
+
+/* The full record. Same field order and wording as the admin's and the owner's panels
+   (components/admin/RemovalDetail.tsx) so one removal never reads differently on two screens. */
+.au-detail { max-width: 620px; width: 100%; }
+.au-d-body { padding: 4px 16px 18px; max-height: 74vh; overflow: auto; }
+.au-d-head { font-size: 10.5px; text-transform: uppercase; letter-spacing: .7px; font-weight: 800;
+  color: var(--muted); margin: 15px 0 5px; }
+.au-d-row { display: flex; gap: 12px; align-items: baseline; padding: 3px 0; font-size: 12.5px; }
+.au-d-row > span { flex: 0 0 auto; min-width: 128px; color: var(--muted); }
+.au-d-row > b { min-width: 0; font-weight: 600; word-break: break-word; }
+.au-d-items { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.au-d-item { display: grid; grid-template-columns: 1fr 44px 88px; gap: 10px; padding: 7px 11px; font-size: 12.5px; }
+.au-d-item + .au-d-item { border-top: 1px solid var(--line); }
+.au-d-item small { display: block; font-size: 11.5px; color: var(--muted); }
+.au-d-item small.au-d-no { color: #ef4444; }
+.au-d-q { text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+.au-d-amt { text-align: right; font-variant-numeric: tabular-nums; }
+.au-d-none, .au-d-note { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.45; }
+@media (max-width: 560px) { .au-d-row { flex-direction: column; gap: 1px; } .au-d-row > span { min-width: 0; } }
+
+
 /* Sidebar list skeleton (owner, 2026-08-02) — the dish/bill list used to be a blank white
    column between opening the panel and /all returning. These rows sit in index.html so they
    are on screen at first paint; the first renderList() overwrites the <ul> and they vanish.

@@ -66,9 +66,81 @@ type RecordArgs = {
   meta?: Record<string, unknown>;
 };
 
+/** What the thing LOOKED LIKE at the moment it was removed (owner, 2026-08-04).
+ *
+ * "You should be able to click and view the full — how it was and what he changed, which KOT he
+ * deleted and what was the item, with time, day, everything, who has done it, with restaurant."
+ *
+ * The Audit recorded a deleted bill's VALUE (`amount`) and which table it was on, and nothing at
+ * all about what was on it. So "₹1,150 deleted from table 6" could not be checked, argued with, or
+ * put right — the one question a person actually asks ("what did they take off?") had no answer.
+ *
+ * The snapshot is taken HERE rather than at the ~12 call sites, for the same reason recording
+ * itself moved server-side: anything that depends on a caller remembering is not a record. One
+ * extra indexed read per removal, and only on a removal, so it costs nothing in normal service.
+ *
+ * Deliberately a COPY, not a join: the row it describes can be edited or (for a menu item) really
+ * gone by the time anyone looks, so the Audit has to hold its own evidence.
+ */
+async function snapshotOrder(rid: string, orderId: string): Promise<Record<string, unknown> | null> {
+  try {
+    const o = (await sb.from("orders")
+      .select("id, kot_no, table_number, session_id, items, subtotal, discount, discount_note, total, tax, status, payment_status, payment_method, created_at, allergies")
+      .eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as Record<string, unknown> | null;
+    if (!o) return null;
+    // The bill numbers live on the SESSION, and they are what a person quotes when they ask about
+    // a bill — so resolve them into the snapshot rather than leaving a uuid nobody can use.
+    let bill: Record<string, unknown> | null = null;
+    if (o.session_id) {
+      bill = (await sb.from("sessions").select("bill_no, invoice_no, invoice_at, opened_at, cust_name, cust_phone")
+        .eq("id", String(o.session_id)).maybeSingle()).data as Record<string, unknown> | null;
+    }
+    const items = Array.isArray(o.items) ? (o.items as Record<string, unknown>[]) : [];
+    return {
+      kot_no: o.kot_no ?? null,
+      table_number: o.table_number ?? null,
+      bill_no: bill?.bill_no ?? null,
+      invoice_no: bill?.invoice_no ?? null,
+      customer: bill?.cust_name ?? null,
+      customer_phone: bill?.cust_phone ?? null,
+      ordered_at: o.created_at ?? null,
+      status: o.status ?? null,
+      payment_status: o.payment_status ?? null,
+      payment_method: o.payment_method ?? null,
+      subtotal: o.subtotal ?? null,
+      discount: o.discount ?? null,
+      discount_note: o.discount_note ?? null,
+      tax: o.tax ?? null,
+      total: o.total ?? null,
+      allergies: Array.isArray(o.allergies) ? o.allergies : null,
+      // Trimmed to what a person reads on a bill line. Capped so one enormous order can never
+      // bloat the audit row (the count is kept, so a truncated snapshot says so honestly).
+      item_count: items.length,
+      items: items.slice(0, 60).map((it) => ({
+        title: it.title ?? null,
+        qty: it.qty ?? null,
+        price: it.price ?? null,
+        options: Array.isArray(it.options) ? it.options : null,
+        removed: Array.isArray(it.removed) ? it.removed : null,
+        note: it.note ?? null,
+      })),
+      items_truncated: items.length > 60,
+    };
+  } catch {
+    return null;   // the removal already happened — never let evidence-gathering undo it
+  }
+}
+
 /** Write one Audit row. Never throws. */
 export async function recordRemoval(a: RecordArgs): Promise<void> {
   try {
+    // Capture what it WAS before writing the row, unless the caller already passed its own
+    // `was` (a dish removal knows the single line better than a re-read would).
+    let meta = a.meta ?? {};
+    if (a.orderId && !("was" in meta)) {
+      const was = await snapshotOrder(a.rid, a.orderId);
+      if (was) meta = { ...meta, was };
+    }
     const { error } = await sb.rpc("lfh_record_removal", {
       p_rid: a.rid,
       p_kind: a.kind,
@@ -86,7 +158,7 @@ export async function recordRemoval(a: RecordArgs): Promise<void> {
       p_qty: a.qty ?? null,
       p_amount: a.amount ?? null,
       p_table: a.tableNumber ?? null,
-      p_meta: a.meta ?? {},
+      p_meta: meta,
       p_session: a.sessionId ?? null,
     });
     if (error) throw new Error(error.message);

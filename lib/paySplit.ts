@@ -58,7 +58,13 @@ export async function settleBillInParts(
   let oq = sb.from("orders").select("id,subtotal,total,discount,status,payment_status,session_id")
     .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
   oq = openSess ? oq.eq("session_id", openSess.id) : oq.eq("table_number", t).eq("archived", false);
-  const rows = (await oq.limit(200)).data as { id: string; subtotal: number; discount: number; session_id: string | null }[] | null;
+  // 400, not 200: the cap silently CHANGES the answer rather than refusing — the due would be
+  // summed over a partial set and only those rows marked paid. 200 KOTs on one open table is
+  // implausible, but a cap that quietly under-collects is the wrong failure mode for money.
+  const rows = (await oq.limit(400)).data as { id: string; subtotal: number; discount: number; session_id: string | null }[] | null;
+  if (rows && rows.length >= 400) {
+    return { ok: false, status: 409, message: "This bill has too many orders to split in one go — settle it in parts from the table instead." };
+  }
   if (!rows || !rows.length) return { ok: false, message: "Nothing to settle — already paid, or accept the order first.", status: 409 };
   const sid = openSess?.id || rows.find((o) => o.session_id)?.session_id;
   if (!sid) return { ok: false, message: "This table has no live bill session — settle it normally instead.", status: 409 };

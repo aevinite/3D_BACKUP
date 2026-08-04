@@ -35,6 +35,30 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "200", 10) || 200, 1), 300);
 
+  // ── ?detail=<id> — ONE removal, in full (owner, 2026-08-04) ─────────────────────────────────
+  // "Click and view the full — how it was and what he changed, which KOT he deleted and what was
+  // the item, with time, day, everything, who has done it." The list deliberately does NOT carry
+  // `meta` (it holds the item-by-item snapshot, so 200 of them would be a heavy payload for rows
+  // nobody has opened yet — the same lazy shape as the admin bill ledger's ?trail=). Read-only,
+  // and scoped exactly like the list: an owner can only ever open a removal from a restaurant
+  // they own. The OWNER CANNOT CHANGE ANYTHING HERE — this route is GET-only by design; putting
+  // a bill back is the admin's alone (/api/admin/bills).
+  const detailId = url.searchParams.get("detail");
+  if (detailId) {
+    if (!/^\d+$/.test(detailId)) return NextResponse.json({ error: "bad id" }, { status: 400 });
+    let dq = sb.from("deletion_audit").select(`${COLS}, session_id, order_id, item_id, device_id, meta`).eq("id", Number(detailId)).limit(1);
+    if (!scope.all) {
+      if (!scope.ids.length) return NextResponse.json({ error: "not found" }, { status: 404 });
+      dq = dq.in("restaurant_id", scope.ids);
+    }
+    const one = (await dq).data?.[0] as Record<string, unknown> | undefined;
+    if (!one) return NextResponse.json({ error: "not found" }, { status: 404 });
+    const rn = one.restaurant_id
+      ? (await sb.from("restaurants").select("name").eq("id", String(one.restaurant_id)).maybeSingle()).data?.name ?? null
+      : null;
+    return NextResponse.json({ removal: { ...one, restaurant_name: rn }, canRestore: false });
+  }
+
   let q = sb.from("deletion_audit").select(COLS).order("at", { ascending: false }).limit(limit);
   // Optional ?rid= — narrow to ONE selected restaurant. Only honoured when that id is already
   // in the caller's scope, so it can only NARROW, never widen (mirrors /api/owner/oplog).

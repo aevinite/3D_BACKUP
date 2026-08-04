@@ -17,6 +17,7 @@ import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { softDeleteOrders } from "@/lib/softDelete";
+import { recordRemoval } from "@/lib/removalAudit";
 
 export const dynamic = "force-dynamic";
 
@@ -71,12 +72,29 @@ async function handler(req: NextRequest) {
     if (op === "void_bill") {
       const sessionId = String(body.session_id || "");
       if (!UUID.test(sessionId)) return err("invalid session_id");
-      const owns = (await sb.from("sessions").select("id, table_number, invoice_no").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; invoice_no?: number | null } | null;
+      const owns = (await sb.from("sessions").select("id, table_number, invoice_no, bill_no").eq("id", sessionId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; invoice_no?: number | null; bill_no?: number | null } | null;
       if (!owns) return err("That table isn't for this restaurant.", 404);
       if (!owns.invoice_no) return err("This bill has no invoice to void.", 409);
-      const { error } = await sb.rpc("lfh_void_invoice", { p_session: sessionId, p_reason: reason });
+      // What the bill stood at BEFORE it was reopened, so the audit row can say what changed —
+      // the same figures the manager's own void records (editor route, invoice_void).
+      const beforeVoid = (await sb.from("orders").select("total, discount").eq("session_id", sessionId).eq("restaurant_id", rid)).data as
+        { total: number | null; discount: number | null }[] | null;
+      const wasTotal = (beforeVoid || []).reduce((s, o) => s + (Number(o.total) || 0), 0);
+      // p_actor was missing, so the append-only invoice history recorded a void with NO actor —
+      // the one field whose whole job is answering "who did this?".
+      const { error } = await sb.rpc("lfh_void_invoice", { p_session: sessionId, p_reason: reason, p_actor: "Admin (repair)" });
       if (error) throw new Error(error.message);
       await logRepair("repair_void_bill", { table_number: owns.table_number ?? null, detail: `session ${sessionId}` });
+      // …AND into the Audit (Removals), which is where the OWNER and the MANAGER look. The
+      // Repair Kit was the last money path that recorded only to the activity log, so an admin
+      // reopening someone's bill was invisible on the one screen built to answer "what was taken
+      // off my bills, and why?" (2026-08-04). The manager's twin has done this since 2026-08-02.
+      await recordRemoval({
+        rid, kind: "invoice_voided", reason: { note: reason }, user: null,
+        sessionId, tableNumber: owns.table_number != null ? String(owns.table_number) : null,
+        amount: wasTotal,
+        meta: { from: "admin repair kit", total_at_reopen: wasTotal, invoice_no: owns.invoice_no ?? null, bill_no: owns.bill_no ?? null },
+      });
       return NextResponse.json({ ok: true });
     }
 
@@ -86,10 +104,19 @@ async function handler(req: NextRequest) {
     if (op === "delete_order") {
       const orderId = String(body.order_id || "");
       if (!UUID.test(orderId)) return err("invalid order_id");
-      const cur = (await sb.from("orders").select("id, table_number, payment_status, status").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as { table_number?: string; payment_status?: string; status?: string } | null;
+      const cur = (await sb.from("orders").select("id, table_number, payment_status, status, total, session_id").eq("id", orderId).eq("restaurant_id", rid).maybeSingle()).data as
+        { table_number?: string; payment_status?: string; status?: string; total?: number | null; session_id?: string | null } | null;
       if (!cur) return err("That order isn't for this restaurant.", 404);
       await softDeleteOrders(rid, [orderId], { actor: "Admin (repair)", actorId: null, reason: reason || "admin repair delete" });
       await logRepair("repair_delete_order", { order_id: orderId, table_number: cur.table_number ?? null, detail: (cur.payment_status === "paid" ? "was PAID — " : "") + "soft-deleted (tombstoned)" });
+      // Same reason as the void above: a removal has to reach the Audit, not just the log.
+      await recordRemoval({
+        rid, kind: "order_deleted", reason: { note: reason || "admin repair delete" }, user: null,
+        orderId, sessionId: cur.session_id ?? null,
+        tableNumber: cur.table_number != null ? String(cur.table_number) : null,
+        amount: Number(cur.total) || 0,
+        meta: { from: "admin repair kit", was_paid: cur.payment_status === "paid" },
+      });
       return NextResponse.json({ ok: true });
     }
 
