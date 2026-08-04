@@ -98,6 +98,7 @@ export const ACT_LABEL: Record<string, string> = {
   // ── the bill: printing it, reopening it, settling it ──────────────────────
   invoice_generate: "Printed the bill", invoice_void: "Reopened the bill", credit_note: "Issued a credit note",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
+  payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
   order_cancel: "Cancelled the KOT", order_uncancel: "Un-cancelled the KOT", order_tip: "Recorded a tip",
   order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",

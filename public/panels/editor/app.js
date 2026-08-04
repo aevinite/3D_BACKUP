@@ -2622,7 +2622,19 @@ function billIdentity(settings) {
 function billMath(orders) {
   const live = (orders || []).filter((o) => o.status !== "cancelled");
   const tm = taxModel(state.data.settings);
-  const rate = tm.rate;
+  // THE RATE THIS BILL WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 284) — not whatever the
+  // settings say right now. Two faults came out of re-deriving it:
+  //   · A BANQUET is taxed at its OWN rate (18% where configured, mig 239) and nothing outside the
+  //     banquet screen knew. This function is what the Bills tab shows AND what the payment sheet
+  //     asks the manager to collect, so a ₹100,000 banquet printed a tax invoice for ₹118,000 while
+  //     the sheet said ₹105,000 — the restaurant short ₹13,000 on its biggest sale of the month.
+  //   · Correcting the tax setup re-priced bills that had already been printed and paid, so the
+  //     day-close disagreed with the paper in the guests' hands.
+  // A bill is one party's orders, so they share a rate: take the first stamped one. `> 0` on
+  // purpose — a genuine 0 (composition, mig 272) must fall through to the settings, which also
+  // return 0, rather than being mistaken for "not stamped".
+  const stamped = live.find((o) => Number(o.tax_rate) > 0);
+  const rate = stamped ? Number(stamped.tax_rate) : tm.rate;
   const r2 = (n) => Math.round(n * 100) / 100;
   let taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false;
   for (const o of live) {
@@ -2659,9 +2671,15 @@ function billMath(orders) {
   const taxable = Math.max(0, r2(taxableBase - Math.min(disc, taxableBase)));
   const tax = r2(taxable * rate);
   const total = r2(subtotal - disc + tax);
-  // components carried through so the printed bill can itemise each named tax;
+  // Components carried through so the printed bill can itemise each named tax — but ONLY when they
+  // actually describe THIS bill's rate. A banquet charged at 18% must not be itemised with the
+  // dine-in "CGST 2.5% + SGST 2.5%" labels: splitTax would hand out the right rupees under
+  // percentages that don't add up to what was charged. On a mismatch, hand back none and let
+  // printBill's 50/50 fallback label them at the real rate.
+  const compPct = (tm.components || []).reduce((a, c) => a + (Number(c.rate) || 0), 0);
+  const compsMatch = (tm.components || []).length > 0 && Math.abs(compPct / 100 - rate) < 0.0001;
   // composition so a render site can drop the tax line without a second settings lookup.
-  return { subtotal, disc, taxable, rate, tax, total, taxComponents: tm.components,
+  return { subtotal, disc, taxable, rate, tax, total, taxComponents: compsMatch ? tm.components : [],
            taxableBase, nontax, mrpAmount, discountBase, discountFixed, hasMrp,
            composition: tm.composition };
 }
@@ -3693,9 +3711,18 @@ async function deleteOrders(ids, all = false, opts = {}) {
     else if (ids && ids.length === 1) r = await api("DELETE", "/orders/" + ids[0] + "?reason=" + encodeURIComponent(reason) + rc);
     else r = await api("POST", "/orders/delete", { ids, reason, reason_code: rr && rr.code });
     const kept = r && r.kept ? r.kept : 0;
-    toast(kept
-      ? `Cleared ${gone.length} · kept ${kept} paid bill${kept > 1 ? "s" : ""} as records`
-      : (all ? "All cleared" : "Order(s) deleted"), "ok");
+    // "All cleared" MUST NOT be said when it wasn't. A clear-all is done in a bounded batch now
+    // (the server used to try thousands in one request and could die part-way), so the server tells
+    // us whether more is waiting — and the person is offered the next tap instead of being told the
+    // job is finished when it isn't.
+    const more = !!(r && r.moreToClear);
+    const cleared = (r && typeof r.deleted === "number") ? r.deleted : gone.length;
+    toast(more
+      ? `Cleared ${cleared} — there are more. Tap Clear again to carry on.`
+      : kept
+        ? `Cleared ${cleared} · kept ${kept} paid bill${kept > 1 ? "s" : ""} as records`
+        : (all ? "All cleared" : "Order(s) deleted"), "ok");
+    if (more) { state.data.orders = null; await loadOrders(); }   // show what is genuinely left
   } catch (e) {
     state.data.orders = before;   // bring the rows back — the delete failed (e.g. a single paid bill: 409)
     renderEditor();
@@ -3776,6 +3803,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
       <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${esc(label)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
       <div class="dish-edit-body">
         <div class="disc-bill-row"><span>Bill</span><b>${inr(due)}</b></div>
+        ${opts.methodOnly ? "" : `
         <div class="dish-edit-lbl" style="margin-top:6px">Add a tip? <span class="muted small">(optional — extra for staff, on top of the bill)</span></div>
         <div class="chips pay-tip-chips" style="margin:4px 0 6px">
           <span class="chip pay-tip-pick" data-tip-amt="0">None</span>
@@ -3784,7 +3812,7 @@ function openPaymentMethodModal(due, label, opts = {}) {
           <span class="chip pay-tip-pick" data-tip-amt="${r2(due * 0.15)}">15%</span>
         </div>
         <input type="number" inputmode="decimal" min="0" step="1" class="dish-edit-custominput" id="payTipInput" placeholder="Custom tip ₹" style="margin-bottom:8px">
-        <div class="disc-bill-row"><span><b>Total collected</b></span><b id="payTotal">${inr(due)}</b></div>
+        <div class="disc-bill-row"><span><b>Total collected</b></span><b id="payTotal">${inr(due)}</b></div>`}
         <div class="dish-edit-lbl">How did they pay? <span class="muted small">— only pick one if the money's actually in hand</span></div>
         <div class="pay-method-grid">
           <button type="button" class="pay-method-btn" data-method="UPI"><span class="pmi">📱</span>UPI</button>
@@ -5181,7 +5209,16 @@ function openParcelTile(id) {
   };
   wrap.querySelector("#pcPay").onclick = async (e) => {
     const b = e.currentTarget; b.disabled = true;
-    try { await api("POST", `/platform/${o.id}/pay`, { method: "cash" }); toast("Collected ✓", "ok"); closeP(); await loadPlatform(); }
+    // ASK HOW THEY PAID (2026-08-04). This posted { method: "cash" } unconditionally, so every
+    // parcel collected by UPI, card or wallet was booked as CASH — the payment-method breakdown and
+    // any cash-vs-digital reconciliation were wrong by the whole value of the day's parcels, and
+    // cash-vs-digital is exactly the split a GST audit looks at. A table settle has always opened
+    // this sheet and asked; the parcel tile never did.
+    // methodOnly: no tip and no split (the parcel endpoint takes neither), and crm:false because
+    // the counter already captured the name when the parcel was punched.
+    const picked = await openPaymentMethodModal(Number(o.total) || 0, `Collect parcel ${o.parcel_no ?? ""}`.trim(), { methodOnly: true, crm: false });
+    if (!picked || picked.special) { b.disabled = false; return; }   // cancelled — the tile stays
+    try { await api("POST", `/platform/${o.id}/pay`, { method: picked.method }); toast(`Collected via ${picked.method} ✓`, "ok"); closeP(); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Couldn't collect: " + ((err && err.message) || err), "err"); }
   };
 }
@@ -6300,6 +6337,7 @@ const OP_ACTION_LABELS = {
   // ── the bill: printing it, reopening it, settling it ──────────────────────
   invoice_generate: "Printed the bill", invoice_void: "Reopened the bill", credit_note: "Issued a credit note",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
+  payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
   order_cancel: "Cancelled the KOT", order_uncancel: "Un-cancelled the KOT", order_tip: "Recorded a tip",
   order_item_move: "Moved a dish to another bill", customer_saved: "Saved the customer",

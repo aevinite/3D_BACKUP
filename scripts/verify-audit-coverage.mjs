@@ -347,7 +347,7 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
   /const sessionStamp = \{/.test(sd) && !/from\("sessions"\)\.update\(orderStamp\)/.test(sd)
     ? ok("the session tombstone sends only the columns sessions HAS (no archived/archived_at)")
     : fail("softDeleteOrders sends `archived` to sessions again — the UPDATE is rejected and the bill is never tombstoned");
-  /bill tombstone failed for session/.test(sd)
+  /throw new Error\(`bill tombstone failed/.test(sd)
     ? ok("a failed bill tombstone THROWS instead of failing silently")
     : fail("the session tombstone's error is swallowed again — that is how this hid for months");
   /soft-delete failed/.test(sd)
