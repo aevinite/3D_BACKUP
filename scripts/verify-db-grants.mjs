@@ -187,6 +187,37 @@ async function checkDb(label, env) {
   if (ghosts.length) fail(`ANON_ALLOWED names ${ghosts.length} function(s) that no longer exist: ${ghosts.join(", ")} — delete the entries`);
   else pass("every entry in the allow-list still exists (no stale permission written down)");
 
+  // 2b. THE ALLOW-LIST IS A TWO-WAY PROMISE. Check 1 catches a function that is anon-callable
+  //     and NOT written down. This catches the opposite, which nothing caught before and which
+  //     cost the guest ban wall: a function that IS written down as needed by a guest browser,
+  //     but has since been revoked from anon. Under-permission is as much a fault as
+  //     over-permission - it is just silent, because the guest's request 401s in a browser
+  //     nobody is watching instead of failing a test.
+  //
+  //     The story: mig 290 restored lfh_check_ban WITH its anon grant (BanGate calls it on every
+  //     guest menu load). Mig 291 then revoked it, in good faith, reading it as a staff-only
+  //     function - its own comment says "a guest browser has no business calling it". Because 291
+  //     sorts later, a reseed left the guest's ban check un-callable and the wall could never
+  //     appear. Mig 293 re-grants it, and this check is what stops the next round trip.
+  //     ONLY the entries that are genuinely CALLED by a guest browser count. The allow-list also
+  //     documents TRIGGER functions (their reason starts "trigger:"), which nothing calls by name
+  //     and which are deliberately revoked from anon — mig 166 revokes lfh_clear_table_tag_on_close
+  //     itself. Counting those would make this check permanently red for the wrong reason, which
+  //     is how a guard stops meaning anything.
+  const muted = Object.keys(ANON_ALLOWED).filter((n) => {
+    if (/^trigger:/i.test(ANON_ALLOWED[n])) return false; // documented, not guest-called
+    const f = fns.find((x) => x.name === n);
+    return f && !f.anon; // it exists, we say a guest calls it, and a guest cannot run it
+  });
+  if (muted.length) {
+    fail(`${muted.length} allow-listed function(s) are NOT executable by anon: ${muted.join(", ")}`
+       + ` - a guest browser calls each of these, so a revoke here shows up as a 401 in the menu,`
+       + ` not as a failing test. Re-GRANT in a new migration, or delete the caller AND the`
+       + ` ANON_ALLOWED entry in the same commit.`);
+  } else {
+    pass("every allow-listed function is actually callable by anon (a guest's own request can't 401)");
+  }
+
   // 3. Every function the app actually uses can be run by the server.
   const noSvc = fns.filter((f) => !f.svc);
   if (noSvc.length) fail(`${noSvc.length} function(s) are not executable by service_role: ${noSvc.slice(0, 5).map((f) => f.name).join(", ")}`);
@@ -275,7 +306,14 @@ function checkMigrations() {
   // object-by-object in the sweep) so nothing breaks — but a worktree currently holds a
   // DIFFERENT 254_*.sql than main does, and merging it would make the order matter.
   const dups = Object.entries(byNum).filter(([, v]) => v.length > 1);
-  const KNOWN_DUP_COUNT = 18;
+  // 19 since 2026-08-04: two sessions merged a 290 within half an hour of each other
+  // (290_the_blocked_guest_must_be_told + 290_document_dates_follow_the_business_day). Checked
+  // object-by-object like the other 18 and they are disjoint: the first touches only
+  // lfh_check_ban, the second only lfh_doc_date_hi + the lfh_inv_report_* family. Neither is
+  // renumbered because both are already merged AND applied to both databases, and renaming a
+  // migration that has run buys nothing but a diff. The ORDER question that mattered here —
+  // 291 revoking what 290 granted — is settled by mig 293, not by the filename.
+  const KNOWN_DUP_COUNT = 19;
   if (dups.length > KNOWN_DUP_COUNT) {
     fail(`${dups.length} duplicate migration numbers (was ${KNOWN_DUP_COUNT}) — a NEW one was added: `
        + dups.filter(([, v]) => v.length > 1).slice(-3).map(([k, v]) => `${k}: ${v.join(" + ")}`).join("; ")
