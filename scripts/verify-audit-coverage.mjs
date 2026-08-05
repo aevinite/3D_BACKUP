@@ -14,6 +14,19 @@ import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => { try { return readFileSync(join(root, p), "utf8"); } catch { return ""; } };
+
+// A migration's NUMBER is not an identifier: parallel branches get RENUMBERED on merge (18 numbers
+// are already duplicated on main), and a guard that hard-codes a filename breaks for everyone the
+// moment someone else's migration lands first — which is exactly what happened to
+// verify-owner-reports.mjs (fixed in c9eff489). So find the migration by its CONTENT.
+const migrationSrcWith = (needle) => {
+  try {
+    const dir = join(root, "supabase/migrations");
+    return readdirSync(dir).filter((f) => f.endsWith(".sql"))
+      .map((f) => readFileSync(join(dir, f), "utf8"))
+      .filter((sql) => sql.includes(needle)).join("\n");
+  } catch { return ""; }
+};
 const fails = [];
 const oks = [];
 const ok = (m) => oks.push(m);
@@ -353,7 +366,7 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
   /soft-delete failed/.test(sd)
     ? ok("a failed order soft-delete throws too")
     : fail("the order soft-delete's error is unchecked");
-  const mig = read("supabase/migrations/280_the_bill_tombstone_that_never_landed.sql");
+  const mig = migrationSrcWith("HAVING count(*) FILTER (WHERE o.deleted_at IS NULL) = 0");
   /HAVING count\(\*\) FILTER \(WHERE o\.deleted_at IS NULL\) = 0/.test(mig)
     ? ok("mig 280 repairs only bills whose every order is already deleted")
     : fail("mig 280 is missing or no longer scoped to fully-deleted bills");
@@ -370,7 +383,7 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
 // Each one would make billMath quote a wrong total for that bill, and billMath is what the payment
 // sheet asks the manager to collect. mig 288 makes the derivation able to say "I don't know".
 {
-  const m287 = read("supabase/migrations/288_only_stamp_a_rate_we_believe.sql"); // renumbered from 287 (a second 287 existed)
+  const m287 = migrationSrcWith("lfh_plausible_tax_rate");  // was 287, landed as 288 — find it by content
   /CREATE OR REPLACE FUNCTION lfh_plausible_tax_rate/.test(m287)
     ? ok("a derived tax rate is credibility-checked before it is stored")
     : fail("mig 288 is missing — an implausible derived rate would be trusted as the bill's rate");
@@ -397,7 +410,7 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
 // bill is invisible to the ledger and cannot be put back. So the rule moved onto the row change
 // itself, exactly as mig 232 did for closing a table.
 {
-  const m291 = read("supabase/migrations/291_a_fully_deleted_bill_tombstones_itself.sql");
+  const m291 = migrationSrcWith("lfh_tombstone_fully_deleted_bill");
   /CREATE TRIGGER trg_tombstone_fully_deleted_bill/.test(m291)
     ? ok("a fully-deleted bill tombstones itself, whoever wrote the delete")
     : fail("mig 291 is missing — a script or a hand-run UPDATE would hide a bill from the admin ledger again");

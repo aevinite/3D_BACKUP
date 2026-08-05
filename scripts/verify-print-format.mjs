@@ -14,7 +14,7 @@
 // document — public/panels/billdoc.js — and this check fails the moment a second one appears.
 //
 // It is static: no database, no login, no browser, no dev server. Runs in well under a second.
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -22,6 +22,19 @@ import { createRequire } from "node:module";
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
 const read = (p) => (existsSync(join(ROOT, p)) ? readFileSync(join(ROOT, p), "utf8") : "");
+
+// A migration's NUMBER is not an identifier: parallel branches get RENUMBERED on merge (18 numbers
+// are already duplicated on main), and a guard that hard-codes a filename breaks for everyone the
+// moment someone else's migration lands first — which is exactly what happened to
+// verify-owner-reports.mjs (fixed in c9eff489). So find the migration by its CONTENT.
+const migrationSrcWith = (needle) => {
+  try {
+    const dir = join(ROOT, "supabase/migrations");
+    return readdirSync(dir).filter((f) => f.endsWith(".sql"))
+      .map((f) => readFileSync(join(dir, f), "utf8"))
+      .filter((sql) => sql.includes(needle)).join("\n");
+  } catch { return ""; }
+};
 
 let fails = 0;
 const ok = (m) => console.log(`  ok   ${m}`);
@@ -170,9 +183,9 @@ if (/onafterprint = function\(\)\{[^}]*focus/.test(bill) && !/onafterprint[^\n]*
 // continue the invoice number and the bill number, to keep the track." A parcel receipt used to
 // print with a blank Invoice line and no Bill no at all, because printParcelReceipt() hardcoded
 // both to null and aggregator_orders had no such columns.
-const MIG = "supabase/migrations/261_parcel_platform_bill_numbers.sql";
-const mig = read(MIG);
-if (!mig) bad(`${MIG} is missing`, "parcel and delivery bills would go out unnumbered again");
+const MIG_SRC = migrationSrcWith("lfh_assign_aggregator_numbers");
+const mig = MIG_SRC;
+if (!mig) bad("no migration defines lfh_assign_aggregator_numbers", "parcel and delivery bills would go out unnumbered again");
 else {
   /lfh_next_counter\(v_rid, 'bill'\)/.test(mig) && /lfh_next_seq\(v_rid, 'invoice'\)/.test(mig)
     ? ok("parcel/delivery numbers come from the SAME two counters dine-in uses")

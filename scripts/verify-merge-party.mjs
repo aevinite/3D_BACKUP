@@ -9,12 +9,25 @@
 //   · the tablet's full refresh wiped the party's slices and re-pulled only ONE table
 //
 // Run: node scripts/verify-merge-party.mjs   (also part of the repo's static guard set)
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => readFileSync(join(root, p), "utf8");
+
+// A migration's NUMBER is not an identifier: parallel branches get RENUMBERED on merge (18 numbers
+// are already duplicated on main), and a guard that hard-codes a filename breaks for everyone the
+// moment someone else's migration lands first — which is exactly what happened to
+// verify-owner-reports.mjs (fixed in c9eff489). So find the migration by its CONTENT.
+const migrationSrcWith = (needle) => {
+  try {
+    const dir = join(root, "supabase/migrations");
+    return readdirSync(dir).filter((f) => f.endsWith(".sql"))
+      .map((f) => readFileSync(join(dir, f), "utf8"))
+      .filter((sql) => sql.includes(needle)).join("\n");
+  } catch { return ""; }
+};
 
 const editor = read("public/panels/editor/app.js");
 const billdoc = read("public/panels/billdoc.js");
@@ -96,7 +109,7 @@ check("lib/tableMerge.ts exists (the one shared resolver)",
   read("lib/tableMerge.ts").includes("export async function mergeParentTable"));
 
 // ── round 2 (mig 264): every remaining path respects a live merge ───────────
-const mig264 = read("supabase/migrations/264_every_path_respects_a_merge.sql");
+const mig264 = migrationSrcWith("lfh_staff_move_order");
 check("mig 264: a guest order at a merged table joins the party (lfh_place_order_public)",
   /lfh_place_order_public[\s\S]{0,4500}lfh_merge_parent_table\(v_rid, v_tbl\)/.test(mig264));
 check("mig 264: the recreate KEPT mig 253's open-price guest guard (staff_priced_item)",
