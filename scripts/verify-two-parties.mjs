@@ -59,7 +59,20 @@ const busy = new Set([
   ...must(await sb.from("sessions").select("table_number").eq("restaurant_id", RID).neq("status", "closed")).map((s) => String(s.table_number)),
   ...must(await sb.from("orders").select("table_number").eq("restaurant_id", RID).eq("archived", false).is("deleted_at", null).neq("status", "cancelled").limit(2000)).map((o) => String(o.table_number)),
 ]);
-const T = String([...Array(count).keys()].map((n) => n + 1).reverse().find((n) => !busy.has(String(n))));
+// `.find()` returns undefined when EVERY table is busy, and `String(undefined)` is the string
+// "undefined" — so this used to go on and try to open a table called "undefined", failing deep
+// inside lfh_staff_open_table with a raw stack trace that named a line number and nothing else.
+// Inside the 520-phase suite that read as "guard: two parties never mix ❌ at …:82:17", which
+// looks like a broken product; the guard next to it (verify-table-lifecycle) says the real
+// reason in one plain line, and that is what this should do too. It happens for real: with
+// several sweep terminals sharing one floor there were 36 open sessions and no free table.
+const freeTable = [...Array(count).keys()].map((n) => n + 1).reverse().find((n) => !busy.has(String(n)));
+if (freeTable === undefined) {
+  console.error(`need one completely free table; the floor is busy right now ` +
+    `(${count} tables, all of them in use — ${busy.size} carry a live session or order)`);
+  process.exit(1);
+}
+const T = String(freeTable);
 const dish = must(await sb.from("menu_items").select("id,title,price").eq("restaurant_id", RID).limit(2));
 
 const openTable = async () => {
