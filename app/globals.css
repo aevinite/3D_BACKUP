@@ -28,6 +28,11 @@
   --cyan-glow: rgba(6,182,212,0.3);
   --brown-cyan-grad: linear-gradient(135deg, rgba(6,182,212,0.6) 0%, rgba(34,211,238,0.5) 100%);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* In the DARK skin the bright accent on a dark page already measured clean
+     (0 text elements under 3:1 across the whole guest menu), so accent-text is
+     the accent itself. The light skin darkens it — see [data-theme="light"]. */
+  --accent-ink: var(--accent);
+  --accent-ink-dim: var(--accent-dim);
 }
 
 [data-theme="light"] {
@@ -44,6 +49,15 @@
   --accent-dim: rgba(212, 165, 116, 0.6);
   --accent-grad: linear-gradient(135deg, #d4a574 0%, #c4956a 100%);
   --accent-glow: rgba(212, 165, 116, 0.25);
+  /* TEXT written in the accent colour, darkened enough to read on a light page.
+     The bright accent is tuned for a dark background: on the cream light page the
+     dish PRICE measured 2.02:1, "ABOUT THIS DISH" 1.50:1 and "Read more" 1.58:1 —
+     effectively invisible (visual sweep, 2026-08-05). Fills, borders and glows keep
+     the bright accent; only text switches to this. Derived from --accent with
+     color-mix so a per-restaurant accent (pink, blue…) darkens too instead of
+     being replaced by a fixed brown. */
+  --accent-ink: color-mix(in srgb, var(--accent) 55%, #000);
+  --accent-ink-dim: color-mix(in srgb, var(--accent) 62%, #000);
 }
 
 * { box-sizing: border-box; }
@@ -63,7 +77,12 @@ button.favorite-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-html[data-theme="light"], html[data-theme="light"] body { background: #faf3e8; }
+/* var(--bg), NOT a hard-coded cream (T11 sweep 2026-08-05). This was `background: #faf3e8`, so in
+   the LIGHT skin every restaurant's page canvas was restaurant #1's cream no matter what palette
+   the restaurant had set — the same fault as the dark skin's brown, in a second place. The token
+   still resolves synchronously from the [data-theme="light"] block below, so this keeps doing its
+   real job (painting the light background on the FIRST frame, no cream-then-dark flash). */
+html[data-theme="light"], html[data-theme="light"] body { background: var(--bg); }
 /* Staff/owner/admin panels are ALWAYS the dark console skin. The boot script tags the
    document data-staffdark on those routes so this render-blocking rule paints it dark on
    the FIRST frame — no cream-guest-background flash before the dark shell mounts (the
@@ -114,8 +133,11 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
   font-style: normal;
 }
 [data-theme="light"] .brand-highlight {
-  color: var(--brand-highlight, #F5B400);
-  text-shadow: 0 1px 0 rgba(245, 180, 0, 0.15);
+  /* Half of every restaurant's own name measured 1.67:1 on the cream page — the
+     bright brand gold is a DARK-skin colour. Darken the same hue for light so the
+     name still reads as the restaurant's colour, just legibly. */
+  color: color-mix(in srgb, var(--brand-highlight, #F5B400) 58%, #000);
+  text-shadow: none;
 }
 .brand-title:hover { transform: scale(1.05); }
 /* Phones: the top bar packs the wordmark + 5 action buttons on one 360-390px
@@ -1117,7 +1139,14 @@ body.menu-frost .nav {
   flex-direction: column; text-align: left; padding: 10px; align-items: flex-start;
 }
 .thumb-wrapper { position: relative; flex-shrink: 0; margin-right: 16px; }
-.gallery-mode .thumb-wrapper { margin: 0 0 10px 0; width: 100%; aspect-ratio: 1; }
+/* min-height:0 + overflow:hidden — WITHOUT them this is a flex item with the default
+   min-height:auto, and the <img> inside is sized height:100%, a percentage against a
+   height aspect-ratio has not definitely resolved. Chromium then falls back to the
+   image's OWN ratio for min-content sizing, so a PORTRAIT photo pushes the square past
+   itself and drags the whole card 34px below its row (Pizza Palace's Pepperoni, visual
+   sweep 2026-08-05). Landscape photos are shorter than square, which is why this hid
+   for so long. */
+.gallery-mode .thumb-wrapper { margin: 0 0 10px 0; width: 100%; aspect-ratio: 1; min-height: 0; overflow: hidden; }
 .dish-thumb { 
   width: 86px; height: 86px; border-radius: 16px; object-fit: cover; transition: all 0.5s var(--ease);
 }
@@ -2119,7 +2148,7 @@ body.menu-frost .nav {
   font-family: 'Inter', sans-serif;
   font-size: 34px;
   font-weight: 700;
-  color: var(--accent);
+  color: var(--accent-ink);
   letter-spacing: -0.025em;
   font-variant-numeric: tabular-nums;
   font-feature-settings: 'tnum' 1;
@@ -2128,7 +2157,7 @@ body.menu-frost .nav {
   font-size: 11px; color: var(--muted2); letter-spacing: 1px; text-transform: uppercase;
 }
 .section-label { 
-  font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent-dim); margin-bottom: 10px;
+  font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--accent-ink-dim); margin-bottom: 10px;
   animation: titleSlide 0.6s var(--ease) 0.32s both;
 }
 .desc-box { 
@@ -2141,7 +2170,7 @@ body.menu-frost .nav {
 }
 .detail-desc.expanded { max-height: 200px; }
 .desc-toggle { 
-  font-size: 11px; color: var(--accent-dim); margin-top: 8px; cursor: pointer; display: inline-block;
+  font-size: 11px; color: var(--accent-ink-dim); margin-top: 8px; cursor: pointer; display: inline-block;
   transition: all 0.2s var(--ease);
 }
 .desc-toggle:hover { opacity: 0.8; }
@@ -2175,7 +2204,7 @@ body.menu-frost .nav {
 .stat-num {
   font-family: 'Inter', sans-serif;
   font-size: 20px;
-  color: var(--accent);
+  color: var(--accent-ink);
   margin-bottom: 4px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -3015,6 +3044,10 @@ a *:active,
 .item-card:hover .thumb-wrapper .badge-4d { color: #1a0f0a !important; }
 
 /* --- CART ADD / QTY BUTTON on food cards --- */
+/* !important beats the `.item-card-link *, … { color: inherit !important }` reset at
+   line ~2280, which otherwise forces this glyph to the theme's cream text colour —
+   a pale plus on pale amber, measured 1.7:1 (visual sweep, 2026-08-05). Same trick the
+   sold-out pill and the 4D badge already use for the same reason. */
 .cart-add-btn {
   position: absolute; bottom: 10px; right: 10px;
   width: 36px; height: 36px;
@@ -3029,6 +3062,10 @@ a *:active,
   z-index: 10;
   -webkit-tap-highlight-color: transparent;
 }
+.cart-add-btn { color: #1a0f0a !important; }
+/* …EXCEPT the customize variant, whose background is only a 16% tint: a near-black
+   glyph would vanish on it. Higher specificity so it wins over the line above. */
+.cart-add-btn.customize-btn { color: var(--text) !important; }
 .cart-add-btn:hover { transform: scale(1.12); box-shadow: 0 6px 20px var(--accent-glow); }
 .cart-add-btn:active { transform: scale(0.95); }
 /* Touch devices (no hover = phone/tablet): enlarge the cramped add / qty
@@ -3118,7 +3155,10 @@ a:focus:not(:focus-visible) { outline: none; }
   bottom: 0;
   width: 36px;
   display: flex;
-  flex-direction: column;
+  /* ROW, not column: the two chevrons are a staggered "chasing" pair and the
+     animations that drive them (peekPrev/peekNext) translate on X. Stacked
+     vertically they read as two disconnected arrows / a rendering glitch. */
+  flex-direction: row;
   align-items: center;
   justify-content: center;
   gap: 6px;

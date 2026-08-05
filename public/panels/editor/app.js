@@ -242,6 +242,13 @@ const fold = (s) => String(s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").toL
 // the menu app's lib/format.ts — update both together when rates move.
 const INR_RATE = 1; // prices are stored in rupees now (migration 043) — no conversion
 const inr = (usd) => "₹" + Math.round((parseFloat(usd) || 0) * INR_RATE).toLocaleString("en-IN");
+// ONE date/time format for the whole panel (T11 desktop sweep, 2026-08-05). The Bills tab stamped
+// a bill "8/4/2026, 7:55:51 AM" — a BARE toLocaleString(), i.e. the browser's default, which is
+// month-first and genuinely ambiguous to an Indian reader (8 April or 4 August?) — while the
+// Audit & logs tab one click away already printed the unambiguous "Aug 05, 07:15 AM". Two formats,
+// one panel. Seconds on a bill timestamp are noise no manager ever uses.
+const fmtWhen = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true }) : "";
+const fmtClock = (ts) => ts ? new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }) : "";
 // el: turn a string of HTML into a real, clickable page element we can insert.
 const el = (html) => {
   const t = document.createElement("template");
@@ -1659,9 +1666,15 @@ function tableSeatingCardHtml(s) {
       Each table's <b>name</b> (optional — e.g. the last table as "Banquet"; tiles and
       table views show it, while bills &amp; QR codes keep the number) and how many
       people can sit there — shown next to the chair icon on every tile. A table you leave
-      alone uses the <b>Seats per table</b> default from the Tables card above.
+      alone uses the restaurant's default number of seats.
     </p>
-    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;max-height:340px;overflow-y:auto;padding-right:4px">${cells}</div>
+    <!-- NO fixed max-height (T11 desktop sweep 2026-08-05). It was 340px with overflow-y:auto, so
+         with 30 tables the card showed T1-T24, SLICED the T25-T28 row in half at its bottom edge and
+         put T29/T30 outside the box — with no scrollbar drawn, so nothing said there was more below
+         and it just read as a broken card. There were ~250px of empty page directly underneath it.
+         The grid now grows to its content; a very large floor still gets a scroller, but a tall one
+         (70vh) that keeps a visible bar instead of hiding four tables behind a clean cut. -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px;max-height:70vh;overflow-y:auto;padding-right:4px;scrollbar-width:thin">${cells}</div>
   </div>`;
 }
 
@@ -2700,7 +2713,7 @@ function mergedOrderCardHtml(g) {
   const anyUnpaid = live.some((o) => o.payment_status !== "paid");
   const cls = anyReceived ? "received" : anyPreparing ? "preparing" : "served";
   const label = anyReceived ? "New order" : anyPreparing ? "Preparing" : "Served";
-  const when = o0.created_at ? new Date(o0.created_at).toLocaleString() : "";
+  const when = fmtWhen(o0.created_at);
   const kots = g.map((o) => o.kot_no).filter((x) => x != null);
   // Stage action: accept the whole table, or serve the whole table.
   let stage = "";
@@ -2765,7 +2778,7 @@ function callsHtml() {
   const calls = (state.data.calls || []).filter((c) => !c.resolved);
   if (!calls.length) return "";
   const rows = calls.map((c) => {
-    const when = c.created_at ? new Date(c.created_at).toLocaleTimeString() : "";
+    const when = fmtClock(c.created_at);
     const REASON_EMOJI = {
       "Call waiter": "🙋", "Water": "💧", "Cutlery": "🍴",
       "Napkins": "🧻", "Clean table": "🧹", "Bring the bill": "🧾",
@@ -3091,7 +3104,7 @@ function billRecordCardHtml(b) {
   const statusPill = b.cancelled ? `<span class="ord-pill cancelled">Cancelled</span>` : `<span class="ord-pill served">Settled</span>`;
   const payPill = b.cancelled ? "" : `<span class="pay-pill ${b.paid ? "paid" : "pending"}">${b.paid ? "💳 Paid" : "⏳ Unpaid"}</span>`;
   const kots = g.map((o) => o.kot_no).filter((x) => x != null);
-  const when = o0.created_at ? new Date(o0.created_at).toLocaleString() : "";
+  const when = fmtWhen(o0.created_at);
   const voided = !!o0.invoice_voided;
   // A FULLY-CANCELLED bill must not show priced dish lines next to a ₹0 total — the exact
   // contradiction the bill modal fixed after the owner's 2026-07-03 screenshot ("Litchi
@@ -3132,7 +3145,7 @@ function parcelRecordCardHtml(p) {
   const tax = Math.max(0, Math.round((total - taxable) * 100) / 100);
   const cancelled = p.status === "cancelled";
   const cls = cancelled ? "ord-cancelled" : "ord-served";
-  const when = p.created_at ? new Date(p.created_at).toLocaleString() : "";
+  const when = fmtWhen(p.created_at);
   const who = (p.customer_name && !/^parcel$/i.test(String(p.customer_name).trim())) ? p.customer_name : "";
   // Same rule as the dine-in record: a cancelled parcel says "no charge" in words instead
   // of showing priced lines and money rows that contradict what was actually taken (₹0).
@@ -3241,7 +3254,7 @@ function openBillModal(key) {
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
       <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"}${o0.bill_no != null ? ` · Bill #${esc(o0.bill_no)}` : ""}</b>${o0.invoice_voided ? `<span class="inv-chip voided">voided</span>` : ""}</div>
-      <div class="bm-sub">${esc(o0.customer_name || "")}${o0.created_at ? " · " + esc(new Date(o0.created_at).toLocaleString()) : ""}</div>
+      <div class="bm-sub">${esc(o0.customer_name || "")}${o0.created_at ? " · " + esc(fmtWhen(o0.created_at)) : ""}</div>
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
         ${mrpTotalsRows(m, pct)}
@@ -4607,15 +4620,41 @@ async function loadDashboard(useCache) {
     emptyCard("chTop", "Top dishes", "No dishes sold in this range yet.");
   }
   // Busy hours — the peak hour is solid gold, the rest stay soft.
+  //
+  // TWO FIXES HERE, both from the T11 desktop sweep (2026-08-05), same rule as Day parts above:
+  //
+  // 1. TWO POPULATED HOURS, NOT ONE. The gate was `.some(v => v > 0)`, so a single busy hour drew
+  //    the full plot — measured on the real dashboard: ONE 9px hairline bar at 5:00 standing in a
+  //    411px-wide empty grid. That is the "lonely 1-bar plot" the owner banned in as many words.
+  //    Early in any shift, and on any quiet day, that is the normal state.
+  // 2. PLOT THE HOURS THE RESTAURANT WAS OPEN, not the 24-hour clock. 24 fixed buckets in the
+  //    card's 411px is ~9px per bar, so even a busy day never reached the ~24px minimum the chart
+  //    rule asks for, and there is no scroller on a canvas chart to fall back on. Trimming to the
+  //    active span (padded an hour either side, at least 8 buckets so it never looks cramped)
+  //    gives ~30-45px bars on a real trading day and stops half the plot being dead air.
   const hoursData = s.hours || [];
-  if (hoursData.some((v) => v > 0)) {
+  const liveHours = hoursData.reduce((n, v) => n + (v > 0 ? 1 : 0), 0);
+  if (liveHours >= 2) {
     const peakH = hoursData.indexOf(Math.max(...hoursData));
+    const busy = hoursData.map((v, h) => (v > 0 ? h : -1)).filter((h) => h >= 0);
+    let from = Math.max(0, busy[0] - 1), to = Math.min(23, busy[busy.length - 1] + 1);
+    while (to - from + 1 < 8 && (from > 0 || to < 23)) { if (from > 0) from--; if (to < 23 && to - from + 1 < 8) to++; }
+    const span = hoursData.slice(from, to + 1);
     dashCharts.push(new Chart(document.getElementById("chHours"), {
       type: "bar",
-      data: { labels: Array.from({ length: 24 }, (_, h) => h + ":00"), datasets: [{ label: "orders", data: hoursData, backgroundColor: hoursData.map((_, i) => (i === peakH ? gold : goldSoft)), borderRadius: 4, borderSkipped: false }] },
+      // Wide slots + wide bars: Chart.js defaults leave ~30% of every category as padding, which
+      // on a 16-hour span in a 411px card meant 17px bars. 0.95/0.94 gets them to ~22px — as close
+      // to the rule's ~24px as a fixed-width card allows once a restaurant is genuinely open 16
+      // hours. (Measured, not guessed: 24 buckets @9px → 16 buckets @17px → 16 buckets @22px.)
+      data: { labels: span.map((_, i) => from + i + ":00"), datasets: [{ label: "orders", data: span, backgroundColor: span.map((_, i) => (from + i === peakH ? gold : goldSoft)), borderRadius: 4, borderSkipped: false, categoryPercentage: 0.95, barPercentage: 0.94 }] },
       options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => ` ${c.parsed.y} order${c.parsed.y === 1 ? "" : "s"}` } } },
         scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: tickLimit("chHours") } }, y: { beginAtZero: true, border: { display: false }, ticks: { precision: 0, maxTicksLimit: 5 } } } },
     }));
+  } else if (liveHours === 1) {
+    // Same honesty rule as Day parts: name the hour and its count rather than claiming "no orders".
+    const h = hoursData.findIndex((v) => v > 0);
+    emptyCard("chHours", "Busy hours <span>· orders by hour</span>",
+      `Every order so far came in between <b>${h}:00</b> and <b>${h + 1}:00</b> — ${hoursData[h]} order${hoursData[h] === 1 ? "" : "s"}. A chart needs two busy hours to compare.`);
   } else {
     emptyCard("chHours", "Busy hours <span>· orders by hour</span>", "No orders in this range yet.");
   }
@@ -7391,7 +7430,9 @@ function tableTileStateFromBoard(t) {
     else { st = "done"; label = "Cleared"; }
     const served = items.filter((i) => i.status === "served").reduce((a, i) => a + qtyOf(i), 0);
     const totalQ = items.reduce((a, i) => a + qtyOf(i), 0);
-    meta = items.length ? `${served}/${totalQ} served${due > 0 ? ` · ${inr(due)} due` : ""}` : `${liveOs.length} order${liveOs.length > 1 ? "s" : ""}`;
+    // \u00a0 between the amount and "due" so a wrap can never leave "₹483" on one line and
+    // "due" on the next — the money and what it means stay one unbreakable chunk.
+    meta = items.length ? `${served}/${totalQ} served${due > 0 ? ` · ${inr(due)}\u00a0due` : ""}` : `${liveOs.length} order${liveOs.length > 1 ? "s" : ""}`;
   } else if (sess) {
     // Someone actually seated → teal "Seated". Open but nobody seated yet → a
     // bright YELLOW "waiting" tile (owner: an open-but-empty table should light up
@@ -10339,8 +10380,14 @@ function tableOpsOn() {
   .kotp-tile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.4); border-color: var(--gold); }
   .kotp-tile b { font-size: 17px; font-weight: 800; color: color-mix(in srgb, var(--c) 78%, var(--text)); }
   .kotp-tile .kotp-state { display:block; font-size:10px; font-weight:700; color: color-mix(in srgb, var(--c) 72%, var(--text)); }
+  /* WRAPS, never truncates (T11 desktop sweep 2026-08-05). This was nowrap+ellipsis in an
+     84px box holding a ~100px string, so EVERY busy tile cut the money off mid-number:
+     "0/1 served · ₹48…" when the truth was "₹483 due", and "₹1,4…" for ₹1,407. An ellipsis
+     inside a number is the worst place for one — ₹48 is a believable amount, so a manager had
+     no way to know it was wrong, and the word "due" was cut off too. The tile has vertical
+     room, so the line wraps instead; the money keeps its own unbroken chunk. */
   .kotp-tile .kotp-meta { display:block; font-size:9px; color: var(--muted); line-height:1.25; max-width:100%;
-    overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    white-space:normal; overflow-wrap:anywhere; }
   .kotp-tile .kotp-pay { display:inline-block; margin-top:2px; font-size:8.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase;
     padding:1px 5px; border-radius:999px; border:1px solid currentColor; }
   .kotp-tile .kotp-pay.unpaid { color:#ef4444; }
@@ -12257,7 +12304,7 @@ function platformHtml() {
       <h2>${title} ${sub}</h2>
       <div class="plat-head-actions">
         ${simMenu}
-        <button class="btn" id="platRefresh" title="Refresh">↻</button>
+        <button class="btn" id="platRefresh" title="Refresh">↻ Refresh</button>
       </div>
     </div>
     <!-- The board is a FIXED 4-column grid, but "🆕 New" is deliberately dropped when nothing is

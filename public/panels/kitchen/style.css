@@ -11,6 +11,9 @@
   --text: #f3e9da;      /* warm cream text */
   --muted: #b6a48d;     /* secondary text */
   --blue: #d8a657;      /* the accent (house gold; keeps the var name so all refs work) */
+  /* The accent when it carries WORDS. In the dark skin the bright gold on a dark board already
+     measured clean, so it is the accent itself; the light skin darkens it (see the light block). */
+  --blue-ink: var(--blue);
   --green: #5fae6e;     /* ready */
   --amber: #e6b450;     /* new/attention */
   --red: #e2664f;       /* allergies/sold-out */
@@ -258,7 +261,16 @@ html[data-theme="light"] .age.age-late { color: #b91c1c; }
 html[data-theme="light"]{
   --bg:#f1ebe1; --panel:#ffffff; --line:#e6dcc9; --text:#2c2219; --muted:#857655;
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
+  /* --blue (the house gold) is a FILL/BORDER colour. On white it measured 2.81:1, so anything
+     drawn with it as TEXT was the faintest thing on the board — including .tbl, the TABLE NUMBER,
+     the one field a cook must not misread, while the ticket number beside it sat at 15.6:1
+     (T11 desktop sweep, pixel-sampled 2026-08-05). This is the same hue taken darker, used only
+     where the accent carries words. Light is the DEFAULT skin for every panel, so this was the
+     default view. */
+  --blue-ink:#8a5a16;
 }
+html[data-theme="light"] .tbl,
+html[data-theme="light"] #col-cooking h2 { color: var(--blue-ink); }
 html[data-theme="light"] .done.rdy{ color:#be185d; }
 html[data-theme="light"] .line-ready .ltitle{ color:#9d174d; }
 /* Deepen the "new — waiting for the waiter" footer text in light mode: the dark-theme

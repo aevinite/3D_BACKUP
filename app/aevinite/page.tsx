@@ -100,7 +100,14 @@ export default function AdminCommand() {
   // should be clickable"). A card with a `href` becomes a link with a → affordance.
   const STATS: { k: string; v: string | number; href?: string; warn?: boolean }[] = [
     { k: "Restaurants", v: rests === null ? "…" : `${activeCount} active / ${rests.length}`, href: "/aevinite/restaurants" },
-    { k: "Open issues", v: openIssuesCount ?? openIssues.length, href: "/aevinite/repair#complaints", warn: (openIssuesCount ?? openIssues.length) > 0 },
+    // "Staff-raised issues", not "Open issues" (T11 desktop sweep, 2026-08-05). This card read
+    // "OPEN ISSUES · 0" while the button 300px to its right read "Fix problems · 7" and the bell
+    // badge also said 7 — two counters with near-identical names giving opposite answers, with
+    // nothing on the screen saying they count different things. They genuinely do: THIS is only
+    // what a member of staff reported (the System health page already calls it exactly that),
+    // while fixCount is app errors in the last 24h PLUS unsolved reports. Naming them apart is
+    // the fix; making them agree would be a lie.
+    { k: "Staff-raised issues", v: openIssuesCount ?? openIssues.length, href: "/aevinite/repair#complaints", warn: (openIssuesCount ?? openIssues.length) > 0 },
     { k: "Staff online now", v: onlineCount ?? online.length, href: "/aevinite/staff-online" },
     { k: "Orders today", v: ordersToday ?? "…", href: "/aevinite/analytics?range=today" },
   ];
@@ -110,10 +117,14 @@ export default function AdminCommand() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
         <h1 className="adm-page-h" style={{ marginBottom: 0 }}>Dashboard</h1>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          {/* Loud red when something needs solving; quiet grey door to the same page otherwise. */}
+          {/* Loud red when something needs solving; quiet grey door to the same page otherwise.
+              --adm-danger (#f87171) is a light red tuned for borders and dots; white text on it
+              measured 2.31:1 — the least readable label in the console, on its most urgent button.
+              Darkened here only (the token keeps its value everywhere else) so white sits at
+              ~5.7:1 and it still reads as a danger button, not a warning chip. */}
           <Link href="/aevinite/repair" className="adm-btn"
-            style={fixCount > 0 ? { background: "var(--adm-danger)", borderColor: "var(--adm-danger)", color: "#fff", fontWeight: 700, boxShadow: "0 0 0 3px color-mix(in srgb, var(--adm-danger) 25%, transparent)" } : undefined}
-            title={fixCount > 0 ? "Errors or reported problems are waiting — open the Repair page" : "Repair page — report a problem or use the repair tools"}>
+            style={fixCount > 0 ? { background: "color-mix(in srgb, var(--adm-danger) 72%, #000)", borderColor: "color-mix(in srgb, var(--adm-danger) 72%, #000)", color: "#fff", fontWeight: 700, boxShadow: "0 0 0 3px color-mix(in srgb, var(--adm-danger) 25%, transparent)" } : undefined}
+            title={fixCount > 0 ? `${fixCount} to fix — app errors from the last 24h plus problems staff reported and nobody has solved. Separate from the "Staff-raised issues" count, which is only the reports.` : "Repair page — report a problem or use the repair tools"}>
             <i className={`fas ${fixCount > 0 ? "fa-triangle-exclamation" : "fa-screwdriver-wrench"}`} style={{ marginRight: 7 }} aria-hidden="true" />
             {fixCount > 0 ? `Fix problems · ${fixCount}` : "Repair"}
           </Link>

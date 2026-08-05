@@ -138,8 +138,40 @@
     var secs = Math.round((Date.now() - lastTap.at) / 1000);
     return "promise · after tap: " + lastTap.l + (secs > 0 ? " (" + secs + "s earlier)" : "");
   }
+  // A button's NAME, as a person would read it off the screen.
+  //
+  // NOT el.textContent (T11 desktop sweep, 2026-08-05). textContent includes children that are
+  // HIDDEN, and the manager's Tables / Bills / Platform tabs each carry a counter badge as a child
+  // span — so the admin's activity feed printed "Button taps · Open menu ×6, Tables0, 📝 Editor,
+  // 🧾 Bills, 🛵 Platform0, Dashboard" with a stray digit glued to two of the names. Tabs without a
+  // badge logged cleanly, which is what made the pattern obvious. If a badge ever showed 3 it would
+  // have read "Tables3". Breaks the owner's "the Activity log must read as English" rule.
+  //
+  // So: walk the visible text only — skip any element the layout is not showing (hidden attribute,
+  // display:none, or the badge's own [hidden]) — and fall back to textContent if that leaves nothing
+  // (an icon-only button whose label lives in a pseudo-element, say). Fixes every button with a
+  // counter, not just these three tabs.
+  function visibleText(node) {
+    var out = "";
+    for (var i = 0; i < node.childNodes.length; i++) {
+      var n = node.childNodes[i];
+      if (n.nodeType === 3) { out += n.nodeValue; continue; }
+      if (n.nodeType !== 1) continue;
+      if (n.hasAttribute && n.hasAttribute("hidden")) continue;
+      try {
+        var cs = window.getComputedStyle(n);
+        if (cs && (cs.display === "none" || cs.visibility === "hidden")) continue;
+      } catch (e) { /* no layout available — fall through and include it */ }
+      // A SPACE across every element boundary, so a badge that IS on screen reads as its own
+      // word: "Tables 3", never "Tables3". label() collapses runs of whitespace afterwards.
+      out += " " + visibleText(n) + " ";
+    }
+    return out;
+  }
   function label(el) {
-    var t = (el.getAttribute("data-log") || el.getAttribute("aria-label") || el.title || el.textContent || "").trim();
+    var own = "";
+    try { own = visibleText(el).trim(); } catch (e) { own = ""; }
+    var t = (el.getAttribute("data-log") || el.getAttribute("aria-label") || el.title || own || el.textContent || "").trim();
     return t.replace(/\s+/g, " ").slice(0, 40);
   }
   document.addEventListener("click", function (e) {

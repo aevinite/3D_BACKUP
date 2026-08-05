@@ -139,7 +139,7 @@
        Custom (mig 238). Pure data; loads before app.js so the first floor render can see it. -->
   <script src="/panels/floor-layouts.js?v=2ec8b2f2"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script src="/panels/errlog.js?v=d74c7524"></script>
+  <script src="/panels/errlog.js?v=c2f64bda"></script>
   <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
        BEFORE app.js so openIssueModal() can call it. -->
   <script src="/panels/issue-raise.js?v=99268ea5"></script>
@@ -160,6 +160,6 @@
   <script src="/panels/billdoc.js?v=5502abfa"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=f06b2b51"></script>
+  <script src="/panels/editor/app.js?v=eb744b3d"></script>
 </body>
 </html>

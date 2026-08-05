@@ -10,7 +10,7 @@ import Maintenance from "./Maintenance";
 import { getSettings } from "@/lib/menu";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
-import { sanitizeBrandTheme, buildModeBlock } from "@/lib/brandTheme";
+import { sanitizeBrandTheme, buildModeBlock, buildCanvasBlock } from "@/lib/brandTheme";
 import { accentPaletteCss, accentBackground } from "@/lib/accent";
 
 // The accent palette now lives in lib/accent.ts so the 3D viewer (a separate
@@ -132,12 +132,22 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
   // #menu-page) — never affecting #1 or other pages. Accent falls back to accentColor
   // per mode. Restaurants with only accentColor (no theme) keep the inline accentVars
   // path below — unchanged.
+  //
+  // ONE EXCEPTION, added 2026-08-05: the two vars the PAGE CANVAS is painted from (--bg, --text)
+  // are ALSO emitted at the document root, because `html, body { background: var(--bg) }` sits
+  // above #app in the tree and could never see the scoped block — so a themed restaurant's hero
+  // band, grid margins and the area below the last dish stayed restaurant #1's brown. Same
+  // reasoning as rootAccentCss below. See lib/brandTheme.ts → buildCanvasBlock.
   const bt = theme ? sanitizeBrandTheme(theme) : {};
   const darkBody = bt.dark ? buildModeBlock("dark", bt.dark, accentColor) : "";
   const lightBody = bt.light ? buildModeBlock("light", bt.light, accentColor) : "";
+  const darkCanvas = bt.dark ? buildCanvasBlock(bt.dark) : "";
+  const lightCanvas = bt.light ? buildCanvasBlock(bt.light) : "";
   const themed = !!(darkBody || lightBody);
   const themedCss = themed
-    ? `${darkBody ? `[data-theme="dark"] #app.brand-themed{${darkBody}}` : ""}` +
+    ? `${darkCanvas ? `html[data-theme="dark"]{${darkCanvas}}` : ""}` +
+      `${lightCanvas ? `html[data-theme="light"]{${lightCanvas}}` : ""}` +
+      `${darkBody ? `[data-theme="dark"] #app.brand-themed{${darkBody}}` : ""}` +
       `${lightBody ? `[data-theme="light"] #app.brand-themed{${lightBody}}` : ""}`
     : "";
 
