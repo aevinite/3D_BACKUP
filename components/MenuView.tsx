@@ -561,7 +561,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // Photos lazy-load and reshape the page WITHOUT firing a scroll event, which
     // would leave the spy pointing at the wrong section — so also re-check on a
     // gentle timer (the computation is a handful of rectangle reads, very cheap).
-    const tick = setInterval(computeSpy, 600);
+    // settleBell rides the SAME tick, and it has to. Running it once on mount was not enough, and
+    // the live site proved it after the first deploy: on Vercel the dish photos arrive later than
+    // in a warm local build, so the single mount-time check ran against a page whose cards had not
+    // laid out yet, found nothing under the bell, and — because a guest who never scrolls never
+    // triggers another check — left the bell sitting on the add button exactly as before. It passed
+    // locally and failed live, which is the whole reason the live pass exists.
+    // The check is a handful of rectangle reads and returns immediately once the bell is clear, so
+    // it costs what the scroll-spy beside it costs, and it self-heals for lazy images, a category
+    // fold, a filter change and a language switch alike.
+    const tick = setInterval(() => { computeSpy(); settleBell(); }, 600);
     // Run once on mount so the shrink starts at the right value if we restored a
     // scrolled position. Cleanup: stop listening + cancel the pending frame/timer.
     onScroll();
