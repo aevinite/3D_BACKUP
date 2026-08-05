@@ -273,6 +273,15 @@ if (!BASE) {
     restaurant_id: rid, table_number: T, session_id: old.id, status: "preparing", payment_status: "pending",
     subtotal: 999, tax: 0, total: 999, items: [{ title: "LEFTOVER check dish", qty: 5, price: 999, status: "preparing" }],
   }).select("id,kot_no").single()).data;
+  // FORCE THE ROW BACK TO LIVE. Since mig 302 the database itself archives an order inserted onto
+  // an already-closed session — which is the point of that migration, and it means this fixture is
+  // neutralised the instant it is created. Without this line the check below still PASSES, but for
+  // the wrong reason: it would be proving "an archived order is hidden", which is trivially true,
+  // instead of "the app hides a LIVE order that belongs to a departed party". That still has to be
+  // tested, because session-LESS legacy rows can be live at a table and mig 302 does not touch
+  // those (deliberately — hiding them would hide a sale). So put the row back to how legacy data
+  // actually looks, and keep testing the app layer.
+  must(await sb.from("orders").update({ archived: false, status: "preparing", cancelled_at: null }).eq("id", ghost.id).select("id"));
   const fresh = (await sb.rpc("lfh_staff_open_table", { p_restaurant_id: rid, p_table: T })).data;
   console.log(`  · T${T}: a closed session's live ₹999 order (KOT #${ghost.kot_no}), then a new party seated`);
 
