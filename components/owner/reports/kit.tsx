@@ -269,7 +269,10 @@ export function ReportsStyles() {
       .rs-tc-toggle { display: inline-flex; background: var(--muted2); border-radius: 999px; padding: 3px; gap: 3px; }
       .rs-tc-toggle button { border: none; background: none; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 700; padding: 4px 14px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
       .rs-tc-toggle button:hover { color: var(--text); }
-      .rs-tc-toggle button.on { background: var(--accent); color: #fff; }
+      /* --accent-on, not #fff: the owner console's accent is a LIGHT emerald and white on it
+         measured 2.54:1 on the Bar/Line toggle (T11 re-run, 2026-08-05). Same token the range
+         chips now use; consoles with a dark accent still get white from its default. */
+      .rs-tc-toggle button.on { background: var(--accent); color: var(--accent-on, #fff); }
       .rs-ov-skel { height: 210px; border-radius: 10px; background: linear-gradient(90deg, color-mix(in srgb, var(--muted2) 55%, transparent), var(--muted2), color-mix(in srgb, var(--muted2) 55%, transparent)); background-size: 200% 100%; animation: rs-shimmer 1.3s ease-in-out infinite; }
       @keyframes rs-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
       @media (prefers-reduced-motion: reduce) { .rs-ov-skel { animation: none; } }

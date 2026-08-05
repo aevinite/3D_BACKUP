@@ -137,8 +137,12 @@ export type Tier = { key: string; color: string; text: string; tint: string; bar
 // from red. Poor is the floor now: 0 lit bars, which also reads correctly as "barely connected".
 export function latencyTier(ms: number | null): Tier | null {
   if (ms == null) return null;
-  if (ms <= 700)  return { key: "good", color: "#22c55e", text: "#16a34a", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
-  if (ms <= 1500) return { key: "okay", color: "#eab308", text: "#ca8a04", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
-  if (ms <= 3000) return { key: "slow", color: "#f97316", text: "#ea580c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
-  return              { key: "poor", color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)",  bars: 0, label: "Poor" };
+  // `text` is the ink for the WORDS/ms on the pale `tint`; `color` is the bright dot and bars.
+  // Each `text` darkened one step on 2026-08-05: "Live" measured 2.63:1 on its own tint over the
+  // light page (T11 re-run) — the indicator staff are told to trust was the least readable thing
+  // in the bar. public/panels/connbadge.js carries the same table for the panels; keep them level.
+  if (ms <= 700)  return { key: "good", color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
+  if (ms <= 1500) return { key: "okay", color: "#eab308", text: "#a16207", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
+  if (ms <= 3000) return { key: "slow", color: "#f97316", text: "#c2410c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
+  return              { key: "poor", color: "#ef4444", text: "#b91c1c", tint: "rgba(239,68,68,.16)",  bars: 0, label: "Poor" };
 }

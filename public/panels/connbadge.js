@@ -18,12 +18,16 @@
   // `bars` (0–3) carries the same meaning as colour so it's never colour-only (a11y).
   function latencyTier(ms) {
     if (ms == null) return null;
-    if (ms <= 700)  return { color: "#22c55e", text: "#16a34a", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
-    if (ms <= 1500) return { color: "#eab308", text: "#ca8a04", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
-    if (ms <= 3000) return { color: "#f97316", text: "#ea580c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
+    // `text` is the ink for the WORDS and the ms number, which sit on the pale `tint`; `color` is
+    // the bright dot/bars. Every `text` was darkened one step on 2026-08-05 — "Live" measured
+    // 2.63:1 on its own tint (T11 re-run), so the indicator staff are told to trust was the least
+    // readable thing in the bar. Keep this table in step with components/ConnectionBadge.tsx.
+    if (ms <= 700)  return { color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
+    if (ms <= 1500) return { color: "#eab308", text: "#a16207", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
+    if (ms <= 3000) return { color: "#f97316", text: "#c2410c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
     // 0 bars, not 1 — Slow and Poor used to show the same bars, so the two worst states differed
     // only by hue. Kept in step with latencyTier() in lib/connectionStatus.ts.
-    return              { color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)",  bars: 0, label: "Poor" };
+    return              { color: "#ef4444", text: "#b91c1c", tint: "rgba(239,68,68,.16)",  bars: 0, label: "Poor" };
   }
 
   function connLevel() {
@@ -35,19 +39,19 @@
   // Build the view (colour/bars/label/ms) exactly like the React computeView().
   function computeView() {
     var level = connLevel();
-    if (level === "offline") return { level: level, color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)", bars: 0, label: "Offline", ms: null, pulse: false };
+    if (level === "offline") return { level: level, color: "#ef4444", text: "#b91c1c", tint: "rgba(239,68,68,.16)", bars: 0, label: "Offline", ms: null, pulse: false };
     if (level === "weak") {
       // First connect not made yet → calm neutral "Connecting…" (NOT the alarming amber
       // "Reconnecting", which is reserved for a drop after we WERE connected).
       var ever = window.LFH_RT && window.LFH_RT.everConnected && window.LFH_RT.everConnected();
       if (!ever) return { level: level, connecting: true, color: "#94a3b8", text: "inherit", tint: "rgba(100,116,139,.14)", bars: 2, label: "Connecting…", ms: null, pulse: true };
-      return { level: level, color: "#f59e0b", text: "#d97706", tint: "rgba(245,158,11,.16)", bars: 1, label: "Reconnecting", ms: null, pulse: true };
+      return { level: level, color: "#f59e0b", text: "#b45309", tint: "rgba(245,158,11,.16)", bars: 1, label: "Reconnecting", ms: null, pulse: true };
     }
     var lat = (window.LFH_RT && window.LFH_RT.getLatency && window.LFH_RT.getLatency()) || { ms: null, at: 0 };
     var fresh = lat.at > 0 && (Date.now() - lat.at) < LATENCY_FRESH_MS;
     var tier = fresh ? latencyTier(lat.ms) : null;
     if (tier) return { level: level, color: tier.color, text: tier.text, tint: tier.tint, bars: tier.bars, label: tier.label, ms: lat.ms, pulse: false };
-    return { level: level, color: "#22c55e", text: "#16a34a", tint: "rgba(34,197,94,.16)", bars: 3, label: "Live", ms: null, pulse: false };
+    return { level: level, color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)", bars: 3, label: "Live", ms: null, pulse: false };
   }
   function statusLine(v) {
     if (v.level === "offline") return "No internet connection";
@@ -74,6 +78,11 @@
       ".lfh-conn-ms{font-variant-numeric:tabular-nums;font-weight:800}",
       ".lfh-conn-unit{font-weight:600;opacity:.7;font-size:10px}",
       ".lfh-conn-txt{font-weight:700}",
+      // A dark panel skin composites the tint to near-black, so the BRIGHT state colour is the
+      // readable ink there (~6:1) and the darkened one is not (2.82:1). !important because the ink
+      // is applied as an inline style. Mirrors the same rule in components/ConnectionBadge.tsx.
+      'html[data-theme="dark"] .lfh-conn-txt,html[data-theme="dark"] .lfh-conn-ms{color:var(--ink-dark)!important}',
+      'html[data-staffdark] .lfh-conn-txt,html[data-staffdark] .lfh-conn-ms{color:var(--ink-dark)!important}',
       ".lfh-conn-n{font-weight:800;opacity:.9}",
       ".lfh-conn-n.warn{color:#ef4444}",
       ".lfh-conn-chev{opacity:.5;flex:0 0 auto}",
@@ -163,6 +172,11 @@
     return badge;
   }
 
+  // WHICH WAY DOES THE SURFACE RUN? The words sit on a translucent tint of their own state
+  // colour, so the composited background follows the panel's skin: pale on light, near-black on
+  // dark. One ink can't serve both — the dark ink that fixed light then measured 2.82:1 on dark
+  // (T11 re-run, 2026-08-05). Dark ink on light, the BRIGHT state colour on dark. Mirrors
+  // onDarkSurface() in components/ConnectionBadge.tsx; keep the two in step.
   function render() {
     if (!mount()) return;
     var v = computeView();
@@ -175,9 +189,9 @@
     if (v.ms != null) {
       msEl.innerHTML = ""; msEl.appendChild(document.createTextNode(String(v.ms)));
       var u = el("span", "lfh-conn-unit", " ms"); msEl.appendChild(u);
-      msEl.className = "lfh-conn-ms"; msEl.style.color = v.text; msEl.style.display = "";
+      msEl.className = "lfh-conn-ms"; msEl.style.color = v.text; msEl.style.setProperty("--ink-dark", v.color); msEl.style.display = "";
     } else {
-      msEl.textContent = v.label; msEl.className = "lfh-conn-txt"; msEl.style.color = v.text; msEl.style.display = "";
+      msEl.textContent = v.label; msEl.className = "lfh-conn-txt"; msEl.style.color = v.text; msEl.style.setProperty("--ink-dark", v.color); msEl.style.display = "";
     }
     // waiting-to-sync count
     var waiting = outbox.queued.length, failed = outbox.failed.length;
@@ -201,7 +215,7 @@
     var main = el("span", "lfh-conn-pop-main");
     main.appendChild(barsHtml(v.bars, v.color, true));
     var figs = el("span", "lfh-conn-pop-figs");
-    var b = el("b"); b.style.color = v.text;
+    var b = el("b"); b.style.color = v.text; b.style.setProperty("--ink-dark", v.color);
     if (v.ms != null) { b.appendChild(document.createTextNode(String(v.ms))); b.appendChild(el("span", "lfh-conn-pop-unit", " ms")); }
     else { b.textContent = v.label; }
     figs.appendChild(b);

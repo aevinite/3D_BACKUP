@@ -533,7 +533,9 @@ export default function OwnerStaffPage() {
         .ost-moregrid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
         .ost-lbl { display: flex; flex-direction: column; gap: 3px; font-size: 11px; font-weight: 700; color: var(--muted); flex: 1 1 150px; }
         .ost-in { font: inherit; font-size: 13px; padding: 8px 10px; border-radius: 8px; border: var(--border); background: var(--card); color: var(--fg, inherit); flex: 1 1 150px; }
-        .ost-btn { font: inherit; font-size: 13px; font-weight: 700; padding: 8px 14px; border-radius: 8px; border: none; background: var(--accent); color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
+        /* --accent-on, not #fff — white on the console's light emerald measured 2.54:1 on the
+           roster's "Add" button (T11 re-run, 2026-08-05). */
+        .ost-btn { font: inherit; font-size: 13px; font-weight: 700; padding: 8px 14px; border-radius: 8px; border: none; background: var(--accent); color: var(--accent-on, #fff); cursor: pointer; display: inline-flex; align-items: center; gap: 7px; }
         .ost-btn:disabled { opacity: .6; cursor: default; }
         .ost-reveal { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; border-color: var(--adm-ok, #2e7d32); }
         .ost-pw { font-family: ui-monospace, monospace; font-size: 15px; font-weight: 700; padding: 6px 12px; border-radius: 8px; border: none; color: var(--fg, inherit); background: color-mix(in srgb, var(--accent) 12%, transparent); letter-spacing: .04em; min-width: 130px; }
