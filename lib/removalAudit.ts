@@ -33,7 +33,12 @@ export type RemovalKind =
   | "invoice_voided"      // a settled bill reopened for edits
   | "discount_given"      // money taken off a bill
   | "payment_reverted"    // a bill marked paid, then un-marked
-  | "on_the_house";       // a bill settled with no money collected
+  | "on_the_house"        // a bill settled with no money collected
+  // Not a removal — the AFTER half of a reopen. Recorded when a reopened bill is re-issued, so
+  // the Audit shows what the bill was worth before, what it is worth now, and what moved
+  // (owner, 2026-08-05: "before and after will also be shown in the audit section"). A reopen
+  // that adds food RAISES the bill, so without this the trail only ever showed the lower number.
+  | "bill_changed_after_reopen";
 
 export type RemovalReason = { code?: string | null; note?: string | null };
 

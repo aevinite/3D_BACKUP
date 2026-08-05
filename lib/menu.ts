@@ -73,6 +73,23 @@ export interface Category {
   active: boolean;
 }
 
+// ── DELIBERATE: DISH NAMES AND DESCRIPTIONS ARE NOT TRANSLATED ──────────────────────────────
+// Owner's decision, 2026-08-05, asked and answered directly. CATEGORIES and FILTERS carry one
+// string per language and go through localized() below; a dish's `title`, `description` and
+// `longDescription` are single-language on purpose and stay that way.
+//
+// This is NOT an oversight and it is NOT a bug — it has now been raised as a finding twice
+// (guest sweep 2026-08-04, wording sweep T15 2026-08-05), which is the cost of not writing it
+// down. Its one real consequence is known and accepted: a guest browsing in Hindi can find a
+// CATEGORY by its Hindi name but cannot find a DISH by one — searching "एस्प्रेसो" returns the
+// empty state while "Espresso" finds it.
+//
+// If we ever want it, the shape is already there: `searchAlias` on the item payload takes extra
+// words a search should match, so translated dish names can be added WITHOUT translating the
+// titles themselves. Do that when the owner asks — not before.
+// Guarded by `npm run verify:i18n-scope` so a future sweep re-reports it as a finding.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
 // Pick the label for a language, falling back to English, then to whatever
 // exists, so the UI never shows a blank.
 // Example: localized({ en: "Burgers", de: "Burger" }, "de") -> "Burger".

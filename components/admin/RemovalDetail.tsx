@@ -59,12 +59,13 @@ export const KIND_LABEL: Record<string, string> = {
   menu_item_deleted: "Taken off the menu", invoice_voided: "Bill reopened",
   discount_given: "Discount given", payment_reverted: "Payment un-booked",
   on_the_house: "Settled on the house",
+  bill_changed_after_reopen: "Bill changed after a reopen",
 };
 /** The little glyph each kind wears in a list. Kept beside the words so the two can't drift. */
 export const KIND_ICON: Record<string, string> = {
   order_cancelled: "🎫", order_deleted: "🧾", dish_removed: "🍽", menu_item_deleted: "📕",
   invoice_voided: "↩️", qty_reduced: "➖", discount_given: "％", payment_reverted: "↺",
-  on_the_house: "🎁",
+  on_the_house: "🎁", bill_changed_after_reopen: "⇄",
 };
 const REASON_LABEL: Record<string, string> = {
   mistake: "Punched by mistake", guest_changed: "Guest changed their mind",

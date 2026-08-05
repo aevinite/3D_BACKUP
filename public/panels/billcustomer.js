@@ -76,6 +76,7 @@
             <div class="bcust-htxt">
               <h3>${esc(o.title || "Who is this bill for?")}</h3>
               <p>Mobile first — if they have eaten here before, the name fills itself in.${o.print === false ? " Saved, but <b>not printed</b> on the bill." : ""}</p>
+              <p class="bcust-why">The number is kept only to recognise a returning guest and for their bill history — so repeat customers can be rewarded later. It is never shared or used for marketing.</p>
             </div>
             <button class="tbl-modal-close bcust-x" aria-label="Close">✕</button>
           </div>

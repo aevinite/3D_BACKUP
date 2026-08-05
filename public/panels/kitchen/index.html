@@ -20,7 +20,7 @@
       <!-- The two worded buttons keep their ICON always and drop their WORDS on a phone (the
            top bar was wrapping to four rows at 360px and eating ~230px of an 780px board —
            T4 sweep, 2026-08-04). title/aria-label carry the meaning either way. -->
-      <button id="boardBtn" class="btn" title="86 board — mark dishes sold out" aria-label="86 board"><i class="bi">🚫</i><i class="bw">86 board</i></button>
+      <button id="boardBtn" class="btn" title="Sold out list (the &quot;86 board&quot;) — mark dishes unavailable" aria-label="Sold out list"><i class="bi">🚫</i><i class="bw">Sold out</i></button>
       <button id="printerBtn" class="btn" title="Report a printer problem — the manager is told right away">🖨❗</button>
       <button id="viewBtn" class="btn viewtgl" title="Switch between the column board and the wall board"><i class="bi">▦</i><i class="bw" id="viewWord">Wall view</i></button>
       <button id="reportIssueBtn" class="btn" title="Report an issue" aria-label="Report an issue">🚩</button>
@@ -44,7 +44,7 @@
   <!-- The 86 board drawer: mark dishes sold-out / available without leaving the kitchen. -->
   <div class="drawer-overlay" id="drawerOverlay" hidden>
     <aside class="drawer">
-      <div class="drawer-head"><h3>🚫 86 board <span class="sub">· mark dishes sold out</span></h3><button class="btn" id="drawerClose">✕</button></div>
+      <div class="drawer-head"><h3>🚫 Sold out <span class="sub">· mark dishes unavailable (the “86 board”)</span></h3><button class="btn" id="drawerClose">✕</button></div>
       <input type="search" id="dishSearch" class="dish-search" placeholder="Find a dish…">
       <div id="dishList" class="dish-list"></div>
     </aside>
@@ -74,6 +74,6 @@
   <!-- billdoc: THE kitchen ticket, written down once (LFH_BILLDOC) and shared with the manager
        panel and the admin's sample, so a ticket can never look different in two places. -->
   <script src="/panels/billdoc.js?v=7df1bca8"></script>
-  <script src="app.js?v=9836c3f1"></script>
+  <script src="app.js?v=5f6deae1"></script>
 </body>
 </html>
