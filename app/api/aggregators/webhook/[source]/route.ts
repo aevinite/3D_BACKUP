@@ -30,8 +30,17 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   try { payload = await req.json(); } catch { /* empty body */ }
   try {
     const row = await ingestIncoming(source as AggSource, payload as Record<string, any>);
-    return NextResponse.json({ ok: true, id: row?.id, external_id: row?.external_id }, { status: 200 });
+    // A RETRY GETS 200, NOT 500 (T9 sweep, 2026-08-05). `duplicate:true` means we already hold
+    // this external_id, so the aggregator is told "delivered" and stops retrying. Answering 5xx
+    // for an order we HAVE is what would make Zomato/Swiggy retry it forever — the same
+    // at-most-once contract our own panels get from lib/idempotency.ts.
+    return NextResponse.json(
+      { ok: true, id: row?.id, external_id: row?.external_id, ...(row?.duplicate ? { duplicate: true } : {}) },
+      { status: 200 },
+    );
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    // The message is already a plain sentence (lib/aggregators.ts turns a database error into one
+    // and logs the detail our side) — an external caller never receives our schema.
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Couldn't record that order." }, { status: 500 });
   }
 }

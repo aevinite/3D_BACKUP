@@ -56,7 +56,13 @@ export async function GET(req: NextRequest) {
   const s = await scope(req);
   if ("error" in s) return s.error;
   const r = await sb.from("settings").select("service_mode").eq("restaurant_id", s.rid).maybeSingle();
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  // NEVER HAND A DATABASE MESSAGE TO A PANEL (T9 sweep, 2026-08-05). `r.error.message` went out
+  // verbatim, which is how a malformed ?rid= put "invalid input syntax for type uuid" on a
+  // manager's screen — meaningless to them, and internal to us. The detail stays in the log.
+  if (r.error) {
+    console.error("[maintenance] read failed:", r.error.message);
+    return NextResponse.json({ error: "Couldn't read the menu's status — please try again." }, { status: 500 });
+  }
   return NextResponse.json({ maintenance: (r.data || {}).service_mode === true });
 }
 
@@ -66,7 +72,10 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const on = body?.on === true;
   const r = await sb.from("settings").update({ service_mode: on }).eq("restaurant_id", s.rid).select("service_mode");
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) {
+    console.error("[maintenance] write failed:", r.error.message);   // detail our side, not theirs
+    return NextResponse.json({ error: "Couldn't change the menu's status — please try again." }, { status: 500 });
+  }
   // A WRITE THAT MATCHED NO ROW IS NOT A WRITE (T9 sweep, 2026-08-05). PostgREST answers an UPDATE
   // that hit zero rows with `data: []` and NO error — which happens if this restaurant somehow has
   // no `settings` row. The old code went straight on to log "took the guest menu OFFLINE" and then
