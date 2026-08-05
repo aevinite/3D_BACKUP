@@ -980,5 +980,7 @@ Single git repo → GitHub `aevinite/3D_BACKUP` (branch `main`); Vercel project
 menu + all four staff panels + admin. The old separate `editor/` repo
 (`INFINITESTUDIOIF/ADMIN_PANEL_3D_MENU`) is **retired/deleted**; ignore the old
 "push both repos" rule. Secrets live in `.env.local` (gitignored, never committed);
-local `*.bat` launchers are gitignored too. The admin gate needs `ADMIN_PASSWORD`
-set in the Vercel project env to work in production.
+the Windows `*.bat` launchers are gitignored (they carried machine paths). The three
+macOS `*.command` launchers ARE committed and should stay that way — they `cd "$(dirname "$0")"`,
+so they work from any checkout. The admin gate needs `ADMIN_PASSWORD` set in the Vercel project
+env to work in production.

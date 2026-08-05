@@ -1,3 +1,12 @@
+> # ⚠️ HISTORY ONLY — kept as a record, not as instructions
+>
+> This is plan v2 for the same redesign, superseding sections C-F of v1. The work it plans is **done**, and the model it describes was
+> replaced by the access rebuild of 2026-07-31.
+>
+> **Do not follow it for new work. Read `docs/ACCESS-MODEL.md` instead.** It is kept because it
+> records WHY things were built the way they were, which the finished code cannot say.
+> Moved here from the repo root on 2026-08-05, where it read like a live plan.
+
 # ACCESS REDESIGN — PLAN v2 (owner 2026-07-24, "plan like crazy, tiny phases, loop")
 
 Supersedes the C–F sections of ACCESS-REDESIGN-PLAN.md. A/B (restaurant-detail cleanup +

@@ -203,9 +203,14 @@ console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${pr
 // the app is protected", and it is not — this walks the three vanilla staff panels only, because
 // they are the surfaces whose writes carry X-LFH-Expect through the offline queue. Saying so is
 // the difference between a guard and a false sense of one.
+// One list, so the COUNT in the verdict below is derived rather than typed — a hand-typed
+// "2 areas" is the same drifting number as every stale check-count in CLAUDE.md.
+const UNCOVERED = [
+  "owner/settings module toggles (a switch, visibly reflected; the admin owns these now)",
+  "a bill's customer name (its capture RPC is idempotent, so a repeat is harmless)",
+];
 console.log("\nNot covered by this check (by design — no expectation travels from these yet):");
-console.log("  · owner/settings module toggles (a switch, visibly reflected; the admin owns these now)");
-console.log("  · a bill's customer name (its capture RPC is idempotent, so a repeat is harmless)");
+for (const u of UNCOVERED) console.log(`  \u00b7 ${u}`);
 // THE OWNER PANEL used to be listed here as a whole, and that footnote is what let a person's
 // SALARY stay overwritable: the owner panel's own profile page writes the same staff_users columns
 // the admin's StaffProfile does, so "not covered by design" quietly covered money. Its three typed
@@ -220,10 +225,23 @@ console.log("  · a bill's customer name (its capture RPC is idempotent, so a re
 // comparator turned every object into "[object Object]", so the check could never have fired.
 console.log("  (table renames and staff pay/permissions WERE listed here — both are protected now.)");
 console.log("  Widening any of those means routing the write through the panel's api()/outbox first.");
+// THE VERDICT LINE HAS TO CARRY THE CAVEAT, not just the paragraph above it. A bare "✅ PASS" is
+// what a tired person reads, and this guard has printed one while naming, three lines earlier, the
+// writes it does not look at — that is how the owner panel's footnote quietly covered SALARY for
+// months. So the headline says how many areas are uncovered, and `--strict` refuses to pass while
+// any remain, for whoever decides to finish the job.
+const STRICT = process.argv.includes("--strict");
 if (problems) {
   console.log(`\n❌ FAIL — wire \`expect: { table, id, fields: { <col>: <oldValue> } }\` at each one, or`);
   console.log(`   add it to KNOWN_EXEMPT with a reason. See CLAUDE.md → NEW-FEATURE CHECKLIST item 11.`);
+} else if (STRICT && UNCOVERED.length) {
+  console.log(`\n❌ FAIL (--strict) — every value edit that IS checked is protected, but ${UNCOVERED.length} area(s)`);
+  console.log(`   are still not checked at all (listed above). Route their writes through the panel's`);
+  console.log(`   api()/outbox so an expectation travels, then delete them from UNCOVERED.`);
+} else if (UNCOVERED.length) {
+  console.log(`\n✅ PASS — every value edit it checks tells the server what it was editing from`);
+  console.log(`   \u26a0 ${UNCOVERED.length} area(s) deliberately NOT checked (above). \`--strict\` fails on those.`);
 } else {
   console.log("\n✅ PASS — every value edit tells the server what it was editing from");
 }
-process.exit(problems ? 1 : 0);
+process.exit(problems || (STRICT && UNCOVERED.length) ? 1 : 0);

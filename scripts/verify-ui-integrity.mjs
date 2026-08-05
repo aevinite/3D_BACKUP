@@ -499,6 +499,43 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
   );
 }
 
+// ── 14. NOTHING UNSERVEABLE MAY SIT IN public/ ────────────────────────────────────────────
+//
+// Everything under public/ is on the internet. On 2026-08-05
+// https://3-d-backup.vercel.app/mockups/index.html answered 200 — three internal design mockups
+// of the manager and tables screens, reachable by anyone with the URL. Nothing linked them, so
+// nothing noticed; they had been there since they were built. A mockup that LOOKS like the app is
+// the worst possible thing to hand a confused person who found it, and the same slot would happily
+// hold a scratch page, an export, or a copy of a panel someone was comparing against.
+//
+// So the allow-list is the four HTML files the product actually serves. Anything else fails, and
+// the fix is to move it to docs/ (which .vercelignore keeps out of the deploy entirely).
+{
+  const ALLOWED = new Set([
+    "public/offline.html",                  // the offline screen the service worker shows
+    "public/panels/editor/index.html",      // the manager panel
+    "public/panels/kitchen/index.html",     // the kitchen screen
+    "public/panels/tablet/index.html",      // the waiter panel
+  ]);
+  const found = [];
+  const walk = (dir) => {
+    let entries = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p);
+      else if (/\.html?$/i.test(e.name)) found.push(p);
+    }
+  };
+  walk("public");
+  const strays = found.filter((p) => !ALLOWED.has(p));
+  if (strays.length === 0) ok(`public/ serves only the ${ALLOWED.size} HTML files it is supposed to`);
+  else bad(
+    `${strays.length} HTML file(s) under public/ are PUBLICLY REACHABLE and are not part of the product`,
+    strays.join("\n         ") + "\n         Everything in public/ is on the internet. Move it to docs/ (kept out of the deploy\n         by .vercelignore), or add it to ALLOWED here with the reason it must be served.",
+  );
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");

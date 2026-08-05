@@ -1,13 +1,18 @@
 // Tiny standalone static server for design mockups — runs on its OWN port so the
 // owner can open it directly (no Next, no login, no iframe). Serves the files in
-// public/mockups/. Stop it with Ctrl-C (or just close the terminal).
+// docs/mockups/. Stop it with Ctrl-C (or just close the terminal).
+// They live under docs/, NOT public/ (moved 2026-08-05). Anything in public/ is served by
+// the real site: https://3-d-backup.vercel.app/mockups/index.html answered 200, so internal
+// design mockups of the manager and tables screens were reachable by anyone with the URL —
+// and a mockup that looks like the app is the worst thing to hand a confused person. This
+// server is how you view them, on its own port.
 import http from "node:http";
 import { readFile } from "node:fs/promises";
 import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const PORT = 4555;
-const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "public", "mockups");
+const ROOT = join(fileURLToPath(new URL(".", import.meta.url)), "..", "docs", "mockups");
 const TYPES = { ".html":"text/html", ".css":"text/css", ".js":"text/javascript", ".png":"image/png", ".svg":"image/svg+xml" };
 
 http.createServer(async (req, res) => {

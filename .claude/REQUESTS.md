@@ -1045,7 +1045,8 @@ find anything just instantly fix it… till every error is not solved."*
 - [ ] **NEEDS HIS YES — one AV-live item.** `lfh_owner_heatmap` DIFFERS between the two databases:
   AV live is running older code than we test. Fixing it means running the pending migration on the
   AV live database, which is an explicit-permission action. Nothing was touched.
-- [ ] The 347-phase `verify:everything` sweep is still running at the time of writing.
+- [x] (2026-08-05) That sweep finished long ago; the suite is 500+ phases now and `--list` prints
+      the live count. Left here only so the note above it still reads in order.
 
 ## 2026-08-01 — THE PERSON PROFILE (owner picked design 1 "Dossier")
 

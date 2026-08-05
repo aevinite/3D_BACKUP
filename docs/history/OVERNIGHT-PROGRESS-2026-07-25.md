@@ -1,3 +1,12 @@
+> # ⚠️ HISTORY ONLY — kept as a record, not as instructions
+>
+> This is the running log of one overnight autonomous session. The work it plans is **done**, and the model it describes was
+> replaced by the access rebuild of 2026-07-31.
+>
+> **Do not follow it for new work. Read `docs/PROJECT-HISTORY.md` instead.** It is kept because it
+> records WHY things were built the way they were, which the finished code cannot say.
+> Moved here from the repo root on 2026-08-05, where it read like a live plan.
+
 # OVERNIGHT AUTONOMOUS BUILD — access panel (owner asleep 2026-07-24)
 
 Owner: "make a loop, wake every ~30-40 min, complete all phases till I'm back;
