@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { adminHeaders } from "./sweep/login.mjs";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -48,11 +49,12 @@ for (const l of readFileSync(join(ROOT, ".env.local"), "utf8").split("\n")) {
   const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
 }
 // Guard the one thing that must never happen: this writes real switches, so it may only ever
-// point at the BACKUP database. AV live is read-only.
-if (!String(env.NEXT_PUBLIC_SUPABASE_URL || "").includes("wnsfcizclkbobwzcxqsf")) {
-  console.error("REFUSING: .env.local does not point at the BACKUP database.");
-  process.exit(2);
-}
+// point at a DEV/TEST database. AV live is read-only, always.
+// The list of allowed databases is shared (scripts/sweep/devStacks.mjs) — backup-1 AND backup-2,
+// never AV live. It was a copy of backup-1's id alone, which meant the one command the suite tells
+// you to run ("run: node scripts/set-access-defaults.mjs …") refused on backup-2, the stack a fix
+// goes live on when backup-1's deploy cap is spent.
+refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "this script writes real permission switches");
 if (/aevinite\.shop|3d-menu-av/.test(BASE)) {
   console.error(`REFUSING: ${BASE} is the live client site. This script only runs against backup.`);
   process.exit(2);
