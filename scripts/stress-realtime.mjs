@@ -26,6 +26,32 @@ const env = Object.fromEntries(fs.readFileSync(".env.local", "utf8").split("\n")
   .map((l) => l.trim()).filter((l) => l && !l.startsWith("#"))
   .map((l) => { const i = l.indexOf("="); return [l.slice(0, i), l.slice(i + 1).replace(/^["']|["']$/g, "")]; }));
 const URL = env.NEXT_PUBLIC_SUPABASE_URL, ANON = env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+// ── SAFETY, added 2026-08-04 ──────────────────────────────────────────────────────────────────
+// A LOAD script: refuse any database but the backup one, and refuse to start while another heavy
+// run is alive. Two heavy runs at once is what took the database down on 2026-07-31 — the test
+// rig, not the product. verify-everything and load-ramp-orders already do both; these did not.
+{
+  const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
+  const ref = (() => { try { return new globalThis.URL(URL).hostname.split(".")[0]; } catch { return ""; } })();
+  if (ref !== BACKUP_REF) {
+    console.error(`This points at project "${ref}", not the backup database (${BACKUP_REF}). Refusing.`);
+    process.exit(1);
+  }
+  const MINE = ".claude/stress.lock";
+  for (const other of ["verify-everything.lock", "load-ramp.lock", "stress.lock"]) {
+    const q = `.claude/${other}`;
+    if (!fs.existsSync(q)) continue;
+    let pid = 0; try { pid = Number(JSON.parse(fs.readFileSync(q, "utf8")).pid) || 0; } catch {}
+    let alive = false; try { if (pid) { process.kill(pid, 0); alive = true; } } catch {}
+    if (alive) { console.error(`Another heavy run is alive (${other}, pid ${pid}). Refusing.`); process.exit(1); }
+  }
+  try { fs.mkdirSync(".claude", { recursive: true }); } catch {}
+  fs.writeFileSync(MINE, JSON.stringify({ pid: process.pid, script: process.argv[1], at: new Date().toISOString() }));
+  const release = () => { try { fs.unlinkSync(MINE); } catch {} };
+  process.on("exit", release);
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { release(); process.exit(130); });
+}
 const SR = env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE;
 const REST = `${URL}/rest/v1/realtime_events`;
 const SH = { apikey: SR, Authorization: `Bearer ${SR}`, "Content-Type": "application/json" };

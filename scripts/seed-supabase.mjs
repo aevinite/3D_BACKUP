@@ -1,5 +1,13 @@
 // Seed the Supabase `menu_items` table from public/content/menu.json.
 //
+// ⚠️  THIS OVERWRITES EDITOR-MADE CHANGES. It upserts EVERY column from menu.json, so it
+//     silently reverts anything the owner changed in the admin editor — dish titles, prices,
+//     3D configs, sold-out marks. CLAUDE.md has said so for months while this file described
+//     the behaviour as a feature; the 2026-08-04 sweep found it was also the only destructive
+//     script with no database refusal at all. To apply a new migration, run JUST the migration
+//     (scripts/apply-migration.mjs) — do not reseed. A full reseed needs a DB-vs-menu.json
+//     diff first.
+//
 // What it does, in order:
 //   1. Runs supabase/migrations/001_menu_items.sql via the Supabase
 //      Management API (uses the personal access token / PAT).
@@ -41,6 +49,18 @@ if (DEV) console.log("▶ DEV target:", SUPABASE_URL);
 const projectRef = new URL(SUPABASE_URL).hostname.split(".")[0];
 
 if (!SUPABASE_URL || !ANON || !SERVICE) throw new Error("Missing keys in .env.local");
+
+// REFUSE ANY DATABASE BUT THE BACKUP ONE. Every other destructive script here does this
+// (db-maintain.mjs, reset-demo-history.mjs, set-access-defaults.mjs, load-ramp-orders.mjs);
+// the most destructive one did not, so whoever's keys happened to be in .env.local had every
+// dish overwritten by a JSON file with no plan step and no confirmation.
+const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
+if (!DEV && projectRef !== BACKUP_REF) {
+  console.error(`This points at project "${projectRef}", not the backup database (${BACKUP_REF}). Refusing.`);
+  console.error("A reseed OVERWRITES every dish from menu.json. On any other database that is a data loss,");
+  console.error("and on the live client stack it would revert a paying restaurant's menu.");
+  process.exit(1);
+}
 if (!pat) throw new Error("Missing SUPABASE_ACCESS_TOKEN in .env.local");
 
 // Run arbitrary SQL through the Management API (uses the PAT).

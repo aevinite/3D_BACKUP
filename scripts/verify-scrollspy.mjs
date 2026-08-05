@@ -7,6 +7,15 @@
 // Prints pass/fail only. Usage: node scripts/verify-scrollspy.mjs (menu on :4000)
 import { chromium } from "playwright";
 
+// A guard that can only run when port 4000 happens to be up is a guard that gets skipped — and
+// 4000 belongs to the human, so a parallel session or CI could never run this at all. Accept a
+// target like every other guard here does. (2026-08-04 sweep.)
+const BASE = (() => {
+  const i = process.argv.indexOf("--base");
+  return (i > -1 && process.argv[i + 1]) || process.env.VERIFY_BASE || "http://localhost:4000";
+})().replace(/\/$/, "");
+
+
 let failures = 0;
 const check = (ok, label) => { console.log(`${ok ? "✓" : "✗ FAIL"} ${label}`); if (!ok) failures++; };
 
@@ -14,7 +23,7 @@ const browser = await chromium.launch();
 try {
   const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
   const page = await ctx.newPage();
-  await page.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await page.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".cat-group-head", { timeout: 60000 });
   await page.evaluate(() => sessionStorage.removeItem("lfh_menu_scroll"));
 

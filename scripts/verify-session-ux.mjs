@@ -24,6 +24,15 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { chromium } from "playwright";
 
+// A guard that can only run when port 4000 happens to be up is a guard that gets skipped — and
+// 4000 belongs to the human, so a parallel session or CI could never run this at all. Accept a
+// target like every other guard here does. (2026-08-04 sweep.)
+const BASE = (() => {
+  const i = process.argv.indexOf("--base");
+  return (i > -1 && process.argv[i + 1]) || process.env.VERIFY_BASE || "http://localhost:4000";
+})().replace(/\/$/, "");
+
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const env = Object.fromEntries(
   readFileSync(join(root, ".env.local"), "utf8").split("\n")
@@ -89,7 +98,7 @@ try {
   {
     const w = await browser.newContext();
     const wp = await w.newPage();
-    await wp.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+    await wp.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
     await wp.waitForSelector(".cat-group-head", { timeout: 60000 });
     await w.close();
   }
@@ -97,7 +106,7 @@ try {
   // ── 1+2: the declined partner's screen ─────────────────────────────────────
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  await page.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await page.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
   // Plant the partner's session note + remembered table, exactly as a real join would.
   await page.evaluate(([t, token, memberId]) => {
     localStorage.setItem("lfh_session", JSON.stringify({ table: t, token, memberId, role: "guest" }));
@@ -139,7 +148,7 @@ try {
   // sha256(ADMIN_PASSWORD) — compute it directly so the password is never sent or printed, and
   // so this never burns a login attempt against the rate limit. (2026-07-30)
   const cookie = "lfh_staff_auth=" + createHash("sha256").update(env.ADMIN_PASSWORD || "").digest("hex");
-  const mh = await fetch(`http://localhost:4000/api/editor/members/${guest.id}/make-head`, {
+  const mh = await fetch(`${BASE}/api/editor/members/${guest.id}/make-head`, {
     method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
   });
   check(mh.ok, `make-head endpoint answers ok (${mh.status})`);
@@ -153,12 +162,12 @@ try {
   const ectx = await browser.newContext();
   if (cookie) {
     const [name, value] = cookie.split("=");
-    await ectx.addCookies([{ name, value, url: "http://localhost:4000" }]);
+    await ectx.addCookies([{ name, value, url: BASE }]);
   }
   // A fresh UNAPPROVED joiner first, so the Requests card + tile Attend show up.
   await sb("POST", "session_members", { session_id: sess.id, name: "Second Guest", token: tok("vg2_"), role: "guest", approved: false });
   const ep = await ectx.newPage();
-  await ep.goto("http://localhost:4000/", { waitUntil: "domcontentloaded" });
+  await ep.goto("${BASE}/", { waitUntil: "domcontentloaded" });
   // Get to the Tables (floor) view — its tab mentions "Tables".
   const tab = ep.locator("button, .tab, [role=tab]").filter({ hasText: /tables/i }).first();
   if (await tab.count()) await tab.click();
