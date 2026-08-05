@@ -109,7 +109,8 @@ function Sparkline({ history }: { history: number[] }) {
   );
 }
 
-export default function ConnectionBadge({ className = "", pollMode = false }: { className?: string; pollMode?: boolean }) {
+export default function ConnectionBadge({ className = "", pollMode = false, guest = false }:
+  { className?: string; pollMode?: boolean; guest?: boolean }) {
   const { level, everConnected, latencyMs, latencyAt, history } = useConnection();
   const box = useGuestOutbox();
   const [open, setOpen] = useState(false);
@@ -165,7 +166,16 @@ export default function ConnectionBadge({ className = "", pollMode = false }: { 
         onClick={() => setOpen((o) => !o)}
       >
         <SignalBars lit={v.bars} color={v.color} />
-        {v.ms != null
+        {/* A DINER IS NOT A DEVELOPER. On staff screens the millisecond figure is the point — it
+            is how someone decides whether the floor is lagging. On the GUEST menu the same pill
+            sits second from the left in a 360px header, right beside the restaurant's own name,
+            and a diner reading "608 ms" learns nothing from it; worse, it is only there when a
+            measurement happens to be fresh, so the header changes wording on its own between two
+            page loads (seen on the deployed site: three loads said "Live", the fourth "608 ms").
+            Guests keep the SIGNAL — the bars and the colour, including amber when it really is
+            slow — and get the plain word. The number is still one tap away in the panel below,
+            which is where a detail belongs. */}
+        {v.ms != null && !guest
           ? <span className="lfh-conn-ms" style={{ color: v.text }}>{v.ms}<span className="lfh-conn-unit"> ms</span></span>
           : <span className="lfh-conn-txt" style={{ color: v.text }}>{v.label}</span>}
         {extra && <span className={`lfh-conn-n${failed ? " warn" : ""}`}>· {extra}</span>}
