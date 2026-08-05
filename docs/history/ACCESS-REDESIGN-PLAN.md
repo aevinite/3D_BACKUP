@@ -1,3 +1,12 @@
+> # ⚠️ HISTORY ONLY — kept as a record, not as instructions
+>
+> This is the micro-phase plan for the July access redesign. The work it plans is **done**, and the model it describes was
+> replaced by the access rebuild of 2026-07-31.
+>
+> **Do not follow it for new work. Read `docs/ACCESS-MODEL.md` instead.** It is kept because it
+> records WHY things were built the way they were, which the finished code cannot say.
+> Moved here from the repo root on 2026-08-05, where it read like a live plan.
+
 # ACCESS + ADMIN-RESTAURANT REDESIGN — micro-phase plan (owner 2026-07-24)
 
 Rule: complete ONE tiny phase at a time, verify, tick it, move on. Ship to DEV (3-d-backup)
