@@ -91,7 +91,7 @@ export default function RestaurantReport({ restaurantId, restaurantName, onBack 
               <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Slug</span><span className="mono">{report.restaurant.slug}</span></div>
               <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Status</span><span>{report.restaurant.active ? "Live" : "Suspended"}</span></div>
               <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Owner</span><span>{report.restaurant.owner || "—"}</span></div>
-              <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Created</span><span>{new Date(report.restaurant.createdAt).toLocaleDateString()}</span></div>
+              <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Created</span><span>{new Date(report.restaurant.createdAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })}</span></div>
               <div className="adm-logrow" style={{ gridTemplateColumns: "1fr 1fr" }}><span className="adm-muted">Plan</span><span>{report.restaurant.plan ? `${report.restaurant.plan} (${report.restaurant.planStatus})` : "No plan set"}</span></div>
             </div>
           </div>

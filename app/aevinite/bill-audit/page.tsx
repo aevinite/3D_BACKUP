@@ -322,7 +322,7 @@ export default function AdminBills() {
                       <div style={{ display: "flex", gap: 11, padding: "12px 14px", borderRadius: 11, border: "1px solid var(--adm-danger)", background: "color-mix(in srgb, #ef4444 12%, transparent)", margin: "12px 0" }}>
                         <span style={{ color: "var(--adm-danger)", flex: "0 0 auto", marginTop: 1 }}><Ico n="trash" s={16} /></span>
                         <div style={{ fontSize: 13 }}>
-                          <b style={{ color: "var(--adm-danger)" }}>This bill was deleted</b>{b.deletedBy ? ` by ${b.deletedBy}` : ""}{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString()}` : ""}.
+                          <b style={{ color: "var(--adm-danger)" }}>This bill was deleted</b>{b.deletedBy ? ` by ${b.deletedBy}` : ""}{b.deletedAt ? ` · ${new Date(b.deletedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}` : ""}.
                           {b.deleteReason ? <div style={{ marginTop: 3 }}>Reason: <i>{b.deleteReason}</i></div> : <div style={{ marginTop: 3, opacity: 0.7 }}>No reason recorded.</div>}
                           <div style={{ marginTop: 3, opacity: 0.7 }}>Kept in full for tax/audit — you can restore it.</div>
                         </div>
@@ -337,8 +337,8 @@ export default function AdminBills() {
                       <Field k="Total" v={inr(b.amount)} />
                       <Field k="Collected" v={inr(b.paid)} />
                       <Field k="Orders" v={String(b.orderCount)} />
-                      <Field k="Opened" v={b.openedAt ? new Date(b.openedAt).toLocaleString() : "—"} />
-                      <Field k="Closed" v={b.closedAt ? new Date(b.closedAt).toLocaleString() : "—"} />
+                      <Field k="Opened" v={b.openedAt ? new Date(b.openedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—"} />
+                      <Field k="Closed" v={b.closedAt ? new Date(b.closedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" }) : "—"} />
                     </div>
 
                     <SecHead icon="invoice" label="Invoice history" />
@@ -432,7 +432,7 @@ function InvoiceHistory({ e, gens }: { e: Expanded | undefined; gens: number }) 
             <div key={i} style={{ position: "relative", padding: "6px 0", fontSize: 12.5 }}>
               <span style={{ position: "absolute", left: -19, top: 9, width: 11, height: 11, borderRadius: 99, background: col, border: "2px solid var(--bg)" }} />
               <div style={{ fontWeight: 600 }}>{voided ? `Invoice #${ev.no} voided (reopened)` : `Invoice #${ev.no} generated`}</div>
-              <div style={{ color: "var(--muted)", fontSize: 11.5 }}>{new Date(ev.at).toLocaleString()}{ev.actor ? ` · ${ev.actor}` : ""}{ev.reason ? <> — <i>{ev.reason}</i></> : ""}</div>
+              <div style={{ color: "var(--muted)", fontSize: 11.5 }}>{new Date(ev.at).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}{ev.actor ? ` · ${ev.actor}` : ""}{ev.reason ? <> — <i>{ev.reason}</i></> : ""}</div>
             </div>
           );
         })}

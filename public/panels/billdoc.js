@@ -858,7 +858,13 @@
       billNo: sess.bill_no != null ? sess.bill_no : "",
       parcel: !!a.parcel,
       tableDisp: a.tableDisp || "—",
-      dateStr: now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      // en-IN + Asia/Kolkata, NOT the printing device's locale. This is a document headed "Tax
+      // Invoice": on a US-locale tablet the same bill printed 8/5/2026 where an India-locale one
+      // printed 05/08/2026 — one says August 5, the other May 8. The money on this doc is already
+      // en-IN and the logs are already pinned to IST (the one-time-zone rule); the date was the
+      // last thing left to the device (T15 sweep, 2026-08-05).
+      dateStr: now.toLocaleDateString("en-IN", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: "Asia/Kolkata" })
+        + " " + now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }),
       cust: cust, custPhone: custPhone,
       lines: combineBillLines(live.reduce(function (acc, o) { return acc.concat(Array.isArray(o.items) ? o.items : []); }, [])),
       subtotal: subtotalShown, discount: discShown,

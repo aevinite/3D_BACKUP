@@ -971,11 +971,11 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           {" "}The rules below apply only while it is on.
         </p>
         <div className="adm-togglegrid" style={{ marginBottom: 12 }}>
-          {boolToggle("Require location (guest must be near the café)", "require_location", draft.require_location !== false)}
+          {boolToggle("Require location (guest must be near the restaurant)", "require_location", draft.require_location !== false)}
           {boolToggle("Require a phone code (OTP) to place an order", "require_otp", draft.require_otp !== false)}
         </div>
         <p className="hint">
-          Café location — used only to confirm guests are physically there. In Google Maps, right-click the café
+          Restaurant location — used only to confirm guests are physically there. In Google Maps, right-click the restaurant
           and click the latitude, longitude numbers to copy them. Leave blank to skip the location check.
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, maxWidth: 560 }}>

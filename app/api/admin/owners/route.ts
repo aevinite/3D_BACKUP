@@ -295,7 +295,7 @@ export async function POST(req: NextRequest) {
     const eligibleAt = new Date(o.deleted_at as string).getTime() + RETENTION_DAYS * 86400000;
     if (Date.now() < eligibleAt) {
       const daysLeft = Math.ceil((eligibleAt - Date.now()) / 86400000);
-      return bad(`Locked for ${daysLeft} more day(s) — an owner can only be purged ${RETENTION_DAYS} days after deletion.`, 423);
+      return bad(`Locked for ${daysLeft} more ${daysLeft === 1 ? "day" : "days"} — an owner can only be purged ${RETENTION_DAYS} days after deletion.`, 423);
     }
     const who = o.name || o.username;
     const res = await hardDeleteOwner(ownerId);

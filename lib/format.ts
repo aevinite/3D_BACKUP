@@ -191,7 +191,10 @@ export const unitDisplay = (unitUsd: number, addonUsds: number[], currency?: Cur
 // toDisplay/toMinor, so the string always matches the math.
 export const formatAmount = (amount: number, currency?: CurrencyMeta): string => {
   const cur = currency || getCurrency();
-  const formatted = (Number.isFinite(amount) ? amount : 0).toLocaleString("en-US", {
+    // en-IN so ₹ prices group the way an Indian guest reads them (₹1,15,000, not ₹115,000).
+  // Non-INR currencies are unaffected in practice — their amounts are small and en-IN groups
+  // the first three digits identically.
+  const formatted = (Number.isFinite(amount) ? amount : 0).toLocaleString("en-IN", {
     minimumFractionDigits: cur.decimals,
     maximumFractionDigits: cur.decimals,
   });

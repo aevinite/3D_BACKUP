@@ -7,7 +7,7 @@
 import { useEffect, useRef } from "react";
 // GSAP is the animation library we use to move/fade things smoothly.
 import { gsap } from "gsap";
-import { splitBrandSegments, stripBrandMarkers, hasBrandMarkers } from "@/lib/brandText";
+import { splitBrandSegments, stripBrandMarkers, hasBrandMarkers, splitGraphemes } from "@/lib/brandText";
 
 // Shows the greeting + tagline at the top of the menu, revealing them letter
 // by letter. `greeting` is the small badge line, `title` is the big tagline.
@@ -60,17 +60,19 @@ export default function HeroTitle({ greeting, title }: { greeting: string; title
     };
   }, [greeting, title]);
 
-  // Turns a piece of text into one <span> per character, so each letter can be
+  // Turns a piece of text into one <span> per letter AS A READER SEES IT, so each can be
   // animated on its own. Spaces are kept as-is so words don't run together.
+  // splitGraphemes, never .split(""): a Devanagari vowel sign cut off from its consonant
+  // renders on a dotted placeholder circle — see lib/brandText.ts for the whole story.
   const split = (text: string) =>
-    stripBrandMarkers(text).split("").map((c, i) => <span key={i}>{c === " " ? " " : c}</span>);
+    splitGraphemes(stripBrandMarkers(text)).map((c, i) => <span key={i}>{c === " " ? " " : c}</span>);
 
   // The title supports *asterisk* highlight markers: marked letters use the accent,
   // the rest the mode-adaptive --text. With markers we add `has-split` so the CSS
   // drops the gradient (per-letter solid colours). No markers → original gradient.
   const titleSplit = hasBrandMarkers(title);
   const titleLetters = splitBrandSegments(title).flatMap((seg, si) =>
-    seg.text.split("").map((c, ci) => (
+    splitGraphemes(seg.text).map((c, ci) => (
       <span key={`${si}-${ci}`} className={seg.hi ? "hi" : undefined}>{c === " " ? " " : c}</span>
     ))
   );

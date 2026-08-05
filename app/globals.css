@@ -651,6 +651,18 @@ body.menu-scrolling .chef-call {
   animation: slideIn 0.6s var(--ease);
 }
 @keyframes slideIn { from { opacity:0; transform: translateY(-10px); } to { opacity:1; transform: translateY(0); } }
+
+/* Wide tracking + UPPERCASE are a Latin small-caps look. Scripts that JOIN or stack their
+   marks — Devanagari, Arabic — read as spaced-out fragments under it ("श्रे णि यां" instead of
+   "श्रेणियां"), and uppercase does nothing for them at all. So drop both for those languages;
+   the <html lang> attribute is already set before first paint by the boot script in
+   app/layout.tsx. (T15 sweep, 2026-08-05 — same finding as the per-letter split fix.) */
+:is(html[lang="hi"], html[lang="ar"], html[lang="ko"]) :is(
+  .greet-badge, .section-title, .browse-hint, .sg-kicker, .allergens-label, .stb-head
+) {
+  letter-spacing: normal;
+  text-transform: none;
+}
 .hero-title { 
   font-family: 'Playfair Display'; font-size: clamp(26px, 8vw, 34px); margin: 0; font-weight: 700; 
   background: linear-gradient(135deg, var(--text) 0%, var(--muted) 50%, var(--accent) 100%); 

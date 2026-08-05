@@ -376,11 +376,11 @@ export default function SessionGate() {
       const headName = nameRef.current.trim();
       const r = await joinSession(p.table, headName, coords.current.lat, coords.current.lng, ridRef.current);
       if (r.reason === "blocked") { setStep("blocked"); return; }
-      if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
+      if (r.reason === "too_far") { setNote("You seem too far from the restaurant."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; } // staff hasn't opened it
       // Unknown failure (usually a network blip): don't slam the popup shut and
       // lose their place — pre-fill the table and let them tap Continue again.
-      if (!r.ok) { setTableInput(p.table); setNote("Couldn't reach the café's system — check your internet and try again."); setStep("ask_table"); return; }
+      if (!r.ok) { setTableInput(p.table); setNote("Couldn't reach the restaurant's system — check your internet and try again."); setStep("ask_table"); return; }
       // Save the new session and make this table our default everywhere.
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
@@ -411,7 +411,7 @@ export default function SessionGate() {
   //   not open      -> request a waiter; keep watching so we auto-continue on open
   //   open + empty  -> you're the first guest in -> become head (no name)
   //   open + others -> give your name -> ask the head to let you in
-  // Decides what to do once we know the guest is at the café: wait for staff to
+  // Decides what to do once we know the guest is at the restaurant: wait for staff to
   // open the table, become the host, or ask the existing host to let them in.
   const afterLocation = useCallback(async () => {
     const p = pending.current!;
@@ -424,7 +424,7 @@ export default function SessionGate() {
     if (!st.ok) {
       setNote(isSessionTimeout(st)
         ? "The restaurant's system isn't answering right now — this one's on us. Please try again."
-        : "We can't reach the café's system right now — check your internet and retry.");
+        : "We can't reach the restaurant's system right now — check your internet and retry.");
       setStep("net_error");
       return;
     }
@@ -448,16 +448,16 @@ export default function SessionGate() {
   // has agreed on the intro screen (or on later visits, where they already have).
   const runLocation = useCallback(async () => {
     const st = settingsRef.current!;
-    setStep("locating"); // show the "Confirming you're at the café…" screen
+    setStep("locating"); // show the "Confirming you're at the restaurant…" screen
     const loc = await checkLocation(st.geoLat, st.geoLng, st.geoRadiusM);
     coords.current = { lat: loc.lat, lng: loc.lng };
     if (loc.near) return afterLocation(); // close enough -> carry on
     // Too far / blocked / unreadable -> explain and offer the waiter-request screen.
-    setNote(loc.reason === "denied" ? "Location was blocked." : loc.reason === "far" ? "You seem too far from the café." : "Couldn't read your location.");
+    setNote(loc.reason === "denied" ? "Location was blocked." : loc.reason === "far" ? "You seem too far from the restaurant." : "Couldn't read your location.");
     setStep("location_help");
   }, [afterLocation]);
 
-  // Step 1 of the flow: confirm the guest is physically at the café (if the
+  // Step 1 of the flow: confirm the guest is physically at the restaurant (if the
   // restaurant requires it). Two-phase: the FIRST time on this device we show a
   // friendly consent screen explaining why, and only request the location once the
   // guest taps "I'm here". On later visits we skip straight to the check.
@@ -523,7 +523,7 @@ export default function SessionGate() {
       // NETWORK BLIP: the membership is still perfectly valid on the server —
       // forgetting it here would throw the guest off their table (and could cost
       // a head their role) over one second of bad Wi-Fi. Keep it; offer a retry.
-      setNote("We can't reach the café's system right now — your spot at the table is safe. Check your internet and retry.");
+      setNote("We can't reach the restaurant's system right now — your spot at the table is safe. Check your internet and retry.");
       setStep("net_error");
       return;
     }
@@ -565,7 +565,7 @@ export default function SessionGate() {
       try {
         settingsRef.current = settingsRef.current || (await getSettings(ridRef.current));
       } catch {
-        setNote("We can't reach the café's system right now — check your internet and retry.");
+        setNote("We can't reach the restaurant's system right now — check your internet and retry.");
         setOpen(true); setStep("net_error");
         return;
       }
@@ -645,11 +645,11 @@ export default function SessionGate() {
       setStep("joining");
       const r = await joinSession(p.table, nm, coords.current.lat, coords.current.lng, ridRef.current);
       if (r.reason === "blocked") { setStep("blocked"); return; }
-      if (r.reason === "too_far") { setNote("You seem too far from the café."); setStep("location_help"); return; }
+      if (r.reason === "too_far") { setNote("You seem too far from the restaurant."); setStep("location_help"); return; }
       if (r.reason === "no_open_session") { setStep("not_open"); return; }
       // Unknown failure (usually a network blip): keep their typed name and let
       // them tap "Ask to join" again instead of closing and losing everything.
-      if (!r.ok) { setNote("Couldn't reach the café's system — check your internet and try again."); setStep("guest_name"); return; }
+      if (!r.ok) { setNote("Couldn't reach the restaurant's system — check your internet and try again."); setStep("guest_name"); return; }
       // Save the session and make this our default table.
       const s = { table: p.table, token: r.token as string, memberId: r.member_id as string, role: (r.role as "owner" | "guest") };
       sess.current = s; storeSession(s); rememberTable(s.table);
@@ -719,7 +719,7 @@ export default function SessionGate() {
   const retryFlow = async () => {
     if (!settingsRef.current) {
       try { settingsRef.current = await getSettings(ridRef.current); } catch {
-        setNote("Still can't reach the café's system — check your internet and try again.");
+        setNote("Still can't reach the restaurant's system — check your internet and try again.");
         return;
       }
     }
@@ -846,10 +846,10 @@ export default function SessionGate() {
           </div>
         </>)}
 
-        {/* PHASE 2: "Checking you're at the café" — the OS prompt appears here. */}
+        {/* PHASE 2: "Checking you're at the restaurant" — the OS prompt appears here. */}
         {step === "locating" && (<>
           <div className="sg-badge spin"><i className="fas fa-location-crosshairs"></i></div>
-          <h3 className="sg-title">Confirming you&apos;re at the café…</h3>
+          <h3 className="sg-title">Confirming you&apos;re at the restaurant…</h3>
           <p className="sg-sub">We use your location only to make sure orders and waiter calls are real. Please tap Allow if your browser asks.</p>
         </>)}
 
@@ -910,7 +910,7 @@ export default function SessionGate() {
           <div className="sg-badge"><i className="fas fa-handshake"></i></div><h3 className="sg-title">This table&apos;s already open</h3>
           <p className="sg-sub">Someone at table {pending.current?.table} started this tab. Add your name so they can confirm it&apos;s you, then ask to join.</p>
           <input className="sg-input" placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
-          {/* e.g. "couldn't reach the café's system" after a failed join attempt */}
+          {/* e.g. "couldn't reach the restaurant's system" after a failed join attempt */}
           {note && <p className="sg-sub" style={{ color: "#fca5a5" }}>{note}</p>}
           <div className="sg-actions">
             <button className="sg-btn gold" onClick={() => doJoinAsGuest()}>Ask to join this table</button>
@@ -956,13 +956,13 @@ export default function SessionGate() {
           </div>
         </>)}
 
-        {/* The café's system couldn't be reached (bad Wi-Fi / mobile data blip).
+        {/* The restaurant's system couldn't be reached (bad Wi-Fi / mobile data blip).
             Crucially: the guest's table membership was KEPT — only the action
             needs retrying once the connection is back. */}
         {step === "net_error" && (<>
           <div className="sg-badge"><i className="fas fa-wifi"></i></div>
           <h3 className="sg-title">Connection trouble</h3>
-          <p className="sg-sub">{note || "We can't reach the café's system right now. Check your internet and retry."}</p>
+          <p className="sg-sub">{note || "We can't reach the restaurant's system right now. Check your internet and retry."}</p>
           <div className="sg-actions">
             <button className="sg-btn ghost" onClick={close}>Close</button>
             <button className="sg-btn gold" onClick={retryFlow}>Retry</button>

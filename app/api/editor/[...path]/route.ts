@@ -1303,7 +1303,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // money on top of the bill (never part of revenue/tax), so reported as their own figure.
       const tips = r2(orders.filter((o) => o.status !== "cancelled" && o.payment_status === "paid").reduce((a, o) => a + (Number(o.tip) || 0), 0));
       return ok({
-        date: new Date().toLocaleDateString(), since,
+        date: new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }), since,
         dineIn: { orderCount, bills: groups.size, gross: r2(gross), discount: r2(disc), taxable: r2(taxable), tax: r2(tax), net: r2(net),
           // MRP / nil-rated turnover, shown as its own line so the day's takings still add up
           // on the page: taxable + tax + mrp = net. 0 for every restaurant not using it.
@@ -2724,7 +2724,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       // SOFT delete — the row stays; a restore can bring it back.
       const res = deletable.length ? await softDeleteOrders(rid, deletable, { actor: actorName, actorId: g.user?.id ?? null, reason: delReason }) : { deleted: 0 };
-      await log("editor", "orders_delete", { restaurant_id: rid, detail: (all ? `cleared all freed records (${res.deleted})` : `deleted ${res.deleted} bill(s)`) + (delReason ? ` — ${delReason}` : ""), device_id: dev });
+      await log("editor", "orders_delete", { restaurant_id: rid, detail: (all ? `cleared all freed records (${res.deleted})` : `deleted ${res.deleted} ${res.deleted === 1 ? "bill" : "bills"}`) + (delReason ? ` — ${delReason}` : ""), device_id: dev });
       // One Audit row per bill, written server-side (was the browser's job — see removalAudit.ts).
       // In bounded PARALLEL, not one after another: strictly sequential meant a clear-all of a few
       // hundred bills spent most of the request waiting on round-trips. recordRemoval never throws,
@@ -3455,7 +3455,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           const rate = sub > 0 ? tax / sub : 0;
           return s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate);
         }, 0);
-        await log("manager", "close_unpaid", { restaurant_id: rid, table_number: t, detail: `table cleared with ${owedRows.length} unpaid order(s), ₹${Math.round(owed * 100) / 100} owed`, device_id: dev });
+        await log("manager", "close_unpaid", { restaurant_id: rid, table_number: t, detail: `table cleared with ${owedRows.length} unpaid ${owedRows.length === 1 ? "order" : "orders"}, ₹${Math.round(owed * 100) / 100} owed`, device_id: dev });
       }
       let q = sb.from("orders").update({ status: "served", archived: true, archived_at: nowIso() }).neq("status", "cancelled").eq("archived", false).eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t);
@@ -3467,7 +3467,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // removed, which is exactly how he found table 30 reading Free on the floor and open in the
       // database. The party now ENDS with its round: the table is free, on both sides.
       if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: nowIso(), last_activity_at: nowIso() }).eq("id", openSess.id).select());
-      await log("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} order(s) cleared`, device_id: dev });
+      await log("manager", "table_restart", { restaurant_id: rid, table_number: t, detail: `${rows.length} ${rows.length === 1 ? "order" : "orders"} cleared`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
 
@@ -3492,7 +3492,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       invalidateFloor(rid);
       await log("manager", "table_unmerge", { restaurant_id: rid, table_number: t,
-        detail: `split from T${r.parent ?? "?"} · ${r.moved ?? 0} order(s) returned${r.kots ? ` (KOT ${r.kots})` : ""}`, device_id: dev });
+        detail: `split from T${r.parent ?? "?"} · ${r.moved ?? 0} ${(r.moved ?? 0) === 1 ? "order" : "orders"} returned${r.kots ? ` (KOT ${r.kots})` : ""}`, device_id: dev });
       return ok({ ok: true, ...r });
     }
 
@@ -3566,7 +3566,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           payment_status: "paid", paid_at: nowIso(), payment_method: ON_THE_HOUSE_METHOD,
         }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
       }
-      await log("manager", "on_the_house", { restaurant_id: rid, table_number: t, detail: `${unpaid.length} order(s) · ${tagRow.tag}`, device_id: dev });
+      await log("manager", "on_the_house", { restaurant_id: rid, table_number: t, detail: `${unpaid.length} ${unpaid.length === 1 ? "order" : "orders"} · ${tagRow.tag}`, device_id: dev });
       // Settling with no money collected is the largest money-lowering action there is, so it
       // gets an Audit row per order, naming what each was worth (2026-08-02).
       for (const o of unpaid) {
@@ -3629,7 +3629,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       } else {
         await clearTableSignals(rid, t);
       }
-      await log("manager", "khata_park", { restaurant_id: rid, table_number: t, detail: `${kunpaid.length} order(s) → ${customer!.name}`, device_id: dev });
+      await log("manager", "khata_park", { restaurant_id: rid, table_number: t, detail: `${kunpaid.length} ${kunpaid.length === 1 ? "order" : "orders"} → ${customer!.name}`, device_id: dev });
       return ok({ ok: true, customer, count: kunpaid.length });
     }
 
@@ -3671,7 +3671,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       else return err("session_id or order_id required");
       const paidRows = must(await pq.select("id,table_number")) as { id: string; table_number: string }[];
       if (!paidRows.length) return err("Nothing outstanding on that bill.", 409);
-      await log("manager", "khata_collect", { restaurant_id: rid, table_number: paidRows[0]?.table_number ?? null, detail: `${paidRows.length} order(s) · ${method}`, device_id: dev });
+      await log("manager", "khata_collect", { restaurant_id: rid, table_number: paidRows[0]?.table_number ?? null, detail: `${paidRows.length} ${paidRows.length === 1 ? "order" : "orders"} · ${method}`, device_id: dev });
       return ok({ ok: true, count: paidRows.length });
     }
 

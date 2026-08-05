@@ -13,6 +13,10 @@ import { useFeatures } from "@/lib/features";
 // A long dish name shrinks to fit its two-line box instead of being cut off with "…"
 // (owner, 2026-08-05: "make it dynamic so that for every screen it should fit").
 import { useFitText } from "@/lib/useFitText";
+// The sold-out pill has a translation in all six languages (t.notAvailable) and the DISH PAGE
+// already used it — only this card rendered the English literal, so a Hindi guest saw
+// "Not available" on the grid and "उपलब्ध नहीं" the moment they opened it (T15 sweep).
+import { useTranslation } from "@/lib/i18n";
 
 // The full set of details one dish can have. The "?" ones are optional.
 interface FoodItem {
@@ -79,6 +83,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
   // The two-line name box keeps its exact designed size; a name too long for it shrinks its own
   // font until the WHOLE name fits, instead of being cut off. (owner, 2026-08-05)
   const nameRef = useFitText(item.title);
+  const t = useTranslation();                 // the guest's language, for the sold-out pill
   // Inside a specific restaurant's menu (/r/<slug>/menu) the dish link must stay in
   // that restaurant (/r/<slug>/item/...). No slug = the default menu → global /item.
   const base = restaurantSlug ? `/r/${restaurantSlug}` : "";
@@ -297,7 +302,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
             className="sold-out-pill"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
           >
-            Not available
+            {t.notAvailable}
           </span>
         ) : hasOptions ? (
           // 2) Has options: a "sliders" button that opens the Customize popup.

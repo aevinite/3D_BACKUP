@@ -1242,7 +1242,7 @@ export function TreeStyle() {
   .at-box.at-nudge { animation:atShake .34s ease; }
   @keyframes atShake { 0%,100% { transform:translateX(0); } 25% { transform:translateX(-5px); } 70% { transform:translateX(5px); } }
   /* An embedded panel's own toggles were as tall as their label — "Require location (guest must
-     be near the café)" wrapped to five lines and the box grew with it (owner, 2026-08-01: "the
+     be near the restaurant)" wrapped to five lines and the box grew with it (owner, 2026-08-01: "the
      toggle is also very fat, vertically it is too much"). Cap the height, let the label use the
      width it needs, and lay them out side by side. */
   .at-panel .adm-togglegrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:10px; }

@@ -1098,7 +1098,7 @@ function tileHtml(i) {
     (finished ? `<span class="tclose" role="button" data-quick="close" data-qt="${partyHead}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}">⏻</span>` : "")
     + (tshow("tablet_take_orders") ? `<span class="t-take${txray("tablet_take_orders")}" role="button" data-quick="order" data-qt="${i}" title="Add another order for ${esc(tableLabel(i))}"><i class="t-take-x">＋</i><i class="t-take-t">Take order</i></span>` : "")
     + (a.nw > 0 ? `<span class="tacc" role="button" data-quick="accept" data-qt="${i}" title="Accept the new order">✓</span>` : "")
-    + (st.cls === "bill" && tshow("tablet_mark_paid") ? `<span class="tpay${txray("tablet_mark_paid")}" role="button" data-quick="pay" data-qt="${partyHead}" title="Mark the bill paid">💳</span>` : "");
+    + (st.cls === "bill" && tshow("tablet_mark_paid") ? `<span class="tpay${txray("tablet_mark_paid")}" role="button" data-quick="pay" data-qt="${partyHead}" title="Mark bill paid">💳</span>` : "");
   // Special table type (mig 166): a corner ribbon + pill badge layered OVER the state
   // look — strip/line/pay ring keep working, the tag is unmistakable on top.
   const ttag = ttagOf(i);
@@ -1873,7 +1873,7 @@ function renderPanel() {
   }));
   // Delete a WHOLE order (confirm; refused server-side if the order is already paid).
   document.querySelectorAll("[data-del-order]").forEach((b) => (b.onclick = async () => {
-    if (await confirmDialog("Delete this whole order? It will be permanently removed.", "Delete order"))
+    if (await confirmDialog("Delete this whole order? It leaves the floor and the reports, and stays in the records for 90 days.", "Delete order"))
       act(() => api("POST", `/orders/${b.dataset.delOrder}/delete`));
   }));
   // ── STAFF EDIT-AFTER-CONFIRM (owner, 2026-06-17) ──────────────────────────
@@ -4789,7 +4789,7 @@ window.addEventListener("online", () => load().catch(() => {}));
     Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
     ov.innerHTML = `<div style="width:min(92vw,360px);background:var(--panel);color:var(--text);border-radius:16px;padding:18px 18px calc(18px + var(--sab));box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;margin:0 0 14px"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">⚙️ Settings</h3><button class="set-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;width:40px;height:40px;font-size:16px;cursor:pointer">✕</button></div>
-      <a class="dw-btn danger" href="/api/panel-logout" style="margin-top:0">Log out</a>
+      <a class="dw-btn danger" href="/api/panel-logout" style="margin-top:0">Sign out</a>
       <div class="muted" style="font-size:12px;margin-top:10px">More settings will live here soon.</div>
     </div>`;
     document.body.appendChild(ov);

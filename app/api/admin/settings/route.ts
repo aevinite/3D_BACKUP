@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
   // never written. Every neighbouring admin write already logs itself; this was the gap.
   await logAction("admin", "retention_change", {
     device_id: deviceIdFrom(req),
-    detail: `log retention set for ALL restaurants — ${Object.entries(patch).map(([k, v]) => `${k.replace(/_/g, " ")} ${v} day(s)`).join(", ")}`,
+    detail: `log retention set for ALL restaurants — ${Object.entries(patch).map(([k, v]) => `${k.replace(/_/g, " ")} ${v} ${Number(v) === 1 ? "day" : "days"}`).join(", ")}`,
   });
   return NextResponse.json({ ok: true });
 }

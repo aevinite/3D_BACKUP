@@ -33,7 +33,7 @@ export default function LoginForm({
       });
       const data = await r.json();
       if (!r.ok || !data.ok) {
-        setErr(data.error || "Login failed.");
+        setErr(data.error || "That username and password don\u2019t match \u2014 check both and try again.");
         setBusy(false);
         return;
       }
