@@ -4555,10 +4555,15 @@ document.addEventListener("click", (e) => {
 // and which also fires on wake, so a tablet picked up after an hour is correct before its first tap.
 // One in-flight read at a time, and it only repaints when the answer actually DIFFERS, so the dish
 // edits that also ride `menu` cost one small GET and nothing else.
-let whoamiJson = null, whoamiBusy = false;
-function refreshWhoami() {
+// THROTTLED for the reason spelled out beside the manager panel's copy: `menu` also carries every
+// dish/category/settings edit, so without this an ordinary run of menu churn would refetch /whoami
+// again and again. A permission change is rare and deliberate; noticing it up to 5s later is free.
+let whoamiJson = null, whoamiBusy = false, whoamiAt = 0;
+const WHOAMI_MIN_GAP_MS = 5000;
+function refreshWhoami(force) {
   if (whoamiBusy) return;
-  whoamiBusy = true;
+  if (!force && Date.now() - whoamiAt < WHOAMI_MIN_GAP_MS) return;
+  whoamiBusy = true; whoamiAt = Date.now();
   api("GET", "/whoami").then((w) => {
     const j = JSON.stringify(w || null);
     if (j === whoamiJson) return;      // powers unchanged — nothing to repaint
@@ -4570,7 +4575,7 @@ function refreshWhoami() {
     renderFloor(); if (!state.ordering && !state.pickerOpen) renderPanel();   // #U1: don't clobber an open Move picker
   }).catch(() => {}).then(() => { whoamiBusy = false; });
 }
-refreshWhoami();
+refreshWhoami(true);
 // Realtime: refetch only when something on the floor actually changes (instant),
 // instead of polling every second. A slow 60s timer is the backup if the
 // WebSocket drops; if realtime didn't load, fall back to a gentle 2s poll.
