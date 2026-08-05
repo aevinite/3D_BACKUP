@@ -11,6 +11,8 @@
  *   node scripts/verify-everything.mjs                        (live backup site)
  *   VERIFY_BASE=http://localhost:4000 node scripts/verify-everything.mjs
  *   node scripts/verify-everything.mjs --only 41-60           (a range)
+ *   node scripts/verify-everything.mjs --only 20              (one phase)
+ *   node scripts/verify-everything.mjs --only 16,19,170       (the ones that failed)
  *   node scripts/verify-everything.mjs --skip-slow            (drops the bundled suites)
  *
  * SAFETY: signs in ONCE per role (loginAs caches, so this can never trip the login limit),
@@ -67,11 +69,40 @@ const baseArg = (() => { const i = ARGS.indexOf("--base"); return i >= 0 ? ARGS[
 const BASE = (baseArg || process.env.VERIFY_BASE || "https://3-d-backup.vercel.app").replace(/\/$/, "");
 const ALLOW_DB_MISMATCH = process.argv.includes("--allow-db-mismatch");
 const BASE_FROM = baseArg ? "--base" : process.env.VERIFY_BASE ? "VERIFY_BASE" : "default";
+// --only PICKS PHASES, AND MUST MEAN WHAT YOU TYPED.
+// It used to parse ONLY a range: `(ARGS[i+1]||"").split("-").map(Number)`. Type the thing a
+// person actually types after a failing run — the failing numbers, `--only 16,19,170` — and
+// Number("16,19,170") is NaN, so `from` fell back to 1 and `to` to 9999 and it silently ran
+// ALL 506 phases. That is a 40-minute run when you asked for three, with nothing said; and it
+// is the same fault the --base note directly above records ("accepted in silence and ignored
+// ... a check that tests something other than what you asked for is worse than no check").
+// It cost exactly that on 2026-08-05, re-running the whole suite twice to re-check 11 phases.
+//
+// Now: a comma list, a range, a single number, or any mix — and an unparseable value STOPS
+// with the four shapes spelled out, instead of quietly meaning "everything".
 const only = (() => {
   const i = ARGS.indexOf("--only");
   if (i === -1) return null;
-  const [a, b] = (ARGS[i + 1] || "").split("-").map(Number);
-  return { from: a || 1, to: b || a || 9999 };
+  const spec = String(ARGS[i + 1] || "").trim();
+  const picked = new Set();
+  let understood = spec.length > 0;
+  for (const part of spec.split(",").map((x) => x.trim()).filter(Boolean)) {
+    const range = part.match(/^(\d+)\s*-\s*(\d+)$/);
+    const single = part.match(/^(\d+)$/);
+    if (range) {
+      const [a, b] = [Number(range[1]), Number(range[2])];
+      for (let n = Math.min(a, b); n <= Math.max(a, b); n++) picked.add(n);
+    } else if (single) {
+      picked.add(Number(single[1]));
+    } else { understood = false; break; }
+  }
+  if (!understood || picked.size === 0) {
+    console.error(`\n⛔ --only ${JSON.stringify(spec)} is not something I can read, and running all`);
+    console.error(`   506 phases instead of the ones you asked for would waste ~40 minutes silently.`);
+    console.error(`   Use any of:  --only 20   ·   --only 16,19,170   ·   --only 41-60   ·   --only 16,41-60,170\n`);
+    process.exit(2);
+  }
+  return { has: (n) => picked.has(n), size: picked.size, spec };
 })();
 const skipSlow = ARGS.includes("--skip-slow");
 
@@ -2617,9 +2648,9 @@ if (ARGS.includes("--list")) {
 }
 
 const results = [];
-console.log(`\nverify-everything · ${PHASES.length} phases · base ${BASE} (from ${BASE_FROM})\n${"─".repeat(78)}`);
+console.log(`\nverify-everything · ${only ? `${only.size} of ${PHASES.length} phases (--only ${only.spec})` : `${PHASES.length} phases`} · base ${BASE} (from ${BASE_FROM})\n${"─".repeat(78)}`);
 for (const ph of PHASES) {
-  if (only && (ph.n < only.from || ph.n > only.to)) continue;
+  if (only && !only.has(ph.n)) continue;
   const t0 = Date.now();
   let status = "PASS", detail = "";
   try { await ph.fn(); }
