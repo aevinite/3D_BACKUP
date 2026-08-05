@@ -28,16 +28,11 @@ type Staff = { id: string; username: string; role: string; name: string | null; 
   in_payroll?: boolean };
 type PayAccess = { moduleOn: boolean; canSeePay: boolean; canRecordPay: boolean; canEditProfile: boolean; canEditJobPay: boolean };
 
-// Per-user override caps for a WAITER (tablet) account — the tablet_* keys tabletPerm enforces.
-// The module gate (or null) is what the admin must have enabled for the restaurant; a gated cap
-// whose module is OFF is greyed here (and refused server-side by GAP-B).
 // WAITER_CAPS + OVR_MODES lived here — a private copy of the waiter permission list. Deleted
 // 2026-08-04 with the controls that used them: lib/staffCaps.ts is the one list now, and the admin
 // Access screen is the one screen. Do not reintroduce a role's permission list in a panel.
 
 const ROLES = ["manager", "kitchen", "tablet"];
-// Powers that only exist while the "Staff profiles & pay" module is on for that restaurant
-// (mig 220). With the module off these would be dead switches, so they're not rendered at all.
 const money = (n: number | null | undefined) => "\u20b9" + Math.round(Number(n || 0)).toLocaleString("en-IN");
 
 export default function OwnerStaffPage() {
