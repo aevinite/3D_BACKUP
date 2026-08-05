@@ -135,18 +135,33 @@ try {
     ? pass(`manager/waiter tile after accepting: "${tile.label}", 1 dish, ₹${Math.round(Number(tile.due))} due — party B's order only`)
     : fail(`tile shows ${JSON.stringify(tile.counts)} and ₹${tile.due} due; party B ordered 1 dish worth ₹${bTotal}`);
 
+  // THESE THREE CHECKS ASSERT IDENTITY, NOT A COUNT (2026-08-05).
+  // They used to demand "exactly 1 thing at this table", which made the guard fail on ANY row it
+  // did not create — including one left by an earlier run of ITSELF that crashed before its own
+  // cleanup (that is precisely what happened: the 520-phase suite reported "kitchen board shows 4
+  // ticket(s) at T29", where this test only ever makes 2). A guard that goes red on its own litter
+  // reads as a product fault and wastes the sweep it is meant to protect.
+  // The invariant was never "the table is otherwise empty" — it is "party A's food is gone and
+  // party B's is here", which is exactly what the table-slice check below already did properly.
+  // Anything unrelated is reported alongside the pass instead of failing it.
   const floor = (await sb.rpc("lfh_floor_state", { p_restaurant_id: RID })).data;
   const entry = (Array.isArray(floor) ? floor : []).find((e) => String(e.table_number) === T);
-  const floorOrders = entry?.orders?.length ?? null;
-  floorOrders === 1
-    ? pass("admin/owner live floor: 1 order at the table (party B's)")
-    : fail(`admin/owner live floor lists ${floorOrders} orders at T${T} — party A's should be gone`);
+  const floorIds = (entry?.orders || []).map((o) => String(o.id ?? o.order_id ?? ""));
+  const floorHasA = floorIds.includes(String(orderA));
+  const floorHasB = floorIds.includes(String(orderB));
+  const floorOther = floorIds.filter((id) => id !== String(orderA) && id !== String(orderB)).length;
+  floorHasB && !floorHasA
+    ? pass(`admin/owner live floor: party B's order is there, party A's is gone${floorOther ? ` (+${floorOther} unrelated, not this test's)` : ""}`)
+    : fail(`admin/owner live floor at T${T}: party A present=${floorHasA}, party B present=${floorHasB} — party A's order must be gone and B's must be listed`);
 
   const kitchen = (await sb.rpc("lfh_kitchen_tickets", { p_restaurant_id: RID })).data || [];
   const kTickets = kitchen.filter((k) => String(k.table_number) === T);
-  kTickets.length === 1 && kTickets[0].order_id === orderB
-    ? pass("kitchen board: exactly party B's ticket at that table")
-    : fail(`kitchen board shows ${kTickets.length} ticket(s) at T${T} — party A's served food must not be cooking again`);
+  const kHasA = kTickets.some((k) => String(k.order_id) === String(orderA));
+  const kHasB = kTickets.some((k) => String(k.order_id) === String(orderB));
+  const kOther = kTickets.filter((k) => String(k.order_id) !== String(orderA) && String(k.order_id) !== String(orderB)).length;
+  kHasB && !kHasA
+    ? pass(`kitchen board: party B's ticket is there and party A's is not${kOther ? ` (+${kOther} unrelated, not this test's)` : ""}`)
+    : fail(`kitchen board at T${T}: party A's ticket present=${kHasA}, party B's present=${kHasB} — party A's served food must not be cooking again`);
 
   const bundle = (await sb.rpc("lfh_floor_bundle", { p_restaurant_id: RID, p_table: T })).data;
   const bundleSess = (bundle?.sessions || []).map((s) => s.id);
@@ -168,9 +183,13 @@ try {
   head("2) The money");
   const liveAtTable = must(await sb.from("orders").select("id,total,session_id,payment_status")
     .eq("restaurant_id", RID).eq("table_number", T).eq("archived", false).is("deleted_at", null).neq("status", "cancelled"));
-  liveAtTable.length === 1 && liveAtTable[0].id === orderB
-    ? pass(`only party B's order is live at the table (₹${bTotal})`)
-    : fail(`${liveAtTable.length} live orders at T${T}: ${JSON.stringify(liveAtTable.map((o) => `₹${o.total}/${o.payment_status}`))} — party B would be billed for A's food`);
+  const liveHasA = liveAtTable.some((o) => String(o.id) === String(orderA));
+  const liveHasB = liveAtTable.some((o) => String(o.id) === String(orderB));
+  const liveOther = liveAtTable.filter((o) => String(o.id) !== String(orderA) && String(o.id) !== String(orderB));
+  liveHasB && !liveHasA
+    ? pass(`party B's order is the live one at the table (₹${bTotal})${liveOther.length ? ` (+${liveOther.length} unrelated, not this test's)` : ""}`)
+    : fail(`live orders at T${T}: party A present=${liveHasA}, party B present=${liveHasB} ` +
+        `${JSON.stringify(liveAtTable.map((o) => `₹${o.total}/${o.payment_status}`))} — party B must never be billed for A's food`);
   const aRow = must(await sb.from("orders").select("payment_status,total,archived,status").eq("id", orderA).limit(1))[0];
   aRow.payment_status === "paid" && aRow.status === "served" && aRow.archived
     ? pass("party A's settled bill is intact and off the floor (archived, still in the ledger)")

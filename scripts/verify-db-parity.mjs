@@ -190,6 +190,27 @@ const q = async (env, sql) => {
 };
 const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();   // whitespace-only diffs aren't drift
 
+// A COMMENT IS NOT CODE — AND A RENUMBERED MIGRATION IS NOT DRIFT (2026-08-05).
+// The parity half compared pg_get_functiondef() text, comments and all, and reported three
+// functions as "an older definition on AV live" whose CODE was byte-identical. The only difference
+// was a migration number inside a comment:
+//     lfh_place_order_public      backup "-- NEW (280/F21):"   AV live "-- NEW (281/F21):"
+//     lfh_staff_unmerge_table     backup "(mig 297)."          AV live "(mig 299)."
+//     lfh_sync_order_items_json   backup "-- (269) the frozen" AV live "-- (270) the frozen"
+// All three lengths matched to the character. The cause is renumbering: when two sessions collide,
+// the newer migration is renumbered and its self-referencing comments are rewritten in the FILE —
+// but AV live already holds the function applied under the old number, so its stored comment keeps
+// it. Nothing about the restaurant's behaviour differs by one byte.
+// This guard's own header says shouting DRIFT at a non-difference "teaches everyone to ignore" it,
+// which is exactly what three permanent false positives would do. So parity compares CODE.
+// `norm` above is left alone: the SOURCED half below matches distinctive phrases from a live body
+// against the migration folder, and some of those phrases are comments.
+const normCode = (s) => norm(
+  String(s || "")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")   // /* block comments */
+    .replace(/--[^\n]*/g, " "),            // -- line comments
+);
+
 // Key by name AND argument list: several functions are OVERLOADED (an old signature kept beside
 // a new one), and keying by name alone compares dev's signature A against AV live's signature B
 // and cries drift where there is none — the first version of this guard did exactly that.
@@ -213,7 +234,7 @@ if (!av) {
     for (const row of d) {
       if (expectedMissing(row.name)) continue;
       if (!A.has(row.name)) { missing.push(row.name); continue; }
-      if (norm(A.get(row.name)) !== norm(row.def)) differing.push(row.name);
+      if (normCode(A.get(row.name)) !== normCode(row.def)) differing.push(row.name);
     }
     const extra = a.map((r) => r.name).filter((n) => !d.some((r) => r.name === n) && !expectedMissing(n));
     // Date each disagreement by the question it answers (see firstIn / lastIn above).
