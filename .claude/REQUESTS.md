@@ -1187,3 +1187,24 @@ Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French Hou
 - [x] **Nothing is ever lost**: jobs queue in the database — kitchen offline/closed prints them
   the moment it's back; failed prints retry (5 attempts), then surface to the manager with a
   "Print here instead" fallback; a successful print auto-resolves every open printer problem.
+## 2026-08-05 — API-layer sweep of the staff-panel + admin routes (T17, PR #852)
+- [x] **The waiter's tap on a dish that has gone is refused, not reported as done** — it answered
+  "OK" while nothing moved and the kitchen never heard. The kitchen and manager screens were both
+  fixed for this on 2026-08-04; the waiter tablet had been left behind.
+- [x] **"Change table" and "Split tables" now obey the Table & KOT operations switch** on the
+  manager panel — with the feature switched off the button vanished but the action still worked.
+  The admin still passes (so a greyed control genuinely works from the console).
+- [x] **Adding an allergen from the waiter tablet now records what the manager's does** — the
+  ✎ Edited badge on the ticket and the ＋/✎− marks per dish, so the kitchen sees what changed.
+  Both panels also refuse it now on an order that has been voided or moved.
+- [x] **Two people can't silently overwrite each other on a staff profile any more** — the
+  person's own screen was missing the check the admin's screen already had.
+- [x] **A profile saved with no internet is kept on the device and sent later** (name, phone, PIN,
+  personal details). The password box deliberately still needs a connection and says so.
+- [x] **Smaller ones:** the admin's sign-in cookie is HTTPS-only in production like the staff one;
+  signing out is no longer something a stray link can trigger; a staff member renaming themselves
+  is no longer refused a name that only another restaurant uses; a missing session secret now warns,
+  because without it changing the admin password signs every staff device out at once.
+- [x] **New guard** so this class can't come back quietly: the clash check now verifies the table an
+  expectation names is one the server actually compares (it could be ignored in silence before).
+- Verified live on 3-d-backup after merge; full report in `.claude/sweep/T17-findings.md`.
