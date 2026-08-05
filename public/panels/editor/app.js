@@ -848,18 +848,14 @@ function renderList() {
     // repeated the owner panel's own Reports. Nobody gets them here now, so there is nothing
     // for the X-ray to mark either. Do NOT add a wider row back: the server clamps this
     // endpoint to the same two words, so it would return today's numbers under a false label.
-    const mk = (key, icon, label, sub) => {
-      const li = el(`<li class="list-item${dashRange === key ? " active" : ""}" data-dash-range="${key}">
-        <div class="thumb">${icon}</div>
-        <div class="meta"><b>${label}</b><small>${sub}</small></div>
-      </li>`);
-      li.onclick = () => { dashRange = key; try { localStorage.setItem("lfh_dash_range", key); } catch {} renderList(); loadDashboard(); };
-      return li;
-    };
-    ul.appendChild(mk("today", '<i class="fas fa-bolt"></i>', "Today", "live snapshot"));
-    // Absent until whoami answers, rather than shown-then-yanked: a row that appears for a
-    // second and vanishes reads as broken, and this one is cheap to add late.
-    if (dashReachAllowsYesterday()) ul.appendChild(mk("yesterday", '<i class="fas fa-calendar-day"></i>', "Yesterday", "the day before"));
+    // NOTHING IN THE SIDEBAR ANY MORE (owner, 2026-08-05): "remove that today thing… you can set
+    // the toggle at the top… and when there is today, you don't need even toggle also."
+    // With the 30-day and 12-month rows deleted on 2026-08-03 this column existed to hold ONE
+    // word, and a tablet-size check measured it eating 320px × 774px — 27% of the screen — with
+    // everything under that one row blank. The range now lives as a small Today / Yesterday
+    // toggle just under the dashboard's title (see dashRangeToggleHtml), and when a restaurant
+    // only reaches Today there is no toggle at all — nothing to choose, so nothing shown.
+    // `dash` is in setTab's .no-sidebar list, so the content takes the full width.
     return;
   }
   if (state.tab === "log") {
@@ -4258,6 +4254,34 @@ let dashRange = (() => { try { return localStorage.getItem("lfh_dash_range") ===
 function dashReachAllowsYesterday() {
   return !!(XRAY_WHO && XRAY_WHO.dashReach === "today_yesterday");
 }
+// ── THE RANGE IS A SMALL TOGGLE UNDER THE TITLE, NOT A WHOLE COLUMN (owner, 2026-08-05) ────────
+// "you can set the toggle at the top — not at the very top — and when there is today, you don't
+// need even toggle also." So: it sits just under the Dashboard heading (never in the top bar), and
+// a restaurant that only reaches Today gets NOTHING — a one-option chooser is a control that
+// cannot be used, which is the dead-switch the access rebuild deleted everywhere else.
+// The old left-hand rail is gone (see the `dash` branch of renderList).
+function dashRangeToggleHtml() {
+  if (!dashReachAllowsYesterday()) return "";
+  const on = (k) => (dashRange === k ? " active" : "");
+  return `<div class="dash-range" role="group" aria-label="Which day to show">
+    <button type="button" class="dash-range-btn${on("today")}" data-dash-range="today">⚡ Today <small>live</small></button>
+    <button type="button" class="dash-range-btn${on("yesterday")}" data-dash-range="yesterday">Yesterday <small>the day before</small></button>
+  </div>`;
+}
+function bindDashRangeToggle() {
+  document.querySelectorAll(".dash-range-btn").forEach((b) => {
+    b.onclick = () => {
+      const key = b.dataset.dashRange;
+      if (key === dashRange) return;              // already showing it — nothing to do
+      dashRange = key;
+      try { localStorage.setItem("lfh_dash_range", key); } catch {}
+      // repaint the toggle's own highlight immediately, then fetch — a tap that looks like
+      // nothing happened is the same as a dropped tap
+      document.querySelectorAll(".dash-range-btn").forEach((x) => x.classList.toggle("active", x.dataset.dashRange === key));
+      loadDashboard();
+    };
+  });
+}
 // The Today summary box: a live snapshot across every channel (dine-in tables +
 // Zomato/Swiggy/takeaway live orders) and today's combined totals. Built from the
 // `live` + `platformToday` fields the /stats endpoint adds.
@@ -5314,7 +5338,8 @@ function renderEditor() {
     return;
   }
   if (state.tab === "dash") {
-    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="mgrReport">📄 Download report</button><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="gstReport">🧾 GST report</button><button class="btn" id="menuMatrix">📊 Menu winners</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div><div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
+    ed.innerHTML = `<div class="ed-head"><h2>Dashboard</h2><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn primary" id="mgrReport">📄 Download report</button><button class="btn" id="zReport">📋 Day-close (Z)</button><button class="btn" id="gstReport">🧾 GST report</button><button class="btn" id="menuMatrix">📊 Menu winners</button><button class="btn" id="dashRefresh">↻ Refresh</button></div></div>${dashRangeToggleHtml()}<div id="dashBody" class="dash-body"><div class="empty">Crunching the numbers…</div></div>`;
+    bindDashRangeToggle();
     document.getElementById("dashRefresh").onclick = () => renderEditor();
     document.getElementById("zReport").onclick = () => printZReport();
     document.getElementById("mgrReport").onclick = () => printManagerReport();
@@ -12496,7 +12521,7 @@ function setTab(tab) {
   // The floor already has its own left tiles + right detail, so it takes the full
   // width — the .no-sidebar class collapses the grid's first column to nothing.
   const layout = document.querySelector(".layout");
-  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform" || tab === "banquet" || tab === "ratings" || tab === "inventory");
+  if (layout) layout.classList.toggle("no-sidebar", tab === "tables" || tab === "platform" || tab === "banquet" || tab === "ratings" || tab === "inventory" || tab === "dash");
   renderCatFilter(); // show category chips on Dishes, hide elsewhere
   renderList();
   renderEditor();

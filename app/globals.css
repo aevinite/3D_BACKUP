@@ -1196,7 +1196,11 @@ body.menu-frost .nav {
 /* Uniform name area in gallery so short and long names line up the same */
 .gallery-mode .dish-name {
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-  overflow: hidden; min-height: 2.5em; line-height: 1.25; font-size: 16px;
+  /* min-height is in PIXELS, not em (owner, 2026-08-05): useFitText shrinks a long name's font so
+     the WHOLE name fits this box, and an em-based height would shrink WITH the font — the box would
+     then differ per card, and a uniform name area (short and long names lining up across a row) is
+     the whole point of it. 40px == the old 2.5em at 16px, so nothing moves today. */
+  overflow: hidden; min-height: 40px; line-height: 1.25; font-size: 16px;
 }
 .badge-4d {
   position: absolute; bottom: 10px; right: 10px;
