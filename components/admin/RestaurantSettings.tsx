@@ -363,6 +363,12 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
       },
       lines: [{ title: "Event catering — set menu", qty: plates, price: rate }],
       settings: draft, restaurant: restForDoc(), logo: logoUrl,
+      // A PREVIEW MEASURES, IT DOES NOT FIRE THE PRINT DIALOG (2026-08-05) — the same rule the bill
+      // preview has always followed. This sheet used to auto-print unconditionally, so tapping
+      // "see the banquet bill" threw a print dialog at the admin, and with no toolbar the window
+      // could then only be closed with the browser's own controls.
+      autoPrint: false,
+      note: "A sample banquet bill from this restaurant's own settings — the exact sheet the manager panel prints. It carries an advance, a remark, a receiver GSTIN and a function line so the busiest version of the layout is visible.",
     });
     const w = window.open("", "lfh_banquet_preview", "width=820,height=980");
     if (!w) { setErr("Allow pop-ups to preview the banquet bill."); return; }

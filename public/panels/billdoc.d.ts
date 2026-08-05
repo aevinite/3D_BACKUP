@@ -37,8 +37,16 @@ export interface BillDocData {
   discount?: number;
   discLabel?: string;
   taxable?: number;
-  /** Tax rows. An EMPTY array means no tax line at all — a composition-scheme restaurant. */
+  /** Tax rows ADDED on top, printed above the TOTAL. An EMPTY array means no tax line at all —
+   *  a composition-scheme restaurant, or a bill whose prices already contain all of their tax. */
   taxRows?: BillDocTaxRow[];
+  /** The tax ALREADY INSIDE the printed prices, reported UNDER the total as "Price includes" and
+   *  never added to it. One bill can carry both: `taxRows` is what is added, this is what the
+   *  prices already hold, so a bill mixing tax-on-top and tax-inside dishes still foots. */
+  inclRows?: BillDocTaxRow[];
+  /** The original all-or-nothing flag: treat `taxRows` itself as inside-tax and add nothing.
+   *  `inclRows` is preferred; this is kept for callers that pass it directly. */
+  taxIncluded?: boolean;
   total?: number;
   /** MRP / untaxed lines (mig 270) — the part of the bill GST is NOT charged on. 0 or absent
    *  renders exactly as before; above 0 the first row becomes "Food subtotal" and this amount
@@ -119,6 +127,18 @@ export interface BillMoney {
   taxComponents: { label: string; rate: number }[];
   taxableBase: number; nontax: number; mrpAmount: number;
   discountBase: number; discountFixed: number; hasMrp: boolean; composition: boolean;
+  /** What the TAXED item rows add up to on the paper. Equals `taxableBase` on an ordinary bill;
+   *  bigger when prices already contain their tax, and the difference is that tax. */
+  grossTaxed: number;
+  /** The part of `tax` already inside the printed prices — reported under the total, never added. */
+  taxInside: number;
+  /** The part of `tax` still to be added on top. `taxInside + taxAdded === tax`. */
+  taxAdded: number;
+  /** True when one bill carries orders charged at DIFFERENT rates (a banquet beside dine-in food),
+   *  so the paper names each rate on its own line instead of one percentage nobody was charged. */
+  mixedRates: boolean;
+  /** One entry per distinct rate, biggest taxed slice first. */
+  rateRows: { rate: number; taxable: number; tax: number }[];
 }
 export interface TaxModel {
   rate: number; pct: number;
@@ -166,6 +186,11 @@ export function banquetDocHtml(a: {
   settings?: Record<string, unknown>;
   restaurant?: Record<string, unknown>;
   logo?: string;
+  /** false = a PREVIEW: show the sheet and its toolbar, but do not fire the print dialog by
+   *  itself. Default (omitted/true) is the real print. */
+  autoPrint?: boolean;
+  /** A line in the screen-only toolbar — a preview says so there. */
+  note?: string;
 }): string;
 export function bqPaper(settings: Record<string, unknown>): {
   pad: boolean; size: "a4" | "a5"; top: number; bot: number; side: number;

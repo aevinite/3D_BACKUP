@@ -229,19 +229,19 @@ export default function AdminBills() {
 
       {/* Summary strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, margin: "18px 0" }}>
-        <Stat icon="running" tone="#22c55e" k="Open now" v={counts.running || 0} sub="tables still running" />
-        <Stat icon="settled" tone="#3b82f6" k="Settled" v={counts.settled || 0} sub={`${inr(settledPaid)} collected`} />
-        <Stat icon="cancelled" tone="#f59e0b" k="Closed unpaid" v={counts.cancelled || 0} sub="walk-outs / cancels" />
-        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} sub="restorable" />
+        <Stat icon="running" tone="#22c55e" k="Open now" v={counts.running || 0} sub="tables still running" calculating={!d} />
+        <Stat icon="settled" tone="#3b82f6" k="Settled" v={counts.settled || 0} sub={`${inr(settledPaid)} collected`} calculating={!d} />
+        <Stat icon="cancelled" tone="#f59e0b" k="Closed unpaid" v={counts.cancelled || 0} sub="walk-outs / cancels" calculating={!d} />
+        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} sub="restorable" calculating={!d} />
       </div>
 
       {/* Filters */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")}>All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{totalAll}</span></button>
+        <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")}>All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? totalAll : "\u2014"}</span></button>
         {ORDER.map((k) => (
           <button key={k} className="blz-chip" onClick={() => setState(k)} style={chip(state === k, META[k].tone)}>
             <span style={{ color: META[k].tone, display: "inline-flex" }}><Ico n={META[k].icon} s={14} /></span>
-            {META[k].label} <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{counts[k] || 0}</span>
+            {META[k].label} <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? (counts[k] || 0) : "\u2014"}</span>
           </button>
         ))}
         <select value={rid} onChange={(e) => { setRid(e.target.value); setOpen(null); }} style={{ marginLeft: "auto", padding: "9px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 13 }}>
@@ -389,14 +389,21 @@ export default function AdminBills() {
   );
 }
 
-function Stat({ icon, tone, k, v, sub }: { icon: IconName; tone: string; k: string; v: number; sub: string }) {
+// A TILE MUST NOT STATE A NUMBER IT DOES NOT HAVE YET (2026-08-05). The list below already showed
+// a skeleton while loading, but these four read `counts.x || 0`, so for the first seconds the screen
+// asserted "0 tables still running / ₹0 collected / 0 Deleted" — indistinguishable from a day with
+// no sales at all, on the one screen whose stated job is spotting a sale that has gone missing. The
+// sibling Live-floor page already had this: app/aevinite/floor/page.tsx passes `calculating`.
+function Stat({ icon, tone, k, v, sub, calculating }: { icon: IconName; tone: string; k: string; v: number; sub: string; calculating?: boolean }) {
   return (
     <div className="adm-card blz-stat" style={{ padding: "14px 16px" }}>
       <div style={{ fontSize: 11.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ color: tone, display: "inline-flex" }}><Ico n={icon} s={14} /></span>{k}
       </div>
-      <div className="fit-num" style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.5px", fontVariantNumeric: "tabular-nums" }}>{v}</div>
-      <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{sub}</div>
+      <div className="fit-num" style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.5px", fontVariantNumeric: "tabular-nums", opacity: calculating ? 0.45 : 1 }}>
+        {calculating ? "—" : v}
+      </div>
+      <div style={{ fontSize: 11.5, color: "var(--muted)", marginTop: 2 }}>{calculating ? "counting\u2026" : sub}</div>
     </div>
   );
 }

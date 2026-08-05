@@ -3231,7 +3231,7 @@ function openBillModal(key) {
         ${canRestore
           ? `<button class="btn" data-bm-restore title="Undo within the next ${restoreMins} min">↩ Restore to floor (${restoreMins}m left)</button>`
           : `<button class="btn" disabled title="More than 30 minutes have passed since this bill was settled">↩ Restore window expired</button>`}
-        ${liveOrders.length === 0 && canDeleteBillNow() ? `<button class="btn danger" data-bm-delete title="Permanently delete this cancelled bill — cannot be undone">🗑 Delete bill</button>` : ""}
+        ${liveOrders.length === 0 && canDeleteBillNow() ? `<button class="btn danger" data-bm-delete title="Remove this cancelled bill from the floor. It stays in the record, tombstoned with your reason, and an admin can put it back.">🗑 Delete bill</button>` : ""}
         <button class="btn confirm-cancel" data-bm-close>Close</button>
       </div>
       ${(() => {
@@ -4949,8 +4949,29 @@ ${di.mrp > 0 ? row("MRP / nil-rated (no GST)", inr(di.mrp)) : ""}
 ${row("Net sales", inr(di.net), true)}
 ${row("Paid bills", di.paidCount + " · " + inr(di.paidNet))}
 ${row("Unpaid bills", di.unpaidCount + " · " + inr(di.unpaidNet))}
+${/* A comped bill is a real sale with nothing collected, so it appears here on its own line and
+     is kept OUT of Paid bills and the GRAND TOTAL (2026-08-05). It is still inside Gross and
+     Discounts above — a sale never disappears from this page. */""}
+${di.onHouseCount > 0 ? row("On the house (nothing collected)", di.onHouseCount + " · " + inr(di.onHouseNet)) : ""}
 ${row("Cancelled orders", di.cancelled)}
 ${di.tips > 0 ? row("Tips collected (staff)", inr(di.tips), true) : ""}
+${/* HOW THE MONEY CAME IN — the reason a manager prints this at all: count the drawer against it.
+     A bill settled in parts is broken down by its real methods (UPI ₹200 + Cash ₹200), not lumped
+     as "Split", because the legs in session_payments are read now. A reversed payment is shown
+     rather than quietly dropped. */""}
+<div class="sec">Money collected, by method</div>
+${(z.payments && z.payments.rows.length)
+  ? z.payments.rows.map((p2) => row(p2.method, p2.bills + " · " + inr(p2.amount))).join("")
+    + row("Total collected", inr(z.payments.total), true)
+    + (z.payments.reversed > 0 ? row("Payments reversed (not collected)", z.payments.reversedCount + " · − " + inr(z.payments.reversed)) : "")
+    // Only flag money on today's bills that NO method accounts for. The other direction is
+    // innocent and would cry wolf every day: a bill opened yesterday and settled this morning
+    // has its payment today but its orders in yesterday's set, so "collected" legitimately
+    // exceeds today's paid bills.
+    + (di.paidNet - z.payments.total > 1
+      ? row("⚠ Settled with no method recorded", inr(di.paidNet - z.payments.total))
+      : "")
+  : row("Nothing collected yet today", "—")}
 <div class="sec">Platform (Zomato / Swiggy / Website / Parcel)</div>
 ${row("Orders", z.platform.count)}
 ${row("Revenue", inr(z.platform.revenue), true)}
@@ -10635,6 +10656,13 @@ function printKotTicket(o) {
       when: o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
       linesHtml: orderItemRows(o).map(kotLineHtml).join(""),
       allergHtml: allerg,
+      // THE BIG DUPLICATE BANNER, not just a word in the header (2026-08-05). This path is reached
+      // from the reprint picker's "Print KOT — prints here on this device", right beside a button
+      // that promises "marked DUPLICATE" — and it printed a ticket indistinguishable from a fresh
+      // order. billdoc.js says why the flag exists rather than free text: "so every panel's reprint
+      // looks identical". Worst of all here, because "print here" is the fallback used exactly when
+      // the kitchen printer may already have printed it once.
+      reprint: true,
     }));
   } catch (e) { /* printing must NEVER break the panel */ }
 }

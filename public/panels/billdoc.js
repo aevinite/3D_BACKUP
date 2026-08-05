@@ -82,7 +82,10 @@
   function billIdentity(settings, restaurant) {
     var s = settings || {}, r = restaurant || {};
     var isDefault = r.slug === "french-house" || r.id === "00000000-0000-0000-0000-000000000001";
-    var DEFAULT_BILL = { address: "Aevidine, Ahmedabad, Gujarat 380015, India", phone: "+91 90000 00000" };
+    // (A DEFAULT_BILL constant used to sit here holding an invented address + phone number. It was
+    // unwired on 2026-08-04 — a paying client's tax invoice must never carry another company's
+    // details — and DELETED on 2026-08-05, because a dead constant holding exactly the wrong answer
+    // is an invitation to wire it back in.)
     var FOOTERS = {
       "pizza-palace": "Grazie — a presto! 🍕",
       "sakura-sushi": "Arigato — mata kite ne 🍣",
@@ -205,24 +208,43 @@
       return r;
     }).join("");
 
-    var taxRows = (d.taxRows || []).map(function (c) {
-      return '<div class="t"><span>' + esc(c.label) + " " + c.rate + '%</span><span>' + inr(c.amt) + "</span></div>";
-    }).join("");
+    var money = function (list) {
+      return (list || []).map(function (c) {
+        return '<div class="t"><span>' + esc(c.label) + " " + c.rate + '%</span><span>' + inr(c.amt) + "</span></div>";
+      }).join("");
+    };
+    var taxRows = money(d.taxRows);
+    // What prints UNDER the total as "Price includes": the explicit inside-tax rows when the caller
+    // supplies them, else — for the original all-or-nothing flag — the tax rows themselves.
+    var inclBelow = (d.inclRows || []).length ? money(d.inclRows) : (d.taxIncluded ? taxRows : "");
 
     var disc = Number(d.discount) || 0;
-    /* TAX-INCLUSIVE BILLS PRINT A DIFFERENT SHAPE, and they have to.
+    /* TAX ALREADY INSIDE THE PRICES IS REPORTED, NEVER ADDED — and it has to be.
        When menu prices already contain GST, the item rows show the GROSS price the guest
        recognises — so a "Taxable value" line (the net) sitting under them, with the tax then
        ADDED below, reads as an arithmetic error to anyone who checks the column: the rows sum
-       to ₹1,340 and the subtotal says ₹1,338.
-       So in this mode the tax is reported, not applied: Subtotal → Discount → TOTAL, and the
-       tax lines sit BELOW the total labelled as already included. That is the standard
-       tax-inclusive receipt and it foots exactly. The caller passes GROSS subtotal and GROSS
-       discount for this mode (this file formats; it never computes money — see the header). */
+       to ₹1,340 and the subtotal says ₹1,276.
+       So that tax is reported, not applied: Subtotal → Discount → TOTAL, and those lines sit
+       BELOW the total labelled as already included. That is the standard tax-inclusive receipt
+       and it foots exactly.
+
+       TWO WAYS IN, because a bill can need BOTH at once (2026-08-05):
+         · 'inclRows'    — the tax INSIDE the prices. Printed below the total. 'taxRows' stays the
+                          tax genuinely ADDED on top, so a bill that mixes tax-inside and
+                          tax-on-top dishes prints one of each and still foots. This is what
+                          billData() now fills in.
+         · 'taxIncluded' — the original all-or-nothing flag: treat 'taxRows' itself as inside-tax
+                          and add nothing. Kept working for callers that pass it directly.
+       This file formats; it never computes money (see the header) — the caller passes figures
+       that already match the item rows above. */
     var inclusive = !!d.taxIncluded;
+    var inclOnly = (d.inclRows || []).length > 0;
+    // A "Taxable value" restatement only makes sense when the row above it really is the taxable
+    // figure. With tax inside the prices it is the gross, so the restatement would misname it.
+    var restate = !inclusive && !inclOnly;
     var discBlock = disc > 0
       ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(billRows(d).discount) + "</span></div>"
-        + (inclusive ? "" : '<div class="t tx"><span>Taxable value</span><span>' + inr(billRows(d).taxable) + "</span></div>")
+        + (restate ? '<div class="t tx"><span>Taxable value</span><span>' + inr(billRows(d).taxable) + "</span></div>" : "")
       : "";
 
     /* MRP / untaxed lines (mig 270). 'nontax' is the part of the bill GST is NOT charged on —
@@ -235,7 +257,8 @@
        bill is byte-identical to the one before this feature. */
     var nontax = Number(d.nontax) || 0;
     var subLabel = nontax > 0 ? "Food subtotal" : "Subtotal";
-    var subAmount = nontax > 0 ? (Number(d.subtotal) || 0) - nontax : Number(d.subtotal) || 0;
+    // (There used to be a second `subAmount` computed here. It was dead — the render below reads
+    // R.subtotal — so a later editor "fixing" one of the two would have changed nothing. Gone.)
     // THE ROWS MUST FOOT TO THE TOTAL (see billRows). Every figure below comes from there, so the
     // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
     var R = billRows(d);
@@ -361,8 +384,8 @@
 + "  " + mrpBlock + "\n"
 + "  " + roundBlock + "\n"
 + '  <div class="g"><span>TOTAL</span><span>' + inr(R.total) + "</span></div>\n"
-+ (inclusive && taxRows
-   ? '  <div class="incl"><div class="t"><span>Price includes</span><span></span></div>' + taxRows + "</div>\n"
++ (inclBelow
+   ? '  <div class="incl"><div class="t"><span>Price includes</span><span></span></div>' + inclBelow + "</div>\n"
    : "")
 + "</div>\n"
 + mrpNote + "\n"
@@ -397,7 +420,13 @@
 + "      *{margin:0;padding:0;box-sizing:border-box}body{font-family:ui-monospace,monospace;width:280px;padding:8px;color:#000}\n"
 + "      .h{text-align:center;font-weight:700;font-size:15px;border-bottom:2px dashed #000;padding-bottom:6px;margin-bottom:6px}\n"
 + "      .meta{display:flex;justify-content:space-between;font-size:13px;font-weight:700;margin-bottom:4px}\n"
-+ "      .kl{font-size:14px;padding:4px 0;border-bottom:1px dotted #999}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:italic;color:#333;font-size:12px}\n"
+// ONE INK ON THE TICKET TOO (2026-08-05). The bill was moved to pure #000 at weight 400 on
+// 2026-07-30 because a thermal head has no grey — it fakes one with sparse dots, and light text
+// came out broken and pale. The KOT prints on the SAME head and was left behind: options and
+// removals ("(extra cheese)", "— no onion") were #333 ITALIC, and every line separator a #999
+// dotted rule. Those are the lines a cook must read correctly on a rushed pass, so they were the
+// worst place to keep grey. Hierarchy is size, as on the bill; nothing here is under 12px.
++ "      .kl{font-size:14px;padding:4px 0;border-bottom:1px solid #000}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:normal;color:#000;font-size:12px}\n"
 + "      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}\n"
 // The duplicate banner (owner, 2026-08-04: "reprint … like duplicate in big words on top").
 // Big, bordered, uppercase — a reprinted ticket must be impossible to mistake for a fresh
@@ -579,44 +608,111 @@
      charged at (orders.tax_rate, mig 284) so a banquet is never re-taxed at the dine-in rate and a
      rate corrected today cannot re-price a bill taken this morning. */
   function billMoney(orders, settings) {
-    var live = (orders || []).filter(function (o) { return o.status !== "cancelled"; });
+    // A SOFT-DELETED ORDER IS NOT ON THE BILL (2026-08-05). This filtered only `cancelled`, so a
+    // tombstoned order stayed in the subtotal, the tax and the TOTAL — while lib/billLedger.ts
+    // drops it, so the paper charged for a line the admin ledger said was not there. Whichever is
+    // right they may not disagree (COMPLIANCE §3, reconcile to the rupee), and a deleted line is
+    // by definition off the bill.
+    var live = (orders || []).filter(function (o) { return o.status !== "cancelled" && !o.deleted_at; });
     var tm = taxModel(settings);
-    var stamped = live.find(function (o) { return Number(o.tax_rate) > 0; });
-    var rate = stamped ? Number(stamped.tax_rate) : tm.rate;
     var r2 = function (n) { return Math.round(n * 100) / 100; };
-    var taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false;
+    // THE RATE EACH ORDER WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 284), per order — not one
+    // rate borrowed from whichever order happened to come first (2026-08-05). Taking `find(> 0)`
+    // for the whole bill re-taxed every other order at that rate, so a banquet at 18% sharing a
+    // session with 5% dine-in food over-charged the food, which is the exact re-pricing mig 284
+    // exists to prevent. `> 0` is kept deliberately: a genuine 0 (composition) falls through to
+    // the settings, which also answer 0 — guarded by verify:audit.
+    var rateOf = function (o) { return Number(o.tax_rate) > 0 ? Number(o.tax_rate) : tm.rate; };
+    var taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false, grossTaxed = 0, netIncl = 0;
+    // One bucket per distinct rate, so the tax is still rounded ONCE per rate (never per order —
+    // that drifts ±½ paise an order and can reject a split that equals the printed bill).
+    var buckets = {};
     live.forEach(function (o) {
       var sub = parseFloat(o.subtotal) || 0;
-      taxableBase += o.taxable_base == null ? sub : (parseFloat(o.taxable_base) || 0);
-      nontax += o.nontax_amount == null ? 0 : (parseFloat(o.nontax_amount) || 0);
+      var base = o.taxable_base == null ? sub : (parseFloat(o.taxable_base) || 0);
+      var ntx = o.nontax_amount == null ? 0 : (parseFloat(o.nontax_amount) || 0);
+      taxableBase += base;
+      nontax += ntx;
+      var r = rateOf(o);
+      var k = String(r);
+      var bk = buckets[k] || (buckets[k] = { rate: r, base: 0, disc: 0 });
+      bk.base += base;
+      bk.disc += parseFloat(o.discount) || 0;
       var lines = Array.isArray(o.items) ? o.items : [];
       if (o.mrp_amount != null) mrpAmount += parseFloat(o.mrp_amount) || 0;
       else lines.forEach(function (i) { if (i && i.is_mrp) mrpAmount += r2((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1)); });
       if (!hasMrp && lines.some(function (i) { return i && i.is_mrp; })) hasMrp = true;
+      // What the ITEM ROWS on the paper add up to for the TAXED lines, and how much of that base
+      // came from prices that ALREADY CONTAIN their tax. On an ordinary bill grossTaxed equals the
+      // taxable base and netIncl is 0; on a tax-inside bill the rows show the gross menu price, so
+      // grossTaxed is bigger. Both fall back to 0 when a row carries no items, which makes
+      // `taxInside` 0 and the bill print exactly as it does today.
+      lines.forEach(function (i) {
+        if (!i) return;
+        var mode = String(i.tax_mode || "excl");
+        if (mode === "exempt") return;
+        var amt = r2((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1));
+        grossTaxed += amt;
+        if (mode === "incl") netIncl += r2(amt / (1 + r));
+      });
     });
     taxableBase = r2(taxableBase); nontax = r2(nontax); mrpAmount = r2(mrpAmount);
+    grossTaxed = r2(grossTaxed); netIncl = r2(netIncl);
     var subtotal = r2(taxableBase + nontax);
+    var rateList = Object.keys(buckets).map(function (k) { return buckets[k]; });
+    // The headline rate: the one the bill is actually on. With several, the biggest taxed slice
+    // speaks for the bill and `mixedRates` tells the document to name each rate on its own line.
+    rateList.sort(function (a, b) { return b.base - a.base; });
+    var rate = rateList.length ? rateList[0].rate : tm.rate;
+    var mixedRates = rateList.length > 1;
     // What may be discounted (mig 272's lfh_order_discount_base): with tax, the taxable base — the
     // discount MUST land there or the `total − discount × (1 + rate)` identity stops holding. With
     // no tax, everything except the locked MRP.
-    var discountBase = rate > 0 ? taxableBase : Math.max(0, r2(subtotal - mrpAmount));
-    var discountFixed = rate > 0 ? nontax : mrpAmount;
+    var anyTax = rateList.some(function (b) { return b.rate > 0; }) || (!rateList.length && rate > 0);
+    var discountBase = anyTax ? taxableBase : Math.max(0, r2(subtotal - mrpAmount));
+    var discountFixed = anyTax ? nontax : mrpAmount;
     var rawDisc = r2(live.reduce(function (a, o) { return a + (parseFloat(o.discount) || 0); }, 0));
     var disc = Math.min(Math.max(0, rawDisc), discountBase);
     var taxable = Math.max(0, r2(taxableBase - Math.min(disc, taxableBase)));
-    var tax = r2(taxable * rate);
+    // Tax per rate bucket, each rounded once, each capping its own discount at its own base.
+    var tax = 0;
+    var taxRowsByRate = [];
+    rateList.forEach(function (bk) {
+      var bBase = r2(bk.base);
+      var bDisc = Math.min(Math.max(0, r2(bk.disc)), bBase);
+      var bTaxable = Math.max(0, r2(bBase - bDisc));
+      var bTax = r2(bTaxable * bk.rate);
+      tax = r2(tax + bTax);
+      if (bk.rate > 0) taxRowsByRate.push({ rate: bk.rate, taxable: bTaxable, tax: bTax });
+    });
     var total = r2(subtotal - disc + tax);
+    // How much of that tax is INSIDE the printed prices (nothing to add) versus ADDED on top.
+    // Apportioned by the share of the taxable base that came from tax-inside prices, so the two
+    // always sum back to `tax` and the TOTAL is untouched. On every ordinary bill netIncl is 0, so
+    // taxInside is 0, taxAdded is the whole tax, and nothing below changes by a paise.
+    var taxInside = 0, taxAdded = tax;
+    if (netIncl > 0 && taxableBase > 0) {
+      var share = Math.min(1, Math.max(0, netIncl / taxableBase));
+      taxInside = r2(tax * share);
+      taxAdded = r2(tax - taxInside);
+    }
     // Components carried through ONLY when they describe THIS bill's rate: a banquet at 18% must
     // not be itemised with the dine-in CGST 2.5% + SGST 2.5% labels — splitTax would hand out the
     // right rupees under percentages that do not add up to what was charged.
     var compPct = (tm.components || []).reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
-    var compsMatch = (tm.components || []).length > 0 && Math.abs(compPct / 100 - rate) < 0.0001;
+    var compsMatch = !mixedRates && (tm.components || []).length > 0 && Math.abs(compPct / 100 - rate) < 0.0001;
     return {
       subtotal: subtotal, disc: disc, taxable: taxable, rate: rate, tax: tax, total: total,
       taxComponents: compsMatch ? tm.components : [],
       taxableBase: taxableBase, nontax: nontax, mrpAmount: mrpAmount,
       discountBase: discountBase, discountFixed: discountFixed, hasMrp: hasMrp,
       composition: tm.composition,
+      // NEW (2026-08-05), all zero/false on an ordinary bill so nothing renders differently:
+      grossTaxed: grossTaxed,        // what the taxed ITEM ROWS add up to
+      taxInside: taxInside,          // the part of `tax` already inside those prices
+      taxAdded: taxAdded,            // the part still to be added on top
+      mixedRates: mixedRates,        // several rates on one bill → name each rate on its own line
+      rateRows: taxRowsByRate,       // [{rate, taxable, tax}] per rate, biggest slice first
     };
   }
   // The untaxed pile AS A BILL SHOULD SHOW IT: on a composition restaurant EVERY line is untaxed,
@@ -654,7 +750,55 @@
       ? m.taxComponents
       : [{ label: "CGST", rate: pct / 2 }, { label: "SGST", rate: pct / 2 }];
     var inside = String(s.mrp_tax_treatment) === "inclusive" ? mrpTaxInside(live, m.rate) : 0;
-    var now = a.now ? new Date(a.now) : new Date();
+    // A REPRINT KEEPS THE BILL'S OWN DATE (2026-08-05). This was always `new Date()` and no caller
+    // ever passed `a.now`, so reprinting last June's invoice stamped today on it — beside an invoice
+    // number whose financial year says otherwise. financialYear() two functions up already reasons
+    // about exactly this hazard for the NUMBER; the date row never got the same treatment. Order of
+    // truth: an explicit `now`, then when the invoice was issued, then when the bill closed, then
+    // really now (a bill still open on the floor).
+    var stampAt = a.now || sess.invoice_at || sess.closed_at || null;
+    var stamped = stampAt ? new Date(stampAt) : null;
+    var now = stamped && !isNaN(stamped.getTime()) ? stamped : new Date();
+
+    // ── THE TAX THAT IS ALREADY INSIDE THE PRICES vs THE TAX STILL TO ADD ────────────────────
+    // A restaurant on "GST inside the price" (price_tax_mode='incl') prints item rows at the GROSS
+    // menu price the guest recognises, so a NET "Subtotal" under that column does not equal it: the
+    // rows said ₹1,340 and the subtotal said ₹1,276 (found 2026-08-05). The document has always had
+    // the right layout for this — tax reported BELOW the total, never added — and nothing ever
+    // switched it on, because billData never set `taxIncluded`.
+    //
+    // Fixed by telling the paper what the rows actually add up to. `m.grossTaxed` is the sum of the
+    // taxed item rows, so the Subtotal always matches the column above it, and `m.taxInside` /
+    // `m.taxAdded` split the tax into the part already in those prices and the part to add. On every
+    // ordinary bill grossTaxed === taxableBase, taxInside is 0, and every figure below is unchanged.
+    var hasInside = m.taxInside > 0;
+    // The food row as the paper shows it. Without inside tax this is exactly what it always was
+    // (subtotal less whatever the MRP row states separately) — which matters for a COMPOSITION
+    // restaurant, where every line is exempt so there is no taxable base to read instead.
+    var foodShown = hasInside ? m.grossTaxed : Math.round((m.subtotal - mrpPart(m)) * 100) / 100;
+    var subtotalShown = Math.round((foodShown + mrpPart(m)) * 100) / 100;
+    // The discount as the PAPER must state it, so the column closes: what is shown at the top, less
+    // the tax that is genuinely added, less the untaxed pile, must leave the TOTAL. On an ordinary
+    // bill this is exactly m.disc; on a tax-inside bill it is that discount grossed up, which is what
+    // a guest sees come off a price that already contained its tax.
+    var discShown = m.disc > 0
+      ? Math.max(0, Math.round((foodShown + m.taxAdded + mrpPart(m) - m.total) * 100) / 100)
+      : 0;
+    // One tax line per RATE when a bill carries more than one (a banquet at 18% beside 5% food):
+    // naming a single percentage there would put the right rupees under a rate nobody was charged.
+    // A ₹0 tax line reads as a mistake, so when there is nothing to ADD the rows are dropped rather
+    // than printed as zeros (the same rule the guest cart follows for a bill with nothing to add).
+    var addWhole = Math.round(m.taxAdded);
+    var addRows = (m.composition || addWhole <= 0)
+      ? []
+      : (m.mixedRates
+        ? (m.rateRows || []).filter(function (b) { return Math.round(b.tax) > 0; }).map(function (b) {
+          return { label: ((s.tax_label || "GST") + "").trim() || "GST", rate: Math.round(b.rate * 10000) / 100, amt: Math.round(b.tax) };
+        })
+        : splitTax(addWhole, taxComps));
+    var insideWhole = Math.round(m.taxInside);
+    var inclRows = (m.composition || !hasInside || insideWhole <= 0) ? [] : splitTax(insideWhole, taxComps);
+
     return {
       logo: a.logo || "",
       name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
@@ -665,10 +809,11 @@
       dateStr: now.toLocaleDateString() + " " + now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
       cust: cust, custPhone: custPhone,
       lines: combineBillLines(live.reduce(function (acc, o) { return acc.concat(Array.isArray(o.items) ? o.items : []); }, [])),
-      subtotal: m.subtotal, discount: m.disc,
-      discLabel: discPct(mrpPart(m) > 0 ? m.taxableBase : m.subtotal, m.disc),
+      subtotal: subtotalShown, discount: discShown,
+      discLabel: discPct(foodShown, discShown),
       taxable: m.taxable, total: m.total,
-      taxRows: m.composition ? [] : splitTax(Math.round(m.tax), taxComps),
+      taxRows: addRows,
+      inclRows: inclRows,
       nontax: mrpPart(m), mrpLabel: "MRP items",
       mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + (((s.tax_label || "GST") + "").trim() || "GST") : "",
       autoPrint: a.autoPrint !== false,
@@ -727,8 +872,15 @@
 function bqWords(amount) {
   const two = (n) => (n < 20 ? BQ_ONES[n] : BQ_TENS[Math.floor(n / 10)] + (n % 10 ? "-" + BQ_ONES[n % 10] : ""));
   const three = (n) => (n >= 100 ? BQ_ONES[Math.floor(n / 100)] + " Hundred" + (n % 100 ? " " : "") : "") + (n % 100 ? two(n % 100) : "");
-  let n = Math.floor(Math.abs(Number(amount) || 0));
-  if (!n) return "Zero Only";
+  // THE WORDS MUST NAME THE SAME AMOUNT AS THE FIGURE BESIDE THEM (2026-08-05). This floored to
+  // whole rupees while the total prints 2dp (bq2), so a ₹1,234.56 banquet invoice read "One Thousand
+  // Two Hundred Thirty-Four Only" next to "1,234.56". On a tax invoice the amount in words is the
+  // controlling figure, so the paper contradicted itself. Paise are now said when there are any.
+  const exact = Math.round(Math.abs(Number(amount) || 0) * 100);
+  const paise = exact % 100;
+  const tail = paise ? " Rupees and " + two(paise) + " Paise Only" : " Only";
+  let n = Math.floor(exact / 100);
+  if (!n) return paise ? two(paise) + " Paise Only" : "Zero Only";
   const p = [];
   const cr = Math.floor(n / 1e7); n %= 1e7;
   const la = Math.floor(n / 1e5); n %= 1e5;
@@ -737,7 +889,7 @@ function bqWords(amount) {
   if (la) p.push(three(la) + " Lakh");
   if (th) p.push(three(th) + " Thousand");
   if (n) p.push(three(n));
-  return p.join(" ").trim() + " Only";
+  return p.join(" ").trim() + tail;
 }
 
 
@@ -779,8 +931,22 @@ function banquetDocHtml(a) {
   // The split PRINTED on this bill. A saved bill carries its own frozen tax_lines
   // (mig 239), so re-printing after a rate change can never re-split an old total.
   var tmB = bqTaxModel(s);
-  const comps = (tmB.components && tmB.components.length) ? tmB.components
-    : [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }];
+  // COMPONENTS ONLY WHEN THEY DESCRIBE THIS BILL'S OWN RATE (2026-08-05) — the same guard the
+  // thermal bill has had (billMoney's compsMatch) and this sheet did not. A banquet bill carries a
+  // FROZEN tax split (mig 239) so a later rate change cannot re-price it; but bills written before
+  // 239 have an empty `tax_lines`, and this then fell back to the LIVE component rates while every
+  // amount was still split out of the bill's STORED tax. One sheet ended up stating three different
+  // things: the item line claimed 9% = ₹21,600, the column's own TOTAL row said ₹6,000, and the
+  // summary labelled ₹6,000 as "9%". So: use the configured components only if their sum really is
+  // the rate this bill was charged, else name the bill's own effective rate on one line.
+  const billRate = taxable > 0 ? Math.round((taxAmt / taxable) * 10000) / 10000 : 0;
+  const cPct = (tmB.components || []).reduce((a, c) => a + (Number(c.rate) || 0), 0);
+  const cMatch = (tmB.components || []).length > 0 && Math.abs(cPct / 100 - billRate) < 0.0005;
+  const halvesMatch = Math.abs(tmB.pct / 100 - billRate) < 0.0005;
+  const comps = cMatch ? tmB.components
+    : (halvesMatch
+      ? [{ label: "CGST", rate: tmB.pct / 2 }, { label: "SGST", rate: tmB.pct / 2 }]
+      : [{ label: ((s.tax_label || "GST") + "").trim() || "GST", rate: Math.round(billRate * 10000) / 100 }]);
   let taxRows;
   if (Array.isArray(b.tax_lines) && b.tax_lines.length) {
     taxRows = b.tax_lines.map((c) => ({ label: String(c.label || ""), rate: Number(c.rate) || 0, amt: Number(c.amt) || 0 }));
@@ -905,8 +1071,24 @@ function banquetDocHtml(a) {
   .sign{text-align:right;font-size:7.7pt;margin-top:2.6mm;line-height:1.5}
   .sign .sp{height:9mm}
   .pfoot{text-align:center;font-size:7.2pt;margin-top:3mm;line-height:1.45}
+  /* Screen-only toolbar — the same one the bill and the KOT carry, and for the same reason
+     (2026-08-05). This sheet used to fire the print dialog by itself, unconditionally, with no
+     toolbar, no close button and no Esc: so the ADMIN'S PREVIEW threw a print dialog at them, and
+     once dismissed the window could only be closed with the browser's own controls. Nothing here
+     closes the window either — Print and Cancel are the same event to the page, which is why the
+     bill stopped closing on afterprint on 2026-08-02. */
+  .bar{position:sticky;top:0;z-index:9;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end;
+       padding:10px 12px;background:#f2f2f4;border-bottom:1px solid #d8d8dc}
+  .bar button{font:13px/1 system-ui,sans-serif;padding:7px 13px;border-radius:8px;cursor:pointer;
+              border:1px solid #b9b9c0;background:#fff;color:#000}
+  .bar button.x{background:#111;color:#fff;border-color:#111}
+  .bar .note{margin-right:auto;align-self:center;text-align:left;max-width:52%;
+             font:11.5px/1.35 system-ui,sans-serif;color:#3a3a42}
+  @media print{.bar{display:none !important}}
   @media print{tr,.ms,.footg,.bx{break-inside:avoid}thead{display:table-row-group}}
-</style></head><body><div class="pg">
+</style></head><body>
+<div class="bar">${a.note ? `<span class="note">${esc(a.note)}</span>` : ""}<button onclick="printAgain()">🖨 Print${a.autoPrint === false ? " this" : " again"}</button><button class="x" onclick="closeBill()">✕ Close</button></div>
+<div class="pg">
   <div style="height:${P.pad ? P.top : 0}mm"></div>
   <div class="body">
     ${P.pad ? "" : `<div class="selfhead"><div class="nm">${esc(bi.name)}</div>
@@ -938,7 +1120,7 @@ function banquetDocHtml(a) {
     <div class="footg">
       <div class="fl"><div class="lbl">Invoice Total (In Words)</div>
         <div class="wrd">${esc(bqWords(total))}</div>
-        ${recv > 0 ? `<div class="stamp">${bal > 0 ? "BALANCE DUE " + bq0(bal) : "PAID IN FULL"}</div>` : ""}</div>
+        ${recv > 0 ? `<div class="stamp">${bal > 0 ? "BALANCE DUE " + bq2(bal) : "PAID IN FULL"}</div>` : ""}</div>
       <div class="fr">${money.join("")}</div>
     </div>
     ${P.sign ? `<div class="sign">For <b>${esc(bi.name)}</b><div class="sp"></div>Authorised Signatory</div>` : ""}
@@ -946,7 +1128,13 @@ function banquetDocHtml(a) {
     ${P.foot ? `<div class="pfoot">${esc(bi.footer)}${bi.gstin ? "<br/>GST No: " + esc(bi.gstin) : ""}</div>` : ""}
   </div>
 </div>
-<script>setTimeout(function(){print()},350)<\/script>
+<script>
+function printAgain(){ try{ print(); }catch(e){} }
+function closeBill(){ try{ if (opener && !opener.closed) opener.focus(); }catch(e){} try{ close(); }catch(e){} }
+addEventListener("keydown", function(e){ if (e.key === "Escape") closeBill(); });
+onafterprint = function(){ try{ var b = document.querySelector(".bar .x"); if (b) b.focus(); }catch(e){} };
+${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
+<\/script>
 </body></html>`;
 }
 

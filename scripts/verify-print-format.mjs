@@ -321,6 +321,155 @@ for (const fn of ["billMoney", "billData", "taxModel", "combineBillLines", "banq
     : bad("the admin's banquet preview draws its own sheet again", "an admin would approve a layout no printer produces");
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// THE T7 SWEEP'S FINDINGS, EACH AS A CHECK (2026-08-05)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// Every failure below actually shipped, and NONE of them could have been caught by the checks
+// above — they all drove billDocHtml() with hand-built rows, so they proved the document could
+// print a shape that nothing ever asked it for. These go through billData(), the way the panels
+// do, which is the only surface that can catch a shape never being reached.
+console.log("\n── the bill a person is actually handed (T7 sweep) ──");
+{
+  const money = (s2) => String(s2).replace(/[₹,\s]/g, "");
+  const n = (s2) => { const t = money(s2); const neg = /^[\u2212-]/.test(t); return (neg ? -1 : 1) * (Number(t.replace(/^[\u2212-]/, "")) || 0); };
+  const read2 = (d) => {
+    const body = BILLDOC.billDocHtml(d).split("</style>")[1] || "";
+    const items = [...body.matchAll(/<td class="r">([\d,]+)<\/td><\/tr>/g)].map((x) => n(x[1])).reduce((a, b) => a + b, 0);
+    const above = body.split('class="g"')[0];
+    const rows = [...above.matchAll(/<div class="t[^"]*"><span>([^<]*)<\/span><span>([^<]*)<\/span><\/div>/g)].map((m) => [m[1].trim(), n(m[2])]);
+    const below = (body.split('class="g"')[1] || "");
+    const total = n((body.match(/TOTAL<\/span><span>([^<]*)</) || [])[1]);
+    let sum = 0;
+    for (const [l, v] of rows) { if (/^Subtotal$|^Food subtotal$/.test(l)) sum = v; else if (/^Taxable value$/.test(l)) { /* a restatement, not a term */ } else sum += v; }
+    const taxRows = rows.filter(([l]) => !/^Subtotal$|^Food subtotal$|^Discount|^Taxable value$|^MRP items$|^Round off$/.test(l));
+    return { items, rows, taxRows, below, total, foots: Math.abs(sum - total) < 0.001, chain: sum };
+  };
+  const S5 = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
+  const order = (items, extra) => ({ status: "served", items, ...extra });
+
+  // 1. GST INSIDE THE PRICE — the item column and the Subtotal must be the same number.
+  //    They were ₹1,340 and ₹1,276: billData never set the flag that picks the right layout, so a
+  //    guest adding up their own bill got a different answer from the row beneath it.
+  {
+    const inclS = { price_tax_mode: "incl", ...S5 };
+    const lines = [{ title: "A", qty: 1, price: 700, tax_mode: "incl" }, { title: "B", qty: 1, price: 640, tax_mode: "incl" }];
+    const net = Math.round((700 / 1.05) * 100) / 100 + Math.round((640 / 1.05) * 100) / 100;
+    for (const disc of [0, 200]) {
+      const os = [order(lines, { subtotal: net, taxable_base: net, nontax_amount: 0, discount: disc, tax_rate: 0.05 })];
+      const r = read2(BILLDOC.billData({ settings: inclS, restaurant: { slug: "x" }, orders: os, tableDisp: "5", session: {} }));
+      const sub = (r.rows.find(([l]) => /^Subtotal$/.test(l)) || [])[1];
+      sub === r.items
+        ? ok(`tax-inside bill (discount ${disc}): the Subtotal equals the item column (${r.items})`)
+        : bad(`tax-inside bill (discount ${disc}): Subtotal ${sub} but the items add to ${r.items}`,
+          "a guest checking the column gets a different number from the row under it — set taxIncluded/inclRows in billData()");
+      r.foots ? ok(`  …and it still foots to the TOTAL (${r.total})`) : bad(`tax-inside bill does not foot: rows ${r.chain} vs TOTAL ${r.total}`);
+      /Price includes/.test(r.below)
+        ? ok("  …with the tax reported UNDER the total, not added to it")
+        : bad("a tax-inside bill does not say the price includes its tax", "the tax must be reported below the total, never added");
+    }
+  }
+
+  // 2. TWO RATES ON ONE BILL — each order taxed at the rate it was charged (mig 284).
+  //    `find(r > 0)` used to pick one rate for the whole bill, so 5% food beside an 18% banquet
+  //    was re-taxed at 18%.
+  {
+    const os = [order([{ title: "Food", qty: 1, price: 1000, tax_mode: "excl" }], { subtotal: 1000, taxable_base: 1000, nontax_amount: 0, discount: 0, tax_rate: 0.05 }),
+      order([{ title: "Banquet", qty: 1, price: 1000, tax_mode: "excl" }], { subtotal: 1000, taxable_base: 1000, nontax_amount: 0, discount: 0, tax_rate: 0.18 })];
+    const m = BILLDOC.billMoney(os, S5);
+    m.tax === 230
+      ? ok("a bill carrying 5% and 18% orders is taxed 50 + 180 = 230, each at its own rate")
+      : bad(`a mixed-rate bill was taxed ${m.tax}, not 230`, "one rate for the whole bill re-prices every other order — mig 284 exists to stop that");
+    const r = read2(BILLDOC.billData({ settings: S5, restaurant: { slug: "x" }, orders: os, tableDisp: "5", session: {} }));
+    r.taxRows.length >= 2
+      ? ok("  …and the paper names each rate on its own line")
+      : bad("a mixed-rate bill prints one percentage", "the right rupees under a rate nobody was charged");
+    r.foots ? ok("  …and it foots") : bad(`mixed-rate bill does not foot: ${r.chain} vs ${r.total}`);
+  }
+
+  // 3. A SOFT-DELETED ORDER IS NOT ON THE BILL. It stayed in the subtotal and the tax while
+  //    lib/billLedger.ts dropped it, so the paper and the admin ledger described different bills.
+  {
+    const os = [order([{ title: "A", qty: 1, price: 500, tax_mode: "excl" }], { subtotal: 500, taxable_base: 500, nontax_amount: 0, discount: 0, tax_rate: 0.05, deleted_at: "2026-01-01" }),
+      order([{ title: "B", qty: 1, price: 100, tax_mode: "excl" }], { subtotal: 100, taxable_base: 100, nontax_amount: 0, discount: 0, tax_rate: 0.05 })];
+    BILLDOC.billMoney(os, S5).total === 105
+      ? ok("a soft-deleted order is not charged on the bill")
+      : bad(`a soft-deleted order is still billed (total ${BILLDOC.billMoney(os, S5).total}, expected 105)`,
+        "the paper charges for a line every ledger says is not there");
+  }
+
+  // 4. A REPRINT KEEPS THE BILL'S OWN DATE. It was always `new Date()`, so a reprint stamped today
+  //    beside an invoice number whose financial year said otherwise.
+  {
+    const d = BILLDOC.billData({ settings: S5, restaurant: { slug: "x" },
+      orders: [order([{ title: "A", qty: 1, price: 100, tax_mode: "excl" }], { subtotal: 100, taxable_base: 100, nontax_amount: 0, discount: 0, tax_rate: 0.05 })],
+      tableDisp: "5", session: { bill_no: 7, invoice_no: 41, invoice_at: "2025-06-10T10:00:00Z" } });
+    /2025/.test(d.dateStr) && /2025-26/.test(d.invNo)
+      ? ok("a reprinted invoice keeps its own date, matching its invoice number's year")
+      : bad(`a reprint stamps ${d.dateStr} on invoice ${d.invNo}`, "the date and the number's financial year must agree on a tax invoice");
+  }
+
+  // 5. THE COMPOSITION BILL still prints no tax line and still applies its discount.
+  {
+    const os = [order([{ title: "A", qty: 2, price: 400, tax_mode: "exempt" }], { subtotal: 800, taxable_base: 0, nontax_amount: 800, discount: 150, tax_rate: 0 })];
+    const r = read2(BILLDOC.billData({ settings: { price_tax_mode: "composition" }, restaurant: { slug: "x" }, orders: os, tableDisp: "5", session: {} }));
+    const noTax = r.taxRows.length === 0 && !/Price includes/.test(r.below);
+    noTax && r.total === 650 && r.foots
+      ? ok("a composition bill shows no tax line, applies its discount, and foots (650)")
+      : bad(`a composition bill is wrong: total ${r.total}, tax rows ${JSON.stringify(r.taxRows)}`,
+        "a composition restaurant may show a diner no GST at all, and its discount must still come off");
+  }
+
+  // 6. THE BANQUET SHEET must not print per-line tax columns that contradict its own TOTAL row.
+  //    With an empty frozen tax_lines it fell back to LIVE component rates while every amount was
+  //    split out of the bill's STORED tax, so one sheet stated three different numbers.
+  {
+    const html = BILLDOC.banquetDocHtml({
+      bill: { bill_no: "B1", issued_at: "2026-08-05", subtotal: 250000, discount: 10000, tax: 12000, total: 252000 },
+      lines: [{ title: "Set menu", qty: 500, price: 500 }],
+      settings: { banquet_paper_size: "a5", banquet_tax_components: [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }] },
+      restaurant: { slug: "x" }, autoPrint: false,
+    });
+    const cells = [...html.matchAll(/<td class="c">([\d.]+)%<\/td><td class="r">([\d,.]+)<\/td>/g)].map((m) => n(m[2]));
+    const totRow = (html.match(/<tr class="tot">([\s\S]*?)<\/tr>/) || [])[1] || "";
+    const totals = [...totRow.matchAll(/class="r">([\d,.]+)</g)].map((m) => n(m[1])).slice(1);
+    const same = cells.length === totals.length && cells.every((c, i) => Math.abs(c - totals[i]) < 0.02);
+    same
+      ? ok("a banquet sheet's per-line tax columns add up to its own TOTAL row")
+      : bad(`a banquet sheet contradicts itself: lines ${JSON.stringify(cells)} vs TOTAL row ${JSON.stringify(totals)}`,
+        "use the components only when their sum IS the rate this bill was charged (billMoney's compsMatch guard)");
+  }
+
+  // 7. THE BANQUET SHEET can be dismissed, and a PREVIEW does not fire the print dialog by itself.
+  {
+    const bq = (extra) => BILLDOC.banquetDocHtml({ bill: { bill_no: "B1", subtotal: 100, total: 100 }, lines: [], settings: {}, restaurant: {}, ...extra });
+    const real = bq({}); const prev = bq({ autoPrint: false, note: "a sample" });
+    /class="bar"/.test(real) && /Escape/.test(real)
+      ? ok("the banquet sheet carries a Close button and answers Esc")
+      : bad("the banquet sheet cannot be closed", "it auto-printed with no toolbar, no ✕ and no Esc — only the browser could dismiss it");
+    /setTimeout\(printAgain/.test(real) && !/setTimeout\(printAgain/.test(prev)
+      ? ok("  …a real banquet print fires the dialog, a PREVIEW does not")
+      : bad("the banquet preview fires a print dialog at the admin", "a preview shows the sheet; only a real print opens the dialog");
+  }
+
+  // 8. THE KITCHEN TICKET obeys the ONE-INK rule — the same thermal head as the bill.
+  {
+    const k = BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [{ qty: 1, title: "X", options: ["extra cheese"], removed: ["onion"] }] });
+    const css = (k.split("<style>")[1] || "").split("</style>")[0].replace(/\/\*[\s\S]*?\*\//g, "");
+    const greys = [...new Set(css.match(/#[0-9a-fA-F]{3,6}/g) || [])].filter((c) => !/^#0{3,6}$/i.test(c) && !/^#f{3,6}$/i.test(c));
+    !greys.length && !/font-style:\s*italic/.test(css)
+      ? ok("the kitchen ticket prints in one ink, no italics (a thermal head has no grey)")
+      : bad(`the kitchen ticket still uses ${greys.join(" ")}${/font-style:\s*italic/.test(css) ? " and italics" : ""}`,
+        "grey is faked with sparse dots at 203dpi — the option/removal lines are the ones a cook must read");
+  }
+
+  // 9. AMOUNT IN WORDS names the same amount as the figure printed beside it.
+  {
+    /Fifty-Six Paise/.test(BILLDOC.bqWords(1234.56)) && BILLDOC.bqWords(1234) === "One Thousand Two Hundred Thirty-Four Only"
+      ? ok("the banquet amount-in-words states its paise, and says nothing extra when there are none")
+      : bad(`bqWords(1234.56) = "${BILLDOC.bqWords(1234.56)}"`, "on a tax invoice the words are the controlling figure — they cannot floor away the paise printed beside them");
+  }
+}
+
 console.log(fails
   ? `\n${fails} check(s) FAILED — the bill or the ticket has more than one description again.`
   : "\nAll checks passed — one bill, one ticket, one file, one numbering series, and it adds up.");

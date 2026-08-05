@@ -30,6 +30,7 @@ export type BillOrder = {
   session_id: string | null;
   total: number | null;
   discount: number | null;
+  tax_rate: number | null;       // the rate THIS order was charged at (mig 284) — see netOf()
   status: string | null;         // received/preparing/served/cancelled
   payment_status: string | null; // pending/paid
   payment_method: string | null;
@@ -55,7 +56,26 @@ export type BillSession = {
   delete_reason: string | null;
 };
 
-const gross = (os: BillOrder[]) => os.reduce((s, o) => s + (Number(o.total) || 0), 0);
+// WHAT A BILL WAS ACTUALLY WORTH — net of its discount (2026-08-05).
+//
+// `orders.total` is stored as `subtotal + tax` on the PRE-discount subtotal (mig 270), and
+// `orders.discount` is kept apart from it, so summing `total` alone overstates every discounted
+// bill by `discount × (1 + rate)`. A ₹1,000 bill discounted ₹200 at 5% read ₹1,050 in the ledger
+// where the guest paid ₹840. This is the screen an owner opens to check whether a real sale is
+// missing, so its figures being higher than every bill, Z-report line and dashboard number
+// undermined the oversight it exists for. `BillOrder.discount` was already declared and unread.
+//
+// The rate comes from the order's own `tax_rate` (mig 284) so a bill is never re-priced by a rate
+// changed later; with no stamped rate we fall back to the plain `total − discount`, which is what
+// those pre-284 bills charged.
+const netOf = (o: BillOrder) => {
+  const total = Number(o.total) || 0;
+  const disc = Number(o.discount) || 0;
+  if (disc <= 0) return total;
+  const rate = Number(o.tax_rate) > 0 ? Number(o.tax_rate) : 0;
+  return Math.round((total - disc * (1 + rate)) * 100) / 100;
+};
+const gross = (os: BillOrder[]) => Math.round(os.reduce((s, o) => s + netOf(o), 0) * 100) / 100;
 
 // Derive the one primary state bucket for a bill from its session + orders.
 export function deriveBillState(session: BillSession, orders: BillOrder[]): BillState {
