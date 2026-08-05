@@ -3020,6 +3020,17 @@ function ordersPreviousHtml(today, previous) {
     .filter((p) => { const t = new Date(p.created_at || 0).getTime(); return t >= (withYesterday ? yStart : dayStart); });
   const recs = [...groupOrdersBySession(dine).map(recOfGroup), ...parcels.map(recOfParcel)];
   // Search + sort (NO date type any more — the record IS the allowed days, owner 2026-08-03).
+  // THE BOX SAYS WHAT IT IS SEARCHING (T18, 2026-08-05). It always read "Search bills…", so the
+  // only clue to which of the five fields was live was the dropdown beside it — and a manager
+  // typing a table number into an Invoice-no search gets no matches and no reason why. The
+  // placeholder now names the field and shows the shape of the thing to type.
+  const BILL_SEARCH_HINT = {
+    bill: "Search by bill no. — e.g. 42",
+    inv: "Search by invoice no. — e.g. 000042",
+    table: "Search by table — e.g. 7 or Patio",
+    amount: "Search by amount ₹ — e.g. 450",
+    cust: "Search by customer name",
+  };
   const q = (state.billSearch || "").toLowerCase().trim();
   const stype = ["inv", "bill", "table", "amount", "cust"].includes(state.billSearchType) ? state.billSearchType : "bill";
   const sort = state.billSort || "new";
@@ -3056,7 +3067,7 @@ function ordersPreviousHtml(today, previous) {
           <option value="cust"${stype === "cust" ? " selected" : ""}>Customer</option>
         </select>
         <span class="vline"></span><i class="fas fa-magnifying-glass"></i>
-        <input type="text" data-bill-q value="${esc(state.billSearch || "")}" placeholder="Search bills…" autocomplete="off"/>
+        <input type="text" data-bill-q value="${esc(state.billSearch || "")}" placeholder="${esc(BILL_SEARCH_HINT[stype] || "Search bills…")}" autocomplete="off"/>
       </div>
       <select class="bill-sort" data-bill-sort>
         <option value="new"${sort === "new" ? " selected" : ""}>Newest</option>
