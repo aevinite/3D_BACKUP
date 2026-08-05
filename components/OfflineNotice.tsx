@@ -29,10 +29,18 @@ function ago(ts: number): string {
   return `${h}:${m < 10 ? "0" : ""}${m} ${ap}`;
 }
 
-// The staff-panel host pages (/manager, /kitchen, /tablet and their /r/<slug>/… twins)
-// are just a frame around a panel that shows its OWN offline bar inside — a second strip
-// here would say the same thing twice and could sit over the panel's bottom controls.
-const isPanelHost = (path: string) => /^\/(manager|kitchen|tablet)(\/|$)/.test(path) || /^\/r\/[^/]+\/(manager|kitchen|tablet)(\/|$)/.test(path);
+// The staff-panel host pages are just a frame around a panel that shows its OWN offline bar
+// inside — a second strip here would say the same thing twice and could sit over the panel's
+// bottom controls.
+//
+// The OWNER COCKPIT hosts that same panel on three of its pages (Menu → menuonly, Manager mode →
+// ownermode, Inventory → invonly). They were missing from this list until 2026-08-05, so offline
+// those pages showed the panel's bar inside the frame AND this fixed strip (bottom: 0,
+// z-index 99990) across it — the exact duplication-and-overlap this check exists to prevent.
+const isPanelHost = (path: string) =>
+  /^\/(manager|kitchen|tablet)(\/|$)/.test(path)
+  || /^\/r\/[^/]+\/(manager|kitchen|tablet)(\/|$)/.test(path)
+  || /^\/owner\/(menu|manager|inventory)(\/|$)/.test(path);
 
 export default function OfflineNotice() {
   const [offline, setOffline] = useState(false);

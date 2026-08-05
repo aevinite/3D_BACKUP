@@ -10,6 +10,7 @@ import { USER_COOKIE, userFromCookie } from "@/lib/userAuth";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
+import { entitledSubset } from "@/lib/ownerEntitlements";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import OwnerMenuEditor from "@/components/owner/OwnerMenuEditor";
 
@@ -24,7 +25,12 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
   let selected = "";
 
   if (u && u.role === "owner") {
-    const ids = await enabledOwnedRestaurantIds(u.id);
+    // Hiding the nav row is never the only guard (docs/ACCESS-MODEL.md): a typed or bookmarked
+    // /owner/menu lands straight here, so the admin's "Menu" section switch is enforced AGAIN.
+    // Manager mode (entitledSubset) and Inventory (inventoryLadder) both already did this; Menu
+    // was gated in the sidebar and nowhere else, so an owner whose Menu section had been switched
+    // off could still open the editor from history and change prices (found 2026-08-05).
+    const ids = await entitledSubset(await enabledOwnedRestaurantIds(u.id), "menu");
     if (ids.length) {
       const rows = (await sb.from("restaurants").select("id, name").in("id", ids)).data || [];
       const nameById = new Map(rows.map((r) => [r.id as string, r.name as string]));
@@ -44,7 +50,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
     return (
       <div className="adm-page">
         <h1 className="adm-page-title">Menu</h1>
-        <p className="adm-page-sub">No restaurant is available to edit right now.</p>
+        {/* Two different reasons land here — no restaurant yet, or the section switched off —
+            so the line says both instead of leaving an owner guessing which one it is. */}
+        <p className="adm-page-sub">
+          The menu editor isn&apos;t switched on for your restaurant — ask your administrator.
+        </p>
       </div>
     );
   }

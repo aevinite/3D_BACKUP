@@ -880,12 +880,26 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
     **The choice is remembered:** toggling to dark and reopening the panel in a new tab comes back
     dark — driven and verified on all three panels, 2026-08-05, which is exactly what the owner
     asked for ("once they select it, remember it").
-  - **Owner (`/owner`) and admin (`/aevinite`) consoles — DARK ONLY, on purpose.** Owner,
-    2026-08-05: *"keep let it stay like it is."* `app/layout.tsx` tags those routes
-    `data-staffdark="1"`, there is no toggle to press, and setting `lfh_theme` changes nothing —
-    a light run of `/owner` renders byte-identical to a dark one. The T11 sweep planned ~35
-    light-skin checks for these two consoles before discovering that; they are impossible, not
-    failing. Don't plan them again.
+  - **Owner console (`/owner`) — DARK BY DEFAULT, but it HAS a light skin.** The owner asked to
+    keep the default as it is (2026-08-05: *"keep let it stay like it is"*), and that stands. The
+    factual half of the earlier note here was wrong and is corrected (2026-08-05, T19):
+
+    · There IS a toggle — the ☀/🌙 button in the cockpit top bar
+      (`components/owner/OwnerShell.tsx` → `toggleSkin`), stored as **`aevidine_skin`** in
+      localStorage AND a cookie (so the next server render starts on the right skin), and
+      broadcast as `lfh:owner-skin` so the embedded staff panel follows by postMessage.
+    · `lfh_theme` is the GUEST key. Setting it on `/owner` changes nothing, which is how a test
+      that drove `lfh_theme` concluded "no light mode" and planned ~35 checks as impossible.
+      They are perfectly possible — drive `aevidine_skin` (or click the button).
+    · What light mode actually looks like, measured on the deployed site: `.adm-card`
+      `rgb(255,255,255)`, body text `rgb(17,24,39)`, the sidebar rail staying dark by design, and
+      the Menu embed going `skin-light` with a `#f6f7f9` background. `data-staffdark="1"` only
+      pins the outermost page background, which the content area covers.
+    · This matters beyond tidiness: `useOwnerSkin` + the "one writer" rule exist BECAUSE the
+      owner hit white-then-dark drift here on 2026-08-03. A doc saying the skin does not exist
+      would send the next session straight past a regression in it.
+  - **Admin console (`/aevinite`)** — dark; not re-measured by T19, so treat the older note as
+    unverified rather than proven either way.
   - Gotcha when testing: on the **tablet** topbar the 🚩 report-issue button also carries the
     class `.theme-toggle` and comes FIRST in the DOM, so a `.theme-toggle` selector clicks the
     wrong button and the theme appears "broken". Target `#themeToggle` by id.

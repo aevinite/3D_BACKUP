@@ -32,7 +32,7 @@ import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { readSnap, writeSnap } from "@/lib/ownerSnap";
 import { useBackClose } from "@/lib/backStack";
-import { buildReportHtml, buildReportTables, type ReportData, type ExportTable } from "@/components/owner/ownerReportDoc";
+import { type ReportData } from "@/components/owner/ownerReportDoc";
 import { gatherOwnerReport } from "@/lib/ownerReportGather";
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 
@@ -478,6 +478,18 @@ export default function OwnerDashboard() {
   const homeRid = single ? ov!.restaurants[0].id : null;
   const activeRid = view.level === "home" ? homeRid : (view as { rid: string }).rid;
   const restCount = ov?.restaurants.length ?? 0;
+  // WHICH RESTAURANTS THESE NUMBERS ARE ACTUALLY ABOUT (2026-08-05).
+  // The captions below said "all N restaurants" using restCount — every restaurant the owner
+  // owns, including any whose "reports" section Aevidine has switched off. Those stay in the
+  // list on purpose (so the owner knows they exist) with their revenue zeroed and flagged
+  // reportsOff, and /api/owner/analytics narrows its scope to the entitled ones — so on an
+  // estate of 5 with reports off for 1, a caption claimed 5 over numbers covering 4. A money
+  // label that overstates its own coverage is exactly what a decision gets built on.
+  const reportedCount = (ov?.restaurants ?? []).filter((r) => !r.reportsOff).length;
+  const restScopeText =
+    reportedCount === restCount
+      ? `all ${restCount} restaurant${restCount === 1 ? "" : "s"}`
+      : `${reportedCount} of ${restCount} restaurants · takings hidden for ${restCount - reportedCount}`;
   const scopeKey = activeRid ?? "group";
 
   // ── Instant-paint (owner 2026-07-26): last-seen payloads from THIS tab paint at ~0ms ──
@@ -810,34 +822,22 @@ export default function OwnerDashboard() {
   const monthCurName = `This month · ${thisMonthName}`;
   const monthPrevName = `Last month · ${lastMonthName}`;
 
-  // Latest-active-week fallback (owner round-5: "the two datas are not even
-  // showing"): if the pinned last-7-days window has zero orders but the main range
-  // does have activity, fetch the newest 7 IST days that HAD orders as a custom
-  // window and label the cards with those dates.
-  const weekFallback = useMemo(() => {
-    const wp = pl(WEEK);
-    if (!wp) return null; // still loading — don't decide yet
-    const active = wp.scope === "restaurant"
-      ? (wp.hourly ?? []).some((h) => h.orders > 0)
-      : ((wp as GroupA).heatmap ?? []).some((c) => c.orders > 0);
-    if (active) return null;
-    const base = pl(globalRange);
-    const ts = base?.timeseries ?? [];
-    let maxMs = 0;
-    for (const t of ts) if ((t.orders || 0) > 0) maxMs = Math.max(maxMs, Date.parse(t.bucket));
-    if (!maxMs) return null;
-    const istDay = (ms: number) => new Date(ms + 5.5 * 3600_000).toISOString().slice(0, 10);
-    const to = istDay(maxMs), from = istDay(maxMs - 6 * DAY_MS);
-    return { key: `latestwk:${from}:${to}`, qs: `range=custom&from=${from}&to=${to}`, from, to };
-  }, [pl, globalRange]);
-  useEffect(() => {
-    if (weekFallback && !cache[`${scopeKey}|${weekFallback.key}`]) fetchPayload(scopeKey, weekFallback.key, { qs: weekFallback.qs });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekFallback, scopeKey]);
-  const weekKey = weekFallback?.key ?? WEEK;
-  const fmtD = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-  const weekTagText = weekFallback ? `week of ${fmtD(weekFallback.from)} – ${fmtD(weekFallback.to)}` : "last 7 days";
-  const weekTagTitle = weekFallback ? "The current week has no orders yet — showing the most recent week with activity." : rangeSpanText(WEEK);
+  // THE LATEST-ACTIVE-WEEK FALLBACK IS GONE (2026-08-05) — it had become dead weight that still
+  // cost a network request.
+  //
+  // It was added in owner round-5 ("the two datas are not even showing"): when the pinned
+  // last-7-days window had no orders it worked out the newest 7 IST days that DID, fetched that
+  // custom window, and labelled the cards with those dates. The labels were later dropped from
+  // the JSX and nobody removed the machinery, so what was left was: a `useMemo` whose result fed
+  // only its own fetch, a fetch whose payload (`latestwk:<from>:<to>`) NO chart ever looked up,
+  // and three computed captions (`weekKey`, `weekTagText`, `weekTagTitle`) that were never
+  // rendered. eslint had been reporting all three as unused; the live-looking fetch next to them
+  // made it read as deliberate. Net effect: every dashboard open during a quiet week paid for an
+  // extra custom-range analytics payload that could not appear on screen.
+  //
+  // The sparse-data story it belonged to is still handled, by the rule that actually renders:
+  // `populated()` / `NotEnough` / the auto-drill in the reports route. If a "most recent week with
+  // activity" card is wanted again, bring back the fetch AND the card together.
 
   // ── multi-restaurant table (all multi tiers — owner: design #4) ──
   const [tq, setTq] = useState("");
@@ -1272,7 +1272,7 @@ export default function OwnerDashboard() {
               heatmap below already covers hour-of-day) + category. Locked to whole months. */}
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · all {restCount} restaurants</span></span><span className="ow2-tag">{thisMonthName}</span></div>
+              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · {restScopeText}</span></span><span className="ow2-tag">{thisMonthName}</span></div>
               {!pl("month") ? <div className="adm-empty">Loading…</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
@@ -1280,7 +1280,7 @@ export default function OwnerDashboard() {
                   <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue by category <span className="mut">· all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Revenue by category <span className="mut">· {restScopeText}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as GroupA).categories!} />
                 : <div className="adm-empty">Loading…</div>}
@@ -1290,13 +1290,13 @@ export default function OwnerDashboard() {
           {/* Heatmap + payments, side by side (group scope) */}
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · {restScopeText}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as GroupA).heatmap!} accent={GREEN} rangeLabel={RANGES.find((r) => r.k === globalRange)!.label} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · all {restCount} restaurants</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · {restScopeText}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.paymentMethods
                 ? <PaymentDonut data={(pl(globalRange) as GroupA).paymentMethods} />
                 : <div className="adm-empty">Loading…</div>}

@@ -26,6 +26,27 @@ should see this and arrange in this structure only."*
 **data:** `GET/PATCH /api/admin/users` (+ `POST /api/admin/users/photo`)
 **Opened from:** `/aevinite → Users` (tap a person) and `/aevinite → Owners → Full profile`.
 
+**There is a SECOND screen about a person, and you need to know what is and is not shared**
+(2026-08-05). The OWNER panel has its own person page — `app/owner/staff/[id]/page.tsx`, opened
+from `/owner/staff` → "Open profile" — with a tabbed layout (Personal · Job & pay · Payments ·
+Access · Performance · Activity) rather than this dossier.
+
+- **The PERMISSIONS half is now shared and must stay that way.** That page renders the rows
+  `/api/owner/staff?staff=<id>` sends, and the route builds them from **`lib/staffCaps`** +
+  `lib/accessState` — the same list, the same folder names, the same `Default (On) · On ·
+  [On + manager PIN] · Off` dropdown, the same `capVisible` hiding of rows the restaurant does
+  not have. It kept a private hand-written list until 2026-08-05 and that list had drifted: six
+  waiter rows where the model has nine (**table types, khata and banquet were missing, so an owner
+  had nowhere to set them**), khata greyed by the wrong module so the screen offered a switch the
+  server refused, and **no manager rows at all** — an owner could not see what their own manager
+  was allowed to do. **Never reintroduce a role's permission list inside a panel.**
+- **The LAYOUT is still not this dossier**, and that is a known open item, not an accident: making
+  the owner page use `components/admin/StaffProfile.tsx` means giving that component an API
+  adapter (it is bound to `/api/admin/users` + the admin-only photo endpoint) rather than copying
+  it, which would make a third shape. Decide it deliberately; don't half-converge it.
+- `lib/accessState.ts` → `accessStateFor(rid)` is the ONE reader of a restaurant's permission
+  state. It is not a gate: the caller proves its right to that restaurant first.
+
 ---
 
 ## The shape — do not invent a second one

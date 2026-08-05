@@ -20,11 +20,16 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { logAction } from "@/lib/oplog";
-import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/lib/ownerEntitlements";
+// MANAGER_POWER_FLAGS is deliberately NOT imported here any more: the per-person allow-list is
+// `capsForRole()` (lib/staffCaps), the one list the Access screen and the admin write route use.
+// A second hand-picked constant is what let `delete_bill` be a manager row on screen and an
+// "Unknown permission" here (fixed 2026-08-04).
+import { mergeOwnerEntitlements, powerEntitled } from "@/lib/ownerEntitlements";
 import { managerSettingsOff } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
-import { capsForRole } from "@/lib/staffCaps";
+import { capsForRole, capGroupsForRole, capVisible, roleDefault, effectiveCap } from "@/lib/staffCaps";
+import { accessStateFor } from "@/lib/accessState";
 import { newWaiterTables } from "@/lib/tableAssign";
 import { viewAsPerson, isPersonId } from "@/lib/viewAsPerson";
 import {
@@ -307,12 +312,23 @@ export async function GET(req: NextRequest) {
 
   // Money totals per person, for the restaurants where this caller may see money. One RPC per
   // restaurant (a tiny grouped result), never one per person.
+  //
+  // TOGETHER, not one after another (2026-08-05). A multi-restaurant owner paid one full
+  // round trip per restaurant before their roster could paint — twelve restaurants meant twelve
+  // sequential Mumbai round trips. They are independent grouped reads, so they overlap.
+  //
+  // Deliberately NOT behind the snapshot cache, even though these are money aggregates: the
+  // fingerprint that gates `cachedOwnerPayload` watches ORDERS, so recording a salary would not
+  // invalidate it and the roster would keep showing yesterday's "paid this month" — a stale
+  // money figure is worse than a small live query. It stays live, indexed
+  // (idx_staff_payments_rest_paid) and month-scoped.
   const money: Record<string, { paid: number; advance: number; last: string | null }> = {};
   const from = todayIST().slice(0, 8) + "01";                 // 1st of this month
   const to = todayIST();
-  for (const r of s.restaurants) {
-    if (!accessByRid[r.id]?.canSeePay) continue;
-    const { data } = await sb.rpc("lfh_staff_pay_summary", { p_restaurant: r.id, p_from: from, p_to: to });
+  const payable = s.restaurants.filter((r) => accessByRid[r.id]?.canSeePay);
+  const paySummaries = await Promise.all(
+    payable.map((r) => sb.rpc("lfh_staff_pay_summary", { p_restaurant: r.id, p_from: from, p_to: to })));
+  for (const { data } of paySummaries) {
     for (const row of (data || []) as any[]) {
       money[row.staff_id] = { paid: Number(row.paid || 0), advance: Number(row.advance_outstanding || 0), last: row.last_paid_on || null };
     }
@@ -426,7 +442,42 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
 
   // Performance is OWNER-ONLY (owner's call 2026-07-29 — a manager gets no access to it).
   if (perfQ) out.performance = (((await perfQ).data || []) as any[]).find((x) => x.staff_id === id) || null;
+  out.capGroups = await capGroupsFor(u.role, u.restaurant_id, u.permissions);
   return ok(out);
+}
+
+// ── THE PERMISSION ROWS FOR ONE PERSON — the SAME rows Aevidine's profile shows ────────────
+//
+// Resolved SERVER-side and sent as plain rows (key · name · help · pin · editable · what the
+// restaurant gives · what this person actually has). Two reasons it is done here rather than in
+// the browser:
+//   • the owner page used to carry its own hand-written waiter list, and it had drifted — three
+//     rows missing (table types, khata, banquet) and khata greyed by the WRONG module, so the
+//     screen offered a switch the server then refused. `lib/staffCaps` is the one list
+//     (docs/STAFF-PROFILE.md), and deriving from it makes that drift impossible.
+//   • the browser never needs the whole TreeState to draw a row, and that state carries
+//     things an owner has no reason to receive. Only the answers travel.
+//
+// A row the restaurant doesn't have at all is dropped (`capVisible`) — the owner's rule: "if the
+// feature is closed, it should not even be seen there". `editable:false` rows (an owner's own
+// pages, the manager-settings sections) are restaurant-wide, so they are shown for context and
+// carry no control — never a dropdown that saves nothing.
+async function capGroupsFor(role: string, rid: string, permissions: Record<string, string> | null | undefined) {
+  const st = await accessStateFor(rid);
+  return capGroupsForRole(role)
+    .map((g) => ({
+      group: g.group,
+      rows: g.caps.filter((c) => capVisible(c, st)).map((c) => ({
+        key: c.key,
+        name: c.node.name,
+        what: c.node.what || null,
+        pin: c.pin,
+        editable: c.perPerson,
+        roleDefault: roleDefault(c, st),
+        effective: effectiveCap(c, st, permissions),
+      })),
+    }))
+    .filter((g) => g.rows.length > 0);
 }
 
 // A human label for whoever is acting, resolved from the SESSION (never the request body) —
@@ -438,6 +489,21 @@ async function actorLabel(s: Extract<Scope, { ok: true }>): Promise<string> {
   if (!a) return s.actor;
   const nm = a.name || a.username || s.actor;
   return a.role === "manager" ? `${nm} (manager)` : nm;
+}
+
+// ── NO SILENT OVERWRITES, ON THE OWNER'S SCREENS TOO (2026-08-05) ──────────────────────────
+// "First save wins, and the loser is told" reached the admin's person profile on 2026-08-04 but
+// not this route — so the SAME edit (a salary, a phone number, an emergency contact) was refused
+// when two people clashed on Aevidine's screen and silently overwritten when they clashed on the
+// owner's. Whose change survived depended on which screen they happened to open, which is exactly
+// the coin-toss the rule exists to remove.
+//
+// Same shape as the panel dispatchers and the admin route: it does NOTHING unless the screen said
+// what it was editing FROM (the X-LFH-Expect header), so a caller that hasn't opted in is
+// unaffected. Always scoped to the target person's own restaurant.
+async function noOverwrite(req: NextRequest, rid: string): Promise<Response | null> {
+  const overwrite = await expectClash(req, rid);
+  return overwrite ? clashJson(overwrite) : null;
 }
 
 // Resolve one target person + this caller's pay rights for their restaurant. Every
@@ -560,6 +626,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
   // void_payment — cancel a ledger entry WITH a reason; the row stays, struck through
   if (action === "set_profile" || action === "set_job" || action === "set_own_pay") {
     const t = await target(s, id); if (t.err) return t.err;
+    { const c = await noOverwrite(req, t.u.restaurant_id); if (c) return c; }
     // NO SILENT OVERWRITES — THE OWNER'S PROFILE PAGE TOO (sweep 2026-08-05, T9 finding 1).
     // /api/admin/users got this gate in the 2026-08-04 sweep, but the OWNER panel has its OWN
     // profile page (app/owner/staff/[id]/page.tsx) writing the SAME columns through THIS route —
@@ -680,6 +747,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
   // Hierarchy: the TARGET must be below the actor's level — a manager can never
   // touch another manager's (or an owner's) account, in any way.
   if (!assignableFor(s.actor).includes(u.role)) return bad("You can't manage accounts at or above your own level.", 403);
+  { const c = await noOverwrite(req, String(u.restaurant_id || "")); if (c) return c; }
 
   // The same gate for the account actions below — `edit` types a name and a phone number into a
   // box, which is a value edit by the same rule (see the note in the profile branch above).

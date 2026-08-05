@@ -40,7 +40,10 @@ const GROUPS: NavGroup[] = [
       // "View menu" when the admin turned menu editing off (enforced in the editor panel).
       { href: "/owner/menu", label: "Menu", icon: "fa-book-open", ent: "menu" },
       { href: "/owner/reports", label: "Reports", icon: "fa-file-invoice", ent: "reports" },
-      { href: "/owner/staff", label: "Staff & powers", icon: "fa-users-gear", ent: "staff" },
+      // "Team" — the page's own heading is "Team & pay" and its only tab is "Team". It was
+      // labelled "Staff & powers" here long after the Powers tab was removed in the access
+      // rebuild, so the sidebar promised a screen that no longer exists (2026-08-05).
+      { href: "/owner/staff", label: "Team", icon: "fa-users-gear", ent: "staff" },
       { href: "/owner/customers", label: "Customers", icon: "fa-user-group", ent: "customers" },
       // Activity = the owner's read-only log of everything their staff did (staff_actions,
       // scoped server-side); each row opens the shared organized detail popup.

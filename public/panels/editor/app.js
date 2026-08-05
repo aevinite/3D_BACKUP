@@ -60,11 +60,13 @@ const INV_ONLY = new URLSearchParams(location.search).get("invonly") === "1";
 const FLOOR_PREVIEW = new URLSearchParams(location.search).get("floorpreview") === "1";
 // ?ownermode=1 (owner panel → Manager mode, 2026-08-02): the FULL manager panel — live
 // floor, Bills, Platform, Banquet, Inventory, Dashboard — embedded inside the owner
-// cockpit, wearing the owner skin. Four tabs are NOT here because the owner panel already
+// cockpit, wearing the owner skin. THREE sections are NOT here because the owner panel already
 // has its own richer versions: the menu editor (owner → Menu), ⭐ Ratings (owner →
-// Feedback & complaints), 🗑 Audit (owner → Activity) and Settings (admin-owned). Their
-// tab buttons are hidden by CSS AND setTab refuses them, so a stale saved tab / deep link
-// can never boot into one. Everything else is exactly the manager panel, same live engine.
+// Feedback & complaints) and 🗑 Audit (owner → Activity). Their tab buttons are hidden by CSS
+// AND setTab refuses them, so a stale saved tab / deep link can never boot into one.
+// Settings STAYS — see the note right below. Everything else is exactly the manager panel,
+// same live engine. (This said "four tabs … and Settings" until 2026-08-05, contradicting the
+// very next comment and the code.)
 const OWNER_MODE = new URLSearchParams(location.search).get("ownermode") === "1";
 // SETTINGS IS NOT HIDDEN HERE (owner, 2026-08-02: "owner panel should also not hide setting").
 // It used to be, as "admin-owned", but that tab is where the FLOOR is configured — Tables per
@@ -14280,8 +14282,9 @@ function xraySettingUrl(flag) {
     color: var(--gold-strong) !important; border-color: var(--gold) !important;
   }
   /* ── Owner "Manager mode" embed (?ownermode=1) ─────────────────────────────────
-     The WHOLE manager panel, owner-skinned, minus the four sections the owner panel
-     already has better versions of: Menu editor, ⭐ Ratings, 🗑 Audit, Settings.
+     The WHOLE manager panel, owner-skinned, minus the three sections the owner panel
+     already has better versions of: Menu editor, ⭐ Ratings, 🗑 Audit. (Settings is NOT one
+     of them — the floor is configured there; see OWNER_HIDDEN_TABS.)
      display:none (not [hidden]) so a live repaint / the X-ray pass can never
      resurrect a tab. The topbar STAYS (unlike menu-only) — its tabs are the mode's
      navigation — but the panel's own theme toggle goes (the owner shell owns the
