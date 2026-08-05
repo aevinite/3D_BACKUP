@@ -427,6 +427,56 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
 
 // ── report ───────────────────────────────────────────────────────────────────
 if (!HOOK) for (const m of oks) console.log("  ok   " + m);
+// ── A DISCOUNT IS GROSSED AT THE RATE IT WAS CHARGED (mig 301, T7 sweep F16) ─────────────────
+// `orders.total` carries tax on the PRE-discount subtotal, so every money surface computes the net
+// as `total - discount x (1 + rate)`. Migration 284 made an order remember its OWN rate; that
+// reached the bill, the Z-report and pay-in-parts and NOT ONE analytics function — they all used
+// the rate configured right now, so a discounted bill whose rate later changed (or a banquet at its
+// own rate) made the owner's revenue disagree with the guest's paper. Mig 301 moved that arithmetic
+// to write time (`orders.disc_gross`), which is also what keeps mig 155's per-row-free read path.
+// These checks exist because the fault's shape is "someone re-issues one of these functions and
+// quietly reverts it" — which is exactly how it survived mig 126 -> 284 in the first place.
+{
+  const migAll = readdirSync(join(root, "supabase/migrations")).sort()
+    .map((f) => [f, readFileSync(join(root, "supabase/migrations", f), "utf8")]);
+  // The LATEST definition of each money reader is the only one that matters — an older migration
+  // may legitimately still contain the old expression.
+  const latestBody = (fn) => {
+    let found = "";
+    for (const [, src] of migAll) {
+      const m = src.match(new RegExp(String.raw`create\s+or\s+replace\s+function\s+(?:public\.)?${fn}\s*\([\s\S]*?\$(?:function|)\$;`, "i"));
+      if (m) found = m[0];
+    }
+    return found;
+  };
+  const READERS = ["lfh_owner_overview", "lfh_owner_payment_breakdown", "lfh_owner_restaurant_revenue",
+    "lfh_owner_revenue_timeseries", "lfh_owner_sales_report", "lfh_owner_hourly",
+    "lfh_owner_records", "lfh_owner_payment_trend", "lfh_owner_heatmap"];
+  let reverted = [];
+  for (const fn of READERS) {
+    const b = latestBody(fn);
+    if (!b) { fail(`${fn} has no definition in supabase/migrations — this guard cannot see it`); continue; }
+    // The fault, in either of the two shapes it took: a discount multiplied by a LIVE rate.
+    if (/o\.discount\s*\*\s*\(1\s*\+/.test(b) || /\(1\s*\+\s*rt\.rate\)\s*\*\s*c?\.?dp\b/.test(b)) reverted.push(fn);
+  }
+  reverted.length === 0
+    ? ok(`all ${READERS.length} owner money functions subtract the discount as it was CHARGED, not as today's rate would gross it`)
+    : fail(`${reverted.join(", ")} gross a discount at the rate configured NOW — the owner's revenue will disagree with the printed bill for any bill whose rate has since changed (use orders.disc_gross, mig 301)`);
+
+  const g = migrationSrcWith("lfh_fill_disc_gross");
+  /NULLIF\(NEW\.tax_rate, 0\)/.test(g) && /lfh_effective_tax_rate/.test(g)
+    ? ok("orders.disc_gross is filled from the order's OWN rate, falling back to the restaurant's")
+    : fail("the disc_gross trigger no longer prefers the order's own stamped rate (mig 301)");
+  /BEFORE INSERT OR UPDATE OF discount, tax_rate/.test(g)
+    ? ok("...and it is re-derived whenever the discount or the stamped rate changes")
+    : fail("the disc_gross trigger does not fire on a discount or rate change — a later edit would leave it stale");
+  // The rollups must carry it too, or a reader falls back to the old maths for frozen history.
+  const r = migrationSrcWith("disc_gross_paid");
+  /orders_daily_agg\s+ADD COLUMN IF NOT EXISTS disc_gross_paid/.test(r) && /orders_report_monthly_agg ADD COLUMN IF NOT EXISTS disc_gross_paid/.test(r)
+    ? ok("both pre-aggregated rollups carry the grossed discount, so frozen history uses it too")
+    : fail("a rollup does not carry disc_gross_paid — its history would still be grossed at today's rate");
+}
+
 if (fails.length) {
   const body = fails.map((m) => "  FAIL " + m).join("\n");
   if (HOOK) {
@@ -438,4 +488,5 @@ if (fails.length) {
   console.log(`\n${fails.length} of ${fails.length + oks.length} checks failed — a money-lowering change would leave no record.`);
   process.exit(1);
 }
+
 if (!HOOK) console.log(`\nAll ${oks.length} checks passed — every change that lowers a bill leaves a record.`);
