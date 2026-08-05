@@ -777,12 +777,16 @@ Also:
   a candidate against the live one tile by tile, for every restaurant and every occupied table, and
   is proven to catch a trailing space in a label, money rounded to 1 decimal, and an off-by-one in
   the ready threshold. Do not hand-review a diff of this function instead.
-- ⏳ **OPEN FOLLOW-UP — run `npm run check:floor-timeouts` and act on the verdict.** It reports
-  FIXED / TOO EARLY / NOT FIXED against the real error rows and prints what a floor read costs now.
-  **`docs/FLOOR-TIMEOUT-WATCH.md`** holds the ordered what-to-do-if-not-fixed list (and the trap:
-  if a floor read is already ~10–30ms, the remaining cause is CONTENTION, so making the query
-  faster again achieves nothing). On FIXED, delete the doc + script + npm script — it's designed to
-  be retired. AV live has the sharing fix but NOT mig 238; that needs its own ask.
+- ✅ **SETTLED 2026-08-05 — the floor no longer times out, measured.** Zero floor-read timeouts in
+  the 117h after mig 238, and a whole-floor read on a 300-table floor costs 12.9–66.3ms against the
+  real 8s limit (PostgREST logs in as `authenticator` with `statement_timeout=8s`, NOT the
+  database's 120s default) — ~121x headroom. The watch script and its doc were built to be deleted
+  once answered, and are gone. **THE TRAP, still true:** if a floor read is already ~10–30ms and
+  something times out anyway, the cause is CONTENTION, not the query — making it faster achieves
+  nothing. Full numbers: `docs/PROJECT-HISTORY.md` §1.
+- ⚠️ **AV LIVE STILL DOES NOT HAVE MIGRATION 238** (it has the sharing fix only). Everything above
+  was measured on the BACKUP database. Giving AV live mig 238 is a schema change on a paying
+  client's stack, so it needs its own explicit ask — nobody has asked yet.
 
 Guarded by **`npm run verify:floor`** (`scripts/verify-floor-share.mjs`) — static, instant, proven
 to fail when an invalidation is removed. Run it against another checkout with `--repo <path>` (that
