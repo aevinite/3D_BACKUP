@@ -360,7 +360,7 @@ async function screen(role, path, opts = {}) {
     return await screenOnce(role, path, opts);
   }
 }
-async function screenOnce(role, path, { settle = 3000 } = {}) {
+async function screenOnce(role, path, { settle = 3000, waitFor = null } = {}) {
   const { ctx } = await roleCtx(role);
   const p = await ctx.newPage();
   pagesOpened++;
@@ -373,6 +373,15 @@ async function screenOnce(role, path, { settle = 3000 } = {}) {
   // (~34s each, which is why the first run took hours). The fixed settle below is what
   // actually decides whether the screen had time to paint.
   await p.waitForLoadState("networkidle", { timeout: 3500 }).catch(() => {});
+  // WAIT FOR THE THING THE PHASE IS ABOUT, not just for the clock. A fixed settle is a guess about
+  // how fast the server is today, and on a loaded free-tier instance the guess is wrong — phase 160
+  // ("the guest menu prices match the database") went red on 2026-08-05 purely because the 59-card
+  // dish grid had not painted inside 3800ms while two full suite runs were hammering the same
+  // database. The prices were perfect: re-checked straight after, at the SAME 3800ms, all 59 cards
+  // and every price matched the server. A guard that cries wolf teaches people to ignore red, so a
+  // phase that needs a specific element can now name it and the settle becomes a floor, not the
+  // whole answer.
+  if (waitFor) await p.waitForSelector(waitFor, { timeout: 15000 }).catch(() => {});
   await wait(settle);
   // ONLY look inside an iframe when the page actually has one. The staff panels are iframed;
   // the admin and owner pages are not — and asking frameLocator for a frame that will never
@@ -1386,7 +1395,7 @@ phase("every settings row has a sane tax rate", async () => {
 phase("the guest menu prices match the database", async () => {
   const items = await dbGet(`menu_items?select=slug,title,price&restaurant_id=eq.${FH.id}&limit=3`);
   ok(items.length, "no dishes to compare");
-  const s = await screen("admin", `/r/${FH.slug}/menu`, { settle: 3800 });
+  const s = await screen("admin", `/r/${FH.slug}/menu`, { settle: 3800, waitFor: ".item-card" });
   s.close();
   const missing = items.filter((i) => !s.text.includes(String(Math.round(Number(i.price)))));
   ok(missing.length < items.length, `none of ${items.length} sampled prices appear on the menu`);
