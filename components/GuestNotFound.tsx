@@ -50,7 +50,12 @@ export default function GuestNotFound() {
     <main
       style={{
         minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center",
-        padding: 24, textAlign: "center", fontFamily: "system-ui, sans-serif",
+        padding: 24, textAlign: "center",
+        // The app's own font and tokens, NOT system-ui (visual sweep 2026-08-05): this was the one
+        // guest screen drawn in a different typeface with no theme, so a diner who scanned a
+        // blue- or pink-themed restaurant's QR landed on a system-font page in restaurant #1's
+        // brown. A dead end still has to look like the restaurant they are sitting in.
+        fontFamily: "'Inter', sans-serif", background: "var(--bg)", color: "var(--text)",
       }}
     >
       <div>

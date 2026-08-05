@@ -566,7 +566,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // one (staggered), each line "drawing" itself then its card fading/scaling in.
   const startTagAnimation = () => {
     config?.tags?.forEach((ing, index) => {
-      const delay = index * 400;  // stagger each tag by 0.4s so they appear in turn
+      const delay = index * 260;  // stagger each tag so they appear in turn (was 400ms — see below)
       const line = document.getElementById(`hs-line-${ing.id}`) as SVGLineElement | null;
       const card = document.querySelector(`#hs-card-${ing.id} .hs-card`);
       const cardWrap = document.getElementById(`hs-card-${ing.id}`);
@@ -598,13 +598,23 @@ export default function ViewerClient({ folder }: { folder: string }) {
           );
         }, delay);
       }
+      // THE BUBBLE AND ITS WORDS ARRIVE TOGETHER (T11 desktop sweep, 2026-08-05).
+      // `content-animate` used to fire 400ms AFTER `card-animate`, so every callout was drawn
+      // as an EMPTY speech bubble for four-tenths of a second before its text appeared — caught
+      // in a screenshot at 6.0s, alongside a leader line running from the food into empty space
+      // because its own card hadn't landed yet. It read as a rendering fault, not a loading
+      // state (there is no loading cue for the callouts). Adding both classes in the same tick
+      // costs nothing: .hs-bullets li keeps its own 0.35s fade and its 0.08s second-line
+      // stagger, so the content still reveals in sequence — it just never shows an empty box.
+      // The title/icon follow closely instead of 800ms later, and the per-tag stagger came down
+      // from 400ms to 260ms, so the whole set settles ~40% sooner.
       setTimeout(() => {
         cardWrap!.style.opacity = "1";
         cardWrap!.style.transform = "translate(-50%,-50%) scale(1)";
         card!.classList.add("card-animate");
+        card!.classList.add("content-animate");
       }, delay + 900);
-      setTimeout(() => card!.classList.add("content-animate"), delay + 1300);
-      setTimeout(() => cardWrap!.classList.add("title-animate"), delay + 1700);
+      setTimeout(() => cardWrap!.classList.add("title-animate"), delay + 1150);
     });
   };
 
