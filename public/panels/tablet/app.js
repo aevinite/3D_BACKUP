@@ -4403,7 +4403,11 @@ const XRAY_CAPS = [
     box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xray-c-dot) 80%, transparent); }
   #xrayRibbon { display: flex; align-items: center; gap: 12px; padding: 6px 14px; flex: none;
     background: color-mix(in srgb, #d97706 14%, var(--panel, #101826)); border-bottom: 1px solid color-mix(in srgb, #d97706 40%, transparent);
-    font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40; }
+    font-size: 12px; color: var(--text, #e8eefc); position: relative; z-index: 40;
+    /* WRAP so the admin's own bar can never push the panel sideways at 360px — the kitchen's
+       identical ribbon put "Exit view" at x364 in a 360px screen (T12 phone sweep, 2026-08-05).
+       No effect on a desktop, where the row never needs to wrap. */
+    flex-wrap: wrap; row-gap: 6px; max-width: 100%; box-sizing: border-box; }
   #xrayRibbon .rb-tag { font-weight: 800; letter-spacing: .04em; color: #f59e0b; text-transform: uppercase; font-size: 11px; }
   #xrayRibbon .rb-rest { color: var(--muted, #9fb0cc); font-weight: 600; }
   #xrayRibbon .rb-crumbs { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; flex-wrap: wrap; }
