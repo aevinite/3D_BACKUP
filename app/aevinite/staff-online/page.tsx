@@ -19,9 +19,15 @@ const ROLE_COLOR: Record<string, string> = { manager: "#d4a574", kitchen: "#7ec8
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, kitchen: 2, tablet: 3 };
 
 const field: React.CSSProperties = { boxSizing: "border-box", padding: "10px 12px", borderRadius: 10, border: "var(--border)", background: "var(--bg)", color: "var(--text)", fontSize: 14 };
+// The ink has to follow the FILL. When no colour is passed the active pill falls back to
+// `var(--text)` as its background — which in this dark console is a near-white (#e6ebf3) — while
+// the ink was hard-coded #fff. That is white on white: the "All" chip measured 1.2:1, the worst
+// reading anywhere in the app (T11 re-run, 2026-08-05). A caller-supplied colour keeps white ink;
+// the --text fallback now takes --bg as its ink, which is the same swap the pill already implies.
 const chip = (on: boolean, color?: string): React.CSSProperties => ({
   padding: "7px 14px", borderRadius: 999, border: on ? "1px solid transparent" : "var(--border)",
-  background: on ? (color || "var(--text)") : "var(--bg)", color: on ? "#fff" : "var(--text)",
+  background: on ? (color || "var(--text)") : "var(--bg)",
+  color: on ? (color ? "#fff" : "var(--bg)") : "var(--text)",
   fontWeight: 600, fontSize: 12.5, cursor: "pointer", minHeight: 34, lineHeight: 1,
 });
 

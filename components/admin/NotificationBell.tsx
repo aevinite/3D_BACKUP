@@ -39,7 +39,11 @@ export default function NotificationBell() {
         {count > 0 && (
           <span aria-hidden="true" style={{
             position: "absolute", top: -3, right: -3, minWidth: 16, height: 16, padding: "0 4px",
-            borderRadius: 9, background: "var(--adm-danger, #e5484d)", color: "#fff", fontSize: 10, fontWeight: 800,
+            // --adm-danger is a LIGHT red in this console (#f87171): white on it measured 2.77:1 —
+            // an unread count nobody can read, on every page of the console (T11 re-run,
+            // 2026-08-05). Darkened here only, the same mix the "Fix problems" button now uses, so
+            // the token keeps its value everywhere it is a border or a dot. ~5.7:1.
+            borderRadius: 9, background: "color-mix(in srgb, var(--adm-danger, #e5484d) 72%, #000)", color: "#fff", fontSize: 10, fontWeight: 800,
             display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1,
           }}>{count > 99 ? "99+" : count}</span>
         )}

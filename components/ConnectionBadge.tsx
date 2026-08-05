@@ -23,7 +23,11 @@ import { useBackClose } from "@/lib/backStack"; // phone back button closes the 
 type View = {
   kind: "live" | "connecting" | "weak" | "offline";
   color: string;  // vivid tier colour — used for the signal bars + status dot
-  text: string;   // legible (darker) colour — used for the ms number so it stays readable on the tint
+  // Legible (darker) colour for the WORDS and the ms number, which sit on the pale `tint`.
+  // Darkened one step each on 2026-08-05: "Live" measured 2.63:1 on its own tint over the light
+  // page (T11 re-run), i.e. the indicator staff are told to trust was the least readable thing in
+  // the bar. `color` (the bright dot/bars) is unchanged — only text moved.
+  text: string;
   tint: string;   // subtle pill background tint
   bars: number;   // 0–3 lit signal bars (carries the same meaning as colour → not colour-only)
   label: string;  // quality word: Excellent / Good / Slow / Poor / Reconnecting / Connecting… / Offline / Live
@@ -39,13 +43,13 @@ function computeView(
   pollMode: boolean,
 ): View {
   if (level === "offline")
-    return { kind: "offline", color: "#ef4444", text: "#dc2626", tint: "rgba(239,68,68,.16)", bars: 0, label: "Offline", ms: null, pulse: false };
+    return { kind: "offline", color: "#ef4444", text: "#b91c1c", tint: "rgba(239,68,68,.16)", bars: 0, label: "Offline", ms: null, pulse: false };
   if (level === "weak") {
     // First connect not made yet → calm neutral "Connecting…" (NOT alarming amber
     // "Reconnecting", which is reserved for a drop after we WERE connected).
     if (!everConnected && !pollMode)
       return { kind: "connecting", color: "#94a3b8", text: "inherit", tint: "rgba(100,116,139,.14)", bars: 2, label: "Connecting…", ms: null, pulse: true };
-    return { kind: "weak", color: "#f59e0b", text: "#d97706", tint: "rgba(245,158,11,.16)", bars: 1, label: pollMode ? "Retrying" : "Reconnecting", ms: null, pulse: true };
+    return { kind: "weak", color: "#f59e0b", text: "#b45309", tint: "rgba(245,158,11,.16)", bars: 1, label: pollMode ? "Retrying" : "Reconnecting", ms: null, pulse: true };
   }
   // online — show a fresh ms number when we have one; otherwise a calm "Live" (a quiet
   // screen just hasn't measured lately — that's healthy, not a problem). The poll-only
@@ -56,7 +60,7 @@ function computeView(
   const tier = fresh ? latencyTier(latencyMs) : null;
   if (tier)
     return { kind: "live", color: tier.color, text: tier.text, tint: tier.tint, bars: tier.bars, label: tier.label, ms: latencyMs, pulse: false };
-  return { kind: "live", color: "#22c55e", text: "#16a34a", tint: "rgba(34,197,94,.16)", bars: 3, label: pollMode ? "Connected" : "Live", ms: null, pulse: false };
+  return { kind: "live", color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)", bars: 3, label: pollMode ? "Connected" : "Live", ms: null, pulse: false };
 }
 
 function statusLine(v: View, pollMode: boolean): string {
@@ -127,6 +131,16 @@ function Sparkline({ history }: { history: number[] }) {
   );
 }
 
+// WHICH WAY DOES THE SURFACE RUN? The pill's words sit on a translucent tint of their own state
+// colour, so the composited background follows the PAGE: pale green on the guest menu's light skin,
+// near-black green inside the dark owner/admin consoles. One ink cannot serve both — the darkened
+// ink that fixed the light page (2.63:1) then measured 2.82:1 on the dark consoles (T11 re-run,
+// 2026-08-05). So the dark ink is applied inline for light surfaces and the BRIGHT state colour is
+// handed to CSS as --ink-dark, which the rule at the bottom of this file switches to on any dark
+// surface. It has to be done in CSS, NOT by reading document.documentElement here: this component
+// renders on the SERVER, where there is no <html> to read, and React keeps the server's inline
+// style after hydration — a first attempt at this returned "light" forever.
+
 export default function ConnectionBadge({ className = "", pollMode = false, guest = false }:
   { className?: string; pollMode?: boolean; guest?: boolean }) {
   const { level, everConnected, latencyMs, latencyAt, history } = useConnection();
@@ -194,8 +208,8 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
             slow — and get the plain word. The number is still one tap away in the panel below,
             which is where a detail belongs. */}
         {v.ms != null && !guest
-          ? <span className="lfh-conn-ms" style={{ color: v.text }}>{v.ms}<span className="lfh-conn-unit"> ms</span></span>
-          : <span className="lfh-conn-txt" style={{ color: v.text }}>{v.label}</span>}
+          ? <span className="lfh-conn-ms" style={{ color: v.text, ["--ink-dark" as string]: v.color }}>{v.ms}<span className="lfh-conn-unit"> ms</span></span>
+          : <span className="lfh-conn-txt" style={{ color: v.text, ["--ink-dark" as string]: v.color }}>{v.label}</span>}
         {extra && <span className={`lfh-conn-n${failed ? " warn" : ""}`}>· {extra}</span>}
         <svg className="lfh-conn-chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
@@ -276,6 +290,13 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
         .lfh-conn-ms { font-variant-numeric: tabular-nums; font-weight: 800; }
         .lfh-conn-unit { font-weight: 600; opacity: 0.7; font-size: 10px; }
         .lfh-conn-txt { font-weight: 700; }
+        /* On a DARK surface the tint composites to near-black, so the bright state colour is the
+           readable one (~6:1) and the darkened ink is not (2.82:1). !important because the ink
+           above is an inline style, which a normal rule cannot beat. */
+        :global(html[data-staffdark]) .lfh-conn-txt,
+        :global(html[data-staffdark]) .lfh-conn-ms,
+        :global(html[data-theme="dark"]) .lfh-conn-txt,
+        :global(html[data-theme="dark"]) .lfh-conn-ms { color: var(--ink-dark) !important; }
         .lfh-conn-n { font-weight: 800; opacity: 0.9; }
         .lfh-conn-n.warn { color: #ef4444; }
         .lfh-conn-chev { opacity: 0.5; flex: 0 0 auto; }

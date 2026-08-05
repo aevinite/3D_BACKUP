@@ -28,6 +28,9 @@
   --cyan-glow: rgba(6,182,212,0.3);
   --brown-cyan-grad: linear-gradient(135deg, rgba(6,182,212,0.6) 0%, rgba(34,211,238,0.5) 100%);
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* Default ink for text on an accent FILL. Overridden per console where the accent is light
+     enough that white stops being readable on it — see --accent-on in the owner block. */
+  --accent-on: #fff;
   /* In the DARK skin the bright accent on a dark page already measured clean
      (0 text elements under 3:1 across the whole guest menu), so accent-text is
      the accent itself. The light skin darkens it — see [data-theme="light"]. */
@@ -128,8 +131,12 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 .brand-highlight {
   /* Falls back to the French House gold for the flagship (#1, which sets no
      accent var); per-restaurant menus override --brand-highlight with their
-     own accent (see accentVars in AppShell) so the brand name matches the theme. */
-  color: var(--brand-highlight, #FFD700);
+     own accent (see accentVars in AppShell) so the brand name matches the theme.
+     LIGHTENED for the dark page: a restaurant may pick an accent that is already dark
+     (Burger Barn's #78350f measured 2.07:1 against the dark canvas — half its own name
+     nearly invisible, T11 re-run 2026-08-05). Mixing toward white lifts a dark accent and
+     barely moves an already-bright one, so one rule serves every tenant. */
+  color: color-mix(in srgb, var(--brand-highlight, #FFD700) 72%, #fff);
   font-style: normal;
 }
 [data-theme="light"] .brand-highlight {
@@ -646,7 +653,9 @@ body.menu-scrolling .chef-call {
 @keyframes maintSteam { 0% { transform: translateY(8px) scale(0.7); opacity: 0; } 30% { opacity: 0.75; } 100% { transform: translateY(-30px) scale(1.15); opacity: 0; } }
 @keyframes maintBounce { 0%, 100% { transform: translateY(0); opacity: 0.5; } 50% { transform: translateY(-9px); opacity: 1; } }
 .greet-badge { 
-  font-size: 11px; color: var(--accent); margin-bottom: 6px; display: block; 
+  /* --accent-ink, not --accent: at 11px on the cream light page the raw accent measured
+     2.02:1 (T11 re-run). Same fix as the price/section labels; this selector was missed. */
+  font-size: 11px; color: var(--accent-ink); margin-bottom: 6px; display: block; 
   letter-spacing: 4px; text-transform: uppercase; font-weight: 700;
   animation: slideIn 0.6s var(--ease);
 }
@@ -675,7 +684,10 @@ body.menu-scrolling .chef-call {
    plain letters use the mode-adaptive --text (white in dark / black in light),
    *marked* letters use the restaurant's accent. Only applies when markers exist. */
 .hero-title.has-split { background: none; animation: none; -webkit-text-fill-color: currentColor; color: var(--text); }
-.hero-title.has-split span.hi { color: var(--accent); -webkit-text-fill-color: var(--accent); }
+/* --accent-ink: on a LIGHT tenant page the raw accent measured 2.9:1 here (34px, so the bar is
+   3:1) — Demo Bistro's pink on cream. The token equals --accent in the dark skin, so the dark
+   look is untouched. (T11 re-run, 2026-08-05) */
+.hero-title.has-split span.hi { color: var(--accent-ink); -webkit-text-fill-color: var(--accent-ink); }
 
 /* --- CATEGORIES --- */
 .section-header {
@@ -1779,8 +1791,10 @@ body.menu-frost .nav {
 .viewer-wrapper .sv{font-size:16px;font-weight:700;color:#6ddc8a;}
 .viewer-wrapper .sl{font-size:8px;color:rgba(255,255,255,0.3);text-transform:uppercase;letter-spacing:1.5px;margin-top:1px;}
 .viewer-wrapper .brow{display:flex;gap:9px;}
-.viewer-wrapper .badd{flex:1;padding:13px;background:#4dbb6d;border:none;border-radius:13px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s,background 0.2s;}
-.viewer-wrapper .badd:hover{transform:scale(1.03);box-shadow:0 0 20px rgba(77,187,109,0.6);background:#5cc97a;}
+/* #27803f, not #4dbb6d: white on the lighter green measured 2.43:1 on the flagship
+   feature's primary button (T11 re-run, 2026-08-05). Now ~4.7:1, same hue. */
+.viewer-wrapper .badd{flex:1;padding:13px;background:#27803f;border:none;border-radius:13px;color:#fff;font-size:15px;font-weight:700;cursor:pointer;transition:transform 0.2s,box-shadow 0.2s,background 0.2s;}
+.viewer-wrapper .badd:hover{transform:scale(1.03);box-shadow:0 0 20px rgba(77,187,109,0.6);background:#2f9950;}
 .viewer-wrapper .badd:active{transform:scale(0.98);}
 .viewer-wrapper .binfo{padding:13px 17px;background:rgba(255,255,255,0.1);backdrop-filter:blur(6px);border:none;border-radius:13px;color:#fff;font-size:17px;cursor:pointer;transition:transform 0.2s,background 0.2s;}
 .viewer-wrapper .binfo:hover{transform:scale(1.05);background:rgba(255,255,255,0.2);}
@@ -3584,7 +3598,7 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
    rendered as two loose buttons. Give it the same segmented-pill shell as .owx-range. */
 .adm .own-range { display: inline-flex; background: var(--card); border: var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
 .adm .own-range button { background: transparent; color: var(--muted); border: none; padding: 5px 11px; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; }
-.adm .own-range button.on { background: var(--accent); color: #fff; }
+.adm .own-range button.on { background: var(--accent); color: var(--accent-on, #fff); }
 .adm .own-crumb .lnk { background: transparent; }
 .adm .own-crumb .cur { color: var(--text); background: transparent; }
 /* Print: drop the panel chrome + report controls so a printed/PDF'd report is
@@ -4238,6 +4252,12 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   --text: #e6ebf3; --muted: #8b94a7; --muted2: rgba(230,235,243,0.10);
   --accent: #10b981; --accent-dim: rgba(16,185,129,0.6);
   --accent-grad: #10b981; --accent-glow: rgba(16,185,129,0.25);
+  /* INK FOR TEXT SITTING ON THE ACCENT FILL. Emerald is a LIGHT green: white on it measured
+     2.54:1 on every active chip in this console (owner reports/staff/customers/activity/issues —
+     T11 re-run, 2026-08-05). Near-black on the same fill is ~9:1 and is what the guest menu
+     already does for its filled accent chips (.oc-choice.on). Consoles whose accent is dark
+     (the admin's purple) keep #fff via the default below. */
+  --accent-on: #06251a;
   --own-cta: #d97706;
   --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24;
   --elev: 0 1px 0 rgba(255,255,255,.03);
@@ -4404,7 +4424,7 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 /* Range toggle (segmented) */
 .owx-range { display: inline-flex; background: var(--card); border: var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
 .owx-range button { background: none; border: none; padding: 5px 11px; border-radius: 7px; font-size: 12px; font-weight: 700; color: var(--muted); cursor: pointer; }
-.owx-range button.on { background: var(--accent); color: #fff; }
+.owx-range button.on { background: var(--accent); color: var(--accent-on, #fff); }
 /* Report picker chips */
 .owx-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .owx-chip {
