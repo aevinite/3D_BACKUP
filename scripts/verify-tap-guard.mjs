@@ -274,6 +274,44 @@ for (const [panel, file] of [["manager", EDITOR], ["tablet", TABLET]]) {
   );
 }
 
+// ── A SHEET THAT OPENS IS NOT A SHEET THAT WORKS (2026-08-05) ──────────────────────────
+// openPaymentMethodModal() builds its markup inside `new Promise((resolve) => { ... })`, and
+// parts of that markup are OPTIONAL: `opts.methodOnly` drops the tip block, `opts.crm === false`
+// drops the customer block. Dereferencing one of those without a null check throws INSIDE the
+// executor, which rejects the promise on the spot — the overlay is already on screen, so a sheet
+// appears, its method buttons are bound to a resolve nobody will ever hear, and tapping UPI does
+// nothing at all. Every methodOnly caller was dead this way: the floor's parcel tile "Mark paid"
+// (from 2026-08-04), the Platform board's Collect, and the parcel "Pay now & print" sheet. The
+// bug was invisible to every check that asserted "the sheet opens".
+{
+  const src = read(EDITOR);
+  const i = src.indexOf("function openPaymentMethodModal");
+  const body = i < 0 ? "" : src.slice(i, src.indexOf("\nasync function payOrdersWithMethod", i));
+  // each conditionally-rendered id/class, and the guard that must protect its wiring
+  const OPTIONAL = [
+    { sel: "#payTipInput", why: "the tip block is absent when opts.methodOnly is set" },
+    { sel: ".pay-cust-phone", why: "the customer block is absent when opts.crm === false" },
+  ];
+  for (const { sel, why } of OPTIONAL) {
+    // find every place the element is dereferenced (`x.foo =` / `x.value`) and require that the
+    // handle was null-checked first (`if (x)` / `if (!x) return` / `x?.`)
+    const varDecl = new RegExp(`const (\\w+) = wrap\\.querySelector\\("${sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\)`);
+    const m = varDecl.exec(body);
+    const guarded = !m ? true : (() => {
+      const v = m[1];
+      const after = body.slice(m.index);
+      const derefs = [...after.matchAll(new RegExp(`(?<![.\\w])${v}\\.(?!\\?)`, "g"))];
+      if (!derefs.length) return true;
+      return new RegExp(`if \\(${v}\\)|if \\(!${v}\\)`).test(after.slice(0, derefs[derefs.length - 1].index));
+    })();
+    check(
+      `the payment sheet wires ${sel} only when it exists (${why})`,
+      guarded,
+      `openPaymentMethodModal dereferences the handle for ${sel} with no null check. That THROWS inside the Promise executor, so the promise rejects, the sheet on screen goes inert and every method tap is swallowed. Wrap the wiring in "if (handle) { ... }".`,
+    );
+  }
+}
+
 // ── report ─────────────────────────────────────────────────────────────────────────────
 // --hook stays SILENT on success (a passing guard must not add noise to every panel edit)
 // and exits 2 on failure, which is how a PostToolUse hook tells the session it broke something.

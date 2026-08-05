@@ -3804,10 +3804,21 @@ function openPaymentMethodModal(due, label, opts = {}) {
     }));
     // Optional tip (additive — never touches the bill/tax/discount). Chips or a custom amount; the
     // "Total collected" figure updates live so staff know how much cash to take.
+    // THE TIP BLOCK IS OPTIONAL, SO ITS WIRING HAS TO BE (fixed 2026-08-05 — this made every
+    // `methodOnly` sheet a DEAD sheet). `opts.methodOnly` renders no tip controls, so
+    // `#payTipInput` was null and `tipInput.oninput = …` threw — INSIDE the `new Promise`
+    // executor, which rejects the promise there and then. The overlay had already been appended,
+    // so a sheet appeared on screen, the method buttons were bound to a resolve that could never
+    // be heard again, and tapping UPI did absolutely nothing. Every methodOnly caller was
+    // affected: the floor's parcel tile "💰 Mark paid" (since 2026-08-04), the Platform board's
+    // 💰 Collect and the parcel "Pay now & print" sheet. The sheet OPENING was never proof that
+    // it works — only a settled row is.
     const tipInput = wrap.querySelector("#payTipInput");
     const updTotal = () => { const el2 = wrap.querySelector("#payTotal"); if (el2) el2.textContent = inr(due + (Number(tip) || 0)); };
-    wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => { tip = Number(c.dataset.tipAmt) || 0; tipInput.value = tip ? String(tip) : ""; wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", x === c)); updTotal(); }));
-    tipInput.oninput = () => { tip = Math.max(0, Number(tipInput.value) || 0); wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.remove("active")); updTotal(); };
+    if (tipInput) {
+      wrap.querySelectorAll(".pay-tip-pick").forEach((c) => (c.onclick = () => { tip = Number(c.dataset.tipAmt) || 0; tipInput.value = tip ? String(tip) : ""; wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.toggle("active", x === c)); updTotal(); }));
+      tipInput.oninput = () => { tip = Math.max(0, Number(tipInput.value) || 0); wrap.querySelectorAll(".pay-tip-pick").forEach((x) => x.classList.remove("active")); updTotal(); };
+    }
     // "Other" opens a choice of TWO things (owner, 2026-08-02): type another way to pay, or
     // SPLIT the bill across ways — "₹200 from this, ₹200 from that". The split is offered only
     // when the caller can post it (opts.split), i.e. a whole table's bill.
