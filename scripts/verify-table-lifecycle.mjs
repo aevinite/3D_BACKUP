@@ -23,16 +23,17 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createClient } from "@supabase/supabase-js";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) => Object.fromEntries(t.split("\n").filter((l) => l.includes("=") && !l.trim().startsWith("#")).map((l) => {
   const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")];
 }));
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
-if (!/wnsfcizclkbobwzcxqsf/.test(env.NEXT_PUBLIC_SUPABASE_URL)) {
-  console.error("refusing: this test places real orders and may only run against the dev/test database");
-  process.exit(1);
-}
+// Which databases this rig may write to lives in ONE place (scripts/sweep/devStacks.mjs) —
+// backup-1 AND backup-2, never AV live. It used to be a copy of one project id per script, which
+// refused on backup-2, the very stack a fix goes live on when backup-1's deploy cap is spent.
+refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL);
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const must = (r) => { if (r.error) throw new Error(r.error.message); return r.data; };
 
