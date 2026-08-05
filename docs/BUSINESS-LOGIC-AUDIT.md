@@ -1,3 +1,8 @@
+> ⚠️ **HISTORY — not a current specification.** an audit snapshot, not a live list — no record of what was closed.
+> Kept because it records why things were built this way. Do not follow it for new work; the
+> live rules are in `CLAUDE.md`. (Banner added 2026-08-04: eleven finished documents were sitting
+> in `docs/` beside the load-bearing ones with nothing to tell them apart.)
+
 # Business-Logic Audit — restaurant POS (2026-06-13)
 
 Audited as a QA engineer + restaurant-ops consultant. Grounded in the real code

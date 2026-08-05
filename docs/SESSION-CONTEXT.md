@@ -1,3 +1,8 @@
+> ⚠️ **HISTORY — not a current specification.** a rolling session handoff, not a specification.
+> Kept because it records why things were built this way. Do not follow it for new work; the
+> live rules are in `CLAUDE.md`. (Banner added 2026-08-04: eleven finished documents were sitting
+> in `docs/` beside the load-bearing ones with nothing to tell them apart.)
+
 # SESSION CONTEXT — read this FIRST after any compaction
 
 Last written 2026-08-02. **This is the live working state.** After a compaction, read this and

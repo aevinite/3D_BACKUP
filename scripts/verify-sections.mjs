@@ -19,7 +19,14 @@
 // app's own limit alerts and pings the owner's phone about us.
 import fs from "node:fs";
 
-const BASE = process.env.BASE || "http://localhost:4000";
+// Accept a target the same way every other guard here does. Requiring port 4000 meant this
+// could only run when the human's dev server happened to be up — so in practice it was skipped,
+// and a parallel session or CI could never run it at all. (2026-08-04 sweep.)
+const BASE = (() => {
+  const i = process.argv.indexOf("--base");
+  return (i > -1 && process.argv[i + 1]) || process.env.VERIFY_BASE || process.env.BASE_URL
+    || process.env.BASE || "http://localhost:4000";
+})().replace(/\/$/, "");
 const env = fs.readFileSync(new URL("../.env.local", import.meta.url), "utf8");
 const g = (k) => (env.match(new RegExp("^" + k + "=(.+)$", "m")) || [])[1]?.trim();
 const SB = g("NEXT_PUBLIC_SUPABASE_URL"), KEY = g("SUPABASE_SERVICE_ROLE_KEY");

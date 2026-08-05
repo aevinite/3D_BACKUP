@@ -52,16 +52,41 @@ const tracked = new Set(
     }
   })(),
 );
+// EVERY directory CLAUDE.md points into, not just docs/ and .claude/.
+//
+// WHY THIS WIDENED (2026-08-05). The old pattern matched `docs/…` and `.claude/…` only, so it
+// walked straight past `app/admin/page.tsx` — a file that has not existed for weeks, named in
+// the section a new session reads to find its way around, right next to the claim that "only
+// these four routes exist" when there are 55. verify:pointers printed "all resolve" the whole
+// time. CLAUDE.md's own security section warns about exactly this shape of stale pointer, and
+// checking all ~85 of them by hand takes one command, so a guard should be doing it.
+const REF_DIRS = "docs|\\.claude|scripts|lib|components|app|public|supabase|tests";
+const REF_EXTS = "md|html|sql|mjs|js|ts|tsx|css|json|sh";
 const refs = new Set(
-  [...claude.matchAll(/`((?:docs|\.claude)\/[A-Za-z0-9._/-]+\.(?:md|html|sql|mjs|json))`/g)].map(
-    (m) => m[1],
-  ),
+  [...claude.matchAll(new RegExp("`((?:" + REF_DIRS + ")\\/[A-Za-z0-9._/\\[\\]-]+\\.(?:" + REF_EXTS + "))`", "g"))]
+    .map((m) => m[1])
+    // A path CLAUDE.md names in order to say it does NOT exist. Both are load-bearing: the file
+    // leads with "THERE IS NO middleware.ts" so that nobody goes looking for the security gate
+    // in the wrong place, and a guard that failed on it would be arguing with the documentation.
+    .filter((p) => !/^(middleware|proxy)\.ts$/.test(p) && !/(^|\/)(middleware|proxy)\.ts$/.test(p)),
 );
+// Ask git, once per path, whether it is deliberately ignored. `git check-ignore` exits 1 when the
+// path is NOT ignored, which is the answer we want, so a non-zero exit is data and not an error.
+const ignored = (p) => {
+  try {
+    execFileSync("git", ["check-ignore", "-q", "--", p], { cwd: ROOT, stdio: "ignore" });
+    return true;
+  } catch { return false; }
+};
 let skipped = 0;
 for (const ref of [...refs].sort()) {
   if (fs.existsSync(R(ref))) continue;
-  if (!tracked.has(ref)) {
-    skipped++; // local-only file (gitignored) — absent here is expected, not a dead pointer
+  // "Untracked" is not the same as "machine-local". A file that git IGNORES (.claude/settings.json,
+  // .env.local) is legitimately absent from a clone, so its pointer is fine. A file that is simply
+  // GONE is a dead pointer — and treating the two the same is what hid `app/admin/page.tsx`, which
+  // has not existed for weeks while this check printed "all resolve".
+  if (!tracked.has(ref) && ignored(ref)) {
+    skipped++;
     continue;
   }
   fails.push(`CLAUDE.md points at \`${ref}\` — that file does not exist`);

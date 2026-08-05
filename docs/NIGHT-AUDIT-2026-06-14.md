@@ -1,3 +1,8 @@
+> ⚠️ **HISTORY — not a current specification.** an overnight audit snapshot.
+> Kept because it records why things were built this way. Do not follow it for new work; the
+> live rules are in `CLAUDE.md`. (Banner added 2026-08-04: eleven finished documents were sitting
+> in `docs/` beside the load-bearing ones with nothing to tell them apart.)
+
 # Overnight bulletproof audit — 2026-06-14
 
 Ran a 30-phase functional sweep + 4 deep audit agents (security, data-integrity,

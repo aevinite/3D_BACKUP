@@ -38,13 +38,19 @@ export default function PanelFrame({ src, title }: { src: string; title: string 
     const probe = document.createElement("div");
     probe.style.cssText =
       "position:fixed;left:0;bottom:0;width:0;height:0;visibility:hidden;pointer-events:none;" +
-      "padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);";
+      "padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom);" +
+      // LEFT/RIGHT too. They matter in LANDSCAPE on a notched phone or tablet — which is how
+      // the waiter panel is actually held — and inside the iframe a bare env() reads 0 there
+      // just like top/bottom, so four rules in the panel stylesheets had no side inset at all.
+      "padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right);";
     document.body.appendChild(probe);
 
     const push = () => {
       const cs = getComputedStyle(probe);
       const envTop = parseFloat(cs.paddingTop) || 0;
       const envBottom = parseFloat(cs.paddingBottom) || 0;
+      const envLeft = parseFloat(cs.paddingLeft) || 0;
+      const envRight = parseFloat(cs.paddingRight) || 0;
       // Some browsers under-report the overlap via env(): also MEASURE the gap between
       // the layout viewport and the visible visual viewport, and trust the larger signal.
       let measured = 0;
@@ -56,7 +62,12 @@ export default function PanelFrame({ src, title }: { src: string; title: string 
       const bottom = Math.max(envBottom, measured);
       try {
         const doc = ref.current?.contentWindow?.document?.documentElement;
-        if (doc) { doc.style.setProperty("--safe-t", envTop + "px"); doc.style.setProperty("--safe-b", bottom + "px"); }
+        if (doc) {
+          doc.style.setProperty("--safe-t", envTop + "px");
+          doc.style.setProperty("--safe-b", bottom + "px");
+          doc.style.setProperty("--safe-l", envLeft + "px");
+          doc.style.setProperty("--safe-r", envRight + "px");
+        }
       } catch { /* iframe not ready yet — the load handler / delayed pushes will catch it */ }
     };
 

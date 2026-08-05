@@ -318,6 +318,37 @@ function mergeAccess(saved: Partial<Access> | undefined | null): Access {
   };
 }
 
+// The create card's two building blocks.
+//
+// They MUST live out here, not inside NewRestaurant's body. A component declared during render is
+// a NEW component type on every render, so React throws the old subtree away and mounts a fresh
+// one — every keystroke in "Restaurant name" was remounting all seven toggles and both access
+// rows, losing focus and restarting their transitions. eslint reports it as an error
+// ("Cannot create components during render"), which is why the lint step now has to pass:
+// the same mistake elsewhere in the owner panel wiped text while it was being typed (PR #762).
+function Tog({ on, k, label, onClick, busy }: { on: boolean; k: string; label: string; onClick: () => void; busy: boolean }) {
+  return (
+    <button key={k} type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={busy} onClick={onClick}
+      title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
+      <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
+    </button>
+  );
+}
+
+function Tri({ cap, label, val, busy, onPick }: { cap: string; label: string; val: string; busy: boolean; onPick: (cap: string, v: "off" | "on" | "pin") => void }) {
+  return (
+    <div className="nr-row">
+      <span className="nr-row-label">{label}</span>
+      <span className="nr-tri">
+        {(["off", "on", "pin"] as const).map((o) => (
+          <button key={o} type="button" disabled={busy} onClick={() => onPick(cap, o)}
+            className={`nr-seg ${val === o ? "sel" : ""}`}>{o === "off" ? "Off" : o === "on" ? "On" : "PIN"}</button>
+        ))}
+      </span>
+    </div>
+  );
+}
+
 function NewRestaurant({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -393,27 +424,6 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
     );
   }
 
-  // Small building blocks (kept inline so the create card owns its own look).
-  const Tog = ({ on, k, label, onClick }: { on: boolean; k: string; label: string; onClick: () => void }) => (
-    <button key={k} type="button" className={`adm-toggle ${on ? "on" : "off"}`} disabled={busy} onClick={onClick}
-      title={on ? "On — tap to turn off" : "Off — tap to turn on"}>
-      <span>{label}</span><span className="pill">{on ? "ON" : "OFF"}</span>
-    </button>
-  );
-  const Tri = ({ cap, label }: { cap: string; label: string }) => {
-    const val = access.tablet[cap] || "off";
-    return (
-      <div className="nr-row">
-        <span className="nr-row-label">{label}</span>
-        <span className="nr-tri">
-          {(["off", "on", "pin"] as const).map((o) => (
-            <button key={o} type="button" disabled={busy} onClick={() => setTablet(cap, o)}
-              className={`nr-seg ${val === o ? "sel" : ""}`}>{o === "off" ? "Off" : o === "on" ? "On" : "PIN"}</button>
-          ))}
-        </span>
-      </div>
-    );
-  };
   const groupCount = (entries: readonly (readonly [string, string])[], on: (k: string) => boolean) => entries.filter(([k]) => on(k)).length;
 
   return (
@@ -427,7 +437,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Restaurant name" disabled={busy} className="nr-input" />
         <div className="nr-slug">Guest link: <code>/r/{slugPreview}/menu</code></div>
         <div className="adm-togglegrid" style={{ marginTop: 8 }}>
-          <Tog on={seedMenu} k="seed" label="Start with sample menu" onClick={() => setSeedMenu((v) => !v)} />
+          <Tog on={seedMenu} k="seed" label="Start with sample menu" onClick={() => setSeedMenu((v) => !v)} busy={busy} />
         </div>
       </div>
 
@@ -435,7 +445,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
       <div className="nr-sec">
         <div className="nr-sec-h">Panels</div>
         <div className="adm-togglegrid">
-          {NR_PANELS.map((p) => <Tog key={p.key} on={panels[p.key] === true} k={p.key} label={p.label} onClick={() => setPanel(p.key)} />)}
+          {NR_PANELS.map((p) => <Tog key={p.key} on={panels[p.key] === true} k={p.key} label={p.label} onClick={() => setPanel(p.key)} busy={busy} />)}
         </div>
       </div>
 
@@ -452,7 +462,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
 
         <details className="nr-grp"><summary>Owner panel sections <em>· {groupCount(NR_OWNER_SECTIONS, (k) => access.owner[k])}/{NR_OWNER_SECTIONS.length} on</em></summary>
           <div className="adm-togglegrid">
-            {NR_OWNER_SECTIONS.map(([k, l]) => <Tog key={k} on={access.owner[k]} k={k} label={l} onClick={() => setOwner(k)} />)}
+            {NR_OWNER_SECTIONS.map(([k, l]) => <Tog key={k} on={access.owner[k]} k={k} label={l} onClick={() => setOwner(k)} busy={busy} />)}
           </div>
         </details>
 
@@ -461,8 +471,8 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
             {NR_MODULES.map(([m, l]) => (
               <div key={m} className="nr-mod">
                 <div className="nr-mod-name">{l}</div>
-                <Tog on={access.features[m + "_allowed"]} k={m + "_a"} label="On" onClick={() => setFeature(m + "_allowed")} />
-                <Tog on={access.features[m + "_owner_control"]} k={m + "_c"} label="Owner controls" onClick={() => setFeature(m + "_owner_control")} />
+                <Tog on={access.features[m + "_allowed"]} k={m + "_a"} label="On" onClick={() => setFeature(m + "_allowed")} busy={busy} />
+                <Tog on={access.features[m + "_owner_control"]} k={m + "_c"} label="Owner controls" onClick={() => setFeature(m + "_owner_control")} busy={busy} />
               </div>
             ))}
           </div>
@@ -473,8 +483,8 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
             {NR_MGR_POWERS.map(([k, l]) => (
               <div key={k} className="nr-mod">
                 <div className="nr-mod-name">{l}</div>
-                <Tog on={access.owner["power_" + k]} k={k + "_ex"} label="Exists" onClick={() => setOwner("power_" + k)} />
-                <Tog on={access.manager[k]} k={k + "_gr"} label="Granted" onClick={() => setManager(k)} />
+                <Tog on={access.owner["power_" + k]} k={k + "_ex"} label="Exists" onClick={() => setOwner("power_" + k)} busy={busy} />
+                <Tog on={access.manager[k]} k={k + "_gr"} label="Granted" onClick={() => setManager(k)} busy={busy} />
               </div>
             ))}
           </div>
@@ -482,7 +492,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
 
         <details className="nr-grp"><summary>Waiter tablet abilities <em>· {NR_TABLET_CAPS.filter(([k]) => (access.tablet[k] || "off") !== "off").length}/{NR_TABLET_CAPS.length} on</em></summary>
           <div style={{ display: "grid", gap: 2 }}>
-            {NR_TABLET_CAPS.map(([k, l]) => <Tri key={k} cap={k} label={l} />)}
+            {NR_TABLET_CAPS.map(([k, l]) => <Tri key={k} cap={k} label={l} val={access.tablet[k] || "off"} busy={busy} onPick={setTablet} />)}
           </div>
         </details>
       </div>

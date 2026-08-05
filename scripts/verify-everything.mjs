@@ -21,6 +21,7 @@ import { execFile, execFileSync } from "node:child_process";
 import { readFileSync, existsSync, readdirSync, statSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
+import { homedir } from "node:os";
 import { loginAs, adminCookie, adminHeaders } from "./sweep/login.mjs";
 
 /** Merge a node's own patch with the Ratings mirror, without losing either branch. */
@@ -74,27 +75,65 @@ const only = (() => {
 })();
 const skipSlow = ARGS.includes("--skip-slow");
 
-// ── ONE RUN AT A TIME (2026-08-01) ────────────────────────────────────────────────────────
-// This suite is the heaviest thing that touches the shared database — 501 phases, reports and
+// ── ONE RUN AT A TIME, PER DATABASE (2026-08-01, re-fixed 2026-08-05) ─────────────────────
+// This suite is the heaviest thing that touches the shared database — 500+ phases, reports and
 // floor reads included. On 2026-07-31 TWO of them ran at once (one had been going 47 minutes)
 // and saturated the instance: unrelated queries piled up at the 8-second wait, Supabase's own
 // health API reported db=UNHEALTHY, and the deployed site stopped answering for about forty
 // minutes. Nothing was wrong with the product — the test rig took the database down, and then
 // the owner met an offline screen and thought his restaurant software had broken.
 //
-// So a second run now refuses to start while the first is alive. The lock records the pid, so a
-// crashed run (pid gone) never blocks the next one, and it is removed however this process ends.
-// `--force` exists for the one case that is legitimate: a genuinely stale lock the pid check
-// can't see (a killed container). It has to be typed on purpose.
-const LOCK = join(ROOT, ".claude", "verify-everything.lock");
-const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+// THE FIRST FIX WAS SCOPED WRONG, and it was caught in the act on 2026-08-05: the lock lived at
+// <checkout>/.claude/verify-everything.lock, i.e. inside whichever folder the run was launched
+// from. A run was alive in .claude/worktrees/guest-t1r2 while the MAIN folder had no lock file
+// at all — and both .env.local files pointed at the same database. So a second full run was one
+// command away, and the guard could not see it. With 28 registered worktrees, and CLAUDE.md
+// telling you to use one whenever the shared folder can't be synced, that is the normal case.
+//
+// The contended resource is the DATABASE, so the lock is keyed on the database and lives OUTSIDE
+// every checkout: ~/.aevidine-locks/verify-everything-<project-ref>.lock. Two worktrees pointed
+// at one database now see each other; two runs against genuinely different databases don't block
+// each other, which is correct.
+// A missing .env.local used to end the run with a raw ENOENT stack trace — which is what happens
+// in a fresh git worktree, where .env.local is machine-local and gitignored. `--list` needs no
+// database at all, so say what is wrong in one line and let the map still print.
+const env = {};
+try {
+  for (const l of readFileSync(join(ROOT, ".env.local"), "utf8").split("\n")) {
+    const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
+  }
+} catch {
+  if (!ARGS.includes("--list")) {
+    console.error(`\n⛔ No .env.local in ${ROOT}\n   This suite reads the database directly, so it needs the keys.` +
+      `\n   A fresh git worktree does not have them (the file is machine-local and gitignored).` +
+      `\n   Run it from the main checkout, or copy your own .env.local in.\n`);
+    process.exit(1);
+  }
+}
+const DB_REF = (() => {
+  try { return new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0]; } catch { return "unknown"; }
+})();
+const LOCK_DIR = join(homedir(), ".aevidine-locks");
+const LOCK = join(LOCK_DIR, `verify-everything-${DB_REF}.lock`);
+// `process.kill(pid, 0)` only answers "does SOME process have that pid" — a recycled pid then
+// blocks a legitimate run until someone types --force, and --force switches the guard off
+// entirely. So confirm the pid is really one of these runs before believing it.
+const alive = (pid) => {
+  try { process.kill(pid, 0); } catch { return false; }
+  try {
+    const cmd = execFileSync("ps", ["-p", String(Number(pid)), "-o", "command="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return /verify-everything/.test(cmd);
+  } catch { return false; }         // ps says it is gone
+};
 if (!ARGS.includes("--force")) {
   try {
     const prev = JSON.parse(readFileSync(LOCK, "utf8"));
     if (prev && prev.pid && prev.pid !== process.pid && alive(prev.pid)) {
       const mins = Math.round((Date.now() - (prev.at || 0)) / 60000);
       console.error(
-        `\n⛔ Another full run is already going (pid ${prev.pid}, started ${mins} min ago, base ${prev.base}).\n` +
+        `\n⛔ Another full run is already going against this database (${DB_REF}).\n` +
+        `   pid ${prev.pid}, started ${mins} min ago, base ${prev.base}\n` +
+        `   in ${prev.cwd || "an unknown folder"}\n` +
         `   Two at once is what took the database down on 2026-07-31 — every panel in every\n` +
         `   restaurant went dark for ~40 minutes. Wait for it, or stop that one first.\n` +
         `   (If you are certain it is dead: re-run with --force.)\n`);
@@ -103,17 +142,13 @@ if (!ARGS.includes("--force")) {
   } catch { /* no lock, or unreadable → we take it below */ }
 }
 try {
-  mkdirSync(dirname(LOCK), { recursive: true });
-  writeFileSync(LOCK, JSON.stringify({ pid: process.pid, at: Date.now(), base: BASE }, null, 1));
+  mkdirSync(LOCK_DIR, { recursive: true });
+  writeFileSync(LOCK, JSON.stringify({ pid: process.pid, at: Date.now(), base: BASE, db: DB_REF, cwd: ROOT }, null, 1));
   const release = () => { try { const p = JSON.parse(readFileSync(LOCK, "utf8")); if (p.pid === process.pid) rmSync(LOCK, { force: true }); } catch { /* already gone */ } };
   process.on("exit", release);
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { release(); process.exit(130); });
 } catch { /* can't write a lock → run anyway rather than block real work */ }
 
-const env = {};
-for (const l of readFileSync(join(ROOT, ".env.local"), "utf8").split("\n")) {
-  const m = l.match(/^([A-Z0-9_]+)=(.*)$/); if (m) env[m[1]] = m[2].trim().replace(/^["']|["']$/g, "");
-}
 const SB = env.NEXT_PUBLIC_SUPABASE_URL, KEY = env.SUPABASE_SERVICE_ROLE_KEY;
 const db = (q, init) => fetch(`${SB}/rest/v1/${q}`, { ...init, headers: { apikey: KEY, Authorization: `Bearer ${KEY}`, "Content-Type": "application/json", ...(init?.headers || {}) } });
 // PostgREST answers an error OBJECT (not an array) for a bad query, and calling .map on it
@@ -2498,6 +2533,11 @@ phase("the health endpoint answers with the fields the repair kit reads", async 
   ok(r.status === 200, `status ${r.status}`);
   const j = await r.json().catch(() => null);
   ok(j && typeof j === "object", "the health check answered something that is not an object");
+  // The phase NAME promised the fields and the assertions only asked "is it an object", so `{}`
+  // passed — a phase title that overstates its check is the green-suite problem in miniature.
+  // The route's contract (app/api/health/route.ts) is 200 {ok:true}, or 503 {ok:false} when it
+  // cannot reach the database, and public/offline.html polls it to decide what to tell a person.
+  ok(j && j.ok === true, `/api/health answered 200 without ok:true — ${JSON.stringify(j).slice(0, 80)}`);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2563,6 +2603,13 @@ phase("guard: the Access search finds any setting and lands on it", async () => 
 // --list prints the map and runs nothing. Useful before a long run (and to hand someone the
 // list of what is actually covered) without waiting ~35 minutes to read the phase names.
 if (ARGS.includes("--list")) {
+  // Phases are registered PER REAL RESTAURANT, so with no keys there is nothing to list. Printing
+  // an empty map would read as "the suite has no phases", which is the wrong thing to believe.
+  if (!PHASES.length) {
+    console.error(`\n⛔ Cannot list the phases: no .env.local in ${ROOT}, and the phase list is built` +
+      `\n   from the real restaurants in the database. Run --list from the main checkout.\n`);
+    process.exit(1);
+  }
   console.log(`\nverify-everything · ${PHASES.length} phases`);
   for (const ph of PHASES) console.log(`${String(ph.n).padStart(3)}  ${ph.name}`);
   await runRestore("");

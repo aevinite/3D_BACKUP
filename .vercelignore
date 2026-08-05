@@ -7,3 +7,26 @@
 # `public/panels/editor` (the manager panel), which silently 404'd the manager
 # panel on every Vercel deploy until this was anchored.
 /editor
+
+# ── Nothing below here is code, and none of it is served ──────────────────────
+# It was ALL being uploaded on every deploy: ~26 MB, which is 27% of the repo, on a
+# stack that genuinely exhausts its ~100-deploy daily cap. Not serving them was never
+# the question — Next only serves `public/` — the cost is the upload on every build.
+#
+# Competitor research: 185 files of 2-4 MB screenshots, plus a macOS .app bundle.
+/All_compitior_POs_INFO
+# Owner-facing explainer docs, read on GitHub, not by the app.
+/LEARN-MY-APP
+# Design explorations whose chosen design has already shipped.
+/access-designs
+# The frozen pre-rewrite reference (the code snapshot is already gitignored).
+/reference
+# Engineering docs + plans. Read in the repo, never at runtime.
+/docs
+/*.md
+!/README.md
+/PROJECT-HANDOFF.pdf
+# Test + sweep output
+/test-results
+/tests
+/.claude

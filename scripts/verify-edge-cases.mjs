@@ -24,6 +24,15 @@ import { fileURLToPath } from "node:url";
 // un-prefixed paths and answered 404, so the checks below had been failing for weeks. (2026-07-30)
 import { chromium } from "playwright";
 
+// A guard that can only run when port 4000 happens to be up is a guard that gets skipped — and
+// 4000 belongs to the human, so a parallel session or CI could never run this at all. Accept a
+// target like every other guard here does. (2026-08-04 sweep.)
+const BASE = (() => {
+  const i = process.argv.indexOf("--base");
+  return (i > -1 && process.argv[i + 1]) || process.env.VERIFY_BASE || "http://localhost:4000";
+})().replace(/\/$/, "");
+
+
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const env = Object.fromEntries(
   readFileSync(join(root, ".env.local"), "utf8").split("\n")
@@ -95,7 +104,7 @@ try {
   {
     const w = await browser.newContext();
     const wp = await w.newPage();
-    await wp.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+    await wp.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
     await wp.waitForSelector(".cat-group-head", { timeout: 60000 });
     await w.close();
   }
@@ -107,7 +116,7 @@ try {
   const [g] = await sb("POST", "session_members", { session_id: sess.id, name: "Edge Partner", token: gTok, role: "guest", approved: false });
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
-  await page.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await page.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
   await page.evaluate(([t, token, memberId]) => {
     localStorage.setItem("lfh_session", JSON.stringify({ table: t, token, memberId, role: "guest" }));
     localStorage.setItem("lfh_table", t);
@@ -128,7 +137,7 @@ try {
   const [h] = await sb("POST", "session_members", { session_id: sess.id, name: "Solo Head", token: hTok, role: "owner", approved: true });
   const ctx2 = await browser.newContext();
   const p2 = await ctx2.newPage();
-  await p2.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await p2.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
   await p2.evaluate(([t, token, memberId]) => {
     localStorage.setItem("lfh_session", JSON.stringify({ table: t, token, memberId, role: "owner" }));
     localStorage.setItem("lfh_table", t);
@@ -163,14 +172,14 @@ try {
   await closeSession(sess.id);
   let cookie = "";
   if (env.EDITOR_PASSWORD) {
-    const r = await fetch("http://localhost:4000/login", {
+    const r = await fetch("${BASE}/login", {
       method: "POST", redirect: "manual",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: `password=${encodeURIComponent(env.EDITOR_PASSWORD)}`,
     });
     cookie = (r.headers.get("set-cookie") || "").split(";")[0];
   }
-  const mh = await fetch(`http://localhost:4000/api/editor/members/${pend.id}/make-head`, {
+  const mh = await fetch(`${BASE}/api/editor/members/${pend.id}/make-head`, {
     method: "POST", headers: { "Content-Type": "application/json", ...(cookie ? { Cookie: cookie } : {}) },
   });
   check(mh.status === 400, `make-head on a closed table is refused (got ${mh.status})`);
@@ -180,7 +189,7 @@ try {
   await sb("POST", "session_members", { session_id: sess.id, name: null, token: tok("dh_"), role: "owner", approved: true });
   const ctx5 = await browser.newContext();
   const p5 = await ctx5.newPage();
-  await p5.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await p5.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
   await p5.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
   await fireGate(p5, TABLE);
   await p5.waitForSelector("text=already open", { timeout: 8000 }); // the "add your name" screen
@@ -200,7 +209,7 @@ try {
   sess = await newSession();
   const ctx6 = await browser.newContext();
   const p6 = await ctx6.newPage();
-  await p6.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await p6.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
   await p6.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
   // wait for the menu to render (React alive), then double-fire ONCE — the gate
   // closes itself quickly on this path, so we assert on the database below
@@ -223,7 +232,7 @@ try {
   const tabA = await ctx7.newPage();
   const tabB = await ctx7.newPage();
   for (const tab of [tabA, tabB]) {
-    await tab.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+    await tab.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
     await tab.evaluate((t) => localStorage.setItem("lfh_table", t), TABLE);
     await fireGate(tab, TABLE);
     await tab.waitForSelector("text=already open", { timeout: 8000 });
@@ -245,8 +254,8 @@ try {
   const ctx8 = await browser.newContext();
   const pgA = await ctx8.newPage();
   const pgB = await ctx8.newPage();
-  await pgA.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
-  await pgB.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await pgA.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await pgB.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
   await pgB.waitForTimeout(1200);
   await pgA.evaluate(() => {
     localStorage.setItem("lfh_cart", JSON.stringify([{ id: "espresso", title: "Espresso", price: 120, qty: 2 }]));
@@ -262,7 +271,7 @@ try {
   const [nm] = await sb("POST", "session_members", { session_id: sess.id, name: "Blip Victim", token: nTok, role: "owner", approved: true });
   const ctx9 = await browser.newContext();
   const p9 = await ctx9.newPage();
-  await p9.goto("http://localhost:4000/menu", { waitUntil: "domcontentloaded" });
+  await p9.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
   await p9.evaluate(([t, token, memberId]) => {
     localStorage.setItem("lfh_session", JSON.stringify({ table: t, token, memberId, role: "owner" }));
     localStorage.setItem("lfh_table", t);

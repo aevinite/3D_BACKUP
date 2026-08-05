@@ -1,3 +1,8 @@
+> ⚠️ **HISTORY — not a current specification.** an audit snapshot; the access model was rebuilt on 2026-07-31, so its findings predate today's model.
+> Kept because it records why things were built this way. Do not follow it for new work; the
+> live rules are in `CLAUDE.md`. (Banner added 2026-08-04: eleven finished documents were sitting
+> in `docs/` beside the load-bearing ones with nothing to tell them apart.)
+
 # Aevidine — Auth / Authz / Tenant-Isolation Audit (2026-06-26)
 
 A→Z review after locking owners out of admin. Verdict: **isolated and gated; one

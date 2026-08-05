@@ -21,15 +21,21 @@
         <integer>0</integer>
     </dict>
 
-    <key>WorkingDirectory</key>
-    <string>/Users/aevinite/Documents/Projects/backup_Menu</string>
-
     <key>RunAtLoad</key>
     <false/>
-
+    <!-- WHY THESE LOGS ARE NOT IN THE PROJECT FOLDER (fixed 2026-08-05).
+         They used to be .claude/audits/*.log, i.e. inside ~/Documents — which macOS TCC
+         protects. launchd could not create them, so it never even started the job and
+         reported `last exit code = 78: EX_CONFIG`. Nothing surfaced that: the job simply
+         never ran, there was no report in .claude/audits/, and only `launchctl list` knew.
+         The proof is the sibling agents: com.aevinite.live-fix-watcher logs to ~/.claude/
+         and has run 3,800+ times at exit 0, while all three audit agents logged into
+         ~/Documents and all three were dead. ~/Library/Logs is not TCC-gated.
+         The script cd's to the project itself, so WorkingDirectory is not needed either —
+         and it was a second TCC-protected path launchd had to resolve before starting. -->
     <key>StandardOutPath</key>
-    <string>/Users/aevinite/Documents/Projects/backup_Menu/.claude/audits/launchd.out.log</string>
+    <string>/Users/aevinite/Library/Logs/aevidine/owner-audit.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/aevinite/Documents/Projects/backup_Menu/.claude/audits/launchd.err.log</string>
+    <string>/Users/aevinite/Library/Logs/aevidine/owner-audit.err.log</string>
 </dict>
 </plist>

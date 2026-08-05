@@ -140,8 +140,13 @@ Stands in auto-accept mode.
   updates INSTANTLY (no flicker, no "old value for 1s then refresh") in owner + admin +
   manager + kitchen + tablet. Test at desktop AND ~390px mobile. Don't claim done from
   source alone.
-- **Use shadcn/ui for EVERY new feature** (owner 2026-06-26: "this thing is great"). shadcn
-  not yet initialised (no `components.json`) → `npx shadcn@latest init` (Tailwind 4) first.
+- **shadcn/ui — BLOCKED, and this is not a task waiting to be done** (owner 2026-06-26: "this
+  thing is great"). Its CLI does not support Tailwind 4, so `npx shadcn@latest init` bails and
+  there is no `components.json` and no `components/ui/`. That has been true since 26 June, so
+  every feature built since was hand-built to the same patterns — which is fine, and is what to
+  keep doing. **Do not open this again** unless the owner asks or the CLI adds Tailwind 4;
+  a standing order nobody can carry out just teaches you to skim this file. The shadcn **MCP**
+  (`.mcp.json`) still works for looking components up as a reference.
 - **Verify in the SAME place the owner looks, with cache busting.** The owner tests on
   `localhost:4000`. `public/panels/editor/app.js` loads with NO version query → the browser
   caches it and a `/manager` reload keeps STALE app.js in the iframe. Bust it (query string /
@@ -311,14 +316,20 @@ Everything is a SINGLE Next app on **port 4000** (`npm run dev` / `START-ALL.bat
 The panels are routes inside it:
 
 - **/menu** — guest menu (`app/`). Scroll-spy category strip in `#sticky-header`.
-- **/admin** — owner control room (`app/admin/page.tsx`): live floor (reads the
-  `lfh_floor_state` brain), key numbers, maintenance switch, and the 10 guest
-  FEATURE TOGGLES. **The only password-gated route** (see Security gate).
-- **/editor** — boss panel: Dishes/Categories/Tags/Orders/Tables/Dashboard/
-  Customers/Log/General; KOT chips, per-order discount, ⇄ Shift table. (Features
-  tab REMOVED — toggles live in /admin now.)
+- **/aevinite** — the admin console (`app/aevinite/`), 22 pages: Access & permissions,
+  restaurants, owners, revenue, floor, bill-audit, rate limits, recycle bin, health, logs…
+  It reads the `lfh_floor_state` brain for the live floor. **This is the password-gated
+  console** (see Security gate). There is **no `/admin` route** — it was never renamed in
+  this section for weeks after the move, which sent sessions looking for a file that does
+  not exist. Feature switches live here now, under Access & permissions, NOT in the editor.
+- **/manager** (and **/editor**) — boss panel: Dishes/Categories/Tags/Orders/Tables/
+  Dashboard/Customers/Log/General; KOT chips, per-order discount, ⇄ Shift table. Both
+  routes embed the SAME files, `public/panels/editor/` — so a "manager panel" bug is an
+  edit to `public/panels/editor/app.js`.
 - **/kitchen** — KDS: New→Cooking→Ready, 86 board (sold-out tag), chime.
 - **/tablet** — waiter app: floor tiles + TAKE ORDER via `lfh_staff_place_order`.
+- **/owner** — the owner's own 16 pages (dashboard, reports, menu, staff, khata, inventory…).
+- **/login**, **/staff-login** — staff and admin sign-in.
 
 The editor/kitchen/tablet UIs are the original vanilla files served from
 `public/panels/<name>/` (embedded full-screen); their old Express APIs are ported
@@ -406,10 +417,19 @@ work in prod). **If you re-introduce a middleware, update this section in the sa
 
 ## Routes
 
+There are **55** `page.tsx` routes, not four — count them with
+`find app -name page.tsx | wc -l` rather than trusting a list in a document. The ones worth
+knowing by heart:
+
 - `/` — `app/page.tsx` is just `redirect("/menu")`.
-- `/menu` — menu with 3D preload (`app/menu/page.tsx`).
-- `/item/[slug]` — dish detail.
-- `/view/[folder]` — 3D viewer. (Only these four routes exist.)
+- **THREE guest menu doors, and every guest rule must hold in all three:**
+  `/menu` (the single-restaurant default), `/r/<slug>/menu` (the tenant path the QR encodes),
+  and `/q/<code>` (the short code). Missing one is not theoretical — `/q/<code>` was found
+  missing five guest rules the others had (PR #761).
+- `/item/[slug]` and `/r/<slug>/item/[slug]` — dish detail.
+- `/view/[folder]` — 3D viewer.
+- The panels and consoles: `/manager`, `/editor`, `/kitchen`, `/tablet`, `/owner/*` (16),
+  `/aevinite/*` (22), `/login`, `/staff-login` — and a `/r/<slug>/…` twin of each panel.
 
 ## Skills and tools to reach for
 
@@ -524,8 +544,11 @@ ordering/billing. Hard rules: the ONLINE path stays untouched (queue diverts onl
 `navigator.onLine === false`); every new staff write handler must be wrapped with
 `withIdempotency(..., "<panel>")` and every new client write must go through the panel's
 `api()` / the guest outbox so it carries an `X-LFH-Action-Id`; the dedup guard FAILS OPEN.
-Only guest place-order is queued so far — other guest writes and a real-device test are the
-main TODOs. Code: `lib/idempotency.ts`, `lib/connectionStatus.ts`, `lib/guestOutbox.ts`,
+**Every STAFF panel write is queued** (`public/panels/outbox.js` wraps each panel's `api()` and
+persists to IndexedDB). On the **GUEST** side only place-order is queued so far — the other guest
+writes (call waiter, requests, cart) and a real-device test are the remaining TODOs. Do not read
+that as "nothing is queued" and rebuild the staff outbox; the earlier wording here dropped the
+word GUEST and said exactly that. Code: `lib/idempotency.ts`, `lib/connectionStatus.ts`, `lib/guestOutbox.ts`,
 `components/ConnectionBadge.tsx`, `public/panels/{outbox,connbadge}.js`, `realtime.js`,
 `app/api/guest/place-order/route.ts`, migration `138_action_idempotency.sql`.
 
@@ -622,7 +645,7 @@ decline a tap:
   branch on that (`reason: 'unpaid' | 'cooking' | 'both'` from `lib/sessionClose.ts`). The old
   `/owes money/` text-match missed the cooking-only refusal, so a paid-but-unserved table had
   no "close anyway" button at all.
-- **Guarded by `npm run verify:taps`** (`scripts/verify-tap-guard.mjs`) — 9 static checks, each
+- **Guarded by `npm run verify:taps`** (`scripts/verify-tap-guard.mjs`) — static checks, each
   mapped to a bug that actually happened. It also runs AUTOMATICALLY as a PostToolUse hook after
   any edit to `public/panels/*/{app.js,style.css,index.html}`: silent when clean, and it fails
   the edit with an explanation if a check breaks. Add a check there when you add a dialog.
@@ -683,7 +706,8 @@ true now:
   the only guard, the endpoint must refuse too.
 - Canonical spec: **`docs/ACCESS-MODEL.md`**. `docs/ACCESS-LADDER.md` is HISTORY only.
 - Guards: **`npm run verify:access`** (a switch that reaches no real code fails) and
-  **`npm run verify:everything`** — **501 numbered phases** against a chosen site, one by one:
+  **`npm run verify:everything`** — every numbered phase against a chosen site, one by one
+  (`--list` prints the current count and map — do NOT quote a number here, it drifts):
   every route, all four panels as their real role, every switch off→gone→on→back, a real
   order followed end to end, the guest journey feature by feature, bills + the compliance
   rules, Inventory/Payroll, the resilience rules, the owner's A35 phone AND a tablet, and
@@ -703,7 +727,9 @@ true now:
   costs ~1.3ms and no network call; **ADD TO the synonym map when you add a node** (khata, zomato,
   swiggy, 3d, sold out, salary…). A row whose parent is off has no row to jump to, so its result is
   labelled "needs <parent>" and lands on that parent instead. Guarded by
-  **`npm run verify:access-search`** (22 checks, desktop + A35 phone) = phase 501.
+  **`npm run verify:access-search`** (desktop + A35 phone). It is also the LAST phase of
+  `verify:everything` — find its number with `--list`, never hard-code it. The suite has been
+  renumbered before, and `--only 501` then silently began running a different test.
 
 ## 👤 EVERY PERSON HAS ONE PROFILE, AND IT HAS ONE SHAPE (owner, 2026-08-01 — ALWAYS)
 
@@ -796,7 +822,7 @@ Also: **`npm run verify:everything` refuses to start while another run is alive*
 `.claude/verify-everything.lock`, `--force` to override). Two concurrent 501-phase runs are what
 actually took the database down — the test rig, not the product.
 
-**Guarded by `npm run verify:busy`** (`scripts/verify-busy-server.mjs`) — 14 checks against the
+**Guarded by `npm run verify:busy`** (`scripts/verify-busy-server.mjs`) — checks against the
 REAL shipped files via a local stub (no database, no login, no load): a busy server's tap is
 queued not lost, delivered exactly once under its original id on recovery, a 4xx still reaches the
 person, deadlines/backoff/jitter are present, and the guest's order is classed correctly (5xx and

@@ -16,6 +16,11 @@
      inside an iframe, and Android's 3-button nav isn't in env() at all). */
   --sat: max(env(safe-area-inset-top, 0px), var(--safe-t, 0px));
   --sab: max(env(safe-area-inset-bottom, 0px), var(--safe-b, 0px));
+  /* LEFT/RIGHT too: in LANDSCAPE on a notched phone or tablet — how the waiter panel is
+     actually held — a bare env() inside the panel iframe reads 0 exactly like top/bottom.
+     PanelFrame.tsx measures the device's real side insets and pushes them in as --safe-l/-r. */
+  --sal: max(env(safe-area-inset-left, 0px), var(--safe-l, 0px));
+  --sar: max(env(safe-area-inset-right, 0px), var(--safe-r, 0px));
 }
 * { box-sizing: border-box; }
 /* Slim, themed scrollbars (replaces the chunky default) — matches the editor. */
@@ -29,7 +34,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 /* MINIMAL top bar (owner, 2026-08-03): one slim row — ☰, a small brand, ⚡ Quick order,
    the connection light. Every pixel saved here is floor space, which is the point.
    Left/right safe-area insets cover a landscape phone's notch. */
-.topbar { display: flex; align-items: center; gap: 10px; padding: calc(7px + var(--sat)) calc(12px + env(safe-area-inset-right, 0px)) 7px calc(12px + env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 5; }
+.topbar { display: flex; align-items: center; gap: 10px; padding: calc(7px + var(--sat)) calc(12px + var(--sar)) 7px calc(12px + var(--sal)); border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); z-index: 5; }
 .brand { font-size: 15.5px; font-weight: 800; white-space: nowrap; overflow: hidden; display: flex; align-items: center; min-width: 0; flex: 1; }
 .top-actions { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
 /* ⚡ Quick order — the one always-there action on the bar (build first, table last). */
@@ -62,7 +67,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
 /* Full-width floor (the table detail is always a popup); left/right safe-area padded. */
 /* The bottom padding carries --sab (the iPhone home bar / the Samsung navigation bar), or the
    last row of tables sits UNDER it and the tile you need is the one you can't tap. */
-.layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 14px; padding: 12px calc(14px + env(safe-area-inset-right, 0px)) calc(12px + var(--sab)) calc(14px + env(safe-area-inset-left, 0px)); align-items: start; }
+.layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.2fr); gap: 14px; padding: 12px calc(14px + var(--sar)) calc(12px + var(--sab)) calc(14px + var(--sal)); align-items: start; }
 /* A grid item's default min-width is AUTO, so a nowrap scrolling row inside the floor (the
    filter chips, the legend) stretched the whole column past the viewport and the PAGE
    scrolled sideways — 481px of document on a 360px phone. min-width:0 lets those rows
@@ -612,7 +617,7 @@ html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c;
 
 @media (max-width: 760px) {
   .hamburger { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text); border-radius: 12px; font-size: 19px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
-  .topbar { padding: calc(6px + var(--sat)) calc(10px + env(safe-area-inset-right, 0px)) 6px calc(10px + env(safe-area-inset-left, 0px)); gap: 8px; }
+  .topbar { padding: calc(6px + var(--sat)) calc(10px + var(--sar)) 6px calc(10px + var(--sal)); gap: 8px; }
   .brand { font-size: 14.5px; }
   /* The generic "🧑‍🍳 Tables" drops; the restaurant's own name stays (branding rule). */
   .brand .brand-word { display: none; }
@@ -763,7 +768,7 @@ body.om-mode #tabletClose { display: none; }
    (and, on the review screen, SEND) end up under the home bar / navigation bar. */
 .om.lite { position: fixed; top: 0; left: 0; right: 0; z-index: 45; background: var(--bg);
   display: flex; flex-direction: column; height: 100vh; height: 100dvh;
-  padding: calc(10px + var(--sat)) calc(14px + env(safe-area-inset-right, 0px)) calc(10px + var(--sab)) calc(14px + env(safe-area-inset-left, 0px));
+  padding: calc(10px + var(--sat)) calc(14px + var(--sar)) calc(10px + var(--sab)) calc(14px + var(--sal));
   box-sizing: border-box; }
 /* Compact ONE-ROW header: the table number as a small pill, the search beside it. */
 .om.lite .om-head { padding: 2px 0 8px; margin: 0; align-items: center; flex-wrap: nowrap; gap: 8px; }

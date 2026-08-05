@@ -13,6 +13,39 @@ const env = readFileSync(".env.local", "utf8");
 const get = (k) => ((env.match(new RegExp("^" + k + "=(.*)$", "m")) || [])[1] || "").trim().replace(/^["']|["']$/g, "");
 const sb = createClient(get("NEXT_PUBLIC_SUPABASE_URL") || get("SUPABASE_URL"), get("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false } });
 
+// ── SAFETY, added 2026-08-04 ──────────────────────────────────────────────────────────────────
+// This is a LOAD script. Two of them at once, or one beside npm run verify:everything, is what
+// actually took the database down on 2026-07-31 — the test rig, not the product. verify-everything
+// and load-ramp-orders both learned that lesson; these three had neither guard.
+{
+  const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
+  const ref = (() => { try { return new URL(get("NEXT_PUBLIC_SUPABASE_URL") || get("SUPABASE_URL")).hostname.split(".")[0]; } catch { return ""; } })();
+  if (ref !== BACKUP_REF) {
+    console.error(`This points at project "${ref}", not the backup database (${BACKUP_REF}). Refusing.`);
+    console.error("Load-testing anything else — a client's database above all — is never the right call.");
+    process.exit(1);
+  }
+  const { existsSync, writeFileSync, unlinkSync, readFileSync: rf, mkdirSync } = await import("node:fs");
+  const LOCKDIR = ".claude";
+  const MINE = `${LOCKDIR}/stress.lock`;
+  for (const other of ["verify-everything.lock", "load-ramp.lock", "stress.lock"]) {
+    const p = `${LOCKDIR}/${other}`;
+    if (!existsSync(p)) continue;
+    let pid = 0; try { pid = Number(JSON.parse(rf(p, "utf8")).pid) || 0; } catch {}
+    let alive = false; try { if (pid) { process.kill(pid, 0); alive = true; } } catch {}
+    if (alive) {
+      console.error(`Another heavy run is alive (${other}, pid ${pid}). Refusing — two at once is what caused the 2026-07-31 outage.`);
+      process.exit(1);
+    }
+  }
+  try { mkdirSync(LOCKDIR, { recursive: true }); } catch {}
+  writeFileSync(MINE, JSON.stringify({ pid: process.pid, script: process.argv[1], at: new Date().toISOString() }));
+  const release = () => { try { unlinkSync(MINE); } catch {} };
+  process.on("exit", release);
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => { release(); process.exit(130); });
+}
+
+
 const MINUTES = parseInt(process.argv[2] || "60", 10);
 const WORKERS = parseInt(process.argv[3] || "24", 10);
 const TABLES = parseInt(process.argv[4] || "300", 10);

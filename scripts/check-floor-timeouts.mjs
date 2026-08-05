@@ -11,7 +11,13 @@
 // already stopped for the evening, so "none since" meant nothing. This script is the follow-up
 // check, so the question gets answered by data instead of by hope.
 //
-// It is READ-ONLY and it never deletes or resolves an error row. A timeout row is a real record of
+// It never deletes or resolves an error row — a timeout row is a real record of something a real
+// screen suffered, and the rule in this project is that an error is never hidden. It is NOT
+// read-only about the database, though: it CREATE OR REPLACEs a temporary zz_floor_probe()
+// function, calls it (a whole-floor read, several times), and drops it. Run it ALONE — two
+// overlapping runs would drop each other's probe mid-measurement, and the 2026-07-31 outage was
+// caused by two heavy runs at once. The old header said flatly "It is READ-ONLY", which is the
+// kind of claim someone trusts. A timeout row is a real record of
 // something a real screen suffered; the rule in this project is that an error is never hidden.
 //
 // Full plan, and what to do if it is NOT fixed: docs/FLOOR-TIMEOUT-WATCH.md

@@ -20,6 +20,11 @@
      isn't in env() at all). */
   --sat: max(env(safe-area-inset-top, 0px), var(--safe-t, 0px));
   --sab: max(env(safe-area-inset-bottom, 0px), var(--safe-b, 0px));
+  /* LEFT/RIGHT too: in LANDSCAPE on a notched phone or tablet — how the waiter panel is
+     actually held — a bare env() inside the panel iframe reads 0 exactly like top/bottom.
+     PanelFrame.tsx measures the device's real side insets and pushes them in as --safe-l/-r. */
+  --sal: max(env(safe-area-inset-left, 0px), var(--safe-l, 0px));
+  --sar: max(env(safe-area-inset-right, 0px), var(--safe-r, 0px));
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
