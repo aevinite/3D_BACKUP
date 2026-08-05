@@ -91,18 +91,15 @@ failure). Full enforcement is expected ~May 2027 — build consent in cheaply no
   audit-trail acknowledgement. (ToS is half the shield; architecture is the other half.)
 - Aim for the **European bar** (every sale signed / hash-chained / tamper-evident) → clears India, US
   and Canada at once, and is a selling point.
-- **One known gap (T7 sweep, 2026-08-05):** the owner dashboard/reports still gross a discount up at
-  the rate configured **right now**, while the printed bill, the Z-report and pay-in-parts use the
-  rate the order was charged at (`orders.tax_rate`, mig 284). For a discounted bill whose rate later
-  changed — or a banquet at its own rate — the owner's revenue and the guest's bill differ by
-  `discount × (rate_now − rate_charged)`. It reads a pre-aggregated rollup (`orders_daily_agg`, migs
-  211/213/266), so the fix means re-issuing five analytics functions plus a rollup column, and
-  migration 155's covering indexes would need `tax_rate` added. Deliberately NOT bundled with the
-  rest of the T7 fixes: it rewrites the owner's revenue on the free-tier hot path and needs its own
-  change with measurement. `docs/COMPLIANCE-GUARDRAILS.md` §3 "reconcile to the rupee" is what it
-  breaks.
 
 **Done since (do not re-add as to-dos):**
+
+- **A discount is grossed at the rate it was CHARGED, everywhere.** Was a real gap: the owner
+  dashboard/reports grossed a discount at the rate configured *now* while the bill, the Z-report and
+  pay-in-parts used `orders.tax_rate` (mig 284), so a discounted bill whose rate later changed — or a
+  banquet at its own rate — made the two disagree by `discount × (rate_now − rate_charged)`. Closed by
+  **migration 301**: `orders.disc_gross` is computed at write time from the order's own rate, and all
+  nine owner money functions plus both rollups subtract it. Guarded by 4 checks in `verify:audit`.
 
 - **Placeholder GSTIN — gone.** `billIdentity()` (`public/panels/billdoc.js`) never invents a GSTIN,
   address or phone; an unconfigured restaurant prints no such line at all, and the dead constant that
