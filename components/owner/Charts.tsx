@@ -290,7 +290,14 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
           <XAxis type="number" domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} allowDecimals={false} />
           <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11.5, fill: AXIS }} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
+          {/* isAnimationActive={false} is NOT a style choice — it is what makes the amounts appear.
+              With the grow-in animation on, this Bar's <LabelList> never reached the DOM at all:
+              a 12-restaurant ranking drew 12 bars and 12 names with ZERO amounts, so the only view
+              an owner gets past 9 restaurants forced them to hover every row to read the money —
+              the exact opposite of what showValues exists for (owner-panel sweep, 2026-08-05).
+              ColumnsChart beside it always had the flag, which is why its labels were fine. */}
           <Bar dataKey="revenue" name={valueLabel} radius={[0, 6, 6, 0]} cursor={onSelect ? "pointer" : undefined}
+            isAnimationActive={false}
             onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>
             {showValues && (
               <LabelList dataKey="revenue" position="right" formatter={((value: unknown) => compact(Number(value))) as never}
