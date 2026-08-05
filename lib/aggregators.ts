@@ -71,7 +71,33 @@ export async function ingestIncoming(source: AggSource, payload: Record<string, 
   const { data, error } = await sb.rpc("lfh_platform_insert", {
     p_source: source, p_external_id: n.externalId, p_customer: n.customer, p_phone: n.phone, p_items: n.items, p_total: n.total, p_restaurant_id: restaurantId,
   });
-  if (error) throw new Error(error.message);
+  if (error) {
+    // A RETRIED WEBHOOK IS NOT AN ERROR — IT IS THE SAME ORDER (T9 sweep, 2026-08-05).
+    //
+    // `lfh_platform_insert` is a plain INSERT with no conflict handling, and
+    // aggregator_orders has UNIQUE (restaurant_id, source, external_id) (mig 079). So the
+    // constraint DOES stop a duplicate order reaching the kitchen — that part was already
+    // safe. What was wrong is the ANSWER: a 23505 threw, the route turned it into a 500, and
+    // every aggregator treats 5xx as "not delivered, retry". Zomato/Swiggy would therefore
+    // retry an order we already have, forever, and never get told we have it. Worse, the raw
+    // Postgres text ("duplicate key value violates unique constraint …") went out in the
+    // response body — our schema, handed to a third party.
+    //
+    // This is the same rule our own panels already run on (lib/idempotency.ts): a duplicate
+    // is answered with the ORIGINAL result, not an error. So look the existing row up and
+    // return it, and the route replies 200 with its id — which is what stops the retry loop.
+    if ((error as { code?: string }).code === "23505") {
+      const existing = await sb.from("aggregator_orders")
+        .select("id, external_id, status")
+        .eq("restaurant_id", restaurantId).eq("source", source).eq("external_id", n.externalId)
+        .maybeSingle();
+      if (existing.data) return { ...existing.data, duplicate: true } as Record<string, unknown>;
+    }
+    // Anything else: log the detail on our side, hand the caller a plain sentence. An external
+    // caller never receives a database message.
+    console.error(`[aggregators] ${source} ingest failed:`, error.message);
+    throw new Error("Couldn't record that order — please retry.");
+  }
   return Array.isArray(data) ? data[0] : data;
 }
 

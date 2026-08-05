@@ -35,6 +35,7 @@
     "verify:clash": "node scripts/verify-clash-coverage.mjs",
     "verify:owner-clash": "node scripts/verify-owner-clash.mjs",
     "verify:customer-erase": "node scripts/verify-customer-erase.mjs",
+    "verify:outbound": "node scripts/verify-outbound-honesty.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
