@@ -14727,10 +14727,18 @@ function applyWhoami(w) {
 // One in-flight re-read at a time, and only when something actually differs — a `menu` breadcrumb
 // fires for ordinary dish edits too, and repainting the whole view on each of those would undo the
 // 300-table freeze fix. Comparing the serialised answer keeps the common case to one small GET.
-let whoamiJson = null, whoamiBusy = false;
-function refreshWhoami() {
+let whoamiJson = null, whoamiBusy = false, whoamiAt = 0;
+// THROTTLED, because `menu` is not only about permissions (measured 2026-08-05). That topic also
+// carries every dish, category, filter and settings edit, and realtime.js hands the panel one
+// event per 200ms burst — so on a busy estate an ordinary run of menu edits would have fetched
+// /whoami over and over. A permission change is a rare, deliberate admin action, so noticing it up
+// to 5 seconds later costs nobody anything, while this caps the reads at one per 5s no matter how
+// much menu churn arrives. `force` is for the boot read, which must not be skipped.
+const WHOAMI_MIN_GAP_MS = 5000;
+function refreshWhoami(force) {
   if (whoamiBusy) return;
-  whoamiBusy = true;
+  if (!force && Date.now() - whoamiAt < WHOAMI_MIN_GAP_MS) return;
+  whoamiBusy = true; whoamiAt = Date.now();
   api("GET", "/whoami").then((w) => {
     const j = JSON.stringify(w || null);
     if (j === whoamiJson) return;      // powers unchanged — nothing to repaint
@@ -14738,7 +14746,7 @@ function refreshWhoami() {
     applyWhoami(w);
   }).catch(() => {}).then(() => { whoamiBusy = false; });
 }
-refreshWhoami();
+refreshWhoami(true);
 
 // Then load all the data, refresh the current view in place, and start live polling.
 // If the very first load fails, show "connection failed" so it's obvious the local

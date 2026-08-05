@@ -3096,6 +3096,22 @@ html[data-theme="light"] .khata-due{ color:#0369a1; }
 @media (max-width: 760px) {
   html, body { height: auto; overflow-y: auto; }
   .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px 10px; position: sticky; top: 0; z-index: 30; }
+  /* THE LAST BUTTON MUST NOT HANG OFF THE SCREEN (owner's A35, measured 2026-08-05).
+     .top-actions is a flex row with `margin-left:auto` and no wrap and no scroll, so on a
+     360px-wide phone the 👤 Profile button ended at x=367 — seven pixels past the edge, with
+     no scroll container anywhere above it, so it could not be reached at all. (navfit's
+     `nav-tight` measures the TABS, not this row, so it never fired: the restaurant name was
+     still showing while a real control sat off-screen.)
+     Two changes, and the SECOND is the durable one:
+       · gap 10px → 4px. MEASURED, not guessed: at 6px the Profile button still dropped to a
+         second line and the header grew 152px tall; at 4px all five controls sit on ONE line and
+         the header is back to its original 108px — with the word "Profile" kept, which matters
+         more than the four pixels. (The floor is already the thing being squeezed on a phone, so
+         a taller header is not a fix.)
+       · `flex-wrap: wrap` means that even if someone adds a sixth control later it drops to a
+         new line instead of silently vanishing off the edge. Fitting exactly today is how this
+         happened in the first place. */
+  .top-actions { flex-wrap: wrap; justify-content: flex-end; gap: 4px; row-gap: 8px; }
   /* Drawer open → lift the topbar (which contains the drawer + scrim) ABOVE the
      phone table-detail popup (.tp-detail-floating, z-index 40): without this the
      drawer slid in UNDERNEATH an open popup and looked broken. */
