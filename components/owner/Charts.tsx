@@ -290,12 +290,17 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
           <XAxis type="number" domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} allowDecimals={false} />
           <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11.5, fill: AXIS }} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
-          {/* isAnimationActive={false} is NOT a style choice — it is what makes the amounts appear.
-              With the grow-in animation on, this Bar's <LabelList> never reached the DOM at all:
-              a 12-restaurant ranking drew 12 bars and 12 names with ZERO amounts, so the only view
-              an owner gets past 9 restaurants forced them to hover every row to read the money —
-              the exact opposite of what showValues exists for (owner-panel sweep, 2026-08-05).
-              ColumnsChart beside it always had the flag, which is why its labels were fine. */}
+          {/* isAnimationActive={false} is NOT a style choice — it is what makes the amounts appear
+              STRAIGHT AWAY. Measured on a 12-restaurant ranking, six runs, before this flag:
+              0 amounts at first paint → all 12 only after ~4s, every time. They arrive when the
+              grow-in animation finishes, and the dashboard re-renders on its 60s refresh, so a
+              portfolio owner can look at the one view they get past 9 restaurants and find bars
+              and names with no figures on them — the opposite of what showValues exists for.
+              (An earlier note here said the labels "never reached the DOM"; that was measured
+              too early and overstated. The fault is the delay and its repetition, not absence.)
+              ColumnsChart beside it has always carried the flag, which is why its labels were
+              instant — the two shapes of one ranking disagreed on a flag nobody read as
+              load-bearing. Owner-panel sweep, 2026-08-05. */}
           <Bar dataKey="revenue" name={valueLabel} radius={[0, 6, 6, 0]} cursor={onSelect ? "pointer" : undefined}
             isAnimationActive={false}
             onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>

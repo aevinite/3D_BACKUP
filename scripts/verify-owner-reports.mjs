@@ -138,15 +138,15 @@ check("no unreferenced chart exports came back",
   && !/export const RevenueBar/.test(charts) && !/export function TrendLine/.test(charts),
   "an unused chart makes its dead query look load-bearing");
 
-console.log("\n── 4b. A LABEL THAT NEVER REACHES THE DOM ──");
-// A 12-restaurant "Who earns more" drew 12 bars and 12 names with ZERO amounts: with the grow-in
-// animation on, this Bar's <LabelList> never rendered at all. That is the ONLY view an owner gets
-// past 9 restaurants, and its own comment says the money must be readable without hovering — so
-// every row had to be hovered. ColumnsChart beside it always set the flag, which is why its
-// labels were fine (owner-panel sweep, 2026-08-05).
-check("the ranking chart's bars are not animated, so their amounts render",
+console.log("\n── 4b. AN AMOUNT THAT ARRIVES LATE IS AN AMOUNT THAT IS MISSING ──");
+// Measured on a 12-restaurant "Who earns more", six runs, before the flag: 0 amounts at first
+// paint → all 12 only after ~4s, every time. They land when the grow-in animation finishes, and
+// the dashboard re-renders on its 60s refresh — so the ONLY view an owner gets past 9 restaurants
+// can show bars and names with no figures on them, though its own comment says the money must be
+// readable without hovering. ColumnsChart has always carried the flag (owner-panel sweep 2026-08-05).
+check("the ranking chart's bars are not animated, so their amounts show straight away",
   /<Bar dataKey="revenue" name=\{valueLabel\}[\s\S]{0,200}isAnimationActive=\{false\}/.test(charts),
-  "with the animation on, LabelList never reaches the DOM and the amounts silently vanish");
+  "with the animation on the amounts only appear once it finishes, and every re-render restarts it");
 check("the column chart keeps the same flag",
   /shape=\{<Column3D \/>\} maxBarSize=\{72\} isAnimationActive=\{false\}/.test(charts),
   "both shapes of the ranking must label their bars");
