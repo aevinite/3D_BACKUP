@@ -23,7 +23,7 @@ import { hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { logAction } from "@/lib/oplog";
 import { newWaiterTables } from "@/lib/tableAssign";
-import { PROFILE_FIELDS, mergeProfilePatch, jobPatchFrom, payHistoryBlocksDelete, PAY_HISTORY_DELETE_MESSAGE } from "@/lib/staffProfile";
+import { PROFILE_FIELDS, hasProfile, mergeProfilePatch, jobPatchFrom, payHistoryBlocksDelete, PAY_HISTORY_DELETE_MESSAGE } from "@/lib/staffProfile";
 import { capsForRole, isCapValue } from "@/lib/staffCaps";
 import { expectClash, clashJson } from "@/lib/clash";
 
@@ -228,7 +228,17 @@ export async function PATCH(req: NextRequest) {
     let patch: Record<string, unknown>;
     try { patch = jobPatchFrom(body?.job || {}); }
     catch (e) { return bad(e instanceof Error ? e.message : "That value isn't valid."); }
-    if (body?.in_payroll !== undefined) patch.in_payroll = !!body.in_payroll;
+    // ONLY a role that HAS a pay record may go on the pay list. Kitchen is deliberately excluded
+    // from profiles and pay (owner 2026-07-29, re-confirmed 2026-08-05), and /api/owner/staff
+    // already refuses every payment for them — but THIS route had no such check, so an admin could
+    // enrol a cook and set a salary that no payment could ever be recorded against (sweep T20,
+    // finding F4). Refused here, not just hidden in the UI, because a stored pay setup that the
+    // payment path rejects is a number in the books that can never be settled.
+    if (body?.in_payroll !== undefined) {
+      if (body.in_payroll && !hasProfile(u.role))
+        return bad(`A ${u.role === "kitchen" ? "kitchen" : u.role} login has no pay record, so it can't go on the pay list.`, 400);
+      patch.in_payroll = !!body.in_payroll;
+    }
     if (body?.can_see_own_pay !== undefined) patch.can_see_own_pay = !!body.can_see_own_pay;
     if (!Object.keys(patch).length) return bad("Nothing to change.");
     const wr = await sb.from("staff_users").update(patch).eq("id", id);

@@ -36,7 +36,7 @@ import {
   type Cap, type CapValue,
 } from "@/lib/staffCaps";
 import {
-  completeness, EMPLOYMENT_TYPES, PAY_TYPES, PAY_MODES, PAY_KINDS, WEEK_DAYS,
+  completeness, hasProfile, EMPLOYMENT_TYPES, PAY_TYPES, PAY_MODES, PAY_KINDS, WEEK_DAYS,
 } from "@/lib/staffProfileShared";
 
 // ── types ────────────────────────────────────────────────────────────────────
@@ -79,6 +79,10 @@ function shortName(name: string): string {
   return looksLikeAPerson && first.length >= 2 ? first : "this person";
 }
 const day = (s: string | null) => (s ? new Date(s + "T00:00:00").toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—");
+// One id per write that must happen AT MOST ONCE (the X-LFH-Action-Id header). Same shape the
+// other admin screens use; the fallback is for a browser with no crypto.randomUUID.
+const newActionId = () =>
+  globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 const when = (s: string | null) => (s ? new Date(s).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "never");
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -163,7 +167,17 @@ export default function StaffProfile({ userId, onClose, onChanged }: {
                 <Personal d={d} patch={patch} reload={load} flash={flash} onChanged={onChanged} />
                 <Emergency d={d} patch={patch} reload={load} flash={flash} />
                 <Job d={d} patch={patch} reload={load} flash={flash} />
-                {!isOwner && d.payrollOn ? <Pay d={d} patch={patch} reload={load} flash={flash} /> : null}
+                {/* PAY — only for a role that HAS a pay record. Kitchen is deliberately excluded
+                    from profiles and pay (owner 2026-07-29, re-confirmed 2026-08-05), and the
+                    server agrees: /api/owner/staff refuses every payment for them with "Kitchen
+                    logins don't have a profile or pay record". This card was still being drawn for
+                    them, so an admin could switch a cook onto the pay list, type a salary, press
+                    "Save this payment" — and only THEN be told kitchen logins have no pay record
+                    (sweep T20, finding F4). A card whose final action can never succeed is worse
+                    than no card. Owners are excluded for their own reason: their pay isn't run
+                    through the restaurant's payroll. */}
+                {!isOwner && hasProfile(p!.role) && d.payrollOn
+                  ? <Pay d={d} patch={patch} reload={load} flash={flash} /> : null}
                 <Papers d={d} patch={patch} reload={load} flash={flash} />
                 <SigningIn d={d} patch={patch} reload={load} flash={flash} onChanged={onChanged} />
                 <Activity d={d} />
@@ -244,7 +258,10 @@ function Rail({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => 
       <div className="stp-facts">
         <Row k="Last seen" v={when(p.last_seen_at)} />
         <Row k="Joined the team" v={day(p.joined_on)} />
-        <Row k="Login created" v={new Date(p.created_at).toLocaleDateString("en-IN")} />
+        {/* Same formatter as the row above it. This was the one date on the whole screen printed
+            by a bare toLocaleDateString, so the rail read "12 Mar 2026" then "16/6/2026" on
+            consecutive lines — three formats in four rows (sweep T20, finding F8). */}
+        <Row k="Login created" v={day(p.created_at.slice(0, 10))} />
         <Row k="Restaurant" v={d.restaurant?.name || "—"} />
       </div>
     </aside>
@@ -655,16 +672,37 @@ function Pay({ d, patch, reload, flash }: Kit) {
     try { await patch({ action: "set_job", in_payroll: on }); flash(on ? "Added to the pay list" : "Taken off the pay list"); reload(); }
     catch (e: any) { flash(e.message); }
   }
+  // RECORDING A PAYMENT IS THE ONE WRITE ON THIS SCREEN THAT CAN'T BE UNDONE — the ledger is
+  // append-only, so a duplicate is fixed only by voiding one entry with a written reason (sweep
+  // T20, finding F1). It had neither of the two guards every other money write in the product has:
+  //   • `paying` disables the button while the request is in flight, so a slow connection can't
+  //     turn "nothing happened yet" into two taps and two salaries.
+  //   • X-LFH-Action-Id makes the at-most-once wrapper on /api/owner/staff actually engage —
+  //     withIdempotency passes straight through when no action id is sent, so the protection that
+  //     route already had was doing nothing for this caller.
+  // Both matter for the same reason: ₹28,000 recorded twice also inflates the month's staff cost
+  // in the owner's reports until somebody notices.
+  // The id is minted ONCE per payment being typed, not per request, and only replaced after one
+  // SAVES. That is what makes it a real guard: a lost reply retried under the same id is
+  // recognised as the same payment, while a genuine retry after a refusal still runs (a failed
+  // write releases its claim — lib/idempotency.ts).
+  const [paying, setPaying] = useState(false);
+  const payAction = useRef(newActionId());
   async function record() {
+    if (paying) return;
+    setPaying(true);
     try {
       const r = await fetch("/api/owner/staff", {
-        method: "POST", headers: { "Content-Type": "application/json" },
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-LFH-Action-Id": payAction.current },
         body: JSON.stringify({ action: "record_payment", staff_id: p.id, ...np }),
       });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j.error || "That payment didn't save.");
+      payAction.current = newActionId();   // that one is banked; the next is a different payment
       setNp({ ...np, amount: "", note: "" }); setPayOpen(false); flash("Payment recorded"); reload();
     } catch (e: any) { flash(e.message); }
+    finally { setPaying(false); }
   }
 
   const paid = d.payments.filter((x) => !x.voided_at);
@@ -720,7 +758,9 @@ function Pay({ d, patch, reload, flash }: Kit) {
                 <Field label="Note" v={np.note} on={(v) => setNp({ ...np, note: v })} wide />
               </div>
               <div className="stp-pop-row">
-                <button className="stp-btn pri sm" onClick={record}>Save this payment</button>
+                <button className="stp-btn pri sm" disabled={paying} onClick={record}>
+                  {paying ? "Saving…" : "Save this payment"}
+                </button>
                 <button className="stp-btn sm" onClick={() => setPayOpen(false)}>Cancel</button>
               </div>
             </div>

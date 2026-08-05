@@ -87,18 +87,33 @@
   // WHERE it broke, in words we can act on. A crash row that only says
   // "Cannot set properties of null (setting 'innerHTML') @ promise" is unactionable — it
   // cost a whole repair session guessing which of ~65 places it was (2026-07-30). So pull
-  // the first two frames of the error's own stack ("app.js:7412 <- app.js:9330" = threw
-  // there, called from there): enough to open the line, small enough for the 120-char
+  // the first two frames of the error's own stack ("app.js@4dda46ba:7412 <- app.js@4dda46ba:9330"
+  // = threw there, called from there): enough to open the line, small enough for the 120-char
   // `where` field. File name only (no long URL), and a graceful "" when a browser gives
   // us no usable stack — this must never itself throw or block the report.
+  //
+  // WHY THE @hash IS PART OF IT (sweep T20, finding F3). The location used to be a bare
+  // "app.js:1108", with the `?v=` deliberately stripped. But `?v=` is the file's CONTENT HASH
+  // (scripts/verify-panel-cache.mjs), and a staff device can be running a weeks-old cached
+  // app.js — so a bare line number does not identify a line in any particular file. A real row
+  // on the Repair board read "input is not defined @ app.js:1108" while line 1108 of the shipped
+  // app.js was a comment, which makes the crash look invented and sends whoever picks up the
+  // Fix-NOW ticket to the wrong code. Carrying the eight-character hash says exactly which build
+  // the number belongs to: same hash as the current file → open that line; different → that
+  // device was on an old bundle, which is itself the answer.
+  function assetTag(name, query) {
+    var m = /[?&]v=([A-Za-z0-9._-]{1,16})/.exec(query || "");
+    return m ? name + "@" + m[1] : name;
+  }
   function frames(err) {
     var st = (err && err.stack) || "";
     var out = [], seen = {};
-    // Matches "…/panels/editor/app.js:7412:23" in every engine's stack format.
-    var re = /([A-Za-z0-9_.-]+\.js)\??[^\s:)]*:(\d+):\d+/g, m;
+    // Matches "…/panels/editor/app.js?v=4dda46ba:7412:23" in every engine's stack format.
+    // Group 2 is the query (may be empty) so the build hash survives into the row.
+    var re = /([A-Za-z0-9_.-]+\.js)(\?[^\s:)]*)?:(\d+):\d+/g, m;
     while ((m = re.exec(st)) && out.length < 2) {
-      var f = m[1] + ":" + m[2];
-      if (f.indexOf("errlog.js") === 0) continue; // our own listener frame says nothing
+      if (m[1].indexOf("errlog.js") === 0) continue; // our own listener frame says nothing
+      var f = assetTag(m[1], m[2]) + ":" + m[3];
       if (seen[f]) continue;
       seen[f] = 1; out.push(f);
     }
@@ -107,7 +122,9 @@
   window.addEventListener("error", function (e) {
     // filename:lineno is the throw site the browser already resolved; the stack (when
     // there is one) adds the CALLER, which is usually what explains the crash.
-    var at = (e && e.filename ? String(e.filename).split("/").pop().split("?")[0] : "") + (e && e.lineno ? ":" + e.lineno : "");
+    var file = e && e.filename ? String(e.filename).split("/").pop() : "";
+    var q = file.indexOf("?") >= 0 ? file.slice(file.indexOf("?")) : "";
+    var at = (file ? assetTag(file.split("?")[0], q) : "") + (e && e.lineno ? ":" + e.lineno : "");
     var chain = frames(e && e.error);
     reportError(e && e.message ? e.message : "script error", chain || at);
   });
