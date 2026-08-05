@@ -64,6 +64,7 @@ const ARGS = process.argv.slice(2);
 // what you asked for is worse than no check, so both spellings work and the source is printed.
 const baseArg = (() => { const i = ARGS.indexOf("--base"); return i >= 0 ? ARGS[i + 1] : null; })();
 const BASE = (baseArg || process.env.VERIFY_BASE || "https://3-d-backup.vercel.app").replace(/\/$/, "");
+const ALLOW_DB_MISMATCH = process.argv.includes("--allow-db-mismatch");
 const BASE_FROM = baseArg ? "--base" : process.env.VERIFY_BASE ? "VERIFY_BASE" : "default";
 const only = (() => {
   const i = ARGS.indexOf("--only");
@@ -123,6 +124,56 @@ const dbGet = async (q) => {
   if (Array.isArray(j)) return j;
   throw new Fail(`the database refused that query: ${JSON.stringify(j).slice(0, 160)}`);
 };
+// ── THE SITE AND THE DATABASE MUST BE THE SAME STACK ─────────────────────────────────────
+// `--base` changes which SITE the browser drives. It does NOT change the database: every
+// dbGet() above reads NEXT_PUBLIC_SUPABASE_URL out of .env.local. Point them at different
+// stacks and the suite places a real order on one database, then looks for it in another —
+// so it reports the order missing, the money wrong, the table slice empty and the kitchen
+// refusing a ticket, while the product did every one of those things correctly.
+//
+// That is exactly what happened running `--base https://3d-backup-2.vercel.app` against
+// backup-1's .env.local (2026-08-05): SIX red phases (16, 123, 170, 175, 177 and the offline
+// tile), none of them a product fault, and an hour spent proving it. A suite that reports
+// failures it cannot substantiate is the same disease as one that passes on dead code.
+//
+// So: refuse, and say exactly what to do instead. Add --allow-db-mismatch only if you
+// genuinely want the browser-only phases and will ignore every database assertion.
+const STACK_DB = {
+  "3-d-backup.vercel.app":   "wnsfcizclkbobwzcxqsf",  // backup-1  (the .env.local pair)
+  "3d-backup-2.vercel.app":  "jhhqzexlpzzwoqnzrgje",  // backup-2  (its own Supabase project)
+  "aevinite.shop":           "kclqkmdxnwlhtyrducku",  // AV LIVE — never a target for this suite
+  "3d-menu-av.vercel.app":   "kclqkmdxnwlhtyrducku",
+};
+{
+  const host = (() => { try { return new URL(BASE).hostname; } catch { return ""; } })();
+  const dbRef = String(SB || "").match(/https?:\/\/([a-z0-9]+)\.supabase\.co/i)?.[1] || "(none)";
+  const wantRef = STACK_DB[host];
+  const isLocal = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(host);
+  if (STACK_DB[host] === "kclqkmdxnwlhtyrducku") {
+    console.error(`\n⛔ ${BASE} is AV LIVE. This suite places real orders and flips real settings — it never runs there.\n`);
+    process.exit(2);
+  }
+  // A local base is correct by construction: it is served BY this checkout, using this .env.local.
+  if (!isLocal && wantRef && wantRef !== dbRef && !ALLOW_DB_MISMATCH) {
+    console.error(`\n⛔ The site and the database are different stacks, so this run cannot mean anything.`);
+    console.error(`   site      ${BASE}  (${BASE_FROM})  → expects database ${wantRef}`);
+    console.error(`   database  ${dbRef}  (NEXT_PUBLIC_SUPABASE_URL in .env.local)`);
+    console.error(`   Every phase that places an order and then reads it back would look for it in the`);
+    console.error(`   WRONG database and report the product broken when it is not.`);
+    console.error(`\n   Do one of these instead:`);
+    console.error(`     · drop --base and run against the stack .env.local already points at;`);
+    console.error(`     · to test THIS checkout's code, build it and run --base http://localhost:<port>`);
+    console.error(`       (a local site uses this .env.local, so the pair is correct);`);
+    console.error(`     · --allow-db-mismatch if you only want the browser-only phases and will`);
+    console.error(`       ignore every database assertion.\n`);
+    process.exit(2);
+  }
+  if (!isLocal && !wantRef) {
+    console.warn(`\n⚠ ${BASE} is not a stack this suite knows. Its database assertions read ${dbRef};`);
+    console.warn(`  if that is not this site's database, treat every order/money/slice failure as noise.\n`);
+  }
+}
+
 const H = adminHeaders(BASE);
 const HJ = { ...H, "Content-Type": "application/json" };
 const api = (p, init) => fetch(BASE + p, { cache: "no-store", ...init, headers: { ...H, ...(init?.headers || {}) } });
