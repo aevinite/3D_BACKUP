@@ -152,7 +152,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
+  // ALLOW / DISMISS MUST NOT SUCCEED AT NOTHING (sweep T20). Both used to answer ok:true for an
+  // event id that matches no row — the page removes the row optimistically, so the admin watched
+  // it disappear and believed a wall had been lifted while the person on the floor was still
+  // stuck. "clear" above already 404s in exactly this case; these two now match it. Same rule the
+  // user DELETE learned in the 2026-07-07 audit: never log and report a change that didn't happen.
   if (action === "allow") {
+    const e = (await sb.from("rate_limit_events").select("id").eq("id", eventId).maybeSingle()).data;
+    if (!e) return err("that limit-reached record no longer exists — refresh the page", 404);
     // Reset that subject's counter now (unblock them) + mark the event handled.
     const r = await sb.rpc("lfh_rate_allow", { p_event_id: eventId, p_actor: "admin" });
     if (r.error) return err(r.error.message, 500);
@@ -162,6 +169,7 @@ export async function POST(req: NextRequest) {
   if (action === "dismiss") {
     const r = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId).select("id").maybeSingle();
     if (r.error) return err(r.error.message, 500);
+    if (!r.data) return err("that limit-reached record no longer exists — refresh the page", 404);
     return NextResponse.json({ ok: true });
   }
   return err("unknown action");

@@ -355,9 +355,18 @@ export default function AdminRepair() {
 
       {/* Status strip — each live pill jumps to its section */}
       <div className="rp-strip">
-        <a className={`rp-pill${groups.length ? " alert" : " ok"}`} href="#problems" title="Jump to problems">
+        {/* ONE number for one thing (sweep T20, finding F5). This pill counted RAW error rows
+            while the section heading right below it counted GROUPS, so the page said "7 problems
+            (24h)" and "Problems right now · 3 · last 24h" at the same time, about the same window.
+            Both were true — 3 tiles rolling up 4+1+2 reports — but two numbers for one fact is how
+            a reader stops trusting either. The pill now counts what the board actually shows, and
+            the raw total lives in the tooltip for anyone who wants it. */}
+        <a className={`rp-pill${groups.length ? " alert" : " ok"}`} href="#problems"
+          title={errors.length > groups.length
+            ? `Jump to problems — ${groups.length} problem${groups.length === 1 ? "" : "s"}, ${errors.length} reports in all (repeats are grouped)`
+            : "Jump to problems"}>
           <i className={`fas ${groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
-          <span className="n">{errLoading ? "…" : errors.length}</span><span>problem{errors.length === 1 ? "" : "s"} (24h)</span>
+          <span className="n">{errLoading ? "…" : groups.length}</span><span>problem{groups.length === 1 ? "" : "s"} (24h)</span>
         </a>
         <a className={`rp-pill${rlHits.length ? " alert" : ""}`} href="#rate-limits" title="Jump to rate-limit hits">
           <i className="fas fa-gauge-high" aria-hidden="true" /><span className="n">{errLoading ? "…" : rlHits.length}</span><span>limit{rlHits.length === 1 ? "" : "s"} reached</span>
