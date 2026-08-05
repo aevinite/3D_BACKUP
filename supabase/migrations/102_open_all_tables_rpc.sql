@@ -1,4 +1,11 @@
 -- 102_open_all_tables_rpc.sql
+-- ⚠️ RETIRED — the function this file creates NO LONGER EXISTS.
+--   (noted 2026-08-05, T8 database sweep)
+--   Migration 281 (`281_close_all_removed_and_three_of_four.sql`) DROPPED both bulk table RPCs —
+--   `lfh_staff_open_all_tables` and `lfh_staff_close_all_tables` — under the owner's "no table
+--   ends itself" rule, and the panels + routes were updated to match (see the note at
+--   public/panels/editor/app.js: "/sessions/close-all and /sessions/open-all are now GONE from
+--   the server too"). Nothing below is live. Kept for the reasoning, not as truth.
 -- INSTANT "Open all" (owner 2026-06-27): the manager's "Open all" fired ONE POST /sessions/open
 -- PER table (300 tables → 300 round-trips to the Sydney DB, browser-capped at ~6 concurrent →
 -- many seconds, and the tiles only flipped to "open" AFTER all finished). This RPC opens every

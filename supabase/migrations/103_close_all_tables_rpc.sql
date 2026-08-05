@@ -1,4 +1,11 @@
 -- 103_close_all_tables_rpc.sql
+-- ⚠️ RETIRED — the function this file creates NO LONGER EXISTS.
+--   (noted 2026-08-05, T8 database sweep)
+--   Migration 281 (`281_close_all_removed_and_three_of_four.sql`) DROPPED both bulk table RPCs —
+--   `lfh_staff_open_all_tables` and `lfh_staff_close_all_tables` — under the owner's "no table
+--   ends itself" rule, and the panels + routes were updated to match (see the note at
+--   public/panels/editor/app.js: "/sessions/close-all and /sessions/open-all are now GONE from
+--   the server too"). Nothing below is live. Kept for the reasoning, not as truth.
 -- INSTANT "Close all" (owner 2026-06-27) — the mirror of mig 102's open-all. The manager's
 -- "Close all" fired one POST /sessions/:id/close PER open session (N round-trips to Sydney) and
 -- the tiles only freed AFTER all finished. This RPC closes every CLOSEABLE open session in ONE
