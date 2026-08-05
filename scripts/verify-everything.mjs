@@ -196,12 +196,27 @@ try {
   // exit handler matches that pid and deletes the file, taking the displaced run's protection
   // with it. So on the way out, hand the lock BACK to whatever run is still alive rather than
   // assuming we were the only one.
+  // A WATCHER IS NOT A RUN. `pgrep -f "verify-everything.mjs"` matches any process whose command
+  // line CONTAINS that string — and the shells other sessions use to queue behind this lock poll
+  // with exactly that pattern (`until ! pgrep -f "verify-everything.mjs"; do sleep 30; done`). So
+  // the hand-over below picked a polling zsh as the next owner. That shell never runs the suite and
+  // never releases the lock, so the lock wedged permanently and EVERY session was refused with
+  // "another full run is already going" naming a pid that was only ever waiting. Observed
+  // 2026-08-05: lock owner pid 54483 was `/bin/zsh -c … until ! pgrep …`, base "unknown
+  // (inherited)", with no real suite process alive anywhere on the machine.
+  //
+  // So require the command to BE a node invocation of this script, not merely to mention it.
   const liveSuitePids = () => {
     try {
-      return execFileSync("pgrep", ["-f", "verify-everything.mjs"], { encoding: "utf8" })
-        .split("\n").map((x) => Number(x.trim()))
+      return execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" })
+        .split("\n")
+        .map((l) => l.trim().match(/^(\d+)\s+(.*)$/))
+        .filter(Boolean)
+        // starts with node (bare or an absolute path) AND runs this script
+        .filter((m) => /^(\S*\/)?node(\.exe)?(\s|$)/.test(m[2]) && /verify-everything\.mjs/.test(m[2]))
+        .map((m) => Number(m[1]))
         .filter((n) => n && n !== process.pid && alive(n));
-    } catch { return []; }                       // pgrep exits 1 when nothing matches
+    } catch { return []; }
   };
   const release = () => {
     try {
