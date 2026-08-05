@@ -59,6 +59,7 @@ const REMOVAL_KIND: Record<string, [string, string]> = {
   discount_given: ["％", "Discount given"],
   payment_reverted: ["↺", "Payment reverted"],
   on_the_house: ["🎁", "On the house"],
+  bill_changed_after_reopen: ["⇄", "Bill changed after a reopen"],
 };
 const REMOVAL_REASON: Record<string, string> = {
   mistake: "By mistake",

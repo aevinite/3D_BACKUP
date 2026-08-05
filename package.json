@@ -61,6 +61,7 @@
     "verify:manager-behaviour": "node scripts/verify-manager-behaviour.mjs",
     "verify:manager-gates": "node scripts/verify-manager-gates.mjs",
     "verify:guest": "node scripts/verify-guest.mjs",
+    "verify:i18n-scope": "node scripts/verify-i18n-scope.mjs",
     "verify:pointers": "node scripts/verify-doc-pointers.mjs",
     "test:units": "node --test lib/*.test.mjs",
     "typecheck": "tsc -p tsconfig.typecheck.json",

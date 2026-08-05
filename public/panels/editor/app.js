@@ -1600,9 +1600,11 @@ function newWaiterTablesHtml() {
 // tableLabel(t): what staff panels CALL table t — its display name (mig 131) with
 // the number kept alongside, else the plain "Table t". Display-only; every id/bill
 // still uses the number.
+// T7, never "Table 7" (owner, 2026-08-05: "it should always be T7 not table 7"). A table with a
+// NAME set shows the name. One short form across every panel, ticket and the printed bill.
 function tableLabel(t) {
   const nm = tableName(t);
-  return nm ? `${nm} (T${t})` : `Table ${t}`;
+  return nm ? `${nm} (T${t})` : `T${t}`;
 }
 // tableName(t): JUST the owner's name for table t ("A1", "Patio"), or "" when unnamed.
 function tableName(t) {
@@ -1612,8 +1614,8 @@ function tableName(t) {
 // tail: the printed ticket has to read exactly like the label on the table, so a waiter
 // carrying it walks to the right place (owner 2026-07-29). Unnamed → "Table 7".
 function tablePrintLabel(t) {
-  if (t == null || t === "") return "Table ?";
-  return tableName(t) || `Table ${t}`;
+  if (t == null || t === "") return "T?";
+  return tableName(t) || `T${t}`;
 }
 
 // HOW MANY PEOPLE FIT AT A TABLE — the one function every screen asks (owner, 2026-08-01).
@@ -2058,7 +2060,7 @@ function openTableHolderPicker(i) {
   }).join("") || `<div class="sx-empty">No waiter logins yet.</div>`;
   const nm = ((s.tableNames || {})[String(i)] || "").trim();
   ov.innerHTML = `<div class="sx-modal sec-modal">
-      <div class="sx-modal-head"><h3>Table ${i}${nm ? ` · ${esc(nm)}` : ""}</h3><button class="sx-x" type="button" data-sec-close>✕</button></div>
+      <div class="sx-modal-head"><h3>T${i}${nm ? ` · ${esc(nm)}` : ""}</h3><button class="sx-x" type="button" data-sec-close>✕</button></div>
       <div class="sx-modal-body"><p class="muted" style="font-size:13px;margin:0 0 12px">Who serves this table? Tick more than one if they share it.</p><div class="sec-holds">${rows()}</div></div>
     </div>`;
   const close = () => { secEscOff(ov); ov.remove(); };
@@ -2403,10 +2405,11 @@ function formGeneral(s) {
 // CSS class that colours it.
 const STATUS_META = {
   received: { label: "🔔 New", cls: "received" },
-  // "Cooking", not "Preparing": the same modal's progress legend already says "N cooking" and the
-  // kitchen board's column is "Cooking", so one order was described three ways within 40px
-  // (T15 sweep, 2026-08-05). The GUEST tracker deliberately keeps the softer "Preparing".
-  preparing: { label: "👨‍🍳 Cooking", cls: "preparing" },
+  // "Preparing" is the ONE word for this status on every screen a guest or a manager sees — the
+  // floor tile (built by the database), this pill, the progress legend and the dish badge. Only
+  // the KITCHEN board says "Cooking", deliberately: it is the cook's own word on the cook's own
+  // screen. Don't change one of these without the others (T15 sweep, 2026-08-05).
+  preparing: { label: "👨‍🍳 Preparing", cls: "preparing" },
   served: { label: "✓ Served", cls: "served" },
   cancelled: { label: "✕ Cancelled", cls: "cancelled" },
 };
@@ -2729,9 +2732,11 @@ function mergedOrderCardHtml(g) {
   const invoiced = !!sid && invNo != null && !invVoided;
   let billBtns;
   if (sid && !invoiced) {
-    // Running tab: Generate-invoice ONLY — no direct Print until an invoice exists
-    // (owner 2026-07-24: print must not be available before the invoice is generated).
-    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-gen-invoice="${esc(sid)}">🧾 Generate invoice</button>` : "";
+    // ONE ACTION: Print issues the invoice and prints it (owner, 2026-08-05: "print means
+    // generate invoice and print ... once the bill is printed, the invoice has been generated").
+    // Invoice-first still holds — nothing prints without a number — but a waiter handing over a
+    // bill now taps once instead of learning which of two buttons comes first.
+    billBtns = anyUnpaid ? `<button class="ord-btn invoice" data-print-issue="${esc(sid)}" data-print-group="${esc(sessKey)}">🖨 Print bill</button>` : "";
   } else if (sid && invoiced) {
     const pay = anyUnpaid ? `<button class="ord-btn pay" data-sess-pay="${esc(sessKey)}"${anyReceived ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark paid</button>` : "";
     billBtns = pay + `<button class="ord-btn" data-print-group="${esc(sessKey)}">🖨 Print</button><button class="ord-btn ghost" data-void-invoice="${esc(sid)}">↩ Reopen</button><button class="ord-btn ghost" data-credit-note="${esc(sid)}" title="Refund/correct without changing the bill (issues a credit note)">🧾− Credit note</button>`;
@@ -2751,7 +2756,7 @@ function mergedOrderCardHtml(g) {
   return `<div class="card ord-card ord-${cls} ${paid ? "is-paid" : ""}">
     <div class="ord-top">
       ${kots.length ? `<span class="kot-chip" title="Kitchen tickets">#${esc(kots[0])}${kots.length > 1 ? ` +${kots.length - 1}` : ""}</span>` : ""}
-      <b>${tnum ? "Table " + esc(tnum) : "Walk-in / no table"}</b>
+      <b>${tnum ? "T" + esc(tnum) : "Walk-in / no table"}</b>
       <span class="ord-pill ${cls}">${label}</span>
       <span class="pay-pill ${paid ? "paid" : "pending"}">${paid ? "💳 Paid" : "⏳ Unpaid"}</span>
       ${invoiced ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(invNo, o0.invoice_at))}</span>` : (sid && invVoided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
@@ -2790,7 +2795,7 @@ function callsHtml() {
     const emoji = REASON_EMOJI[c.note] || "🔔";
     return `<div class="call-row">
       <span class="call-bell">${emoji}</span>
-      <b>${c.table_number ? "Table " + esc(c.table_number) : "A guest"}</b>
+      <b>${c.table_number ? "T" + esc(c.table_number) : "A guest"}</b>
       <span class="call-when">${reason} · ${esc(when)}</span>
       <button class="ord-btn serve" data-resolve="${esc(c.id)}">✓ Attended</button>
     </div>`;
@@ -3120,7 +3125,7 @@ function billRecordCardHtml(b) {
   return `<div class="card ord-card ${cls} ${b.paid ? "is-paid" : ""} ord-record" data-bill-open="${esc(b.key)}" role="button" tabindex="0" title="Open this bill">
     <div class="ord-top">
       ${kots.length ? `<span class="kot-chip" title="Kitchen tickets">#${esc(kots[0])}${kots.length > 1 ? ` +${kots.length - 1}` : ""}</span>` : ""}
-      <b>${b.table ? "Table " + esc(b.table) : "Walk-in"}${b.billNo != null ? ` · #${esc(b.billNo)}` : ""}</b>
+      <b>${b.table ? "T" + esc(b.table) : "Walk-in"}${b.billNo != null ? ` · #${esc(b.billNo)}` : ""}</b>
       ${statusPill}${payPill}
       ${b.invNo != null && !voided ? `<span class="inv-chip" title="Tax invoice">${esc(invFmt(b.invNo, b.invoiceAt))}</span>` : (voided ? `<span class="inv-chip voided">invoice voided</span>` : "")}
     </div>
@@ -3256,7 +3261,7 @@ function openBillModal(key) {
   const wrap = document.createElement("div");
   wrap.className = "bill-overlay";
   wrap.innerHTML = `<div class="bill-modal">
-      <div class="bm-head"><b>${o0.table_number ? "Table " + esc(o0.table_number) : "Walk-in"}${o0.bill_no != null ? ` · Bill #${esc(o0.bill_no)}` : ""}</b>${o0.invoice_voided ? `<span class="inv-chip voided">voided</span>` : ""}</div>
+      <div class="bm-head"><b>${o0.table_number ? "T" + esc(o0.table_number) : "Walk-in"}${o0.bill_no != null ? ` · Bill #${esc(o0.bill_no)}` : ""}</b>${o0.invoice_voided ? `<span class="inv-chip voided">voided</span>` : ""}</div>
       <div class="bm-sub">${esc(o0.customer_name || "")}${o0.created_at ? " · " + esc(fmtWhen(o0.created_at)) : ""}</div>
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
@@ -3290,7 +3295,8 @@ function openBillModal(key) {
         // ONE place in the panel: the LIVE card, and only while the bill was UNPAID. A paid
         // bill leaves Live the same instant, so the promise had nowhere to land and the sale
         // ended up with no tax invoice and no button anywhere that could issue one.
-        if (sid2 && o0.invoice_no == null) acts.push(`<button class="btn ghost" data-gen-invoice="${esc(sid2)}">🧾 Generate invoice</button>`);
+        // Print issues the invoice first — same one-action rule as the floor card above.
+        if (sid2 && o0.invoice_no == null) acts.push(`<button class="btn ghost" data-print-issue="${esc(sid2)}">🖨 Print bill</button>`);
         // Reopen: only an ISSUED invoice can be reopened (the server enforces the window +
         // permission; voiding is recorded). A voided/never-issued bill has nothing to reopen.
         if (invoiced2) acts.push(`<button class="btn ghost" data-void-invoice="${esc(sid2)}">↩ Reopen bill</button>`);
@@ -3324,6 +3330,8 @@ function openBillModal(key) {
   // document.body, outside the #editor delegated binders.
   const genBtn = wrap.querySelector("[data-gen-invoice]");
   if (genBtn) genBtn.onclick = async () => { close(); await generateInvoice(genBtn.dataset.genInvoice); };
+  const piBtn = wrap.querySelector("[data-print-issue]");
+  if (piBtn) piBtn.onclick = async () => { close(); await printIssuingInvoice(piBtn.dataset.printIssue, null); };
   const voidBtn = wrap.querySelector("[data-void-invoice]");
   if (voidBtn) voidBtn.onclick = async () => { close(); await voidInvoice(voidBtn.dataset.voidInvoice); };
   const cnBtn = wrap.querySelector("[data-credit-note]");
@@ -3453,7 +3461,7 @@ async function freeTable(t, opts = {}) {
   const ids = (state.data.orders || []).filter((o) => !o.archived && (o.table_number || "").trim() === String(t)).map((o) => o.id);
   const sess = openSessionForTable(t);
   if (!ids.length && !sess) return;
-  if (!opts.silent && !(await confirmDialog(`Free Table ${t}? Its ${ids.length} settled ${ids.length === 1 ? "order" : "orders"} leave the floor (kept in records).`, "Free table"))) return;
+  if (!opts.silent && !(await confirmDialog(`Free T${t}? Its ${ids.length} settled ${ids.length === 1 ? "order" : "orders"} leave the floor (kept in records).`, "Free table"))) return;
   try {
     for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
     (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) o.archived = true; });
@@ -3462,7 +3470,7 @@ async function freeTable(t, opts = {}) {
     // whose food was cancelled unmade, and the table would sit on the floor forever.
     if (sess) { try { await api("POST", "/sessions/" + sess.id + "/close", { force: true }); } catch (e) { /* orders are already off the floor; the tile reads free */ } }
     await loadSessions();
-    toast(`Table ${t} is free`, "ok");
+    toast(`T${t} is free`, "ok");
   } catch (e) { toast("Could not free: " + e.message, "err"); }
 }
 
@@ -3596,7 +3604,7 @@ async function cancelOrder(id) {
   // A cancelled ticket must say WHY (mig 251). The reason ask replaces the old yes/no confirm — it
   // is a confirmation in itself, and one tap fewer than asking twice.
   const o0 = (state.data.orders || []).find((x) => x.id === id);
-  const reason = await askRemovalReason(`KOT #${o0 && o0.kot_no != null ? o0.kot_no : "—"}${o0 && o0.table_number ? ` · Table ${o0.table_number}` : ""} — it will be voided, no charge to the guest.`);
+  const reason = await askRemovalReason(`KOT #${o0 && o0.kot_no != null ? o0.kot_no : "—"}${o0 && o0.table_number ? ` · T${o0.table_number}` : ""} — it will be voided, no charge to the guest.`);
   if (!reason) return;
   // The reason travels WITH the cancel; the server writes the audit row (see setOrderStatus).
   await setOrderStatus(id, "cancelled", reason);
@@ -4086,7 +4094,7 @@ async function onHouseSettle(t) {
     await pollTables([String(t)]);
     if (ids.length && window.LFH_UNDO) LFH_UNDO.show({
       message: "On the house — settled free",
-      sub: `Table ${t} · tap undo to reopen the bill`,
+      sub: `T${t} · tap undo to reopen the bill`,
       icon: "🏠",
       seconds: 5,
       onUndo: () => editorUndoOnHouse(ids),
@@ -4133,7 +4141,7 @@ function openKhataPersonPicker(due, t) {
     const wrap = el(`<div class="sx-modal-overlay khata-overlay"><div class="sx-modal pay-modal">
       <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Pay Later — who's this bill on?</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
       <div class="dish-edit-body">
-        <div class="disc-bill-row"><span>Park Table ${esc(t)} bill</span><b>${inr(due)}</b></div>
+        <div class="disc-bill-row"><span>Park T${esc(t)} bill</span><b>${inr(due)}</b></div>
         <input type="text" class="dish-edit-custominput" id="khataSearch" maxlength="60" placeholder="🔍 Search name or mobile…" autocomplete="off" style="margin:8px 0 6px">
         <div class="khata-pick-list" id="khataPickList"><div class="sx-empty">Type to search, or add a new person below.</div></div>
         <div class="dish-edit-lbl" style="margin-top:10px">— or add a new person —</div>
@@ -4353,7 +4361,7 @@ function renderRatings(d) {
     return `<div style="border-left:4px solid ${col};background:var(--panel,#fff);border:1px solid var(--line,#e5e7eb);border-radius:12px;padding:12px;margin-bottom:10px;opacity:${r.acknowledged ? 0.72 : 1}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <span style="font-size:15px">${ratingStars(r.rating)}</span>
-        ${r.table_number ? `<span style="${RCHIP}">Table ${esc(String(r.table_number))}</span>` : ""}
+        ${r.table_number ? `<span style="${RCHIP}">T${esc(String(r.table_number))}</span>` : ""}
         ${r.acknowledged ? `<span style="${RCHIP};color:#16a34a">handled</span>` : ""}
         <span style="margin-left:auto;display:flex;gap:6px">
           <button class="btn" data-rnote="${r.id}">✎ Note</button>
@@ -5474,6 +5482,9 @@ function renderEditor() {
     };
     // Invoice pipeline buttons on the bill card.
     ed.querySelectorAll("[data-gen-invoice]").forEach((btn) => { btn.onclick = () => generateInvoice(btn.dataset.genInvoice); });
+    ed.querySelectorAll("[data-print-issue]").forEach((btn) => {
+      btn.onclick = () => printIssuingInvoice(btn.dataset.printIssue, btn.dataset.printGroup || null);
+    });
     ed.querySelectorAll("[data-void-invoice]").forEach((btn) => { btn.onclick = () => voidInvoice(btn.dataset.voidInvoice); });
     ed.querySelectorAll("[data-credit-note]").forEach((btn) => { btn.onclick = () => creditNote(btn.dataset.creditNote); });
     ed.querySelectorAll("[data-print-group]").forEach((btn) => {
@@ -6731,6 +6742,7 @@ const AUDIT_KIND = {
   invoice_voided: ["↩", "Invoice voided"],
   qty_reduced: ["➖", "Quantity reduced"], discount_given: ["％", "Discount given"],
   payment_reverted: ["↺", "Payment reverted"], on_the_house: ["🎁", "On the house"],
+  bill_changed_after_reopen: ["⇄", "Bill changed after a reopen"],
 };
 async function loadAudit() {
   try { state.audit = await api("GET", "/audit?limit=200"); }
@@ -6771,7 +6783,7 @@ function auditHtml() {
     <input id="auQ" class="au-q" type="search" placeholder="Search a KOT, bill, table, dish, person or reason…" value="${esc(state.auditQ || "")}">
     ${list.length ? `<div class="au-rows">${list.map((r) => {
       const [ico, label] = AUDIT_KIND[r.kind] || ["•", r.kind];
-      const bits = [r.table_number ? "Table " + esc(r.table_number) : "", r.kot_no != null ? "KOT #" + esc(r.kot_no) : "",
+      const bits = [r.table_number ? "T" + esc(r.table_number) : "", r.kot_no != null ? "KOT #" + esc(r.kot_no) : "",
         r.bill_no != null ? "Bill #" + esc(r.bill_no) : "", r.invoice_no ? "Invoice " + esc(r.invoice_no) : "",
         r.item_title ? esc(r.item_title) + (r.qty > 1 ? " ×" + esc(r.qty) : "") : "",
         r.amount != null ? inr(parseFloat(r.amount) || 0) : ""].filter(Boolean).join(" · ");
@@ -6843,7 +6855,7 @@ async function openRemovalDetail(id) {
       ${row("Kitchen ticket", (w && w.kot_no != null ? w.kot_no : d.kot_no) != null ? "KOT #" + esc((w && w.kot_no != null ? w.kot_no : d.kot_no)) : "—")}
       ${row("Bill number", (w && w.bill_no != null ? w.bill_no : d.bill_no) != null ? "#" + esc((w && w.bill_no != null ? w.bill_no : d.bill_no)) : "—")}
       ${row("Invoice", (w && w.invoice_no) || d.invoice_no ? esc((w && w.invoice_no) || d.invoice_no) : "not invoiced")}
-      ${row("Table", (w && w.table_number) || d.table_number ? "Table " + esc((w && w.table_number) || d.table_number) : "no table (walk-in / parcel)")}
+      ${row("Table", (w && w.table_number) || d.table_number ? "T" + esc((w && w.table_number) || d.table_number) : "no table (walk-in / parcel)")}
       ${w && w.ordered_at ? row("Ordered at", whenLong(w.ordered_at)) : ""}
       ${w && w.customer ? row("Customer", esc(w.customer) + (w.customer_phone ? ` · ${esc(w.customer_phone)}` : "")) : ""}
       <div class="au-d-head">What was on it${w && w.item_count != null ? ` · ${esc(w.item_count)} line${w.item_count === 1 ? "" : "s"}` : ""}</div>
@@ -6906,6 +6918,59 @@ const REMOVAL_REASONS = [
   ["kitchen_error", "👨‍🍳 Kitchen error", ""],
   ["other", "✏️ Other reason", "Type it below"],
 ];
+// Why a PRINTED bill is being reopened. Same shape as askRemovalReason, different words and
+// different reasons — reopening is not a removal, it is almost always "they want to order more"
+// (owner, 2026-08-05: "there should be a option of asking why you want to reopen ... and there
+// will be a quick option that more things to add"). A free-text prompt made the commonest reason
+// in the restaurant something a manager had to TYPE, every time, mid-service.
+// The chosen reason travels with the void and the SERVER records it in the Audit.
+const REOPEN_REASONS = [
+  ["add_items", "🍽 Adding more items", "The guest wants to order more"],
+  ["wrong_items", "✏️ Wrong items on the bill", ""],
+  ["wrong_price", "₹ Wrong price or discount", ""],
+  ["wrong_table", "⇄ Wrong table", ""],
+  ["guest_request", "🙋 Guest asked for a change", ""],
+  ["other", "✏️ Other reason", "Type it below"],
+];
+function askReopenReason(what) {
+  return new Promise((resolve) => {
+    const wrap = el(`<div class="sx-modal-overlay rr-overlay"><div class="sx-modal rr-modal">
+      <div class="rr-head"><div class="rr-ico">↩</div><div class="rr-htxt">
+        <h3>Why are you reopening this bill?</h3><p>${esc(what || "")}</p></div>
+        <button class="tbl-modal-close rr-x" aria-label="Close">✕</button></div>
+      <div class="rr-body"><div class="rr-grid">
+        ${REOPEN_REASONS.map(([code, label, hint]) => `<button type="button" class="rr-opt" data-code="${code}">
+          <b>${esc(label)}</b>${hint ? `<small>${esc(hint)}</small>` : ""}</button>`).join("")}
+      </div>
+      <label class="rr-notelbl" for="roNote">Anything to add <span class="muted">(optional — required for \u201cOther\u201d)</span></label>
+      <input id="roNote" class="rr-note" type="text" maxlength="200" placeholder="e.g. adding 2 desserts">
+      <p class="rr-foot-note">The invoice is voided (kept on record) and a NEW number is issued when you print again.
+        This is recorded with your name in <b>Audit</b>, with the bill before and after.</p>
+      </div>
+      <div class="rr-foot"><button type="button" class="btn rr-cancel">Keep it closed</button>
+        <button type="button" class="btn danger rr-go" disabled>Reopen bill</button></div>
+    </div></div>`);
+    document.body.appendChild(wrap);
+    const note = wrap.querySelector(".rr-note"), go = wrap.querySelector(".rr-go");
+    let code = null;
+    const sync = () => { go.disabled = !code || (code === "other" && !note.value.trim()); };
+    wrap.querySelectorAll(".rr-opt").forEach((b) => (b.onclick = () => {
+      code = b.dataset.code;
+      wrap.querySelectorAll(".rr-opt").forEach((x) => x.classList.toggle("sel", x === b));
+      sync(); if (code === "other") note.focus();
+    }));
+    note.addEventListener("input", sync);
+    // No manual back-layer: .sx-modal-overlay is already watched, and __lfhClose is the ONE
+    // closer so the awaiting caller always gets an answer (see askRemovalReason for the story).
+    function done(v) { wrap.remove(); resolve(v); }
+    wrap.__lfhClose = () => done(null);
+    wrap.querySelector(".rr-cancel").onclick = () => done(null);
+    wrap.querySelector(".rr-x").onclick = () => done(null);
+    wrap.onclick = (e) => { if (e.target === wrap) done(null); };
+    go.onclick = () => { if (go.disabled) return; done({ code, note: note.value.trim() }); };
+    setTimeout(() => wrap.querySelector(".rr-opt").focus(), 50);
+  });
+}
 function askRemovalReason(what) {
   return new Promise((resolve) => {
     const wrap = el(`<div class="sx-modal-overlay rr-overlay"><div class="sx-modal rr-modal">
@@ -7154,7 +7219,7 @@ async function itemStatus(id, status) {
       const ord = it ? (state.data.orders || []).find((x) => x.id === it.order_id) : null;
       LFH_UNDO.show({
         message: `${(it && it.title) || "Dish"} served`,
-        sub: ord ? `Table ${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
+        sub: ord ? `T${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
         onUndo: () => editorUndoServe([{ kind: "session", id, prev }]),
       });
     }
@@ -7204,7 +7269,7 @@ async function attendCall(id) {
     // A mis-tapped "Done" silently drops a real guest call — offer a takeback (2026-07-22).
     if (window.LFH_UNDO) LFH_UNDO.show({
       message: "Call attended",
-      sub: target ? `Table ${target.table_number} · ${target.note || "call"} — tap undo` : "Tap undo to put the call back",
+      sub: target ? `T${target.table_number} · ${target.note || "call"} — tap undo` : "Tap undo to put the call back",
       icon: "🔔",
       onUndo: async () => { try { await api("PATCH", "/calls/" + id, { resolved: false }); await loadSessions(); } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); } },
     });
@@ -8723,7 +8788,12 @@ function itemRowHtml(row, editing = false) {
   // silently delete it (mirror the tablet, which also blocks delete on served).
   const delBtn = (row.kind === "session" && row.status !== "served") ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
-  const STLABEL = { received: "new", preparing: "cooking", ready: "ready", served: "served", cancelled: "cancelled" };
+  // "preparing", not "cooking": the tile above this card and the guest's own order tracker both
+  // say Preparing (the tile's label comes from the DATABASE, lfh_table_view_summary), so calling
+  // the same status "cooking" here made ONE order read three ways inside one modal — Preparing
+  // on the pill, cooking in the legend, COOKING on the badge (T15 sweep, 2026-08-05). The KITCHEN
+  // board keeps "Cooking" on purpose: that is the word a cook uses, on the cook's own screen.
+  const STLABEL = { received: "new", preparing: "preparing", ready: "ready", served: "served", cancelled: "cancelled" };
   // STAFF EDIT (a real dish): qty −/＋ steppers + a "✎ Edit" button (allergens +
   // kitchen note) on a FULL-WIDTH row below the dish. Split into two separate gates:
   //   qty steppers  — blocked once READY/SERVED (re-prices the bill; you can't
@@ -8956,7 +9026,7 @@ function tablePanelParts(t, host = "float") {
   const nItems = dishN || 1;
   const guestsN = streaming ? (Number(sumTile.members) || 0) : (sess ? membersOf(sess.id).length : 0);
   const subLine = `<div class="tp-det-sub">${sess && sess.bill_no != null ? `<span>Bill <b>#${esc(sess.bill_no)}</b></span>` : ""}<span><b>${guestsN}</b> guest${guestsN === 1 ? "" : "s"}</span><span><b>${dishN}</b> dish${dishN === 1 ? "" : "es"}</span>${due > 0 ? `<span>Due <b>${inr(due)}</b></span>` : billTotal > 0 ? `<span>Total <b>${inr(billTotal)}</b></span>` : ""}</div>`;
-  const progress = dishN ? `<div class="tp-prog"><div class="tp-prog-bar"><span class="pp-served" style="width:${(cServed / nItems) * 100}%"></span><span class="pp-cook" style="width:${(cCook / nItems) * 100}%"></span><span class="pp-recv" style="width:${(cRecv / nItems) * 100}%"></span></div><div class="tp-prog-leg"><span><i class="pl-served"></i>${cServed} served</span><span><i class="pl-cook"></i>${cCook} cooking</span><span><i class="pl-recv"></i>${cRecv} new</span></div></div>` : "";
+  const progress = dishN ? `<div class="tp-prog"><div class="tp-prog-bar"><span class="pp-served" style="width:${(cServed / nItems) * 100}%"></span><span class="pp-cook" style="width:${(cCook / nItems) * 100}%"></span><span class="pp-recv" style="width:${(cRecv / nItems) * 100}%"></span></div><div class="tp-prog-leg"><span><i class="pl-served"></i>${cServed} served</span><span><i class="pl-cook"></i>${cCook} preparing</span><span><i class="pl-recv"></i>${cRecv} new</span></div></div>` : "";
   let headMeta = subLine + progress;
 
   // STREAMING: head is accurate from summary; the actionable body (guest rows, dish rows,
@@ -9114,7 +9184,12 @@ function tablePanelParts(t, host = "float") {
   // is recorded), and nothing here can erase a sale.
   const printBtn = !os.length ? "" : (invoicedNow
     ? `<button class="btn" id="sxPrint">🖨 Print</button><button class="btn" id="sxReopen" title="Void the invoice to change the bill again">↩ Reopen</button>`
-    : `<button class="btn primary" id="sxPrint" title="Generates the invoice, then prints it">🖨 Print</button><button class="btn" id="sxGenInv" title="Only issues the invoice — no paper">🧾 Generate invoice</button>`);
+    // ONE button (owner, 2026-08-05: "print means generate invoice and print ... once the bill is
+    // printed, the invoice has been generated"). Print already issues-then-prints; a second
+    // button that ONLY issues was the thing making people ask which one comes first, and it
+    // could leave a numbered invoice with no paper. Nothing about compliance changes — the
+    // invoice is still issued before anything prints, and it still locks the bill.
+    : `<button class="btn primary" id="sxPrint" title="Issues the tax invoice, then prints the bill">🖨 Print bill</button>`);
   // The bill now shows a full BREAKDOWN (subtotal · discount · GST · total) summed
   // across the table's non-cancelled orders, not just a one-line "Due/Total".
   // Breakdown from billMath (same rate + discount-before-tax rule as the printed bill),
@@ -9197,8 +9272,8 @@ function tablePanelParts(t, host = "float") {
     // table that holds the bill offers to release each of the others, one button each, because there
     // is nothing to detach IT from.
     const unmergeBtns = mergeParentOf(t)
-      ? `<button class="btn danger sx-unmerge" data-unmerge="${esc(t)}">⇹ Unmerge Table ${esc(t)}</button>`
-      : mergeChildrenOf(t).map((k) => `<button class="btn danger sx-unmerge" data-unmerge="${esc(k)}">⇹ Unmerge Table ${esc(k)}</button>`).join("");
+      ? `<button class="btn danger sx-unmerge" data-unmerge="${esc(t)}">⇹ Unmerge T${esc(t)}</button>`
+      : mergeChildrenOf(t).map((k) => `<button class="btn danger sx-unmerge" data-unmerge="${esc(k)}">⇹ Unmerge T${esc(k)}</button>`).join("");
     foot = `${foot}<div class="sx-unmerge-row">${unmergeBtns}</div>`;
   }
   return { sess, os, headPill, headMeta, kotHeadBtn, requestsSec, sessionSec, ordersSec, callsSec, billSec, foot };
@@ -9378,7 +9453,8 @@ async function openBillPreview(t) {
         <div class="bm-trow grand"><span>${anyUnpaid ? "Total due" : "Total"}</span><span>${inr(m.total)}</span></div>
       </div>
       <div class="bm-actions">
-        ${!invoiced && sess ? `<button class="btn" data-bp-inv>🧾 Generate invoice</button>` : ""}
+        ${/* Print below already issues-then-prints; a separate issue-only button is the confusion
+             the owner removed on 2026-08-05. */ ""}
         <button class="btn primary" data-bp-print>🖨 Print</button>
         ${invoiced && anyUnpaid ? `<button class="btn green" data-bp-pay${anyReceived ? ` disabled title="Accept the order first — a bill can only be paid once the order is accepted."` : ""}>💳 Mark paid</button>` : ""}
         <button class="btn confirm-cancel" data-bp-close>Close</button>
@@ -9413,8 +9489,7 @@ async function openBillPreview(t) {
     printBill(t, ss || { invoice_no: null, bill_no: null }, live(), { party: true }); // a LIVE bill — the party label applies
     if (needsInvoice) await reopen();
   };
-  const invBtn = wrap.querySelector("[data-bp-inv]");
-  if (invBtn) invBtn.onclick = async () => { await generateInvoice(sess.id); await reopen(); };
+  // (the issue-only button was removed 2026-08-05 — Print issues then prints)
   // Mark paid runs the normal payment popup (method + khata/on-the-house where allowed),
   // and the server frees the table once the bill is settled and everything is served.
   //
@@ -9676,7 +9751,7 @@ function openTakeOrder(table, rerender, opts = {}) {
 
   const headTitle = quick ? "⚡ QO/P <span class=\"qo-sub\">· quick order / parcel</span>"
     : parcel ? "🥡 New Parcel"
-    : `＋ Take order · Table ${esc(table)}`;
+    : `＋ Take order · T${esc(table)}`;
   const wrap = el(`<div class="sx-modal-overlay to-overlay"><div class="sx-modal to-modal${quick ? " to-quick" : ""}">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${headTitle}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div>${parcel ? `<div class="to-cust"><input class="to-cust-name" maxlength="120" placeholder="Customer name (optional)"><input class="to-cust-phone" maxlength="20" inputmode="tel" placeholder="Phone (optional)"></div>` : ""}</div>
     <div class="to-body">
@@ -10343,9 +10418,9 @@ function openShiftPicker(t, sess) {
   // lives on the parent), but shifting onto it would land a second party on a joined table.
   for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !summaryTableOpen(i) && !reqTables.has(String(i)) && !mergeParentOf(i)) free.push(i); }
   const grid = free.length
-    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
+    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">T${i}</button>`).join("")
     : `<div class="muted" style="padding:14px">No free tables to move to right now.</div>`;
-  const wrap = el(`<div class="sx-modal-overlay shift-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Move Table ${esc(t)} →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Move this party — orders, calls &amp; bill included — to a free table:</div><div class="shiftgrid">${grid}</div></div></div>`);
+  const wrap = el(`<div class="sx-modal-overlay shift-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Move T${esc(t)} →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Move this party — orders, calls &amp; bill included — to a free table:</div><div class="shiftgrid">${grid}</div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = closeM;
@@ -10597,7 +10672,7 @@ function openKotColumns(t, sess) {
   ];
   let sel1 = null, sel2 = null; // op id · chosen KOT/dish id
   const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal kotm-colwrap">
-    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 Table ${esc(t)}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
+    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 T${esc(t)}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
     <div class="kotm-bill">KOT &amp; table operations${bill.total > 0 ? ` · bill due ${inr(bill.total)}` : ""}${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}</div></div>
     <div class="kotm-cols"></div></div></div>`);
   document.body.appendChild(wrap);
@@ -10699,7 +10774,7 @@ function openKotColumns(t, sess) {
     }));
     colsEl.querySelectorAll("[data-gomerge]").forEach((b) => (b.onclick = async () => {
       const to = b.dataset.gomerge;
-      if (!(await confirmDialog(`Merge Table ${t} into ${partyLabel(to)}? They become ONE party on ONE bill${mergeChildrenOf(to).length ? " — Table " + t + " joins " + partyLabel(to) : ""}. The lowest table number holds the bill.`, "Merge"))) return;
+      if (!(await confirmDialog(`Merge T${t} into ${partyLabel(to)}? They become ONE party on ONE bill${mergeChildrenOf(to).length ? " — Table " + t + " joins " + partyLabel(to) : ""}. The lowest table number holds the bill.`, "Merge"))) return;
       run("POST", `/sessions/${sess.id}/merge`, { to }, `Merged into table ${to} — one bill`, async (r) => {
         // Refresh BOTH tiles + the live merges list BEFORE the detail re-renders — otherwise the
         // panel still thinks the tables are separate and the detail/tiles count one table's food
@@ -10752,7 +10827,7 @@ function openKotTablePicker() {
     // pay: red = an accepted bill still owing, green = settled. Say it in words, not just colour.
     const money = ts.pay === "red" ? "unpaid" : ts.pay === "green" ? "paid" : "";
     const nm = ((s.table_names || {})[String(i)] || "").trim();
-    return `<button class="kotm-tile kotp-tile ft-${esc(ts.st)}${busy ? " occ" : ""}${ts.pay ? " pay-" + esc(ts.pay) : ""}" data-kotpick="${esc(i)}" title="${esc(nm ? nm + " (T" + i + ")" : "Table " + i)}">
+    return `<button class="kotm-tile kotp-tile ft-${esc(ts.st)}${busy ? " occ" : ""}${ts.pay ? " pay-" + esc(ts.pay) : ""}" data-kotpick="${esc(i)}" title="${esc(nm ? nm + " (T" + i + ")" : "T" + i)}">
       <b>${info ? info.emoji + " " : ""}T${esc(i)}</b>
       <small class="kotp-state">${esc(busy ? ts.label : "free")}</small>
       ${busy && ts.meta ? `<small class="kotp-meta">${esc(ts.meta)}</small>` : ""}
@@ -10811,7 +10886,7 @@ function openKotMenu(t, sess) {
     <span class="kotm-txt"><b>${r.label}</b><small>${r.sub}</small></span>
     ${r.on ? `<span class="kotm-chev">›</span>` : `<span class="kotm-off-why">${r.why}</span>`}</button>`;
   const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal kotm-sheet">
-    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 Table ${esc(t)}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
+    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 T${esc(t)}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
     <div class="kotm-bill">KOT &amp; table operations${bill.total > 0 ? ` · bill due ${inr(bill.total)}` : ""}${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}</div></div>
     <div class="kotm-list">${rows.map(rowHtml).join("")}</div></div></div>`);
   document.body.appendChild(wrap);
@@ -11042,7 +11117,7 @@ async function openSplitSettle(t) {
   const dishSubtotal = dishes.reduce((s, d) => s + d.amt, 0) || 1;
   const methodSel = (i, v) => `<select class="ss-method" data-leg="${i}" style="padding:8px;border-radius:8px">${METHODS.map((m) => `<option${m === (v || "Cash") ? " selected" : ""}>${m}</option>`).join("")}</select>`;
   const wrap = el(`<div class="sx-modal-overlay splitsettle-overlay"><div class="sx-modal" style="max-width:460px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split Table ${esc(t)}'s bill · ${inr(due)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split T${esc(t)}'s bill · ${inr(due)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body" style="padding:12px 14px 14px">
       <div class="ss-tabs" style="display:flex;gap:6px;margin-bottom:10px">
         <button class="btn ss-tab" data-mode="equal">Equal</button>
@@ -11120,7 +11195,7 @@ function openMoveItemPicker(t) {
   if (!groups) { toast("No movable dishes on this table", "err"); return; }
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   const wrap = el(`<div class="sx-modal-overlay moveitem-overlay"><div class="sx-modal" style="max-width:440px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍛 Move a dish from Table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍛 Move a dish from T${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="muted small mvi-hint" style="padding:0 14px 8px">Step 1 · which dish should move? (a multi-plate line moves whole)</div>
     <div class="dish-edit-body mvi-body" style="padding:6px 14px 14px">${groups}</div></div></div>`);
   document.body.appendChild(wrap);
@@ -11162,14 +11237,14 @@ function openMergePicker(t, sess) {
   const grid = occ.length
     ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ" data-mergeto="${i}"><b>T${i}</b><small>${tileDue(i) ? `due ${tileDue(i)}` : "open"}</small></button>`).join("") + `</div>`
     : `<div class="muted" style="padding:14px">No other open tables to merge with.</div>`;
-  const wrap = el(`<div class="sx-modal-overlay merge-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>🪢 Merge Table ${esc(t)} into →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Everything — orders, guests, calls &amp; bill — joins the other table as ONE bill. Table ${esc(t)} then frees up.</div><div class="shiftgrid">${grid}</div></div></div>`);
+  const wrap = el(`<div class="sx-modal-overlay merge-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>🪢 Merge T${esc(t)} into →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Everything — orders, guests, calls &amp; bill — joins the other table as ONE bill. T${esc(t)} then frees up.</div><div class="shiftgrid">${grid}</div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = closeM;
   wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
   wrap.querySelectorAll("[data-mergeto]").forEach((b) => (b.onclick = async () => {
     const to = b.dataset.mergeto;
-    if (!(await confirmDialog(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`, "Merge"))) return;
+    if (!(await confirmDialog(`Merge T${t} into T${to}? Both parties become ONE bill on T${to}.`, "Merge"))) return;
     closeM();
     try {
       const r = await api("POST", `/sessions/${sess.id}/merge`, { to });
@@ -11200,7 +11275,7 @@ function openMoveKotPicker(t) {
       <span><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b> · ${nd} dish${nd === 1 ? "" : "es"}</span><span>${inr(parseFloat(o.total) || 0)}</span></button>`;
   };
   const wrap = el(`<div class="sx-modal-overlay movekot-overlay"><div class="sx-modal" style="max-width:440px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Move a KOT from Table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Move a KOT from T${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="muted small" style="padding:0 14px 8px">Step 1 · which KOT should move?</div>
     <div class="dish-edit-body movekot-body" style="padding:6px 14px 14px">${movable.map(kotRow).join("")}</div></div></div>`);
   document.body.appendChild(wrap);
@@ -11528,9 +11603,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     }
     printBill(head, ss || sess, os, { party: true });
   };
-  // Invoice-first billing (owner 2026-07-24): Generate invoice / Reopen (void) buttons.
-  const gi = root.querySelector("#sxGenInv");
-  if (gi && sess) gi.onclick = () => generateInvoice(sess.id);
+  // The issue-only button is gone (owner, 2026-08-05) — Print issues then prints. Reopen stays.
   const ro = root.querySelector("#sxReopen");
   if (ro && sess) ro.onclick = () => voidInvoice(sess.id);
   const payAll = root.querySelector("#sxPayAll"); if (payAll) payAll.onclick = () => markTablePaid(t);
@@ -11560,14 +11633,14 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     const disc = parseFloat(sess && sess.discount) || 0;
     const lines = [
       mine.length
-        ? `<b>Back to Table ${esc(child)}:</b> ${mine.map((o) => "KOT #" + (o.kot_no ?? "—")).join(", ")} — ${inr(sum(mine))}`
-        : `<b>Table ${esc(child)}</b> gets nothing back — nothing was ordered at it. It simply becomes free.`,
-      theirs.length ? `<b>Stays on Table ${esc(parent)}:</b> ${theirs.map((o) => "KOT #" + (o.kot_no ?? "—")).join(", ")} — ${inr(sum(theirs))}` : "",
-      disc > 0 ? `<b>Does NOT move:</b> the ${inr(disc)} bill discount stays on Table ${esc(parent)} — it was given to the joint bill, so it cannot be split between the two tables.` : "",
-      (sess && sess.guests > 0) ? `<b>Does NOT move:</b> the guest count stays with Table ${esc(parent)} — nobody recorded which guests sat where.` : "",
+        ? `<b>Back to T${esc(child)}:</b> ${mine.map((o) => "KOT #" + (o.kot_no ?? "—")).join(", ")} — ${inr(sum(mine))}`
+        : `<b>T${esc(child)}</b> gets nothing back — nothing was ordered at it. It simply becomes free.`,
+      theirs.length ? `<b>Stays on T${esc(parent)}:</b> ${theirs.map((o) => "KOT #" + (o.kot_no ?? "—")).join(", ")} — ${inr(sum(theirs))}` : "",
+      disc > 0 ? `<b>Does NOT move:</b> the ${inr(disc)} bill discount stays on T${esc(parent)} — it was given to the joint bill, so it cannot be split between the two tables.` : "",
+      (sess && sess.guests > 0) ? `<b>Does NOT move:</b> the guest count stays with T${esc(parent)} — nobody recorded which guests sat where.` : "",
     ].filter(Boolean);
     const ok = await confirmDialog(
-      `<div style="text-align:left"><div style="font-weight:800;margin-bottom:8px">Splitting Table ${esc(child)} from Table ${esc(parent)} will do this:</div>`
+      `<div style="text-align:left"><div style="font-weight:800;margin-bottom:8px">Splitting T${esc(child)} from T${esc(parent)} will do this:</div>`
       + `<ul style="margin:0 0 10px 18px;padding:0;line-height:1.5;font-size:13px">${lines.map((l) => `<li>${l}</li>`).join("")}</ul>`
       + `<div>Are you sure you want to unmerge?</div></div>`,
       "Unmerge", { html: true });
@@ -11575,7 +11648,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     try {
       const r = await api("POST", `/tables/${child}/unmerge`, {});
       if (r && r.queued) { toast("Saved — will split when the connection is back", "ok"); return; }
-      toast(`Table ${child} split from Table ${parent}` + (r && r.moved ? ` · ${r.moved} ${r.moved === 1 ? "order" : "orders"} returned` : ""), "ok");
+      toast(`T${child} split from T${parent}` + (r && r.moved ? ` · ${r.moved} ${r.moved === 1 ? "order" : "orders"} returned` : ""), "ok");
       closeFloatingTable(child);
       await pollTables([String(child), String(parent)]);
     } catch (e) { toast("Couldn't unmerge: " + e.message, "err"); }
@@ -11744,7 +11817,7 @@ async function acceptOrder(orderId) {
   const release = () => { if (!released) { released = true; floorOpsInFlight--; if (o) opEnd(o.id); } };
   try {
     await api("POST", "/orders/" + orderId + "/accept"); release(); await loadSessions();
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: "Order accepted", sub: o ? `Table ${o.table_number} · tap undo to unsend` : "Tap undo to unsend", icon: "✋", onUndo: () => editorUndoServe(snap) });
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: "Order accepted", sub: o ? `T${o.table_number} · tap undo to unsend` : "Tap undo to unsend", icon: "✋", onUndo: () => editorUndoServe(snap) });
     else toast("Order accepted → preparing", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await loadSessions(); }
@@ -11796,7 +11869,7 @@ async function serveAllOrder(orderId) {
     // so it replaces the old plain "served" toast.
     if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
       message: "All dishes served",
-      sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+      sub: o ? `T${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
       onUndo: () => editorUndoServe(snap),
     });
     else toast("All items served", "ok");
@@ -11865,7 +11938,7 @@ async function acceptTableOrders(t) {
   try {
     for (const o of recv) await api("POST", "/orders/" + o.id + "/accept");
     release(); await pollTables([String(t)]); // refresh THIS tile's summary so the grid reflects truth
-    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: recv.length > 1 ? `${recv.length} orders accepted` : "Order accepted", sub: `Table ${t} · tap undo to unsend`, icon: "✋", onUndo: () => editorUndoServe(snap) });
+    if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: recv.length > 1 ? `${recv.length} orders accepted` : "Order accepted", sub: `T${t} · tap undo to unsend`, icon: "✋", onUndo: () => editorUndoServe(snap) });
     else toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
   }
   catch (e) { release(); toast("Failed: " + e.message, "err"); await pollTables([String(t)]); } // reload truth on failure
@@ -11910,7 +11983,7 @@ async function serveAllOrders(t) {
     release(); await pollTables([String(t)]);
     if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
       message: "All dishes served",
-      sub: `Table ${t} · ${snap.length} dish${snap.length > 1 ? "es" : ""}`,
+      sub: `T${t} · ${snap.length} dish${snap.length > 1 ? "es" : ""}`,
       onUndo: () => editorUndoServe(snap),
     });
     else toast("All orders served", "ok");
@@ -11951,7 +12024,7 @@ async function attendTableCalls(t) {
     const callIds = [...ids];
     if (window.LFH_UNDO) LFH_UNDO.show({
       message: `${callIds.length} call${callIds.length > 1 ? "s" : ""} attended`,
-      sub: `Table ${t} · tap undo to put them back`,
+      sub: `T${t} · tap undo to put them back`,
       icon: "🔔",
       onUndo: async () => { try { await Promise.all(callIds.map((cid) => api("PATCH", "/calls/" + cid, { resolved: false }))); await loadSessions(); } catch (e) { toast("Undo failed: " + e.message, "err"); await loadSessions(); } },
     });
@@ -11969,7 +12042,7 @@ async function restartTable(t) {
   await ensureTableSlice(t); // a non-selected table's orders aren't cached otherwise
   const ids = ordersForTable(t).map((o) => o.id);
   if (!ids.length) { toast(`${tableLabel(t)} has nothing to clear`, "err"); return; } // never silent
-  if (!(await confirmDialog(`Restart Table ${t}? Its orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))) return;
+  if (!(await confirmDialog(`Restart T${t}? Its orders clear off the floor and the table stays OPEN for a fresh round.`, "Restart"))) return;
   // OPTIMISTIC after the confirm: the tile resets instantly, server follows.
   // Orders become SERVED + archived (the round is done; they stay as real,
   // completed orders in records/revenue — NOT cancelled, which would void them).
@@ -11988,7 +12061,7 @@ async function restartTable(t) {
     await api("POST", "/tables/" + t + "/restart", {});
     release();
     await pollTables([String(t)]); // refresh this tile's summary (cheap, single-table)
-    toast(`Table ${t} restarted — still open`, "ok");
+    toast(`T${t} restarted — still open`, "ok");
   } catch (e) { release(); toast("Could not restart: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }
 }
@@ -12115,7 +12188,7 @@ function oplogHtml() {
     const device = r.device_id
       ? `<span class="op-dev">📱 #${esc(r.device_id)}</span>`
       : `<span class="lg-muted">—</span>`;
-    const where = r.table_number ? "Table " + esc(r.table_number) : (r.detail ? esc(opDetailText(r.action, r.detail)) : "");
+    const where = r.table_number ? "T" + esc(r.table_number) : (r.detail ? esc(opDetailText(r.action, r.detail)) : "");
     // Block/Unblock only for field devices (tablet/kitchen) — never the editor,
     // so the owner can't lock themselves out of the panel that does the unblocking.
     let act = "";
@@ -12198,7 +12271,7 @@ function showOpDetail(id) {
   rows.push(
     { section: "What happened" },
     { label: "Details", value: r.detail || "" },
-    { label: "Table", value: r.table_number ? "Table " + r.table_number : "" },
+    { label: "Table", value: r.table_number ? "T" + r.table_number : "" },
     { label: "Order id", value: r.order_id || "" },
   );
   if (isErr) {
@@ -12610,7 +12683,7 @@ async function askBillCustomer(sid, sess) {
   return LFH_BILLCUST.ask({ api, required, print: s.bill_customer_print !== false, prefill });
 }
 async function generateInvoice(sid) {
-  if (_invBusy.has(sid)) return;
+  if (_invBusy.has(sid)) return false;
   // A RE-issue (a number already exists → the previous was voided) must say WHY — the
   // reason is recorded in the invoice history. A first-ever issue needs no reason.
   const ss = (state.board.sessions || []).find((s) => s.id === sid);
@@ -12618,26 +12691,55 @@ async function generateInvoice(sid) {
   let reason = null;
   if (isReissue) {
     reason = await promptDialog("This invoice was voided. Re-issuing assigns a NEW number — why are you re-issuing it?", { confirmLabel: "Re-issue invoice", placeholder: "corrected GST, fixed items…", required: true });
-    if (reason == null) return; // cancelled
+    if (reason == null) return false; // cancelled
   }
   // Who is this bill for? (owner, 2026-07-30 — mobile first, name auto-fills for a
   // returning number, and no bill at all without both when the restaurant requires it).
   // A bill that ALREADY carries a customer (re-issue after a void) doesn't ask again.
   const body = reason ? { reason } : {};
   const cust = await askBillCustomer(sid, ss);
-  if (cust === null) return;               // cancelled — nothing is issued
+  if (cust === null) return false;         // cancelled — nothing is issued
   if (cust) { body.cust_phone = cust.phone; body.cust_name = cust.name; }
   _invBusy.add(sid);
-  try { await api("POST", `/sessions/${sid}/invoice`, body); await loadOrders(); toast(isReissue ? "Invoice re-issued" : "Invoice generated", "ok"); }
-  catch (e) { toast("Failed: " + e.message, "err"); }
+  // Returns TRUE only when a number was actually issued — printIssuingInvoice relies on it, so a
+  // failed issue can never be followed by a printed bill carrying no invoice number.
+  try {
+    await api("POST", `/sessions/${sid}/invoice`, body);
+    await loadOrders();
+    toast(isReissue ? "Invoice re-issued" : "Invoice generated", "ok");
+    return true;
+  } catch (e) { toast("Failed: " + e.message, "err"); return false; }
   finally { _invBusy.delete(sid); }
 }
+// Print a bill that has no invoice yet: ISSUE it, then print it. One tap, and if issuing fails
+// nothing is printed (a printed bill with no number is the thing invoice-first exists to stop).
+// generateInvoice() already asks for the customer and handles a re-issue reason, so this just
+// sequences the two and prints the FRESH rows (the invoice number is assigned server-side, so we
+// must re-read before printing or the paper carries no number).
+async function printIssuingInvoice(sid, groupKey) {
+  const issued = await generateInvoice(sid);
+  if (!issued) return;               // cancelled or failed — generateInvoice already said why
+  const os = groupKey ? ordersInGroup(groupKey)
+    : (state.data.orders || []).filter((o) => o.session_id === sid && !o.archived);
+  const o0 = os[0];
+  if (!o0) { toast("Bill issued, but there was nothing to print", "err"); return; }
+  printBill(o0.table_number, { invoice_no: o0.invoice_no, bill_no: o0.bill_no, invoice_at: o0.invoice_at }, os);
+}
 async function voidInvoice(sid) {
-  if (!(await confirmDialog("Reopen this bill? Its invoice is voided (kept in records) and the bill unlocks for edits — a new invoice number is issued next time. Only possible while the table is not settled.", "Reopen bill"))) return;
-  const reason = await promptDialog("Why are you voiding / reopening this invoice? (required)", { confirmLabel: "Void invoice", placeholder: "refund, correction, wrong GST…", required: true });
-  if (reason == null) return; // cancelled — a reason is required
-  try { await api("POST", `/sessions/${sid}/void-invoice`, { reason }); await loadOrders(); toast("Invoice voided — bill reopened", "ok"); }
-  catch (e) { toast("Failed: " + e.message, "err"); }
+  // ONE dialog, not two: the old flow was a confirm AND THEN a free-text "why?", so the most
+  // common reason in a restaurant — the guest wants to order more — took two taps and typing.
+  // The picker below IS the confirmation (owner, 2026-08-05).
+  const ss = (state.board.sessions || []).find((x) => x.id === sid) || {};
+  const where = ss.table_number != null ? tableLabel(ss.table_number) : "this bill";
+  const rr = await askReopenReason(`${where}${ss.invoice_no != null ? ` · invoice #${ss.invoice_no}` : ""}`);
+  if (!rr) return; // cancelled — a reason is required
+  const label = (REOPEN_REASONS.find((x) => x[0] === rr.code) || [, rr.code])[1].replace(/^\S+\s/, "");
+  const reason = [label, rr.note].filter(Boolean).join(" — ");
+  try {
+    await api("POST", `/sessions/${sid}/void-invoice`, { reason, reason_code: rr.code, reason_note: rr.note || null });
+    await loadOrders();
+    toast("Bill reopened — add or change items, then Print again for a new invoice", "ok");
+  } catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // Issue a CREDIT NOTE — the legal way to refund/correct a bill WITHOUT changing it (used
 // once a bill is settled and can't be edited). Records a new, numbered credit document.
@@ -12901,7 +13003,7 @@ function reconcileBoard() {
   // alongside it in the summary so the toast still names the table).
   if (prev !== null && orderCount > prev) {
     const newCount = orderCount - prev;
-    const where = summary.latest_order_table ? "Table " + summary.latest_order_table : "Walk-in";
+    const where = summary.latest_order_table ? "T" + summary.latest_order_table : "Walk-in";
     playOrderChime();
     toast(`🔔 ${newCount} new order${newCount > 1 ? "s" : ""} — ${where}`, "ok", null, 6000);
     if (state.tab !== "orders") { unseenOrders += newCount; updateOrdersBadge(); }
@@ -12914,7 +13016,7 @@ function reconcileBoard() {
     const fresh = calls.filter((c) => !seenCallIds.has(c.id));
     if (fresh.length) {
       const latest = fresh[0];
-      const where = latest && latest.table_number ? "Table " + latest.table_number : "a guest";
+      const where = latest && latest.table_number ? "T" + latest.table_number : "a guest";
       playOrderChime();
       toast(`🔔 ${fresh.length > 1 ? fresh.length + " waiter calls" : "Waiter call"} — ${where}`, "ok", null, 6000);
       if (state.tab !== "orders") { unseenOrders += fresh.length; updateOrdersBadge(); }
@@ -12926,7 +13028,7 @@ function reconcileBoard() {
   if (prevR !== null && reqCount > prevR) {
     const latest = requests[reqCount - 1];
     const verb = latest && latest.type === "open" ? "wants to open" : latest && latest.type === "join" ? "wants to join" : "needs access to";
-    const where = latest && latest.table_number ? `Table ${latest.table_number}` : "a table";
+    const where = latest && latest.table_number ? `T${latest.table_number}` : "a table";
     playOrderChime();
     toast(`🙋 Request — ${verb} ${where}`, "ok", null, 6000);
     // Floor request → light the TABLES badge (not Orders). The table tile itself

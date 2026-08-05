@@ -880,7 +880,8 @@ function renderMySection() {
 // tableLabel(t): the table's display name (mig 131) with the number kept alongside,
 // else "Table t". Display-only — bills/KOTs/ids all keep the number.
 const tname = (t) => (((state.data.settings || {}).table_names || {})[String(t)] || "").trim();
-const tableLabel = (t) => { const n = tname(t); return n ? `${n} (T${t})` : `Table ${t}`; };
+// T7, never "Table 7" (owner, 2026-08-05). A named table shows its name.
+const tableLabel = (t) => { const n = tname(t); return n ? `${n} (T${t})` : `T${t}`; };
 // Is table i OPEN (has a dining session / live orders)? Read from the summary tile state so it
 // works for EVERY tile, not just the loaded one — "free" and "req" are the only not-open states.
 function tileIsOpen(i) {
@@ -1812,7 +1813,7 @@ function renderPanel() {
       // A mis-tapped "Done" silently drops a real guest call — offer a takeback (2026-07-22).
       if (window.LFH_UNDO) LFH_UNDO.show({
         message: "Call attended",
-        sub: c ? `Table ${c.table_number} · ${c.note || "call"} — tap undo` : "Tap undo to put the call back",
+        sub: c ? `T${c.table_number} · ${c.note || "call"} — tap undo` : "Tap undo to put the call back",
         icon: "🔔",
         onUndo: () => api("POST", `/calls/${id}/reopen`).then(() => load()).catch((e) => { toast("Undo failed: " + errText(e), false); load(); }),
       });
@@ -1841,7 +1842,7 @@ function renderPanel() {
       await load();
       if (window.LFH_UNDO) LFH_UNDO.show({
         message: `${ids.length} call${ids.length > 1 ? "s" : ""} attended`,
-        sub: `Table ${tbl} · tap undo to put them back`,
+        sub: `T${tbl} · tap undo to put them back`,
         icon: "🔔",
         onUndo: () => Promise.all(ids.map((id) => api("POST", `/calls/${id}/reopen`))).then(() => load()).catch((e) => { toast("Undo failed: " + errText(e), false); load(); }),
       });
@@ -2020,7 +2021,7 @@ async function advanceDish(id, cur, forceNext) {
         const ord = it ? (state.data.orders || []).find((x) => x.id === it.order_id) : null;
         LFH_UNDO.show({
           message: `${dishName} served`,
-          sub: ord ? `Table ${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
+          sub: ord ? `T${ord.table_number} · tap undo to put it back` : "Tap undo to put it back",
           onUndo: () => undoServe([{ id, prev: cur }]),
         });
       }
@@ -2156,7 +2157,7 @@ function optimisticAccept(orderIds) {
         const o = (state.data.orders || []).find((x) => x.id === orderIds[0]);
         LFH_UNDO.show({
           message: orderIds.length > 1 ? "Orders accepted" : "Order accepted",
-          sub: o ? `Table ${o.table_number} · tap undo to unsend` : "Tap undo to unsend",
+          sub: o ? `T${o.table_number} · tap undo to unsend` : "Tap undo to unsend",
           icon: "✋",
           onUndo: () => undoServe(snap),
         });
@@ -2179,7 +2180,7 @@ function optimisticServeAll(orderIds) {
         const o = (state.data.orders || []).find((x) => x.id === orderIds[0]);
         LFH_UNDO.show({
           message: "All dishes served",
-          sub: o ? `Table ${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
+          sub: o ? `T${o.table_number} · ${snap.length} dish${snap.length > 1 ? "es" : ""}` : `${snap.length} dishes`,
           onUndo: () => undoServe(snap),
         });
       }
@@ -2286,7 +2287,7 @@ function renderKotMenu(t, s) {
     (!!(state.data.settings || {}).split_bill_enabled
       ? row("split", "🍴", "Split the bill", "Collect one bill as several payments — equal, custom, or by dish", tshow("tablet_mark_paid") && splittable.length > 0)
       : "");
-  const { dropLayer } = renderPickerShell(`Table ${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
+  const { dropLayer } = renderPickerShell(`T${esc(t)} — KOT &amp; table operations`, `<div class="pactions">${body}</div>`, "tablet-kot-menu", renderPanel);
   document.querySelectorAll("[data-kotop]").forEach((b) => (b.onclick = () => {
     dropLayer(); // drop this step's back layer before advancing (same rule as move-order's step 1)
     if (b.dataset.kotop === "shift" && s) renderShiftPicker(t, s);
@@ -2314,7 +2315,7 @@ function renderSplitSettle(t) {
       <button class="btn ss-tab" data-mode="equal">Equal</button><button class="btn ss-tab" data-mode="custom">Custom</button><button class="btn ss-tab" data-mode="dish">By dish</button>
     </div><div class="ss-body"></div><div class="ss-sum muted small" style="margin:10px 0 8px"></div>
     <button class="btn primary ss-go" style="width:100%">💳 Collect ${inr(due)} in parts</button>`;
-  const { dropLayer } = renderPickerShell(`Split Table ${esc(t)}'s bill · ${inr(due)}`, bodyShell, "tablet-split-settle", renderPanel);
+  const { dropLayer } = renderPickerShell(`Split T${esc(t)}'s bill · ${inr(due)}`, bodyShell, "tablet-split-settle", renderPanel);
   const p = $("#panel");
   const bodyEl = p.querySelector(".ss-body"), sumEl = p.querySelector(".ss-sum");
   const methodSel = (i) => `<select class="ss-method" data-leg="${i}" style="padding:8px;border-radius:8px">${METHODS.map((m) => `<option${m === "Cash" ? " selected" : ""}>${m}</option>`).join("")}</select>`;
@@ -2364,7 +2365,7 @@ function renderMoveItemPicker(t) {
     return `<div class="muted small" style="margin:8px 2px 4px">KOT #${esc(o.kot_no ?? "—")}</div>` +
       items.map((r) => `<button class="btn" style="text-align:left;display:flex;justify-content:space-between;width:100%" data-mvitem="${esc(r.id)}"><span>${r.qty > 1 ? r.qty + "× " : ""}${esc(r.title)}</span><span>${inr(r.price * (r.qty || 1))}</span></button>`).join("");
   }).join("");
-  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Pick the dish to move off Table ${esc(t)} (a multi-plate line moves whole):</div><div class="pactions">${groups || `<div class="muted">No movable dishes.</div>`}</div>`;
+  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Pick the dish to move off T${esc(t)} (a multi-plate line moves whole):</div><div class="pactions">${groups || `<div class="muted">No movable dishes.</div>`}</div>`;
   const { dropLayer } = renderPickerShell("Move a dish", bodyHtml, "tablet-moveitem-picker", renderPanel);
   document.querySelectorAll("[data-mvitem]").forEach((b) => (b.onclick = () => { dropLayer(); renderMoveItemTarget(t, b.dataset.mvitem); }));
 }
@@ -2407,11 +2408,11 @@ function renderMergePicker(t, s) {
   const btns = occ.length
     ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ" data-mergeto="${i}"><b>T${i}</b><small>${tileState(i).label}</small></button>`).join("") + `</div>`
     : `<div class="muted">No other open tables to merge with.</div>`;
-  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Everything — orders, guests &amp; bill — joins the other table as ONE bill. Table ${esc(t)} then frees up:</div><div class="shiftgrid">${btns}</div>`;
-  const { dropLayer } = renderPickerShell(`Merge Table ${esc(t)} into →`, bodyHtml, "tablet-merge-picker", renderPanel);
+  const bodyHtml = `<div class="muted small" style="margin-bottom:10px">Everything — orders, guests &amp; bill — joins the other table as ONE bill. T${esc(t)} then frees up:</div><div class="shiftgrid">${btns}</div>`;
+  const { dropLayer } = renderPickerShell(`Merge T${esc(t)} into →`, bodyHtml, "tablet-merge-picker", renderPanel);
   document.querySelectorAll("[data-mergeto]").forEach((b) => (b.onclick = async () => {
     const to = b.dataset.mergeto;
-    if (!(await confirmDialog(`Merge Table ${t} into Table ${to}? Both parties become ONE bill on Table ${to}.`, "Merge"))) return;
+    if (!(await confirmDialog(`Merge T${t} into T${to}? Both parties become ONE bill on T${to}.`, "Merge"))) return;
     dropLayer();
     actGated("POST", `/sessions/${s.id}/merge`, { to }, {
       message: "Enter a manager PIN to merge these tables.",
@@ -2427,10 +2428,10 @@ function renderShiftPicker(t, s) {
   // selected one whose slice is cached. (Two-tier: the grid no longer holds every table's session.)
   for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && inMySection(i) && !tileIsOpen(i)) free.push(i); }
   const btns = free.length
-    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">Table ${i}</button>`).join("")
+    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">T${i}</button>`).join("")
     : `<div class="muted">No free tables to shift to.</div>`;
   const body = `<div class="muted small" style="margin-bottom:10px">Move this party — orders &amp; calls included — to a free table:</div><div class="shiftgrid">${btns}</div>`;
-  const { dropLayer } = renderPickerShell(`Move Table ${esc(t)} →`, body, "tablet-shift-picker", renderPanel);
+  const { dropLayer } = renderPickerShell(`Move T${esc(t)} →`, body, "tablet-shift-picker", renderPanel);
   document.querySelectorAll("[data-shiftto]").forEach((b) => (b.onclick = () => {
     const to = b.dataset.shiftto;
     dropLayer();
@@ -2449,7 +2450,7 @@ function renderMoveOrderPicker(t) {
   // so it reads like every other money view on the panel. (audit 2026-07-08)
   const netDue = (o) => Math.max(0, (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + effRate()));
   const list = os.map((o, i) => `<button class="btn" style="text-align:left" data-pickorder="${esc(o.id)}">#${esc(o.kot_no ?? "—")} · Order ${i + 1} · ${inr(netDue(o))}</button>`).join("");
-  const body = `<div class="muted small" style="margin-bottom:10px">Pick the order to move off Table ${esc(t)}:</div><div class="pactions">${list || `<div class="muted">No movable orders (paid bills can't be moved).</div>`}</div>`;
+  const body = `<div class="muted small" style="margin-bottom:10px">Pick the order to move off T${esc(t)}:</div><div class="pactions">${list || `<div class="muted">No movable orders (paid bills can't be moved).</div>`}</div>`;
   const { dropLayer } = renderPickerShell("Move an order", body, "tablet-move-picker", renderPanel);
   // Drop THIS step's back-stack layer before advancing to the target step — otherwise the
   // step-1 layer leaks and the phone Back button needs one extra press afterwards. (audit 2026-07-08)
@@ -2461,7 +2462,7 @@ function renderMoveOrderTarget(t, orderId) {
   for (let i = 1; i <= n; i++) {
     if (String(i) === String(t) || !inMySection(i)) continue;  // sections: only my own tables
     const st = tileState(i);
-    tiles.push(`<button class="btn shiftpick" data-moveto="${i}">Table ${i}<br><span class="muted small">${st.label}</span></button>`);
+    tiles.push(`<button class="btn shiftpick" data-moveto="${i}">T${i}<br><span class="muted small">${st.label}</span></button>`);
   }
   const body = `<div class="muted small" style="margin-bottom:10px">Send this order to which table's bill?</div><div class="shiftgrid">${tiles.length ? tiles.join("") : `<div class="muted">No other table in your section to move this to.</div>`}</div>`;
   const { dropLayer } = renderPickerShell("Move order →", body, "tablet-move-target", () => renderMoveOrderPicker(t));
@@ -2652,7 +2653,7 @@ function offerPayUndo(t, o) {
   if (stillOpen && window.LFH_UNDO) {
     LFH_UNDO.show({
       message: msg,
-      sub: `Table ${t} · tap undo to reopen the bill`,
+      sub: `T${t} · tap undo to reopen the bill`,
       icon: o.icon || "💳",
       seconds: 5,
       onUndo: () => actGated("POST", `/tables/${t}/unpay`, null, { message: "Enter a manager PIN to undo this settle.", toast: "Settle undone" }),
@@ -2921,7 +2922,7 @@ function openKhataPersonSheet(due, t) {
     ov.innerHTML = `<div style="width:min(94vw,420px);max-height:90vh;overflow:auto;background:var(--panel);color:var(--text);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;padding:16px 18px;border-bottom:1px solid var(--line)"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">Pay Later — who's this bill on?</h3><button class="kp-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;padding:6px 10px;cursor:pointer">✕</button></div>
       <div style="padding:16px 18px">
-        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted);margin-bottom:10px"><span>Table ${esc(t)} bill</span><b style="color:var(--text)">${inr(due)}</b></div>
+        <div style="display:flex;justify-content:space-between;font-size:13.5px;color:var(--muted);margin-bottom:10px"><span>T${esc(t)} bill</span><b style="color:var(--text)">${inr(due)}</b></div>
         <input type="text" class="kp-search" maxlength="60" placeholder="🔍 Search name or mobile…" autocomplete="off" style="${inputCss};margin-bottom:8px">
         <div class="kp-list" style="border:1px solid var(--line);border-radius:10px;max-height:180px;overflow-y:auto"><div style="padding:10px 12px;color:var(--muted);font-size:13px">Type to search, or add a new person below.</div></div>
         <div style="font-size:12.5px;color:var(--muted);margin:10px 0 6px">— or add a new person —</div>

@@ -2994,6 +2994,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const custSave = await saveBillCustomer(sb, rid, b as string, body);
       if (!custSave.ok) return err(custSave.message, 400);
       const genReason = typeof body?.reason === "string" ? body.reason.trim().slice(0, 200) : "";
+      // ── the AFTER half of a reopen ────────────────────────────────────────────────────────
+      // A reopen records what the bill was worth when it was reopened. Until now nothing recorded
+      // what it became — so a bill reopened to ADD food showed only the lower, earlier number and
+      // the trail read as if money had gone missing (owner, 2026-08-05: "before and after will
+      // also be shown in the audit section"). Read the last reopen for this bill; if there is
+      // one, this issue is the "after", so capture both sides. Only on a re-issue, so a normal
+      // first bill costs nothing.
+      // The timestamp column on deletion_audit is `at`, NOT `created_at` (migration 251). Asking
+      // for created_at made this select fail silently, so `reopened` was always falsy and the
+      // before/after row was never written — invisible in code review, caught the first time a
+      // real bill was driven through the server (T15, 2026-08-05).
+      const priorVoid = (await sb.from("deletion_audit")
+        .select("id, at, meta")
+        .eq("restaurant_id", rid).eq("session_id", b).eq("kind", "invoice_voided")
+        .order("at", { ascending: false }).limit(1)).data as { id: number; at: string; meta: Record<string, unknown> | null }[] | null;
+      const reopened = priorVoid && priorVoid[0];
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReason || null, p_actor: actorName });
       if (error) { if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw pgError(error); }
       // Say WHICH table and bill, not the session's uuid. The Activity log's "Where" column read
@@ -3003,6 +3019,32 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         restaurant_id: rid, table_number: ownsGen.table_number ?? null,
         detail: `Bill #${ownsGen.bill_no ?? "?"}` + (genReason ? ` · ${genReason}` : ""), device_id: dev,
       });
+      // If this bill had been reopened, write the before → after so the Audit can be read as one
+      // story instead of two unrelated rows.
+      if (reopened) {
+        const afterRows = (await sb.from("orders").select("total, discount").eq("session_id", b).eq("restaurant_id", rid)).data as
+          { total: number | null; discount: number | null }[] | null;
+        const nowTotal = (afterRows || []).reduce((t, o) => t + (Number(o.total) || 0), 0);
+        const nowDiscount = (afterRows || []).reduce((t, o) => t + (Number(o.discount) || 0), 0);
+        const wasT = Number((reopened.meta || {}).total_at_reopen) || 0;
+        const wasD = Number((reopened.meta || {}).discount_at_reopen) || 0;
+        const wasN = Number((reopened.meta || {}).orders_on_bill) || 0;
+        const delta = Math.round((nowTotal - wasT) * 100) / 100;
+        // Plain words first — this is what a person reads before they open the detail.
+        const moved = delta > 0 ? `₹${delta} MORE` : delta < 0 ? `₹${Math.abs(delta)} LESS` : "no change in value";
+        await recordRemoval({
+          rid, kind: "bill_changed_after_reopen", reason: reasonFromBody(body), user: g.user, deviceId: dev,
+          sessionId: b, tableNumber: ownsGen.table_number ?? null, amount: Math.abs(delta),
+          meta: {
+            summary: `Reopened at ₹${wasT}, re-issued at ₹${nowTotal} — ${moved}`,
+            before: { total: wasT, discount: wasD, orders: wasN },
+            after: { total: nowTotal, discount: nowDiscount, orders: (afterRows || []).length },
+            change: { total: delta, discount: Math.round((nowDiscount - wasD) * 100) / 100, orders: (afterRows || []).length - wasN },
+            reopened_at: reopened.at, reopen_audit_id: reopened.id,
+            reissue_reason: genReason || null,
+          },
+        });
+      }
       return ok(Array.isArray(data) ? data[0] : data);
     }
     // sessions/:id/void-invoice — VOID it (reopen the bill for edits; number kept in record).

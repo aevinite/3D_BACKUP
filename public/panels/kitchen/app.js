@@ -75,9 +75,11 @@ const tname = (t) => (((state.tableNames || {})[String(t)]) || "").trim();
 // because that is what is written on the table (owner 2026-07-29). No name → the plain
 // number. Display only — every id/bill still uses the number.
 const tshort = (t) => tname(t) || `T${t}`;              // tight spots (ticket header)
-const tlong = (t) => (t == null || t === "" ? "Table ?" : (tname(t) || `Table ${t}`)); // prints, toasts
+// T7, never "Table 7" (owner, 2026-08-05: "it should always be T7"). A table with a NAME set
+// shows the name instead. One short form everywhere — panels, tickets and the printed bill.
+const tlong = (t) => (t == null || t === "" ? "T?" : (tname(t) || `T${t}`)); // prints, toasts
 // A PARCEL has no table at all, so where a ticket says which table it is for, it says
-// PARCEL instead (owner, 2026-08-02). Without this a parcel printed as "Table ?" / "Tnull",
+// PARCEL instead (owner, 2026-08-02). Without this a parcel printed as "T?" / "Tnull",
 // which tells a cook nothing and looks like a fault. The KOT number is untouched — a parcel
 // still carries its own ticket number.
 const isParcelOrder = (o) => !!o && o.source === "parcel";
@@ -267,7 +269,7 @@ function ticketHtml(o, rows) {
   const tb = TAG_BADGE[o.tag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${o.tag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="${isParcelOrder(o) ? "Parcel — no table" : `Table ${esc(o.table_number)}`}">${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageClass(o.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="${isParcelOrder(o) ? "Parcel — no table" : `T${esc(o.table_number)}`}">${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageClass(o.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
