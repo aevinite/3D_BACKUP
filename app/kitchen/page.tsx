@@ -15,6 +15,11 @@
 import { panelAdminRid, panelIframeSrc } from "@/lib/panelGate";
 import PanelFrame from "@/components/PanelFrame";
 
+// The browser TAB title. All four panels inherited the root "Aevidine — Restaurant OS", so a
+// manager with the manager panel, the kitchen screen and the waiter view open in three tabs had
+// three identical tabs to pick from (T15 sweep, 2026-08-05). The guest menu already names itself.
+export const metadata = { title: "Kitchen — Aevidine" };
+
 export default async function KitchenPanel({ searchParams }: { searchParams: Promise<{ rid?: string; as?: string; view?: string }> }) {
   const { rid, as, view } = await searchParams;
   const adminRid = await panelAdminRid("kitchen", rid);

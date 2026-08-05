@@ -159,9 +159,21 @@ else fail("the admin bill ledger deletes bills without an Audit row — the admi
       const rel = `${dir}/${e.name}`;
       if (e.isDirectory()) { if (e.name !== "node_modules") scan(rel); continue; }
       if (!/\.(ts|tsx)$/.test(e.name)) continue;
-      for (const m of read(rel).matchAll(/\blog(?:Action)?\(\s*"([a-z0-9_]+)"\s*,\s*(?:"([a-z0-9_]+)"\s*,)?/g)) {
+      const body = read(rel);
+      for (const m of body.matchAll(/\blog(?:Action)?\(\s*"([a-z0-9_]+)"\s*,\s*(?:"([a-z0-9_]+)"\s*,)?/g)) {
         if (m[2]) written.add(m[2]);
         else if (!PANEL_NAMES.has(m[1])) written.add(m[1]);
+      }
+      // A TERNARY second argument writes TWO codes and the literal pattern above sees NEITHER.
+      // Twelve codes hid behind this for months — `active ? "staff_enable" : "staff_disable"`
+      // had a label for the false branch only, so "Staff enable" printed as a prettified
+      // database key beside real sentences (T15 sweep, 2026-08-05). Read both branches.
+      // Two shapes: logAction(panel, cond ? "a" : "b", …) and the panels' log(cond ? "a" : "b", …).
+      // `[^,;){:]` keeps the run before the `?` inside the ARGUMENT — without excluding `{` and `:`
+      // it walked into a later `{ detail: value ? "on" : "off" }` and recorded "on"/"off" as codes.
+      for (const re of [/\blog(?:Action)?\(\s*[^,]+,\s*[^,;){:]*?\?\s*"([a-z0-9_]+)"\s*:\s*"([a-z0-9_]+)"/g,
+                        /\blog(?:Action)?\(\s*[^,;){:"]*?\?\s*"([a-z0-9_]+)"\s*:\s*"([a-z0-9_]+)"/g]) {
+        for (const m of body.matchAll(re)) { written.add(m[1]); written.add(m[2]); }
       }
     }
   };
@@ -200,10 +212,15 @@ else fail("the admin bill ledger deletes bills without an Audit row — the admi
 const kinds = [...lib.matchAll(/^\s*\|\s*"([a-z_]+)"/gm)].map((m) => m[1]);
 if (kinds.length < 8) fail(`only found ${kinds.length} kinds in RemovalKind — the list looks truncated`);
 else {
+  // A screen may either LIST every kind itself, or derive its labels from the one shared map in
+  // RemovalDetail (`KIND_LABEL`). Deriving is stronger than listing — it cannot fall behind — so
+  // it counts as covered. Before the T15 sweep there were three hand-written maps and the owner's
+  // row and the card it opened disagreed on six of the nine kinds.
+  const derives = (src) => /KIND_LABEL/.test(src) && /Object\.(keys|fromEntries)\s*\(/.test(src);
   const missing = [];
-  for (const k of kinds) {
-    for (const [name, src] of [["manager panel", panel], ["admin page", adminPage], ["owner page", ownerPage]])
-      if (!src.includes(`${k}:`)) missing.push(`${k} (${name})`);
+  for (const [name, src] of [["manager panel", panel], ["admin page", adminPage], ["owner page", ownerPage]]) {
+    if (derives(src)) continue;
+    for (const k of kinds) if (!src.includes(`${k}:`)) missing.push(`${k} (${name})`);
   }
   if (missing.length) fail(`kinds with no label — they render as a raw key like "qty_reduced": ${missing.join(", ")}`);
   else ok(`all ${kinds.length} kinds have a label in the manager, admin and owner views`);

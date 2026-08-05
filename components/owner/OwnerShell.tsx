@@ -506,7 +506,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                 <i className="fas fa-arrow-rotate-left" aria-hidden="true" />
               </button>
             ) : (
-              <a className="adm-icnbtn" href="/api/panel-logout" title="Log out" aria-label="Log out">
+              <a className="adm-icnbtn" href="/api/panel-logout" title="Sign out" aria-label="Sign out">
                 <i className="fas fa-right-from-bracket" aria-hidden="true" />
               </a>
             )}

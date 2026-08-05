@@ -257,7 +257,7 @@ export default function AdminUsers() {
                   <span className="av" style={{ background: ROLE_COLOR[u.role] || "#64748b" }} aria-hidden>{initialOf(u)}</span>
                   <span className="pi">
                     <span className="nm">{u.name || u.username}{u.hasPin ? <span className="pin" title="PIN set">🔑</span> : null}{!u.active ? <em>disabled</em> : null}</span>
-                    <span className="mt">{u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleDateString() : "never"}</span>
+                    <span className="mt">{u.phone || "no phone"} · last seen {u.last_seen_at ? new Date(u.last_seen_at).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }) : "never"}</span>
                   </span>
                   <span className="rp" style={{ color: ROLE_COLOR[u.role], background: `color-mix(in srgb, ${ROLE_COLOR[u.role]} 16%, transparent)` }}>{ROLE_LABEL[u.role] || u.role}</span>
                   <svg className="chev" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m9 18 6-6-6-6" /></svg>

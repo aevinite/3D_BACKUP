@@ -46,12 +46,25 @@ export type RemovalFull = {
   meta?: Record<string, unknown> | null;
 };
 
-const KIND_LABEL: Record<string, string> = {
+// ONE name per removal event, for every screen that shows one.
+//
+// There used to be three maps: this one, the owner list's REMOVAL_KIND, and ACT_LABEL. The owner
+// tapped a row reading "KOT cancelled" and the card that opened said "Kitchen ticket cancelled" —
+// six of the nine kinds changed name inside a single click (T15 sweep, 2026-08-05). This set won
+// because it is the plainest: no KOT jargon, and "Bill reopened" rather than "Invoice voided".
+// The owner list now imports it; do NOT add a fourth map.
+export const KIND_LABEL: Record<string, string> = {
   order_cancelled: "Kitchen ticket cancelled", order_deleted: "Bill deleted",
   dish_removed: "Dish taken off an order", qty_reduced: "Quantity reduced",
   menu_item_deleted: "Taken off the menu", invoice_voided: "Bill reopened",
   discount_given: "Discount given", payment_reverted: "Payment un-booked",
   on_the_house: "Settled on the house",
+};
+/** The little glyph each kind wears in a list. Kept beside the words so the two can't drift. */
+export const KIND_ICON: Record<string, string> = {
+  order_cancelled: "🎫", order_deleted: "🧾", dish_removed: "🍽", menu_item_deleted: "📕",
+  invoice_voided: "↩️", qty_reduced: "➖", discount_given: "％", payment_reverted: "↺",
+  on_the_house: "🎁",
 };
 const REASON_LABEL: Record<string, string> = {
   mistake: "Punched by mistake", guest_changed: "Guest changed their mind",

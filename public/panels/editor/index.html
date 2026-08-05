@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Manager — Little French House</title>
+  <title>Manager — Aevidine</title>
   <!-- Inline emoji favicon (an SVG data URI) so the browser stops 404-ing on /favicon.ico — no extra file needed. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🍽️</text></svg>" />
   <!-- Font Awesome is SELF-HOSTED (was a cdnjs link) so the panel's icons never break
@@ -120,7 +120,7 @@
   <!-- Chart.js powers the Dashboard graphs. SELF-HOSTED (was a jsdelivr CDN link) so the
        Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
   <script src="/panels/vendor/chart.umd.min.js?v=4.4.7"></script>
-  <script src="/panels/maint.js?v=7d03e59d"></script>
+  <script src="/panels/maint.js?v=2c139cfc"></script>
   <script src="/panels/realtime.js?v=9708934b"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=d2aaaaf0"></script>
@@ -157,7 +157,7 @@
        the kitchen panel and the admin's sample, so a document can never look different in two
        places. app.js CALLS LFH_BILLDOC (billIdentity, splitTax), so this must load BEFORE it —
        without it, printing a bill throws "LFH_BILLDOC is not defined" and nothing prints. -->
-  <script src="/panels/billdoc.js?v=5502abfa"></script>
+  <script src="/panels/billdoc.js?v=7df1bca8"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
   <script src="/panels/editor/app.js?v=3fd05012"></script>

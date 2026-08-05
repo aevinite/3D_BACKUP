@@ -48,7 +48,10 @@ const TOOLS: { op: Op; label: string; icon: string; desc: string; danger?: boole
   { op: "refire_order", label: "Re-fire an order", icon: "fa-fire-burner", desc: "Send the same dishes to the kitchen again as a fresh order (new KOT)." },
   { op: "void_bill", label: "Void a bill", icon: "fa-file-circle-xmark", desc: "Reopen an invoiced bill for edits. The invoice number is kept on record." },
   { op: "edit_time", label: "Edit an order's time", icon: "fa-clock-rotate-left", desc: "Fix a wrong date/time on an order. Note: the business day flips at 5 AM." },
-  { op: "delete_order", label: "Delete an order", icon: "fa-trash-can", desc: "Permanently remove a stuck order/bill. Can't be undone.", danger: true },
+  // NOT "permanently" — this route soft-deletes (app/api/admin/repair/route.ts logs
+  // "soft-deleted (tombstoned)"). Telling an admin the row is erased is both untrue and the
+  // wrong mental model for the one behaviour the compliance case rests on (T15 sweep).
+  { op: "delete_order", label: "Delete an order", icon: "fa-trash-can", desc: "Take a stuck order/bill off the floor and out of the reports. It stays in the records, tombstoned — not erased.", danger: true },
 ];
 
 // Which staff panel an error came from → where "Go to that panel" opens, and a friendly name.

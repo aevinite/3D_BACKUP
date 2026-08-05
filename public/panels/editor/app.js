@@ -247,8 +247,10 @@ const inr = (usd) => "₹" + Math.round((parseFloat(usd) || 0) * INR_RATE).toLoc
 // month-first and genuinely ambiguous to an Indian reader (8 April or 4 August?) — while the
 // Audit & logs tab one click away already printed the unambiguous "Aug 05, 07:15 AM". Two formats,
 // one panel. Seconds on a bill timestamp are noise no manager ever uses.
-const fmtWhen = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true }) : "";
-const fmtClock = (ts) => ts ? new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }) : "";
+// timeZone pinned like fullWhen() below: without it a manager viewing from another timezone
+// reads shifted times that disagree with the IST business-day logic (one-time-zone rule).
+const fmtWhen = (ts) => ts ? new Date(ts).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "";
+const fmtClock = (ts) => ts ? new Date(ts).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "";
 // el: turn a string of HTML into a real, clickable page element we can insert.
 const el = (html) => {
   const t = document.createElement("template");
@@ -652,7 +654,7 @@ const recKey = (r) => ((state.tab === "items" || state.tab === "general") ? r.id
 const recLabel = (r) =>
   state.tab === "items"
     ? (r.title || r.slug || "(untitled)")
-    : ((r.name && r.name.en) || r.slug || "(untitled)");
+    : (nameOf(r.name, r.slug) || "(untitled)");
 
 // nextSort: pick a sort_order for a brand-new row — one higher than the current
 // highest, so new items land at the bottom of the list by default.
@@ -674,7 +676,7 @@ function renderCatFilter() {
   const chip = (slug, label, icon, active) =>
     `<button type="button" class="cat-chip ${active ? "active" : ""}" data-cat="${esc(slug)}">${icon ? `<i class="fas ${esc(icon)}"></i> ` : ""}<span>${esc(label)}</span></button>`;
   let html = chip("", "All", "fa-layer-group", !state.catFilter);
-  html += cats.map((c) => chip(c.slug, (c.name && c.name.en) || c.slug, c.icon, state.catFilter === c.slug)).join("");
+  html += cats.map((c) => chip(c.slug, nameOf(c.name, c.slug), c.icon, state.catFilter === c.slug)).join("");
   bar.innerHTML = html;
   bar.querySelectorAll(".cat-chip").forEach((b) => (b.onclick = () => {
     state.catFilter = b.dataset.cat; // "" for All
@@ -1191,7 +1193,7 @@ function taxModeField(it) {
 // catSelect: a drop-down listing every category, used to pick a dish's category.
 function catSelect(val) {
   const opts = state.data.categories
-    .map((c) => `<option value="${esc(c.slug)}" ${c.slug === val ? "selected" : ""}>${esc((c.name && c.name.en) || c.slug)}</option>`)
+    .map((c) => `<option value="${esc(c.slug)}" ${c.slug === val ? "selected" : ""}>${esc(nameOf(c.name, c.slug))}</option>`)
     .join("");
   return `<div class="field"><label>Category</label>
     <select data-path="category"><option value="">—</option>${opts}</select></div>`;
@@ -1201,7 +1203,7 @@ function catSelect(val) {
 function tagChips(tags) {
   tags = tags || [];
   const chips = state.data.filters
-    .map((f) => `<span class="chip ${tags.includes(f.slug) ? "on" : ""}" data-action="toggleTag" data-arg="${esc(f.slug)}">${esc(f.icon || "")} ${esc((f.name && f.name.en) || f.slug)}</span>`)
+    .map((f) => `<span class="chip ${tags.includes(f.slug) ? "on" : ""}" data-action="toggleTag" data-arg="${esc(f.slug)}">${esc(f.icon || "")} ${esc(nameOf(f.name, f.slug))}</span>`)
     .join("");
   return `<div class="chips">${chips || '<span class="hint">No filters yet — make some in the Filters tab.</span>'}</div>`;
 }
@@ -1413,7 +1415,7 @@ function formFilters(f) {
 // in its normal category AND tagged here at the same time.
 function filterMembersHtml(f) {
   if (state.isNew || !f.slug) return "";
-  const label = (f.name && f.name.en) || f.slug;
+  const label = nameOf(f.name, f.slug);
   const items = state.data.items || [];
   const selected = items.filter((it) => (it.tags || []).includes(f.slug)).length;
   const rows = items
@@ -2399,7 +2401,10 @@ function formGeneral(s) {
 // CSS class that colours it.
 const STATUS_META = {
   received: { label: "🔔 New", cls: "received" },
-  preparing: { label: "👨‍🍳 Preparing", cls: "preparing" },
+  // "Cooking", not "Preparing": the same modal's progress legend already says "N cooking" and the
+  // kitchen board's column is "Cooking", so one order was described three ways within 40px
+  // (T15 sweep, 2026-08-05). The GUEST tracker deliberately keeps the softer "Preparing".
+  preparing: { label: "👨‍🍳 Cooking", cls: "preparing" },
   served: { label: "✓ Served", cls: "served" },
   cancelled: { label: "✕ Cancelled", cls: "cancelled" },
 };
@@ -3446,7 +3451,7 @@ async function freeTable(t, opts = {}) {
   const ids = (state.data.orders || []).filter((o) => !o.archived && (o.table_number || "").trim() === String(t)).map((o) => o.id);
   const sess = openSessionForTable(t);
   if (!ids.length && !sess) return;
-  if (!opts.silent && !(await confirmDialog(`Free Table ${t}? Its ${ids.length} settled order(s) leave the floor (kept in records).`, "Free table"))) return;
+  if (!opts.silent && !(await confirmDialog(`Free Table ${t}? Its ${ids.length} settled ${ids.length === 1 ? "order" : "orders"} leave the floor (kept in records).`, "Free table"))) return;
   try {
     for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
     (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) o.archived = true; });
@@ -3622,7 +3627,7 @@ async function deleteOrders(ids, all = false, opts = {}) {
   // type when "By mistake" is the truth. A programmatic caller can still pass opts.reason.
   let rr = null;
   if (!opts.reason) {
-    rr = await askRemovalReason(`${gone.length > 1 ? gone.length + " bills" : "This bill"} — permanent, kept in the recycle bin for 90 days.`);
+    rr = await askRemovalReason(`${gone.length > 1 ? gone.length + " bills" : "This bill"} — leaves the reports, kept in the recycle bin for 90 days.`);
     if (!rr) return;
   }
   const reason = (opts.reason || [(REMOVAL_REASONS.find((x) => x[0] === rr.code) || [, rr.code])[1].replace(/^\S+\s/, ""), rr.note].filter(Boolean).join(" — ")).trim();
@@ -3653,7 +3658,7 @@ async function deleteOrders(ids, all = false, opts = {}) {
       ? `Cleared ${cleared} — there are more. Tap Clear again to carry on.`
       : kept
         ? `Cleared ${cleared} · kept ${kept} paid bill${kept > 1 ? "s" : ""} as records`
-        : (all ? "All cleared" : "Order(s) deleted"), "ok");
+        : (all ? "All cleared" : (gone.length === 1 ? "Bill deleted" : "Bills deleted")), "ok");
     if (more) { state.data.orders = null; await loadOrders(); }   // show what is genuinely left
   } catch (e) {
     state.data.orders = before;   // bring the rows back — the delete failed (e.g. a single paid bill: 409)
@@ -4469,7 +4474,7 @@ async function loadDashboard(useCache) {
   body.innerHTML = `
     ${summary}
     <div class="dash-fresh"><i class="fa-solid fa-clock-rotate-left"></i> Updated ${freshT} · deltas ${cmpLabel}</div>
-    ${s.truncated ? `<div class="dash-fresh" style="background:color-mix(in srgb,var(--gold) 13%,transparent);color:var(--gold-strong);border:1px solid color-mix(in srgb,var(--gold) 33%,transparent)" role="note"><i class="fa-solid fa-circle-info"></i> Showing the most recent ${Number(s.statsCap || 5000).toLocaleString()} orders — this range has more, so these totals (and the menu winners) read a little low for now. Penny-exact full-range totals are coming.</div>` : ""}
+    ${s.truncated ? `<div class="dash-fresh" style="background:color-mix(in srgb,var(--gold) 13%,transparent);color:var(--gold-strong);border:1px solid color-mix(in srgb,var(--gold) 33%,transparent)" role="note"><i class="fa-solid fa-circle-info"></i> Showing the most recent ${Number(s.statsCap || 5000).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} orders — this range has more, so these totals (and the menu winners) read a little low for now. Penny-exact full-range totals are coming.</div>` : ""}
     <div class="dash-cards">
       ${kpi("revenue", "fa-indian-rupee-sign", "#b97f35", `Revenue · ${rangeLabel}`, `<span data-cu="${s.revenue}" data-cu-fmt="inr">${inr(s.revenue)}</span>${deltaChip(s.revenue, prev.revenue)}${sparkSvg((s.series || []).map((p) => p.revenue), "#b97f35")}`, revSub)}
       ${kpi("orders", "fa-utensils", "#2a78d6", "Orders", `<span data-cu="${s.orderCount}">${s.orderCount}</span>${deltaChip(s.orderCount, prev.orders)}`, ordSub)}
@@ -4935,7 +4940,7 @@ async function openMenuMatrix() {
     const b = wrap.querySelector("#mmBody"); if (!b) return;
     // Same honesty note as the dashboard: if the range exceeded the row cap, the winners/losers
     // split is from the most recent orders only and can shift once full-range totals arrive. (review #2)
-    const note = s && s.truncated ? `<div class="muted small" style="margin-bottom:10px;color:var(--gold-strong)"><i class="fa-solid fa-circle-info"></i> Based on the most recent ${Number(s.statsCap || 5000).toLocaleString()} orders — a longer range has more, so this split may shift once full-range totals arrive.</div>` : "";
+    const note = s && s.truncated ? `<div class="muted small" style="margin-bottom:10px;color:var(--gold-strong)"><i class="fa-solid fa-circle-info"></i> Based on the most recent ${Number(s.statsCap || 5000).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })} orders — a longer range has more, so this split may shift once full-range totals arrive.</div>` : "";
     b.innerHTML = note + render(s && s.menuMatrix);
   };
   // Reuse the Dashboard's already-loaded stats for the current range if present (no extra fetch).
@@ -6257,7 +6262,34 @@ const PANEL_LABEL = { editor: "Manager", manager: "Manager", kitchen: "Kitchen",
 // drift or if a new action code has no label. It used to hold 19 of ~130 codes, so a manager
 // reading their own Activity log saw raw database keys (`order_item_qty`, `invoice_void`,
 // `menu_delete`) between the readable lines (found 2026-08-03).
+
+// The label for a DB name that carries one string per language ({en, hi, …}).
+// The guest side has had this ladder since day one (lib/menu.ts -> localized): try English,
+// then ANY language that is filled, and only then fall back to the slug. The panel used
+// `name.en || slug`, so a restaurant that filled only Hindi saw its own menu as
+// `main-course` / `starters-veg` in the category strip, the tag chips and the dish form
+// (T15 sweep, 2026-08-05).
+function nameOf(n, slug) {
+  if (typeof n === "string" && n.trim()) return n;
+  if (n && typeof n === "object") {
+    if (n.en && String(n.en).trim()) return n.en;
+    for (const v of Object.values(n)) if (v && String(v).trim()) return String(v);
+  }
+  return slug || "";
+}
+
 const OP_ACTION_LABELS = {
+  // Added by the T15 wording sweep (2026-08-05). All twelve are written from a TERNARY call site
+  // (`active ? "staff_enable" : "staff_disable"`), which verify-audit-coverage.mjs could not see —
+  // so half of each pair had a label and half printed as a prettified database key next to real
+  // sentences. The guard now reads both branches; these are the codes it was missing.
+  payroll_add: "Put on the payroll", payroll_remove: "Took off the payroll",
+  staff_enable: "Enabled a staff member",
+  issue_resolved: "Resolved a complaint", issue_reopened: "Reopened a complaint",
+  restaurant_reactivate: "Reactivated a restaurant", restaurant_suspend: "Suspended a restaurant",
+  error_reopened: "Reopened a problem",
+  owner_restore: "Restored an owner", owner_suspend: "Suspended an owner",
+  maintenance_on: "Turned Service Mode on", maintenance_off: "Turned Service Mode off",
   // Not from this PR — the printing feature (80a39a5f) added these three codes without labels, so
   // `npm run verify:audit` was already red on main and they were printing as raw keys on the
   // Activity screens. Three lines, same class of gap as the nine this PR fixed.
@@ -6280,19 +6312,19 @@ const OP_ACTION_LABELS = {
   user_create: "Created user", user_delete: "Deleted user", user_reset_password: "Reset password",
   user_enable: "Enabled user", user_disable: "Disabled user", user_set_role: "Changed role", user_set_access: "Changed access",
   order_add_item: "Added a dish", order_item_qty: "Changed quantity", order_item_note: "Edited a note",
-  order_item_delete: "Removed a dish", order_delete: "Deleted order", order_move: "Moved order",
+  order_item_delete: "Removed a dish", order_delete: "Deleted a bill", order_move: "Moved order",
   order_allergies: "Set allergies", order_item_removed: "Removed allergen", item_status: "Updated dish status",
-  bill_paid: "Marked paid", close_unpaid: "Closed unpaid", payment_revert: "Reverted payment",
+  bill_paid: "Marked paid", close_unpaid: "Closed a table that still owed money", payment_revert: "Reverted payment",
   member_remove: "Removed guest", member_ban: "Banned guest", auto_approve: "Auto-approve", table_restart: "Restarted table",
   billing_set_plan: "Set billing plan", billing_add_payment: "Recorded a payment", billing_delete_payment: "Deleted a payment",
   // Everything Log (mig 159) + runtime-support tooling.
-  route_error: "Server error", client_error: "Screen error", ui_taps: "Button taps", row_change: "Manual DB edit",
+  route_error: "Server error", client_error: "Screen error", ui_taps: "Button taps", row_change: "Direct database edit",
   alert_sent: "Alert sent",
   repair_void_bill: "Repair · voided bill", repair_delete_order: "Repair · deleted order",
   repair_refire_order: "Repair · re-fired order", repair_unstick_table: "Repair · unstuck table",
-  repair_edit_time: "Repair · edited time", fix_request: "Sent to Claude", error_resolved: "Marked resolved",
+  repair_edit_time: "Repair · edited time", fix_request: "Sent for overnight repair", error_resolved: "Marked resolved",
   // ── the bill: printing it, reopening it, settling it ──────────────────────
-  invoice_generate: "Printed the bill", invoice_void: "Reopened the bill", credit_note: "Issued a credit note",
+  invoice_generate: "Printed the bill", invoice_void: "Reopened the bill (invoice voided)", credit_note: "Issued a credit note",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
   payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
@@ -11541,7 +11573,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     try {
       const r = await api("POST", `/tables/${child}/unmerge`, {});
       if (r && r.queued) { toast("Saved — will split when the connection is back", "ok"); return; }
-      toast(`Table ${child} split from Table ${parent}` + (r && r.moved ? ` · ${r.moved} order(s) returned` : ""), "ok");
+      toast(`Table ${child} split from Table ${parent}` + (r && r.moved ? ` · ${r.moved} ${r.moved === 1 ? "order" : "orders"} returned` : ""), "ok");
       closeFloatingTable(child);
       await pollTables([String(child), String(parent)]);
     } catch (e) { toast("Couldn't unmerge: " + e.message, "err"); }
@@ -12716,7 +12748,16 @@ function syncBurgerNews() {
 // requests) so a notification is visible even when this tab is in the background.
 function refreshTitle() {
   const n = unseenOrders + unseenTables;
-  document.title = n ? `(${n}) Menu Editor` : "Menu Editor";
+  // This panel runs inside an IFRAME on /manager, and an iframe's document.title never reaches
+  // the browser tab — so the count the comment above promises was written where nobody could
+  // see it, and "Menu Editor" is a retired name besides (T15 sweep, 2026-08-05). Set the title
+  // on the PARENT document when we are framed; fall back to our own when opened directly.
+  const title = n ? `(${n}) Manager — Aevidine` : "Manager — Aevidine";
+  document.title = title;
+  try {
+    // Same-origin parent (the /manager page hosts us), so this is a plain property write.
+    if (window.parent && window.parent !== window) window.parent.document.title = title;
+  } catch (e) { /* cross-origin embed: our own title is the best we can do */ }
 }
 
 // A short, soft two-note chime via the Web Audio API — no sound file needed.
@@ -13499,7 +13540,7 @@ function bqBillsHtml() {
     const when = new Date(b.issued_at);
     return `<tr${b.voided_at ? ' style="opacity:.55"' : ""}>
       <td><b>${esc(b.bill_no)}</b>${b.voided_at ? ' <span style="color:var(--red)">VOID</span>' : ""}
-        <div style="color:var(--muted);font-size:11.5px">${when.toLocaleDateString()} ${when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div></td>
+        <div style="color:var(--muted);font-size:11.5px">${when.toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" })} ${when.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", timeZone: "Asia/Kolkata" })}</div></td>
       <td>${esc(b.cust_name || "—")}${b.cust_phone ? `<div style="color:var(--muted);font-size:11.5px">${esc(b.cust_phone)}</div>` : ""}</td>
       <td>${esc([b.func, b.hall].filter(Boolean).join(" · ") || "—")}${b.pax ? `<div style="color:var(--muted);font-size:11.5px">${b.pax} plates</div>` : ""}</td>
       <td style="text-align:right;font-variant-numeric:tabular-nums">${inr(b.total)}</td>

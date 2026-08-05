@@ -202,7 +202,7 @@ export async function POST(req: NextRequest) {
     const eligibleAt = new Date(r.deleted_at).getTime() + RETENTION_DAYS * 86400000;
     if (Date.now() < eligibleAt) {
       const daysLeft = Math.ceil((eligibleAt - Date.now()) / 86400000);
-      return bad(`Locked for ${daysLeft} more day(s) — a restaurant can only be purged 90 days after deletion.`, 423);
+      return bad(`Locked for ${daysLeft} more ${daysLeft === 1 ? "day" : "days"} — a restaurant can only be purged 90 days after deletion.`, 423);
     }
     // Atomic hard delete (children → parents → the row) in one transaction.
     const { error } = await sb.rpc("admin_purge_restaurant", { p_rid: rid });

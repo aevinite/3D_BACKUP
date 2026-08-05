@@ -1055,8 +1055,8 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           // yet): show a friendly empty state, NOT endless skeletons (bug G2, 2026-07-05).
           <div className="menu-empty-state" style={{ textAlign: "center", padding: "56px 24px", color: "var(--muted)" }}>
             <i className="fas fa-utensils" style={{ fontSize: 40, opacity: 0.5, color: "var(--accent)" }} aria-hidden="true" />
-            <p style={{ marginTop: 16, fontSize: 16, fontWeight: 600, color: "var(--text)" }}>No dishes on the menu yet</p>
-            <p style={{ marginTop: 6, fontSize: 13.5 }}>This restaurant hasn&apos;t added any dishes. Please check back soon.</p>
+            <p style={{ marginTop: 16, fontSize: 16, fontWeight: 600, color: "var(--text)" }}>{t.noDishesYet}</p>
+            <p style={{ marginTop: 6, fontSize: 13.5 }}>{t.noDishesYetSub}</p>
           </div>
         ) : menuData.length === 0 ? (
           // A) still loading → grey placeholder cards
@@ -1093,7 +1093,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                     </div>
                     <span className="fav-howto-cue">tap to save</span>
                   </div>
-                  <h3 className="fav-empty-title">No favorites yet</h3>
+                  <h3 className="fav-empty-title">{t.noFavourites}</h3>
                   <p className="fav-empty-sub">
                     Open any dish, then tap the{" "}
                     <i className="fas fa-heart" aria-hidden="true"></i> at the{" "}
@@ -1101,7 +1101,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   </p>
                 </>
               ) : (
-                <h3 className="fav-empty-title">No dishes match these filters.</h3>
+                <h3 className="fav-empty-title">{t.noMatch}</h3>
               )}
             </div>
           ) : (
@@ -1144,10 +1144,10 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           // below the search box and thinks the page broke (bug fix 2026-07-06).
           <div className="fav-empty" role="status">
             <h3 className="fav-empty-title">
-              {q ? <>No dishes found for &ldquo;{searchQuery.trim()}&rdquo;</> : "No dishes match these filters."}
+              {q ? t.noSearchResults.replace("{q}", searchQuery.trim()) : t.noMatch}
             </h3>
             <p className="fav-empty-sub">
-              {q ? "Try a different word, or check your spelling." : "Try turning a filter off."}
+              {q ? t.noSearchResultsSub : t.noMatchSub}
             </p>
           </div>
         ) : (

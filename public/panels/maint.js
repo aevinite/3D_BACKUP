@@ -312,12 +312,12 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
 
       // — log out —
       sections.push(el("div", { class: "lfh-sec" }, [
-        el("button", { class: "lfh-bt", style: { background: "#991b1b", width: "100%" }, onClick: () => { location.href = "/api/panel-logout"; } }, ["Log out"]),
+        el("button", { class: "lfh-bt", style: { background: "#991b1b", width: "100%" }, onClick: () => { location.href = "/api/panel-logout"; } }, ["Sign out"]),
       ]));
     } else {
       // — first-login: a quiet "not you?" escape + reassuring footer (no full menu) —
       sections.push(el("div", { class: "lfh-sec", style: { paddingTop: "4px" } }, [
-        el("button", { class: "lfh-ghost", onClick: () => { if (confirm("Log out and sign in as someone else?")) location.href = "/api/panel-logout"; } }, ["Not you? Log out"]),
+        el("button", { class: "lfh-ghost", onClick: () => { if (confirm("Sign out and sign in as someone else?")) location.href = "/api/panel-logout"; } }, ["Not you? Sign out"]),
       ]));
       sections.push(el("div", { class: "lfh-foot" }, ["🔒 Visible only to you and your team"]));
     }

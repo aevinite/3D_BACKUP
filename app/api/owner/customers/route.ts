@@ -188,7 +188,7 @@ export async function DELETE(req: NextRequest) {
   await logAction("owner", "customer_erase", {
     restaurant_id: restaurantId,
     actor: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
-    detail: `erased guest record ending ${phone.slice(-4)} (${(del.data || []).length} row(s)) + their visits and devices`,
+    detail: `erased guest record ending ${phone.slice(-4)} (${(del.data || []).length} ${(del.data || []).length === 1 ? "row" : "rows"}) + their visits and devices`,
   });
   return NextResponse.json({ ok: true, erased: (del.data || []).length });
 }

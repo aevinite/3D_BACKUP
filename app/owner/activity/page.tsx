@@ -18,9 +18,9 @@
 // it's your own data). A 60s backstop refresh (paused while the tab is hidden) keeps new
 // rows appearing without a manual Refresh; no faster poll (egress rule).
 import { useCallback, useEffect, useState } from "react";
-import { actLabel, panelChipStyle, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
-import { RemovalDetailModal } from "@/components/admin/RemovalDetail";
+import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
 
 // One row of the Removals record — same wording as the manager panel's Removals screen
@@ -33,17 +33,12 @@ type Removal = {
   item_title: string | null; qty: number | null; amount: string | number | null;
   restaurant_id: string | null; restaurant_name: string | null;
 };
-const REMOVAL_KIND: Record<string, [string, string]> = {
-  order_cancelled: ["🎫", "KOT cancelled"],
-  order_deleted: ["🧾", "Bill deleted"],
-  dish_removed: ["🍽", "Dish removed from an order"],
-  menu_item_deleted: ["📕", "Menu item deleted"],
-  invoice_voided: ["↩️", "Invoice voided (reopened)"],
-  qty_reduced: ["➖", "Quantity reduced"],
-  discount_given: ["％", "Discount given"],
-  payment_reverted: ["↺", "Payment reverted"],
-  on_the_house: ["🎁", "On the house"],
-};
+// The words + glyph come from the removal-detail card this list opens, so a row and its card can
+// never say two different things about the same event (T15 sweep). Shape kept as [icon, label]
+// so the render below is unchanged.
+const REMOVAL_KIND: Record<string, [string, string]> = Object.fromEntries(
+  Object.keys(KIND_LABEL).map((k) => [k, [KIND_ICON[k] || "•", KIND_LABEL[k]] as [string, string]]),
+);
 const REMOVAL_REASON: Record<string, string> = {
   mistake: "By mistake",
   guest_changed: "Guest changed their mind",
@@ -308,7 +303,7 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen }:
                   opacity: isResolved ? 0.62 : 1,
                 }}
               >
-                <div><span className="adm-chip" style={panelChipStyle(a.panel)}>{a.panel}</span></div>
+                <div><span className="adm-chip" style={panelChipStyle(a.panel)}>{panelLabel(a.panel)}</span></div>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ color: showRed ? "var(--adm-danger)" : undefined, fontWeight: isErr ? 600 : undefined, textDecoration: isResolved ? "line-through" : undefined }}>{actLabel(a.action)}</span>
                   {isPin

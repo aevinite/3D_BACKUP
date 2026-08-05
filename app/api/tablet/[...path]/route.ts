@@ -1205,7 +1205,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // every screen (the floor draws it Free) but "open" in the database, which is the mismatch
       // the owner caught on table 30 (2026-08-01). One truth: the round ends, the table is free.
       if (openSess) must(await sb.from("sessions").update({ status: "closed", closed_at: new Date().toISOString(), last_activity_at: new Date().toISOString() }).eq("id", openSess.id).select());
-      await log("table_restart", { table_number: t, detail: `${rows.length} order(s) cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}`, device_id: dev });
+      await log("table_restart", { table_number: t, detail: `${rows.length} ${rows.length === 1 ? "order" : "orders"} cleared${owed > 0 ? `, ≈₹${Math.round(owed)} was unpaid` : ""}`, device_id: dev });
       return ok({ ok: true, count: rows.length });
     }
 
@@ -1733,7 +1733,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           payment_status: "paid", paid_at: nowIso(), payment_method: ON_THE_HOUSE_METHOD,
         }).eq("id", o.id).eq("restaurant_id", rid).select("id"));
       }
-      await log("on_the_house", { table_number: t, device_id: dev, detail: `${unpaid.length} order(s) · ${tagRow.tag}` });
+      await log("on_the_house", { table_number: t, device_id: dev, detail: `${unpaid.length} ${unpaid.length === 1 ? "order" : "orders"} · ${tagRow.tag}` });
       // Settling with no money collected is the largest money-lowering action there is — one Audit
       // row per order, from the tablet too (2026-08-03; only the manager's twin recorded it).
       for (const o of unpaid) {
@@ -1792,7 +1792,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       } else {
         await clearTableSignals(rid, t);
       }
-      await log("khata_park", { table_number: t, device_id: dev, detail: `${kunpaid.length} order(s) → ${customer!.name}` });
+      await log("khata_park", { table_number: t, device_id: dev, detail: `${kunpaid.length} ${kunpaid.length === 1 ? "order" : "orders"} → ${customer!.name}` });
       return ok({ ok: true, customer, count: kunpaid.length });
     }
 

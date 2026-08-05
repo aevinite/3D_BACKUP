@@ -68,12 +68,29 @@ export interface Translations {
   contains: string;
   tripleTapReplay: string;
   notAvailable: string; // a sold-out dish's button label, shared by the dish page and 3D view
+  // The menu's EMPTY states. They were hardcoded English on a screen whose chips, headings and
+  // search box all translate, so a Hindi guest whose search found nothing was told what to do
+  // next in a language they may not read (T15 sweep, 2026-08-05).
+  noDishesYet: string;
+  noDishesYetSub: string;
+  noFavourites: string;
+  noMatch: string;
+  noMatchSub: string;
+  noSearchResults: string;   // takes the typed term, e.g. `No dishes found for “{q}”`
+  noSearchResultsSub: string;
 }
 
 // The dictionary itself: one complete set of phrases per language code.
 // To translate a button, find its key (e.g. "addToCart") under every language.
 const translations: Record<LanguageCode, Translations> = {
   en: {
+    noDishesYet: "No dishes on the menu yet",
+    noDishesYetSub: "This restaurant hasn\u2019t added any dishes. Please check back soon.",
+    noFavourites: "No favourites yet",
+    noMatch: "No dishes match these filters.",
+    noMatchSub: "Try turning a filter off.",
+    noSearchResults: "No dishes found for \u201c{q}\u201d",
+    noSearchResultsSub: "Try a different word, or check your spelling.",
     greeting: "BONSOIR",
     heroTitle: "All-Day Café & Bakery",
     categories: "CATEGORIES",
@@ -132,14 +149,21 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "Not available",
   },
   de: {
+    noDishesYet: "Noch keine Gerichte auf der Karte",
+    noDishesYetSub: "Dieses Restaurant hat noch keine Gerichte hinzugef\u00fcgt. Bitte schauen Sie bald wieder vorbei.",
+    noFavourites: "Noch keine Favoriten",
+    noMatch: "Keine Gerichte passen zu diesen Filtern.",
+    noMatchSub: "Schalten Sie einen Filter aus.",
+    noSearchResults: "Keine Gerichte gefunden f\u00fcr \u201e{q}\u201c",
+    noSearchResultsSub: "Versuchen Sie ein anderes Wort oder pr\u00fcfen Sie die Schreibweise.",
     greeting: "GUTEN ABEND",
     heroTitle: "Ganztags Café & Bäckerei",
     categories: "KATEGORIEN",
     slide: "Wischen",
     searchPlaceholder: "Gerichte suchen...",
     filterAll: "Alle",
-    filterVeg: "🌿 Veg",
-    filterNonVeg: "🍖 Nicht-Veg",
+    filterVeg: "🌿 Vegetarisch",
+    filterNonVeg: "🍖 Nicht vegetarisch",
     filterChef: "⭐ Chef-Empfehlung",
     filterFav: "❤️ Favoriten",
     sortTopRated: "⭐ Top bewertet",
@@ -190,6 +214,13 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "Nicht verfügbar",
   },
   fr: {
+    noDishesYet: "Aucun plat au menu pour l\u2019instant",
+    noDishesYetSub: "Ce restaurant n\u2019a pas encore ajout\u00e9 de plats. Revenez bient\u00f4t.",
+    noFavourites: "Aucun favori pour l\u2019instant",
+    noMatch: "Aucun plat ne correspond \u00e0 ces filtres.",
+    noMatchSub: "Essayez de d\u00e9sactiver un filtre.",
+    noSearchResults: "Aucun plat trouv\u00e9 pour \u00ab\u202f{q}\u202f\u00bb",
+    noSearchResultsSub: "Essayez un autre mot, ou v\u00e9rifiez l\u2019orthographe.",
     greeting: "BONSOIR",
     heroTitle: "Café & Boulangerie Toute la Journée",
     categories: "CATÉGORIES",
@@ -248,6 +279,13 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "Non disponible",
   },
   ar: {
+    noDishesYet: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0623\u0637\u0628\u0627\u0642 \u0641\u064a \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u0628\u0639\u062f",
+    noDishesYetSub: "\u0644\u0645 \u064a\u0636\u0641 \u0647\u0630\u0627 \u0627\u0644\u0645\u0637\u0639\u0645 \u0623\u064a \u0623\u0637\u0628\u0627\u0642 \u0628\u0639\u062f. \u064a\u0631\u062c\u0649 \u0627\u0644\u0639\u0648\u062f\u0629 \u0642\u0631\u064a\u0628\u064b\u0627.",
+    noFavourites: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0641\u0636\u0644\u0627\u062a \u0628\u0639\u062f",
+    noMatch: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0623\u0637\u0628\u0627\u0642 \u062a\u0637\u0627\u0628\u0642 \u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u0634\u062d\u0627\u062a.",
+    noMatchSub: "\u062c\u0631\u0651\u0628 \u0625\u064a\u0642\u0627\u0641 \u0623\u062d\u062f \u0627\u0644\u0645\u0631\u0634\u062d\u0627\u062a.",
+    noSearchResults: "\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u0639\u062b\u0648\u0631 \u0639\u0644\u0649 \u0623\u0637\u0628\u0627\u0642 \u0644\u0640 \u201c{q}\u201d",
+    noSearchResultsSub: "\u062c\u0631\u0651\u0628 \u0643\u0644\u0645\u0629 \u0623\u062e\u0631\u0649\u060c \u0623\u0648 \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0625\u0645\u0644\u0627\u0621.",
     greeting: "مساء الخير",
     heroTitle: "مقهى ومخبز طوال اليوم",
     categories: "الفئات",
@@ -306,6 +344,13 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "غير متوفر",
   },
   hi: {
+    noDishesYet: "\u092e\u0947\u0928\u0942 \u092e\u0947\u0902 \u0905\u092d\u0940 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902",
+    noDishesYetSub: "\u0907\u0938 \u0930\u0947\u0938\u094d\u091f\u0949\u0930\u0947\u0902\u091f \u0928\u0947 \u0905\u092d\u0940 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902 \u091c\u094b\u0921\u093c\u093e \u0939\u0948\u0964 \u0915\u0943\u092a\u092f\u093e \u091c\u0932\u094d\u0926 \u0939\u0940 \u0926\u094b\u092c\u093e\u0930\u093e \u0926\u0947\u0916\u0947\u0902\u0964",
+    noFavourites: "\u0905\u092d\u0940 \u0915\u094b\u0908 \u092a\u0938\u0902\u0926\u0940\u0926\u093e \u0928\u0939\u0940\u0902",
+    noMatch: "\u0907\u0928 \u092b\u093c\u093f\u0932\u094d\u091f\u0930 \u0938\u0947 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u092e\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093e\u0924\u093e\u0964",
+    noMatchSub: "\u0915\u094b\u0908 \u090f\u0915 \u092b\u093c\u093f\u0932\u094d\u091f\u0930 \u092c\u0902\u0926 \u0915\u0930\u0915\u0947 \u0926\u0947\u0916\u0947\u0902\u0964",
+    noSearchResults: "\u201c{q}\u201d \u0915\u0947 \u0932\u093f\u090f \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902 \u092e\u093f\u0932\u093e",
+    noSearchResultsSub: "\u0915\u094b\u0908 \u0926\u0942\u0938\u0930\u093e \u0936\u092c\u094d\u0926 \u0906\u091c\u092e\u093e\u090f\u0901, \u092f\u093e \u0935\u0930\u094d\u0924\u0928\u0940 \u091c\u093e\u0901\u091a\u0947\u0902\u0964",
     greeting: "शुभ संध्या",
     heroTitle: "ऑल-डे कैफ़े और बेकरी",
     categories: "श्रेणियां",
@@ -364,6 +409,13 @@ const translations: Record<LanguageCode, Translations> = {
     notAvailable: "उपलब्ध नहीं",
   },
   ko: {
+    noDishesYet: "\uc544\uc9c1 \uba54\ub274\uc5d0 \uc694\ub9ac\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
+    noDishesYetSub: "\uc774 \uc2dd\ub2f9\uc740 \uc544\uc9c1 \uc694\ub9ac\ub97c \ub4f1\ub85d\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uacf1 \ub2e4\uc2dc \ud655\uc778\ud574 \uc8fc\uc138\uc694.",
+    noFavourites: "\uc990\uaca8\ucc3e\uae30\uac00 \uc544\uc9c1 \uc5c6\uc2b5\ub2c8\ub2e4",
+    noMatch: "\uc774 \ud544\ud130\uc5d0 \ub9de\ub294 \uc694\ub9ac\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.",
+    noMatchSub: "\ud544\ud130\ub97c \ud558\ub098 \uaebc\ubcf4\uc138\uc694.",
+    noSearchResults: "\u201c{q}\u201d\uc5d0 \ub300\ud55c \uc694\ub9ac\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4",
+    noSearchResultsSub: "\ub2e4\ub978 \ub2e8\uc5b4\ub97c \uc2dc\ub3c4\ud558\uac70\ub098 \ucca0\uc790\ub97c \ud655\uc778\ud574 \uc8fc\uc138\uc694.",
     greeting: "안녕하세요",
     heroTitle: "올데이 카페 & 베이커리",
     categories: "카테고리",

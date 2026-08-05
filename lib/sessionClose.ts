@@ -113,7 +113,7 @@ export async function closeSession(
         const rate = sub > 0 ? tax / sub : 0;
         return s + (Number(o.total) || 0) - (Number(o.discount) || 0) * (1 + rate);
       }, 0);
-      await logAction(ctx.panel, "close_unpaid", { restaurant_id: sess.restaurant_id ?? undefined, table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid order(s), ₹${Math.round(owed * 100) / 100} owed`, device_id: ctx.deviceId ?? undefined });
+      await logAction(ctx.panel, "close_unpaid", { restaurant_id: sess.restaurant_id ?? undefined, table_number: sess.table_number ?? null, detail: `closed with ${owedRows.length} unpaid ${owedRows.length === 1 ? "order" : "orders"}, ₹${Math.round(owed * 100) / 100} owed`, device_id: ctx.deviceId ?? undefined });
       // …AND into the Audit (2026-08-03). Closing a table that still owes money writes the bill
       // OFF — the orders below are cancelled, so the money never becomes a sale. That is the
       // single largest money-lowering event in the product and it lived only in the activity log,

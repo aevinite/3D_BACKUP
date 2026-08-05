@@ -22,6 +22,10 @@ import OwnerShell from "@/components/owner/OwnerShell";
 import OwnerReconnecting from "@/components/owner/OwnerReconnecting";
 import AutoFitNumbers from "@/components/AutoFitNumbers";
 
+// The browser TAB title for every owner page. All four panels inherited the root
+// "Aevidine — Restaurant OS", so three open panel tabs looked identical (T15 sweep, 2026-08-05).
+export const metadata = { title: "Owner — Aevidine" };
+
 export default async function OwnerLayout({ children }: { children: React.ReactNode }) {
   const store = await cookies();
   const acting = store.get(ADMIN_ACT_COOKIE)?.value;

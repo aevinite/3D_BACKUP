@@ -132,7 +132,7 @@ export default function AdminAnalytics() {
             snapshot cache. Without it a cached number looks live, which is the one thing a
             dashboard must never do. */}
         {data?.cachedAt ? (
-          <span className="adm-muted" style={{ fontSize: 12 }} title={new Date(data.cachedAt).toLocaleString()}>
+          <span className="adm-muted" style={{ fontSize: 12 }} title={new Date(data.cachedAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}>
             updated {timeAgo(data.cachedAt)}
           </span>
         ) : null}

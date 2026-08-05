@@ -34,6 +34,22 @@ export const STATE_COLOR: Record<Tile["state"], string> = {
   free: "", seated: "#2563eb", new: "#ea580c", preparing: "#7c3aed", served: "#ca8a04", cleared: "#15803d",
 };
 export const PANEL_COLOR: Record<string, string> = { editor: "#d4a574", manager: "#d4a574", kitchen: "#7ec88a", tablet: "#60a5fa", admin: "#e8a13c", owner: "#c084fc", db: "#94a3b8", guest: "#38bdf8", menu: "#38bdf8" };
+
+// What a PERSON calls each panel. The manager panel's internal name is still "editor", so the
+// raw column rendered two chips — EDITOR and MANAGER — for the SAME panel, in the same list, in
+// the same colour, and "editor" is a word that names nothing a person can open (T15 sweep).
+// `db` and `menu` had a colour here but no name anywhere; LogDetailModal already had the right
+// words for `db`, so they are reused.
+export const PANEL_LABEL: Record<string, string> = {
+  editor: "Manager", manager: "Manager", kitchen: "Kitchen", tablet: "Tablet",
+  admin: "Admin", owner: "Owner", guest: "Guest", menu: "Menu", db: "Database",
+};
+/** The chip's text: always the human name, never the raw column. */
+export function panelLabel(panel: string | null | undefined): string {
+  const k = String(panel || "").trim();
+  if (!k) return "—";
+  return PANEL_LABEL[k] || (k.charAt(0).toUpperCase() + k.slice(1));
+}
 /** The tinted "which panel did this" pill. One helper because three screens drew it
  *  identically (owner Activity, admin Logs, the shared log row).
  *
@@ -62,6 +78,17 @@ export function panelChipStyle(panel: string | null | undefined): React.CSSPrope
 //   • never render `ACT_LABEL[x] || x` — call actLabel(x), which prettifies an unknown code into
 //     "Order item qty" rather than leaking `order_item_qty` onto a person's screen.
 export const ACT_LABEL: Record<string, string> = {
+  // Added by the T15 wording sweep (2026-08-05). All twelve are written from a TERNARY call site
+  // (`active ? "staff_enable" : "staff_disable"`), which verify-audit-coverage.mjs could not see —
+  // so half of each pair had a label and half printed as a prettified database key next to real
+  // sentences. The guard now reads both branches; these are the codes it was missing.
+  payroll_add: "Put on the payroll", payroll_remove: "Took off the payroll",
+  staff_enable: "Enabled a staff member",
+  issue_resolved: "Resolved a complaint", issue_reopened: "Reopened a complaint",
+  restaurant_reactivate: "Reactivated a restaurant", restaurant_suspend: "Suspended a restaurant",
+  error_reopened: "Reopened a problem",
+  owner_restore: "Restored an owner", owner_suspend: "Suspended an owner",
+  maintenance_on: "Turned Service Mode on", maintenance_off: "Turned Service Mode off",
   // Not from this PR — the printing feature (80a39a5f) added these three codes without labels, so
   // `npm run verify:audit` was already red on main and they were printing as raw keys on the
   // Activity screens. Three lines, same class of gap as the nine this PR fixed.
@@ -84,19 +111,19 @@ export const ACT_LABEL: Record<string, string> = {
   user_create: "Created user", user_delete: "Deleted user", user_reset_password: "Reset password",
   user_enable: "Enabled user", user_disable: "Disabled user", user_set_role: "Changed role", user_set_access: "Changed access",
   order_add_item: "Added a dish", order_item_qty: "Changed quantity", order_item_note: "Edited a note",
-  order_item_delete: "Removed a dish", order_delete: "Deleted order", order_move: "Moved order",
+  order_item_delete: "Removed a dish", order_delete: "Deleted a bill", order_move: "Moved order",
   order_allergies: "Set allergies", order_item_removed: "Removed allergen", item_status: "Updated dish status",
-  bill_paid: "Marked paid", close_unpaid: "Closed unpaid", payment_revert: "Reverted payment",
+  bill_paid: "Marked paid", close_unpaid: "Closed a table that still owed money", payment_revert: "Reverted payment",
   member_remove: "Removed guest", member_ban: "Banned guest", auto_approve: "Auto-approve", table_restart: "Restarted table",
   billing_set_plan: "Set billing plan", billing_add_payment: "Recorded a payment", billing_delete_payment: "Deleted a payment",
   // Everything Log (mig 159) + runtime-support tooling.
-  route_error: "Server error", client_error: "Screen error", ui_taps: "Button taps", row_change: "Manual DB edit",
+  route_error: "Server error", client_error: "Screen error", ui_taps: "Button taps", row_change: "Direct database edit",
   alert_sent: "Alert sent",
   repair_void_bill: "Repair · voided bill", repair_delete_order: "Repair · deleted order",
   repair_refire_order: "Repair · re-fired order", repair_unstick_table: "Repair · unstuck table",
-  repair_edit_time: "Repair · edited time", fix_request: "Sent to Claude", error_resolved: "Marked resolved",
+  repair_edit_time: "Repair · edited time", fix_request: "Sent for overnight repair", error_resolved: "Marked resolved",
   // ── the bill: printing it, reopening it, settling it ──────────────────────
-  invoice_generate: "Printed the bill", invoice_void: "Reopened the bill", credit_note: "Issued a credit note",
+  invoice_generate: "Printed the bill", invoice_void: "Reopened the bill (invoice voided)", credit_note: "Issued a credit note",
   bill_discount: "Discounted the whole bill", bill_split: "Split the bill", bill_restore: "Restored a bill",
   payment_legs_reversed: "Reversed the split payment record",
   on_the_house: "Settled on the house", orders_delete: "Deleted bills",
@@ -160,7 +187,11 @@ export function actLabel(code: string | null | undefined): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
+// en-IN, not en-US: an Indian owner reads ₹85,62,929 (lakh grouping), and the Reports page put
+// this number directly above a chart axis labelled in lakhs (₹6.7L) — two groupings for one
+// figure on one card. Every other formatter in the product already uses en-IN; these were the
+// three that did not (T15 sweep, 2026-08-05).
+export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
 
 // Paise-precise money — for lines that must ADD UP exactly (e.g. the CGST/SGST halves of
 // an odd total tax: ₹162,739 → ₹81,369.50 + ₹81,369.50, not ₹81,370 + ₹81,369 which reads
@@ -169,7 +200,7 @@ export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleStr
 export const inrP = (n: number) => {
   const v = Number(n) || 0;
   const hasPaise = Math.abs(Math.round(v) - v) > 0.005;
-  return "₹" + v.toLocaleString("en-US", { minimumFractionDigits: hasPaise ? 2 : 0, maximumFractionDigits: 2 });
+  return "₹" + v.toLocaleString("en-IN", { minimumFractionDigits: hasPaise ? 2 : 0, maximumFractionDigits: 2 });
 };
 
 // isManagerPinRow — a TABLET row's `actor` normally names the manager whose PIN authorised
@@ -373,7 +404,7 @@ export function ActivityFeed({ rows }: { rows: Action[] }) {
         <div key={a.id} role="button" tabIndex={0} onClick={() => setDetailRow(a)}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDetailRow(a); } }}
           style={{ display: "grid", gridTemplateColumns: "84px 1fr auto", gap: 10, alignItems: "center", fontSize: 13, padding: "8px 0", borderBottom: "var(--border)", cursor: "pointer" }}>
-          <span className="adm-chip" style={panelChipStyle(a.panel)}>{a.panel}</span>
+          <span className="adm-chip" style={panelChipStyle(a.panel)}>{panelLabel(a.panel)}</span>
           <span style={{ minWidth: 0 }}>
             {actLabel(a.action)}{a.actor ? ` · ${a.actor}` : a.table_number ? ` · Table ${a.table_number}` : det ? ` · ${det}` : ""}
             {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
