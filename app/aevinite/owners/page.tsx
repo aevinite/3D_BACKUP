@@ -100,7 +100,7 @@ export default function AdminOwners() {
 
   const visibleOwners = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let list = owners.filter((o) => {
+    const list = owners.filter((o) => {
       if (filter === "active" && !o.active) return false;
       if (filter === "suspended" && o.active) return false;
       if (filter === "multi" && o.restaurants.length <= 1) return false;

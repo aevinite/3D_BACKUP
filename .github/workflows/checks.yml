@@ -1,0 +1,63 @@
+# The checks that used to run on exactly one laptop.
+#
+# WHY THIS EXISTS. CLAUDE.md says of four guards that they run "AUTOMATICALLY as a PostToolUse
+# hook" and, of one of them, "NOW ENFORCED, not just asked for". The only thing wiring them to an
+# edit was `.claude/settings.json`, and that file was gitignored — so a fresh clone, a CI run, and
+# every one of the 28 git worktrees had zero guards, silently. Nothing printed a warning; an
+# unguarded session looked exactly like a guarded one. That file is versioned now, and this is the
+# other half: the same checks, on every push, where nobody has to remember.
+#
+# It is deliberately CHEAP and SECRET-FREE. Every step below reads only files in the repo — no
+# database, no login, no deployed site, no `.env.local`. That is why it can run on a pull request
+# from anywhere and why it takes well under a minute. The heavy suites (`verify:everything`,
+# `load:ramp`, anything with `--base`) are NOT here on purpose: they write to the shared database,
+# and two of them at once is what took it down on 2026-07-31.
+name: checks
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+# A newer push supersedes an in-flight run on the same branch. Parallel sessions push often here.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # verify:ui and verify:test-safety compare against origin/main to judge only what is
+          # NEW (duplicate migration numbers, a migration missing its REVOKE). With a shallow
+          # clone that comparison silently finds nothing and both checks become weaker in a way
+          # that still prints green — the exact failure mode this whole file exists to stop.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci --no-audit --no-fund
+
+      # tsc --noEmit. CLAUDE.md's definition of done asks for a type-check and, until now, no
+      # command provided one: `npm run lint` is bare eslint and does not type-check.
+      - name: typecheck
+        run: npm run -s typecheck
+
+      - name: lint
+        run: npm run -s lint
+
+      # money rounding, error classification, and the brandText/brandTheme/starterMenu units.
+      # Not the e2e (test:totals) — that one reads the real database.
+      - name: unit tests
+        run: npm run -s test:money && npm run -s test:errors && npm run -s test:units
+
+      # The 16 static, read-only guards. Each one is a bug that actually reached someone's screen.
+      - name: static guards
+        run: npm run -s verify:static

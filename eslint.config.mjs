@@ -44,6 +44,13 @@ const eslintConfig = defineConfig([
       "react-hooks/purity": "off",
       "react-hooks/refs": "off",
       "react-hooks/immutability": "off",
+      // "Compilation Skipped: existing memoization could not be preserved" is the React
+      // Compiler declining to OPTIMISE a component. The code runs exactly as written, so it
+      // is not a defect — but it shipped as severity ERROR, which meant `npm run lint` could
+      // never be a gate for the errors that ARE defects (a component created during render
+      // wiping text as it was typed — PR #762). Kept as a WARNING so it stays visible, rather
+      // than "off", because a component the compiler cannot optimise is worth knowing about.
+      "react-hooks/preserve-manual-memoization": "warn",
       // Plain <img> is a deliberate app-wide choice: dish image URLs are
       // DB/editor-driven to ANY host, which crashes next/image's host
       // whitelist. See components/FoodCard.tsx for the full reasoning.

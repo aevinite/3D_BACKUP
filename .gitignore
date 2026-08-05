@@ -33,8 +33,21 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
-# IDE/AI tools - NEVER commit these!
-.claude/
+# IDE/AI tools - NEVER commit these... with two deliberate exceptions.
+#
+# Everything under .claude/ stays out (settings.local.json holds this machine's command
+# approvals, .vercel2.token is a secret, worktrees/ is 17 GB, sweep/ is scratch).
+#
+# BUT the four "cannot be forgotten" guards — verify:ui, verify:taps, verify:test-safety,
+# verify:audit — are wired to an edit ONLY by .claude/settings.json, and that file being
+# ignored meant the enforcement existed on exactly one laptop: no clone, no CI, and none of
+# the 28 git worktrees had it. Nothing printed a warning; an unguarded session looked
+# identical to a guarded one. So the hook config and the hook it runs are versioned.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/health-nudge.mjs
 
 # Private local menu editor (uses the service-role key — never push it).
 # Anchored with a leading slash so it ONLY ignores the ROOT editor/ — NOT the
@@ -71,3 +84,23 @@ reference/code-snapshot/
 # admin panel must show NO money, so these must NEVER be committed or wired into the app.
 temp-admin-analytics/
 temp-admin-console/
+
+# ── gaps found by the tooling sweeps (2026-08-04, 2026-08-05) ─────────────────
+# `/.next/` above is ANCHORED and exact, so a dev server on another port creates a
+# fully committable build directory (.next-8093/ was sitting here untracked).
+.next-*/
+# Throwaway probe scripts. verify:ui catches these AFTER they are committed;
+# ignoring them stops it happening at all. Two such files at the repo root were
+# signing in to the live client site when the 2026-08-04 sweep found them.
+/_*.mjs
+/_*.js
+/_*.ts
+# Handoff notes are temp files by definition — the session that picks one up deletes it.
+/*-HANDOFF.md
+# Local research/scratch output
+docs/research/
+# Other AI tools' per-machine state. These were TRACKED, and .agents/ was also the
+# only CRLF content in the repo (67 files of image-generation marketing skills, which
+# have nothing to do with a restaurant billing app).
+.agents/
+.codex/

@@ -1,0 +1,28 @@
+# Line endings, decided once, so nobody has to remember.
+#
+# WHY: 67 tracked files were CRLF and there was no .gitattributes, so the only protection was
+# a human remembering to check `git diff --stat` per file — because a Python or byte-level
+# write to a CRLF file rewrites EVERY line ending, and a one-line change then arrives as a
+# whole-file diff that hides what actually changed. Several panel stylesheets are CRLF too.
+* text=auto eol=lf
+
+# Binary, never touched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.pdf binary
+*.glb binary
+*.gltf binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.mp4 binary
+*.mov binary
+
+# The panel stylesheets and scripts are served as STATIC files and are currently CRLF.
+# Left alone on purpose: normalising them would rewrite thousands of lines in files that are
+# edited constantly, turning every future diff into noise for no benefit. New files get LF.
+public/panels/**/*.css -text
+public/panels/**/*.js  -text
