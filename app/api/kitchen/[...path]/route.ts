@@ -4,7 +4,9 @@
 // server-only service-role client. The kitchen UI calls fetch("/api/kitchen"+path).
 
 import { NextRequest, NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
+import { menuTag } from "@/lib/menuDataServer";
 import { withIdempotency } from "@/lib/idempotency";
 import { replayClash, clashJson, expectClash } from "@/lib/clash";
 import { logAction, logError, deviceIdFrom, deviceBlocked } from "@/lib/oplog";
@@ -367,6 +369,20 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tags = Array.isArray(cur.tags) ? cur.tags.filter((t: string) => t !== "sold-out") : [];
       if (value) tags.push("sold-out");
       const row = must(await sb.from("menu_items").update({ tags }).eq("id", b).eq("restaurant_id", rid).select());
+      // AND TELL THE GUESTS (T13 sweep, 2026-08-05). The guest menu does NOT read menu_items — it
+      // reads the server-side cached bundle (lib/menuDataServer.ts), and the ONLY thing that gets a
+      // change in front of a guest promptly is purging that restaurant's tag. The manager panel's
+      // sold-out toggle goes through the editor route's upsert, which busts it; the 86 board is the
+      // same action from the other side and never did. So a cook marked a dish sold out, the
+      // breadcrumb this UPDATE raises made every guest phone refetch — and each refetch was handed
+      // the same stale bundle, which still said the dish was available. Guests kept ordering it and
+      // kept being refused at Place Order, with the waiter's tablet and this board both showing it
+      // correctly, so nobody on the floor could see why. The backstop is `revalidate: 86400`, so
+      // "eventually" meant up to 24 HOURS, not the 120s an old comment promised.
+      // Best-effort on purpose: a bust failure must never fail the 86 itself.
+      // `{ expire: 0 }` — see the note on bustMenuCache in the editor route: the "max" profile hands
+      // the OLD bundle to the next reader, which on a sold-out is the one thing we cannot do.
+      try { revalidateTag(menuTag(rid), { expire: 0 }); } catch { /* the revalidate window is the backstop */ }
       await logAction("kitchen", value ? "sold_out_on" : "sold_out_off", { ...adminMark, detail: b, device_id: dev, restaurant_id: rid });
       return ok(row[0] || null);
     }

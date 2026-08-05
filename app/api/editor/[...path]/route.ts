@@ -394,14 +394,22 @@ async function editorScope(req: NextRequest, g: { user: StaffUser | null }): Pro
 
 // Owner edited the SHARED menu (a dish/category/filter/guest-safe setting) → bust
 // THIS restaurant's cached menu bundle so guests get the change within seconds via
-// their realtime 'menu' refetch (which would otherwise hit a stale 120s cache),
-// not after the 120s revalidate window. Scoped to one restaurant's tag — never
-// invalidates anyone else's menu. Best-effort: a bust failure must never fail the
-// save (the 120s revalidate is the backstop).
+// their realtime 'menu' refetch, which would otherwise be handed the stale bundle.
+// Scoped to one restaurant's tag — never invalidates anyone else's menu.
+//
+// ⚠️ THE BACKSTOP IS 24 HOURS, NOT 120 SECONDS. This comment said "120s" three times and
+// that number does not exist anywhere: lib/menuDataServer.ts sets `revalidate: 86400`. A
+// missing bust is therefore a full DAY of guests reading a stale menu, not a two-minute
+// annoyance — which is exactly how the kitchen's 86 board shipped without one (T13 sweep,
+// 2026-08-05). If you add a write path that changes what a GUEST sees, it must call this.
+// Best-effort: a bust failure must never fail the save.
 const bustMenuCache = (rid: string) => {
-  // 'max' = stale-while-revalidate: purge the tag and let the next read refresh
-  // it (the documented profile for route-handler / webhook busting in Next 16).
-  try { revalidateTag(menuTag(rid), "max"); } catch {}
+  // `{ expire: 0 }`, NOT the "max" profile. This said 'max' = stale-while-revalidate, and that is
+  // precisely wrong for a menu: MEASURED on the running app, "max" serves the OLD bundle to the very
+  // next reader and only then refreshes — so an owner's edit needed a SECOND save (or a second guest
+  // load) before a guest saw it, which is the "menu edits need a panel save" annoyance. Expiring the
+  // entry makes the next read recompute. (T13 sweep, 2026-08-05)
+  try { revalidateTag(menuTag(rid), { expire: 0 }); } catch {}
 };
 
 // Money-integrity lock: while a session holds a LIVE (non-voided) invoice, its bill
@@ -1359,36 +1367,50 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // still updates the instant its order lands.
       const { data, error } = tbl
         ? await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: tbl })
-        : await sharedFloorSummary(`floor:${rid}`, async () => {
-            const r = await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null });
-            // PRINTER TROUBLE RIDES THE FLOOR READ (mig 269, owner 2026-08-04): open printer
-            // problems + reprints nobody printed (queued/printing past 90s, or failed out of
-            // retries). Inside the SHARED closure on purpose — a dozen devices polling
-            // together still cost these two indexed few-row reads ONCE, and every write
-            // already drops the snapshot, so a report or a resolve shows on the next read.
-            // A targeted ?table= refetch never pays for this (printer state isn't per-table).
-            if (!r.error && r.data) {
-              const staleIso = new Date(Date.now() - 90000).toISOString();
-              const [ev, stuck] = await Promise.all([
-                sb.from("printer_events").select("id, kind, note, count, reported_by, last_at")
-                  .eq("restaurant_id", rid).eq("status", "open").order("last_at", { ascending: false }).limit(5),
-                sb.from("print_jobs").select("id, order_id, status, attempts, created_at, requested_by, error")
-                  .eq("restaurant_id", rid).eq("kind", "kot")
-                  .or(`status.eq.failed,and(status.eq.queued,created_at.lt.${staleIso}),and(status.eq.printing,created_at.lt.${staleIso})`)
-                  .order("created_at").limit(5),
-              ]);
-              let jobs = (stuck.data || []) as Record<string, unknown>[];
-              if (jobs.length) {
-                const oids = [...new Set(jobs.map((j) => j.order_id).filter(Boolean))] as string[];
-                const os = (await sb.from("orders").select("id, kot_no, table_number").in("id", oids).eq("restaurant_id", rid)).data || [];
-                const byId = new Map(os.map((x) => [x.id, x]));
-                jobs = jobs.map((j) => ({ ...j, kot_no: byId.get(j.order_id as string)?.kot_no ?? null, table_number: byId.get(j.order_id as string)?.table_number ?? null }));
-              }
-              (r.data as Record<string, unknown>).printer = { events: ev.data || [], stuck: jobs };
-            }
-            return r;
-          });
+        : await sharedFloorSummary(`floor:${rid}`, async () => await sb.rpc("lfh_table_view_summary", { p_restaurant_id: rid, p_table: null }));
       if (error) throw new Error(error.message);
+      // ── PRINTER TROUBLE — ITS OWN SHARED KEY, NOT FOLDED INTO THE FLOOR READ ───────────────
+      // Open printer problems + reprints nobody printed (queued/printing past 90s, or failed out
+      // of retries), added by mig 269 for the manager's floor strip.
+      //
+      // IT USED TO BE ATTACHED INSIDE THE `floor:${rid}` CLOSURE, AND THAT WAS A REAL FAULT
+      // (T13 sweep, 2026-08-05). `sharedFloorSummary` keys on the STRING alone, and the waiter
+      // route shares the SAME `floor:${rid}` key with a closure that is a bare
+      // lfh_table_view_summary call — no printer. So whichever panel read first decided for both,
+      // and a waiter's routine poll handed the manager a floor with no `printer` key at all.
+      // `printerAlerts()` starts `if (!pr) return []`, so the strip VANISHED — and worse,
+      // `noticePrinterNews()` ends `seenPrinterKeys = keys`, so the empty pass reset the seen-set
+      // and the next pass that DID carry the payload re-announced every still-open problem in red.
+      // The one alarm that means "food orders are not reaching the kitchen" blinked in and out and
+      // cried wolf each time it came back. Not a rare race either: an unscopable event wakes the
+      // manager and every tablet at the same instant, so the winner was a coin flip.
+      //
+      // Its own key fixes it without giving up anything: the EXPENSIVE whole-floor read stays
+      // shared between both panels (that is the whole point of lib/floorSummary), these two tiny
+      // indexed reads are shared across manager devices under their own key, and the waiter route
+      // never pays for them. Same 1.5s window, and the key ENDS IN THE RESTAURANT ID so
+      // invalidateFloor() still drops it after a write — a report or a resolve shows on the next
+      // read. Exactly the shape `merges:${rid}` below already uses.
+      // A targeted ?table= refetch never pays for this (printer state isn't per-table).
+      const printer = tbl ? null : await sharedFloorSummary(`printer:${rid}`, async () => {
+        const staleIso = new Date(Date.now() - 90000).toISOString();
+        const [ev, stuck] = await Promise.all([
+          sb.from("printer_events").select("id, kind, note, count, reported_by, last_at")
+            .eq("restaurant_id", rid).eq("status", "open").order("last_at", { ascending: false }).limit(5),
+          sb.from("print_jobs").select("id, order_id, status, attempts, created_at, requested_by, error")
+            .eq("restaurant_id", rid).eq("kind", "kot")
+            .or(`status.eq.failed,and(status.eq.queued,created_at.lt.${staleIso}),and(status.eq.printing,created_at.lt.${staleIso})`)
+            .order("created_at").limit(5),
+        ]);
+        let jobs = (stuck.data || []) as Record<string, unknown>[];
+        if (jobs.length) {
+          const oids = [...new Set(jobs.map((j) => j.order_id).filter(Boolean))] as string[];
+          const os = (await sb.from("orders").select("id, kot_no, table_number").in("id", oids).eq("restaurant_id", rid)).data || [];
+          const byId = new Map(os.map((x) => [x.id, x]));
+          jobs = jobs.map((j) => ({ ...j, kot_no: byId.get(j.order_id as string)?.kot_no ?? null, table_number: byId.get(j.order_id as string)?.table_number ?? null }));
+        }
+        return { events: ev.data || [], stuck: jobs };
+      });
       // WHICH TABLES ARE SERVED AS ONE PARTY (mig 249). A handful of rows, restaurant-scoped, live
       // ones only — small enough to ride along with every floor read, and the floor needs it on
       // BOTH tiles: the parent says "merged with T7", the child says "access from T6" instead of
@@ -1405,7 +1427,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const merges = await sharedFloorSummary(`merges:${rid}`, async () => (await sb.from("table_merges")
         .select("parent_table, child_table, merged_at, merged_by")
         .eq("restaurant_id", rid).is("ended_at", null).limit(200)).data || []);
-      return ok({ ...(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] }), merges });
+      // Spread into a NEW object — `data` may BE the 1.5s shared snapshot and a handler must never
+      // write into it (owner bug, 2026-08-02). `printer` lands in the same place the panel already
+      // reads it from (`state.summary.printer`, editor/app.js printerAlerts), and stays absent on
+      // the targeted ?table= path exactly as before.
+      return ok({
+        ...(data || { tiles: {}, order_count: 0, latest_order_table: null, calls: [], requests: [], joiners: [], blocklist: [] }),
+        merges,
+        ...(printer ? { printer } : {}),
+      });
     }
 
     // print-jobs/:id — everything needed to print a stuck reprint HERE instead (mig 269).
