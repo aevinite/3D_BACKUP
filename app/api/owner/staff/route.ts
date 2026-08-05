@@ -24,12 +24,12 @@ import { mergeOwnerEntitlements, MANAGER_POWER_FLAGS, powerEntitled } from "@/li
 import { managerSettingsOff } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
-import { TABLET_PERM_KEYS } from "@/lib/accessModel";
+import { capsForRole } from "@/lib/staffCaps";
 import { newWaiterTables } from "@/lib/tableAssign";
 import { viewAsPerson, isPersonId } from "@/lib/viewAsPerson";
 import {
   PROFILE_FIELDS, hasProfile, completeness, mergeProfilePatch, jobPatchFrom, paymentFrom,
-  payAccessWith, todayIST, type PayAccess,
+  payAccessWith, todayIST, payHistoryBlocksDelete, PAY_HISTORY_DELETE_MESSAGE, type PayAccess,
 } from "@/lib/staffProfile";
 
 // GAP-B (owner ceiling): a tablet cap gated by an admin module may only be granted to a
@@ -729,8 +729,18 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     //   • MANAGER powers (the bare flag, e.g. give_discounts) — per-person override for a
     //     MANAGER, two-state on|off; enforced by managerCan (Option B, 2026-07-24). A key
     //     the enforcer doesn't read would be a dead grant, so both lists are the enforced set.
-    const TABLET_KEYS = TABLET_PERM_KEYS; // derived from lib/accessModel (2026-07-26) — lockstep with tabletPerm by construction
-    const POWER_KEYS = MANAGER_POWER_FLAGS as readonly string[];
+    // ONE LIST, derived from lib/staffCaps for the ROLE being edited (2026-08-04). It used to be
+    // two hand-picked constants — TABLET_PERM_KEYS + MANAGER_POWER_FLAGS — and they had already
+    // drifted from the rows the Access screen shows: `delete_bill` is a manager row on that screen
+    // and is genuinely enforced by canDeleteBill(), but MANAGER_POWER_FLAGS does not contain it, so
+    // this route answered `Unknown permission "delete_bill"`. The admin's Per-person tab posts
+    // here, so tapping On for one manager said "That change didn't save" — while the identical
+    // dropdown inside that person's profile (which allow-lists from staffCaps) saved fine. Deriving
+    // both routes from the same list is what makes those two screens impossible to disagree again.
+    const roleCaps = capsForRole(u.role).filter((c) => c.perPerson);
+    const capByKey = new Map(roleCaps.map((c) => [c.key, c]));
+    // Which family a key belongs to still decides the extra rules below.
+    const isTabletKey = (k: string) => k.startsWith("tablet_") || k.startsWith("cap:");
     const patch = body?.permissions;
     if (!patch || typeof patch !== "object" || Array.isArray(patch)) return bad("Missing permissions object.");
     const merged: Record<string, string> = { ...(u.permissions && typeof u.permissions === "object" ? u.permissions : {}) };
@@ -739,12 +749,13 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     let entsCache: unknown; let entsLoaded = false;
     const ents = async () => { if (!entsLoaded) { entsCache = (await sb.from("restaurants").select("owner_entitlements").eq("id", u.restaurant_id).maybeSingle()).data?.owner_entitlements ?? null; entsLoaded = true; } return entsCache; };
     for (const [k, v] of Object.entries(patch)) {
-      const isTablet = TABLET_KEYS.includes(k);
-      const isPower = POWER_KEYS.includes(k);
-      if (!isTablet && !isPower) return bad(`Unknown permission "${k}".`);
+      const cap = capByKey.get(k);
+      if (!cap) return bad(`"${k}" isn't a permission a ${u.role} has.`);
+      const isTablet = isTabletKey(k);
       if (v === null || v === "" || v === "default") { delete merged[k]; noted.push(`${k}→default`); continue; }
-      // Tablet caps allow the PIN state; manager-power overrides are plain on/off.
-      const modes = isTablet ? ["on", "pin", "off"] : ["on", "off"];
+      // The PIN state exists only where the row itself offers it (money rows) — the model says
+      // which, so a floor row can't be set to "pin" and silently behave as "on".
+      const modes = cap.pin ? ["on", "pin", "off"] : ["on", "off"];
       if (!modes.includes(String(v))) return bad(`Bad value for "${k}" — use ${modes.join(", ")}, or null.`);
       // Least-privilege (audit 2026-07-07): a MANAGER may REDUCE a junior's power (off) or
       // reset it to default, but may NOT GRANT (on/pin) — only the owner/admin grants powers.
@@ -808,6 +819,10 @@ async function deleteImpl(req: NextRequest) {
   if (!u) return bad("That person isn't on your staff.", 404);
   // Hierarchy: can only delete accounts BELOW your level (see assignableFor).
   if (!assignableFor(s.actor).includes(u.role as Role)) return bad("You can't manage accounts at or above your own level.", 403);
+  // A person with pay history is never deleted — see payHistoryBlocksDelete(). Same rule and same
+  // wording as the admin route, because the ledger is just as unrecoverable from either screen.
+  const pay = await payHistoryBlocksDelete(sb, id);
+  if (pay.blocked) return bad(PAY_HISTORY_DELETE_MESSAGE(pay.count), 409);
   const { error } = await sb.from("staff_users").delete().eq("id", id);
   if (error) return bad("Couldn't remove that account — please try again.", 500);
   await logAction("owner", "staff_delete", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `deleted "${u.username}"` });

@@ -13,7 +13,7 @@
 // render at reduced opacity — no skeleton flash.
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useState } from "react";
-import { openRestaurantPanel, useActiveAutoRefresh } from "@/components/admin/shared";
+import { openRestaurantPanel, useActiveAutoRefresh, timeAgo } from "@/components/admin/shared";
 import type { TrendPoint } from "@/components/admin/OrdersTrend";
 
 const OrdersTrend = dynamic(() => import("@/components/admin/OrdersTrend"), {
@@ -26,6 +26,10 @@ type Busiest = { id: string; slug: string; name: string; orders: number; activeT
 type Data = {
   totals: { totalOrders: number; activeTablesNow: number; activeRestaurants: number; totalRestaurants: number; totalStaff: number; totalTables: number };
   bucket?: "day" | "hour";
+  // The snapshot cache stamps every payload (lib/ownerCache) — so the page can say how old the
+  // numbers are instead of implying they are live.
+  cachedAt?: string;
+  cached?: boolean;
   trend: TrendPoint[];
   busiest: Busiest[];
   bySource: { source: string; orders: number }[];
@@ -61,10 +65,12 @@ export default function AdminAnalytics() {
     if (r === "today" || r === "30d") setRange(r);
   }, []);
 
-  const load = useCallback(async (r: Range) => {
+  // `live` = the ↻ button: ask the server to recompute and wait for it (?refresh=1). A normal open
+  // and the 60s backstop take the snapshot, which is one row read.
+  const load = useCallback(async (r: Range, live = false) => {
     setLoading(true); setErr(null);
     try {
-      const res = await fetch(`/api/admin/analytics?range=${r}`, { cache: "no-store" });
+      const res = await fetch(`/api/admin/analytics?range=${r}${live ? "&refresh=1" : ""}`, { cache: "no-store" });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't load analytics.");
       setData(j);
@@ -122,7 +128,15 @@ export default function AdminAnalytics() {
             <button key={r} className={range === r ? "active" : ""} onClick={() => setRange(r)}>{RANGE_LABEL[r]}</button>
           ))}
         </div>
-        <button className="adm-btn" disabled={loading} onClick={() => load(range)}>
+        {/* "updated X ago" next to Refresh — the standing rule for anything served from the
+            snapshot cache. Without it a cached number looks live, which is the one thing a
+            dashboard must never do. */}
+        {data?.cachedAt ? (
+          <span className="adm-muted" style={{ fontSize: 12 }} title={new Date(data.cachedAt).toLocaleString()}>
+            updated {timeAgo(data.cachedAt)}
+          </span>
+        ) : null}
+        <button className="adm-btn" disabled={loading} onClick={() => load(range, true)}>
           <i className={`fas fa-rotate-right${loading ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
         </button>
       </div>

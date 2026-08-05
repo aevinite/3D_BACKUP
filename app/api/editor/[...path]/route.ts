@@ -283,11 +283,20 @@ async function canDeleteBill(g: { user: StaffUser | null }, rid: string): Promis
   // class this model exists to prevent (found 2026-08-02 while proving "off means gone AND
   // refused"). The admin's own caps are still checked by the managerCan("void_bills") call that
   // must run before this one, so an override can't climb above them.
+  const r = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
+    { manager_permissions?: Record<string, boolean>; access_config?: Record<string, { on?: boolean; manager_opts?: Record<string, boolean> }> } | null;
+  // THE FEATURE HALF FIRST, above the person's own setting (2026-08-04). managerCan() has always
+  // checked `access_config[flag].on === false` — "does this restaurant HAVE the thing at all" —
+  // and this gate did not. The call before it checks void_bills' feature half, which is a
+  // DIFFERENT row, so switching "Delete a bill" off for the whole restaurant removed the row from
+  // every screen (capVisible hides it) and left a manager with a stored `delete_bill: "on"` still
+  // deleting bills. Hiding is never the only guard — least of all on the most destructive money
+  // action there is.
+  if (r?.access_config?.delete_bill?.on === false) return false;
+  // THIS PERSON's own setting wins over the restaurant's, exactly as managerCan() resolves it.
   const ov = u.permissions?.delete_bill;
   if (ov === "on" || ov === "pin") return true;
   if (ov === "off") return false;
-  const r = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
-    { manager_permissions?: Record<string, boolean>; access_config?: { void_bills?: { manager_opts?: Record<string, boolean> } } } | null;
   const row = r?.manager_permissions?.delete_bill;
   if (typeof row === "boolean") return row;
   return r?.access_config?.void_bills?.manager_opts?.delete_bill === true;
@@ -687,8 +696,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // A named manager's OWN answer wins here too (?as=), exactly as managerCan
         // resolves it — otherwise the one person given/denied this row would be the one
         // person this view got wrong.
+        // The FEATURE half caps the simulated answer too, or "view as a manager" would show a
+        // Delete-bill button for a restaurant that doesn't have the row at all (2026-08-04).
         canDeleteBill: simulate
-          ? (myOv.delete_bill === "on" || myOv.delete_bill === "pin" ? true
+          ? ((r?.access_config as Record<string, { on?: boolean }> | null)?.delete_bill?.on === false ? false
+            : myOv.delete_bill === "on" || myOv.delete_bill === "pin" ? true
             : myOv.delete_bill === "off" ? false
             : typeof r?.manager_permissions?.delete_bill === "boolean"
               ? r.manager_permissions.delete_bill

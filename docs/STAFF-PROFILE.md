@@ -40,7 +40,12 @@ the right column, above the danger zone. Nothing about a person gets its own sep
     "what they may manage" list. Their rows are **read-only** here: `owner_entitlements` is a
     restaurant setting, not a per-person one, and a dropdown that saved nothing is exactly the
     dead switch the 2026-07-31 access rebuild removed.
-  - **waiter** → one: what they may do on the tablet.
+  - **waiter** → two, named as Access names them: **Permission for waiter** (mark a bill paid ·
+    discount a bill · close a table that still owes money) and **What a waiter can do on the
+    floor** (take an order · move/merge/split · table type · khata · parcel · banquet). Printing
+    an invoice and reopening a bill are not rows at all — a tablet can never be given either
+    (owner, 2026-08-04). The walk-out row is stored in `access_config`, not a column, and was
+    missing from this list entirely until 2026-08-04.
   - **kitchen** → none, and it says so in a line instead of showing empty controls.
 - Saving is **per row, immediately**, and it takes effect on the person's next tap — no
   re-login. If the server refuses, the row snaps back and says so.
@@ -63,6 +68,13 @@ stored in the public `branding` bucket under `staff/<user id>/`, URL kept in
 - Pay ledger — `staff_payments`, append-only (a wrong entry is cancelled with a reason, never
   deleted). The pay card only appears when the **payroll module is on** for that restaurant,
   and only when the person is **on the pay list**.
+  **A person with pay history cannot be DELETED** (both delete routes refuse with a 409 —
+  `payHistoryBlocksDelete()` in `lib/staffProfile.ts`). The foreign key is
+  `ON DELETE CASCADE`, so a hard delete used to erase the whole ledger silently, on a screen
+  whose own warning said "their past orders and bills stay in the books either way". Salary is an
+  expense in the day book and in "After staff pay" on the owner dashboard, so that quietly
+  rewrote past totals. **"Mark as left" is the action** — it records the day, stops the pay
+  counting from it and switches the login off, keeping every row. (2026-08-04)
 
 ## Rules that must stay true
 

@@ -52,19 +52,25 @@ export function cleanClonedSettings(
   base.table_names = {};
   // NOT-NULL tenant-specific columns can't be nulled — reset them to their safe "blank"
   // default instead, so a new restaurant does NOT inherit #1's current values.
-  // Waiter-tablet billing capabilities: NEW restaurants must start with these OFF, never
-  // copy whatever #1 has switched on (audit 2026-07-06 — #1 had mark-paid + invoice ON, so
-  // every new tenant's waiters could settle bills / issue invoices with no admin grant).
+  // ── WHAT A NEW RESTAURANT'S WAITERS CAN DO (rewritten 2026-08-04) ──────────────────────────
+  // MONEY: off. The two the owner named stay off until an admin hands them over on
+  // Access → Waiter → Permission for waiter — that is his whole rule ("they can only mark as
+  // paid, only if permission is given"). Never copied from #1, which has them on.
   base.tablet_discount = "off";
   base.tablet_mark_paid = "off";
-  base.tablet_invoice = "off";
-  // Order-taking is the tablet's core function, so a NEW restaurant's waiters start able
-  // to take orders (default 'on' — mig 178). It's still a manager-controlled tri-state.
+  base.tablet_invoice = "off";   // never grantable at all — see WAITER_NEVER in lib/accessTree.ts
+  // FLOOR: on. These are how the tablet does its job, and the model always SAID they were
+  // permanently on for the panel that owns them — but writing 'off' here made that a lie for a
+  // waiter, because tabletPerm reads a stored 'off' as a refusal and no screen had a row to undo
+  // it. Eight of nine restaurants shipped with their waiters unable to move a table or use khata.
+  // Each now has its own row on Access → Waiter (default ON), and a new restaurant is born
+  // matching that default. A module that is off still removes its own (khata/banquet/parcel).
   base.tablet_take_orders = "on";
-  // The banquet tablet capability is a tri-state cap like the three above — same rule: a new
-  // restaurant starts OFF and never inherits #1's, so a later `banquet_allowed` grant doesn't
-  // arrive with waiters already able to create banquet bills. (mig 130.)
-  base.tablet_banquet = "off";
+  base.tablet_table_ops = "on";
+  base.tablet_table_tags = "on";
+  base.tablet_khata = "on";
+  base.tablet_parcel = "on";
+  base.tablet_banquet = "on";
   // Admin ENTITLEMENTS must default OFF for a new restaurant (NEW-FEATURE-CHECKLIST: "new
   // modules default OFF"). A raw clone copied #1's values, so if the flagship had banquet
   // billing or auto-print-KOT switched on, a brand-new restaurant was born with them enabled
@@ -80,13 +86,10 @@ export function cleanClonedSettings(
   base.table_tags_allowed = false;
   base.table_tags_owner_control = false;
   base.table_tags_enabled = true;
-  base.tablet_table_tags = "off";
-  base.tablet_khata = "off";
   // Table & KOT operations — the KOT ▾ menu (migs 172-177): same fresh-start ladder.
   base.table_ops_allowed = false;
   base.table_ops_owner_control = false;
   base.table_ops_enabled = true;
-  base.tablet_table_ops = "off";
   // Order-taking module (mig 179): unlike the modules above, _allowed starts ON for a NEW
   // restaurant too — taking orders is the app's core function, not a premium add-on. The
   // admin can still switch it off per restaurant. (Its tablet cap defaults 'on' above.)
@@ -109,7 +112,6 @@ export function cleanClonedSettings(
   base.parcel_allowed = true;      // permanent (mig 263) — the counter always sells parcels
   base.parcel_owner_control = false;
   base.parcel_enabled = true;
-  base.tablet_parcel = "off";
   // Platform board module (mig 209): unlike existing restaurants (backfilled ON), a NEW
   // restaurant starts OFF — it's opt-in (admin turns it on once the restaurant is on the
   // delivery apps). Channels start empty (none live). owner-transfer off, owner toggle neutral-ON.

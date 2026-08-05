@@ -23,7 +23,7 @@ import { hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { logAction } from "@/lib/oplog";
 import { newWaiterTables } from "@/lib/tableAssign";
-import { PROFILE_FIELDS, mergeProfilePatch, jobPatchFrom } from "@/lib/staffProfile";
+import { PROFILE_FIELDS, mergeProfilePatch, jobPatchFrom, payHistoryBlocksDelete, PAY_HISTORY_DELETE_MESSAGE } from "@/lib/staffProfile";
 import { capsForRole, isCapValue } from "@/lib/staffCaps";
 import { expectClash, clashJson } from "@/lib/clash";
 
@@ -356,6 +356,9 @@ export async function DELETE(req: NextRequest) {
   // Never delete an owner from here — deleting a PRIMARY owner would skip the
   // co-owner handoff and orphan the restaurant. Owners page only.
   if (u.role === "owner") return bad("Owners are managed on the Owners page, not here.", 403);
+  // A person with pay history is never deleted — see payHistoryBlocksDelete().
+  const pay = await payHistoryBlocksDelete(sb, id);
+  if (pay.blocked) return bad(PAY_HISTORY_DELETE_MESSAGE(pay.count), 409);
   const del = await sb.from("staff_users").delete().eq("id", id);
   if (del.error) return bad(del.error.message, 500);
   await logAction("admin", "user_delete", { actor: "admin", restaurant_id: u.restaurant_id, detail: `deleted "${u?.username || "?"}" · id ${id}` });

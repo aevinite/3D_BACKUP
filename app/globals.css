@@ -3556,38 +3556,10 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 .adm-nav a:hover { background: rgba(255,255,255,.08); color: #fff !important; }
 .adm-nav a.active { background: var(--accent-grad); color: #fff !important; box-shadow: 0 8px 20px -8px var(--accent); }
 .adm-nav a.active i { color: #fff !important; opacity: 1; }
-/* F3: "Arrange" edit-mode + drag-to-reorder for the sidebar nav (ReorderableNav). */
-/* Arrange = a subtle FOOTER control at the bottom of the sidebar (owner 2026-06-27:
-   it looked bad up top). margin-top:auto floats it to the bottom of the flex column;
-   a faint top divider sets it apart from the real nav items; muted + smaller so it
-   recedes until needed. */
-.adm-nav-edit {
-  display: flex; align-items: center; gap: 11px; padding: 8px 13px; border-radius: 9px; width: 100%;
-  margin-top: auto; border-top: 1px solid rgba(255,255,255,.07); padding-top: 11px;
-  background: transparent; border-left: none; border-right: none; border-bottom: none;
-  color: rgba(255,255,255,.42) !important; font-size: 11.5px; font-weight: 600; cursor: pointer;
-  transition: background .15s, color .15s;
-}
-.adm-nav-edit i { width: 19px; text-align: center; font-size: 13px; }
-.adm-nav-edit:hover { background: rgba(255,255,255,.06); color: rgba(255,255,255,.85) !important; }
-.adm-nav-edit.editing { background: var(--accent-grad); color: #fff !important; border-top-color: transparent; }
-.adm-nav-drag {
-  display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 11px; margin-bottom: 3px;
-  color: rgba(255,255,255,.74); font-size: 14px; font-weight: 600;
-  background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.08);
-  cursor: grab; user-select: none;
-}
-.adm-nav-drag i:not(.adm-nav-grip) { width: 19px; text-align: center; font-size: 15px; opacity: .9; }
-.adm-nav-grip { color: rgba(255,255,255,.4); font-size: 13px; }
-.adm-nav-drag.dragging { opacity: .45; cursor: grabbing; }
-.adm-nav-drag:active { cursor: grabbing; }
-/* While arranging, pin the desktop rail open so labels + drag targets are visible. */
-@media (min-width: 901px) {
-  .adm-side:has(.adm-nav.editing) { width: 248px; box-shadow: 10px 0 44px -10px rgba(0,0,0,.55); }
-  .adm-side:has(.adm-nav.editing) .lbl,
-  .adm-side:has(.adm-nav.editing) .who,
-  .adm-side:has(.adm-nav.editing) .navsoon { opacity: 1; }
-}
+/* The "Arrange / drag-to-reorder the sidebar" CSS lived here with components/admin/ReorderableNav.
+   Both deleted 2026-08-04: nothing imported the component (AdminShell and OwnerShell each render
+   their nav inline), so the feature was unreachable while 83 lines of code and this block read as
+   live. If it comes back, it comes back with a screen that uses it. */
 /* ── shadcn-style ANIMATION KIT (plain CSS, framework-agnostic) ───────────────
    The signature shadcn/Radix enter animations (fade + zoom + slide) as portable
    classes — work in the React shells AND the vanilla panels with NO Tailwind. Add

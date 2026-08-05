@@ -15,11 +15,11 @@
  *     instead of a switch that would save and do nothing.
  * Both live in staff_users.permissions and are written through /api/owner/staff. */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { nodeValue, type TreeState } from "@/lib/accessTree";
+import { type TreeState } from "@/lib/accessTree";
 // The rows each role has now live in lib/staffCaps, shared with the person's PROFILE panel
 // (components/admin/StaffProfile) and with the admin write route. One list, three screens —
 // this used to be a private copy here, and a second copy would be free to drift.
-import { capGroupsForRole, capVisible } from "@/lib/staffCaps";
+import { capGroupsForRole, capVisible, capStates, roleDefault as capRoleDefault, countOverrides as countRoleOverrides } from "@/lib/staffCaps";
 
 type Staff = { id: string; name: string | null; username: string; role: string; active?: boolean; permissions?: Record<string, string> };
 
@@ -27,9 +27,10 @@ const ROLE_LABEL: Record<string, string> = { owner: "Owner", manager: "Manager",
 const ROLE_COLOR: Record<string, string> = { owner: "#b491f0", manager: "#d4a574", tablet: "#60a5fa", kitchen: "#7ec88a" };
 const ROLE_ORDER: Record<string, number> = { owner: 0, manager: 1, tablet: 2, kitchen: 3 };
 
-const OVERRIDE_STATES = (pin: boolean) =>
-  pin ? ["default", "on", "pin", "off"] : ["default", "on", "off"];
-const STATE_LABEL: Record<string, string> = { default: "Default", on: "On", pin: "On + PIN", off: "Off" };
+// The states and their words come from lib/staffCaps, not a copy here — a private
+// `OVERRIDE_STATES` said "On + PIN" while the person's profile said "On + manager PIN" for the
+// same row, which reads as two different systems for one idea.
+const STATE_LABEL: Record<string, string> = { default: "Default", on: "On", pin: "On + manager PIN", off: "Off" };
 
 export default function AccessPerPerson({ rid }: { rid: string }) {
   const [staff, setStaff] = useState<Staff[] | null>(null);
@@ -70,7 +71,14 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
       ? { ...x, permissions: { ...(x.permissions || {}), ...(sent ? { [key]: sent } : {}) , ...(sent ? {} : { [key]: undefined as unknown as string }) } }
       : x));
     setSaving("saving");
-    fetch("/api/owner/staff", {
+    // THE ADMIN ROUTE, deliberately (2026-08-04). This posted to /api/owner/staff, whose allow-list
+    // was two hand-picked constants that had drifted from the rows this very screen renders — so
+    // "Delete a bill" for one manager answered `Unknown permission` and the row snapped back with
+    // "That change didn't save", while the identical dropdown in that person's profile worked.
+    // Both routes now derive their allow-list from lib/staffCaps, and an admin screen uses the
+    // admin route, which is what docs/STAFF-PROFILE.md has always said ("one list, three screens":
+    // this tab, the profile, and app/api/admin/users).
+    fetch("/api/admin/users", {
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: u.id, action: "set_permissions", permissions: { [key]: sent } }),
     })
@@ -81,12 +89,15 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
       .catch(() => { setErr("That change didn't save — the connection dropped."); setSaving("err"); load(rid); });
   };
 
+  // Same rule as the tree: the stylesheet renders in every state, including while the list is in
+  // flight, so nothing ever paints before its CSS exists.
+  // No stylesheet render here: app/aevinite/access/page.tsx renders PerPersonStyle unconditionally,
+  // so the CSS is in the server HTML long before this component decides what to show.
   if (!staff) return <div className="adm-muted" style={{ padding: 28, textAlign: "center" }}>Loading people…</div>;
   if (!staff.length) return <div className="acc2-warn"><div>This restaurant has no staff logins yet. Add people in the manager panel first.</div></div>;
 
   return (
     <>
-      <PerPersonStyle />
       <div className="app-head">
         <span className={`acc2-save ${saving}`}>
           {saving === "saving" ? "Saving…" : saving === "saved" ? "Saved" : saving === "err" ? "Not saved" : ""}
@@ -112,7 +123,7 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
                 {u.name || u.username}
                 <span className="rl" style={{ color: ROLE_COLOR[u.role] }}>{ROLE_LABEL[u.role] || u.role}</span>
               </span>
-              <span className="ct">{countOverrides(u)}</span>
+              <span className="ct">{overrideCount(u)}</span>
             </button>
           )) : <div className="adm-muted" style={{ padding: 14, fontSize: 12.5 }}>Nobody matches that.</div>}
         </aside>
@@ -125,8 +136,12 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
   );
 }
 
-const countOverrides = (u: Staff) => {
-  const n = Object.values(u.permissions || {}).filter((v) => v === "on" || v === "off" || v === "pin").length;
+// The SHARED counter (lib/staffCaps), which counts only rows this person's role actually has.
+// A private copy here counted every value in staff_users.permissions, so a leftover key from a
+// retired permission put a blue "2" on someone whose every row read "Default" — and the same
+// person's profile, which uses the shared helper, correctly said "All default".
+const overrideCount = (u: Staff) => {
+  const n = countRoleOverrides(u.role, u.permissions);
   return n ? String(n) : "";
 };
 
@@ -177,13 +192,12 @@ function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null
       {groups.map((g) => (
         <div key={g.group}>
           <div className="app-grp-h">{g.group}</div>
-          {g.caps.map(({ node, key, pin, perPerson }) => {
-            const roleDefault = st ? nodeValue(node, st) : undefined;
+          {g.caps.map((cap) => {
+            const { node, key, pin, perPerson } = cap;
+            const restaurantSays = st ? capRoleDefault(cap, st) : null;
             const cur = person.permissions?.[key];
             const value = cur === "on" || cur === "off" || cur === "pin" ? cur : "default";
-            const defaultReads = roleDefault === undefined ? "" : typeof roleDefault === "string"
-              ? (STATE_LABEL[roleDefault] || String(roleDefault))
-              : roleDefault ? "On" : "Off";
+            const defaultReads = restaurantSays ? (STATE_LABEL[restaurantSays] || restaurantSays) : "";
             return (
               <div key={key} className="app-cap">
                 <div className="app-cap-b">
@@ -192,7 +206,7 @@ function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null
                 </div>
                 {perPerson ? (
                   <div className="app-segs" role="radiogroup" aria-label={node.name}>
-                    {OVERRIDE_STATES(pin).map((s) => (
+                    {capStates(pin).map((s) => (
                       <button key={s} role="radio" aria-checked={value === s}
                         className={`${value === s ? "on" : ""} ${s === "default" ? "def" : ""}`}
                         onClick={() => onSet(person, key, s)}>
@@ -204,7 +218,11 @@ function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null
                   /* Restaurant-wide row (a Manager-settings section): the truth, read-only —
                      a per-person dropdown here would save a key nothing reads. */
                   <div className="app-fixed">
-                    <span className={`chip ${roleDefault === false ? "off" : "on"}`}>{roleDefault === false ? "Off" : "On"}</span>
+                    {/* The truth, and only once we know it — a chip that says "On" while the
+                        restaurant's settings are still loading is a claim we can't stand behind. */}
+                    <span className={`chip ${restaurantSays === "off" ? "off" : restaurantSays ? "on" : "wait"}`}>
+                      {restaurantSays ? (STATE_LABEL[restaurantSays] || restaurantSays) : "…"}
+                    </span>
                     <span className="hint">set for the restaurant</span>
                   </div>
                 )}
@@ -217,8 +235,13 @@ function PersonCard({ person, st, onSet }: { person: Staff; st: TreeState | null
   );
 }
 
-function PerPersonStyle() {
-  return <style jsx global>{`
+export function PerPersonStyle() {
+  // PLAIN <style href precedence>, deliberately NOT `<style jsx global>` — the same rule the
+  // Access page itself follows (app/aevinite/access/page.tsx). styled-jsx injects its CSS from
+  // JavaScript AFTER hydration, so this tab painted as raw browser defaults for a frame: unboxed
+  // rows, unstyled segmented buttons, a rail with no card. A plain <style> is server-rendered
+  // above the markup it styles. Do not convert this back. (2026-08-04)
+  return <style href="adm-access-person" precedence="default">{`
   .app-head { display:flex; justify-content:flex-end; min-height:18px; margin:0 0 8px; }
   .app-wrap { display:grid; grid-template-columns:260px 1fr; gap:16px; align-items:start; }
   .app-rail { position:sticky; top:12px; max-height:calc(100dvh - 96px); overflow-y:auto; background:var(--card); border:var(--border); border-radius:14px; padding:8px; }
@@ -244,6 +267,7 @@ function PerPersonStyle() {
   .app-fixed .chip { font-size:11px; font-weight:800; padding:4px 10px; border-radius:8px; }
   .app-fixed .chip.on { color:#22c55e; background:color-mix(in srgb,#22c55e 14%,transparent); }
   .app-fixed .chip.off { color:#ef4444; background:color-mix(in srgb,#ef4444 14%,transparent); }
+  .app-fixed .chip.wait { color:var(--muted); background:var(--muted2); }
   .app-fixed .hint { font-size:11px; color:var(--muted); }
   .app-cap { display:flex; align-items:flex-start; gap:14px; padding:11px 12px; border-radius:11px; background:var(--bg); margin-bottom:7px; }
   .app-cap-b { flex:1; min-width:0; }
