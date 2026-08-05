@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=1b12e0ef" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=36a77aea" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -39,7 +39,10 @@
       <button class="tab" data-tab="banquet" hidden>🎪 Banquet</button>
       <!-- Inventory module (mig 221): admin-entitled per restaurant — unhidden by syncInventoryTab(). -->
       <button class="tab" data-tab="inventory" hidden>📦 Inventory</button>
-      <button class="tab" data-tab="dash">Dashboard</button>
+      <!-- Every drawer row carries a glyph: on a phone the icon is the fastest thing to aim at,
+           and Dashboard + Settings were the only two bare-text rows in the list, which read as
+           half-finished beside the other seven (T12 phone sweep, 2026-08-05). -->
+      <button class="tab" data-tab="dash">📊 Dashboard</button>
       <!-- Guest ratings (mig 140): gated by the view_ratings manager power via XRAY_TABS. -->
       <!-- "Rating review", not "Ratings" (owner, 2026-08-02) — the Access screen row says the
            same. Only the LABEL changed: the tab key, the stored menus key and the view_ratings
@@ -50,7 +53,7 @@
            key, the stored menus key and the view_logs grant all keep their names. -->
       <button class="tab" data-tab="log">🗂 Audit &amp; logs</button>
       
-      <button class="tab" data-tab="general">Settings</button>
+      <button class="tab" data-tab="general">⚙️ Settings</button>
     </nav>
     <!-- Right-side actions cluster. The shared connbadge.js mounts the 🟢/🟡/🔴 connection
          light as the FIRST child of .top-actions (kitchen/tablet have this wrapper too); without
@@ -60,7 +63,13 @@
       <button id="reportIssueBtn" class="theme-toggle" type="button" title="Report an issue to the owner" aria-label="Report an issue">🚩</button>
       <!-- My profile & pay (mig 220). Starts hidden; myprofile.js reveals it only when this
            restaurant has the feature and this person has a profile. -->
-      <button id="myProfileBtn" class="theme-toggle" type="button" title="My profile &amp; pay" aria-label="My profile and pay" hidden style="display:none">👤</button>
+      <!-- 💳, not 👤: this opens "my profile & PAY", while maint.js's neighbouring button (the
+           staff drawer: name, phone, PIN, panel password) is the 👤 one. Once the phone layout
+           dropped the word "Profile" from that neighbour to make the row fit, two IDENTICAL person
+           glyphs sat side by side and neither said which was which (T12 phone sweep, 2026-08-05).
+           Same crowding the tablet panel solved by suppressing one; here both are reachable, so
+           they just need to look different. -->
+      <button id="myProfileBtn" class="theme-toggle" type="button" title="My profile &amp; pay" aria-label="My profile and pay" hidden style="display:none">💳</button>
       <div class="conn" id="conn">connecting…</div>
     </div>
   </header>
@@ -111,7 +120,7 @@
   <!-- Chart.js powers the Dashboard graphs. SELF-HOSTED (was a jsdelivr CDN link) so the
        Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
   <script src="/panels/vendor/chart.umd.min.js?v=4.4.7"></script>
-  <script src="/panels/maint.js?v=36aa5641"></script>
+  <script src="/panels/maint.js?v=7d03e59d"></script>
   <script src="/panels/realtime.js?v=9708934b"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
   <script src="/panels/outbox.js?v=d2aaaaf0"></script>
@@ -137,7 +146,7 @@
   <!-- My profile & pay (mig 220) — shared with the waiter tablet -->
   <script src="/panels/myprofile.js?v=7e0bcacf"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
-  <script src="/panels/undobar.js?v=9890d642"></script>
+  <script src="/panels/undobar.js?v=26fc85cb"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
   <script src="/panels/billcustomer.js?v=d165b9d0"></script>
   <!-- fitnums: big figures shrink their font to FIT their tile instead of clipping. -->
@@ -151,6 +160,6 @@
   <script src="/panels/billdoc.js?v=5502abfa"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=5f827fb7"></script>
+  <script src="/panels/editor/app.js?v=db8b8f43"></script>
 </body>
 </html>

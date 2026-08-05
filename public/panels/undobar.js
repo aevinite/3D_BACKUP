@@ -120,9 +120,22 @@
     if (timer) { clearTimeout(timer); timer = null; }
   }
 
+  // TELL THE PANEL WE ARE ON SCREEN (T12 phone sweep, 2026-08-05). This card and each panel's
+  // toast are both centred at the bottom ~8px apart, so on a 360px phone a "1 new order" toast
+  // landed ON the "Undo serve" card — and the undo is the one with a deadline. A body class plus
+  // the measured height let the toast step over us; nothing here depends on the panel reacting.
+  function markBody(up) {
+    try {
+      document.body.classList.toggle("lfh-undobar-up", !!up);
+      if (up && el) document.body.style.setProperty("--lfh-undobar-h", Math.round(el.getBoundingClientRect().height) + "px");
+      else document.body.style.removeProperty("--lfh-undobar-h");
+    } catch (_) { /* a cosmetic hint; never let it break an undo */ }
+  }
+
   function hide() {
     clearTimer();
     if (el) el.classList.remove("show");
+    markBody(false);
   }
 
   // Start (or restart) the draining ring + the auto-dismiss timer for `seconds`.
@@ -179,11 +192,13 @@
     // registers the off-screen start before the transition).
     if (el.classList.contains("show")) {
       runCountdown(seconds, opts.onExpire);
+      markBody(true);   // re-measure: swapped text can change the card's height
     } else {
       requestAnimationFrame(function () {
         requestAnimationFrame(function () {
           el.classList.add("show");
           runCountdown(seconds, opts.onExpire);
+          markBody(true);
         });
       });
     }

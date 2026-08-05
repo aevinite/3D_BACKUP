@@ -208,7 +208,7 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
         profile.name = name; profile.phone = phone; profile.needsProfile = false;
         if (setupPinIn) profile.hasPin = true;
         setMsg(detMsg, wasSetup ? "All set — welcome aboard! 🎉" : "Saved.", true);
-        const sb = document.getElementById("staffSettingsBtn"); if (sb) sb.textContent = "👤 Profile";
+        setSettingsBtnLabel(false);   // setup done → the everyday "👤 Profile" wording
         // Re-render as the everyday profile card after first-login setup.
         if (wasSetup) setTimeout(openDrawer, 700);
       } catch { setMsg(detMsg, "Network error.", false); }
@@ -328,6 +328,24 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
     armBack(); // hardware BACK now closes this popup instead of exiting the whole panel (B6)
   }
 
+  // Paint the top-bar button's label. The glyph and the WORD are separate spans so a narrow phone
+  // can drop just the word (each panel's CSS targets `[data-mode="profile"] .ssb-t`): the manager
+  // top bar wanted 373px of a 348px row at 360px and this button, being last in the row, was the
+  // one clipped — to "Profil" (T12 phone sweep, 2026-08-05). aria-label carries the full wording so
+  // hiding the word never hides it from a screen reader, and data-mode keeps the one-time
+  // "👋 Finish setup" state fully worded — that one is an invitation, not a utility. Called on
+  // build AND after first-login setup, so the spans are never wiped by a bare textContent assign.
+  function setSettingsBtnLabel(setup) {
+    const b = document.getElementById("staffSettingsBtn");
+    if (!b) return;
+    const word = setup ? "Finish setup" : "Profile";
+    b.setAttribute("data-mode", setup ? "setup" : "profile");
+    b.setAttribute("aria-label", word);
+    b.textContent = "";
+    b.appendChild(el("span", { class: "ssb-i", "aria-hidden": "true" }, [setup ? "👋" : "👤"]));
+    b.appendChild(el("span", { class: "ssb-t" }, [" " + word]));
+  }
+
   // ── user: the ⚙️ Settings button in the top bar ────────────────────────────
   function buildSettingsButton() {
     const bar = topbar();
@@ -338,9 +356,9 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
     // for the one-time "👋 Finish setup" capture, since that flow lives here, not in the
     // hamburger — once profile is confirmed the everyday button stays hidden on those panels.
     if (window.LFH_SUPPRESS_SETTINGS_BTN && !(profile && profile.needsProfile)) return;
-    const btn = el("button", { id: "staffSettingsBtn", class: "btn", style: { marginLeft: "auto" }, onClick: openDrawer },
-      [profile && profile.needsProfile ? "👋 Finish setup" : "👤 Profile"]);
+    const btn = el("button", { id: "staffSettingsBtn", class: "btn", style: { marginLeft: "auto" }, onClick: openDrawer });
     bar.appendChild(btn);
+    setSettingsBtnLabel(!!(profile && profile.needsProfile));
   }
 
   async function init() {

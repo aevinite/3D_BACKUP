@@ -959,8 +959,11 @@ body.menu-frost .nav {
 /* ── rate-your-visit row under a past bill ────────────────────────────────── */
 .fb-box { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(150,140,125,0.25); }
 .fb-ask { font-size: 12.5px; color: var(--muted); font-weight: 600; }
-.fb-starrow { display: flex; gap: 2px; }
-.fb-star { background: none; border: none; font-size: 20px; line-height: 1; cursor: pointer; color: rgba(212,165,116,0.32); padding: 2px; transition: transform .12s, color .12s; }
+/* Five stars, one thumb. These were 20px glyphs with 2px of padding — a ~24px box, 2px apart —
+   for the one thing we ask a guest to do after paying (T12 phone sweep, 2026-08-05). 22px + 5px
+   padding makes each star a 32px target and the row still fits well inside 360px. */
+.fb-starrow { display: flex; gap: 4px; }
+.fb-star { background: none; border: none; font-size: 22px; line-height: 1; cursor: pointer; color: rgba(212,165,116,0.32); padding: 5px; transition: transform .12s, color .12s; }
 .fb-star:hover, .fb-star.on { color: var(--accent); transform: scale(1.12); }
 .fb-comment { flex-basis: 100%; }
 .fb-comment input { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: var(--border); background: rgba(128,90,60,0.08); color: var(--text); font-size: 13px; font-family: inherit; }
@@ -4427,7 +4430,16 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
      at ~360px (sweep C2 visual). The right control cluster keeps its space; the label +
      chevron are still available by tapping the badge (the popup is unaffected). */
   .owx-top .lfh-conn-txt, .owx-top .lfh-conn-ms, .owx-top .lfh-conn-chev, .owx-top .lfh-conn-n { display: none; }
-  .owx-top .lfh-conn-badge { padding: 0 7px; }
+  /* …but wordless is not the same as CONTENTLESS. With the label, ms, chevron and count all
+     hidden, `padding: 0 7px` left a 20x12 capsule: on the owner's A35 that reads as an empty pill
+     someone forgot to finish, and it was the smallest tap target in the shell — for a control
+     whose own label says "Tap for details" (T12 phone sweep, 2026-08-05; the bars inside it were
+     0x0 as well, fixed in ConnectionBadge.tsx). Keep it wordless, but make the meter legible and
+     the box thumb-sized — the other controls in this bar are 32px. */
+  .owx-top .lfh-conn-badge { padding: 6px 9px; min-height: 32px; }
+  /* (No bar-height override here: SignalBars sets its geometry inline, and an inline style beats
+     a stylesheet rule — a `.lfh-bars { height }` here would be a rule that silently does nothing,
+     which is the class of dead CSS this sweep is cleaning up.) */
 }
 /* Tiny phones (≤430px): even with the breadcrumb ROOT hidden, the current-page
    name still crowds/overlaps the connection pill and the scope switcher at 360-390px.
@@ -4578,4 +4590,20 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ── AN iPHONE MUST NOT ZOOM IN WHEN A FIELD IS TAPPED (T12 phone sweep, 2026-08-05) ──────────
+   Every text field in the product is under 16px — measured: guest search 13px, owner 13.5px,
+   admin 12.5–13.5px, the panels the same range. On ANDROID (the owner's own A35) that is
+   harmless. On iOS Safari any input below 16px makes the browser zoom the page in on focus and it
+   does NOT zoom back out — the "I tapped the box and everything went huge" complaint — and staff
+   use whatever phone they own. Scoped two ways so nothing else moves: `-webkit-touch-callout`
+   only matches iOS/WebKit, and the width cap keeps it to phones. Android and desktop are
+   byte-for-byte unchanged. */
+@supports (-webkit-touch-callout: none) {
+  @media (max-width: 560px) {
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+    textarea,
+    select { font-size: 16px; }
+  }
 }
