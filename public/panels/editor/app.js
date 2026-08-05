@@ -4521,7 +4521,14 @@ async function loadDashboard(useCache) {
   }
   // Day parts (PetPooja pattern): the biggest slot is solid gold; tooltip carries orders.
   const dpData = (s.dayParts || []).filter((d, i) => i < 4 || d.orders > 0 || d.revenue > 0);
-  if (dpData.some((d) => d.revenue > 0 || d.orders > 0)) {
+  // TWO POPULATED SLOTS, NOT ONE (CLAUDE.md "charts must be DYNAMIC" — enforced here after the
+  // T12 phone sweep, 2026-08-05). The gate used to be `.some(...)`, so ONE slot with money drew
+  // the whole plot: a quiet morning rendered a single fat gold bar on the far right with four
+  // empty slots beside it — exactly the shape the owner banned ("a single fat bar floating in a
+  // wide empty plot reads as broken"), and on his 360px phone it spent 260px of a 780px screen
+  // saying nothing. Below two points, the honest card wins.
+  const dpLive = dpData.filter((d) => d.revenue > 0 || d.orders > 0);
+  if (dpLive.length >= 2) {
     const dpMax = Math.max(...dpData.map((d) => d.revenue));
     dashCharts.push(new Chart(document.getElementById("chDay"), {
       type: "bar",
@@ -4530,7 +4537,11 @@ async function loadDashboard(useCache) {
         scales: { x: { grid: { display: false }, border: { display: false }, ticks: { font: { size: 10 } } }, y: { beginAtZero: true, border: { display: false }, ticks: { maxTicksLimit: 4, callback: (v) => v >= 1000 ? "₹" + Math.round(v / 1000) + "k" : "₹" + v } } } },
     }));
   } else {
-    emptyCard("chDay", "Day parts", "No orders in this range yet.");
+    // The message has to match what is actually true. With ONE populated slot the honest line is
+    // that slot and its money — "no orders" would be a lie the owner could act on.
+    emptyCard("chDay", "Day parts", dpLive.length === 1
+      ? `All of it came in at <b>${esc(dpLive[0].label)}</b> — ${inr(dpLive[0].revenue)} from ${dpLive[0].orders} order${dpLive[0].orders === 1 ? "" : "s"}. A chart needs two busy parts of the day to compare.`
+      : "No orders in this range yet.");
   }
   // Channels — dine-in vs the delivery apps, with click-to-hide legend rows.
   const CH_META = { dinein: ["Dine-in", "#b97f35"], zomato: ["Zomato", "#e23744"], swiggy: ["Swiggy", "#fc8019"], takeaway: ["Website", "#0ea5e9"], parcel: ["Parcel", "#6b7280"] };
@@ -12403,6 +12414,12 @@ function setTab(tab) {
   // Multi-select is Dishes-only; leaving the Dishes tab exits it. syncBulkBtn shows/hides
   // the "Select" button and reflects the current mode.
   if (tab !== "items") { state.bulkMode = false; state.bulkSel.clear(); }
+  // …and publish the tab on <body> so CSS can hide that button too. syncBulkBtn()'s `hidden`
+  // attribute rides on the button NODE, and the sidebar is re-rendered from innerHTML — the
+  // replacement node carries no attribute, so a stale "☑︎ Select" was measured visible on
+  // Dashboard / Bills / Settings / Audit & logs (T12 phone sweep, 2026-08-05). A body attribute
+  // cannot be lost with the node. See `body[data-tab]` in style.css.
+  document.body.dataset.tab = tab;
   syncBulkBtn();
   $("#search").style.display = noList ? "none" : "";
   closeSuggest(); // the open suggestions belong to the tab we're leaving

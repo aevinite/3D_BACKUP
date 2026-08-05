@@ -141,7 +141,15 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   transition: transform .12s ease, box-shadow .16s ease; }
 /* The phone grid is auto-fill, not --per-row, so --tw means nothing there: tiles are ≥104px
    and get a plain comfortable padding. */
-@media (max-width: 600px) { .tile { padding: 9px 10px; } }
+@media (max-width: 600px) { .tile { padding: 9px 10px; }
+  /* A WAITER'S THUMB NEEDS MORE THAN 19px (T12 phone sweep, 2026-08-05). Measured on the owner's
+     A35: `＋ Take order` came out 83x19 and the ✓ accept 22x19, three pixels apart — the two
+     most-used controls on the floor, at the height of a line of text. The clamps that size them
+     scale with the tile (4.5cqw etc.), which is right for a dense desktop floor but bottoms out on
+     a phone, so raise only the FLOOR here. The tile is `min-height: fit-content` under its 1/1
+     aspect-ratio, so it grows rather than clipping if a row ever needs the room. */
+  .t-act > .t-take, .t-act > .tacc, .t-act > .tpay, .t-act > .tclose { min-height: 30px; }
+}
 .tile:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(0,0,0,0.4); }
 /* Selection ring: gold normally, but on a tile that carries the red/green payment
    outline the ring takes THAT colour — brighter + glowing — so selecting an unpaid
@@ -211,6 +219,20 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
    for them. These numbers are CONTENT widths, checked against measured tiles: an 89px tile is
    ~73 inside, 75px is ~61, 55px is ~43. */
 @container (max-width: 80px) { .t-take-t { display: none; } }        /* the word, keep ＋ */
+/* …but that threshold only knows how wide the TILE is, and the take-order button does not get the
+   whole tile: a tile that ALSO carries ✓ / 💳 / ⏻ hands ~25px of its action row to that icon. On
+   the owner's A35 the tile's content box is 82px — just over the 80px line, so the word stayed —
+   while the button itself was squeezed to 58px for 65px of content, and `.t-take` is
+   overflow:hidden, so the label rendered as "＋ Take orde" on exactly the tiles that need action
+   (T12 phone sweep, 2026-08-05). Whenever the row is SHARED, drop the word earlier. */
+@container (max-width: 150px) {
+  .t-act:has(.tacc) .t-take-t,
+  .t-act:has(.tpay) .t-take-t,
+  .t-act:has(.tclose) .t-take-t { display: none; }
+}
+/* Last-ditch: if a future combination still squeezes it, degrade to "＋ Take…" rather than
+   slicing a letter in half — a cut word reads as a broken button. */
+.t-take-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @container (max-width: 64px) { .tseats, .tile .tmerge .tm-t { display: none; } } /* seats, and the
    merged table LIST — the ⇄ itself never goes, or a joined table would read as a solo one */
 @container (max-width: 56px) { .t-linenum { display: none; } }               /* the count, keep the bar */
@@ -656,7 +678,14 @@ html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c;
   .floor-nav { margin-bottom: 8px; padding-bottom: 2px; }
   .floor-nav::-webkit-scrollbar { display: none; }
   .fnav { flex: 0 0 auto; padding: 7px 12px; }
-  .floor-legend { gap: 9px; margin-bottom: 8px; font-size: 11px; }
+  /* THE LEGEND MUST FIT, not scroll (T12 phone sweep, 2026-08-05). Measured at 360px: 350px of
+     keys in a 332px box, so the LAST one — "paid" — ran to x364 against a right edge of 346, and a
+     waiter saw a green outline swatch with no word beside it. That is the one key that says "this
+     table has settled", and the fade above reads as decoration, not as "swipe me". Same treatment
+     the four filters got below: tighten the gaps until it fits (7 gaps × 3px = 21px back, which
+     clears the 18px overhang) instead of leaving a key behind a swipe. */
+  .floor-legend { gap: 6px; margin-bottom: 8px; font-size: 11px; }
+  .floor-legend .lgi { gap: 4px; }
   .floor-legend::-webkit-scrollbar { display: none; }
   .floor-legend .lgi, .floor-legend .lgcap { flex: 0 0 auto; }
   .my-section { padding: 6px 11px; margin-bottom: 8px; font-size: 12px; }

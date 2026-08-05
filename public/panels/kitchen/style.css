@@ -160,6 +160,11 @@ html[data-theme="light"] .age.age-late { color: #b91c1c; }
 /* the 86 board drawer */
 .drawer-overlay { position: fixed; inset: 0; background: rgba(3,7,16,0.6); z-index: 20; }
 .drawer { position: absolute; top: 0; right: 0; height: 100%; width: min(94vw, 420px); background: var(--bg); border-left: 1px solid var(--line); padding: calc(16px + var(--sat)) 16px calc(16px + var(--sab)); display: flex; flex-direction: column; }
+/* STOP THE SWIPE AT THE DRAWER'S EDGE (T12 phone sweep, 2026-08-05). The lanes and the wall got
+   overscroll-behavior in the tablet-sweep work above, but the 86-board drawer and the print sheet
+   did not — so a cook who reached the end of the 86 list and kept swiping dragged the ticket board
+   behind the open drawer: the board they were not looking at. */
+.drawer, .prsheet-ov, .prsheet { overscroll-behavior: contain; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .drawer-head h3 { margin: 0; font-size: 17px; }
 .drawer-head .sub { color: var(--muted); font-weight: 500; font-size: 13px; }

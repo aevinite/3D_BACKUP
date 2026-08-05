@@ -50,7 +50,13 @@ body {
 .brand span { margin-right: 4px; }
 /* Right-side actions cluster (theme + report + connection light). margin-left:auto pushes it
    to the far right regardless of how wide the tab strip is, so the connbadge pill sits top-right. */
-.top-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+/* flex-wrap is the SAFETY NET, not the plan: this row gains buttons at RUNTIME (connbadge.js
+   prepends the pill, myprofile.js reveals 👤, maint.js appends "👤 Profile"), and syncNavFit()
+   only ever fits the TAB strip — it never asks whether this row fits. On the owner's A35 the row
+   measured 373px inside a 348px space, so its last child was sliced to "Profil" and the phone
+   rule `html,body{overflow-x:hidden}` meant the rest could not even be scrolled to (T12 phone
+   sweep, 2026-08-05). Wrapping means a future button drops to a second line, never off-screen. */
+.top-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; margin-left: auto; }
 .brand-rest { margin-left: 7px; font-weight: 600; font-size: 14px; color: var(--gold); letter-spacing: .2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 38vw; display: inline-block; vertical-align: bottom; }
 /* The 7 tabs can crowd a mid-width window before the phone layout kicks in;
    let them scroll sideways rather than overflow/wrap awkwardly. min-width:0
@@ -456,6 +462,19 @@ input:disabled { opacity: .55; cursor: not-allowed; }
 /* Singleton toast toggled via [hidden]: an explicit display on .toast overrides
    the UA [hidden]{display:none}, so keep this or the toast never hides. */
 .toast[hidden] { display: none; }
+/* MULTI-SELECT IS DISHES-ONLY, AND CSS HAS TO SAY SO TOO (T12 phone sweep, 2026-08-05).
+   syncBulkBtn() sets `hidden` on #bulkBtn when you leave the Dishes tab, but the sidebar is
+   re-rendered from innerHTML, which replaces the button NODE and takes the attribute with it — so
+   a stale "☑︎ Select" measured VISIBLE (91x38) on Dashboard, Bills, Settings and Audit & logs,
+   where it does nothing. On a phone the sidebar is a full-width band, so it cost a whole row of a
+   780px screen on four screens. body[data-tab] is set by setTab, survives any re-render and
+   cannot be lost with the node. The JS stays as the first line of defence. */
+body[data-tab]:not([data-tab="items"]) #bulkBtn { display: none !important; }
+/* A TOAST MUST NOT LAND ON THE UNDO BAR (same sweep). Both are centred at the bottom ~8px apart
+   (undobar.js sits at 16px + --sab, this at 24px), so on a 360px screen a "1 new order" toast
+   covered the "Undo serve" card — and the undo is the one with a deadline. undobar.js adds
+   .lfh-undobar-up to <body> while it is showing and publishes its measured height. */
+body.lfh-undobar-up .toast { bottom: calc(24px + var(--sab) + var(--lfh-undobar-h, 56px) + 8px); }
 .toast.ok { border-color: var(--green); }
 .toast.err { border-color: var(--red); }
 .toast .toast-x {
@@ -983,7 +1002,13 @@ body {
 .sx-sec.tp-req-sec .sx-sec-h { color: #e7b75a; } /* bright amber on the dark theme */
 html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* darker amber for contrast on the cream theme */
 .sx-sec.tp-req-sec .sx-req { border-top-color: rgba(231,183,90,0.30); }
-.sx-auto { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+/* "auto-approve" decides whether a guest's NEXT order is accepted without a person looking at
+   it — a real behaviour change, and it was the hardest thing on the phone table sheet to hit: a
+   13x13 native box inside a 19px-tall label (T12 phone sweep, 2026-08-05). Size the box and give
+   the label a thumb-height hit area; the label wraps the input, so the words are part of the
+   target. */
+.sx-auto { margin-left: auto; font-size: 12px; font-weight: 500; color: var(--muted); display: inline-flex; align-items: center; gap: 8px; cursor: pointer; min-height: 32px; padding: 4px 2px; }
+.sx-auto input[type="checkbox"] { width: 20px; height: 20px; margin: 0; flex: 0 0 auto; accent-color: var(--gold); }
 .sx-mem, .sx-item, .sx-call { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 0; }
 /* per-dish line price, pushed to the right just before the Serve button */
 .sx-item-price { margin-left: auto; font-weight: 700; font-size: 13px; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -1725,6 +1750,22 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
   }
   .brand { font-size: 18px; }
   .conn { margin-left: auto; }              /* stays top-right, on the brand's row */
+
+  /* THE ACTIONS ROW MUST FIT ON ONE LINE AT 360px (T12 phone sweep, 2026-08-05).
+     Measured on the owner's A35: the row wanted 373px of a 348px inner width, so its LAST child
+     — the "👤 Profile" button maint.js appends — ran from x285 to x385 and the `overflow-x: hidden`
+     below CLIPPED it to "Profil" with no way to scroll to the rest. It got worse as the connection
+     slowed, because the pill's text drives its width: "757 ms" = 107px, "2144 ms" = 116px → 393px.
+     Two cheap savings, no button removed:
+       · a 6px gap instead of 10px across the (up to) 5 gaps  → ~20px back
+       · an icon-only Profile button (the drawer it opens names itself) → ~59px back
+     That lands at ~314px, so a 4-digit latency AND a future 6th button still fit. */
+  .top-actions { gap: 6px; }
+  /* Icon-only, but ONLY for the everyday "👤 Profile" label. The one-time "👋 Finish setup"
+     state keeps its words — that one is an invitation, not a utility button (maint.js sets
+     data-mode so this rule can tell them apart, and aria-label carries the wording either way). */
+  #staffSettingsBtn[data-mode="profile"] { padding: 9px 11px; }
+  #staffSettingsBtn[data-mode="profile"] .ssb-t { display: none; }
 
   /* belt-and-braces: never let a stray wide element scroll the whole page sideways */
   html, body { overflow-x: hidden; }
@@ -3083,6 +3124,13 @@ html[data-theme="light"] .khata-due{ color:#0369a1; }
   }
   .tp-detail-floating .tp-detail-body { overflow-y: auto; }
   .tp-detail-floating .tp-detail-head { cursor: default; }
+  /* KEEP THE ✕ ON THE TITLE'S LINE (T12 phone sweep, 2026-08-05). The floating head wraps its
+     top row (so "Table 1 · Preparing · KOT ▾" can breathe), and at 360px that pushed the 36px ✕
+     — a `margin-left:auto` flex item — onto a line of its OWN with nothing beside it. It read as
+     a stray floating button rather than a close control. Pin it to the head's corner instead; the
+     head is `position: sticky`, so it is already the containing block. */
+  .tp-detail-head { padding-right: 58px; }
+  .tp-detail-head .tp-detail-close { position: absolute; top: 12px; right: 12px; margin-left: 0; }
   /* Phone popups/modals reach the device bottom: keep the sticky action bar's buttons
      above the home indicator / 3-button nav (safe-area, audit 2026-07-20). */
   .tp-detail-foot, .tbl-modal-foot, .to-foot, .dish-edit-foot { padding-bottom: calc(13px + var(--sab)); }

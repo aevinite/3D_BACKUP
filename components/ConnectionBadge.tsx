@@ -74,12 +74,30 @@ const fmtAgo = (ts: number) => { const m = Math.floor((Date.now() - ts) / 60000)
 
 // Three signal bars; `lit` of them are coloured, the rest faint. Reduced height so it
 // reads as a signal-strength meter, not a button.
+// THE GEOMETRY IS INLINE ON PURPOSE — do not move it back into the <style jsx> block below.
+// styled-jsx scopes its selectors to the component whose JSX holds the <style jsx> tag, and this
+// is a SEPARATE function component, so these spans never received that scoping class: the
+// `.lfh-bars { display: inline-flex }` and `.lfh-bar { width: 3px }` rules matched nothing, the
+// bars computed to 0x0, and the meter has been invisible on every React badge since it was
+// written — measured on the deployed site as well as locally (T12 phone sweep, 2026-08-05). The
+// guest menu hid the fault because the "608 ms" text carries the meaning there; the owner top bar
+// hides that text on a phone by design, so it drew a completely empty capsule. Inline styles
+// cannot be scoped away. The style block below keeps the same rules for the pulse animation.
 function SignalBars({ lit, color, big = false }: { lit: number; color: string; big?: boolean }) {
   const h = big ? [10, 15, 20] : [6, 9, 12];
+  const w = big ? 4 : 3;
   return (
-    <span className={`lfh-bars${big ? " lfh-big" : ""}`} aria-hidden="true">
+    <span
+      className={`lfh-bars${big ? " lfh-big" : ""}`}
+      aria-hidden="true"
+      style={{ display: "inline-flex", alignItems: "flex-end", gap: big ? 3 : 2, height: big ? 20 : 12, flex: "0 0 auto" }}
+    >
       {[0, 1, 2].map((i) => (
-        <span key={i} className="lfh-bar" style={{ height: h[i], background: i < lit ? color : "currentColor", opacity: i < lit ? 1 : 0.22 }} />
+        <span
+          key={i}
+          className="lfh-bar"
+          style={{ width: w, borderRadius: w / 2, height: h[i], background: i < lit ? color : "currentColor", opacity: i < lit ? 1 : 0.22 }}
+        />
       ))}
     </span>
   );
