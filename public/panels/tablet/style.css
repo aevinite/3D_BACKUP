@@ -87,7 +87,11 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
      drawn OUTSIDE the tile) then gets sliced off flat on the far-left/far-right column — the
      "green line cutting out" the owner reported on a served+paid corner tile. Give the floor
      a little horizontal + top breathing room so the ring/glow paints inside the clip box. */
-  .layout .floor { padding-left: 8px; padding-right: 8px; padding-top: 8px; }
+  /* 8px was enough for the crisp 3px outline+1px offset, but the SELECTION GLOW is a
+     `box-shadow: 0 0 18px` (measured, T14 tablet sweep 2026-08-05) — so on the far-left and
+     far-right columns the outer ~10px of that glow was still being sliced flat by the scroll
+     box's clip. 20px clears the whole glow on both edges. */
+  .layout .floor { padding-left: 20px; padding-right: 20px; padding-top: 8px; }
 }
 
 /* floor tiles — MANAGER-STYLE grid (owner, 2026-08-03): tiles-per-row comes from the SAME
@@ -179,7 +183,18 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: system
   letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .t-line-plain .t-linenum { font-size: clamp(9px, 8.4cqw, 12px); color: color-mix(in srgb, var(--c) 70%, var(--text)); }
 /* Row 4: the actions — ＋ Take order is the biggest control; ✓ / 💳 are square icons. */
-.t-act { display: flex; align-items: stretch; gap: clamp(3px, 3cqw, 6px); margin-top: clamp(4px, 4cqw, 8px); }
+/* THE ROW HAS TO BE TAPPABLE, AND THE SQUARE ALREADY HAS THE ROOM (T14 tablet sweep, 2026-08-05).
+   Measured on the owner's own 12-per-row floor at 1194×834: the tile is 89px square, and inside its
+   87px of content height the number row took 16px, the served line + bar 20px and this action row
+   just **19px** — leaving ~30px of the square doing nothing. So ＋ Take order came out 73×19 and the
+   ✓ 22×19, both under half a fingertip, sitting 7px from the next table's tile: a waiter aiming at
+   table 9's ✓ can land on table 10. `align-items: stretch` already sizes the children to this row,
+   so one min-height spends the slack the square was wasting and roughly doubles the target. It
+   scales with the tile (44cqw), so a sparse 8-per-row floor gets the full 40px and a dense floor
+   still gets 26px instead of 19px — and below 50px of tile the row is hidden entirely (rule further
+   down), so nothing is forced into a space it can't have. */
+.t-act { display: flex; align-items: stretch; gap: clamp(3px, 3cqw, 6px); margin-top: clamp(4px, 4cqw, 8px);
+  min-height: clamp(26px, 44cqw, 40px); }
 .t-take { flex: 1 1 auto; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 4px;
   background: linear-gradient(180deg, #e8c79a, #d4a574); color: #1a140c; font-weight: 800;
   font-size: clamp(9px, 8.6cqw, 13.5px); padding: clamp(4px, 4.5cqw, 9px) 4px;
@@ -666,9 +681,14 @@ html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c;
   body.tbl-open #panel { position: fixed; inset: 0; z-index: 50; margin: 0; border: 0; border-radius: 0; min-height: 100dvh; max-height: 100dvh; overflow: auto; background: var(--bg); padding: 56px 14px calc(84px + var(--sab)); }
   body.tbl-open #tabletClose { display: inline-flex; align-items: center; justify-content: center; position: fixed; top: calc(var(--sat) + 10px); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 22px; line-height: 1; z-index: 52; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
   body.tbl-open .backtop { display: none; } /* the ✕ replaces the "↑ Tables" link */
-  /* comfortable touch targets */
-  .panel .btn, .floor-nav button { min-height: 42px; }
 }
+/* Comfortable touch targets — at EVERY width, not just on a phone (T14 tablet sweep, 2026-08-05).
+   This rule used to live inside the `max-width: 760px` block above, so on the 1194px waiter tablet
+   the floor's own filter chips (All / ⚠ Needs / Active / Free) measured 34px against the phone's
+   42px, and so did every `.panel .btn`. A tablet is a touch device too — the same greasy thumb, the
+   same 44px target — and nothing here was ever mouse-only, so there is no reason the bigger screen
+   should get the smaller control. */
+.panel .btn, .floor-nav button { min-height: 42px; }
 
 /* ── skeleton shimmer for the streaming table detail (stale-while-revalidate) ──
    Shown between the instant summary paint and the full slice landing: an order-
@@ -755,7 +775,14 @@ body.om-mode #tabletClose { display: none; }
 .om.lite .om-cat.on { background: var(--gold); border-color: var(--gold); color: #14110d; font-weight: 800; }
 /* dish browser: its OWN scroll (like the old 60vh grid, now with sections) */
 .om.lite .om-scroll { max-height: 48vh; max-height: 48dvh; padding: 10px 2px 24px; }
-.om.lite .om-sec-h { top: -10px; background: linear-gradient(var(--panel) 78%, transparent); }
+/* --bg, NOT --panel (T14 tablet sweep, 2026-08-05). This gradient exists to hide dish tiles
+   scrolling UNDER the sticky category heading, so it has to be the colour of what is actually
+   behind it — and that is `--bg` (the order screen's own surface), not `--panel`. Measured on the
+   deployed site at 1194px: the heading painted from `rgb(255,255,255)` on an `rgb(241,235,225)`
+   page in the light skin, i.e. a glaring full-width WHITE stripe under every category name, and
+   `rgb(29,24,18)` on `rgb(20,17,13)` in dark — a lighter band. Instead of hiding the tiles it drew
+   attention to itself. Wrong in BOTH skins, one token from right. */
+.om.lite .om-sec-h { top: -10px; background: linear-gradient(var(--bg) 78%, transparent); }
 /* the cart: unchanged markup, its OWN scroll right below — never hidden */
 .om.lite .om-cart { border-left: 0; border-top: 1px solid var(--line); background: transparent; padding: 10px 2px 0; max-height: 42vh; max-height: 42dvh; overflow-y: auto; }
 
@@ -898,6 +925,12 @@ body:has(.detail-pop) #tabletClose { display: none; }
 /* KOT & table operations AT THE TOP of the popup (owner, 2026-08-03 — manager style). */
 .phead-ops { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 0 10px; border-bottom: 1px solid var(--line); }
 .phead-ops .btn { flex: 0 0 auto; }
+/* ONE line between the KOT row and the orders, not two (T14 tablet sweep, 2026-08-05).
+   `.phead-ops` ends with a border-bottom, then `.detail-body` adds 12px of padding, then the first
+   `.sec` opens with its OWN border-top + 10px margin — so opening a table drew two horizontal rules
+   33px apart with nothing between them, which reads as a section that failed to load. The first
+   section in the popup doesn't need its own rule; the ops row already drew it. */
+.detail-pop .detail-body > .sec:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
 
 /* ── THE ORDERS MUST BE THE PART YOU CAN SEE (T4 sweep, 2026-08-04) ──────────────────────────
    Measured on the owner's phone (360×780), a table with ONE dish on it: the popup was 640px of
