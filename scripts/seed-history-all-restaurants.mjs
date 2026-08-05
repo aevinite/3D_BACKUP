@@ -131,7 +131,15 @@ async function seedRestaurant(rest, tableCount, isLive) {
       const total = Math.round((subtotal + tax) * 100) / 100;
       const cancelled = rand() < 0.07;
       const live = isToday && !cancelled && rand() < 0.12;
-      const discount = (!cancelled && rand() < 0.16) ? wpick([[50,4],[75,3],[100,3],[125,2],[150,2],[200,1]]) : 0;
+      // A discount can never be larger than the food it comes off. This line used to pick from
+      // the list below without looking at the order it was attaching to, so on a ₹39 bill it
+      // could hand out ₹200 — and every money surface reads `total − discount × (1 + rate)`, so
+      // 40 seeded bills came out NEGATIVE (−₹519.75 on Aangan alone, −₹1,399.65 across six
+      // restaurants). The database now clamps this too (migration 295), but a seeder that plants
+      // a nonsense figure and relies on being corrected is still a seeder that lies about what
+      // it wrote. Cap it at the subtotal here, at the source.
+      const wanted = (!cancelled && rand() < 0.16) ? wpick([[50,4],[75,3],[100,3],[125,2],[150,2],[200,1]]) : 0;
+      const discount = Math.min(wanted, subtotal);
       const paid = !cancelled && !live;
       const dnote = discount > 0 ? (pick(DISC_NOTES) || null) : TAG;
       dayOrders.push({

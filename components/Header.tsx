@@ -198,7 +198,7 @@ export default function Header({ logoText }: { logoText?: string }) {
       {/* Right: all the action buttons (currency, language, theme, cart). */}
       <div className="nav-actions">
         {/* Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline). */}
-        <ConnectionBadge />
+        <ConnectionBadge guest />
         {/* Currency dropdown: button shows the current symbol; the list lets
             the guest pick another. onSelect calls setCurrency to switch.
             Gone when the currency feature is off (₹-only menu). */}

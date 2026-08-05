@@ -1,5 +1,19 @@
 -- 099_auto_close_idle_sessions.sql
 -- ============================================================================
+-- ⚠️ HALF OF THIS FILE IS HISTORY — read this before believing the rest.
+--   (corrected 2026-08-05, T8 database sweep)
+--
+--   • `lfh_touch_session` (part 1) is LIVE and still does exactly what it says.
+--   • `lfh_auto_close_idle_sessions` (part 2) and its 5-minute pg_cron job
+--     (part 3) are BOTH GONE. The owner's later rule — NO TABLE ENDS ITSELF —
+--     retired them: migration 254 established it and 267 dropped the function
+--     and unscheduled the job. `scripts/verify-db-grants.mjs` now lists that
+--     job name as FORBIDDEN, so re-adding it fails the checks on purpose.
+--
+--   So an idle open table staying open is the INTENDED behaviour now, not a
+--   leak. Only a person closes a table. Everything below part 1 describes a
+--   safety net that no longer exists — kept for the reasoning, not as truth.
+-- ============================================================================
 -- AUTO-CLOSE ABANDONED TABLE SESSIONS (presence-aware safety net)
 -- ============================================================================
 -- Today a table session stays status='open' forever once opened (a waiter-call
