@@ -788,10 +788,15 @@ export default function CartPanel() {
   if (!open) return null;
 
   // Shared inline styling for the round − / + quantity buttons.
+  // 32px, not 28px, and never smaller: − and + sit side by side on the one screen where a diner
+  // changes what they are about to pay for, and on the owner's A35 they measured 28x28 a few
+  // pixels apart — the same too-small-and-adjacent pair the waiter tiles had (T12 phone sweep,
+  // 2026-08-05). 32px is the floor the rest of the product now uses.
   const qtyBtn = {
-    width: "28px", height: "28px", borderRadius: "50%",
+    width: "32px", height: "32px", borderRadius: "50%",
     border: "1px solid rgba(212,165,116,0.4)", background: "transparent",
     color: "var(--text)", cursor: "pointer", fontSize: "16px", lineHeight: 1, fontWeight: 700,
+    flex: "0 0 auto",
   } as const;
 
   return (
