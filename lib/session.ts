@@ -182,9 +182,11 @@ async function rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult
 // ── RPC wrappers: each one-liner below just calls a specific database function.
 // Naming each its own function keeps the rest of the app readable.
 
-// Look up a returning customer by phone number.
-export const recognizeCustomer = (phone: string, restaurantId: string = DEFAULT_RESTAURANT_ID) =>
-  rpc("lfh_recognize_customer", { p_phone: phone, p_restaurant_id: restaurantId });
+// NOTE (mig 300): there is deliberately NO guest-side "look up a customer by phone" wrapper
+// here. `lfh_recognize_customer` answers {name, blocked, visits} for ANY phone number, with no
+// consent check, and it is now service_role only — the till's repeat-customer lookup calls it
+// server-side (app/api/{editor,tablet} → `customer-recognize`). The guest-facing door is
+// greetDevice() below, which is the consented, phone-free one. Don't re-add a browser wrapper.
 // Greet a returning guest BY DEVICE (Customer CRM, mig 212) — recognises this phone/
 // browser from a past consented visit so the menu can say "Welcome back, {name}".
 // Returns { known, name, visits } and NEVER the phone number. Anon-callable RPC.

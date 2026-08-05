@@ -416,12 +416,79 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // aside (see body.menu-scrolling in globals.css). On a phone the bell floats exactly
     // where each card pins its add button, so it was covering the control the guest was
     // scrolling towards. The flag clears ~450ms after the last scroll tick.
+    //
+    // THAT ALONE WAS NOT ENOUGH, and the sweep measured why (T16, 2026-08-05, on the deployed
+    // site which already had the stepping-aside above): the class only applies WHILE scrolling,
+    // and it moves the bell DOWN 26px — so at rest the bell returns to the corner, and even
+    // mid-scroll a ~12px band still overlapped the button while the bell kept its own
+    // pointer-events. A hit-test at the bell's centre returned the bell, not the button, on BOTH
+    // restaurants at 360x780: tapping "+" on the right-hand dish rang for a waiter instead of
+    // adding the dish. Desktop was clean — it is a narrow-viewport fault only.
+    //
+    // So the resting position is now decided by MEASUREMENT rather than by a fixed offset that
+    // hopes to miss. After scrolling settles we ask the page what is actually under the bell's
+    // centre; if it is something tappable, the bell is lifted just clear of it. Nothing under it
+    // → no lift at all, so the owner's chosen floating-bell look is untouched (and desktop never
+    // moves). Lifting UP is the safe direction: a card pins its controls to its own BOTTOM, so
+    // the space directly above one is that card's picture, never another control.
     let scrollIdle: ReturnType<typeof setTimeout> | undefined;
+    const BELL_MAX_LIFT = 260; // a sanity cap, so a surprising layout can never fling it away.
+    // Deliberately roomy: a control is <=96px and the bell is <=58px, so ONE clearing move costs up
+    // to ~164px, and a card's favourite button sits above its add button — measured, both needed.
+    // Deliberately BOX INTERSECTION, not elementFromPoint. The first attempt at this probed the
+    // bell's centre point and always came back with the bell's own <i> icon — whose nearest
+    // button/anchor ancestor is null, because the bell is a div — so it read "nothing underneath"
+    // and never lifted. Rectangles have no such blind spot, and they also catch a PARTIAL overlap,
+    // which a single centre probe misses entirely.
+    const CTL_MAX = 96; // a dish's own control is this small; a whole-card link is far bigger and
+                        // must not be treated as an obstruction or the bell would never sit still
+    // Does anything tappable overlap the bell where it sits RIGHT NOW?
+    const bellObstruction = (bell: HTMLElement): number => {
+      const b = bell.getBoundingClientRect();
+      if (!b.width) return Infinity;
+      let highestTop = Infinity;
+      document.querySelectorAll<HTMLElement>("button, [role='button'], a").forEach((el) => {
+        if (el.closest(".chef-call")) return; // the bell and its icon are not obstructions
+        const r = el.getBoundingClientRect();
+        if (!r.width || r.width > CTL_MAX || r.height > CTL_MAX) return;
+        const overlaps = r.left < b.right && b.left < r.right && r.top < b.bottom && b.top < r.bottom;
+        if (overlaps && r.top < highestTop) highestTop = r.top;
+      });
+      return highestTop;
+    };
+    const settleBell = () => {
+      const bell = document.querySelector<HTMLElement>(".chef-call");
+      if (!bell) return;
+      // STABILITY FIRST: if where it sits now is already clear, leave it completely alone. Without
+      // this the lift is recomputed from zero on every scroll-stop and the bell visibly hops around
+      // the screen as the guest browses — trading a covered button for a restless one.
+      if (bellObstruction(bell) === Infinity) return;
+      bell.style.removeProperty("--bell-lift"); // it IS overlapping — re-measure from rest
+      // Several passes: clearing one control moves the bell onto whatever is above it, and on a
+      // dish card that is the favourite button (measured — the first version capped out here and
+      // only landed clear by luck). Each pass is a handful of rectangle reads, and it stops the
+      // moment nothing overlaps.
+      for (let pass = 0; pass < 4; pass++) {
+        const highestTop = bellObstruction(bell);
+        if (highestTop === Infinity) return; // clear — stop here and leave it
+        const b = bell.getBoundingClientRect();
+        const current = parseFloat(bell.style.getPropertyValue("--bell-lift")) || 0;
+        const lift = Math.min(current + Math.ceil(b.bottom - highestTop + 10), BELL_MAX_LIFT);
+        bell.style.setProperty("--bell-lift", `${lift}px`);
+      }
+    };
     const markScrolling = () => {
       document.body.classList.add("menu-scrolling");
       clearTimeout(scrollIdle);
-      scrollIdle = setTimeout(() => document.body.classList.remove("menu-scrolling"), 450);
+      scrollIdle = setTimeout(() => {
+        document.body.classList.remove("menu-scrolling");
+        settleBell(); // the guest has stopped — this is the moment they reach out to tap
+      }, 450);
     };
+    // The very first paint counts too: a guest who never scrolls at all was the case the
+    // measurement above actually caught. Re-checked on resize/rotate for the same reason.
+    const bellRaf = requestAnimationFrame(settleBell);
+    window.addEventListener("resize", settleBell);
     // SCROLL-SPY (Petpooja-style): work out which category section sits under
     // the sticky header right now. The chips highlight + follow automatically
     // (Coffee → Beverages → … as the guest scrolls the "All" view).
@@ -501,10 +568,14 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     return () => {
       el.removeEventListener("scroll", onScroll);
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(bellRaf);
+      window.removeEventListener("resize", settleBell);
       clearInterval(tick);
       clearTimeout(scrollIdle);
       document.body.classList.remove("menu-frost");
       document.body.classList.remove("menu-scrolling"); // never strand the bell hidden
+      // …and never strand it lifted either: another page's bell must start at rest.
+      document.querySelector<HTMLElement>(".chef-call")?.style.removeProperty("--bell-lift");
     };
   }, []);
 

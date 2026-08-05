@@ -177,7 +177,12 @@ html[data-staffdark="1"], html[data-staffdark="1"] body { background: #0a0c10 !i
 /* --- CHEF CALL BUTTON --- */
 .chef-call {
   position: fixed;
-  bottom: calc(24px + env(safe-area-inset-bottom));
+  /* --bell-lift is set by MenuView's settleBell(): 0 unless a dish's own tappable control is
+     measured to be underneath, in which case it is exactly the distance needed to clear it.
+     It rides on `bottom` rather than `transform` on purpose — transform is already owned by the
+     float animation, :hover and :active, and a second writer there is how one of them silently
+     stops working. */
+  bottom: calc(24px + env(safe-area-inset-bottom) + var(--bell-lift, 0px));
   right: calc(20px + env(safe-area-inset-right));
   width: clamp(48px, 13vw, 58px); height: clamp(48px, 13vw, 58px);
   background: var(--accent-grad); border-radius: 50%; display: flex; align-items: center; justify-content: center;

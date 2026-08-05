@@ -63,6 +63,15 @@ const q = async (env, sql) => {
 // be anon-callable. It calls `lfh_nice_usd`. Revoking that helper does not look dangerous and
 // would silently break guest pricing. Before removing anything from this list, check whether an
 // INVOKER function above it depends on it.
+//
+// AND THE SECOND HALF OF THAT TRAP, which this file could not see and mig 300 fixed (T16 sweep):
+// an EXECUTE grant is not the same thing as "this function works for that role". An INVOKER
+// function also needs the caller to be able to read every TABLE in its body. `lfh_resolve_tax_mode`
+// and `lfh_effective_tax_rate` were anon-granted INVOKER functions reading `public.settings` —
+// which mig 283 revoked from anon when it moved the guest onto the two RPC doors. The grants were
+// live, the functions were listed here as guest-facing, and a guest call would have failed on the
+// table read. Mig 300 made both DEFINER so the chain above is true rather than merely written down.
+// So: when you add an INVOKER function here, check its TABLE reads too, not just its grant.
 const ANON_ALLOWED = {
   // ── the guest's own journey (the public menu holds the anon key by design) ──
   lfh_place_order:            "guest places an order from their phone (token-scoped)",
@@ -73,7 +82,7 @@ const ANON_ALLOWED = {
   // created lfh_resolve_tax_mode with Supabase's default anon grant, this check went red, and the
   // right answer was NOT to revoke it — lfh_price_order (SECURITY INVOKER, anon) calls it, so a
   // revoke would have silently broken every guest cart's pricing. Verified by reading the caller.
-  lfh_resolve_tax_mode:       "decides a dish's tax mode; called BY lfh_price_order, which is INVOKER (mig 270)",
+  lfh_resolve_tax_mode:       "decides a dish's tax mode; called BY lfh_price_order (INVOKER). DEFINER since mig 300 so its settings read works",
   lfh_phone10:                "phone-number formatter, pure",
   // THE TWO DOORS (mig 282). These exist so the guest does NOT need a table-wide read on
   // `settings` / `restaurants` — they return that restaurant's guest slice as one jsonb object,
@@ -83,7 +92,7 @@ const ANON_ALLOWED = {
   // access_config / the rest.
   lfh_guest_settings:         "the guest menu's own settings, minus the staff-only fields (mig 282)",
   lfh_guest_restaurant:       "resolve a restaurant from its slug for a guest, minus the permission block (mig 282)",
-  lfh_effective_tax_rate:     "the guest cart shows tax; granted on purpose by mig 119:36",
+  lfh_effective_tax_rate:     "the tax rate for a bill; called BY lfh_price_order (INVOKER). DEFINER since mig 300 so its settings read works",
   lfh_session_state:          "the guest's own table state, scoped by their session token",
   lfh_join_session:           "guest joins a table",
   lfh_open_session:           "guest/waiter opens a table (legacy path, still granted)",
@@ -103,7 +112,6 @@ const ANON_ALLOWED = {
   lfh_geo_ok:                 "geofence check for the guest's location",
   lfh_is_blocked:             "guest ban gate, called by 8 guest RPCs",
   lfh_greet_device:           "returns a returning guest's name",
-  lfh_recognize_customer:     "returns a returning guest's name by phone",
   lfh_leave_feedback:         "guest rates their order (one per order, enforced by a unique index)",
   lfh_submit_review:          "guest reviews a dish (one per device per dish, unique index)",
   lfh_request_unban:          "a blocked guest asks to be let back in",
