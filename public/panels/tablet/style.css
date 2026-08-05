@@ -841,6 +841,52 @@ body.om-mode #tabletClose { display: none; }
 .om.lite:not(.vieworder) .om-scroll { flex: 1 1 auto; min-height: 0; max-height: none; overflow-y: auto; padding-bottom: 12px; }
 .om.lite:not(.vieworder) .om-cart { display: none; }        /* no side pane while browsing */
 .om.lite:not(.vieworder) .om-viewpill { display: flex; }
+
+/* ── ⚡ QUICK ORDER, HELD SIDEWAYS = EVERYTHING ON ONE SCREEN (owner, 2026-08-05) ──────────────
+   His words: "in the quick order, all the categories should show on one page, all the things
+   should show on one page… remove the list thing [the View order step]… on the right side, just
+   like the actual manager panel, they will see the whole order thing. They will mainly use this
+   quick when they will be horizontal."
+   So while the device is SIDEWAYS: every category chip is on screen (the rail WRAPS instead of
+   hiding the rest behind a sideways drag), the dishes take the space that's left, and the order
+   sits down the right-hand side exactly like the manager's ＋ Take order — no "View order" pill,
+   no second screen, nothing to go and fetch.
+   Three deliberate limits:
+   · `orientation: landscape` — held UPRIGHT there is no room for a side pane, so upright keeps
+     today's bottom pill and its own review screen (his choice when asked).
+   · `pointer: coarse` — phones and tablets ONLY, never a PC ("make sure not PC"). A mouse has
+     a fine pointer, so a laptop window of the same width is untouched.
+   · `.om-quick` only — ＋ Take order for a table is unchanged (his choice when asked), so a waiter's
+     normal per-table flow is exactly what it was today.
+   A very long category still scrolls INSIDE the dish area; what is gone is hunting for a
+   category, and hunting for the order. */
+/* NOTE THE CLASS NAME — `om-quick`, never plain `quick`. `.quick` is ALREADY taken in this file
+   (~line 314: the one-click action pill on a floor tile) and it carries `position: absolute;
+   left: 50%; transform: translateX(-50%)`. Marking the order screen with a bare `quick` inherited
+   all three and dragged the whole screen half its own width off the left edge — the menu measured
+   x = -583 on a 1194px screen. It was invisible in every functional check (the panes were still in
+   the right ORDER) and only showed up when the boxes were measured against the viewport. */
+@media (orientation: landscape) and (pointer: coarse) {
+  .om.lite.om-quick .om-body {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(230px, 30%, 330px);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "nav cart" "menu cart";
+    column-gap: 12px; min-height: 0;
+  }
+  /* every category visible: wrap onto as many lines as it needs, never a hidden sideways strip */
+  .om.lite.om-quick .om-nav {
+    grid-area: nav; flex-wrap: wrap; overflow: visible; row-gap: 6px; padding-bottom: 8px;
+  }
+  .om.lite.om-quick .om-scroll { grid-area: menu; min-height: 0; }
+  /* the order pane — the manager's right-hand "This order", same idea, its own scroll */
+  .om.lite.om-quick .om-cart {
+    grid-area: cart; display: block; min-height: 0; max-height: none; overflow-y: auto;
+    border-top: 0; border-left: 1px solid var(--line); padding: 10px 0 12px 12px;
+  }
+  /* the pill and the separate review screen have nothing left to do */
+  .om.lite.om-quick .om-viewpill { display: none; }
+}
 /* VIEW-ORDER: the added items, the ONE allergy/note field, the total AND SEND all
    scroll TOGETHER, so SEND is always reachable. */
 .om.lite.vieworder .om-voscroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;

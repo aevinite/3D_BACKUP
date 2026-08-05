@@ -1145,10 +1145,25 @@ function floorNavHtml() {
 // differently here than in the manager. A panel file can't import TS, so the values are
 // restated — keep them in step, and prefer changing lib/floorLayout.ts first.
 const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
+// A FINGER NEEDS A BIGGER SQUARE THAN A MOUSE DOES (owner, 2026-08-05).
+// The admin number is chosen for a desktop floor. Taken literally on a tablet it made the tiles
+// SMALLER than the same panel gives a phone — measured 89px at 12-per-row on an iPad against 105px
+// on a 360px phone, with 42% of the tablet screen left empty underneath. His instruction: "when it
+// is horizontal at least four to five to six can be shown… if there is twelve, then six will be
+// shown… it should look properly and able to click properly". (A tablet-specific number in the
+// admin screen comes later; until then this cap is the rule.)
+// So on a TOUCH device the count is capped at 6 — 12 becomes 6, 8 becomes 6 — and a restaurant that
+// deliberately chose a small number keeps it (4 stays 4). A PC is untouched: a mouse reports
+// `pointer: fine`, so `coarse` is what tells the two apart, exactly as the CSS does it. The phone
+// (<600px) still ignores the number entirely via CSS auto-fill, which is unchanged.
+const FLOOR_PER_ROW_TOUCH_MAX = 6;
+function isTouchDevice() {
+  try { return window.matchMedia("(pointer: coarse)").matches; } catch { return false; }
+}
 function floorPerRow() {
   const n = Math.round(Number((state.data.settings || {}).floor_per_row));
-  if (!Number.isFinite(n)) return FLOOR_PER_ROW_DEFAULT;
-  return Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
+  const set = Number.isFinite(n) ? Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX) : FLOOR_PER_ROW_DEFAULT;
+  return isTouchDevice() ? Math.min(set, FLOOR_PER_ROW_TOUCH_MAX) : set;
 }
 
 // Is a guest-facing feature on for this restaurant? Mirrors the manager's featureOn(): the
@@ -3877,6 +3892,13 @@ function renderViewOrder() {
   const back = $("#voBack");
   if (back) back.onclick = closeViewOrder;
 }
+// quickSideBySide(): is ⚡ Quick order currently showing the menu and the order together?
+// Must stay in step with the matching @media block in style.css (landscape + coarse pointer).
+// `pointer: coarse` is what keeps a PC out of it — a mouse reports `fine` at any window size.
+function quickSideBySide() {
+  try { return window.matchMedia("(orientation: landscape) and (pointer: coarse)").matches; }
+  catch { return false; }
+}
 function renderOrderMode() {
   // Phone: the added-items review lives on its OWN screen (like the guest menu), reached
   // by the floating "View order" pill. Desktop keeps the side pane, so it never sets
@@ -3885,6 +3907,11 @@ function renderOrderMode() {
   // dish MENU (what they actually need) instead of the "no dishes" screen. Only open the review
   // when there's actually something in the cart. This kills the intermittent "no dishes added"
   // screen when the order opens. (audit 2026-07-09)
+  // ⚡ QUICK ORDER HELD SIDEWAYS shows the order down the right-hand side instead (owner
+  // 2026-08-05 — "remove the list thing… on the right side they will see the whole order thing").
+  // There is nothing to go and open, so the separate review screen is skipped entirely. The same
+  // three limits as the CSS: quick order only, sideways only, and touch devices only (never a PC).
+  if (state.quick && quickSideBySide()) state.viewOrder = false;
   if (state.viewOrder && state.cart.length) { renderViewOrder(); return; }
   state.viewOrder = false;
   const p = $("#panel");
@@ -3897,7 +3924,7 @@ function renderOrderMode() {
   if (window.LFH_BACK && !omBackOff) omBackOff = LFH_BACK.layer("tablet-order", exitOrderMode);
   const addMode = !!state.addToOrderId;
   p.innerHTML = `
-    <div class="om lite">
+    <div class="om lite${state.quick ? " om-quick" : ""}">
       <div class="om-head">
         <h2>${state.quick ? "⚡ Quick order" : `${addMode ? "Add · " : ""}${esc(tableLabel(state.table))}`}</h2>
         <input type="search" id="dishSearch" class="order-search om-search" placeholder="🔎 Search dishes…" value="${esc(state.dishSearch)}">

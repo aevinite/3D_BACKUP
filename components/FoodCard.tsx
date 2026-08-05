@@ -10,6 +10,9 @@ import VegIcon from "./VegIcon";
 import { gateAddToCart } from "@/lib/tableConnection";
 // Per-restaurant feature switches: ratings / 3D badges can be turned off.
 import { useFeatures } from "@/lib/features";
+// A long dish name shrinks to fit its two-line box instead of being cut off with "…"
+// (owner, 2026-08-05: "make it dynamic so that for every screen it should fit").
+import { useFitText } from "@/lib/useFitText";
 
 // The full set of details one dish can have. The "?" ones are optional.
 interface FoodItem {
@@ -73,6 +76,9 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
   // toggle — e.g. turning ratings off for one restaurant — actually shows/hides
   // here. Falls back to the default restaurant when no id is passed.
   const features = useFeatures(restaurantId); // which restaurant features are switched on
+  // The two-line name box keeps its exact designed size; a name too long for it shrinks its own
+  // font until the WHOLE name fits, instead of being cut off. (owner, 2026-08-05)
+  const nameRef = useFitText(item.title);
   // Inside a specific restaurant's menu (/r/<slug>/menu) the dish link must stay in
   // that restaurant (/r/<slug>/item/...). No slug = the default menu → global /item.
   const base = restaurantSlug ? `/r/${restaurantSlug}` : "";
@@ -258,7 +264,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           ) : null}
         </div>
         <div className="dish-info">
-          <div className="dish-name">
+          <div className="dish-name" ref={nameRef}>
             {item.title}
             {/* A small cube icon beside the name for 4D dishes */}
             {item.is4d && features.model3d ? <i className="fas fa-cube dish-4d-icon"></i> : null}

@@ -2903,6 +2903,20 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 @media (max-width: 1000px) { .plat-board { grid-template-columns: repeat(2, 1fr); } }
 
 /* ── Dashboard: left sub-nav (Today / Yesterday) + Today summary box ──────── */
+/* ── Today / Yesterday, just under the Dashboard title (owner, 2026-08-05) ─────────────────────
+   Replaces the left-hand rail, which held one word and ate 320px × 774px on a tablet. Only drawn
+   when the restaurant actually reaches Yesterday (dashRangeToggleHtml returns "" otherwise), so a
+   Today-only restaurant sees no chooser at all. Full finger height at every width. */
+.dash-range { display: flex; gap: 8px; flex-wrap: wrap; padding: 0 0 14px; }
+.dash-range-btn { display: inline-flex; align-items: baseline; gap: 7px; min-height: 44px;
+  padding: 9px 16px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--panel); color: var(--muted); font-family: inherit; font-size: 14px;
+  font-weight: 700; cursor: pointer; transition: background .15s, color .15s, border-color .15s; }
+.dash-range-btn small { font-weight: 500; font-size: 12px; opacity: .75; }
+.dash-range-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
+.dash-range-btn.active { background: var(--gold); border-color: var(--gold); color: #2a1d0c; }
+.dash-range-btn.active small { opacity: .8; }
+
 .dash-layout { display: grid; grid-template-columns: 168px 1fr; gap: 20px; align-items: start; }
 .dash-nav { display: flex; flex-direction: column; gap: 6px; position: sticky; top: 0; }
 .dash-navitem { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-radius: 11px; border: 1px solid var(--line); background: var(--panel); color: var(--muted); font-size: 14px; font-weight: 600; cursor: pointer; text-align: left; font-family: inherit; }
