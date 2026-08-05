@@ -12,13 +12,14 @@ import { revalidateTag } from "next/cache";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cleanClonedSettings } from "@/lib/settingsClone";
+import { accessStateFor } from "@/lib/accessState";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { menuTag } from "@/lib/menuDataServer";
 import {
-  SECTIONS, ALL_NODES, NODE_BY_ID, SETTINGS_COLUMNS, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
+  SECTIONS, ALL_NODES, NODE_BY_ID, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
   LIST_KEYS, TEXT_KEYS, MODULE_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
-  TABLET_COLS, TAB_KEYS, HAS_IDS, type TreeState,
+  TABLET_COLS, TAB_KEYS, HAS_IDS,
 } from "@/lib/accessTree";
 
 export const dynamic = "force-dynamic";
@@ -72,55 +73,11 @@ export async function GET(req: NextRequest) {
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!uuid(rid)) return bad("Invalid restaurant_id.");
 
-  const rq = await sb.from("restaurants")
-    .select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle();
-  if (rq.error) return bad(rq.error.message, 500);
-  if (!rq.data) return bad("Restaurant not found.", 404);
-  const r = rq.data as Record<string, any>;
-
-  const cols = ["features", "platform_channels", ...SETTINGS_COLUMNS];
-  const s = obj((await sb.from("settings").select(Array.from(new Set(cols)).join(", "))
-    .eq("restaurant_id", rid).maybeSingle()).data);
-
-  const featOverrides = obj(s.features);
-  const features: Record<string, boolean> = {};
-  for (const k of WRITEABLE_FEATURES) if (k in featOverrides) features[k] = featOverrides[k] === true;
-
-  const settings: Record<string, unknown> = {};
-  for (const c of SETTINGS_COLUMNS) if (c in s) settings[c] = s[c];
-
-  const pc = obj(s.platform_channels);
-  const channels: Record<string, boolean> = {};
-  for (const k of CHANNEL_KEYS) channels[k] = obj(pc[k]).on === true;
-
-  // A channel's API key belongs to the restaurant's Zomato/Swiggy account, so it goes OUT only as
-  // a hint that tells you WHICH key is stored without being the key: "••••1234". The value itself
-  // has no path back to the browser — not in this response, not anywhere — so it cannot be read
-  // off the Access screen or out of a saved network log.
-  const creds: Record<string, string> = {};
-  for (const k of CREDS_KEYS) {
-    const raw = obj(pc[k]).api_key;
-    creds[k] = typeof raw === "string" && raw.length ? `••••${raw.slice(-4)}` : "";
-  }
-
-  const mp = obj(r.manager_permissions);
-  const grants: Record<string, boolean> = {};
-  for (const f of GRANT_FLAGS) if (f in mp) grants[f] = mp[f] === true;
-
-  const oe = obj(r.owner_entitlements);
-  const sections: Record<string, boolean> = {};
-  for (const k of SECTION_ENTITLEMENTS) if (typeof oe[k] === "boolean") sections[k] = oe[k];
-
-  const cfg = obj(r.access_config);
-  const menus = obj(cfg.menus);
-  const tabs: Record<string, Record<string, boolean>> = {};
-  for (const panel of Object.keys(TAB_ALLOWED)) {
-    tabs[panel] = {};
-    const stored = obj(menus[panel]);
-    for (const key of TAB_ALLOWED[panel]) if (typeof stored[key] === "boolean") tabs[panel][key] = stored[key];
-  }
-
-  const state: TreeState = { features, settings, channels, grants, sections, tabs, config: cfg, creds };
+  // The state builder moved to lib/accessState.ts (2026-08-05) so the OWNER panel's person
+  // profile can read the SAME answer instead of keeping its own hand-written permission list
+  // (which had already drifted from this one). Identical output, one reader.
+  const state = await accessStateFor(rid);
+  if (!state) return bad("Restaurant not found.", 404);
   // JUST THE STATE. This used to ship `sections: SECTIONS` as well — 25 KB of constant JSON
   // (measured 2026-08-04) that no client has ever read: AccessTree, AccessPerPerson and
   // StaffProfile all import the model directly and use `state` only. It rode along on every load

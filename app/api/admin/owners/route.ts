@@ -120,9 +120,13 @@ export async function GET(req: NextRequest) {
     // (they live in the recycle bin above).
     sb.from("staff_users")
       .select("id, username, name, active, last_seen_at, created_at")
-      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }),
+      // PAGED, like lib/ownerScope's scopedRestaurantIds (2026-08-05). A bare select with no
+      // .limit() stops at PostgREST's cap and silently drops everyone past it — the same bug that
+      // "silently dropped every restaurant past the 100th" in the owner reports. 2000 is far above
+      // any real estate and still an explicit ceiling rather than a hidden one.
+      .eq("role", "owner").is("deleted_at", null).order("created_at", { ascending: true }).limit(2000),
     sb.from("restaurant_owners").select("restaurant_id, user_id"),
-    sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
+    sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name").limit(2000),
   ]);
   if (ownersQ.error) return bad(ownersQ.error.message, 500);
   if (linksQ.error) return bad(linksQ.error.message, 500);

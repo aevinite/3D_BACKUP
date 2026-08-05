@@ -416,12 +416,20 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
   }
 
   async function init() {
-    // Owner "Manager mode" embed (?ownermode=1): the panel runs on the OWNER's login, and
-    // this drawer is a STAFF-account thing (first-login name/phone capture, PIN, panel
-    // password) — the owner manages their identity in the owner panel. Worse, the forced
-    // "Finish setup" open registered a back layer at boot, so the phone's BACK button was
-    // silently swallowed once before it could return to the restaurant launcher.
-    if (new URLSearchParams(location.search).get("ownermode") === "1") return;
+    // EVERY OWNER-PANEL EMBED, not just Manager mode (fixed 2026-08-05). This drawer is a
+    // STAFF-account thing (first-login name/phone capture, PIN, panel password) and the owner
+    // manages their identity in the owner panel, so it has no business inside a cockpit page.
+    // Two harms, both real:
+    //   • `profile.needsProfile` FORCES the drawer open at boot, and in setup mode it has no ✕
+    //     and re-arms the hardware BACK layer on purpose — so an owner whose row was never
+    //     "confirmed" met an un-closable "Welcome, finish setting up your account" card sitting
+    //     on top of their Menu editor. Every owner created from /aevinite → Owners is in that
+    //     state, because that screen stores no phone and mig 064 only backfilled name+phone rows.
+    //   • even when not forced, the drawer swallows one BACK press before the page can use it.
+    // ownermode was guarded on 2026-08-02; menuonly (owner → Menu) and invonly (owner →
+    // Inventory) were missed, which is where the owner actually hit it.
+    const embedQ = new URLSearchParams(location.search);
+    if (["ownermode", "menuonly", "invonly"].some((k) => embedQ.get(k) === "1")) return;
     let res = null;
     // the shared single-flight (top of this file) — myprofile.js reads the same endpoint at boot
     try { res = await window.LFH_PROFILE_GET(); } catch {}

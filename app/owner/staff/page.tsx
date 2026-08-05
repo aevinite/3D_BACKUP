@@ -346,16 +346,21 @@ export default function OwnerStaffPage() {
                       </a>
                     )}
                     {/* Two DIFFERENT things, kept apart (owner 2026-07-29): "Open profile" is the
-                        person's record; "Visit panel" is the app THEY use, opened in a new tab so
-                        you don't lose your place in the roster. */}
+                        person's record; this opens the PANEL, in a new tab so you don't lose your
+                        place in the roster. It says "the panel", not "their panel": a person-pinned
+                        view (?as=) only works for Aevidine support (lib/viewAsPerson re-checks the
+                        admin cookie), so for an owner this opens it with THEIR OWN access. It
+                        promised the staff member's own view until 2026-08-05 and never gave it. */}
                     {(s.role === "manager" || s.role === "tablet") && (
                       <a className="ost-mini" href={s.role === "manager" ? "/manager" : "/tablet"} target="_blank" rel="noopener"
-                        title={`Open the ${s.role === "manager" ? "manager" : "waiter"} panel — the screen ${s.name || s.username} works on`}>
-                        <i className="fas fa-up-right-from-square" /> Visit panel
+                        title={`Opens the ${s.role === "manager" ? "manager" : "waiter"} panel with your own access — not ${s.name || s.username}'s view of it`}>
+                        <i className="fas fa-up-right-from-square" /> Open {s.role === "manager" ? "manager" : "waiter"} panel
                       </a>
                     )}
                     <select className="ost-mini" value={s.role} disabled={busy} onChange={(e) => setRole(s, e.target.value)} aria-label="Role">
-                      {ROLES.map((ro) => <option key={ro} value={ro}>{ro}</option>)}
+                      {/* "waiter", not the storage word "tablet" — the badge on the left of this very
+                          row says WAITER, and the Add form below already translated it. */}
+                      {ROLES.map((ro) => <option key={ro} value={ro}>{ro === "tablet" ? "waiter" : ro}</option>)}
                     </select>
                     <button className="ost-mini" disabled={busy} onClick={() => setEditing(editing?.id === s.id ? null : { id: s.id, name: s.name || s.username, phone: s.phone || "" })}>Rename / edit phone</button>
                     <button className="ost-mini" disabled={busy} onClick={() => resetPw(s)}>Reset password</button>
@@ -507,7 +512,11 @@ export default function OwnerStaffPage() {
         .ost-editrow { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: var(--border); }
         .ost-mini { font: inherit; font-size: 11.5px; font-weight: 700; padding: 5px 9px; border-radius: 7px; border: var(--border); background: var(--card); color: var(--fg, inherit); cursor: pointer; }
         .ost-mini:hover:not(:disabled) { border-color: var(--accent); }
-        .ost-mini.danger:hover:not(:disabled) { border-color: var(--adm-danger, #c0392b); color: var(--adm-danger, #c0392b); }
+        /* DANGER IS VISIBLE WITHOUT A MOUSE (2026-08-05). This was :hover-only, so on the owner's
+           phone "Remove" looked exactly like "Disable" sitting next to it — and Remove is the one
+           that cannot be undone. Colour it always; deepen it on hover. */
+        .ost-mini.danger { border-color: color-mix(in srgb, var(--adm-danger, #c0392b) 45%, transparent); color: var(--adm-danger, #c0392b); }
+        .ost-mini.danger:hover:not(:disabled) { border-color: var(--adm-danger, #c0392b); background: color-mix(in srgb, var(--adm-danger, #c0392b) 10%, transparent); }
         .ost-add { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: var(--border); }
         /* Waiter sections: the table picker inside the Add form. Full width so it sits under
            the name/role/password row rather than squeezing them. */

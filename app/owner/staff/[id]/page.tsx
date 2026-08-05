@@ -69,13 +69,27 @@ const KIND_LABEL: Record<string, string> = {
 const EMP_LABEL: Record<string, string> = { full_time: "Full-time", part_time: "Part-time", trial: "On trial", casual: "Casual / on-call" };
 const PAYT_LABEL: Record<string, string> = { monthly: "Monthly salary", daily: "Daily wage", hourly: "Hourly", per_shift: "Per shift" };
 const MODE_LABEL: Record<string, string> = { cash: "Cash", upi: "UPI", bank: "Bank transfer" };
-// Per-user waiter caps — moved here from the roster so one person = one page.
-const WAITER_CAPS: [string, string][] = [
-  ["tablet_mark_paid", "Mark bill paid"], ["tablet_discount", "Give discount"],
-  ["tablet_invoice", "Generate invoice"], ["tablet_take_orders", "Take orders"],
-  ["tablet_parcel", "Parcel orders (counter)"], ["tablet_table_ops", "Table & KOT ops"],
+// PERMISSION ROWS COME FROM THE SERVER, which reads lib/staffCaps — the same one list that
+// feeds Aevidine's Access screen, its Per-person tab and the write allow-list
+// (docs/STAFF-PROFILE.md). A hand-written copy lived here until 2026-08-05 and had already
+// drifted from that list: six waiter rows where the model has nine (table types, khata and
+// banquet were missing entirely, so an owner had nowhere to set them), no module gating at all,
+// and NO rows whatsoever for a manager — so an owner could not see what their own manager was
+// allowed to do. Never reintroduce a role's permission list in a panel.
+type CapRow = {
+  key: string; name: string; what: string | null; pin: boolean; editable: boolean;
+  roleDefault: "on" | "off" | "pin" | null; effective: "on" | "off" | "pin" | null;
+};
+type CapGroup = { group: string; rows: CapRow[] };
+// The states a row offers, and the words the dossier uses for them — one vocabulary across both
+// screens, so nobody has to translate between two ideas of the same setting. "Default" carries
+// what the RESTAURANT gives that role in the bracket, so a row says both things at once.
+const capChoices = (r: CapRow): [string, string][] => [
+  ["default", `Default (${r.roleDefault === "pin" ? "On + PIN" : r.roleDefault === "on" ? "On" : r.roleDefault === "off" ? "Off" : "—"})`],
+  ["on", "On"],
+  ...(r.pin ? ([["pin", "On + manager PIN"]] as [string, string][]) : []),
+  ["off", "Off"],
 ];
-const OVR_MODES: [string, string][] = [["default", "Default"], ["on", "On"], ["pin", "PIN"], ["off", "Off"]];
 type Tab = "personal" | "job" | "pay" | "access" | "perf" | "activity";
 
 // ── One "saves on blur" profile field ────────────────────────────────────────────────
@@ -130,6 +144,7 @@ export default function StaffProfilePage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [summary, setSummary] = useState<{ thisMonth: number; thisYear: number; advanceOutstanding: number; lastPaidOn: string | null; entries: number } | null>(null);
   const [perf, setPerf] = useState<Perf>(null);
+  const [capGroups, setCapGroups] = useState<CapGroup[]>([]);
   const [restaurant, setRestaurant] = useState<{ name: string; accentColor: string; modules?: Record<string, boolean> } | null>(null);
   const [tab, setTab] = useState<Tab>("personal");
   const [loading, setLoading] = useState(true);
@@ -159,6 +174,7 @@ export default function StaffProfilePage() {
       setNotEnabled(null);
       setStaff(r.staff); setAccess(r.payAccess); setRestaurant(r.restaurant);
       setPayments(r.payments || []); setSummary(r.summary || null); setPerf(r.performance || null);
+      setCapGroups((r.capGroups || []) as CapGroup[]);
       setErr(null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setLoading(false); }
@@ -287,7 +303,10 @@ export default function StaffProfilePage() {
     if (!staff) return;
     setStaff((s) => (s ? { ...s, permissions: { ...(s.permissions || {}), [key]: v } } : s));
     try {
-      const d = await call({ id, action: "set_permissions", permissions: { [key]: v === "default" ? null : v } });
+      // Send what this row was set to FROM — a permission is exactly the kind of value two
+      // people can change at once, and the loser must be told rather than quietly lose.
+      const d = await call({ id, action: "set_permissions", permissions: { [key]: v === "default" ? null : v } },
+        "PATCH", { fields: { [`permissions.${key}`]: staff.permissions?.[key] ?? "" } });
       setStaff((s) => (s ? { ...s, permissions: d.permissions || {} } : s));
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); load(); }
   }
@@ -369,10 +388,15 @@ export default function StaffProfilePage() {
           <div className="sp-acts">
             {/* This page IS the profile; visiting the panel they work on is a separate action
                 (owner 2026-07-29 — the two were easy to mix up). New tab, so this page stays. */}
+            {/* SAYS WHAT IT ACTUALLY DOES (2026-08-05). It used to promise "their panel" / "the
+                screen <name> works on", but a person-pinned view (?as=) is re-checked against the
+                ADMIN cookie in lib/viewAsPerson — for an owner it is ignored, so this always opened
+                the panel with the OWNER's own access. A button that answers "what can Rohit see?"
+                wrongly is worse than one that doesn't offer to. */}
             {(staff.role === "manager" || staff.role === "tablet") && (
               <a className="sp-btn" href={staff.role === "manager" ? "/manager" : "/tablet"} target="_blank" rel="noopener"
-                title={`Open the ${staff.role === "manager" ? "manager" : "waiter"} panel — the screen ${who} works on`}>
-                <i className="fas fa-up-right-from-square" /> Visit their panel
+                title={`Opens the ${staff.role === "manager" ? "manager" : "waiter"} panel with YOUR access — not ${who}'s own view of it`}>
+                <i className="fas fa-up-right-from-square" /> Open the {staff.role === "manager" ? "manager" : "waiter"} panel
               </a>
             )}
             <button className="sp-btn" onClick={() => router.push(scopePin ? `/owner/staff?rid=${scopePin}` : "/owner/staff")}>
@@ -533,7 +557,7 @@ export default function StaffProfilePage() {
             <div className="sp-note amber">
               <i className="fas fa-lock" />
               <div><b>Only you and Aevidine support see this tab.</b> Managers can&apos;t — unless you switch on
-                “See staff pay” in Team → Powers. {who} sees their own salary here in their panel
+                “See staff pay” for managers, which Aevidine sets. {who} sees their own salary here in their panel
                 {staff.can_see_own_pay ? "" : " (you've switched that off for them)"}.</div>
             </div>
             {!canJob && <div className="sp-note"><i className="fas fa-circle-info" /><div>Only the owner can change someone&apos;s job and pay.</div></div>}
@@ -770,27 +794,56 @@ export default function StaffProfilePage() {
               )}
             </div>
 
-            {staff.role === "tablet" && canJob && (
-              <>
-                <p className="sp-sect">What this waiter may do <span className="sp-mut">— Default follows the restaurant setting</span></p>
+            {/* THE PERMISSION BLOCKS — exactly the rows Access & permissions has for this role,
+                in the same folders, with the same words (docs/STAFF-PROFILE.md). The server sends
+                them; nothing here decides which rows exist. A row the restaurant doesn't have is
+                already absent, and a restaurant-wide row (an owner's own pages, the manager
+                settings sections) shows its value with no control rather than a dead dropdown. */}
+            {capGroups.length > 0 && (
+              <div className="sp-note" style={{ marginTop: 14 }}>
+                <i className="fas fa-sliders" />
+                <div><b>These are the same rows Aevidine sees.</b> “Default” follows what this
+                  restaurant gives every {staff.role === "tablet" ? "waiter" : staff.role} — the bracket
+                  says which way that currently falls, so you only change the ones you want different
+                  for {who}.</div>
+              </div>
+            )}
+            {capGroups.map((g) => (
+              <div key={g.group}>
+                <p className="sp-sect">{g.group}</p>
                 <div className="sp-rows">
-                  {WAITER_CAPS.map(([key, label]) => {
-                    const cur = staff.permissions?.[key] || "default";
+                  {g.rows.map((r) => {
+                    const cur = (r.editable && staff.permissions?.[r.key]) || "default";
                     return (
-                      <div className="sp-row" key={key}>
-                        <b>{label}</b>
-                        <span className="sp-rt">
-                          <span className="sp-seg">
-                            {OVR_MODES.map(([v, ml]) => (
-                              <button key={v} className={cur === v ? "on" : ""} disabled={busy} onClick={() => setCap(key, v)}>{ml}</button>
-                            ))}
+                      <div className="sp-row" key={r.key}>
+                        <b title={r.what || undefined}>{r.name}</b>
+                        {!r.editable && (
+                          <span className="sp-mut">
+                            {r.effective === "pin" ? "on, with a manager PIN" : r.effective === "on" ? "on" : r.effective === "off" ? "off" : "—"}
+                            {" · set for the whole restaurant"}
                           </span>
+                        )}
+                        <span className="sp-rt">
+                          {r.editable && canJob ? (
+                            <select className="sp-capsel" value={cur} disabled={busy}
+                              aria-label={r.name}
+                              onChange={(e) => setCap(r.key, e.target.value)}>
+                              {capChoices(r).map(([v, ml]) => <option key={v} value={ml === "" ? v : v}>{ml}</option>)}
+                            </select>
+                          ) : r.editable ? (
+                            <span className="sp-mut" style={{ fontSize: 12 }}>
+                              {cur === "default" ? "follows the restaurant" : cur === "pin" ? "on, with a manager PIN" : cur}
+                            </span>
+                          ) : null}
                         </span>
                       </div>
                     );
                   })}
                 </div>
-              </>
+              </div>
+            ))}
+            {!capGroups.length && staff.role !== "tablet" && staff.role !== "manager" && (
+              <p className="sp-sect">This role has no per-person settings.</p>
             )}
 
             {/* Waiter sections (mig 222): which tables this person's tablet shows. Only for
@@ -966,6 +1019,15 @@ export default function StaffProfilePage() {
         .sp-days { display: flex; gap: 6px; flex-wrap: wrap; }
         .sp-day { min-height: 36px; min-width: 46px; border-radius: 9px; border: var(--border); background: var(--bg); color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; }
         .sp-day.on { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: var(--accent); color: var(--adm-ok); }
+        /* One dropdown per permission row — the same control the dossier uses, so the two
+           screens read identically (docs/STAFF-PROFILE.md). */
+        .sp-capsel { font: inherit; font-size: 12px; font-weight: 700; padding: 6px 9px; border-radius: 8px;
+          border: var(--border); background: var(--card); color: var(--text); cursor: pointer; min-height: 32px;
+          /* one width for every row, so the controls line up down the page instead of stepping in
+             and out with the length of each label */
+          min-width: 156px; }
+        @media (max-width: 560px) { .sp-capsel { min-width: 0; flex: 1 1 auto; } }
+        .sp-capsel:disabled { opacity: .6; cursor: default; }
         .sp-seg { display: inline-flex; gap: 2px; background: var(--bg); border: var(--border); border-radius: 9px; padding: 2px; }
         .sp-seg button { min-height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 800; cursor: pointer; }
         .sp-seg button.on { background: var(--accent); color: #04160f; }
