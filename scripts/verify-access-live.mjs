@@ -22,13 +22,39 @@ const H = adminHeaders(B);
 const env = {}; for (const l of readFileSync(new URL("../.env.local", import.meta.url),"utf8").split("\n")) { const m=l.match(/^([A-Z0-9_]+)=(.*)$/); if(m) env[m[1]]=m[2].trim(); }
 const U = env.NEXT_PUBLIC_SUPABASE_URL, K = env.SUPABASE_SERVICE_ROLE_KEY;
 const db = (q) => fetch(`${U}/rest/v1/${q}`, { headers: { apikey: K, Authorization: `Bearer ${K}` } }).then((r) => r.json());
+// A TRANSPORT HICCUP IS NOT A PRODUCT FAULT (2026-08-05).
+// Every read here was a bare fetch with no retry, and the checks below assert an EXACT status
+// (200 / 404 / 403). Run standalone that is fine; run inside the 520-phase suite — where other
+// phases are driving the same deployed site — one 502 or one dropped connection turned into
+// "menu comes back when switched on · got: 502", which reads as a broken product. It cost a red
+// phase in the 2026-08-05 sweep that passed 26/26 the moment it was run on its own.
+//
+// So: retry ONLY what is transport (a thrown network error, or 5xx — the server saying "not now"),
+// with backoff + jitter like every other retry in this codebase. A WRONG ANSWER is never retried:
+// a 200 where 403 was expected still fails on the first try, because that is the product talking.
+const NET_TRIES = 3;
+const netFetch = async (url, opts) => {
+  let last;
+  for (let i = 1; i <= NET_TRIES; i++) {
+    try {
+      const r = await fetch(url, opts);
+      if (r.status < 500 || i === NET_TRIES) return r;      // <500 = the product answered; keep it
+      last = `HTTP ${r.status}`;
+    } catch (e) { last = e.message; }
+    const wait = Math.round(400 * i * (0.75 + Math.random() * 0.5));   // backoff + jitter
+    console.log(`       (transport: ${last} — retry ${i}/${NET_TRIES - 1} in ${wait}ms)`);
+    await new Promise((r) => setTimeout(r, wait));
+  }
+  return fetch(url, opts);
+};
 const bad = (t) => ["-->", "${", "[object Object]", "NaN"].filter((x) => t.includes(x));
 
-const rests = await (await fetch(B + "/api/admin/restaurants", { headers: H })).json();
+const rests = await (await netFetch(B + "/api/admin/restaurants", { headers: H })).json();
 const list = Array.isArray(rests) ? rests : rests.restaurants || [];
 const fh = list.find((x) => x.slug === "french-house");
 let pass = 0, fail = 0;
 const ck = (n, ok, got) => { ok ? (pass++, console.log("  PASS " + n)) : (fail++, console.log("  FAIL " + n + " · got: " + JSON.stringify(got))); };
+
 
 // ── PUT EVERYTHING BACK, EVEN IF THIS SCRIPT DIES ────────────────────────────────────────────
 // This guard switches a real restaurant's things OFF to prove they disappear, then switches them
@@ -148,19 +174,19 @@ const setMenu = async (on) => {
   if (on) undo.delete("the guest menu (menu_enabled)");
   return r;
 };
-const before = await fetch(`${B}/r/${fh.slug}/menu`);
+const before = await netFetch(`${B}/r/${fh.slug}/menu`);
 ck("menu opens while the switch is on", before.status === 200, before.status);
 await setMenu(false);
 // getSettings caches a restaurant's row for 8s (lib/menu.ts SETTINGS_TTL_MS), so a switch
 // takes up to that long to bite everywhere. Wait it out rather than racing our own cache.
 await new Promise((r) => setTimeout(r, 9000));
-const off = await fetch(`${B}/r/${fh.slug}/menu`);
-const offItem = await fetch(`${B}/r/${fh.slug}/item/anything`);
+const off = await netFetch(`${B}/r/${fh.slug}/menu`);
+const offItem = await netFetch(`${B}/r/${fh.slug}/item/anything`);
 ck("menu is not found with the switch off", off.status === 404, off.status);
 ck("a dish URL is not found either", offItem.status === 404, offItem.status);
 await setMenu(true);
 await new Promise((r) => setTimeout(r, 9000));
-const back = await fetch(`${B}/r/${fh.slug}/menu`);
+const back = await netFetch(`${B}/r/${fh.slug}/menu`);
 ck("menu comes back when switched on", back.status === 200, back.status);
 
 // ── 4 · the manager panel carries no permission screens any more ──────────

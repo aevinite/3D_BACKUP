@@ -178,6 +178,24 @@ const pass = (m) => { if (!QUIET) console.log("  ✓ " + m); };
 const fail = (m) => { console.log("  ✗ " + m); failed++; };
 const head = (m) => console.log("\n" + m);
 
+// AV LIVE IS REPORTED, NOT ENFORCED — BACKUP IS ENFORCED (owner, 2026-08-05).
+// Asked what to do about AV live's state showing up as failures in the backup sweep, the owner was
+// unambiguous: "Leave AV live alone, only check for backup and only check error and all that stuff
+// for backup." So half A (dev ⇄ AV live) no longer turns the BACKUP sweep red: its findings are
+// printed in full — nothing is hidden, which is the standing rule — but they do not fail the run.
+// Half B (every live function is written down in supabase/migrations) is backup hygiene and still
+// fails, because that is what keeps the folder the single source of truth.
+//
+// Run `npm run verify:db-parity -- --av-strict` (or PARITY_AV_STRICT=1) to make half A fail again —
+// which is what to use when a release to AV live is actually being prepared and its parity matters.
+const AV_STRICT = process.argv.includes("--av-strict") || process.env.PARITY_AV_STRICT === "1";
+const avNote = (m) => {
+  console.log("  ⓘ " + m);
+  if (AV_STRICT) failed++;
+  else avNoted++;
+};
+let avNoted = 0;
+
 const q = async (env, sql) => {
   const ref = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
   const r = await fetch(`https://api.supabase.com/v1/projects/${ref}/database/query`, {
@@ -189,6 +207,27 @@ const q = async (env, sql) => {
   return r.json();
 };
 const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();   // whitespace-only diffs aren't drift
+
+// A COMMENT IS NOT CODE — AND A RENUMBERED MIGRATION IS NOT DRIFT (2026-08-05).
+// The parity half compared pg_get_functiondef() text, comments and all, and reported three
+// functions as "an older definition on AV live" whose CODE was byte-identical. The only difference
+// was a migration number inside a comment:
+//     lfh_place_order_public      backup "-- NEW (280/F21):"   AV live "-- NEW (281/F21):"
+//     lfh_staff_unmerge_table     backup "(mig 297)."          AV live "(mig 299)."
+//     lfh_sync_order_items_json   backup "-- (269) the frozen" AV live "-- (270) the frozen"
+// All three lengths matched to the character. The cause is renumbering: when two sessions collide,
+// the newer migration is renumbered and its self-referencing comments are rewritten in the FILE —
+// but AV live already holds the function applied under the old number, so its stored comment keeps
+// it. Nothing about the restaurant's behaviour differs by one byte.
+// This guard's own header says shouting DRIFT at a non-difference "teaches everyone to ignore" it,
+// which is exactly what three permanent false positives would do. So parity compares CODE.
+// `norm` above is left alone: the SOURCED half below matches distinctive phrases from a live body
+// against the migration folder, and some of those phrases are comments.
+const normCode = (s) => norm(
+  String(s || "")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")   // /* block comments */
+    .replace(/--[^\n]*/g, " "),            // -- line comments
+);
 
 // Key by name AND argument list: several functions are OVERLOADED (an old signature kept beside
 // a new one), and keying by name alone compares dev's signature A against AV live's signature B
@@ -213,7 +252,7 @@ if (!av) {
     for (const row of d) {
       if (expectedMissing(row.name)) continue;
       if (!A.has(row.name)) { missing.push(row.name); continue; }
-      if (norm(A.get(row.name)) !== norm(row.def)) differing.push(row.name);
+      if (normCode(A.get(row.name)) !== normCode(row.def)) differing.push(row.name);
     }
     const extra = a.map((r) => r.name).filter((n) => !d.some((r) => r.name === n) && !expectedMissing(n));
     // Date each disagreement by the question it answers (see firstIn / lastIn above).
@@ -245,9 +284,9 @@ if (!av) {
     const drift  = gaps.filter((g) => g.mig == null || (g.mig <= avLevel && !withheld(g.mig)));
     // Keep the record above honest: if something it says is withheld is actually THERE, say so.
     const wrongly = a.map((r) => firstWritten(r.name)).filter((m) => withheld(m));
-    if (wrongly.length) fail(`the withheld-from-AV list names migration(s) ${[...new Set(wrongly)].join(", ")} as not released, but AV live has their ${what}s — update WITHHELD_FROM_AV in this script`);
+    if (wrongly.length) avNote(`the withheld-from-AV list names migration(s) ${[...new Set(wrongly)].join(", ")} as not released, but AV live has their ${what}s — update WITHHELD_FROM_AV in this script (AV live: reported, not enforced)`);
     if (drift.length) {
-      fail(`${drift.length} ${what}(s) DRIFTED — AV live is on release ~${avLevel}, so these are not "not released yet": ${drift.slice(0, 8).map((g) => `${g.n} — ${g.why}${g.mig ? ` (mig ${g.mig})` : ", and in no migration at all"}`).join(" · ")}`);
+      avNote(`${drift.length} ${what}(s) DRIFTED — AV live is on release ~${avLevel}, so these are not "not released yet": ${drift.slice(0, 8).map((g) => `${g.n} — ${g.why}${g.mig ? ` (mig ${g.mig})` : ", and in no migration at all"}`).join(" · ")}`);
     } else if (behind.length) {
       const migs = [...new Set(behind.map((g) => g.mig))].sort((x, y) => x - y);
       pass(`${what}s: ${behind.length} object(s) wait on ${migs.length} migration(s) not sent to AV live (${migs.map((m) => `${m}${WITHHELD_FROM_AV[m] ? ` — ${WITHHELD_FROM_AV[m]}` : ""}`).join("; ")})`);
@@ -345,7 +384,8 @@ head("B. Is every live function written down in supabase/migrations?");
     : fail(`${handEdited.length} function(s) look changed on the database without a migration: ${handEdited.slice(0, 8).join(", ")}`);
 }
 
+const avTail = avNoted ? ` · ${avNoted} AV-live note(s) reported, not enforced (--av-strict to enforce)` : "";
 console.log(failed
-  ? `\n✗ ${failed} parity problem(s) — a fix that is only on one stack is not a fix`
-  : "\n✓ both databases agree, and every function is written down in migrations");
+  ? `\n✗ ${failed} parity problem(s) — a fix that is only on one stack is not a fix${avTail}`
+  : `\n✓ backup is sound: every function is written down in migrations${avTail}`);
 process.exit(failed ? 1 : 0);
