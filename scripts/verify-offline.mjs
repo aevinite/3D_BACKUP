@@ -96,6 +96,54 @@ async function waitControlled(page, tries = REMOTE ? 120 : 40) {   // 60s remote
   }
   return false;
 }
+// BEING CONTROLLED IS NOT BEING READY. waitControlled() only proves a worker is driving the
+// page; it says nothing about whether /offline.html has actually landed in a cache. That
+// precache happens inside install/activate's waitUntil, so on a BUSY server it can still be in
+// flight — or its own fetch can time out — after the page is already controlled.
+//
+// Go offline in that window and all five last-resort assertions fail at once ("the branded
+// offline page was not served", "the reassurance text is missing", "the page never named a
+// reason", "it blamed the wrong side", "the last-resort page has no way out") — five red lines
+// describing one thing that was merely not ready yet. That is what happened inside
+// verify:everything on 2026-08-05: the guard passed 55/55 standing alone and failed 5 of 55 as
+// a child phase, purely because the server was under the suite's own load.
+//
+// So wait for the artefact, not the appearance — and if it truly never arrives, say THAT once
+// instead of five symptoms.
+async function waitOfflinePrecached(page, tries = REMOTE ? 60 : 40) {
+  for (let i = 0; i < tries; i++) {
+    const there = await page.evaluate(async () => {
+      try {
+        for (const name of await caches.keys()) {
+          if (!name.startsWith("lfh-")) continue;
+          const c = await caches.open(name);
+          if (await c.match("/offline.html")) return true;
+        }
+      } catch {}
+      return false;
+    }).catch(() => false);
+    if (there) return true;
+    await sleep(500);
+  }
+  return false;
+}
+// READ A SETTLED PAGE, NOT A STOPWATCH. These blocks used `await sleep(1500)` and then read
+// the body once. On a loaded server that is a coin toss: the document is still arriving, the
+// body reads short, and EVERY assertion about its wording fails together — five red lines that
+// describe a slow read, not a product fault. (verify:everything, 2026-08-05: this guard passed
+// 55/55 alone and failed 5 of 55 as a child phase, where it took 249s instead of seconds.)
+// Wait for the text we expect, up to a bound; return whatever is there when time runs out so
+// the assertions still report the REAL body.
+async function bodyWhenSettled(page, expect, ms = 12000) {
+  const deadline = Date.now() + ms;
+  let text = "";
+  while (Date.now() < deadline) {
+    text = ((await page.locator("body").textContent().catch(() => "")) || "");
+    if (expect.test(text)) return text;
+    await sleep(250);
+  }
+  return text;
+}
 // One reload, then wait again. Returns true the moment the page is controlled.
 async function ensureControlled(page) {
   if (await waitControlled(page)) return true;
@@ -760,8 +808,9 @@ async function run() {
     // needs a real device losing WiFi; that's the outstanding item in docs/OFFLINE-SYNC.md.
     const after = await offlinePage(ctx);
     await after.goto(BASE + "/still-unseen-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
-    await sleep(1500);
-    const afterText = ((await after.locator("body").textContent().catch(() => "")) || "").trim();
+    // Same reason as bodyWhenSettled: this asserted a NON-empty body after a fixed 1.5s, so a
+    // slow document read as "unhandled" when it was merely still arriving.
+    const afterText = (await bodyWhenSettled(after, /\S/)).trim();
     afterText.length > 0
       ? ok("and the next navigation is still answered (not the browser's error page)")
       : bad("a sign-in reload left the next navigation unhandled (empty body)");
@@ -777,12 +826,17 @@ async function run() {
     const fresh = await ctx.newPage();
     await fresh.goto(BASE + "/login", { waitUntil: "domcontentloaded" });   // installs the worker
     await waitControlled(fresh);
+    // ...and wait for the page it will need to actually BE saved (see waitOfflinePrecached).
+    const precached = await waitOfflinePrecached(fresh);
+    if (!precached) {
+      bad("the worker never precached /offline.html, so the last-resort checks below cannot mean anything",
+          "give the server room and re-run — this is the guard not being ready, not the product failing");
+    }
     await ctx.setOffline(true);
     for (let i = 0; i < 20 && !(await fresh.evaluate(() => navigator.onLine === false).catch(() => false)); i++) await sleep(250);
     // A URL that certainly has no saved copy on this device.
     await fresh.goto(BASE + "/never-opened-" + Date.now(), { waitUntil: "domcontentloaded" }).catch(() => {});
-    await sleep(1500);
-    const lastResort = (await fresh.locator("body").textContent().catch(() => "")) || "";
+    const lastResort = await bodyWhenSettled(fresh, /This screen hasn't been opened on this device/i);
     /This screen hasn't been opened on this device/i.test(lastResort)
       ? ok("it shows our own page, not the browser's error page")
       : bad("the branded offline page was not served", JSON.stringify(lastResort.slice(0, 100)));
