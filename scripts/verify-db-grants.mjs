@@ -117,14 +117,6 @@ const ANON_ALLOWED = {
   lfh_send_otp:               "guest phone verification (answers 'disabled' while the feature is off)",
   lfh_verify_otp:             "guest phone verification",
   lfh_request_verification:   "mig-037 verification stub",
-  // Its other half. Migration 040 created BOTH and granted both to anon — a guest asks for a
-  // code with one and hands the code back with the other — but only the request half was ever
-  // in the database. The T8 sweep found it ABSENT, which no check could see: verify:db-parity
-  // compares the two stacks and both were missing it, and this file only inspects functions
-  // that exist. Restored + tenant-scoped by mig 296, so it belongs here beside its sibling.
-  // (It was written as 295 and renumbered when two sessions both reached for that number on
-  //  2026-08-05 — 295 is the waiter-caps migration. Kept accurate so nobody reads the wrong file.)
-  lfh_check_verification:     "mig-040/296 verification stub: the guest hands their code back (answers 'disabled' while the feature is off, and fails closed with no restaurant)",
   get_order_status:           "guest polls their order's status + KOT number; no money in the result",
   set_order_table_number:     "narrow relabel: digits only, refuses session orders, derives the restaurant from the order (migs 007/051)",
 
@@ -397,10 +389,78 @@ function checkMigrations() {
   }
 }
 
+// ── A FUNCTION A MIGRATION CREATED, THAT THE DATABASE DOES NOT HAVE ──────────────────────────
+// THE BLIND SPOT THIS CLOSES. The T8 sweep of migrations 001–150 found `lfh_check_verification`
+// ABSENT from the database. Migration 040 created it and granted it to anon — a guest asks for a
+// code with one function and hands the code back with the other — and only the request half ever
+// landed. Nothing in the repo could see it:
+//   • verify:db-parity compares function BODIES between the two stacks, and BOTH were missing it,
+//     so it stayed green;
+//   • checkDb() above walks the functions that EXIST, so a function that isn't there has no row
+//     to fail on.
+// An absent function is invisible to a check that can only look at what is present. So look from
+// the other direction: everything the migrations CREATE must still be in pg_proc, unless a
+// migration also DROPs it (a deliberate retirement, e.g. mig 281 removing the bulk close-all).
+//
+// Name-level, not signature-level, ON PURPOSE. Signatures change constantly here (a scoping pass
+// adds a trailing p_restaurant_id and re-grants), and matching on them would cry wolf on every
+// one. What actually went wrong — and what this catches — is a whole NAME going missing.
+//
+// REPLAY IN ORDER, don't just collect two sets. The first cut of this check kept a `created` set
+// and a `dropped` set and exempted any name in both — which silently exempted almost every
+// interesting function, because the house pattern for changing a signature is DROP the old one and
+// CREATE the new one. Proof it was useless: with that logic, deleting `lfh_price_order` from the
+// database was NOT flagged. So a name is expected LIVE when its last CREATE comes after its last
+// DROP, in apply order.
+//
+// ONLY the absent-but-expected direction is checked, and that is a deliberate limit. The mirror
+// ("still live after a deliberate drop") cannot be done safely at name level: the other common
+// house pattern is to CREATE the new signature and THEN drop an obsolete OVERLOAD of the same name
+// (mig 080 does it to lfh_next_seq, mig 213 to lfh_owner_sales_report and
+// lfh_owner_payment_breakdown). Name-level replay reads those as retirements and cries wolf on
+// three healthy functions — measured, not guessed. Telling those apart needs real signature
+// parsing, and a function that lingers is a far smaller problem than one that has vanished.
+function expectedLiveFunctions() {
+  const dir = join(root, "supabase", "migrations");
+  const lastCreate = new Map(); // name → "<file>#<offset>" of its last CREATE
+  const lastDrop = new Map();   // name → same, for its last DROP
+  for (const f of readdirSync(dir).filter((x) => x.endsWith(".sql")).sort()) {
+    const sql = readFileSync(join(dir, f), "utf8");
+    const key = (at) => `${f}#${String(at).padStart(8, "0")}`;
+    for (const m of sql.matchAll(/CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?:public\.)?"?([a-zA-Z0-9_]+)"?\s*\(/g))
+      lastCreate.set(m[1].toLowerCase(), key(m.index));
+    for (const m of sql.matchAll(/DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?(?:public\.)?"?([a-zA-Z0-9_]+)"?/g))
+      lastDrop.set(m[1].toLowerCase(), key(m.index));
+  }
+  const out = new Map();
+  for (const [n, madeAt] of lastCreate) {
+    const goneAt = lastDrop.get(n);
+    if (!goneAt || madeAt > goneAt) out.set(n, madeAt.split("#")[0]); // created, and not retired since
+  }
+  return out;
+}
+
+async function checkAbsentFunctions(label, env) {
+  head(`${label} — every function the migrations still expect is actually there`);
+  const expected = expectedLiveFunctions();
+  const live = new Set(
+    (await q(env, `SELECT lower(p.proname) AS n FROM pg_proc p
+                     JOIN pg_namespace ns ON ns.oid = p.pronamespace
+                    WHERE ns.nspname = 'public'`)).map((r) => r.n)
+  );
+  const missing = [...expected.entries()].filter(([n]) => !live.has(n));
+  for (const [n, f] of missing)
+    fail(`${n}() — ${f} creates it and no later migration retires it, but it is NOT in the database. `
+       + `Either that migration never applied, or something removed it by hand. If it is meant to be `
+       + `gone, DROP it in a migration so the intent is written down where the next reader will see it.`);
+  if (!missing.length) pass(`all ${expected.size} functions the migrations still expect are present`);
+}
+
 // ── run ──────────────────────────────────────────────────────────────────────────────────────
 checkMigrations();
 const dev = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
 await checkDb("BACKUP / DEV database", dev);
+await checkAbsentFunctions("BACKUP / DEV database", dev);
 
 if (WITH_AV) {
   // READ-ONLY on AV live: SELECTs against the catalog only, never a write. The sweep found the
