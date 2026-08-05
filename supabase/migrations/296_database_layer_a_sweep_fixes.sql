@@ -1,4 +1,8 @@
--- 295_database_layer_a_sweep_fixes.sql
+-- 296_database_layer_a_sweep_fixes.sql
+--   (renumbered 295 -> 296: a parallel session merged its own 295 minutes earlier. Two files
+--    sharing a number apply in FILENAME order, not intent order — the exact trap this sweep
+--    reported as a finding, hit for real inside the hour. Already applied to the backup DB
+--    under the old name; every statement is idempotent, so re-running under this one is a no-op.)
 -- The database-layer findings from the 001–150 migration sweep (T8), fixed at the source.
 --
 -- The shape of almost every fault below is the same, and worth naming once: a migration
