@@ -1,3 +1,8 @@
+> ⚠️ **HISTORY — not a current specification.** the app was still unnamed; superseded by CLAUDE.md and docs/SAAS-ARCHITECTURE-PLAN.html.
+> Kept because it records why things were built this way. Do not follow it for new work; the
+> live rules are in `CLAUDE.md`. (Banner added 2026-08-04: eleven finished documents were sitting
+> in `docs/` beside the load-bearing ones with nothing to tell them apart.)
+
 # MASTER PLAN — InfiniDine (working name) · nextjs_MENU_FINAL
 
 > THE single source of truth for everything we're building. Written 2026-06-12 from

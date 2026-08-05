@@ -1,3 +1,8 @@
+> ⚠️ **HISTORY — not a current specification.** a one-off manual test script; the automated cover is npm run verify:offline.
+> Kept because it records why things were built this way. Do not follow it for new work; the
+> live rules are in `CLAUDE.md`. (Banner added 2026-08-04: eleven finished documents were sitting
+> in `docs/` beside the load-bearing ones with nothing to tell them apart.)
+
 # Offline test — Waiter Tablet (10 minutes, on a real tablet)
 
 This checks that the waiter tablet **saves your work when the internet drops** and then **sends it exactly once** when the internet comes back — no lost orders, no duplicates.

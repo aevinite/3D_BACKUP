@@ -1,3 +1,8 @@
+> ⚠️ **HISTORY — not a current specification.** superseded by the MEASURED ceiling of 2026-08-01 (100 simultaneous orders in ~2s — see CLAUDE.md).
+> Kept because it records why things were built this way. Do not follow it for new work; the
+> live rules are in `CLAUDE.md`. (Banner added 2026-08-04: eleven finished documents were sitting
+> in `docs/` beside the load-bearing ones with nothing to tell them apart.)
+
 # Stress test 2026-07-03 — FINAL findings (bugs listed, NOT fixed)
 
 Test: 7 restaurants (pizza-palace, burger-barn, spice-route, sakura-sushi, taco-fiesta,

@@ -1,6 +1,12 @@
 # The 500-phase whole-app test
 
-`npm run verify:everything` — 501 numbered phases, run one at a time against a chosen site.
+`npm run verify:everything` — every numbered phase, run one at a time against a chosen site.
+
+> **Do not trust a phase NUMBER written down anywhere, including below.** The suite gets
+> renumbered when parallel branches merge, and when it does, every `--only <n>` in every doc
+> silently starts running a different test — which is exactly what happened to the two rows at
+> the bottom of this table. `node scripts/verify-everything.mjs --list` prints the live count
+> and map, and costs nothing. Use it, then type the range.
 Each phase is ONE question with a yes/no answer, printed as it runs, so a failure is pinned to
 a number instead of hiding in a wall of output.
 
@@ -30,7 +36,10 @@ npm run access:defaults -- --slug aangan-garden-restaurant --apply   # write it,
 The applier refuses to run unless `.env.local` points at the backup database, and refuses any
 live client base URL.
 
-## What the 500 phases cover
+## What the phases cover
+
+The group boundaries below drift by a few whenever phases are added. They are here to tell you
+WHAT is covered and roughly where; `--list` is the authority on the numbers.
 
 | phases | group | what it answers |
 |---|---|---|
@@ -55,8 +64,9 @@ live client base URL.
 | **441–461** | **bills, invoices, compliance** | bill numbers, no negative bill, discount never exceeds the bill, tax from one place, refusal by CODE not prose, a deleted bill still counted, soft-delete only, the staff-action trail, GSTIN shape, no order outlives its session, customer name+number |
 | **462–475** | **Inventory + Payroll** | off on Aangan by default; switched on for French House inside the run and put back; units, quantities, movements; the pay ledger is append-only and server-only |
 | **476–490** | **the rules that hold under real use** | idempotency, clash guard, connection light, realtime per restaurant, channel dropped when hidden, no poll faster than the 60s backstop on the normal path, outbox replays once, login page still offline-able, alerts time out, every limited action has a rule, nothing hides a limit event, the crash log is clean, no test restaurant switched on |
-| **491–500** | **the owner's real devices** | the A35 phone (360×780) and a tablet (1194×834): each panel renders and nothing spills off the side |
-| **501** | **the Access screen's "find a setting" bar** | 30 checks on desktop AND the A35 phone: sections start closed, a synonym like "zomato" finds a row nothing is called, every result shows its path, 15 keystrokes filter+render in ~20ms, picking a result lands on that exact row and blinks it, the typed text survives the pick and only the × clears it, sub-settings really are boxes in a grid, arrows/Escape work, and a row under a switched-off parent is labelled rather than a dead click (`npm run verify:access-search`) |
+| **~491–495** | **limits, crashes, health** | every limited action has a rule behind it, nothing hides a limit event from the owner, the crash log holds no unresolved crash, no leftover test restaurant is switched on |
+| **~496–505** | **the owner's real devices** | the A35 phone (360×780) and a tablet (1194×834): each of the four panels, the owner dashboard and the guest menu renders and nothing spills off the side |
+| **last phase** | **the Access screen's "find a setting" bar** | 30 checks on desktop AND the A35 phone: sections start closed, a synonym like "zomato" finds a row nothing is called, every result shows its path, 15 keystrokes filter+render in ~20ms, picking a result lands on that exact row and blinks it, the typed text survives the pick and only the × clears it, sub-settings really are boxes in a grid, arrows/Escape work, and a row under a switched-off parent is labelled rather than a dead click (`npm run verify:access-search`) |
 
 ## Running it in parallel (about a third of it cannot be)
 
@@ -74,7 +84,8 @@ node scripts/verify-everything.mjs --only 462-475      # Inventory/Payroll on an
 node scripts/verify-everything.mjs --only 277-320 &    # APIs + the phone
 node scripts/verify-everything.mjs --only 321-418 &    # records, every restaurant, Aangan's defaults
 node scripts/verify-everything.mjs --only 441-461 &    # bills + compliance
-node scripts/verify-everything.mjs --only 476-500 &    # resilience + the owner's devices
+node scripts/verify-everything.mjs --only 476-505 &    # resilience + the owner's devices
+#   ^ check these numbers with --list first; they move when phases are added
 
 # WAIT for the writing lane to finish before these two — they read surfaces it changes
 node scripts/verify-everything.mjs --only 122-160 &    # manager screens (module tabs move)

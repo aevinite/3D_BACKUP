@@ -81,13 +81,44 @@ try {
     ok(`${speed.n} keystrokes filter and re-render in ${speed.ms.toFixed(0)}ms`, speed.ms < 900, `${(speed.ms / speed.n).toFixed(1)}ms each`);
 
     // Picking a result must LAND on that row, not just open the page.
+    //
+    // These two checks used to be `click()` then `sleep(1700)`, and they were the only FLAKY
+    // checks in the repo: two back-to-back runs against the deployed site gave 28/30 then 30/30
+    // with no code change. Landing on the row means a navigation plus a scroll, which is slower
+    // than 1700ms whenever the deploy is cold — and this guard is also the last phase of
+    // verify:everything, so the whole suite went red on nothing being wrong. A guard that cries
+    // wolf is one people stop reading.
+    //
+    // The flash is worse than slow: `.at-flash` is ADDED and then REMOVED when the animation
+    // ends, so a fixed wait can land before it appears OR after it is gone, and polling for it
+    // can miss it entirely. So watch for it from BEFORE the click, and remember that it happened.
     await box.fill("");
     await box.fill("languages");
-    await sleep(450);
+    await p.locator(".as-item").first().waitFor({ state: "visible", timeout: 15000 });
+    // Install the watch BEFORE the click, in THIS document. Picking a result does not navigate —
+    // it scrolls the row into view and sets React state — so the page context survives and an
+    // observer set here keeps running. (addInitScript would be wrong: it only applies to documents
+    // created AFTER it is registered, so with no navigation it never runs at all.)
+    await p.evaluate(() => {
+      window.__sawFlash = false;
+      const seen = () => { if (document.querySelector("[data-node].at-flash")) window.__sawFlash = true; };
+      seen();
+      new MutationObserver(seen).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ["class"] });
+    });
     await p.locator(".as-item").first().click();
-    await sleep(1700);
-    ok("picking a result lands on that exact row", await p.locator('[data-node="menu_languages"]').isVisible().catch(() => false));
-    ok("the row blinks once, so you can see you arrived", (await p.locator('[data-node="menu_languages"].at-flash').count()) > 0);
+    let landed = true;
+    try {
+      await p.locator('[data-node="menu_languages"]').waitFor({ state: "visible", timeout: 20000 });
+    } catch { landed = false; }
+    ok("picking a result lands on that exact row", landed);
+    // The flash is added on arrival and removed when its animation ends, so poll the REMEMBERED
+    // flag for a moment rather than asking "is it flashing right now" once.
+    let sawFlash = false;
+    for (let i = 0; i < 40 && !sawFlash; i++) {
+      sawFlash = await p.evaluate(() => window.__sawFlash === true).catch(() => false);
+      if (!sawFlash) await sleep(150);
+    }
+    ok("the row blinks once, so you can see you arrived", sawFlash);
     // What you typed STAYS after picking (owner: "should stay there until click cross at very
     // end just like phone"). Clearing it meant retyping the same word to take a second match.
     ok("what you typed is still in the box after picking", (await box.inputValue()) === "languages", JSON.stringify(await box.inputValue()));

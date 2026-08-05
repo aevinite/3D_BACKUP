@@ -4,6 +4,23 @@ Hard-won lessons from the 2026-06-26 egress incident + the follow-up audits. Thi
 "how we keep this SaaS cheap, fast, and safe as it grows" reference. The short version lives
 in `CLAUDE.md` (NEW-FEATURE CHECKLIST item 9) and in the global `~/.claude/CLAUDE.md`.
 
+> ⚠️ **THREE LATER LESSONS ARE NOT IN THIS FILE YET (noted 2026-08-04).** CLAUDE.md points here
+> as "the full pattern", so a feature written by this document alone gets the June rules and not
+> the ones learned by taking the database down twice since. Read these three in CLAUDE.md before
+> building a data feature:
+>
+> 1. **Analytics go through the compute-on-view snapshot cache** — `lib/ownerCache.ts`
+>    (`cachedOwnerPayload`) + `owner_analytics_cache` (mig 196). This is the DEFAULT for any
+>    dashboard/report number, not an optimisation to add later.
+> 2. **A change-detector may never scan the table it guards.** `lfh_owner_orders_fingerprint`
+>    cost **21,591 ms and ~2.9 GB** of page reads — 2.7x the 8s statement ceiling, so the
+>    dashboard burned the CPU and then FAILED. Mig 246 replaced it with a trigger-maintained
+>    watermark: **5 ms, 157 buffers**. If a guard costs more than the query it protects, it is
+>    not a guard.
+> 3. **The floor is read once and shared** — `lib/floorSummary.ts` (a ~1.5s window) plus mig 238.
+>    Every write handler must call `invalidateFloor(rid)`, a `?table=N` refetch is NEVER shared,
+>    and the window stays ~1.5s. Guarded by `npm run verify:floor`.
+
 ---
 
 ## 1. What happened (so we never repeat it)
@@ -126,3 +143,19 @@ readable; blocking devtools only annoys real users. Real protection:
 - [x] **Multiple owners per restaurant** via restaurant_owners join table (PR #48, mig 097); isolation verified live.
 - [x] **Cross-tenant manager-PIN hole** fixed — PIN check scoped to the tablet's restaurant (PR #48).
 - [x] **Guest AppShell** reads its own restaurant's settings, not #1's (PR #49).
+
+## Do NOT reach for infrastructure (owner rule, restated 2026-08-05)
+
+Every rule above is a way to make a read cheap. When one is still slow, the temptation is to buy
+capacity instead, and the answer is no until the numbers say otherwise:
+
+- **Redis, job queues and read replicas are Stage-3 (50–300+ restaurants). Do not add them early**
+  — that is CLAUDE.md's rule, and this file is where people come looking for permission.
+- **Order volume is not the risk.** 100 genuinely simultaneous orders land in ~2s on the free tier
+  and the rest of the site never wobbles (measured, `npm run load:ramp`). What saturates the
+  instance is a handful of unbounded analytics reads landing together — so the fix is always
+  further up this page, not a bigger machine. Full numbers: `docs/PROJECT-HISTORY.md` §2.
+- **Measure before and after, on the real database.** A set-based rewrite of the floor query was
+  rejected by measurement once already (`docs/PROJECT-HISTORY.md` §1); "it should be faster" is not
+  evidence. And if a read is already ~10–30ms, the remaining cause is CONTENTION, so making the
+  query faster again achieves nothing.

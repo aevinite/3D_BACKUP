@@ -2533,6 +2533,11 @@ phase("the health endpoint answers with the fields the repair kit reads", async 
   ok(r.status === 200, `status ${r.status}`);
   const j = await r.json().catch(() => null);
   ok(j && typeof j === "object", "the health check answered something that is not an object");
+  // The phase NAME promised the fields and the assertions only asked "is it an object", so `{}`
+  // passed — a phase title that overstates its check is the green-suite problem in miniature.
+  // The route's contract (app/api/health/route.ts) is 200 {ok:true}, or 503 {ok:false} when it
+  // cannot reach the database, and public/offline.html polls it to decide what to tell a person.
+  ok(j && j.ok === true, `/api/health answered 200 without ok:true — ${JSON.stringify(j).slice(0, 80)}`);
 });
 
 // ════════════════════════════════════════════════════════════════════════════
