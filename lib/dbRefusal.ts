@@ -38,6 +38,7 @@ const REFUSAL_CODES = new Set([
   // the person. See the migration's header for the full reasoning.
   "LFH01", // the invoice is locked — the bill is settled and cannot be reopened
   "LFH02", // a credit note bigger than the bill total
+  "LFH03", // reopening a bill was asked for without a reason (mig 286's guard, coded in mig 300)
   "22001", // string too long
   "22003", // number out of range
   "22007", // invalid date/time format
@@ -64,6 +65,11 @@ const PLAIN: Record<string, string> = {
 const OWN_CODE_TEXT: Record<string, string> = {
   LFH01: "This bill is settled — its invoice can't be reopened. Make a credit note instead.",
   LFH02: "The credit can't be more than the bill total.",
+  // Migration 286 started refusing a void with no reason, but raised it as a generic
+  // check_violation — so this arrived as "That value isn't allowed here." and nobody learned
+  // what to do. The manager panel asks for a reason before calling; this sentence is for every
+  // other caller 286 was written to cover (the Repair Kit, a script, a future panel).
+  LFH03: "Say why this bill is being reopened — a reason is required.",
 };
 /** Our own refusal code, if this error carries one (mig 278). Null for anything else. */
 export function ownRefusalCode(e: unknown): string | null {
