@@ -87,6 +87,20 @@ const WITHHELD_FROM_AV = {
   250: "ordering at a merged table — not released (needs 249)",
   251: "the deletion audit — not released",
   260: "a joined table cannot be given a second party — not released (needs 249)",
+  296: "the 001-150 migration-sweep fixes — the owner was asked on 2026-08-05 and said NO, leave AV "
+     + "live alone for now. Backup only. It makes a supplied KOT number move the counter past itself "
+     + "(so two bills can never share a ticket number on one shift), clamps a discount that exceeds "
+     + "the food it comes off, gates the guest menu-data route on the Menu switch, numbers dishes per "
+     + "restaurant, guarantees every restaurant a settings row, and re-applies the locks migs 094/003/"
+     + "078 asked for. All of it is safe to send whenever he asks — nothing in it is backup-specific.",
+  297: "correction to 296 — same decision, same answer: backup only. It re-drops lfh_check_verification "
+     + "(296 wrongly resurrected it; mig 267 had deleted it on purpose) and comments the surviving half "
+     + "of that retired stub. NOTE: AV live never received 267 either, so AV live still HAS the function "
+     + "296 wrongly restored — which is why it shows as drift until one of these is released.",
+  298: "every restaurant's dish codes become its own 1..N — backup only FOR NOW, but the owner's words "
+     + "were: renumber on backup, and on the day he says to copy everything over, this goes too. It is a "
+     + "migration rather than a script precisely so that release carries it without anyone remembering. "
+     + "Move this line to the released side on that day rather than deleting it.",
   267: "the database sweep fixes — NOT released, and it needs an explicit owner yes. It re-locks 17 "
      + "staff-only functions (incl. close-all-tables and the bill counter), moves the activity-log "
      + "breadcrumb off the floor topic, drops 11 unused indexes and schedules the 2 missing cron "
@@ -203,8 +217,22 @@ if (!av) {
     }
     const extra = a.map((r) => r.name).filter((n) => !d.some((r) => r.name === n) && !expectedMissing(n));
     // Date each disagreement by the question it answers (see firstIn / lastIn above).
+    // A SIGNATURE CHANGE IS NOT A LOST FUNCTION. These keys carry the argument list, so the moment a
+    // migration adds a parameter — the commonest change in this repo, every tenant-scoping pass does
+    // it — the new signature is absent from AV live and lands in `missing`, which dates it by the
+    // migration that FIRST wrote the name. For a function first written long ago that reads as
+    // "AV live lost something ancient" and fails, when the truth is "AV live has the older shape of
+    // it and the change that altered it has not been released". Found 2026-08-05: mig 296 added a
+    // p_restaurant_id to lfh_request_verification (first written in mig 40) and the check blamed
+    // mig 40. So: if AV live has the same NAME at some other signature, this is a signature change —
+    // date it by the migration that changed it, exactly as `differing` is dated. A genuinely lost
+    // function, where AV live has no signature of that name at all, is still dated by firstWritten
+    // and still fails. The check keeps its teeth and stops crying wolf on every scoping pass.
+    const avBare = new Set(a.map((r) => bare(r.name)));
     const gaps = [
-      ...missing.map((n) => ({ n, mig: firstWritten(n), why: "missing from AV live" })),
+      ...missing.map((n) => (avBare.has(bare(n))
+        ? { n, mig: lastWritten(n), why: "a different signature on AV live (its own is older)" }
+        : { n, mig: firstWritten(n), why: "missing from AV live" })),
       ...differing.map((n) => ({ n, mig: lastWritten(n), why: "an older definition on AV live" })),
       ...extra.map((n) => ({ n, mig: lastWritten(n), why: "dropped here, still on AV live" })),
     ];
