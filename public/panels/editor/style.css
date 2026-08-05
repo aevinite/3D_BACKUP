@@ -110,6 +110,18 @@ body.nav-compact .nav-burger {
   width: 40px; height: 40px; min-height: 40px;      /* comfortable tap target */
   background: transparent; border: 1px solid var(--line); border-radius: 10px;
   cursor: pointer; padding: 0;
+  position: relative;                               /* anchors the .has-news dot below */
+}
+/* ── THE ☰ CARRIES THE NEWS IN COMPACT MODE (T14 tablet sweep, 2026-08-05) ────────────────────
+   In .nav-compact the tabs live in a closed drawer, so the Bills / Tables / Platform badges are
+   not on screen at all — measured on a 1194px iPad, all three had offsetParent === null. A manager
+   on a tablet had nothing telling them anything was waiting. syncBurgerNews() in app.js adds
+   .has-news whenever any of those badges is showing, so the ☰ wears the same red dot the tabs do.
+   Only in compact mode: when the tabs ARE on the bar their own numbers say it better. */
+body.nav-compact .nav-burger.has-news::after {
+  content: ""; position: absolute; top: -3px; right: -3px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--danger, #ef4444); border: 2px solid var(--bg);
 }
 body.nav-compact .nav-burger span {
   display: block; width: 18px; height: 2px; border-radius: 2px;
@@ -1634,7 +1646,9 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
 /* separate order boxes inside a table panel */
 .tp-order-head { font-size: 11px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 8px; }
 .tp-order { margin-bottom: 14px; }
-.tp-accept { width: 100%; margin-top: 4px; }
+/* 40px minimum: measured 494×30 on an iPad — "✓ Accept order" is the tap a manager repeats more
+   than any other during service, and 30px is thin for a thumb. (T14 tablet sweep, 2026-08-05) */
+.tp-accept { width: 100%; margin-top: 4px; min-height: 40px; }
 
 /* ============================================================================
    Visual polish pass — brand serif headings, warmth & depth. Layered last so it
@@ -2104,7 +2118,11 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
 .tp-detail-floating .tp-detail-top h3 { white-space: nowrap; }
 /* Resize handle — drag the bottom-right corner to make a card smaller/larger. Resizing
    pins the card (keeps its size + position, out of the auto-arrange), same as a drag. */
-.tp-resize-handle { position: absolute; right: 2px; bottom: 2px; width: 18px; height: 18px; cursor: nwse-resize; z-index: 6;
+/* 18px was a mouse-only target. This handle only exists above 1040px (the rule below hides it
+   under that), and 1194px — a real iPad — is the NARROWEST width where it shows, so the first
+   device to meet it is a touch one. 28px is a draggable corner for a thumb and still visually
+   small; the diagonal grip lines just spread a little wider. (T14 tablet sweep, 2026-08-05) */
+.tp-resize-handle { position: absolute; right: 2px; bottom: 2px; width: 28px; height: 28px; cursor: nwse-resize; z-index: 6;
   background: linear-gradient(135deg, transparent 0 45%, color-mix(in srgb, var(--gold) 60%, var(--line)) 45% 55%, transparent 55% 70%, color-mix(in srgb, var(--gold) 60%, var(--line)) 70% 80%, transparent 80%);
   border-bottom-right-radius: 14px; opacity: .7; }
 .tp-resize-handle:hover { opacity: 1; }
@@ -2799,7 +2817,11 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .plat-toggle { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); cursor: pointer; user-select: none; }
 .plat-toggle input { width: 15px; height: 15px; accent-color: var(--gold); }
 .btn.ghost { background: transparent; }
-.plat-board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; padding: 4px 0 18px; align-items: start; }
+/* --plat-cols is set inline by platformHtml() to the number of lanes it actually renders — the
+   "🆕 New" lane is dropped when nothing is awaiting acceptance, and a hard-coded 4 then left the
+   fourth slot empty (317px of blank screen on a 1194px iPad). Falls back to 4 if the attribute is
+   ever missing, which is the old behaviour. */
+.plat-board { display: grid; grid-template-columns: repeat(var(--plat-cols, 4), 1fr); gap: 14px; padding: 4px 0 18px; align-items: start; }
 .plat-col { background: var(--bg); border: 1px solid var(--line); border-radius: 16px; display: flex; flex-direction: column; min-height: 120px; }
 .plat-col-h { padding: 12px 15px; font-size: 13px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
 .plat-col-h .ct { margin-left: auto; background: var(--panel); border-radius: 8px; padding: 1px 9px; font-size: 13px; color: var(--text); }

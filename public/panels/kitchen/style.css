@@ -54,6 +54,43 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 
 /* the three columns — fluid, no dead gap (stack on a narrow screen) */
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; padding: 14px 18px; align-items: start; }
+
+/* ── THE BOARD IS THE SCREEN, AND EACH LANE SCROLLS ITSELF (T14 tablet sweep, 2026-08-05) ─────
+   Measured on a real waiter/kitchen tablet (iPad 1194×834) with 12 live tickets: New was 906px
+   tall, Cooking 1410px, and the PAGE 1554px inside an 834px screen. Three things followed, and
+   all three cost a cook time during exactly the rush this screen exists for:
+     · only ~45% of the board was on screen and the rest needed a page scroll;
+     · ONE scroll dragged all three lanes together, so reaching the bottom of New also pushed
+       Cooking and Ready out of view;
+     · `.col h2` is a chip in normal page flow, so "🆕 New 5 / 🔥 Cooking 7 / ✅ Ready 0" and
+       their live counts scrolled off the top and you lost which lane you were reading;
+     · and the empty Ready lane was a 101px stub sitting beside content that didn't fit.
+   In PORTRAIT (834×1194) it was worse: `auto-fit, minmax(300px, 1fr)` gives TWO columns there, so
+   ✅ Ready wrapped onto a second ROW underneath a 906px Cooking column — the one lane that says
+   what to carry out was off the bottom of the screen.
+   This is the same shape the waiter tablet already uses at the same widths (tablet/style.css →
+   "scrolling one side must never move the other", owner 2026-07-04): the board fills the viewport
+   under the top bar, the three lanes are EQUAL and never wrap, each owns its own scroll, and each
+   heading sits OUTSIDE its lane's scroll region so it can never scroll away.
+   Gated at 820px, not 761px: that is the narrowest real tablet in portrait (834px), and three
+   equal lanes below it would be ~230px each, which crushes a ticket head. Phones and narrow
+   windows keep the plain page scroll they have today, untouched. */
+@media (min-width: 820px) {
+  html, body { height: 100%; }
+  body { display: flex; flex-direction: column; overflow: hidden; }
+  .cols, .wall { flex: 1 1 auto; min-height: 0; }
+  /* EQUAL lanes that never wrap — auto-fit is what dropped Ready to a second row in portrait. */
+  .cols { grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; }
+  .col { min-height: 0; display: flex; flex-direction: column; }
+  /* the heading is a plain flex item ABOVE the scroll region, so it never moves */
+  .col h2 { flex: 0 0 auto; align-self: flex-start; }
+  /* the lane's own scroll; overscroll-behavior stops a finished lane dragging the page */
+  .col .tickets { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+    /* room so a ticket's coloured border/glow isn't sliced flat by the scroll box's clip */
+    padding: 2px 3px 14px; }
+  /* the wall board is one grid, so it keeps ONE scroll — but inside itself, not the page */
+  .wall { overflow-y: auto; overscroll-behavior: contain; }
+}
 /* one chip = label + count together (same look as the tablet header's .cchip) */
 .col h2 { display: inline-flex; align-items: center; gap: 7px; font-size: 14px; margin: 0 0 10px; color: var(--muted); letter-spacing: 0.4px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 6px 12px; }
 .col .count { font-size: 14.5px; font-weight: 700; color: var(--text); }
@@ -130,6 +167,16 @@ html[data-theme="light"] .age.age-late { color: #b91c1c; }
 .dish-list { overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
 .dish-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 11px; padding: 9px 12px; }
 .dish-row.is-out { border-color: rgba(239,68,68,0.45); }
+/* ── FINGER-SIZED IN THE 86 BOARD (T14 tablet sweep, 2026-08-05) ──────────────────────────────
+   Measured at 1194×834: every one of the 60 controls in this drawer came out 37px tall — the
+   per-dish `available / sold out` toggles at 86×37 and the drawer's ✕ at 41×37 — against the
+   44px finger target the rest of the product uses (.pstep, .detail-x, .qdest-t, .prsheet-row all
+   hit it). These are the controls a cook uses mid-service on a greasy tablet to say "we're out of
+   that", and a mis-tap here puts a dish back on sale. Applies at every width: a phone is touch
+   too, and nothing here was ever mouse-only. */
+.dish-row .btn, .drawer-head .btn, .prsheet-head .btn {
+  min-height: 44px; display: inline-flex; align-items: center; justify-content: center;
+}
 .dtitle { font-size: 14.5px; font-weight: 600; }
 .dtitle small { display: block; color: var(--muted); font-weight: 400; font-size: 12px; }
 

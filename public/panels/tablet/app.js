@@ -1704,7 +1704,11 @@ function renderPanel() {
     const hasOrders = os.length > 0;
     const payCls = a.unpaid ? "unpaid" : a.paid ? "paid" : "";
     const billInner = hasOrders
-      ? `<span class="bn">bill #${esc(a.billNo ?? "—")}</span>${invoiced ? `<span class="inv">🧾 #${esc(s.invoice_no)}</span>` : ""}${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span>`
+      // An em dash where a number belongs reads as a missing value, not as "there isn't one yet"
+      // — and it was printed TWICE on the same card (here and in the header line below), which
+      // made a perfectly healthy open table look broken (T14 tablet sweep, 2026-08-05). Say it in
+      // words instead; the amount due beside it is unaffected either way.
+      ? `<span class="bn">${a.billNo ? `bill #${esc(a.billNo)}` : "bill not numbered yet"}</span>${invoiced ? `<span class="inv">🧾 #${esc(s.invoice_no)}</span>` : ""}${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span>`
       : `<span class="bn">no bill yet</span><span class="due">starts on first order</span>`;
     const attend = calls.length
       ? `<button class="attend ${calls.length > 1 ? "more" : ""}" data-attend="${esc(calls[0].id)}">🔔 ATTEND — ${esc(calls[0].note || "call")}${calls.length > 1 ? ` (+${calls.length - 1} more)` : ""}</button>`
@@ -1740,7 +1744,7 @@ function renderPanel() {
    <div class="detail-pop">
     <button class="detail-x" id="detailClose" type="button" aria-label="Close">✕</button>
     <div class="phead">
-      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${mergeGroupLabel(t) ? `<span class="tmerge">⇄ one party · ${esc(mergeGroupLabel(t))}</span> · ` : ""}${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? `bill #${esc(a.billNo ?? "—")}` : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}${unsentMeta}</div></div>
+      <div style="flex:1"><h2 style="margin:0;font-size:19px">${esc(tableLabel(t))}</h2><div class="pmeta">${mergeGroupLabel(t) ? `<span class="tmerge">⇄ one party · ${esc(mergeGroupLabel(t))}</span> · ` : ""}${s ? `${a.guests ? `${a.guests} guest${a.guests > 1 ? "s" : ""} · ` : ""}${os.length ? (a.billNo ? `bill #${esc(a.billNo)}` : "bill not numbered yet") : "no bill yet"} · <span class="live">● open</span>` : `<span class="off">closed</span>`}${unsentMeta}</div></div>
       ${stepBtns}
     </div>
     ${headOps ? `<div class="phead-ops">${headOps}</div>` : ""}

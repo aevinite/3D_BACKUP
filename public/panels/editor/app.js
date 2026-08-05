@@ -12060,7 +12060,12 @@ function platformHtml() {
   const all = state.data.platform || [];
   const cols = { new: [], prep: [], ready: [], done: [] };
   all.forEach((o) => { const c = platColOf(o.status); if (c) cols[c].push(o); });
-  const col = (key, label) => `<div class="plat-col"><div class="plat-col-h">${label} <span class="ct">${cols[key].length}</span></div><div class="plat-col-body">${cols[key].map(platCardHtml).join("") || '<div class="plat-col-empty">—</div>'}</div></div>`;
+  // An empty lane used to print a bare em dash. On a quiet afternoon that meant the whole board
+  // read as three dashes and a manager could not tell "no delivery orders right now" from "this
+  // failed to load" — the honest-empty-state rule, in the one place it was skipped (T14 tablet
+  // sweep, 2026-08-05). Each lane now says what its own emptiness means.
+  const EMPTY = { new: "nothing waiting to be accepted", prep: "nothing being made right now", ready: "nothing waiting to be picked up", done: "nothing handed over yet" };
+  const col = (key, label) => `<div class="plat-col"><div class="plat-col-h">${label} <span class="ct">${cols[key].length}</span></div><div class="plat-col-body">${cols[key].map(platCardHtml).join("") || `<div class="plat-col-empty">${EMPTY[key]}</div>`}</div></div>`;
   // The "Add test order" button and the "Show in bills" toggle were REMOVED (owner 2026-07-06):
   //  • the test button inserted a REAL, auto-accepted order that polluted live revenue / the
   //    Z-report with fake money and couldn't be told apart — turned OFF so it can't happen.
@@ -12097,7 +12102,12 @@ function platformHtml() {
         <button class="btn" id="platRefresh" title="Refresh">↻</button>
       </div>
     </div>
-    <div class="plat-board">
+    <!-- The board is a FIXED 4-column grid, but "🆕 New" is deliberately dropped when nothing is
+         awaiting acceptance (see newCol above) — so normally only THREE lanes render into four
+         slots and the fourth sits empty. Measured on an iPad (1194px): the three cards ended at
+         x=877 with 317px of blank screen beside them (T14 tablet sweep, 2026-08-05). Tell the grid
+         how many lanes there actually are so it always fills the width. -->
+    <div class="plat-board" style="--plat-cols:${newCol ? 4 : 3}">
       ${newCol}${col("prep", "🍳 Preparing")}${col("ready", "✅ Ready")}${col("done", "📦 Handed over")}
     </div>`;
 }
@@ -12150,6 +12160,7 @@ function updatePlatformBadge() {
   const live = (state.data.platform || []).filter((o) => o.status !== "handed_over" && o.status !== "cancelled").length;
   const b = $("#platformBadge");
   if (b) { b.textContent = live; b.hidden = live === 0; }
+  syncBurgerNews();
 }
 let platSeq = 0; // own latest-wins guard so platform loads never cancel the board loaders
 let parcelStripSig = ""; // last painted set of open parcels — see loadPlatform
@@ -12414,6 +12425,7 @@ let unseenTables = 0;
 function updateOrdersBadge() {
   const b = $("#ordersBadge");
   if (b) { b.textContent = unseenOrders; b.hidden = unseenOrders === 0; }
+  syncBurgerNews();
   refreshTitle();
 }
 
@@ -12423,7 +12435,31 @@ function updateOrdersBadge() {
 function updateTablesBadge() {
   const b = $("#tablesBadge");
   if (b) { b.textContent = unseenTables; b.hidden = unseenTables === 0; }
+  syncBurgerNews();
   refreshTitle();
+}
+
+// syncBurgerNews: put the tab badges' "there is something for you" ON THE ☰ ITSELF.
+//
+// WHY (T14 tablet sweep, 2026-08-05): syncNavFit picks .nav-compact — the ☰ drawer — whenever the
+// tab strip cannot fit, and on a 1194px iPad it always can't (8 tabs of pills plus a 355px action
+// cluster need more than the bar has). That decision is right and nothing is cut. But the Bills,
+// Tables and Platform badges live ON those tabs, so in compact mode all three measured
+// offsetParent === null: a manager on a tablet could not see "3 bills waiting / 2 tables need you"
+// without first opening a drawer, and the ☰ carried no hint at all. refreshTitle() puts the total
+// in the document title, which is invisible here because this panel runs inside an iframe.
+// So the ☰ wears a dot whenever any badge is showing, and its aria-label says the number out loud
+// for anyone using a screen reader. No new data, no request — it reads the badges we already set.
+function syncBurgerNews() {
+  const burger = document.querySelector(".nav-burger");
+  if (!burger) return;
+  let n = 0;
+  for (const id of ["ordersBadge", "tablesBadge", "platformBadge"]) {
+    const b = document.getElementById(id);
+    if (b && !b.hidden) n += Number(b.textContent) || 0;
+  }
+  burger.classList.toggle("has-news", n > 0);
+  burger.setAttribute("aria-label", n > 0 ? `Menu & settings — ${n} need${n === 1 ? "s" : ""} you` : "Menu & settings");
 }
 
 // refreshTitle: the browser-tab title shows the TOTAL unseen (orders + floor
