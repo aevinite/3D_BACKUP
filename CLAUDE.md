@@ -343,8 +343,17 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
   re-checks the per-restaurant panel entitlement and the recycle bin on **every request** (30s
   cache), so switching a panel off cuts an already-open tab instead of only blocking new logins.
 - **`/api/owner/**`** — `ownerScope()` (`lib/ownerScope.ts`); null → 401.
-- **Deliberately public:** `/api/health`, `/api/blocked`, `/api/log/client-error`,
-  `/api/guest/limit-hit`, `/api/r/<slug>/menu-data`, and the guest menu itself.
+- **Deliberately public** (the COMPLETE list — an API route absent from here must have a gate;
+  re-checked route by route in the T9 sweep 2026-08-05, which found the last two missing):
+  `/api/health`, `/api/blocked`, `/api/log/client-error`, `/api/guest/limit-hit`,
+  `/api/guest/place-order`, `/api/r/<slug>/menu-data`, `/api/rt-config`,
+  `/api/aggregators/webhook/<source>`, and the guest menu itself.
+  - `/api/guest/place-order` is a diner's own order — identity is the session token / the table in
+    the body, and both RPCs are SECURITY DEFINER, so there is no login to require.
+  - `/api/rt-config` returns only the PUBLIC Supabase url + anon key (already shipped inside the
+    guest bundle) plus which restaurant the caller's panel belongs to. No cookie → restaurant #1.
+  - `/api/aggregators/webhook/<source>` is an inbound POST from Zomato/Swiggy, so it cannot carry
+    our cookie; it is dormant until the `aggregators` flag is on and verifies a shared secret.
 
 `ADMIN_PASSWORD` is in `.env.local` (must also be set in the Vercel project env for the gate to
 work in prod). **If you re-introduce a middleware, update this section in the same commit.**

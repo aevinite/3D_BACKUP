@@ -9,7 +9,7 @@
 // mig-184 RPCs as the manager panel, so the two views can never disagree on what's owed.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
 import { khataLadder } from "@/lib/tableTags";
 import { businessDayStartIso } from "@/lib/businessDay";
 
@@ -30,7 +30,11 @@ const scopedIds = scopedRestaurantIds;
 export async function GET(req: NextRequest) {
   const scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const ids = await scopedIds(scope);
+  // A half-read restaurant list would make "total outstanding" quietly too small, so it is
+  // answered as a retryable failure rather than a wrong figure (T9 sweep, 2026-08-05).
+  let ids: string[];
+  try { ids = await scopedIds(scope); }
+  catch (e) { if (e instanceof RestaurantListIncomplete) return incompleteListResponse(); throw e; }
   if (!ids.length) return NextResponse.json({ summary: emptySummary(), customers: [] });
 
   // Keep only restaurants whose pay-later module is actually on.

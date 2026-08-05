@@ -6,9 +6,16 @@
 // and downloads one tiny pre-summed row per restaurant — never N queries, never
 // scanning every order in JS. Service-role only (the RPC is REVOKEd from anon).
 //
-// AUTH: behind the existing ADMIN_PASSWORD cookie gate, same as /api/admin/*.
-// TODO: replace with the dedicated owner role once RBAC lands (a parallel session
-//       owns staff_users / userAuth / panelGate / middleware — do not touch them).
+// AUTH: ownerScope() (lib/ownerScope.ts) — a real OWNER sees only the restaurants they own, the
+// ADMIN super-user sees all, everyone else gets 401. (The old note here said "behind the
+// ADMIN_PASSWORD cookie gate" with a TODO to add the owner role once RBAC landed; RBAC landed long
+// ago and this route has used ownerScope since. Corrected in the T9 sweep, 2026-08-05.)
+//
+// WHY THERE IS NO cachedOwnerPayload HERE, deliberately: this reads the PRE-AGGREGATED
+// orders_daily_agg rollup plus a small tail since its watermark, scoped by p_ids (mig 266) — which
+// is exactly the "dashboards read pre-aggregated summary tables" rule, not a live order scan. The
+// shell and the dashboard mount together, so lib/ownerOverviewCache.ts shares one request for ~8s.
+// Don't "fix" this by wrapping it in the snapshot cache; it would only add staleness.
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";

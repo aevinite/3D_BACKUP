@@ -129,12 +129,27 @@ export default function OwnerFeedback() {
   const saveNote = async (id: string) => {
     setBusy(id);
     try {
-      const res = await fetch(`/api/owner/ratings${scp}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, note: noteVal }) });
+      // What the note said when this editor opened, so a co-owner who typed first wins and this
+      // person is TOLD rather than overwritten (T9 sweep, 2026-08-05 — the rule reached the panels
+      // in 2026-07-30 but never this box).
+      const was = (ratings || []).find((r) => r.id === id)?.staff_note ?? "";
+      const res = await fetch(`/api/owner/ratings${scp}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-LFH-Expect": JSON.stringify({ table: "feedback", id, fields: { staff_note: was } }),
+        },
+        body: JSON.stringify({ id, note: noteVal }),
+      });
       // Only close the editor + clear the box AFTER the save actually succeeds — otherwise
       // a failed PATCH used to wipe the note the owner typed with no warning.
-      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || "Couldn't save your note — please try again."); }
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        const c = j?.clash as { plain?: string; todo?: string } | undefined;
+        throw new Error(c?.plain ? `${c.plain}${c.todo ? ` ${c.todo}` : ""}` : (j.error || "Couldn't save your note — please try again."));
+      }
       setErr(null); setNoteFor(null); setNoteVal(""); await loadRatings();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); await loadRatings(); }
     finally { setBusy(null); }
   };
   const setIssueStatus = async (id: string, status: "open" | "resolved") => {

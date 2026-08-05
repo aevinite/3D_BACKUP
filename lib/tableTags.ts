@@ -158,12 +158,44 @@ export const parcelLadder = async (_rid: string): Promise<TableTagsLadder> => AL
 export const payrollLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "payroll_allowed", control: "payroll_owner_control", enabled: "payroll_enabled" });
 
+// The SAME payroll rung for MANY restaurants in ONE settings read (T9 sweep, 2026-08-05).
+// `payrollLadder` is per-restaurant, so asking it in a loop costs one round-trip each — fine for a
+// single restaurant, wrong for the admin's whole-platform view. Callers that need a set (the owner
+// dashboard's staff-pay tile, the staff roster) use this instead. Same rule as moduleLadder:
+// allowed must be on, and a transferred switch must not be explicitly off.
+export async function payrollEffectiveByRid(ids: string[]): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  if (!ids.length) return out;
+  const { data } = await sb.from("settings")
+    .select("restaurant_id, payroll_allowed, payroll_owner_control, payroll_enabled")
+    .in("restaurant_id", ids);
+  for (const r of (data || []) as Record<string, unknown>[]) {
+    out[String(r.restaurant_id)] =
+      r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false);
+  }
+  return out;
+}
+
 // Inventory management + the expense book (mig 221). A brand-new module: every rung starts
 // OFF, so no restaurant sees stock/expense screens until the admin grants it. One module
 // carries the whole area (stock register, purchases, counts, waste, expenses; recipes in
 // Stage 2) — the khata/table-types "one module, several capabilities" pattern.
 export const inventoryLadder = (rid: string) =>
   moduleLadder(rid, { allowed: "inventory_allowed", control: "inventory_owner_control", enabled: "inventory_enabled" });
+
+/** The inventory rung for MANY restaurants in ONE settings read — see payrollEffectiveByRid. */
+export async function inventoryEffectiveByRid(ids: string[]): Promise<Record<string, boolean>> {
+  const out: Record<string, boolean> = {};
+  if (!ids.length) return out;
+  const { data } = await sb.from("settings")
+    .select("restaurant_id, inventory_allowed, inventory_owner_control, inventory_enabled")
+    .in("restaurant_id", ids);
+  for (const r of (data || []) as Record<string, unknown>[]) {
+    out[String(r.restaurant_id)] =
+      r.inventory_allowed === true && (r.inventory_owner_control !== true || r.inventory_enabled !== false);
+  }
+  return out;
+}
 
 // PLATFORMS again, under the name most call sites use. An alias of takeawayLadder (ONE
 // feature, two historic names) — NOT of parcelLadder, which is a different feature.

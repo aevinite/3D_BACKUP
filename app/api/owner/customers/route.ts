@@ -5,7 +5,7 @@
 // columns, .in(restaurant_id), .limit, one cheap head-count for the true total.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { logAction } from "@/lib/oplog";
@@ -31,7 +31,11 @@ export async function GET(req: NextRequest) {
     if (!allowed.length) return NextResponse.json({ error: "Customers isn't enabled for your restaurant — contact Aevidine.", disabled: true }, { status: 403 });
     scope = { ...scope, ids: allowed };
   }
-  const ids = await scopedIds(scope);
+  // Retryable failure beats an undercounted guest list (T9 sweep, 2026-08-05 — see the note on
+  // scopedRestaurantIds).
+  let ids: string[];
+  try { ids = await scopedIds(scope); }
+  catch (e) { if (e instanceof RestaurantListIncomplete) return incompleteListResponse(); throw e; }
   if (!ids.length) return NextResponse.json({ summary: { total: 0, returning: 0, newThisMonth: 0, blocked: 0, shown: 0 }, customers: [] });
 
   // Sanitised search (their own data; strip chars that would break the PostgREST or() filter).
@@ -160,7 +164,10 @@ export async function DELETE(req: NextRequest) {
 
   // The restaurant must be in the owner's own, still-entitled set (never trust the
   // client's restaurant_id beyond that). Admin bypasses the entitlement gate only.
-  const ownIds = await scopedIds(scope);
+  // Never let a half-read list decide an erase is allowed OR refused — retry instead.
+  let ownIds: string[];
+  try { ownIds = await scopedIds(scope); }
+  catch (e) { if (e instanceof RestaurantListIncomplete) return incompleteListResponse(); throw e; }
   if (!ownIds.includes(restaurantId)) return NextResponse.json({ error: "not your restaurant" }, { status: 403 });
   if (!scope.all && !scope.admin) {
     const allowed = await entitledSubset([restaurantId], "customers");

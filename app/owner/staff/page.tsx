@@ -1,9 +1,14 @@
 "use client";
-// Owner · Staff & powers. Per restaurant the owner owns: flip what their MANAGERS
-// are allowed to do (the manager_permissions flags), and add / disable / reset /
-// remove staff. Data + writes go through /api/owner/staff and
-// /api/owner/manager-permissions, which are scoped server-side to exactly the
-// restaurants this caller owns — the UI never has to police that itself.
+// Owner · Staff & powers. Per restaurant the owner owns: add / disable / reset / remove staff.
+// Data + writes go through /api/owner/staff, scoped server-side to exactly the restaurants this
+// caller owns — the UI never has to police that itself.
+//
+// FLIPPING MANAGER POWERS IS NOT HERE ANY MORE. The access rebuild (2026-07-31) retired the old
+// ladder: "Only the admin holds permissions. The owner panel and the manager panel configure none"
+// (docs/ACCESS-MODEL.md) — the admin writes those flags through /api/admin/restaurants/access-tree.
+// This comment used to point at /api/owner/manager-permissions, which no screen had called since
+// that rebuild; the route was still live and was deleted in the T9 sweep (2026-08-05), so
+// access-tree is genuinely the single writer the docs claim it is.
 //
 // This /owner/staff route is OWNER/ADMIN-only — the owner layout bounces anyone else to
 // /login. A manager granted "manage_staff" manages staff from the EDITOR panel, which
@@ -126,7 +131,12 @@ export default function OwnerStaffPage() {
     try {
       const r = await fetch(path, { ...init, headers: { "Content-Type": "application/json", ...(init.headers || {}) } });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
+      // A first-save-wins refusal (409) carries its plain sentence in `clash` — show that rather
+      // than a bare code, so the person knows their value did NOT land (T9 sweep, 2026-08-05).
+      if (!r.ok) {
+        const c = d?.clash as { plain?: string; todo?: string } | undefined;
+        throw new Error(c?.plain ? `${c.plain}${c.todo ? ` ${c.todo}` : ""}` : (d.error || `Request failed (${r.status})`));
+      }
       return d;
     } finally { setBusy(false); }
   }
@@ -198,9 +208,15 @@ export default function OwnerStaffPage() {
     const name = editing.name.trim(); const phone = editing.phone.trim();
     if (name.length < 2) { setErr("Name must be at least 2 characters."); return; }
     try {
-      await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s.id, action: "edit", name, phone }) });
+      // What the row said when this inline editor opened — so a second person renaming the same
+      // person is refused instead of silently overwritten (T9 sweep, 2026-08-05).
+      await call(withScope("/api/owner/staff"), {
+        method: "PATCH",
+        headers: { "X-LFH-Expect": JSON.stringify({ table: "staff_users", id: s.id, fields: { name: s.name ?? "", phone: s.phone ?? "" } }) },
+        body: JSON.stringify({ id: s.id, action: "edit", name, phone }),
+      });
       setEditing(null); await load();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); await load(); }
   }
 
   async function resetPw(s: Staff) {
