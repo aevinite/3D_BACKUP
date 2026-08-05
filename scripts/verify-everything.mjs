@@ -732,12 +732,26 @@ async function restoreSnapshot() {
 // went red the moment Staff apps was removed (owner, 2026-07-31) — a test that has to be edited
 // every time the screen legitimately changes teaches people to edit tests instead of reading them.
 // What actually matters is that the endpoint serves the same sections the app is built from.
-phase("the access tree loads every section the model declares", async () => {
+// THE ENDPOINT DELIBERATELY STOPPED ECHOING THE MODEL (2026-08-04, route.ts:123-127).
+// `sections: SECTIONS` was 25 KB of CONSTANT JSON on every load of the Access screen, the
+// Per-person tab and every staff profile — and no client ever read it: AccessTree,
+// AccessPerPerson and StaffProfile all import the model directly and use `state` alone.
+// Dropping it was right. This phase and the two below kept asserting `d.sections`, so they
+// went red describing nothing wrong — ELEVEN phases of it ("no sections" for all nine
+// restaurants), which is exactly how a real finding gets buried (see the phantom-table note
+// on the order phases). What actually proves the screen can load is `state`, which is what
+// the components consume; the model's own section list is checked where it belongs — against
+// the model, in-process, with no endpoint involved.
+phase("the access tree loads, and the model declares its sections", async () => {
   await ensureSnap();                       // takes the snapshot AND registers the undo
   const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${(await needFH()).id}`)).json();
+  ok(!d.error && d.state, d.error || "the endpoint sent no state, so the screen has nothing to render");
   const want = SECTIONS.map((s) => s.id);
-  const got = Array.isArray(d.sections) ? d.sections.map((s) => s.id) : [];
-  ok(want.length > 0 && want.join(",") === got.join(","), `model has ${want.join(", ")} · endpoint sent ${got.join(", ") || "nothing"}`);
+  ok(want.length > 0, "the model declares no sections at all");
+  // Every section must have somewhere to put its rows, or the screen renders a heading over
+  // nothing. The field is `children` — checked against the real model, not a guessed name.
+  const empty = SECTIONS.filter((s) => !Array.isArray(s.children) || s.children.length === 0).map((s) => s.id);
+  ok(!empty.length, `sections with no children: ${empty.join(", ")}`);
 });
 
 // each guest sub-switch: OFF removes its mark from the served page, ON brings it back
@@ -1333,8 +1347,17 @@ phase("the menu of restaurant A never lists restaurant B's dishes", async () => 
   const uniqueToB = bItems.map((x) => x.title).filter((t) => t && !aTitles.has(t)).slice(0, 6);
   if (!uniqueToB.length) return ok(true);
   const s = await screen("admin", `/r/${a.slug}/menu`, { settle: 3600 });
+  // COMPARE DISH NAMES, NOT A PAGE-WIDE SUBSTRING. This was `s.text.includes(t)` over the whole
+  // rendered body, so any dish whose name CONTAINS another restaurant's dish name was reported as
+  // tenant bleed. It fired for real on 2026-08-05: burger-barn has "Chocolate Shake", Aangan has
+  // "Brownie Chocolate Shake", and A's own legitimate dish made the check announce that A was
+  // showing B's menu. Nothing was wrong. A false alarm here is expensive twice over — it is the
+  // one check that would catch actual cross-restaurant bleed, so it has to be believable.
+  const shown = await s.page.locator(".dish-name, .search-result-name, .related-name")
+    .allInnerTexts().catch(() => []);
+  const shownSet = new Set(shown.map((t) => t.replace(/\s+/g, " ").trim()));
   s.close();
-  const bleed = uniqueToB.filter((t) => s.text.includes(t));
+  const bleed = uniqueToB.filter((t) => shownSet.has(t.replace(/\s+/g, " ").trim()));
   ok(!bleed.length, `restaurant A's menu shows B's dishes: ${bleed.join(", ")}`);
 });
 phase("a non-#1 restaurant's menu shows its OWN brand name", async () => {
@@ -1350,7 +1373,9 @@ phase("the access screen loads for EVERY restaurant, not just #1", async () => {
   const bad = [];
   for (const r of REST) {
     const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${r.id}`)).json();
-    if (d.error || !d.sections) bad.push(`${r.slug}:${d.error || "no sections"}`);
+    // `state`, not `sections`: the endpoint stopped echoing the model on 2026-08-04 (see the
+    // note on the access-tree phase above). `state` is what the screen actually renders from.
+    if (d.error || !d.state) bad.push(`${r.slug}:${d.error || "no state"}`);
   }
   ok(!bad.length, bad.join(" "));
 });
@@ -1819,7 +1844,8 @@ phase("every migration file is valid SQL text (not empty, no conflict markers)",
     }],
     ["its Access screen loads", async (r) => {
       const d = await (await api(`/api/admin/restaurants/access-tree?restaurant_id=${r.id}`)).json();
-      ok(!d.error && d.sections, d.error || "no sections");
+      // `state`, not `sections` — see the access-tree phase note; the model is no longer echoed.
+      ok(!d.error && d.state, d.error || "no state");
     }],
     ["it has a settings row with a sane tax rate", async (r) => {
       const st = (await dbGet(`settings?select=tax_rate,table_count&restaurant_id=eq.${r.id}`))[0];
