@@ -1,9 +1,26 @@
 # THE PERSON PROFILE — one shape for everybody (owner, 2026-08-01)
 
-Every human in this product — **owner, manager, waiter, kitchen** — has ONE profile panel,
-and it always looks the same. The owner chose it ("design 1 · Dossier") on 2026-08-01 and
-asked for it to be the permanent structure: *"whenever Claude does something, he should see
-this and arrange in this structure only."*
+Every human in this product **who has a profile at all** — **owner, manager, waiter** — has ONE
+profile panel, and it always looks the same. The owner chose it ("design 1 · Dossier") on
+2026-08-01 and asked for it to be the permanent structure: *"whenever Claude does something, he
+should see this and arrange in this structure only."*
+
+> ## ⛔ KITCHEN HAS NO PROFILE — and this sentence is the reason you must not "fix" that
+>
+> **Owner, 2026-08-05, asked directly and answered directly:** *"Let the things stay like this
+> kitchen. Don't need the profile. Update that thing in the doc and every other will need the
+> profile."* He first said it on 2026-07-29 (*"for the kitchen, we don't need this thing"*), and
+> that is what `lib/staffProfileShared.ts` → `PROFILE_ROLES = ["owner","manager","tablet"]`
+> implements.
+>
+> This heading exists because the doc used to open with *"owner, manager, waiter, **kitchen**"*
+> while the code said the opposite, and CLAUDE.md tells every session to follow the doc. The T11
+> visual sweep found the two disagreeing (kitchen rows on `/owner/staff` have no "Open profile",
+> no "Visit panel" and no completeness bar, while every manager and waiter row has all three) —
+> a session reading only the doc would have "fixed" the screen and silently reversed the owner's
+> call. Cooks keep their login, their PIN and their action log; they have no profile and no pay
+> record. **If this ever changes, flip the one list in `lib/staffProfileShared.ts` AND this
+> block in the same commit.**
 
 **Code:** `components/admin/StaffProfile.tsx` · **rows:** `lib/staffCaps.ts` ·
 **data:** `GET/PATCH /api/admin/users` (+ `POST /api/admin/users/photo`)
@@ -46,7 +63,9 @@ the right column, above the danger zone. Nothing about a person gets its own sep
     an invoice and reopening a bill are not rows at all — a tablet can never be given either
     (owner, 2026-08-04). The walk-out row is stored in `access_config`, not a column, and was
     missing from this list entirely until 2026-08-04.
-  - **kitchen** → none, and it says so in a line instead of showing empty controls.
+  - **kitchen** → not applicable: a cook has no profile panel to show permissions in. (This line
+    used to read "none, and it says so in a line instead of showing empty controls", which only
+    makes sense if a kitchen profile exists — see the ⛔ block at the top.)
 - Saving is **per row, immediately**, and it takes effect on the person's next tap — no
   re-login. If the server refuses, the row snaps back and says so.
 

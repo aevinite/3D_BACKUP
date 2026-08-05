@@ -743,9 +743,10 @@ true now:
   `verify:everything` — find its number with `--list`, never hard-code it. The suite has been
   renumbered before, and `--only 501` then silently began running a different test.
 
-## 👤 EVERY PERSON HAS ONE PROFILE, AND IT HAS ONE SHAPE (owner, 2026-08-01 — ALWAYS)
+## 👤 EVERY PERSON WHO HAS A PROFILE HAS THE SAME ONE — AND KITCHEN HAS NONE (owner, 2026-08-01, kitchen re-confirmed 2026-08-05)
 
-Owner, manager, waiter, kitchen — every human in this product opens the **same** profile panel
+**Owner, manager, waiter** — every human in this product **who has a profile** opens the **same**
+profile panel
 (`components/admin/StaffProfile.tsx`, his chosen "Dossier" design). His instruction was explicit:
 *"whenever Claude does something, he should see this and arrange in this structure only."* So
 before adding anything about a PERSON — a field, a number, a control, a new panel's idea of a
@@ -754,6 +755,15 @@ second one. Left rail: photo (optional) · name · role · "record complete X of
 buttons. Right column: Permissions → who they are → emergency → job → pay → papers → signing in
 → activity → private note → danger zone.
 
+- **⛔ KITCHEN IS NOT IN THAT LIST, DELIBERATELY.** Owner, 2026-07-29 (*"for the kitchen, we
+  don't need this thing"*) and re-confirmed 2026-08-05 when asked directly: *"Let the things stay
+  like this kitchen. Don't need the profile. Update that thing in the doc and every other will
+  need the profile."* Implemented as `lib/staffProfileShared.ts` → `PROFILE_ROLES =
+  ["owner","manager","tablet"]`. Cooks keep their login, PIN and action log; no profile, no pay
+  record. This paragraph exists because this heading used to say "owner, manager, waiter,
+  **kitchen**" while the code said the opposite, and the T11 sweep found the two disagreeing —
+  a session following only the doc would have reversed an owner decision. If it ever changes,
+  flip the list AND both docs in the same commit.
 - **Permissions are the Access & permissions rows for that role and nothing else.** ONE list
   feeds the profile, the Access screen's Per-person tab and the write route's allow-list
   (`lib/staffCaps.ts`); an unknown key is REFUSED, never stored — a stored key no enforcer reads
@@ -860,7 +870,25 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
   "latest-wins" seq guard in each loader is a DIFFERENT mechanism — don't conflate.)
 - **Supabase HEAD lies about Cache-Control.** Use GET with `Range: bytes=0-0`
   for header checks. `scripts/set-glb-cache.mjs` has this bug.
-- **Light mode works and persists** (`lfh_theme`) via the theme toggle.
+- **Light mode — which surfaces have it, and what persists.** Three separate answers, so check
+  before writing a "both skins" test:
+  - **Guest menu** — toggle in the brand bar, stored as `lfh_theme`. A tenant menu
+    (`/r/<slug>/menu`, `/q/<code>`) defaults to **DARK** when nothing is saved; the root layout
+    otherwise defaults light.
+  - **Manager / kitchen / tablet panels** — their own toggle (`#themeToggle`, wired by
+    `public/panels/theme.js`), stored as `lfh_panel_theme`, default **LIGHT** (owner 2026-06-26).
+    **The choice is remembered:** toggling to dark and reopening the panel in a new tab comes back
+    dark — driven and verified on all three panels, 2026-08-05, which is exactly what the owner
+    asked for ("once they select it, remember it").
+  - **Owner (`/owner`) and admin (`/aevinite`) consoles — DARK ONLY, on purpose.** Owner,
+    2026-08-05: *"keep let it stay like it is."* `app/layout.tsx` tags those routes
+    `data-staffdark="1"`, there is no toggle to press, and setting `lfh_theme` changes nothing —
+    a light run of `/owner` renders byte-identical to a dark one. The T11 sweep planned ~35
+    light-skin checks for these two consoles before discovering that; they are impossible, not
+    failing. Don't plan them again.
+  - Gotcha when testing: on the **tablet** topbar the 🚩 report-issue button also carries the
+    class `.theme-toggle` and comes FIRST in the DOM, so a `.theme-toggle` selector clicks the
+    wrong button and the theme appears "broken". Target `#themeToggle` by id.
 - **Don't re-suggest Draco compression.** Already done. See model-pipeline memory.
 - **Service-role Supabase keys must never be committed or echoed.** If the user
   pastes one in chat, warn them loudly and treat it as compromised.
