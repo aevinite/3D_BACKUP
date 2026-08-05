@@ -51,7 +51,9 @@ export const GROUP_MENUS = "Manager's menu";
 export const GROUP_MANAGE = "Permission for manager";
 export const GROUP_MGRSET = "Manager settings (what manager can do)";
 export const GROUP_OWNER = "Owner's menu";
-export const GROUP_WAITER = "What a waiter may do";
+// The waiter's two folders, named exactly as Access → Waiter names them (owner, 2026-08-04).
+export const GROUP_WAITER_MONEY = "Permission for waiter";
+export const GROUP_WAITER_FLOOR = "What a waiter can do on the floor";
 
 /** Roles whose rows can be overridden for one person. */
 export const ROLES_WITH_OVERRIDES = ["manager", "tablet"] as const;
@@ -72,8 +74,8 @@ export function capsForRole(role: string): Cap[] {
     const mgr = section("mgrMenu")?.children ?? [];
     const walk = (nodes: Node[], group: string) => {
       for (const n of nodes) {
-        if (n.bind.t === "grant" || n.bind.t === "menu") {
-          add({ key: n.bind.t === "grant" ? n.bind.flag : n.bind.grant, group, node: n, pin: false, perPerson: true });
+        if (n.bind.t === "grant") {
+          add({ key: n.bind.flag, group, node: n, pin: false, perPerson: true });
         }
         if (n.children?.length && n.bind.t === "none") walk(n.children, group);
       }
@@ -90,22 +92,49 @@ export function capsForRole(role: string): Cap[] {
   }
 
   if (role === "tablet") {
-    // The Waiter rows are their own top-level section since 2026-08-02 (the old
-    // "Default set for user" section was deleted at the owner's word).
+    // The Waiter section grew two FOLDERS on 2026-08-04 (money · floor), the same shape as
+    // Manager, so this walks them by name exactly as the manager branch above does. Both waiter
+    // bind shapes are collected:
+    //   · `tablet`    → settings.tablet_<x>, the tri-state tabletPerm() reads
+    //   · `capTablet` → access_config[id].tablet, for an action with no column of its own
+    // The second was MISSING here until 2026-08-04, which is why the waiter walk-out row had a
+    // restaurant-wide switch on the Access screen and no per-person row anywhere: the doc's rule
+    // is "a person's rows are exactly the rows Access has for their role", and it wasn't true.
     const waiter = section("waiter")?.children ?? [];
-    for (const n of waiter) {
-      if (n.bind.t === "tablet") add({ key: n.bind.key, group: GROUP_WAITER, node: n, pin: !!n.pin, perPerson: true });
-    }
+    const walkWaiter = (nodes: Node[], group: string) => {
+      for (const n of nodes) {
+        if (n.bind.t === "tablet") add({ key: n.bind.key, group, node: n, pin: !!n.pin, perPerson: true });
+        else if (n.bind.t === "capTablet") add({ key: `cap:${n.bind.id}`, group, node: n, pin: !!n.pin, perPerson: true });
+        if (n.children?.length && n.bind.t === "none") walkWaiter(n.children, group);
+      }
+    };
+    walkWaiter(waiter.find((n) => n.id === "wtr_money")?.children ?? [], GROUP_WAITER_MONEY);
+    walkWaiter(waiter.find((n) => n.id === "wtr_floor")?.children ?? [], GROUP_WAITER_FLOOR);
+    // A row added to the Waiter section OUTSIDE those two folders would otherwise be silently
+    // missing from every person's screen, so sweep up anything left over rather than lose it.
+    walkWaiter(waiter.filter((n) => n.id !== "wtr_money" && n.id !== "wtr_floor"), GROUP_WAITER_MONEY);
     return out;
   }
 
   if (role === "owner") {
     // The owner's own pages. Restaurant-wide (owner_entitlements), so shown but not editable
     // per person — see the header note.
-    for (const n of section("ownMenu")?.children ?? []) {
-      if (n.bind.t === "section") add({ key: `section:${n.bind.key}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
-      else if (n.bind.t === "none") add({ key: `todo:${n.id}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
-    }
+    //
+    // RECURSIVE, deliberately (fixed 2026-08-04). The Owner section was flattened into a single
+    // `own_menu_group` folder, and this loop only looked one level down — so it stopped finding
+    // the four pages and added ONE row keyed `todo:own_menu_group`, i.e. every owner's profile
+    // showed a lone "Owner's menu · left to build" placeholder instead of their actual pages.
+    // A folder is not a permission; walk through it.
+    const walkOwner = (nodes: Node[]) => {
+      for (const n of nodes) {
+        if (n.bind.t === "section") add({ key: `section:${n.bind.key}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
+        else if (n.bind.t === "none" && !n.children?.length) add({ key: `todo:${n.id}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
+        // Walk INTO everything, folder or page: the sub-views inside "Audit & logs" are pages the
+        // owner does or doesn't get, so they belong on their profile too (read-only, like the rest).
+        if (n.children?.length) walkOwner(n.children);
+      }
+    };
+    walkOwner(section("ownMenu")?.children ?? []);
     return out;
   }
 

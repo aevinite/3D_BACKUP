@@ -27,13 +27,37 @@ const fmtHour = (iso: string) => {
 
 export default function OrdersTrend({ data, bucket = "day" }: { data: TrendPoint[]; bucket?: "day" | "hour" }) {
   if (!data || data.length === 0) return <div className="adm-empty">No orders in this range.</div>;
+  // THE DYNAMIC-CHART RULE (CLAUDE.md): "< 2 points of real activity → NO chart". The API
+  // zero-fills every bucket, so a quiet restaurant over 30 days arrived here as 1 real day and 29
+  // empty ones — and this drew a single fat bar in a wide empty plot, which is exactly the shape
+  // the rule bans ("a single value is a stat tile, not a one-bar chart"). Say the number instead.
+  const populated = data.filter((d) => Number(d.orders) > 0);
+  if (populated.length < 2) {
+    const only = populated[0];
+    const label = only ? (bucket === "hour" ? fmtHour(only.day) : fmtDay(only.day)) : "";
+    return (
+      <div className="adm-empty" style={{ display: "grid", gap: 6, placeItems: "center", padding: "26px 16px" }}>
+        <div style={{ fontSize: 13 }}>Not enough activity to draw a trend yet.</div>
+        {only ? (
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)" }}>
+            {only.orders} {only.orders === 1 ? "order" : "orders"} · {label}
+          </div>
+        ) : null}
+        <div style={{ fontSize: 11.5 }}>A chart needs at least two {bucket === "hour" ? "hours" : "days"} with orders in them.</div>
+      </div>
+    );
+  }
   const fmt = bucket === "hour" ? fmtHour : fmtDay;
   const rows = data.map((d) => ({ ...d, label: fmt(d.day) }));
   // Adaptive tick thinning: aim for ~8 labelled ticks whatever the range
   // (24 hours → every 3rd, 30 days → every 4th, 7 days → all).
   const tickEvery = Math.max(0, Math.ceil(rows.length / 8) - 1);
   return (
-    <div style={{ width: "100%", height: 220 }}>
+    // DENSE → SCROLL, don't squeeze (the other half of the rule). Bars stay ≥22px by giving the
+    // chart a minimum width and letting the card scroll sideways when there are too many buckets to
+    // fit; it still fills the card when they do fit, so nothing changes for a normal range.
+    <div style={{ width: "100%", height: 220, overflowX: "auto" }}>
+      <div style={{ width: `max(100%, ${rows.length * 22}px)`, height: "100%" }}>
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={rows} margin={{ top: 6, right: 8, left: 0, bottom: 0 }}>
           <CartesianGrid stroke="var(--muted2, rgba(120,120,120,0.16))" strokeWidth={1} vertical={false} />
@@ -48,6 +72,7 @@ export default function OrdersTrend({ data, bucket = "day" }: { data: TrendPoint
           <Bar dataKey="orders" fill="var(--accent)" radius={[4, 4, 0, 0]} maxBarSize={24} isAnimationActive={false} />
         </BarChart>
       </ResponsiveContainer>
+      </div>
     </div>
   );
 }

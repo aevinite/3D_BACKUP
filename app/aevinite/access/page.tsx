@@ -13,8 +13,8 @@
  * The rule now: a toggle exists only where lib/accessTree.ts says so. Spec:
  * docs/ACCESS-MODEL.md. */
 import { useEffect, useState } from "react";
-import AccessTree from "@/components/admin/AccessTree";
-import AccessPerPerson from "@/components/admin/AccessPerPerson";
+import AccessTree, { TreeStyle } from "@/components/admin/AccessTree";
+import AccessPerPerson, { PerPersonStyle } from "@/components/admin/AccessPerPerson";
 import { SettingsSaveBar } from "@/components/admin/RestaurantSettings";
 
 type Rest = { id: string; name: string; slug: string; active: boolean };
@@ -43,10 +43,18 @@ export default function AccessPage() {
     const q = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
     const urlRid = q.get("rid") || "";
     setFromRest(q.get("from") === "rest");
-    fetch("/api/admin/restaurants")
+    // no-store: every other admin read goes through adminFetch, which sets it. Without it a
+    // just-renamed restaurant kept its old name in this picker until a hard reload.
+    fetch("/api/admin/restaurants", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
-        const list: Rest[] = (Array.isArray(d) ? d : d.restaurants || []).filter((x: Rest) => x.active !== false);
+        // A SUSPENDED RESTAURANT IS STILL IN THE PICKER (fixed 2026-08-05). These were filtered
+        // out, so the one screen that decides what anyone can do could not be opened for a
+        // restaurant in the recycle bin — you could not check, or correct, its permissions before
+        // restoring it. They are listed last and labelled, never silently mixed in with the live
+        // ones. The bin itself is still what restores them; this only lets you look and set.
+        const all: Rest[] = (Array.isArray(d) ? d : d.restaurants || []);
+        const list: Rest[] = [...all.filter((x) => x.active !== false), ...all.filter((x) => x.active === false)];
         setRests(list);
         const pick = list.find((x) => x.id === urlRid) || list[0];
         if (pick) setRid(pick.id);
@@ -58,7 +66,16 @@ export default function AccessPage() {
 
   return (
     <div className="acc2">
+      {/* ALL THREE STYLESHEETS, RENDERED HERE AND UNCONDITIONALLY (2026-08-04).
+          The page's own <Style/> was made a plain <style> to kill the unstyled flash, but the two
+          components that draw everything below still injected theirs from JavaScript — and even
+          after converting them, they render nothing until `rid` arrives from a client fetch, so
+          their CSS reached the document only in the same commit as the markup it styles. Rendered
+          from the page they are in the SERVER HTML, in <head>, before any of it exists. Verified by
+          asserting `.at-box` appears in the response body of /aevinite/access. */}
       <Style />
+      <TreeStyle />
+      <PerPersonStyle />
       <nav className="adm-crumbs" style={{ marginBottom: 4 }}>
         <a href="/aevinite">Dashboard</a><span className="sep">›</span>
         <a href="/aevinite/restaurants">Restaurants</a><span className="sep">›</span>
@@ -81,7 +98,7 @@ export default function AccessPage() {
         </div>
         <div className="acc2-head-r">
           <select className="acc2-rsel" value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Restaurant">
-            {rests.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            {rests.map((r) => <option key={r.id} value={r.id}>{r.active === false ? `${r.name} — suspended` : r.name}</option>)}
           </select>
           <div className="acc2-tabs">
             <button className={tab === "general" ? "on" : ""} onClick={() => setTab("general")}><Icon n="shield" /> General</button>

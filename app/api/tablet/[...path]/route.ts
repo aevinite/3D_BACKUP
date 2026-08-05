@@ -23,6 +23,9 @@ import { mergeParentTable } from "@/lib/tableMerge";
 import { rateAllowed } from "@/lib/rateLimit";
 import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
+// ONE resolver for what a waiter may do, shared with the Access screen — see the note above
+// tabletPerm(). WAITER_NEVER is the owner's "no printing, no reopening" rule made structural.
+import { waiterCapValue, waiterConfigCapValue, resolveWaiterCaps, WAITER_NEVER, type WaiterCap } from "@/lib/accessTree";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
@@ -134,50 +137,94 @@ const takeOrdersEffectiveFromRow = (s: Record<string, unknown> | null) =>
 // in settings and an old row may say false — reading it again would let a retired switch take a
 // live feature away. See the box at the top of lib/tableTags.ts before changing this.
 const parcelEffectiveFromRow = (_s: Record<string, unknown> | null) => true;
+// WHAT A WAITER MAY DO — one resolver, shared with the screen (2026-08-04).
+//
+// This used to read `settings[key] || "off"`, which is the bug the sweep found: a capability with
+// NO row on the Access screen resolved to OFF and nothing could turn it on. Eight of nine
+// restaurants had tablet_mark_paid / tablet_invoice / tablet_table_ops = 'off' with no switch
+// anywhere, so a waiter could not settle a bill — while the panel's own admin ribbon said
+// "⚙ change in Access". `waiterCapValue()` (lib/accessTree.ts) is now the single answer for both
+// sides: never-list → off, listed row → stored-or-its-default, unlisted → on.
+//
+// TWO RUNGS ABOVE THE WAITER, in this order:
+//   1. WAITER_NEVER — printing an invoice is refused for a real waiter, always. Owner's rule
+//      (2026-08-04): "tablet will not have option of print and reopen bill and stuff."
+//   2. the FEATURE half — access_config[<row>].on === false means the restaurant does not have
+//      the thing AT ALL, so nobody has it whatever their own override says. managerCan() has
+//      always checked this; the tablet did not, so switching a money row's Feature off removed it
+//      from every screen and left a waiter with a stored 'on' still able to do it.
 async function tabletPerm(key: string, req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   // Admin super-user (no staff cookie — the gate already vetted the admin token):
   // never blocked by a waiter tri-state. This is what makes the X-ray's tinted
   // buttons honest — a revealed control the admin clicks genuinely works.
   if (!user) return { allow: true, managerName: "admin" };
+  // The never-list is about WAITERS. A manager or owner can also reach this route (roleSatisfies:
+  // manager ⊇ tablet), and they are allowed to issue an invoice — the rule is that a TABLET
+  // account can't, not that this URL can't. Scoped so the owner's rule takes nothing away from
+  // anyone he didn't name.
+  if (user.role === "tablet" && WAITER_NEVER.includes(key)) {
+    return { allow: false, resp: NextResponse.json({ error: key === "tablet_invoice" ? "Only a manager can issue the invoice." : "A waiter can't do this — ask a manager.", disabled: true }, { status: 403 }) };
+  }
+  const feat = WAITER_FEATURE_OF[key];
+  if (feat) {
+    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as Record<string, { on?: boolean }> | null;
+    if (cfg?.[feat]?.on === false) return { allow: false, resp: NextResponse.json({ error: "This isn't part of this restaurant — ask a manager.", disabled: true }, { status: 403 }) };
+  }
   const override = (user?.permissions ?? {})[key];
-  let mode: string;
-  if (isPermMode(override)) mode = override;
+  let mode: WaiterCap;
+  if (isPermMode(override)) mode = override as WaiterCap;
   else {
     const s = await sb.from("settings").select(key).eq("restaurant_id", rid).maybeSingle();
-    mode = ((s.data as Record<string, string> | null)?.[key]) || "off";
+    mode = waiterCapValue(key, (s.data as Record<string, string> | null)?.[key]);
   }
   if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "This isn't enabled for you — ask a manager.", disabled: true }, { status: 403 }) };
   if (mode === "pin") return managerPinGate(req, body, rid);
   return { allow: true }; // 'on'
 }
+/** Which restaurant-level "does this restaurant have it at all" switch a waiter column sits under. */
+const WAITER_FEATURE_OF: Record<string, string> = { tablet_discount: "give_discounts" };
 
-// Force-closing a table that still owes money on the TABLET (a walk-out / write-off) is
-// admin-laddered via the void_bills tablet tri-state (access_config.void_bills.tablet, set on
-// /aevinite → Access — the same tri-state the access screen already stores for this card).
-// DEFAULT 'pin': a walk-out must stay closable by a waiter WITH a manager's PIN — this keeps
-// the previous always-PIN behaviour while letting the admin switch it to direct 'on' or fully
-// 'off'. Admin super-user + 'on' pass; 'off' denies; 'pin' (and unset = default) require a PIN.
-// Owner/manager use the manager panel's own close, which is deliberately un-gated. (owner, 2026-07-24)
+// Force-closing a table that still owes money on the TABLET (a walk-out / write-off).
+//
+// It has its OWN Access row since 2026-08-04 — "Close a table that still owes money", stored at
+// access_config.close_unpaid.tablet, default 'pin'. It used to hang off
+// access_config.void_bills.tablet, i.e. off the row labelled "Reopen a bill", which is a different
+// act entirely: the screen said one thing and the switch did another, and when the owner removed
+// the waiter's reopen row (he never wanted a tablet reopening bills) the walk-out would have gone
+// with it. Migration 268 copies any stored void_bills.tablet value into the new key so no
+// restaurant's behaviour moves. A per-person override lives under `cap:close_unpaid`.
 async function closeUnpaidGate(req: NextRequest, body: any, rid: string, user: StaffUser | null): Promise<PinGate> {
   if (!user) return { allow: true, managerName: "admin" }; // admin super-user
-  const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
-    { void_bills?: { tablet?: string } } | null;
-  const mode = cfg?.void_bills?.tablet;
+  const own = (user.permissions ?? {})["cap:close_unpaid"];
+  let mode: WaiterCap;
+  if (isPermMode(own)) mode = own as WaiterCap;
+  else {
+    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config;
+    mode = waiterConfigCapValue("close_unpaid", cfg);
+  }
   if (mode === "off") return { allow: false, resp: NextResponse.json({ error: "Closing an unpaid table isn't enabled on the tablet — ask a manager.", disabled: true }, { status: 403 }) };
   if (mode === "on") return { allow: true };
   return managerPinGate(req, body, rid); // 'pin' or unset → manager PIN (the default)
 }
 
-// Overlay the logged-in waiter's per-user overrides ONTO the settings object the
-// board GETs send to the tablet client. The client's tperm() reads settings[key] to
-// show/hide the Mark-paid / Discount / Invoice buttons — resolving here means the
-// buttons follow the PER-USER truth with zero client changes (the server gate above
-// stays the real guard either way). `user` is the real waiter, or — on an admin tab
-// opened from someone's profile (?as=) — the waiter being looked through.
+// What the tablet client is TOLD it may do — resolved server-side, so the panel needs no rule of
+// its own. Its `tperm(k)` is `settings[k] || "off"`, so every tablet_* key is passed through
+// waiterCapValue() first (an unlisted floor capability becomes "on", `tablet_invoice` becomes
+// "off" and its button disappears), and THEN the logged-in waiter's own overrides are laid on top.
+// `user` is the real waiter, or — on an admin tab opened from someone's profile (?as=) — the
+// waiter being looked through. The server gates above stay the real guard either way.
 function overlayUserPerms<T extends Record<string, any> | null>(settings: T, user: StaffUser | null): T {
-  if (!settings || !user?.permissions) return settings;
-  const out: Record<string, any> = { ...settings };
-  for (const k of TABLET_PERM_KEYS) if (isPermMode(user.permissions[k])) out[k] = user.permissions[k];
+  if (!settings) return settings;
+  // A manager/owner looking in through this panel keeps their own reach (see tabletPerm), so the
+  // waiter resolution is applied only when a real waiter is asking.
+  const asWaiter = !user || user.role === "tablet";
+  const out: Record<string, any> = asWaiter ? resolveWaiterCaps({ ...settings }) : { ...settings };
+  if (user?.permissions) {
+    for (const k of TABLET_PERM_KEYS) {
+      if (asWaiter && WAITER_NEVER.includes(k)) continue;      // an override can't grant a never
+      if (isPermMode(user.permissions[k])) out[k] = user.permissions[k];
+    }
+  }
   return out as T;
 }
 

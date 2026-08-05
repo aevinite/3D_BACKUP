@@ -26,18 +26,9 @@ type PayAccess = { moduleOn: boolean; canSeePay: boolean; canRecordPay: boolean;
 // Per-user override caps for a WAITER (tablet) account — the tablet_* keys tabletPerm enforces.
 // The module gate (or null) is what the admin must have enabled for the restaurant; a gated cap
 // whose module is OFF is greyed here (and refused server-side by GAP-B).
-const WAITER_CAPS: [string, string, string | null][] = [
-  ["tablet_mark_paid", "Mark bill paid", null],
-  ["tablet_discount", "Give discount", null],
-  ["tablet_invoice", "Generate invoice", null],
-  ["tablet_take_orders", "Take orders", "take_orders"],
-  ["tablet_parcel", "Parcel orders (counter)", "parcel"],
-  ["tablet_table_ops", "Table & KOT ops", "table_ops"],
-  ["tablet_table_tags", "Mark table types", "table_tags"],
-  ["tablet_khata", "Khata (pay later)", "table_tags"],
-  ["tablet_banquet", "Banquet billing", "banquet"],
-];
-const OVR_MODES: [string, string][] = [["default", "Default"], ["on", "On"], ["pin", "PIN"], ["off", "Off"]];
+// WAITER_CAPS + OVR_MODES lived here — a private copy of the waiter permission list. Deleted
+// 2026-08-04 with the controls that used them: lib/staffCaps.ts is the one list now, and the admin
+// Access screen is the one screen. Do not reintroduce a role's permission list in a panel.
 
 const ROLES = ["manager", "kitchen", "tablet"];
 // Powers that only exist while the "Staff profiles & pay" module is on for that restaurant
@@ -151,14 +142,6 @@ export default function OwnerStaffPage() {
       await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: s2.id, action: "set_payroll", in_payroll: on }) });
       await load();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-  }
-
-  async function setUserPerm(u: Staff, key: string, v: string) {
-    setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: { ...(x.permissions || {}), [key]: v } } : x));
-    try {
-      const d = await call(withScope("/api/owner/staff"), { method: "PATCH", body: JSON.stringify({ id: u.id, action: "set_permissions", permissions: { [key]: v === "default" ? null : v } }) });
-      setStaff((prev) => prev.map((x) => x.id === u.id ? { ...x, permissions: d.permissions || {} } : x));
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); load(); }
   }
 
   async function addStaff(rid: string, form: HTMLFormElement) {
@@ -378,31 +361,22 @@ export default function OwnerStaffPage() {
                       <button className="ost-mini" disabled={busy} onClick={() => setEditing(null)}>Cancel</button>
                     </div>
                   )}
-                  {/* Per-user tablet permissions — only for waiter accounts, only the owner can set.
-                      A cap the admin hasn't enabled for this restaurant is greyed (and refused server-side). */}
-                  {s.role === "tablet" && canEditPowers && !r.modules?.payroll && (
-                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: "var(--border)", display: "flex", flexWrap: "wrap", gap: 8 }}>
-                      {WAITER_CAPS.map(([key, label, gate]) => {
-                        const gated = !!gate && !(r.modules?.[gate]);
-                        const cur = s.permissions?.[key] || "default";
-                        return (
-                          <div key={key} style={{ display: "flex", alignItems: "center", gap: 7, opacity: gated ? 0.45 : 1 }}>
-                            <span style={{ fontSize: 11.5, fontWeight: 600, minWidth: 96 }}>{label}{gated ? " · not enabled" : ""}</span>
-                            <div style={{ display: "inline-flex", gap: 2, background: "var(--bg)", border: "var(--border)", borderRadius: 8, padding: 2 }}>
-                              {OVR_MODES.map(([v, ml]) => (
-                                <button key={v} disabled={busy || gated}
-                                  onClick={() => setUserPerm(s, key, v)}
-                                  title={gated ? "The admin hasn't enabled this feature for the restaurant" : `Set ${label} to ${ml}`}
-                                  style={{ minHeight: 28, padding: "0 9px", borderRadius: 6, border: "none", fontSize: 11.5, fontWeight: 700, cursor: gated ? "not-allowed" : "pointer",
-                                    background: cur === v ? (v === "off" ? "var(--adm-danger)" : v === "default" ? "var(--muted2)" : "var(--accent)") : "transparent",
-                                    color: cur === v ? (v === "default" ? "var(--text)" : "#fff") : "var(--muted)" }}>{ml}</button>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                  {/* PER-USER WAITER PERMISSIONS WERE REMOVED FROM HERE (owner, 2026-08-04).
+                      Nine tri-state controls used to sit on this row — mark paid, discount,
+                      invoice, take orders, parcel, table ops, table type, khata, banquet — written
+                      straight to staff_users.permissions from a PRIVATE list in this file.
+                      Three things were wrong with that, and they are the whole reason it is gone:
+                        • "Only the admin holds permissions" (CLAUDE.md / docs/ACCESS-MODEL.md):
+                          the owner panel configures none. This was the last screen that did.
+                        • Eight of its nine keys had no row on the Access screen at all, so it was
+                          a second, larger permission list quietly disagreeing with the canonical
+                          one (lib/staffCaps) — a waiter's per-person list is ONE row there.
+                        • It broke two of the screen's own rules: a capability the admin hadn't
+                          enabled rendered greyed at 0.45 opacity ("no greyed-out ghosts"), and the
+                          whole block was hidden whenever the payroll module was ON — so switching
+                          payroll on made the only way to grant these disappear.
+                      Waiter permissions now live in exactly one place, for every restaurant:
+                      /aevinite → Access & permissions → Waiter (and its Per-person tab). */}
                 </div>
               ))}
             </div>

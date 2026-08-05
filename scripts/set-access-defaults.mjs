@@ -85,7 +85,29 @@ const before = (await (await api(`/api/admin/restaurants/access-tree?restaurant_
 if (!before) { console.error("The Access screen did not return a state for that restaurant."); process.exit(1); }
 
 /** Every node whose default we can honestly write and read back. */
-const defaultNodes = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild);
+const realNodes = ALL_NODES.filter((n) => n.bind.t !== "none" && n.bind.t !== "text" && n.bind.t !== "creds" && !n.leftToBuild);
+
+// THE FEATURE HALF COUNTS TOO (fixed 2026-08-05). This script read and wrote `n.bind` only, and
+// every two-control row on the Access screen keeps HALF its state in `n.featureBind` — the four
+// manager menus and the three money rows. So "is this restaurant at the factory defaults?" was
+// only ever half a question: Aangan, the control restaurant the QA suite checks against this very
+// list, had its manager Rating review FEATURE switched off and this reported "already at the
+// factory defaults — nothing to change". A tool that cannot see a drift cannot restore it.
+//
+// A feature half is modelled as its own pseudo-node so the rest of the script needs no change:
+// same nodeValue/nodePatch, just pointed at the other bind.
+const featureNodes = ALL_NODES
+  .filter((n) => n.featureBind && !n.leftToBuild)
+  .map((n) => ({
+    ...n,
+    bind: n.featureBind,
+    // Both halves of a two-control row ship the same default: a `tab` half follows the row's own
+    // `def`, and a `has` half is ON unless the bind says otherwise ("Put menu on maintenance").
+    def: n.featureBind.t === "has" ? n.featureBind.def !== false : n.def,
+    name: `${n.name} (Feature)`,
+  }));
+
+const defaultNodes = [...realNodes, ...featureNodes];
 
 let patch = {};
 const diffs = [];

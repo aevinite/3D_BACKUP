@@ -926,7 +926,15 @@ const txray = (k) => (tperm(k) === "off" && tHigher() ? " xray-off" : "");
 // templates don't need a title on every txray() usage (owner 2026-07-28).
 document.addEventListener("mouseover", (e) => {
   const el = e.target.closest && e.target.closest(".xray-off");
-  if (el && !el.title) el.title = "Not available — this isn't enabled for this restaurant's waiters. You can still use it from the admin view.";
+  // The invoice control is a DIFFERENT kind of "off": it is not a setting somebody switched, it is
+  // the rule (owner, 2026-08-04 — a waiter never issues the invoice), so it says so rather than
+  // implying there is a switch to find. Matched on the control's own id/data, not on its position.
+  if (el && !el.title) {
+    const isInvoice = !!(el.id && /invoice/i.test(el.id)) || !!(el.dataset && el.dataset.cap === "tablet_invoice") || /invoice/i.test(el.textContent || "");
+    el.title = isInvoice
+      ? "Only a manager issues the invoice — a waiter never can, on any restaurant. You can still use it from the admin view."
+      : "Not available — this isn't enabled for this restaurant's waiters. You can still use it from the admin view.";
+  }
 });
 
 // ── Special table types (VIP / Family / Owner's Guest) + khata — mig 166 ──────
@@ -4318,13 +4326,21 @@ load().catch((e) => { if (!(window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))) t
 // Marks the admin act-as view and counts the billing controls that are off for
 // waiters (the tinted ones). body is a flex column, so the ribbon simply takes the
 // top row — no viewport math needed. Server still enforces everything (tabletPerm).
+// EVERY KEY HERE MUST HAVE A ROW ON /aevinite → Access → Waiter, because each row in the ribbon's
+// popover offers "⚙ change in Access" and deep-links to it (?focus=<key>). `tablet_invoice` was
+// listed and has no row — deliberately, since 2026-08-04 a waiter can NEVER issue an invoice
+// (owner's rule) — so that row sent the admin to a page with no such switch and nothing
+// highlighted. It is gone from this list; the greyed invoice control explains itself by hover.
+// Adding a waiter capability? Add its Access row first, then a line here.
 const XRAY_CAPS = [
   { key: "tablet_take_orders", label: "Take orders" },
   { key: "tablet_discount", label: "Apply discount" },
   { key: "tablet_mark_paid", label: "Mark bill paid" },
-  { key: "tablet_invoice", label: "Generate invoice" },
   { key: "tablet_banquet", label: "Banquet billing" },
   { key: "tablet_table_ops", label: "Table & KOT operations" },
+  { key: "tablet_table_tags", label: "Mark a table's type" },
+  { key: "tablet_khata", label: "Pay later (khata)" },
+  { key: "tablet_parcel", label: "Parcel" },
 ];
 (function injectXrayStyles() {
   const css = `

@@ -17,7 +17,7 @@ import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { menuTag } from "@/lib/menuDataServer";
 import {
   SECTIONS, ALL_NODES, NODE_BY_ID, SETTINGS_COLUMNS, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
-  LIST_KEYS, TEXT_KEYS, MODULE_KEYS, PANEL_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
+  LIST_KEYS, TEXT_KEYS, MODULE_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
   TABLET_COLS, TAB_KEYS, HAS_IDS, type TreeState,
 } from "@/lib/accessTree";
 
@@ -34,13 +34,25 @@ const TAB_ALLOWED: Record<string, Set<string>> = TAB_KEYS.reduce((acc, b) => {
 // access_config paths the tree may touch: { permId → { opts: Set<"side.key">, limits, tablet } }
 const CONFIG_OPTS = new Set<string>();   // `${id}|${side}|${key}`
 const CONFIG_LIMITS = new Set<string>(); // `${id}|${side}`
+const CONFIG_LIMIT_MAX = new Map<string, number>(); // the biggest value that row's own dropdown offers
 const CONFIG_TABLET = new Set<string>(); // id
 for (const n of ALL_NODES) {
   const b = n.bind;
   if (b.t === "opt") CONFIG_OPTS.add(`${b.id}|${b.side}|${b.key}`);
-  if (b.t === "limit") CONFIG_LIMITS.add(`${b.id}|${b.side}`);
+  if (b.t === "limit") {
+    CONFIG_LIMITS.add(`${b.id}|${b.side}`);
+    if (n.options?.length) CONFIG_LIMIT_MAX.set(`${b.id}|${b.side}`, Math.max(...n.options));
+  }
   if (b.t === "capTablet") CONFIG_TABLET.add(b.id);
 }
+// Every access_config top-level id this model can legitimately write — the union of the four
+// shapes above plus the `has` feature halves. Derived, so a node added to the tree wires itself.
+const KNOWN_CONFIG_IDS = new Set<string>([
+  ...HAS_IDS,
+  ...[...CONFIG_TABLET],
+  ...[...CONFIG_OPTS].map((k) => k.split("|")[0]),
+  ...[...CONFIG_LIMITS].map((k) => k.split("|")[0]),
+]);
 // The legal values of every choice / list node, so a hand-made request can't write a value
 // the screen would then be unable to display.
 const CHOICE_VALUES: Record<string, Set<string>> = {};
@@ -66,7 +78,7 @@ export async function GET(req: NextRequest) {
   if (!rq.data) return bad("Restaurant not found.", 404);
   const r = rq.data as Record<string, any>;
 
-  const cols = ["features", "enabled_panels", "platform_channels", ...SETTINGS_COLUMNS];
+  const cols = ["features", "platform_channels", ...SETTINGS_COLUMNS];
   const s = obj((await sb.from("settings").select(Array.from(new Set(cols)).join(", "))
     .eq("restaurant_id", rid).maybeSingle()).data);
 
@@ -76,10 +88,6 @@ export async function GET(req: NextRequest) {
 
   const settings: Record<string, unknown> = {};
   for (const c of SETTINGS_COLUMNS) if (c in s) settings[c] = s[c];
-
-  const ep = obj(s.enabled_panels);
-  const panels: Record<string, boolean> = {};
-  for (const k of PANEL_KEYS) panels[k] = ep[k] !== false; // absent = on
 
   const pc = obj(s.platform_channels);
   const channels: Record<string, boolean> = {};
@@ -112,8 +120,39 @@ export async function GET(req: NextRequest) {
     for (const key of TAB_ALLOWED[panel]) if (typeof stored[key] === "boolean") tabs[panel][key] = stored[key];
   }
 
-  const state: TreeState = { features, settings, panels, channels, grants, sections, tabs, config: cfg, creds };
-  return NextResponse.json({ sections: SECTIONS, state });
+  const state: TreeState = { features, settings, channels, grants, sections, tabs, config: cfg, creds };
+  // JUST THE STATE. This used to ship `sections: SECTIONS` as well — 25 KB of constant JSON
+  // (measured 2026-08-04) that no client has ever read: AccessTree, AccessPerPerson and
+  // StaffProfile all import the model directly and use `state` only. It rode along on every load
+  // of the Access screen, the Per-person tab AND every staff profile. (2026-08-04)
+  return NextResponse.json({ state });
+}
+
+/** "Menu → 3D dish viewer: off · Manager → Delete a bill: on" — what the audit line says.
+ *  Reads the MODEL for each key's real name, so a row renamed on screen is renamed here too. */
+function describeAccessPatch(patch: Record<string, any>): string {
+  const bits: string[] = [];
+  const nameOfBind = (test: (b: any) => boolean) => ALL_NODES.find((n) => test(n.bind) || (n.featureBind && test(n.featureBind)))?.name;
+  const say = (label: string | undefined, key: string, v: unknown) =>
+    bits.push(`${label || key}: ${v === true ? "on" : v === false ? "off" : v === null ? "cleared" : String(v)}`);
+  for (const [k, v] of Object.entries(obj(patch.features))) say(nameOfBind((b) => b.t === "feature" && b.key === k), k, v);
+  for (const [k, v] of Object.entries(obj(patch.grants))) say(nameOfBind((b) => b.t === "grant" && b.flag === k), k, v);
+  for (const [k, v] of Object.entries(obj(patch.sections))) say(nameOfBind((b) => b.t === "section" && b.key === k), k, v);
+  for (const [k, v] of Object.entries(obj(patch.channels))) say(nameOfBind((b) => b.t === "channel" && b.key === k), k, v);
+  for (const [k, v] of Object.entries(obj(patch.settings))) {
+    const label = nameOfBind((b) => (b.t === "setting" || b.t === "tablet" || b.t === "choice" || b.t === "list" || b.t === "text") && b.key === k)
+      || nameOfBind((b) => b.t === "module" && `${b.key}_allowed` === k);
+    say(label, k, Array.isArray(v) ? v.join("/") : v);
+  }
+  for (const [panel, keys] of Object.entries(obj(patch.tabs)))
+    for (const [k, v] of Object.entries(obj(keys))) say(nameOfBind((b) => b.t === "tab" && b.panel === panel && b.key === k), `${panel}.${k}`, v);
+  for (const [id, raw] of Object.entries(obj(patch.config)))
+    for (const [side, v] of Object.entries(obj(raw)))
+      bits.push(side === "on" ? `${nameOfBind((b) => b.t === "has" && b.id === id) || id} (whole feature): ${v === true ? "on" : "off"}`
+        : `${id}.${side}: ${JSON.stringify(v)}`);
+  // A credential's VALUE never reaches the log — only that one was set or cleared.
+  for (const [k, v] of Object.entries(obj(patch.creds))) bits.push(`${k} key: ${v === null ? "removed" : "saved"}`);
+  return bits.slice(0, 12).join(" · ") + (bits.length > 12 ? ` · +${bits.length - 12} more` : "");
 }
 
 export async function POST(req: NextRequest) {
@@ -130,15 +169,20 @@ export async function POST(req: NextRequest) {
   // ── restaurants columns ───────────────────────────────────────────────────
   const restUpdate: Record<string, any> = {};
 
+  // ONLY WRITE THE COLUMN IF A KEY SURVIVED THE ALLOW-LIST. Assigning it regardless meant a patch
+  // naming nothing but unknown flags still produced a column update, so "did anything land?"
+  // could not be answered at the end of this handler — and the caller was told "Saved".
   if (patch.grants) {
     const next = { ...obj(cur.manager_permissions) };
-    for (const [k, v] of Object.entries(obj(patch.grants))) if (GRANT_FLAGS.includes(k)) next[k] = v === true;
-    restUpdate.manager_permissions = next;
+    let took = 0;
+    for (const [k, v] of Object.entries(obj(patch.grants))) if (GRANT_FLAGS.includes(k)) { next[k] = v === true; took++; }
+    if (took) restUpdate.manager_permissions = next;
   }
   if (patch.sections) {
     const next = { ...obj(cur.owner_entitlements) };
-    for (const [k, v] of Object.entries(obj(patch.sections))) if (SECTION_ENTITLEMENTS.includes(k)) next[k] = v === true;
-    restUpdate.owner_entitlements = next;
+    let took = 0;
+    for (const [k, v] of Object.entries(obj(patch.sections))) if (SECTION_ENTITLEMENTS.includes(k)) { next[k] = v === true; took++; }
+    if (took) restUpdate.owner_entitlements = next;
   }
 
   // access_config carries the tab lists, the per-side menu parts, the dashboard picks,
@@ -174,8 +218,16 @@ export async function POST(req: NextRequest) {
         }
         if (side === "limit") {
           const dest = { ...obj(entry.limit) };
-          for (const [sd, num] of Object.entries(obj(vals)))
-            if (CONFIG_LIMITS.has(`${permId}|${sd}`) && Number.isFinite(Number(num))) dest[sd] = Number(num);
+          for (const [sd, num] of Object.entries(obj(vals))) {
+            if (!CONFIG_LIMITS.has(`${permId}|${sd}`)) continue;
+            const n = Number(num);
+            if (!Number.isFinite(n)) continue;
+            // CLAMPED to what the row itself offers (2026-08-04). Any finite number used to be
+            // accepted, so a hand-made request could store a 100000% discount ceiling that no
+            // dropdown could ever show or undo — and lib/discountCap.ts would honour it.
+            const ceiling = CONFIG_LIMIT_MAX.get(`${permId}|${sd}`);
+            dest[sd] = ceiling === undefined ? n : Math.max(0, Math.min(n, ceiling));
+          }
           entry.limit = dest;
           continue;
         }
@@ -186,17 +238,23 @@ export async function POST(req: NextRequest) {
           if (CONFIG_OPTS.has(`${permId}|${m[1]}|${k}`)) dest[k] = typeof v === "boolean" ? v : String(v);
         entry[side] = dest;
       }
-      root[permId] = entry;
+      // ONLY WRITE BACK A KEY THE MODEL KNOWS (fixed 2026-08-05). Every branch above already
+      // refuses an id it doesn't recognise — but the write itself sat outside them, so a patch
+      // naming any id at all stored an entry for it, and an unknown one stored `{}` for ever.
+      // access_config is the restaurant's permanent permission record and is read on hot paths;
+      // it should not collect keys nothing will ever look at. (The retired ids already sitting in
+      // there are left alone on purpose — that is how every retired switch in this model is
+      // handled, and deleting stored history is not this endpoint's job.)
+      if (KNOWN_CONFIG_IDS.has(permId)) root[permId] = entry;
     }
   }
   if (cfg) restUpdate.access_config = cfg;
 
-  if (Object.keys(restUpdate).length) {
-    const up = await sb.from("restaurants").update(restUpdate).eq("id", rid);
-    if (up.error) return bad(up.error.message, 500);
-  }
-
   // ── settings columns ──────────────────────────────────────────────────────
+  // BUILT BEFORE ANYTHING IS WRITTEN (2026-08-04). The `restaurants` update used to run here,
+  // ABOVE this block — and the list branch below can still `return bad(...)` ("pick at least one
+  // language"). A patch carrying both a grant and an empty list therefore landed the grant, then
+  // refused, and the screen reloaded showing half the change applied. Validate first, write after.
   const setPatch: Record<string, any> = {};
 
   if (patch.features) {
@@ -204,12 +262,6 @@ export async function POST(req: NextRequest) {
     const next = { ...curFeat };
     for (const [k, v] of Object.entries(obj(patch.features))) if (WRITEABLE_FEATURES.has(k)) next[k] = v === true;
     setPatch.features = next;
-  }
-  if (patch.panels) {
-    const curEp = obj((await sb.from("settings").select("enabled_panels").eq("restaurant_id", rid).maybeSingle()).data?.enabled_panels);
-    const next = { ...curEp };
-    for (const [k, v] of Object.entries(obj(patch.panels))) if (PANEL_KEYS.includes(k)) next[k] = v === true;
-    setPatch.enabled_panels = next;
   }
   // Channels and their API keys live in the SAME column, so they are merged into ONE object here.
   // Doing them in two independent branches would have let a patch carrying both write the column
@@ -252,6 +304,12 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Everything is validated by here, so the writes can go out together.
+  if (Object.keys(restUpdate).length) {
+    const up = await sb.from("restaurants").update(restUpdate).eq("id", rid);
+    if (up.error) return bad(up.error.message, 500);
+  }
+
   if (Object.keys(setPatch).length) {
     const existing = (await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle()).data;
     if (existing) {
@@ -281,19 +339,38 @@ export async function POST(req: NextRequest) {
     try { revalidateTag(menuTag(rid), "max"); } catch { /* the revalidate window is the backstop */ }
   }
 
-  // A PERMISSION CHANGE IS THE ONE THING THAT MOST NEEDS A RECORD (sweep 2026-08-04). This is the
-  // single endpoint behind the whole Access & permissions screen — grants, section entitlements,
-  // per-panel caps, module rungs, guest features — and it logged nothing. So a manager losing a
-  // capability overnight, or a whole rung moving, had no who-and-when anywhere in the product.
+  // WHO CHANGED THIS RESTAURANT'S PERMISSIONS (found twice on 2026-08-04 — by the API sweep and by
+  // the admin sweep, independently, which is a fair sign of how visible the gap was). Every sibling
+  // write records itself — `restaurant_settings`, `manager_permissions`, `user_set_permissions` —
+  // and this one, the single endpoint behind the WHOLE Access & permissions screen, logged nothing.
+  // So a manager losing a capability overnight, or a restaurant's guest menu going dark, had no
+  // who-and-when anywhere in the product.
   //
-  // The detail names the GROUPS that moved rather than dumping the patch: the body is a nested
-  // shape and a wall of JSON in the Activity log's "What" column is unreadable (the same lesson as
-  // the invoice row that printed a session uuid). Best-effort and last — a logging failure must
-  // never fail a save that already succeeded.
-  const touched = Object.keys(patch).filter((k) => patch[k] && typeof patch[k] === "object" ? Object.keys(patch[k]).length : patch[k] !== undefined);
+  // BOTH sweeps' versions are kept here on purpose:
+  //   · the detail names the ROWS that moved and what they moved TO, read from the model, so the
+  //     Activity log's "What" column reads as English and not as a wall of nested JSON (the same
+  //     lesson as the invoice row that printed a session uuid). It falls back to naming the GROUPS
+  //     when nothing describable came out, so the line is never empty.
+  //   · the device id rides along, and the whole thing is `.catch()`ed — a logging failure must
+  //     never fail a save that already succeeded.
+  // A credential's VALUE never reaches the log; only that one was saved or removed.
+  const changed = describeAccessPatch(patch);
+  const groups = Object.keys(patch).filter((k) => (patch[k] && typeof patch[k] === "object" ? Object.keys(patch[k]).length : patch[k] !== undefined));
+
+  // A SAVE THAT LANDED NOWHERE MUST NOT SAY "Saved" (sweep 2026-08-05). Every allow-list above
+  // `continue`s past a key it doesn't recognise, and then this answered {ok:true} regardless — so
+  // a patch the route silently dropped in full read back as a success, the screen showed "Saved",
+  // and the value returned to its old state on the next load. That is the dead-switch shape this
+  // whole model exists to remove, wearing a green tick.
+  //
+  // "Nothing landed" is specifically: the caller named at least one group with at least one key,
+  // and not one of them survived. Re-saving a value that was ALREADY what you asked for still
+  // lands (the column is written), so an ordinary no-op tap is unaffected.
+  if (groups.length && !Object.keys(restUpdate).length && !Object.keys(setPatch).length)
+    return bad(`Nothing in that change could be saved — this screen does not own ${groups.join(", ")}.`);
   await logAction("admin", "access_change", {
-    restaurant_id: rid, device_id: deviceIdFrom(req),
-    detail: `access & permissions saved — ${touched.length ? touched.join(", ") : "no group named"}`,
+    actor: "admin", restaurant_id: rid, device_id: deviceIdFrom(req),
+    detail: changed || `access & permissions saved — ${groups.length ? groups.join(", ") : "no group named"}`,
   }).catch(() => { /* the save stands either way */ });
 
   return NextResponse.json({ ok: true });

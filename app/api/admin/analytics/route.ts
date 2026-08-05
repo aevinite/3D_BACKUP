@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { businessDayStartIso } from "@/lib/businessDay";
+import { cachedOwnerPayload, ordersFingerprint, scopeKeyOf } from "@/lib/ownerCache";
 
 export const dynamic = "force-dynamic";
 const admin = (req: NextRequest) => tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -75,7 +76,31 @@ export async function GET(req: NextRequest) {
   const { from, to } = rangeBounds(range);
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
+  // ?refresh=1 — the page's ↻ button asks for the live value and waits for it.
+  const force = new URL(req.url).searchParams.get("refresh") === "1";
 
+  // THROUGH THE SNAPSHOT CACHE (2026-08-04). CLAUDE.md: "Any owner/ADMIN dashboard, report, or
+  // analytics number that comes from an aggregate query must be served through the compute-on-view
+  // snapshot cache, never recomputed on every open. This is now the DEFAULT for every such
+  // feature." This route was recomputing three platform-WIDE aggregates on every request —
+  // measured 907 ms on the deployed backup — with no cachedAt, so the page could not even say how
+  // old its numbers were, and `useActiveAutoRefresh` re-ran the lot about once a minute per open
+  // tab. That is exactly the "handful of expensive reads landing together" shape that took the
+  // database down on 2026-07-31.
+  //
+  // The scope is the whole platform, which the engine already has a key for (scopeKeyOf(null,
+  // true, [])), and the change-detector is the same cheap orders fingerprint the owner reports
+  // use — with ids = null meaning "every restaurant", so a single order anywhere refreshes it.
+  const payload = await cachedOwnerPayload({
+    key: `admin:v1:${scopeKeyOf(null, true, [])}:analytics:${range}`,
+    force,
+    fingerprint: () => ordersFingerprint(null, fromIso, toIso),
+    compute: () => computeAnalytics(range, from, to, fromIso, toIso),
+  });
+  return NextResponse.json(payload);
+}
+
+async function computeAnalytics(range: string, from: Date, to: Date, fromIso: string, toIso: string) {
   const [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
     // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
@@ -93,7 +118,10 @@ export async function GET(req: NextRequest) {
     sb.rpc("lfh_admin_orders_by_source", { p_from: fromIso, p_to: toIso }),
   ]);
   for (const q of [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ]) {
-    if (q.error) return NextResponse.json({ error: q.error.message }, { status: 500 });
+    // THROWN, not returned as a response: this is the cache's `compute`, and it must fail loudly
+    // so nothing half-built is ever stored under the key. cachedOwnerPayload lets a sync failure
+    // reach the caller and swallows a background one (the stale value already shipped).
+    if (q.error) throw new Error(q.error.message);
   }
 
   const restaurants = restQ.data || [];
@@ -120,7 +148,7 @@ export async function GET(req: NextRequest) {
     activeTablesNow: openByRid.get(r.restaurant_id) || 0,
   }));
 
-  return NextResponse.json({
+  return {
     range,
     totals: {
       totalOrders: ordersCountQ.count || 0,
@@ -134,5 +162,5 @@ export async function GET(req: NextRequest) {
     trend: zeroFill(range, from, to, trendQ.data || []),
     busiest,
     bySource: (sourceQ.data || []).map((r: { source: string; orders: number }) => ({ source: r.source, orders: Number(r.orders) || 0 })),
-  });
+  };
 }

@@ -20,7 +20,12 @@ const fail = (m) => fails.push(m);
 
 // The model itself, compiled. `npm run verify:access` bundles it first (see package.json), so
 // these are the REAL exported values — every generated row included.
-const { MANAGER_GRANT_DEFAULTS, isConfigurableGrant, MODULE_KEYS, HAS_IDS, ALL_NODES } = await import("../node_modules/.cache/accessTree.mjs");
+const {
+  MANAGER_GRANT_DEFAULTS, isConfigurableGrant, MODULE_KEYS, HAS_IDS, ALL_NODES,
+  nodePatch, defOf, SETTING_KEYS, CHOICE_KEYS, LIST_KEYS, TEXT_KEYS, TABLET_COLS,
+  GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
+  waiterCapValue, WAITER_NEVER,
+} = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
 const format = read("lib/format.ts");
@@ -404,6 +409,190 @@ if (!deadRows) ok("no row is a switch with nothing behind it");
 // ── 10 · the read/write route must allow-list from the model, not by hand ──
 if (!treeRoute.includes('from "@/lib/accessTree"')) fail("the access-tree route does not derive its allow-lists from lib/accessTree.ts");
 else ok("the read/write route derives every allow-list from the model");
+
+// ── 11 · EVERY ROW'S OWN SAVE MUST SURVIVE THE WRITE ROUTE ────────────────
+//
+// THE TWO BUGS THIS EXISTS TO CATCH, both live while all ten checks above passed (2026-08-04):
+//   • "Put menu on maintenance" wrote { config: { maintenance: { on: true } } }, and the route
+//     gated that path on HAS_IDS — which was built from `featureBind` only, so a row carrying its
+//     has-bind as its MAIN bind was dropped. The save answered { ok: true } and read back OFF for
+//     every restaurant, forever.
+//   • the per-person write route refused `delete_bill` — a row this very screen shows.
+// The checks above prove a row's KEY is read by real code. Neither proved the row's SAVE gets past
+// the route's own filters, which is the other half of "a switch that changes nothing".
+//
+// So: build each node's real patch with nodePatch(), then assert the route has an allow-list entry
+// that will let every key in it through. Static, no database, no server.
+{
+  const allowed = {
+    features: new Set([...FEATURE_KEYS, "ratings"]),
+    settings: new Set([...SETTING_KEYS, ...CHOICE_KEYS, ...LIST_KEYS, ...TEXT_KEYS, ...TABLET_COLS,
+      ...MODULE_KEYS.flatMap((m) => [`${m}_allowed`, `${m}_enabled`])]),
+    channels: new Set(CHANNEL_KEYS),
+    creds: new Set(CREDS_KEYS),
+    grants: new Set(GRANT_FLAGS),
+    sections: new Set(SECTION_ENTITLEMENTS),
+  };
+  const tabAllowed = new Set(TAB_KEYS.map((b) => `${b.panel}|${b.key}`));
+  const configOpts = new Set(), configLimits = new Set(), configTablet = new Set();
+  for (const n of ALL_NODES) {
+    const b = n.bind;
+    if (b.t === "opt") configOpts.add(`${b.id}|${b.side}|${b.key}`);
+    if (b.t === "limit") configLimits.add(`${b.id}|${b.side}`);
+    if (b.t === "capTablet") configTablet.add(b.id);
+  }
+  const dead = [];
+  const sample = (n) => {
+    const b = n.bind;
+    if (b.t === "tablet" || b.t === "capTablet") return "on";
+    if (b.t === "choice" || (b.t === "opt" && n.choices)) return (n.choices || [{ value: "x" }])[0].value;
+    if (b.t === "list") return [(n.choices || [{ value: "en" }])[0].value];
+    if (b.t === "text") return "x";
+    if (b.t === "creds") return "abcd1234";
+    if (b.t === "limit") return Number(defOf(n)) || 5;
+    return true;
+  };
+  for (const n of ALL_NODES) {
+    const binds = [n.bind, ...(n.featureBind ? [n.featureBind] : [])];
+    for (const bind of binds) {
+      if (bind.t === "none") continue;
+      const patch = nodePatch({ ...n, bind }, sample({ ...n, bind }));
+      for (const [family, obj] of Object.entries(patch)) {
+        if (family === "tabs") {
+          for (const [panel, keys] of Object.entries(obj))
+            for (const k of Object.keys(keys))
+              if (!tabAllowed.has(`${panel}|${k}`)) dead.push(`${n.id} → tabs.${panel}.${k}`);
+          continue;
+        }
+        if (family === "config") {
+          for (const [id, sides] of Object.entries(obj))
+            for (const [side, v] of Object.entries(sides)) {
+              if (side === "on") { if (!HAS_IDS.includes(id)) dead.push(`${n.id} → config.${id}.on`); continue; }
+              if (side === "tablet") { if (!configTablet.has(id)) dead.push(`${n.id} → config.${id}.tablet`); continue; }
+              if (side === "limit") { for (const sd of Object.keys(v)) if (!configLimits.has(`${id}|${sd}`)) dead.push(`${n.id} → config.${id}.limit.${sd}`); continue; }
+              const m = side.match(/^(owner|manager|waiter)_opts$/);
+              if (!m) { dead.push(`${n.id} → config.${id}.${side} (the route ignores that side)`); continue; }
+              for (const k of Object.keys(v)) if (!configOpts.has(`${id}|${m[1]}|${k}`)) dead.push(`${n.id} → config.${id}.${side}.${k}`);
+            }
+          continue;
+        }
+        const set = allowed[family];
+        if (!set) { dead.push(`${n.id} → the route has no "${family}" branch at all`); continue; }
+        for (const k of Object.keys(obj)) if (!set.has(k)) dead.push(`${n.id} → ${family}.${k}`);
+      }
+    }
+  }
+  if (dead.length) fail(`a row's own save would be DROPPED by the write route (the switch moves and nothing changes): ${dead.join(", ")}`);
+  else ok(`all ${ALL_NODES.length} rows: every key their own save writes is one the route accepts`);
+}
+
+// ── 12 · a person's per-person rows must be writable by the routes that save them ──
+{
+  const { capsForRole } = await import("../node_modules/.cache/staffCaps.mjs").catch(() => ({ capsForRole: null }));
+  if (!capsForRole) ok("per-person allow-lists: skipped (staffCaps bundle not built)");
+  else {
+    const adminRoute = read("app/api/admin/users/route.ts");
+    const ownerRoute = read("app/api/owner/staff/route.ts");
+    const bad = [];
+    for (const r of ["manager", "tablet"]) {
+      const keys = capsForRole(r).filter((c) => c.perPerson).map((c) => c.key);
+      if (!keys.length) bad.push(`${r} has no per-person rows at all`);
+    }
+    // Both write routes must derive from staffCaps INSIDE their set_permissions handler, never from
+    // a hand-picked constant. That drift is what made "Delete a bill" impossible to set on one
+    // screen and fine on the other. Checked on the HANDLER, not the file: an unused import at the
+    // top would otherwise satisfy a whole-file search while the handler used something else.
+    const handlerOf = (src, file) => {
+      const i = src.indexOf('action === "set_permissions"');
+      if (i < 0) { bad.push(`${file}: no set_permissions handler found — if it moved, update this guard`); return ""; }
+      const j = src.indexOf('\n  if (action === ', i + 30);
+      // CODE ONLY. The handler's own comments name the retired constants (explaining why they are
+      // gone), and a naive search on the raw text flagged the very comment that documents the fix.
+      return src.slice(i, j > 0 ? j : i + 4000).replace(/\/\/[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    };
+    for (const [src, file] of [[adminRoute, "app/api/admin/users"], [ownerRoute, "app/api/owner/staff"]]) {
+      const h = handlerOf(src, file);
+      if (!h) continue;
+      if (!/capsForRole\(/.test(h)) bad.push(`${file}: set_permissions does not build its allow-list from capsForRole()`);
+      if (/TABLET_PERM_KEYS|MANAGER_POWER_FLAGS/.test(h)) bad.push(`${file}: set_permissions still allow-lists from a hand-picked constant`);
+    }
+    if (bad.length) fail(`per-person permissions: ${bad.join("; ")}`);
+    else ok("both write routes allow-list a person's rows from the ONE list (lib/staffCaps)");
+  }
+}
+
+// ── 13 · a waiter can never print an invoice or reopen a bill (owner's rule, 2026-08-04) ──
+{
+  const bad = [];
+  if (!WAITER_NEVER.includes("tablet_invoice")) bad.push("tablet_invoice is not on the never-list");
+  if (waiterCapValue("tablet_invoice", "on") !== "off") bad.push("a stored 'on' can still grant the invoice");
+  // and no row may offer either of them
+  for (const n of ALL_NODES) {
+    if (n.bind.t === "tablet" && WAITER_NEVER.includes(n.bind.key)) bad.push(`a row (${n.id}) offers ${n.bind.key}, which a waiter may never have`);
+    if (n.bind.t === "capTablet" && n.bind.id === "void_bills") bad.push(`a row (${n.id}) still offers a waiter the reopen-a-bill tri-state`);
+  }
+  const tabletApi = read("app/api/tablet/[...path]/route.ts");
+  if (!tabletApi.includes("WAITER_NEVER")) bad.push("the tablet API does not consult WAITER_NEVER — hiding would be the only guard");
+  // an unlisted floor capability must read ON, or a waiter is stuck with no switch to fix it
+  if (waiterCapValue("tablet_something_new", undefined) !== "on") bad.push("an unlisted waiter capability reads OFF — that is the bug that stuck 8 of 9 restaurants");
+  if (bad.length) fail(`waiter rules: ${bad.join("; ")}`);
+  else ok("a waiter can never print an invoice or reopen a bill, and an unlisted floor action stays on");
+}
+
+// ── 14 · every search synonym must name a real row ──────────────────────────
+{
+  const src = read("components/admin/AccessSearch.tsx");
+  const body = (src.match(/const SYNONYMS: Record<string, string> = \{([\s\S]*?)\n\};/) || [])[1] || "";
+  const keys = [...body.matchAll(/\n  ([a-z0-9_]+): "/g)].map((m) => m[1]);
+  const ids = new Set(ALL_NODES.map((n) => n.id));
+  const stale = keys.filter((k) => !ids.has(k));
+  if (!keys.length) fail("could not read the SYNONYMS map — if it moved, update this guard");
+  else if (stale.length) fail(`${stale.length} search synonym key(s) name a row that does not exist, so those words match nothing: ${stale.join(", ")}`);
+  else ok(`all ${keys.length} search synonyms name a real row`);
+}
+
+// ── 15 · every row must actually RENDER a control (sweep 2026-08-05) ────────
+// THE BUG THIS EXISTS TO KILL: "Put menu on maintenance" is the one row whose MAIN bind is `has`,
+// and `has` was missing from AccessTree's isBoolBind list. Control() therefore fell through every
+// branch and returned null, so the row shipped with a name, help text and NO SWITCH — an empty gap
+// where every neighbouring row has a toggle. Nothing caught it: the key was allow-listed for
+// saving (check 11), it was read by real code (check 9), and the save path worked perfectly. It
+// was simply unreachable. Check 9 asks "does this switch reach code"; this asks the other half,
+// "can a person reach this switch".
+{
+  const tree = read("components/admin/AccessTree.tsx");
+  const listed = new Set(((tree.match(/const isBoolBind = \(n: Node\) =>\s*\[([^\]]*)\]/) || [])[1] || "")
+    .split(",").map((x) => x.trim().replace(/^"|"$/g, "")).filter(Boolean));
+  // Every OTHER bind kind Control() draws by name. Keep in step with that function.
+  const drawn = new Set(["tablet", "capTablet", "choice", "limit", "list", "text", "creds", "opt"]);
+  const bad = [];
+  for (const n of ALL_NODES) {
+    if (n.leftToBuild || n.bind.t === "none") continue;              // deliberately no control
+    if (listed.has(n.bind.t) || drawn.has(n.bind.t)) continue;
+    bad.push(`${n.id} (bind "${n.bind.t}") renders no control at all`);
+  }
+  // The feature half of a two-control row is drawn by FeatureRow, which needs the same answer.
+  for (const n of ALL_NODES) {
+    if (!n.featureBind) continue;
+    if (!listed.has(n.featureBind.t) && !drawn.has(n.featureBind.t))
+      bad.push(`${n.id}'s Feature half (bind "${n.featureBind.t}") renders no control`);
+  }
+  if (bad.length) fail(`a row a person cannot reach: ${bad.join("; ")}`);
+  else ok(`all ${ALL_NODES.filter((n) => !n.leftToBuild && n.bind.t !== "none").length} switchable rows render a control someone can tap`);
+}
+
+// ── 16 · the defaults tool must see BOTH halves of a two-control row ────────
+// Aangan — the control restaurant the QA suite checks against the model's defaults — had its
+// manager Rating review FEATURE switched off while `npm run access:defaults` reported "already at
+// the factory defaults". The script read n.bind only, and every two-control row keeps half its
+// state in n.featureBind. A tool that cannot see a drift can never restore it.
+{
+  const src = read("scripts/set-access-defaults.mjs");
+  const twoControl = ALL_NODES.filter((n) => n.featureBind && !n.leftToBuild).length;
+  if (!src.includes("featureBind"))
+    fail(`the defaults script ignores featureBind, so it is blind to the Feature half of all ${twoControl} two-control rows`);
+  else ok(`the defaults tool reads both halves of all ${twoControl} two-control rows`);
+}
 
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);

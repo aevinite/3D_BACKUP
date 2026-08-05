@@ -8,9 +8,11 @@
  *
  *   left rail   photo (optional) · name · role · how complete the record is · the buttons
  *               you press daily · when they joined / were last seen
- *   right       ① what they've done  ② PERMISSIONS  ③ who they are  ④ emergency contact
- *               ⑤ the job  ⑥ pay + what has been paid  ⑦ papers  ⑧ signing in
- *               ⑨ what they did lately  ⑩ your private note  ⑪ danger zone
+ *   right       ① PERMISSIONS  ② who they are  ③ emergency contact  ④ the job
+ *               ⑤ pay + what has been paid  ⑥ papers  ⑦ signing in
+ *               ⑧ what they did lately  ⑨ your private note  ⑩ danger zone
+ *               (this list is the render order below AND docs/STAFF-PROFILE.md — it used to say
+ *                "① what they've done ② PERMISSIONS", which matched neither)
  *
  * PERMISSIONS — the rule (owner, 2026-08-01):
  *   • The rows are EXACTLY the ones Access & permissions has for that role, no others
@@ -26,7 +28,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
-import { openRestaurantPanel } from "@/components/admin/shared";
+import { openRestaurantPanel, actLabel } from "@/components/admin/shared";
 import { useScrollMemory } from "@/components/admin/useOverlayParam";
 import type { TreeState } from "@/lib/accessTree";
 import {
@@ -333,7 +335,11 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
           👁 Visit their panel
         </button>
       ) : null}
-      <a className="stp-btn" href={`/aevinite/access?restaurant=${p.restaurant_id}`}>🔑 Access &amp; permissions</a>
+      {/* ?rid=, NOT ?restaurant= — app/aevinite/access/page.tsx reads `rid`, so the old spelling
+          silently opened the FIRST restaurant in the list instead of this person's. Every other
+          link in the product (the Restaurants page, both staff panels, the owner shell) uses
+          ?rid=; this was the one that didn't. Proven live on the deployed site, 2026-08-04. */}
+      <a className="stp-btn" href={`/aevinite/access?rid=${p.restaurant_id}`}>🔑 Access &amp; permissions</a>
       <button className="stp-btn" onClick={toggleActive}>{p.active ? "⏸ Disable this login" : "▶ Enable this login"}</button>
     </div>
   );
@@ -401,7 +407,7 @@ function Permissions({ d, tree, patch, reload, flash }: Kit & { tree: TreeState 
           <p className="stp-permnote">
             <b>Default</b> means this person follows what every {ROLE_LABEL[p.role].toLowerCase()} at{" "}
             {d.restaurant?.name || "this restaurant"} gets — the bracket shows what that is, and it&apos;s set on{" "}
-            <a href={`/aevinite/access?restaurant=${p.restaurant_id}`}>Access &amp; permissions</a>. Choosing On or Off
+            <a href={`/aevinite/access?rid=${p.restaurant_id}`}>Access &amp; permissions</a>. Choosing On or Off
             applies to this person alone and takes effect on their next tap, with no re-login.
           </p>
           {groups.map((g) => (
@@ -817,7 +823,10 @@ function Activity({ d }: { d: Detail }) {
           {d.activity.map((a, i) => (
             <div key={i}>
               <time>{when(a.created_at)}</time>
-              <span>{a.detail || a.action.replace(/_/g, " ")}{a.panel ? ` · ${a.panel}` : ""}</span>
+              {/* actLabel(), like every other screen — this was the last place that hand-rolled
+                  `action.replace(/_/g," ")`, which turns an unlabelled code into "user set
+                  permissions" instead of "Changed permissions". */}
+              <span>{a.detail || actLabel(a.action)}{a.panel ? ` · ${a.panel}` : ""}</span>
             </div>
           ))}
         </div>
@@ -898,7 +907,8 @@ function Danger({ d, patch, reload, onClose, onChanged }: Kit & { onClose: () =>
               : <> and they can&apos;t sign in.</>} Everything they did is still in the books.</>
           : <>Marking someone as left records the day, stops their pay counting from it, and switches their login off —
             that is what you want when someone leaves. Deleting removes the login for good. Their past orders and bills
-            stay in the books either way.</>}
+            stay in the books either way — but a person who has been PAID can’t be deleted at all, because their salary
+            and advances are part of the books too. Mark them as left instead.</>}
       </p>
       {msg ? <div className="stp-err" style={{ marginBottom: 10 }}>{msg}</div> : null}
       <div className="stp-row">
@@ -945,7 +955,10 @@ const SaveRow = ({ busy, onSave, extra }: { busy: boolean; onSave: () => void; e
 
 // ── styling: the admin shell's own tokens, scoped to .stp-* ──────────────────
 function ProfileStyle() {
-  return <style jsx global>{`
+  // PLAIN <style href precedence>, not `<style jsx global>` — styled-jsx injects after hydration,
+  // so this whole sheet painted as raw browser defaults for a frame. Same rule as the Access page.
+  // Do not convert this back. (2026-08-04)
+  return <style href="adm-staff-profile" precedence="default">{`
   .stp-scrim { position:fixed; inset:0; background:rgba(2,6,16,.72); backdrop-filter:blur(3px); z-index:1000; animation:stpFade .16s ease-out; }
   /* NO padding on the scroller. The sheet's own margin gives the gap at the top, so the
      sticky header can pin flush to the viewport: with padding here, the header pinned 18px

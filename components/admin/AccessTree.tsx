@@ -20,6 +20,7 @@ import {
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
 import { useToast } from "@/components/admin/toast";
+import { useAdminModal } from "@/components/admin/useAdminModal";
 import AccessSearch from "./AccessSearch";
 import RestaurantSettings, { type SettingsSection } from "./RestaurantSettings";
 import BrandingCard from "./BrandingCard";
@@ -187,8 +188,16 @@ function defaultLine(node: Node): string {
   return `By default: ${String(d)}.`;
 }
 
+// `has` BELONGS HERE (fixed 2026-08-05). It was the one boolean bind left off this list, and the
+// list feeds three things at once: whether Control() draws a switch, whether isOn() reports the
+// row's real value, and whether a leaf can become a chip. "Put menu on maintenance" is the only
+// row whose MAIN bind is `has`, so it rendered with a name, help text and NO CONTROL AT ALL —
+// an empty gap where every neighbouring row has a toggle — while isOn() answered a blanket `true`,
+// which also left its "Who may do it" child editable instead of greyed and stopped the search
+// from ever saying "needs Put menu on maintenance". The save path was already correct (HAS_IDS
+// allow-lists it), so nobody could reach a switch that would have worked.
 const isBoolBind = (n: Node) =>
-  ["feature", "setting", "module", "panel", "channel", "grant", "section", "tab", "menu", "ratingsMaster"].includes(n.bind.t);
+  ["feature", "setting", "module", "panel", "channel", "grant", "section", "tab", "menu", "ratingsMaster", "has"].includes(n.bind.t);
 
 /** Does this row read as "on"? Used for the parent gate and the section counter. A row with
  *  no switch of its own (a pure group, e.g. Format / Bill) is always "on" so its children show. */
@@ -304,7 +313,14 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
   // ONE way to land on a row, shared by the ?focus= deep link and the search bar. Opens the
   // section (and any collapsed group above the row), waits for it to exist, scrolls it to the
   // middle and rings it. Written once so the two entry points can't drift apart.
-  const jumpTo = useCallback((nodeId: string, sectionId?: string, ancestorIds: string[] = []) => {
+  // `exclusive` = this jump ARRIVED FROM OUTSIDE (a ?focus= deep link off a staff panel's
+  // "⚙ change in Access"), so the page is being presented fresh and should show that row's
+  // section and nothing else. Which sections are open is remembered per browser tab in
+  // sessionStorage, and this used only ever to ADD — so following three or four such links in a
+  // row reached "every dropdown is open" one section at a time, which is the state the owner
+  // asked to be rid of (2026-07-31). The in-page SEARCH bar deliberately does NOT pass this: the
+  // admin opened those sections themselves a moment ago and slamming them shut would be rude.
+  const jumpTo = useCallback((nodeId: string, sectionId?: string, ancestorIds: string[] = [], onMissing?: (id: string) => void, exclusive = false) => {
     // Open ONLY the section holding the row. This used to fall back to opening EVERY section when
     // no section was named ("the row may be anywhere"), so following a "change this" link from
     // anywhere else in the admin flung all six open at once and you had to close them by hand
@@ -313,7 +329,7 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
     const found = sectionId && ancestorIds.length ? { sectionId, ancestorIds } : locateNode(nodeId);
     const sec = found?.sectionId ?? sectionId;
     const anc = found?.ancestorIds ?? ancestorIds;
-    if (sec) setOpenSec((s) => ({ ...s, [sec]: true }));
+    if (sec) setOpenSec((s) => (exclusive ? { [sec]: true } : { ...s, [sec]: true }));
     ancestorIds = anc;
     if (ancestorIds.length) {
       setOpenNode((s) => { const n = { ...s }; for (const id of ancestorIds) n[id] = true; return n; });
@@ -322,7 +338,9 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
     const locate = () => {
       const el = document.querySelector<HTMLElement>(`[data-node="${CSS.escape(nodeId)}"]`);
       if (!el && tries++ < 14) return void setTimeout(locate, 120);
-      if (!el) return;
+      // A jump that finds nothing used to `return` in silence, which is how a "⚙ change in Access"
+      // link from a staff panel ended in the admin staring at an unchanged page. Say it instead.
+      if (!el) return void onMissing?.(nodeId);
       el.scrollIntoView({ behavior: "smooth", block: "center" });
       setFlashId(nodeId);
       setTimeout(() => setFlashId(""), 2200);
@@ -387,17 +405,32 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
     focusDone.current = true;
     const hit = ALL_NODES.find((n) => {
       const b: any = n.bind;
-      return n.id === key || b.key === key || b.flag === key || (b.t === "module" && `${b.key}_allowed` === key);
+      const fb: any = n.featureBind;
+      return n.id === key || b.key === key || b.flag === key || (b.t === "module" && `${b.key}_allowed` === key)
+        || b.id === key || (fb && (fb.key === key || fb.id === key));
     });
-    if (hit) jumpTo(hit.id);          // jumpTo looks the section up itself — see locateNode
+    // NO MATCH IS A REAL ANSWER, and it has to be said out loud (2026-08-04). The staff panels
+    // send "⚙ change in Access" links carrying a storage key; a key with no row here — because the
+    // capability is permanent, or is one a role can never be given — used to land the admin on an
+    // unchanged page with nothing highlighted and no explanation. That is exactly what happened
+    // with ?focus=tablet_mark_paid before this change: the waiter panel offered the link and the
+    // switch did not exist.
+    if (hit) jumpTo(hit.id, undefined, [], () => setHint(`Couldn’t open “${hit.name}” — it isn’t on this screen for this restaurant.`), true);
+    else setHint(`There is no switch for “${key}” on this screen. It is either permanent for whoever’s panel owns it, or it is a thing that role can never be given — nothing to change here.`);
   }, [st, jumpTo]);
 
+  // THE CSS SHIPS BEFORE THE DATA (2026-08-04). Converting this to a plain <style> was only half
+  // the fix: the tree renders nothing until its fetch resolves, so its stylesheet was not in the
+  // document at all while "Loading…" was on screen — it arrived in the same commit as the boxes,
+  // which is the flash under another name. Rendered above the early returns, the browser has the
+  // rules parsed before the first row exists. Verified on the built app: `.at-box` now appears in
+  // the loading state's HTML, where it used to be absent.
+  // No stylesheet render here either — the page owns it (see the note on TreeStyle's caller).
   if (err && !st) return <div className="acc2-warn"><Icon n="info" s={17} /><div>{err}</div></div>;
   if (!st) return <div className="adm-muted" style={{ padding: 28, textAlign: "center" }}>Loading…</div>;
 
   return (
     <>
-      <TreeStyle />
       <div className="at-head">
         <AccessSearch
           isOn={(n) => isOn(n, st)}
@@ -412,7 +445,7 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
               return;
             }
             setHint("");
-            jumpTo(nodeId, sectionId, ancestorIds);
+            jumpTo(nodeId, sectionId, ancestorIds, () => setHint("That setting isn’t on the page for this restaurant — its feature may be off."));
           }}
         />
         <span className={`acc2-save ${saving}`}>
@@ -458,7 +491,21 @@ function SectionCard({ sec, st, open, onToggle, openNode, setOpenNode, set, onIn
 }) {
   // The counter counts only rows that HAVE a switch at this level — a group header
   // (Format, Bill, the three role folders) isn't a thing you can turn on.
-  const switchable = sec.children.filter((n) => n.bind.t !== "none" && !n.leftToBuild);
+  // COUNT THROUGH A FOLDER, not just the top row (fixed 2026-08-05). This looked only at
+  // sec.children, and Manager and Owner have nothing BUT folders at that level — "Manager's menu",
+  // "Permission for manager", "Owner's menu" are all `none` groups — so those two sections showed
+  // no count at all while Main features, Extra features and Waiter each wore one. Three chips for
+  // five sections reads as two broken headers. A folder isn't a thing you can switch, so it still
+  // doesn't count itself; we look inside it for the rows that are.
+  const switchable: Node[] = [];
+  const collect = (nodes: Node[]) => {
+    for (const n of nodes) {
+      if (n.leftToBuild) continue;
+      if (n.bind.t !== "none") switchable.push(n);
+      else if (n.children?.length) collect(n.children);   // a pure group — look inside it
+    }
+  };
+  collect(sec.children);
   const on = switchable.filter((n) => isOn(n, st)).length;
   return (
     <section className="adm-card acc2-sect" id={`sec-${sec.id}`}>
@@ -582,17 +629,17 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
           tooltip. Now each option is a row: radio, its name, and what it actually does. */}
       {stacked ? <ChoiceRows node={node} value={v} set={set} /> : null}
 
-      {/* This row IS an editor (the cards that moved off the restaurant-detail page). It sits
-          under the row's own text, inside the same box, so the switch that decides whether the
-          feature applies and the settings that configure it are read as one thing. */}
-      {node.panel && expanded ? <EmbeddedPanel what={node.panel} preview={node.preview} /> : null}
-
       {/* A dropdown that is open only because its feature is OFF is READ-ONLY (owner, 2026-08-01:
           "you could be able to see the bottom even if the feature is off… if you try to do stuff,
           it should say you have to on the feature"). You can read what is in there — check which
           key is stored, see how the bill is laid out — but a tap tells you what to turn on first
           instead of silently saving into a feature nobody has. */}
-      {showKids && expanded ? (
+      {/* An OFF row's EMBEDDED EDITOR is inside the locked wrapper too (2026-08-04). It used to
+          render above it, outside the capture — so with "Dining session and location" off (the
+          default for every restaurant) its whole settings card, geofence and OTP included, saved
+          normally while the plain sub-rows beside it refused a tap saying "switch this on first".
+          One row, two answers. */}
+      {(showKids || (node.panel && expanded)) && expanded ? (
         <div className={`at-box-k ${unlocked ? "" : "at-locked"}`}
           onClickCapture={unlocked ? undefined : (e) => {
             const el = e.target as HTMLElement;
@@ -602,7 +649,11 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
             const box = (e.currentTarget as HTMLElement).closest(".at-box") as HTMLElement | null;
             if (box) { box.classList.remove("at-nudge"); void box.offsetWidth; box.classList.add("at-nudge"); }
           }}>
-          <Kids nodes={kids} st={st} depth={depth + 1} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} />
+          {/* This row IS an editor (the cards that moved off the restaurant-detail page). It sits
+              under the row's own text, inside the same box, so the switch that decides whether the
+              feature applies and the settings that configure it are read as one thing. */}
+          {node.panel ? <EmbeddedPanel what={node.panel} preview={node.preview} /> : null}
+          {showKids ? <Kids nodes={kids} st={st} depth={depth + 1} openNode={openNode} setOpenNode={setOpenNode} set={set} onInfo={onInfo} flashId={flashId} /> : null}
         </div>
       ) : null}
     </div>
@@ -953,7 +1004,10 @@ function CredsControl({ node, hint, set }: { node: Node; hint: string; set: (n: 
       <div className="at-creds-state">
         {stored ? (
           <>
-            <span className="at-creds-ok">Connected · key ending {hint.replace(/[^0-9a-z]/gi, "").slice(-4)}</span>
+            {/* The server already sent exactly the last four ("••••1234"); stripping non-alphanumerics
+                and re-slicing shifted the answer for any key ending in a dash or underscore, so the
+                screen claimed an "ending" the key doesn't have. Take the tail of the hint as given. */}
+            <span className="at-creds-ok">Connected · key ending {hint.slice(-4)}</span>
             <button className="at-creds-rm" type="button"
               onClick={() => { if (confirm(`Remove the ${node.name}? Orders from that channel stop arriving until a new key is saved.`)) set(node, null); }}>
               Remove
@@ -966,13 +1020,14 @@ function CredsControl({ node, hint, set }: { node: Node; hint: string; set: (n: 
 }
 
 function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
-  // Registered with nothing to peel: this is a plain admin-desktop popover, and the admin
-  // console is not one of the panels the back-button manager governs.
-  useEffect(() => {
-    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    window.addEventListener("keydown", esc);
-    return () => window.removeEventListener("keydown", esc);
-  }, [onClose]);
+  // REGISTERED like every other admin overlay (2026-08-04). The old note here said "the admin
+  // console is not one of the panels the back-button manager governs" — but AdminShell itself
+  // registers its phone nav drawer with useBackClose, so the manager IS live in this area. This
+  // sheet was the one overlay a phone's Back button left the PAGE from instead of closing: you
+  // tapped ⓘ to read what a setting does and Back threw you off the screen.
+  // useAdminModal gives the whole set in one line — Back, Escape, focus trap, scroll lock.
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useAdminModal(sheetRef, `access-info-${node.id}`, onClose);
   // The pictures. Every one that LOADS is shown; a name with no file drops out via onError. When
   // nothing is left the sheet says so, rather than reaching for a photo of somewhere else.
   const [broken, setBroken] = useState<Record<string, boolean>>({});
@@ -982,8 +1037,8 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
   const kids = node.children || [];
   const def = defaultLine(node);
   return (
-    <div className="at-sheet" role="dialog" aria-label={node.name} onClick={onClose}>
-      <div className="at-sheet-b" onClick={(e) => e.stopPropagation()}>
+    <div className="at-sheet" role="dialog" aria-modal="true" aria-label={node.name} onClick={onClose}>
+      <div className="at-sheet-b" ref={sheetRef} onClick={(e) => e.stopPropagation()}>
         <h3>{node.name}</h3>
         {path ? <div className="at-sheet-path">{path}</div> : null}
         {/* Real screenshots of the places this setting shows up, with the control ringed. The
@@ -1039,8 +1094,14 @@ function DeepHelp({ node, depth }: { node: Node; depth: number }) {
   );
 }
 
-function TreeStyle() {
-  return <style jsx global>{`
+export function TreeStyle() {
+  // PLAIN <style href precedence>, not `<style jsx global>` (2026-08-04). The Access PAGE was
+  // converted for exactly this reason and left a comment saying "do not convert this back to
+  // styled-jsx" — but the component that draws almost everything ON that page still injected its
+  // ~350 lines from JavaScript after hydration. Proven: `.at-box` was absent from the server HTML
+  // of the deployed screen while the page's own `.acc2-head` was present, so the tree painted
+  // unboxed and uncoloured for a frame. Do not convert this back either.
+  return <style href="adm-access-tree" precedence="default">{`
   /* HOVER FOLLOWS THE BOX'S OWN COLOUR. The owner's "make it red" (2026-07-31) was about the
      PRIMARY FEATURE BOX's border — the outline round "Main features" — not about hover, and he
      corrected this the same day: "there was not a hover colour, the colour was for the primary
