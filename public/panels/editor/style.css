@@ -2653,6 +2653,19 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    scrolls again (an honest fallback beats 8px type in a rush). */
 .to-quick .to-list { padding-top: 9px; }
 .to-list.qo-noscroll { overflow: hidden; }
+/* WHEN IT DOES HAVE TO SCROLL, SAY SO (2026-08-05). On the owner's A35, tapping the "0 items"
+   bar to check the order leaves the browse block ~125px tall against ~159px of cards, so the
+   row at the boundary was cut straight through the middle of its own text and butted against
+   the white edge of the order sheet — it read as a rendering fault, not as "scroll for more".
+   The honest fallback (let it scroll) is right; it just had no affordance. Fading the last
+   few pixels is that affordance, and it removes the sliced-text look at the same time. Only
+   in quick mode, and only while `.qo-noscroll` is off — i.e. exactly when there IS more. */
+.to-quick .to-list:not(.qo-noscroll) {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent 100%);
+  scroll-padding-bottom: 12px;
+}
+.to-quick .to-list:not(.qo-noscroll) .qo-grid { padding-bottom: 14px; }
 .qo-grid.qo-fit { align-content: start; margin-bottom: 0; }
 
 /* level 1 — the category cards. WORDS ONLY: the name, its dish count, and the category's

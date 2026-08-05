@@ -2959,6 +2959,12 @@ let _billHistSeq = 0, _billHistTimer = null;
 function loadBillHistory(q, type) {
   clearTimeout(_billHistTimer);
   if (!q) { state.billHistRows = []; return; } // cleared search → drop server results, fall back to local
+  // "Amount ₹" HAS NO SERVER-SIDE MATCH, so asking for one is a read that pays for nothing
+  // (2026-08-05). The route resolves inv / bill / table / cust / date; an unknown type left the
+  // query with only its window filter and handed back up to 500 rows — every one of which the
+  // panel already holds — on every debounced keystroke. The client's own matchB() does the
+  // amount filtering, so the honest thing is not to ask.
+  if (type === "amount") { state.billHistRows = []; return; }
   _billHistTimer = setTimeout(async () => {
     const seq = ++_billHistSeq;
     try {
@@ -3185,7 +3191,11 @@ function openBillModal(key) {
   const g = (key || "").startsWith("solo:")
     ? pool.filter((o) => o.id === key.slice(5))
     : pool.filter((o) => o.session_id === key);
-  if (!g.length) return;
+  // A card that is on screen and tappable must always answer. This used to `return` in
+  // silence, so a record whose orders had aged out of every pool looked like a dead button —
+  // indistinguishable from a broken one, and leaving no trace to debug. Its sibling
+  // printBillFromKey has always said so out loud; now both do.
+  if (!g.length) { toast("Couldn't load that bill — refresh and try again", "err"); return; }
   const o0 = g[0];
   const m = billMath(g);
   const pct = Math.round(m.rate * 10000) / 100; // e.g. 5
@@ -3245,6 +3255,15 @@ function openBillModal(key) {
         const invoiced2 = !!sid2 && o0.invoice_no != null && !o0.invoice_voided;
         const anyUnpaid2 = liveOrders.some((o) => o.payment_status !== "paid");
         const acts = [];
+        // A SETTLED BILL WITH NO INVOICE MUST STILL BE ABLE TO GET ONE (2026-08-05).
+        // markTablePaid generates the invoice best-effort AFTER taking the money, and
+        // generateInvoice returns early when the "who is this bill for?" sheet is dismissed —
+        // which a manager does whenever the guest is already walking out. Its comment promised
+        // "it stays generable from the bill", but 🧾 Generate invoice was rendered in exactly
+        // ONE place in the panel: the LIVE card, and only while the bill was UNPAID. A paid
+        // bill leaves Live the same instant, so the promise had nowhere to land and the sale
+        // ended up with no tax invoice and no button anywhere that could issue one.
+        if (sid2 && o0.invoice_no == null) acts.push(`<button class="btn ghost" data-gen-invoice="${esc(sid2)}">🧾 Generate invoice</button>`);
         // Reopen: only an ISSUED invoice can be reopened (the server enforces the window +
         // permission; voiding is recorded). A voided/never-issued bill has nothing to reopen.
         if (invoiced2) acts.push(`<button class="btn ghost" data-void-invoice="${esc(sid2)}">↩ Reopen bill</button>`);
@@ -3276,6 +3295,8 @@ function openBillModal(key) {
   // The bill's money actions (2026-08-03) — the same voidInvoice / creditNote / discount
   // flows the Live card and the floor detail run, wired here because the modal lives on
   // document.body, outside the #editor delegated binders.
+  const genBtn = wrap.querySelector("[data-gen-invoice]");
+  if (genBtn) genBtn.onclick = async () => { close(); await generateInvoice(genBtn.dataset.genInvoice); };
   const voidBtn = wrap.querySelector("[data-void-invoice]");
   if (voidBtn) voidBtn.onclick = async () => { close(); await voidInvoice(voidBtn.dataset.voidInvoice); };
   const cnBtn = wrap.querySelector("[data-credit-note]");
@@ -5418,17 +5439,26 @@ function renderEditor() {
         const amount = Number(btn.dataset.khataAmount) || 0;
         const picked = await openPaymentMethodModal(amount, `Collect all from ${btn.dataset.khataName}`);
         if (!picked) return;
-        try {
-          for (const bl of cst.bills) {
-            const payload = { method: picked.method, note: picked.note };
-            if (bl.session_id) payload.session_id = bl.session_id; else payload.order_id = bl.key;
-            await api("POST", "/khata/pay", payload);
-          }
-          toast(`Collected ${inr(amount)} from ${btn.dataset.khataName} 📒→💳`, "ok");
-          state.khataLoadedAt = 0;
-          await loadKhataBook();
-          loadSessions();
-        } catch (e) { toast("Couldn't collect: " + e.message, "err"); }
+        // REPORT WHAT ACTUALLY HAPPENED, NEVER "it all failed" AFTER TAKING SOME OF THE MONEY
+        // (2026-08-05). One try/catch around the whole loop meant a failure on bill 4 of 5
+        // toasted "Couldn't collect" although bills 1–3 were already settled — and the catch
+        // never refreshed the book, so the screen kept showing the FULL amount as outstanding.
+        // A manager reading that either takes the money twice or writes off money they took.
+        // Each bill now stands on its own and the book is reloaded either way, exactly as
+        // payOrdersWithMethod has always done for a table.
+        let okN = 0, failN = 0, got = 0, lastErr = "";
+        for (const bl of cst.bills) {
+          const payload = { method: picked.method, note: picked.note };
+          if (bl.session_id) payload.session_id = bl.session_id; else payload.order_id = bl.key;
+          try { await api("POST", "/khata/pay", payload); okN++; got += Number(bl.amount) || 0; }
+          catch (e) { failN++; lastErr = (e && e.message) || String(e); }
+        }
+        if (okN && !failN) toast(`Collected ${inr(got)} from ${btn.dataset.khataName} 📒→💳`, "ok");
+        else if (okN) toast(`Collected ${inr(got)} — ${failN} bill${failN === 1 ? "" : "s"} could NOT be collected (${lastErr}). The rest is still owed.`, "err");
+        else toast("Couldn't collect: " + lastErr, "err");
+        state.khataLoadedAt = 0;
+        await loadKhataBook();
+        loadSessions();
       };
     });
     // Pay Later search — filter the people list client-side (small list; no refetch). Keep
@@ -9469,27 +9499,33 @@ function openTakeOrder(table, rerender, opts = {}) {
       }).join("")
     : `<div class="muted" style="padding:14px 4px">No dishes yet — tap a dish to add it.</div>`;
   // Estimate INCLUDES tax so the "≈ ₹" staff quote matches the server's bill.
-  // Parcel (takeaway) is stored & charged at the item subtotal — same as every other
-  // Platform order (Zomato/Swiggy rows carry no tax line); dine-in keeps the tax-inclusive quote.
+  //
+  // A PARCEL IS PRICED EXACTLY LIKE A TABLE — no special case (2026-08-05). It used to be
+  // quoted here at the bare item subtotal, on the old rule that "a parcel is stored & charged
+  // at the item subtotal, like every other Platform order". That rule ended on 2026-08-02,
+  // when the /parcel route started storing `splitBill(picked, parcelSet, parcelDisc).total` —
+  // subtotal + tax — precisely so the record equals the paper. The quote was never moved with
+  // it, so the counter screen said ₹250 while the parcel tile a second later said ₹262.50 and
+  // the customer was charged the second number. One formula for both, so they cannot drift
+  // again: whatever the server would charge is what this footer says.
   const cartSub = () => cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0);
-  // The cart's taxable/untaxed split (mig 270), by the SAME rule the server prices it by.
-  // A parcel carries no tax line at all, so its whole value is the discountable base — the
-  // split only means something for a dine-in ticket.
+  // The cart's taxable/untaxed split (mig 270), by the SAME rule the server prices it by —
+  // for a parcel too, since lib/tax.ts splitBill() is what prices both.
   const cartSplit = () => splitCartLines(cart, state.data.settings);
   // The held discount can never be worth more than the TAXABLE food: emptying the cart after
   // typing ₹200 off must not leave ₹200 of discount attached to a ₹50 order, and it may never
   // eat into an MRP line, whose price is final (same cap the server applies).
   // Same cap rule as billMath / mig 272: with tax, only the taxable base may be discounted;
-  // with no tax, everything except the locked MRP lines. A parcel carries no tax line at all.
+  // with no tax, everything except the locked MRP lines. The parcel route applies the very
+  // same cap (`splitBill(...).discountBase`), so offering a bigger one here only produced a
+  // refusal at the last tap — the failure the QO/P destination gates exist to remove.
   const discCap = () => {
-    if (parcel) return cartSub();
     const sp = cartSplit();
     const rate = (taxModel(state.data.settings) || {}).rate || 0;
     return rate > 0 ? sp.taxableBase : Math.max(0, Math.round((sp.taxableBase + sp.nontax - sp.mrpAmount) * 100) / 100);
   };
   const discOf = () => Math.round(Math.min(Math.max(discAmount, 0), discCap()) * 100) / 100;
   const estTotal = () => {
-    if (parcel) return inr(Math.max(0, cartSub() - discOf()));
     const sp = cartSplit();
     const rate = (taxModel(state.data.settings) || {}).rate || 0;
     const d = discOf();
@@ -9526,7 +9562,7 @@ function openTakeOrder(table, rerender, opts = {}) {
           <textarea class="to-note" rows="2" placeholder="Note for the kitchen (optional)"></textarea>
         </div>
         <div class="to-foot">
-          <div class="to-total">${parcel ? "" : "≈ "}<b>${estTotal()}</b><span class="to-disc-tag" hidden></span></div>
+          <div class="to-total">≈ <b>${estTotal()}</b><span class="to-disc-tag" hidden></span></div>
           ${canDiscount() ? `<button class="btn to-disc-btn" type="button" title="Give a discount on this order">− Discount</button>` : ""}
           ${quick
             ? `<button class="qo-cartbtn" type="button" aria-expanded="false" title="Show / hide the order you're building"><b class="qo-cartn">0</b> <span class="qo-cartl">items</span> <span class="qo-cartcar" aria-hidden="true">▴</span></button><button class="btn primary to-send qo-place" ${cart.length ? "" : "disabled"}>Place order →</button>`
@@ -9705,8 +9741,19 @@ function openTakeOrder(table, rerender, opts = {}) {
     const els = [...grid.querySelectorAll(".qo-cat-n, .to-dish-t")];
     if (!els.length) return;
     els.forEach((e) => (e.style.fontSize = ""));
+    // A SINGLE WORD IS NEVER BROKEN IN HALF — it shrinks instead (2026-08-05). These names
+    // carry `overflow-wrap: anywhere`, which is what stops a long name overflowing its tile,
+    // but it also lets the browser split a word that merely doesn't fit the line: "Sandwiches"
+    // came out as "Sandwiche / s" on the owner's phone. Two lines are by design; a word cut
+    // with no hyphen is not — it just reads as a rendering fault. So a one-word name that has
+    // wrapped counts as "over" and goes through the same shrink loop below as a clipped one.
+    const oneWord = (e) => !/\s/.test((e.textContent || "").trim());
+    const wrapped = (e) => {
+      const lh = parseFloat(getComputedStyle(e).lineHeight) || 0;
+      return lh > 0 && e.scrollHeight > lh * 1.5;
+    };
     for (let pass = 0; pass < 3; pass++) {
-      const over = els.filter((e) => e.scrollHeight > e.clientHeight + 1);
+      const over = els.filter((e) => e.scrollHeight > e.clientHeight + 1 || (oneWord(e) && wrapped(e)));
       if (!over.length) return;
       over.forEach((e) => {
         const cur = parseFloat(e.style.fontSize || getComputedStyle(e).fontSize) || 13;
@@ -9776,7 +9823,15 @@ function openTakeOrder(table, rerender, opts = {}) {
       <button class="btn primary to-te-done">Done</button>
     </div></div>`);
     wrap.querySelector(".to-modal").appendChild(ov);
-    const done = () => { ov.remove(); dedupe(); paintCart(); paintList(); };
+    // THE PHONE'S BACK BUTTON MUST CLOSE THIS SHEET, NOT THE WHOLE ORDER (2026-08-05).
+    // The panel-wide adapter (wireOverlayBack) cannot see this one twice over: the class is
+    // not in its selector list, and it observes document.body WITHOUT `subtree`, while this
+    // overlay is appended inside `.to-modal`. So the top registered layer was the take-order
+    // modal itself — one Back press closed the whole builder and a nine-dish cart went with
+    // it. Registered explicitly through the sanctioned LFH_BACK API, exactly as pricePrompt
+    // and allergyPrompt in this same file do; `off()` runs on every close path.
+    let backOff = window.LFH_BACK ? LFH_BACK.layer("editor-tile-edit", () => done()) : null;
+    const done = () => { if (backOff) { const f = backOff; backOff = null; f(); } ov.remove(); dedupe(); paintCart(); paintList(); };
     ov.querySelector(".to-te-x").onclick = done;
     ov.querySelector(".to-te-done").onclick = done;
     ov.onclick = (e) => { if (e.target === ov) done(); };
@@ -9941,12 +9996,14 @@ function openTakeOrder(table, rerender, opts = {}) {
   // of the cart: pre-tax subtotal, this restaurant's rate, and the amount already held.
   const discBtn = wrap.querySelector(".to-disc-btn");
   if (discBtn) discBtn.onclick = () => {
-    const rate = parcel ? 0 : ((taxModel(state.data.settings) || {}).rate || 0);
-    // The synthetic bill now carries the SPLIT, not just a subtotal (mig 270), so the modal
-    // caps on the taxable part and refuses out loud when someone tries to discount an MRP
-    // line — the same answer the server would give a moment later, given before the tap
-    // instead of after it. A parcel has no tax and no split: its whole value is taxable base.
-    const sp = parcel ? { taxableBase: cartSub(), nontax: 0, mrpAmount: 0 } : cartSplit();
+    const rate = (taxModel(state.data.settings) || {}).rate || 0;
+    // The synthetic bill carries the SPLIT, not just a subtotal (mig 270), so the modal caps
+    // on the taxable part and refuses out loud when someone tries to discount an MRP line —
+    // the same answer the server would give a moment later, given before the tap instead of
+    // after it. A PARCEL GETS THE SAME SPLIT: it is priced by the same splitBill() a table is
+    // (see estTotal above), so pretending its whole value was discountable let a manager take
+    // ₹250 off a bill with a ₹100 sealed bottle in it and only learn at the last tap.
+    const sp = cartSplit();
     const cap = discCap();
     openDiscountModal(
       { discount: discOf(), discount_note: discNote },
@@ -10039,18 +10096,39 @@ function openTakeOrder(table, rerender, opts = {}) {
       const payNow = payMode === "now";
       // Quick mode already asked the real question ("where does it go?") and was answered
       // with Parcel — asking again would be the second dialog on one decision.
-      if (!quick && !(await confirmDialog(payNow ? "Take payment now and send this parcel to the kitchen?" : "Send this parcel to the kitchen (pay on pickup)?", payNow ? "Pay & send" : "Send"))) return;
+      // "PAY NOW" ASKS HOW, IT DOES NOT ASSUME CASH (2026-08-05 — the third place this same
+      // fault lived, after the floor's parcel tile and the Platform board's Collect button).
+      // It posted method: "cash" unconditionally, so a parcel paid by UPI at the counter was
+      // booked as cash and the day's cash-vs-digital split — the one a GST audit looks at —
+      // was wrong by its whole value. The method sheet REPLACES the old yes/no confirm rather
+      // than stacking on top of it: it asks a real question and it has its own Cancel, so this
+      // is the same number of taps it always was, exactly as settling a table works.
+      // Pay-on-pickup takes no money here, so it keeps the plain confirm.
+      let payMethod = null;
+      if (payNow) {
+        const picked = await openPaymentMethodModal(Math.max(0, cartSub() - discOf()), "Take payment for this parcel", { methodOnly: true, crm: false });
+        if (!picked || picked.special) return;   // cancelled — nothing is sent
+        payMethod = picked.method;
+      } else if (!quick && !(await confirmDialog("Send this parcel to the kitchen (pay on pickup)?", "Send"))) return;
       sendBtns.forEach((b) => (b.disabled = true));
       try {
         // The discount travels WITH the order (2026-08-03). Not a follow-up POST: a second call
         // can fail on its own, or land after "Pay now & print" has already put paper in a
         // customer's hand at the undiscounted price. The server re-clamps it to the food value
         // and re-checks this role's % cap — the client's number is a request, never the ruling.
-        const r = await api("POST", "/parcel", { items, allergies, note: orderNote || null, customer: custName || null, phone: custPhone || null, paid: payNow, method: payNow ? "cash" : null, discount: discOf() || undefined, discountNote: discOf() > 0 ? (discNote || undefined) : undefined });
+        const r = await api("POST", "/parcel", { items, allergies, note: orderNote || null, customer: custName || null, phone: custPhone || null, paid: payNow, method: payMethod, discount: discOf() || undefined, discountNote: discOf() > 0 ? (discNote || undefined) : undefined });
         if (r && r.queued) { toast("Saved ✓ — the parcel will send when you're back online.", "ok"); close(); return; }
         toast(r && r.kot_no != null ? `Parcel sent! Ticket #${r.kot_no}${payNow ? " · paid" : " · pay on pickup"}` : "Parcel sent to the kitchen", "ok");
         // "Pay now & print" → a customer receipt for the counter printer (pay-on-pickup doesn't).
-        if (payNow) { try { printParcelReceipt({ kot: r && r.kot_no, phone: custPhone, bill_no: r && r.bill_no, invoice_no: r && r.invoice_no, invoice_at: r && r.invoice_at, created_at: r && r.created_at, items: cart.map((c) => ({ title: c.title, qty: c.qty, price: c.price })), total: cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0), customer: custName, method: "cash", paid: true }); } catch {} }
+        //
+        // THE DISCOUNT HAS TO TRAVEL ONTO THE PAPER (2026-08-05). This bag was built from the
+        // cart alone and carried no discount, so printParcelReceipt read `o.discount` as
+        // undefined, priced the full lines and added tax on all of them: a ₹500 parcel with
+        // ₹50 off was charged ₹472.50 and the customer was handed a bill saying ₹525. The
+        // parcel TILE's Print button never had this problem because it passes the stored row.
+        // `total` is the server's own figure when it answered, so the fallback for a legacy
+        // row with unpriced lines is the truth too, not the pre-discount sum.
+        if (payNow) { try { printParcelReceipt({ kot: r && r.kot_no, phone: custPhone, bill_no: r && r.bill_no, invoice_no: r && r.invoice_no, invoice_at: r && r.invoice_at, created_at: r && r.created_at, items: cart.map((c) => ({ title: c.title, qty: c.qty, price: c.price })), total: (r && r.total != null) ? r.total : cart.reduce((s, c) => s + (parseFloat(c.price) || 0) * c.qty, 0), discount: discOf() || 0, discount_note: discOf() > 0 ? (discNote || null) : null, customer: custName, method: payMethod || "cash", paid: true }); } catch {} }
         close();
         try { loadPlatform(); } catch {}
         if (rerender) rerender();
@@ -10643,14 +10721,22 @@ function printTicketHtml(html) {
     }, 250);
   } catch (e) { /* printing must NEVER break the panel */ }
 }
-// Reprint ONE order's kitchen ticket.
+// Reprint ONE order's kitchen ticket, on THIS device.
+//
+// It carries the SAME big `*** Reprint · Duplicate ***` banner the kitchen's copy does
+// (owner, 2026-08-04: "every panel's reprint looks identical"). It used to pass no `reprint`
+// flag and only whisper the word in the small header line, so the two reprint paths in this
+// one panel produced two different pieces of paper — and on a rushed pass the quiet one is
+// exactly the ticket a kitchen cooks a second time. The head goes back to the plain
+// "KITCHEN TICKET" because the banner above it now says it, loudly.
 function printKotTicket(o) {
   try {
     const allerg = Array.isArray(o.allergies) && o.allergies.length ? `<div class="al">⚠ AVOID: ${esc(o.allergies.join(", "))}</div>` : "";
     printTicketHtml(kotTicketHtml({
       title: `KOT ${o.kot_no != null ? o.kot_no : "—"}`,
       rname: (state.data.restaurant || {}).name || "Kitchen",
-      head: "KITCHEN TICKET · REPRINT",
+      head: "KITCHEN TICKET",
+      reprint: true,
       kot: o.kot_no != null ? o.kot_no : "—",
       tableLabel: tablePrintLabel(o.table_number),
       when: o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
@@ -12186,10 +12272,24 @@ function bindPlatform() {
     try { await api("POST", `/platform/${b.dataset.platId}/status`, { status: b.dataset.platAct }); await loadPlatform(); }
     catch (e) { toast("Failed: " + e.message, "err"); b.disabled = false; }
   });
-  // Collect payment for an unpaid parcel (pay-on-pickup) — settles it, flips the pill to PAID.
+  // Collect payment for an unpaid parcel / website order (pay-on-pickup) — settles it, flips
+  // the pill to PAID.
+  //
+  // IT ASKS HOW THEY PAID (2026-08-05). This posted { method: "cash" } unconditionally — the
+  // very fault fixed on the floor's parcel tile on 2026-08-04, which this sibling button never
+  // got. Every parcel collected here by UPI, card or wallet was booked as CASH, so the day's
+  // payment-method breakdown was wrong by their whole value, and cash-vs-digital is exactly
+  // the split a GST audit looks at. Same sheet, same options as the tile: methodOnly (this
+  // endpoint takes no tip and no split) and crm:false (the counter already took the name).
   document.querySelectorAll("[data-plat-pay]").forEach((b) => b.onclick = async () => {
+    const id = b.dataset.platPay;
+    const o = (state.data.platform || []).find((x) => String(x.id) === String(id));
+    // Say so rather than opening a sheet for ₹0 — the same refusal the Print button gives.
+    if (!o) { toast("That order is no longer on the board", "err"); return; }
     b.disabled = true;
-    try { await api("POST", `/platform/${b.dataset.platPay}/pay`, { method: "cash" }); toast("Collected ✓", "ok"); await loadPlatform(); }
+    const picked = await openPaymentMethodModal(Number(o.total) || 0, `Collect ${o.source === "parcel" ? "parcel" : "order"}`, { methodOnly: true, crm: false });
+    if (!picked || picked.special) { b.disabled = false; return; }   // cancelled — the card stays
+    try { await api("POST", `/platform/${id}/pay`, { method: picked.method }); toast(`Collected via ${picked.method} ✓`, "ok"); await loadPlatform(); }
     catch (e) { toast("Failed: " + e.message, "err"); b.disabled = false; }
   });
 }
