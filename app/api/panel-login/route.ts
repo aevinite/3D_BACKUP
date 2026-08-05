@@ -111,7 +111,13 @@ export async function POST(req: NextRequest) {
     // restaurants' logins and a non-#1 restaurant's Log showed none of its own.
     restaurant_id: u.restaurant_id ?? null,
     device_id: deviceIdFrom(req),
-    detail: `${u.name || "(no name yet)"} logged in · user "${u.username}" · id ${u.id}`,
+    // The row already carries `actor` (the name) and `actor_id` (the uuid), and the log line
+    // renders as "Signed in · <actor> · <detail>". Repeating both here made every sign-in read
+    // "Signed in · diagm1 · diagm1 logged in · user \"diagm1\" · id bc422e5d-…" — the same name
+    // three times, ending in a uuid chopped mid-string. The id is in actor_id, which the
+    // click-through detail card shows in full under "Log id"/"Done by" (T15 sweep, 2026-08-05).
+    // Keep only what the name does NOT already say: the username, when it differs.
+    detail: u.name && u.name !== u.username ? `username "${u.username}"` : null,
   });
   // Show the one-time setup card until the user has confirmed their profile ONCE
   // (even if the admin pre-filled everything). After that it never auto-opens.
