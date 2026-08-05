@@ -262,6 +262,11 @@
     // THE ROWS MUST FOOT TO THE TOTAL (see billRows). Every figure below comes from there, so the
     // paper and the manager's screen quote the same whole-rupee numbers and they reconcile.
     var R = billRows(d);
+    // What the cancelled bill WOULD have come to — added straight from the printed lines, so
+    // the "Ordered value" row and the item rows above it are the same arithmetic.
+    var orderedValue = (d.lines || []).reduce(function (a, i) {
+      return a + (parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1);
+    }, 0);
     var roundBlock = R.roundOff !== 0
       ? '<div class="t"><span>Round off</span><span>' + (R.roundOff < 0 ? "− " : "+ ") + inr(Math.abs(R.roundOff)) + "</span></div>"
       : "";
@@ -281,7 +286,7 @@
         + (d.custPhone ? '<div class="kv"><span>Mobile</span><b>' + esc(d.custPhone) + "</b></div>" : "")
       : "";
 
-    return '<!doctype html><title>Tax Invoice — ' + name + "</title>\n"
+    return '<!doctype html><title>' + (d.cancelled ? "Cancelled Bill" : "Tax Invoice") + " — " + name + "</title>\n"
 + "<style>\n"
 + "  /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS driver\n"
 + "     chain (2026-07-21, see aangan-thermal-printer-setup memory). Three rules:\n"
@@ -315,6 +320,10 @@
 + "  .sub{text-align:center;font-size:11px;line-height:1.5}\n"
 + "  .kind{border-top:1px solid #000;border-bottom:1px solid #000;margin:9px 0 8px;padding:4px 0;\n"
 + "        text-align:center;font-size:11px;letter-spacing:.24em;text-transform:uppercase}\n"
+// The cancelled band — same one ink, same double border the KOT's DUPLICATE banner uses, so
+// a voided bill is as unmistakable on paper as a reprinted ticket is.
++ "  .vband{text-align:center;font-weight:700;font-size:15px;letter-spacing:1.5px;\n"
++ "         border:3px double #000;padding:5px 2px;margin:8px 0 2px;text-transform:uppercase}\n"
 + "  .kv{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:1.5px 0}\n"
 + "  .kv span:first-child{font-size:11px;letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}\n"
 + "  .kv b{font-weight:400;text-align:right}\n"
@@ -367,7 +376,9 @@
 + (d.logo ? '<img class="logo" src="' + esc(d.logo) + '" onerror="this.style.display=\'none\'"/>' : "")
 + "\n<h2>" + name + "</h2>\n"
 + '<div class="sub">' + (addr ? addr + "<br/>" : "") + (phone ? "Ph " + phone : "") + (phone && gstin ? "<br/>" : "") + (gstin ? "GSTIN " + gstin : "") + "</div>\n"
-+ '<div class="kind">Tax Invoice</div>\n'
+// A cancelled bill says so, in a band nobody can miss, and is NOT called a tax invoice.
++ (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
++ '<div class="kind">' + (d.cancelled ? "Cancelled Bill" : "Tax Invoice") + "</div>\n"
 + (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
 + (d.billNo !== "" && d.billNo != null ? '<div class="kv"><span>Bill no</span><b>#' + esc(d.billNo) + "</b></div>" : "") + "\n"
 + (d.parcel ? '<div class="kv"><span>Parcel</span><b></b></div>' : '<div class="kv"><span>Table</span><b>' + esc(d.tableDisp) + "</b></div>") + "\n"
@@ -378,15 +389,25 @@
 + "<colgroup><col><col style=\"width:calc(" + widest.qty + "ch + 8px)\"><col style=\"width:calc(" + widest.rate + "ch + 11px)\"><col style=\"width:calc(" + widest.amt + "ch + 11px)\"></colgroup>\n"
 + '<thead><tr><th>Item</th><th class="c">Qty</th><th class="r">Rate</th><th class="r">Amt</th></tr></thead><tbody>' + rows + "</tbody></table>\n"
 + '<div class="totals">\n'
-+ '  <div class="t"><span>' + subLabel + "</span><span>" + inr(R.subtotal) + "</span></div>\n"
-+ "  " + discBlock + "\n"
-+ "  " + (inclusive ? "" : taxRows) + "\n"
-+ "  " + mrpBlock + "\n"
-+ "  " + roundBlock + "\n"
-+ '  <div class="g"><span>TOTAL</span><span>' + inr(R.total) + "</span></div>\n"
-+ (inclBelow
-   ? '  <div class="incl"><div class="t"><span>Price includes</span><span></span></div>' + inclBelow + "</div>\n"
-   : "")
+// A CANCELLED BILL'S MONEY BLOCK MUST NOT CONTRADICT ITS OWN ITEM LIST. The rows above are
+// what was ORDERED, so they are named that; then one line says the sale was cancelled, and
+// the total is ₹0. Printing "Subtotal ₹0" over ₹250 of priced dishes — or a CGST line on a
+// sale that never happened — is the arithmetic-error look the record card already removed
+// from the screen (owner's 2026-07-03 screenshot). No discount, tax, MRP or round-off row:
+// none of them describe a bill nobody paid. The normal branch is untouched T7 work.
++ (d.cancelled
+   ? '  <div class="t"><span>Ordered value</span><span>' + inr(orderedValue) + "</span></div>\n"
+     + '  <div class="t"><span>Cancelled — not charged</span><span>− ' + inr(orderedValue) + "</span></div>\n"
+     + '  <div class="g"><span>TOTAL</span><span>' + inr(0) + "</span></div>\n"
+   : '  <div class="t"><span>' + subLabel + "</span><span>" + inr(R.subtotal) + "</span></div>\n"
+     + "  " + discBlock + "\n"
+     + "  " + (inclusive ? "" : taxRows) + "\n"
+     + "  " + mrpBlock + "\n"
+     + "  " + roundBlock + "\n"
+     + '  <div class="g"><span>TOTAL</span><span>' + inr(R.total) + "</span></div>\n"
+     + (inclBelow
+        ? '  <div class="incl"><div class="t"><span>Price includes</span><span></span></div>' + inclBelow + "</div>\n"
+        : ""))
 + "</div>\n"
 + mrpNote + "\n"
 + '<div class="foot">' + footer + "</div>\n"
@@ -622,7 +643,20 @@
     // session with 5% dine-in food over-charged the food, which is the exact re-pricing mig 284
     // exists to prevent. `> 0` is kept deliberately: a genuine 0 (composition) falls through to
     // the settings, which also answer 0 — guarded by verify:audit.
-    var rateOf = function (o) { return Number(o.tax_rate) > 0 ? Number(o.tax_rate) : tm.rate; };
+    // A STAMPED ZERO IS A RATE, NOT A MISSING ONE (T18, 2026-08-05). The per-order lookup above
+    // is right, but `> 0` alone still cannot tell a deliberate stamped 0 from a legacy row that
+    // was never stamped. The note that "a genuine 0 falls through to the settings, which also
+    // answer 0" holds only while the restaurant has not CHANGED: the moment a 0%/composition
+    // restaurant switches GST on, tm.rate becomes 0.05 and every 0% bill still inside the Bills
+    // record showed and PRINTED tax that was never charged — a ₹1,000 bill reprinting as ₹1,050.
+    // That is the one direction mig 284's stamp was meant to cover and did not. So a stamped 0 is
+    // honoured — but only from an order that actually carries money, so a ₹0 line sitting on a
+    // taxed bill still cannot drag that bill's rate down to nothing.
+    var rateOf = function (o) {
+      if (Number(o.tax_rate) > 0) return Number(o.tax_rate);
+      if (o.tax_rate != null && (parseFloat(o.subtotal) || 0) > 0) return 0;
+      return tm.rate;
+    };
     var taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false, grossTaxed = 0, netIncl = 0;
     // One bucket per distinct rate, so the tax is still rounded ONCE per rate (never per order —
     // that drifts ±½ paise an order and can reject a split that equals the printed bill).
@@ -733,6 +767,23 @@
     var live = orders.filter(function (o) { return o.status !== "cancelled"; });
     var bi = billIdentity(s, a.restaurant || {});
 
+    /* A CANCELLED BILL IS NOT A TAX INVOICE (2026-08-05).
+       Every order on this bill is cancelled, so 'live' is empty and the document came out as
+       the full invoice template with NOTHING in it: headed "Tax Invoice", carrying the
+       restaurant's GSTIN and a real bill number, an empty item table, and CGST/SGST/TOTAL all
+       ₹0 — with no word anywhere saying the sale was cancelled. For a tool whose whole safety
+       argument is that it cannot misrepresent a sale, that is the wrong piece of paper, and
+       the Bills record puts a 🖨 Print button directly under the words "This bill was
+       cancelled — no charge".
+       So it prints as what it IS: a CANCELLED BILL, saying so in a band across the top, still
+       listing what was ordered (a void record nobody can read is no record at all) and
+       charging nothing. Nothing is hidden — the compliance rule is that a cancelled sale stays
+       visible, not that it prints as a tax invoice. */
+    // Explicitly "every order was CANCELLED", not "live is empty": since T7's fix `live` also
+    // drops soft-deleted orders, and a tombstoned bill is a different thing from a voided sale.
+    var voidedAll = orders.length > 0 && orders.every(function (o) { return o.status === "cancelled"; });
+    if (voidedAll) live = orders;   // show what WAS ordered; the money below stays ₹0
+
     // WHO THE BILL IS FOR, in priority order: the pair captured at invoice time and stored on the
     // bill itself (mig 227), else the guest's own name. Printing them is the restaurant's switch;
     // they are always SAVED either way. Blank hides the line rather than printing it empty.
@@ -802,7 +853,8 @@
     return {
       logo: a.logo || "",
       name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
-      invNo: sess.invoice_no != null ? invFmt(sess.invoice_no, sess.invoice_at, bi.prefix) : "",
+      cancelled: voidedAll,
+      invNo: (voidedAll || sess.invoice_no == null) ? "" : invFmt(sess.invoice_no, sess.invoice_at, bi.prefix),
       billNo: sess.bill_no != null ? sess.bill_no : "",
       parcel: !!a.parcel,
       tableDisp: a.tableDisp || "—",
