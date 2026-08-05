@@ -1,0 +1,21 @@
+// `npm run typecheck` uses this instead of tsconfig.json, for one reason.
+//
+// tsconfig.json includes `.next/types/**/*.ts` — route-signature validators that NEXT generates
+// during a build. That is right for the editor and for `next build`, which regenerates them. It is
+// wrong for a standalone type-check, because those files are a SNAPSHOT of the routes that existed
+// the last time you built. Change branches, or rebase onto a commit that deleted a route, and
+// `tsc --noEmit` reports errors about files that are already gone:
+//
+//   .next/types/validator.ts(1142,39): error TS2307: Cannot find module
+//     '../../app/api/owner/manager-permissions/route.js'
+//
+// Nothing is wrong with the code; the artifact is stale. That is a confusing five minutes for
+// anyone, and `npm run typecheck` exists precisely so the answer can be trusted at a glance.
+//
+// Nothing is lost by excluding them: `next build` runs its own TypeScript pass over the generated
+// validators (and CI runs the build's equivalents via typecheck + lint on a clean checkout, where
+// .next does not exist at all). Every hand-written .ts / .tsx / .mts file is still checked here.
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "reference", ".next", ".next-*"]
+}

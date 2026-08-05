@@ -63,7 +63,7 @@
     "verify:guest": "node scripts/verify-guest.mjs",
     "verify:pointers": "node scripts/verify-doc-pointers.mjs",
     "test:units": "node --test lib/*.test.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -p tsconfig.typecheck.json",
     "verify:allergy-isolation": "node scripts/verify-allergy-isolation.mjs",
     "verify:avlive-release": "node scripts/verify-avlive-offline-complete.mjs",
     "verify:board-sig": "node scripts/verify-board-sig.mjs",
