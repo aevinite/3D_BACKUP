@@ -4274,7 +4274,9 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       if (!Object.keys(patch).length) return err("nothing to update");
       // session_id is read here so a payment revert can reverse THAT party's customer visit
       // (mig 233) instead of whoever is sitting at the table by the time it happens.
-      const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,table_number,session_id").eq("id", id).eq("restaurant_id", rid).single());
+      // khata_at is read because the archive rule below must NOT cancel a parked pay-later tab —
+      // that is money still to be collected (mig 232's own stated exception).
+      const cur = must(await sb.from("orders").select("status,payment_status,archived,paid_at,archived_at,cancelled_at,khata_at,table_number,session_id").eq("id", id).eq("restaurant_id", rid).single());
       if (patch.status === "cancelled" && cur.payment_status === "paid")
         return err("Can't cancel a paid order — mark it unpaid (refund) first.", 409);
       // CANCELLING A TICKET IS NOT GATED (restored 2026-08-02, and here is why it changed twice).
@@ -4370,6 +4372,40 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
       if (patch.payment_status === "pending") { patch.paid_at = null; patch.tip = 0; }
       if (patch.archived === true) patch.archived_at = new Date().toISOString();
       if (patch.archived === false) patch.archived_at = null;
+      // Whether the ✕ below was forced by the archive rather than asked for directly — it goes
+      // into the audit row so a later reader knows this was "table freed with food unpaid",
+      // not somebody deliberately cancelling a ticket.
+      let archiveForcedTheCancel = false;
+      // ── ARCHIVING UNPAID FOOD MUST STILL LEAVE A ✕ (T16 sweep, 2026-08-05) ─────────────
+      // Migration 232 installed the rule "an order can never outlive its session": when a party
+      // ends, unpaid non-khata work becomes a VISIBLE ✕ cancelled record and everything else is
+      // merely archived. It lives on the session status change so EVERY close honours it.
+      //
+      // This PATCH is a different door into the same outcome, and it did not honour it. It set
+      // `archived` and left `status` alone, so an unpaid, still-cooking order could leave the
+      // floor as "preparing" — off the live view, with no cancellation, no cancelled_at, and
+      // nothing recording that a walk-out happened. FOUND IN THE DATA, not by reading: 9 such
+      // orders on French House (two of ₹4,189.50), all archived by hand; Aangan, which is only
+      // ever read, had none. The panel's freeTable() calls exactly this and its own comment
+      // ASSUMES "the orders left here are cancelled/settled" — nothing enforced it.
+      //
+      // Same decision as lib/sessionClose.ts, in the one place every caller passes through
+      // (panel button, a script, the offline replay, a future screen). Deliberately narrow:
+      //   · only when the caller did NOT set a status itself — `serve-all` archives a served
+      //     round on purpose and must keep saying 'served';
+      //   · khata is money still to collect, so it is never cancelled (mig 232's own exception);
+      //   · a paid or already-cancelled order is untouched — archive-only, exactly as before.
+      // Nothing is deleted or hidden: a ✕ row stays in Bills and in every report.
+      if (
+        patch.archived === true &&
+        patch.status === undefined &&
+        cur.status !== "cancelled" &&
+        cur.payment_status !== "paid" &&
+        !(cur as { khata_at?: string | null }).khata_at
+      ) {
+        patch.status = "cancelled";
+        archiveForcedTheCancel = true;
+      }
       if (patch.status === "cancelled") patch.cancelled_at = new Date().toISOString();
       if (patch.status === "received" && cur.status === "cancelled") patch.cancelled_at = null;
       // Cancelling takes a bill OUT of revenue, so it is a money-affecting action and must name
@@ -4388,7 +4424,7 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
           rid, kind: "order_cancelled", reason: reasonFromBody(body), user: g.user,
           deviceId: deviceIdFrom(req), orderId: id, sessionId: cur.session_id ?? null,
           tableNumber: cur.table_number != null ? String(cur.table_number) : null,
-          meta: { was_paid: cur.payment_status === "paid" },
+          meta: { was_paid: cur.payment_status === "paid", ...(archiveForcedTheCancel ? { auto: "unpaid food archived off the floor" } : {}) },
         });
       } else if (patch.status === "received" && cur.status === "cancelled") {
         await log("editor", "order_uncancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: "cancel undone — back on the floor", device_id: deviceIdFrom(req) });
