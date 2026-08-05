@@ -2405,10 +2405,10 @@ function formGeneral(s) {
 // CSS class that colours it.
 const STATUS_META = {
   received: { label: "🔔 New", cls: "received" },
-  // NOTE (T15, 2026-08-05): this modal shows "Preparing" here, "N cooking" in its progress
-  // legend and "COOKING" on the dish badge — three words for one status. Aligning them needs the
-  // DATABASE to change too (lfh_table_view_summary builds the floor tile's label), so it is one
-  // migration + one panel change, not a panel change alone. Left as-is deliberately.
+  // "Preparing" is the ONE word for this status on every screen a guest or a manager sees — the
+  // floor tile (built by the database), this pill, the progress legend and the dish badge. Only
+  // the KITCHEN board says "Cooking", deliberately: it is the cook's own word on the cook's own
+  // screen. Don't change one of these without the others (T15 sweep, 2026-08-05).
   preparing: { label: "👨‍🍳 Preparing", cls: "preparing" },
   served: { label: "✓ Served", cls: "served" },
   cancelled: { label: "✕ Cancelled", cls: "cancelled" },
@@ -8788,7 +8788,12 @@ function itemRowHtml(row, editing = false) {
   // silently delete it (mirror the tablet, which also blocks delete on served).
   const delBtn = (row.kind === "session" && row.status !== "served") ? `<button class="icon-del sx-item-del" data-item-del="${esc(row.id)}" data-item-name="${esc(row.title)}" title="Remove this dish from the order">🗑</button>` : "";
   // status label: friendlier words for the chip (class stays the raw status for colour).
-  const STLABEL = { received: "new", preparing: "cooking", ready: "ready", served: "served", cancelled: "cancelled" };
+  // "preparing", not "cooking": the tile above this card and the guest's own order tracker both
+  // say Preparing (the tile's label comes from the DATABASE, lfh_table_view_summary), so calling
+  // the same status "cooking" here made ONE order read three ways inside one modal — Preparing
+  // on the pill, cooking in the legend, COOKING on the badge (T15 sweep, 2026-08-05). The KITCHEN
+  // board keeps "Cooking" on purpose: that is the word a cook uses, on the cook's own screen.
+  const STLABEL = { received: "new", preparing: "preparing", ready: "ready", served: "served", cancelled: "cancelled" };
   // STAFF EDIT (a real dish): qty −/＋ steppers + a "✎ Edit" button (allergens +
   // kitchen note) on a FULL-WIDTH row below the dish. Split into two separate gates:
   //   qty steppers  — blocked once READY/SERVED (re-prices the bill; you can't
@@ -9021,7 +9026,7 @@ function tablePanelParts(t, host = "float") {
   const nItems = dishN || 1;
   const guestsN = streaming ? (Number(sumTile.members) || 0) : (sess ? membersOf(sess.id).length : 0);
   const subLine = `<div class="tp-det-sub">${sess && sess.bill_no != null ? `<span>Bill <b>#${esc(sess.bill_no)}</b></span>` : ""}<span><b>${guestsN}</b> guest${guestsN === 1 ? "" : "s"}</span><span><b>${dishN}</b> dish${dishN === 1 ? "" : "es"}</span>${due > 0 ? `<span>Due <b>${inr(due)}</b></span>` : billTotal > 0 ? `<span>Total <b>${inr(billTotal)}</b></span>` : ""}</div>`;
-  const progress = dishN ? `<div class="tp-prog"><div class="tp-prog-bar"><span class="pp-served" style="width:${(cServed / nItems) * 100}%"></span><span class="pp-cook" style="width:${(cCook / nItems) * 100}%"></span><span class="pp-recv" style="width:${(cRecv / nItems) * 100}%"></span></div><div class="tp-prog-leg"><span><i class="pl-served"></i>${cServed} served</span><span><i class="pl-cook"></i>${cCook} cooking</span><span><i class="pl-recv"></i>${cRecv} new</span></div></div>` : "";
+  const progress = dishN ? `<div class="tp-prog"><div class="tp-prog-bar"><span class="pp-served" style="width:${(cServed / nItems) * 100}%"></span><span class="pp-cook" style="width:${(cCook / nItems) * 100}%"></span><span class="pp-recv" style="width:${(cRecv / nItems) * 100}%"></span></div><div class="tp-prog-leg"><span><i class="pl-served"></i>${cServed} served</span><span><i class="pl-cook"></i>${cCook} preparing</span><span><i class="pl-recv"></i>${cRecv} new</span></div></div>` : "";
   let headMeta = subLine + progress;
 
   // STREAMING: head is accurate from summary; the actionable body (guest rows, dish rows,

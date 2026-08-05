@@ -3001,10 +3001,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // also be shown in the audit section"). Read the last reopen for this bill; if there is
       // one, this issue is the "after", so capture both sides. Only on a re-issue, so a normal
       // first bill costs nothing.
+      // The timestamp column on deletion_audit is `at`, NOT `created_at` (migration 251). Asking
+      // for created_at made this select fail silently, so `reopened` was always falsy and the
+      // before/after row was never written — invisible in code review, caught the first time a
+      // real bill was driven through the server (T15, 2026-08-05).
       const priorVoid = (await sb.from("deletion_audit")
-        .select("id, created_at, meta")
+        .select("id, at, meta")
         .eq("restaurant_id", rid).eq("session_id", b).eq("kind", "invoice_voided")
-        .order("created_at", { ascending: false }).limit(1)).data as { id: string; created_at: string; meta: Record<string, unknown> | null }[] | null;
+        .order("at", { ascending: false }).limit(1)).data as { id: number; at: string; meta: Record<string, unknown> | null }[] | null;
       const reopened = priorVoid && priorVoid[0];
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReason || null, p_actor: actorName });
       if (error) { if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw pgError(error); }
@@ -3036,7 +3040,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             before: { total: wasT, discount: wasD, orders: wasN },
             after: { total: nowTotal, discount: nowDiscount, orders: (afterRows || []).length },
             change: { total: delta, discount: Math.round((nowDiscount - wasD) * 100) / 100, orders: (afterRows || []).length - wasN },
-            reopened_at: reopened.created_at, reopen_audit_id: reopened.id,
+            reopened_at: reopened.at, reopen_audit_id: reopened.id,
             reissue_reason: genReason || null,
           },
         });
