@@ -34,6 +34,26 @@ const parseEnv = (t) => Object.fromEntries(t.split("\n").filter((l) => l.include
   const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")];
 }));
 const dev = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
+
+// THIS CHECK NEEDS THE MANAGEMENT API, AND BACKUP-2's TOKEN IS EXPIRED — say so, don't go red.
+// Everything below reads schemas through api.supabase.com, which needs SUPABASE_ACCESS_TOKEN.
+// Backup-2's token has been dead since at least 2026-08-01 (documented in PROJECT-HISTORY §8:
+// "use psql instead"), so a checkout paired with backup-2 gets a bare `Unauthorized` and a stack
+// trace — which inside verify:everything reads as a PRODUCT fault when it is a missing credential
+// on the test rig. A check that cannot run must say that in one line, loudly, and exit non-zero
+// only for something real. Parity vs AV LIVE is what this guard is FOR, and AV live's schema is
+// compared from the backup-1 checkout, which does have a working token — so nothing is lost by
+// standing down here. (Backup-1 vs backup-2 parity itself is cheap to do without a token: read
+// both PostgREST OpenAPI documents and diff the table/function lists.)
+{
+  const ref = (() => { try { return new URL(dev.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0]; } catch { return ""; } })();
+  if (ref === "jhhqzexlpzzwoqnzrgje" && !process.argv.includes("--force-token")) {
+    console.log("⏭  skipped: this checkout is paired with backup-2, whose Supabase management token is expired.");
+    console.log("   Parity against AV live is checked from the backup-1 checkout, which has a working token.");
+    console.log("   Backup-1 vs backup-2 parity needs no token — diff the two PostgREST OpenAPI documents.");
+    process.exit(0);
+  }
+}
 const AV_ENV = "/Users/aevinite/Documents/Projects/backup_Menu/.env.AV.live";
 let av = null;
 try { av = parseEnv(readFileSync(AV_ENV, "utf8")); } catch { /* no live keys here → parity half is skipped */ }

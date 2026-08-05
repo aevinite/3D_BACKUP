@@ -25,6 +25,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
 import { homedir } from "node:os";
 import { loginAs, adminCookie, adminHeaders } from "./sweep/login.mjs";
+import { DEV_TEST_DBS, isDevTestDb, dbRefOf } from "./sweep/devStacks.mjs";
 
 /** Merge a node's own patch with the Ratings mirror, without losing either branch. */
 const applyTwo = (a, b) => {
@@ -377,8 +378,8 @@ phase("the database is reachable with the service key", async () => {
   const rows = await dbGet("restaurants?select=id&limit=1");
   ok(Array.isArray(rows), JSON.stringify(rows).slice(0, 120));
 });
-phase("we are pointed at the BACKUP database, never AV live", async () => {
-  ok(/wnsfcizclkbobwzcxqsf/.test(SB), "the Supabase URL is not the dev/backup project");
+phase("we are pointed at a DEV/TEST database, never AV live", async () => {
+  ok(isDevTestDb(SB), `${dbRefOf(SB)} is not one of the dev/test projects — ${DEV_TEST_DBS.join(" or ")}`);
 });
 phase("the restaurant list loads for the admin", async () => {
   const d = await (await api("/api/admin/restaurants")).json();
