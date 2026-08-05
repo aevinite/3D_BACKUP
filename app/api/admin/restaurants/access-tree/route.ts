@@ -336,7 +336,9 @@ export async function POST(req: NextRequest) {
   // Best-effort and last: a purge failure must never fail a save that already succeeded — the
   // 24h revalidate is still the backstop underneath.
   if (Object.keys(setPatch).length) {
-    try { revalidateTag(menuTag(rid), "max"); } catch { /* the revalidate window is the backstop */ }
+    // `{ expire: 0 }` for the same measured reason as the other two call sites: "max" serves one
+    // more stale read, so a guest-facing switch appeared to need saving twice. (T13, 2026-08-05)
+    try { revalidateTag(menuTag(rid), { expire: 0 }); } catch { /* the revalidate window is the backstop */ }
   }
 
   // WHO CHANGED THIS RESTAURANT'S PERMISSIONS (found twice on 2026-08-04 — by the API sweep and by

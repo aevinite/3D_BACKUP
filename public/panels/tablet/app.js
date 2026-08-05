@@ -4072,6 +4072,26 @@ let lastSig = null;
 // snapshot is what made the panel flash the pre-open "Attend/request" view,
 // drop an order that's actually there, then pop it back a moment later.
 let loadSeq = 0;
+// ── TWO TARGETED REFETCHES MUST NOT CANCEL EACH OTHER (T13 sweep, 2026-08-05) ────────────────
+// loadTables() used to take a ticket from `loadSeq` too, and bail the moment a newer refresh had
+// started — BEFORE patching a single tile. That is right when the newer refresh is a whole-floor
+// load() (its board is fresher), and WRONG when it is another targeted loadTables() for DIFFERENT
+// tables: that call knows nothing about this table, so this tile's update was simply thrown away
+// and the table sat stale until another breadcrumb named it or the 60s backstop landed. A waiter
+// walked past a table whose food was ready with nothing on screen saying so.
+//
+// Reachable exactly when it hurts: realtime.js debounces at 200ms and its debounce() has no
+// re-entry guard, so a second burst fires while the first loadTables is still awaiting its
+// /summary?table=N reads — and on restaurant wifi those take well over 200ms. During a rush,
+// breadcrumbs for different tables arrive continuously.
+//
+// So, the same split the MANAGER panel already uses (editor/app.js pollTables, fixed 2026-07-06):
+//   · fullSeq  — bumped ONLY by a whole-floor load(). A targeted patch is dropped when this moves,
+//                because the full board that replaced it is genuinely fresher.
+//   · tileSeq  — a ticket PER TABLE, so same-table overlap still resolves latest-wins while two
+//                different tables never touch each other's ticket.
+let fullSeq = 0;
+const tileSeq = {};
 // The restaurant's display name for the header: prefer the short brand label
 // (logo_text), else the English name, else any translation, else a neutral
 // fallback. Renders "" while nothing is loaded yet — never "undefined". NEVER a
@@ -4150,7 +4170,12 @@ async function loadTables(tables) {
   // refresh the whole party or the other tiles sit stale until the 60s backstop. Same fix as
   // the manager's pollTables (owner, 2026-08-03).
   tables = [...new Set(tables.map(String).flatMap((t) => partyTablesOf(t)))];
-  const seq = ++loadSeq;
+  // A ticket per TABLE (not one shared counter) — see the note by tileSeq. `born` is the
+  // whole-floor generation: only a full load() moves it, and only that justifies dropping this
+  // patch. Two targeted polls for different tables no longer cancel each other.
+  const born = fullSeq;
+  const mySeq = {};
+  for (const t of tables) mySeq[t] = (tileSeq[t] = (tileSeq[t] || 0) + 1);
   const sel = state.table != null ? String(state.table) : null;
   let tileResps, selSlice;
   try {
@@ -4159,13 +4184,17 @@ async function loadTables(tables) {
       (sel != null && tables.map(String).includes(sel)) ? api("GET", "/state?table=" + encodeURIComponent(sel)) : Promise.resolve(null),
     ]);
   } catch (e) { return load(); }        // network/parse blip → safe full reload
-  if (seq !== loadSeq) return;          // a newer refresh started — drop this stale snapshot
+  if (fullSeq !== born) return;         // a whole-floor load() started — its fresher board wins
 
   // Patch each changed table's tile into the cached summary; a table that's now gone from the
   // server's tile set (e.g. dropped below table_count) is set to nothing so it renders "free".
+  // A table whose OWN newer poll has already landed is skipped — just that tile, never the others.
   const tiles = Object.assign({}, state.summary.tiles || {});
+  const applied = [];
   tileResps.forEach((resp, i) => {
     const t = String(tables[i]);
+    if (mySeq[t] !== tileSeq[t]) return;   // a newer targeted poll for THIS table won
+    applied.push(t);
     const tile = resp && resp.tiles ? resp.tiles[t] : null;
     if (tile) tiles[t] = tile; else delete tiles[t];
   });
@@ -4189,7 +4218,7 @@ async function loadTables(tables) {
     const mates = partyTablesOf(sel).filter((x) => String(x) !== String(sel) && tables.includes(String(x)));
     if (mates.length) {
       const mateSlices = await Promise.all(mates.map((x) => api("GET", "/state?table=" + encodeURIComponent(x)).catch(() => null)));
-      if (seq !== loadSeq) return;
+      if (fullSeq !== born) return;
       mates.forEach((x, i) => { if (mateSlices[i]) mergeSelectedSlice(x, mateSlices[i]); });
     }
   }
@@ -4201,7 +4230,9 @@ async function loadTables(tables) {
   // 300-table freeze fix). patchTabletTiles self-falls-back to a full renderFloor() if a tile's
   // filter membership flipped or the grid isn't present. The detail panel (#panel) is a separate
   // container, so patching tiles never disturbs an open detail — keep its same guard below.
-  patchTabletTiles(tables);
+  // Repaint only the tiles this pass actually applied (a tile skipped above is already being
+  // painted by the newer poll that beat us to it).
+  patchTabletTiles(applied.length ? applied : tables);
   if (!state.ordering && !state.pickerOpen) renderPanel();   // never repaint under a mid-order waiter OR an open Move picker (#U1)
 }
 
@@ -4231,6 +4262,9 @@ async function loadImpl() {
   // the reply is this device's last known floor, which is exactly what should be on screen.
   if (navigator.onLine === false && !(window.LFH_OFF && window.LFH_OFF.canReadOffline())) return;
   const seq = ++loadSeq;
+  // A WHOLE-FLOOR read is the only thing that may cancel a targeted tile patch (see tileSeq):
+  // this board replaces every tile, so anything in flight for one table is genuinely superseded.
+  fullSeq++;
   const sel = state.table != null ? String(state.table) : null;
   // TIER 1: the slim summary drives the GRID + side aggregates + the table-agnostic bundle
   // (settings/dishes/categories/restaurant). TIER 2: if a table's detail is open, ALSO fetch its
@@ -4509,15 +4543,34 @@ function renderXrayRibbon() {
 document.addEventListener("click", (e) => {
   if (document.getElementById("xrayZones") && !e.target.closest("#xrayZones") && !e.target.closest("#xrayZonesBtn")) closeXrayZones();
 });
-// Boot: learn WHO is viewing, then repaint so the templates' tshow()/txray() see it.
-// One tiny request, once per page load — no polling.
-api("GET", "/whoami").then((w) => {
-  TABLET_WHO = w;
-  if (!tHigher() && !tSim()) return;
-  renderXrayRibbon();
-  lastSig = ""; // force one repaint — buttons may need to appear tinted
-  renderFloor(); if (!state.ordering && !state.pickerOpen) renderPanel();   // #U1: don't clobber an open Move picker
-}).catch(() => {});
+// Learn WHO is viewing (and what this restaurant currently lets them do), then repaint so the
+// templates' tshow()/txray() see it.
+//
+// RE-READ IT WHEN THE POWERS CHANGE (T13 sweep, 2026-08-05). This was a one-shot at boot and
+// nothing asked again, so an Access change made in /aevinite never reached a waiter tablet that was
+// already open — it kept offering a control the server would refuse, until someone reloaded. Every
+// gated endpoint still refused it, so nothing was exposed; the fault is that the SCREEN disagreed
+// with the truth and the waiter's tap died with an error. Hooked to the `menu` topic below, which
+// carries the `settings` half of an Access write and — since mig 299 — the `restaurants` half too,
+// and which also fires on wake, so a tablet picked up after an hour is correct before its first tap.
+// One in-flight read at a time, and it only repaints when the answer actually DIFFERS, so the dish
+// edits that also ride `menu` cost one small GET and nothing else.
+let whoamiJson = null, whoamiBusy = false;
+function refreshWhoami() {
+  if (whoamiBusy) return;
+  whoamiBusy = true;
+  api("GET", "/whoami").then((w) => {
+    const j = JSON.stringify(w || null);
+    if (j === whoamiJson) return;      // powers unchanged — nothing to repaint
+    whoamiJson = j;
+    TABLET_WHO = w;
+    if (!tHigher() && !tSim()) return;
+    renderXrayRibbon();
+    lastSig = ""; // force one repaint — buttons may need to appear tinted
+    renderFloor(); if (!state.ordering && !state.pickerOpen) renderPanel();   // #U1: don't clobber an open Move picker
+  }).catch(() => {}).then(() => { whoamiBusy = false; });
+}
+refreshWhoami();
 // Realtime: refetch only when something on the floor actually changes (instant),
 // instead of polling every second. A slow 60s timer is the backup if the
 // WebSocket drops; if realtime didn't load, fall back to a gentle 2s poll.
@@ -4531,7 +4584,7 @@ if (window.LFH_RT) {
     // place so a just-sold-out dish becomes untappable immediately (load() skips renderPanel
     // while ordering, so without this the grid stayed stale). Flag the menu stale so this load()
     // is a FULL one that actually refetches the dishes (normal refreshes are slim). (perf 2026-07-20)
-    menu: () => { state._menuStale = true; return load().then(() => { if (state.ordering) updateDishAvailability(); }).catch(() => {}); },
+    menu: () => { refreshWhoami(); state._menuStale = true; return load().then(() => { if (state.ordering) updateDishAvailability(); }).catch(() => {}); },
   }});
   // Backup floor sync every 60s (slim). Every ~10th minute also flag the menu stale so the next
   // load refetches dishes — a safety-net that self-heals a missed realtime `menu` event. (perf 2026-07-20)

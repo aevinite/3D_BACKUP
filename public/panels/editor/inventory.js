@@ -999,9 +999,40 @@
     });
   }
 
+  // ── THE STOCK FIGURES MOVE ON THEIR OWN, SO THE SCREEN HAS TO FOLLOW (T13 sweep, 2026-08-05) ──
+  // `trg_inv_deplete_order` (mig 224) posts a consumption movement for every recipe ingredient of
+  // every dish on every kitchen-committed order. So during service these numbers change constantly
+  // with nobody touching them — and this file had no setInterval, no realtime handler and no
+  // visibilitychange hook. Whatever was on screen was frozen at the moment the tab was opened, with
+  // nothing saying so: a manager could read "chicken 4.2 kg", decide whether to 86 a dish, and be
+  // acting on a figure twenty minutes and thirty orders old. Two managers counting stock on two
+  // devices were each certain of a different number.
+  //
+  // Deliberately driven by the `ops` breadcrumb the manager panel ALREADY receives, not by new
+  // triggers on the inv_* tables: stock only moves because an order moved (or because a person did
+  // something right here), and a per-ingredient trigger would raise fifteen breadcrumbs for one
+  // five-dish order — a firehose aimed at the connection budget. So this costs ZERO extra reads on
+  // an idle floor and zero when the tab isn't open.
+  //
+  // Two guards keep it cheap and safe: only when the Inventory tab is actually showing (its body
+  // element is in the document), and never while a popup is open — refreshView() repaints #invBody
+  // and would tear a half-finished count or purchase out from under the person filling it in.
+  let bumpTimer = null;
+  function liveBump() {
+    const body = document.getElementById("invBody");
+    if (!body || !body.offsetParent) return;              // tab not on screen → nothing to refresh
+    if (document.hidden) return;                          // backgrounded → the wake event will do it
+    if (document.querySelector(".inv-pop, #invPop")) return; // someone is mid-entry — never clobber it
+    clearTimeout(bumpTimer);
+    // Coalesce a rush: a burst of orders is one refresh, not one per order.
+    bumpTimer = setTimeout(() => { refreshView(true).catch(() => {}); }, 1200);
+  }
+
   // Public surface for app.js
   window.LFH_INV = {
     render,
     reset() { S.loaded = false; S.count = null; },   // admin switches restaurant → refetch
+    // Called from app.js's realtime `ops` handler — see liveBump above.
+    live: liveBump,
   };
 })();

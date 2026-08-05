@@ -10725,7 +10725,18 @@ function printerStripHtml() {
 }
 // Toast NEW problems the moment a floor read carries them (realtime makes that near-instant);
 // history never toasts on boot, and a problem only toasts once however many polls repeat it.
+//
+// "NO PAYLOAD" IS NOT "NO PROBLEMS" — never let a missing answer clear the seen-set (T13 sweep,
+// 2026-08-05). This used to end `seenPrinterKeys = keys` unconditionally, so any pass that arrived
+// WITHOUT a printer payload reset the set to empty, and the next pass that did carry one
+// re-announced every still-open problem in red — the same printer fault shouted over and over. The
+// server-side cause is fixed (the manager's printer read has its own shared key now), but a client
+// must not depend on that: a targeted ?table= refetch, a boot before the first full read, or a
+// failed read all legitimately arrive with nothing to say. Only a real, present, EMPTY list means
+// "the problems are gone". This is the owner's don't-cry-wolf rule at the one place it costs him
+// trust in the alarm.
 function noticePrinterNews() {
+  if (!(state.summary && state.summary.printer)) return;  // nothing was reported this pass — leave the seen-set alone
   const list = printerAlerts();
   const keys = new Set(list.map((a) => a.key));
   if (seenPrinterKeys) for (const a of list) if (!seenPrinterKeys.has(a.key)) toast(a.icon + " " + a.text, "err");
@@ -12756,8 +12767,20 @@ function startOrderWatch() {
         // Pay Later view open? A park or collect touches orders → refresh the book LIVE
         // (loadKhataBook self-guards against overlap; one scoped read per event burst).
         if (state.tab === "orders" && ordersViewKey() === "khata") { state.khataLoadedAt = 0; loadKhataBook(); }
+        // Inventory tab open? Stock DRAINS BY ITSELF on every order (trg_inv_deplete_order, mig
+        // 224), so the figures on that screen were frozen from the moment it was opened while
+        // service quietly emptied them. This is the only signal needed — stock moves because an
+        // order moved — and LFH_INV.live() self-guards on "tab actually visible / no popup open /
+        // not backgrounded" and coalesces a rush, so an idle floor pays nothing. (T13, 2026-08-05)
+        if (state.tab === "inventory" && window.LFH_INV && window.LFH_INV.live) window.LFH_INV.live();
       },
-      menu: () => { if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
+      // `menu` carries dish/category/filter/settings edits AND — since mig 299 — a change to this
+      // restaurant's permissions. So re-read who we are alongside the menu: refreshWhoami() is one
+      // small GET that repaints only when the answer actually differs, so an ordinary dish edit
+      // costs nothing extra. This is what makes an Access change land on an open panel instead of
+      // waiting for someone to reload (T13 sweep, 2026-08-05). Not gated by the boot grace — the
+      // boot read is the same one-shot, and a permission change must never be the thing we skip.
+      menu: () => { refreshWhoami(); if (Date.now() >= rtBootGraceUntil) loadAll(); }, // boot already loaded the menu
     }});
     setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 60000); // backup sync; skip on a hidden/backgrounded tab (realtime refetches on wake) so an idle tab stops costing egress (B18)
     // CATCH UP WHILE THE SOCKET IS DOWN BUT READS STILL WORK (sweep 2026-08-04).
@@ -12776,7 +12799,33 @@ function startOrderWatch() {
     // failed read — without it there is nothing to back off from.
     if (LFH_RT.catchUp) LFH_RT.catchUp(() => pollOrders({ rethrow: true }));
   } else {
-    setInterval(() => { if (document.hidden) return; pollOrders(); loadPlatform(); }, 2000); // fallback poll (realtime down); paused while hidden (B18)
+    // NO REALTIME AT ALL (realtime.js failed to load, or is blocked). This used to be a flat
+    // `setInterval(..., 2000)` firing TWO whole-board reads (pollOrders + loadPlatform) — a fixed
+    // two-second beat, from every manager screen in the estate, for as long as the page was open,
+    // never backing off and never jittered. That is the exact shape CLAUDE.md's rush rule 4
+    // forbids, and the reason is that a saturated database is what makes realtime unavailable in
+    // the FIRST place: the moment things get bad every device switches to hammering it in
+    // lockstep and keeps it down. The KITCHEN (backoffPoll) and the TABLET (_fbTick) were both
+    // rewritten for this; the manager — the busiest panel of the three — was left behind
+    // (T13 sweep, 2026-08-05).
+    //
+    // LFH_RT.catchUp() is the sanctioned shape but unreachable here (window.LFH_RT is absent, which
+    // is what put us in this branch), so the same behaviour, written out small: 2s while the reads
+    // succeed, doubling to a minute for as long as they FAIL, straight back to quick on the first
+    // success, ±20% jitter so twenty screens never share a beat, and nothing at all while the tab
+    // is hidden or the device is genuinely offline. `rethrow` is what lets it SEE a failed read —
+    // without it there is nothing to back off from.
+    let fbStep = 0;
+    const fbSpread = (ms) => Math.round(ms * (0.8 + Math.random() * 0.4));
+    const fbTick = async () => {
+      if (document.hidden || navigator.onLine === false) { fbStep = 0; }   // nothing to catch up on
+      else {
+        try { await pollOrders({ rethrow: true }); loadPlatform(); fbStep = 0; }
+        catch (e) { fbStep = Math.min(fbStep + 1, 5); }                    // 2s → 4 → 8 … → 60s
+      }
+      setTimeout(fbTick, fbSpread(Math.min(2000 * Math.pow(2, fbStep), 60000)));
+    };
+    setTimeout(fbTick, fbSpread(2000));
   }
 }
 
@@ -14484,7 +14533,24 @@ document.addEventListener("click", (e) => {
   else window.prompt("Copy this table's link:", url);
 });
 
-api("GET", "/whoami").then((w) => { XRAY_WHO = w;
+// applyWhoami(w) — everything on this screen that depends on WHO is looking and WHAT the
+// restaurant currently allows them. Kept as a named function so it can run again, which is the
+// whole point:
+//
+// A PERMISSION CHANGE MUST REACH AN OPEN PANEL (T13 sweep, 2026-08-05). This was a one-shot
+// `api("GET","/whoami").then(...)` at boot and nothing ever asked again — no re-read on a
+// breadcrumb, on wake, or on the 60s backstop. So the owner rang the admin to take a power off a
+// manager "right now", the admin did it, and the manager's open screen kept offering the control
+// until they happened to reload the page; their next tap was refused by the server with an error.
+// Nothing was ever exposed (requireRole re-checks the panel entitlement every 30s and every gated
+// endpoint refuses on its own), but the SCREEN disagreed with the truth, and a refused tap is
+// exactly what the tap-never-vanishes rule exists to prevent.
+// Now re-run on the `menu` topic — which carries BOTH halves of an Access write: the `settings`
+// half always did, and mig 299 gives `restaurants` (manager_permissions / access_config /
+// owner_entitlements) its own 'menu' breadcrumb. `menu` also fires on wake/reconnect, so a tablet
+// picked up after an hour re-reads its powers before its first tap.
+function applyWhoami(w) {
+  XRAY_WHO = w;
   // The dashboard rail is drawn from THIS answer: Today always, Yesterday only when the
   // restaurant's Access setting reaches that far (w.dashReach). Two things to settle now that
   // we know it — and both matter on the FIRST paint, before anyone taps:
@@ -14512,7 +14578,22 @@ api("GET", "/whoami").then((w) => { XRAY_WHO = w;
   // The Audit & logs sidebar rows depend on whoami.logParts — repaint them too, or a
   // switched-off view's row would sit there until the next tab change.
   try { if (state.tab === "log") renderList(); } catch (e) {}
-}).catch(() => {});
+}
+// One in-flight re-read at a time, and only when something actually differs — a `menu` breadcrumb
+// fires for ordinary dish edits too, and repainting the whole view on each of those would undo the
+// 300-table freeze fix. Comparing the serialised answer keeps the common case to one small GET.
+let whoamiJson = null, whoamiBusy = false;
+function refreshWhoami() {
+  if (whoamiBusy) return;
+  whoamiBusy = true;
+  api("GET", "/whoami").then((w) => {
+    const j = JSON.stringify(w || null);
+    if (j === whoamiJson) return;      // powers unchanged — nothing to repaint
+    whoamiJson = j;
+    applyWhoami(w);
+  }).catch(() => {}).then(() => { whoamiBusy = false; });
+}
+refreshWhoami();
 
 // Then load all the data, refresh the current view in place, and start live polling.
 // If the very first load fails, show "connection failed" so it's obvious the local
