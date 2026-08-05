@@ -1172,11 +1172,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const [invQ, voidQ, platQ, setQ] = await Promise.all([
+      const [invQ, voidQ, platQ, setQ, legQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
         sb.from("settings").select(`${TAX_SETTINGS_COLUMNS}, restaurant_name, gstin, invoice_prefix`).eq("restaurant_id", rid).maybeSingle(),
+        // HOW THE MONEY CAME IN — the day's payment legs (2026-08-05). `session_payments` was
+        // WRITE-ONLY: lib/paySplit.ts inserted legs and stamped them reversed, and nothing in the
+        // product ever read one. So the day-close had no cash-vs-UPI line at all and a manager could
+        // not count the drawer against it, while a split-settled bill showed only "Split". Reversed
+        // legs are read too, and reported separately — a reversal is never hidden, only excluded
+        // from what was collected (mig 285). Scoped, explicit columns, limited.
+        sb.from("session_payments").select("amount,method,reversed_at").eq("restaurant_id", rid)
+          .gte("created_at", since).limit(20000),
       ]);
       const set = (must(setQ) || {}) as any;
       // Effective rate = sum of named tax components (CGST/SGST/…), else the fallback
@@ -1211,6 +1219,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // nontax_amount, and contributes no tax at all. The report never has to ask which.
       let gross = 0, disc = 0, taxable = 0, tax = 0, net = 0, mrp = 0;
       let paidCount = 0, paidNet = 0, unpaidCount = 0, unpaidNet = 0; // counts are BILLS, not orders
+      let onHouseCount = 0, onHouseNet = 0;                            // comped — a real sale, zero collected
       for (const g of groups.values()) {
         const base = g.reduce((a, o) => a + (o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0)), 0);
         const nontax = g.reduce((a, o) => a + (Number(o.nontax_amount) || 0), 0);
@@ -1232,9 +1241,58 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         gross += sub; disc += d; taxable += tx; tax += t; net += tot; mrp += nontax;
         // A bill counts as collected only when EVERY order on it is paid (a table settles in
         // one go — Mark paid pays the whole table — so this matches real behaviour).
-        if (g.every((o) => o.payment_status === "paid")) { paidCount++; paidNet += tot; }
+        //
+        // ON THE HOUSE IS NOT MONEY IN THE TILL (2026-08-05). Comping sets `discount = subtotal`,
+        // but every discount door caps a discount at the TAXABLE base (mig 272 — a sealed MRP price
+        // is locked and may not be discounted), so a comped bill carrying a bottle kept a residue:
+        // sub 880 − capped disc 800 = ₹80 counted into GRAND TOTAL on a bill nobody paid for. The
+        // sale still shows in gross and discount, and now has its own line, so nothing is hidden —
+        // it simply stops being counted as cash.
+        if (g.some((o) => o.payment_method === ON_THE_HOUSE_METHOD)) { onHouseCount++; onHouseNet += tot; }
+        else if (g.every((o) => o.payment_status === "paid")) { paidCount++; paidNet += tot; }
         else { unpaidCount++; unpaidNet += tot; }
       }
+      // ── HOW THE MONEY CAME IN, by method — the day-close till count ─────────────────────────
+      // Two sources, and each bill uses exactly one of them so nothing is counted twice:
+      //   · a bill settled in PARTS carries payment_method 'Split' and its real methods live in
+      //     session_payments, so the legs speak for it;
+      //   · every other paid bill states its own method on the order rows.
+      // Reversed legs are excluded from what was collected and reported on their own line.
+      const legs = (must(legQ) || []) as { amount: number; method: string | null; reversed_at: string | null }[];
+      const byMethod = new Map<string, { amount: number; count: number }>();
+      const addMethod = (m: string, amt: number) => {
+        const key = (m || "").trim() || "Not recorded";
+        const row = byMethod.get(key) || { amount: 0, count: 0 };
+        row.amount = r2(row.amount + amt); row.count += 1;
+        byMethod.set(key, row);
+      };
+      let reversedNet = 0, reversedCount = 0;
+      for (const l of legs) {
+        const amt = Number(l.amount) || 0;
+        if (l.reversed_at) { reversedNet = r2(reversedNet + amt); reversedCount += 1; continue; }
+        addMethod(String(l.method || ""), amt);
+      }
+      // The order-stated side, per BILL so a multi-order table counts once, and net of its discount
+      // the same way every figure above is.
+      for (const g of groups.values()) {
+        if (g.some((o: any) => o.payment_method === ON_THE_HOUSE_METHOD)) continue;   // nothing collected
+        if (!g.every((o: any) => o.payment_status === "paid")) continue;              // still open
+        const method = String((g.find((o: any) => o.payment_method) || {}).payment_method || "");
+        if (method === "Split") continue;                                             // its legs already spoke
+        const base = g.reduce((a: number, o: any) => a + (o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0)), 0);
+        const ntx = g.reduce((a: number, o: any) => a + (Number(o.nontax_amount) || 0), 0);
+        const stampedG = g.find((o: any) => Number(o.tax_rate) > 0);
+        const gR = stampedG ? Number(stampedG.tax_rate) : rate;
+        const cap = g.reduce((a: number, o: any) => a + discountBaseOf(o, gR), 0);
+        const d2 = Math.min(g.reduce((a: number, o: any) => a + (Number(o.discount) || 0), 0), cap);
+        const tx2 = Math.max(0, base - Math.min(d2, base));
+        addMethod(method, r2(r2(base + ntx) - d2 + r2(tx2 * gR)));
+      }
+      const payments = [...byMethod.entries()]
+        .map(([method, v]) => ({ method, amount: r2(v.amount), bills: v.count }))
+        .sort((a, b) => b.amount - a.amount);
+      const paymentsTotal = r2(payments.reduce((a, p2) => a + p2.amount, 0));
+
       const plat = (must(platQ) || []) as any[];
       // Exclude cancelled AND still-"new" (pending, unaccepted) delivery orders — the same
       // filter the dashboard /stats uses — so the Z-report platform revenue matches the
@@ -1250,7 +1308,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           // MRP / nil-rated turnover, shown as its own line so the day's takings still add up
           // on the page: taxable + tax + mrp = net. 0 for every restaurant not using it.
           mrp: r2(mrp),
-          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled, tips },
+          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled, tips,
+          onHouseCount, onHouseNet: r2(onHouseNet) },
+        // The till count: what came in and how. `total` is the sum of the methods, so a manager can
+        // check it against paidNet — a gap means a bill was settled without a method recorded.
+        payments: { rows: payments, total: paymentsTotal, reversed: r2(reversedNet), reversedCount },
         platform: { count: platActive.length, revenue: platRevenue },
         invoicesGenerated: (must(invQ) || []).length,
         invoicesVoided: (must(voidQ) || []).length,

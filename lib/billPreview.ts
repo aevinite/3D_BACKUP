@@ -118,16 +118,61 @@ export function billPreviewHtml(settings: Settings, mode: BillMode, restaurant: 
   const taxWhole = composition ? 0 : Math.round((taxable * rateSum) / 100);
   // A COMPOSITION-SCHEME RESTAURANT MAY NOT SHOW A DINER ANY GST AT ALL
   // (docs/COMPLIANCE-GUARDRAILS.md §3) — so no tax rows, not even a zero one.
-  const taxRows = composition ? [] : BILLDOC.splitTax(taxWhole, comps);
+  // (The single `taxRows` that used to be built here is now split into the ADDED rows and the
+  //  ALREADY-INSIDE rows just below, so a tax-inclusive sample prints the shape the printer prints.)
 
   // The untaxed block under the tax rows. Under composition NOTHING on the bill is taxed, so
   // there is no taxed-versus-untaxed split to draw: printing "Food subtotal 0 / MRP items 1,150"
   // would misstate what those two rows mean. It is 0 there, and the bill simply carries no tax.
   const nontax = composition ? 0 : split.nontaxAmount;
   const mrpInclusive = String(settings.mrp_tax_treatment) === "inclusive";
-  const total = taxable + taxWhole + split.nontaxAmount;
+  // THE TOTAL COMES FROM splitBill, NOT FROM A SECOND SUM HERE (2026-08-05). This used to be
+  // `taxable + taxWhole + split.nontaxAmount`, which quietly dropped the discount for a
+  // COMPOSITION-scheme restaurant: there every line resolves to `exempt`, so `taxable` is 0 and the
+  // whole bill sits in `nontaxAmount` — the preview then showed "Discount − ₹50" and handed it
+  // straight back as "Round off + ₹50", with the TOTAL unchanged. splitBill had the right answer
+  // all along, and using it is also the only way this page can promise what the printer produces
+  // (the reason this file exists — see the header).
+  const total = split.total;
 
-  const discLabel = BILLDOC.discPct(subtotal, discount);
+  // The percentage must be quoted against the row the paper actually SHOWS above it — "Food
+  // subtotal" (the taxable part) when there are untaxed/MRP lines, else the plain subtotal. Reading
+  // the full subtotal here made the preview say "3.7%" where the printer said "3.8%" on the same
+  // bill; discPct exists precisely so every surface quotes one figure.
+  // ── TAX ALREADY INSIDE THE PRICES — the same shape billdoc's billData() builds ──────────────
+  // A restaurant on "GST inside the price" prints item rows at the GROSS menu price, so a NET
+  // Subtotal under that column does not equal it (the rows said ₹1,300 and the subtotal ₹1,238).
+  // Worked out here the same way and in the same order as billData, because a preview that
+  // disagrees with the printer is the one fault this file exists to prevent.
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const amountOf = (l: { qty?: number; price?: number }) => r2((Number(l.price) || 0) * Math.max(1, Number(l.qty) || 1));
+  const grossTaxed = r2(lines.filter((l) => l.tax_mode !== "exempt").reduce((a, l) => a + amountOf(l), 0));
+  const netIncl = r2(lines.filter((l) => l.tax_mode === "incl")
+    .reduce((a, l) => a + r2(amountOf(l) / (1 + split.rate)), 0));
+  const insideShare = split.taxableBase > 0 ? Math.min(1, Math.max(0, netIncl / split.taxableBase)) : 0;
+  // Split at FULL precision. Deriving the shown discount from a whole-rupee tax makes it absorb the
+  // rounding (a ₹50 discount printed as ₹51 with a "Round off +₹1" beside it), so the rows below
+  // round only at the last moment — the same order billdoc's billRows() uses.
+  const taxPrecise = composition ? 0 : (taxable * rateSum) / 100;
+  const taxInside = r2(taxPrecise * insideShare);
+  const taxAdded = r2(taxPrecise - taxInside);
+  const hasInside = taxInside > 0;
+  // The food row as the paper shows it — gross when tax is inside, otherwise exactly what it was
+  // (which is what keeps a COMPOSITION restaurant, where there is no taxable base, correct).
+  const foodShown = hasInside ? grossTaxed : r2(subtotal - nontax);
+  const subtotalShown = r2(foodShown + nontax);
+  // Stated so the column closes: what is shown, less the tax genuinely added and the untaxed pile,
+  // must leave the TOTAL. On an ordinary bill this is exactly `discount`.
+  // Without inside tax the discount is stated exactly as it always was, so every restaurant that is
+  // not on "GST inside the price" gets a byte-identical preview.
+  const discShown = !hasInside ? discount
+    : (discount > 0 ? Math.max(0, r2(foodShown + taxAdded + nontax - total)) : 0);
+  const addWhole = Math.round(taxAdded);
+  const insideWhole = Math.round(taxInside);
+  const taxRowsAdded = composition || addWhole <= 0 ? [] : BILLDOC.splitTax(addWhole, comps);
+  const taxRowsInside = composition || insideWhole <= 0 ? [] : BILLDOC.splitTax(insideWhole, comps);
+
+  const discLabel = BILLDOC.discPct(foodShown, discShown);
   // Printing the customer's details is the restaurant's own switch — respect it here too, or
   // the preview would promise a line the printer leaves off.
   const showCust = settings.bill_customer_print !== false;
@@ -143,9 +188,10 @@ export function billPreviewHtml(settings: Settings, mode: BillMode, restaurant: 
     cust: showCust ? "Riya Sharma" : "",
     custPhone: showCust ? "98250 12345" : "",
     lines,
-    subtotal, discount, discLabel, taxable,
+    subtotal: subtotalShown, discount: discShown, discLabel, taxable,
     total,
-    taxRows,
+    taxRows: taxRowsAdded,
+    inclRows: taxRowsInside,
     nontax,
     mrpLabel: "MRP items",
     // The note must only ever say what the accounts support (billdoc.js says so itself). With

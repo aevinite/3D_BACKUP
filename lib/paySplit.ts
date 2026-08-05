@@ -55,8 +55,12 @@ export async function settleBillInParts(
   const openSess = (await sb.from("sessions").select("id")
     .eq("table_number", t).eq("status", "open").eq("restaurant_id", rid)
     .order("last_activity_at", { ascending: false }).limit(1)).data?.[0] as { id: string } | undefined;
-  let oq = sb.from("orders").select("id,subtotal,total,discount,status,payment_status,session_id,taxable_base,nontax_amount,tax_rate")
-    .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
+  // A SOFT-DELETED ORDER IS NOT PART OF THE BILL (2026-08-05) — it was neither excluded from the
+  // due nor from the rows marked paid, so a split settle collected for a tombstoned line. The
+  // printed bill and lib/billLedger.ts both drop it now; this is the third door onto the same rule.
+  let oq = sb.from("orders").select("id,subtotal,total,discount,status,payment_status,session_id,taxable_base,nontax_amount,mrp_amount,tax_rate")
+    .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid")
+    .is("deleted_at", null).eq("restaurant_id", rid);
   oq = openSess ? oq.eq("session_id", openSess.id) : oq.eq("table_number", t).eq("archived", false);
   // 400, not 200: the cap silently CHANGES the answer rather than refusing — the due would be
   // summed over a partial set and only those rows marked paid. 200 KOTs on one open table is
@@ -85,19 +89,50 @@ export async function settleBillInParts(
   // taken this morning. `> 0` on purpose: a genuine 0 (composition) falls through to the settings,
   // which also return 0, rather than being read as "not stamped".
   const set = (await sb.from("settings").select(TAX_SETTINGS_COLUMNS).eq("restaurant_id", rid).maybeSingle()).data || {};
-  const stamped = rows.find((o) => Number((o as { tax_rate?: number }).tax_rate) > 0);
-  const rate = stamped ? Number((stamped as { tax_rate?: number }).tax_rate) : effectiveTaxRate(set);
+  const settingsRate = effectiveTaxRate(set);
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  type MoneyRow = { taxable_base?: number | null; nontax_amount?: number | null; mrp_amount?: number | null; subtotal?: number; discount?: number; tax_rate?: number | null };
+  // THE RATE EACH ORDER WAS CHARGED AT, per order (mig 284) — not one rate borrowed from whichever
+  // order came first (2026-08-05). `find(> 0)` asked for the whole bill at that order's rate, so a
+  // banquet at 18% sharing a session with 5% food demanded the wrong money, and it demanded it in
+  // lockstep with the same fault on the printed bill. `> 0` is kept: a genuine 0 (composition) falls
+  // through to the settings, which also answer 0. Bucketed per rate so tax still rounds ONCE per
+  // rate — never per order, which drifts ±½ paise an order and can reject a correct split.
+  const rateOf = (o: MoneyRow) => (Number(o.tax_rate) > 0 ? Number(o.tax_rate) : settingsRate);
   const base = rows.reduce((s, o) => {
-    const r = o as { taxable_base?: number | null; subtotal?: number };
+    const r = o as MoneyRow;
     return s + (r.taxable_base == null ? (Number(r.subtotal) || 0) : (Number(r.taxable_base) || 0));
   }, 0);
-  const nontax = rows.reduce((s, o) => s + (Number((o as { nontax_amount?: number }).nontax_amount) || 0), 0);
-  const sub = Math.round((base + nontax) * 100) / 100;
-  const disc = rows.reduce((s, o) => s + (Number(o.discount) || 0), 0);
-  const taxable = Math.max(0, base - Math.min(disc, base));
+  const nontax = rows.reduce((s, o) => s + (Number((o as MoneyRow).nontax_amount) || 0), 0);
+  const mrp = rows.reduce((s, o) => s + (Number((o as MoneyRow).mrp_amount) || 0), 0);
+  const sub = r2(base + nontax);
+  const anyTax = rows.some((o) => rateOf(o as MoneyRow) > 0);
+  // CLAMP THE DISCOUNT TO ITS OWN BASE, exactly as the printed bill does (billdoc's billMoney) —
+  // this used the RAW sum in `sub - disc` (2026-08-05). On an on-the-house bill carrying a sealed
+  // MRP item the stored discount is the whole subtotal while the cap is only the food, so the paper
+  // asked ₹80 and this asked ₹0; on a legacy over-cap row it produced a NEGATIVE due, and the ±2p
+  // gate then refused every split with "the bill due is ₹-200.00" — a tap no waiter could satisfy.
+  const discountBase = anyTax ? r2(base) : Math.max(0, r2(sub - mrp));
+  const rawDisc = r2(rows.reduce((s, o) => s + (Number(o.discount) || 0), 0));
+  const disc = Math.min(Math.max(0, rawDisc), discountBase);
+  // Tax per rate bucket, each rounded once, each capping its own discount at its own base.
+  const buckets = new Map<number, { base: number; disc: number }>();
+  for (const o of rows as MoneyRow[]) {
+    const r = rateOf(o);
+    const b = buckets.get(r) || { base: 0, disc: 0 };
+    b.base += o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0);
+    b.disc += Number(o.discount) || 0;
+    buckets.set(r, b);
+  }
+  let tax = 0;
+  for (const [r, b] of buckets) {
+    const bBase = r2(b.base);
+    const bTaxable = Math.max(0, r2(bBase - Math.min(Math.max(0, r2(b.disc)), bBase)));
+    tax = r2(tax + r2(bTaxable * r));
+  }
   // subtotal − discount + tax: one formula that also holds at a zero rate, where the discount can
   // legitimately land outside the taxable base.
-  const due = Math.round((sub - disc + Math.round(taxable * rate * 100) / 100) * 100) / 100;
+  const due = r2(sub - disc + tax);
   const sum = splits.reduce((s, x) => s + Number(x.amount), 0);
   if (Math.abs(sum - due) > 0.02) {
     return { ok: false, status: 409, message: `The parts add up to ₹${sum.toFixed(2)} but the bill due is ₹${due.toFixed(2)} — they must match.` };

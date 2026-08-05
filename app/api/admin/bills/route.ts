@@ -40,7 +40,17 @@ export const dynamic = "force-dynamic";
 const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
 
 const SESSION_COLS = "id, status, bill_no, invoice_no, invoice_voided, table_number, restaurant_id, opened_at, closed_at, created_at, deleted_at, deleted_by, delete_reason";
-const ORDER_COLS = "id, session_id, total, discount, status, payment_status, payment_method, khata_at, deleted_at, deleted_by, delete_reason";
+const ORDER_COLS = "id, session_id, total, discount, tax_rate, status, payment_status, payment_method, khata_at, deleted_at, deleted_by, delete_reason";
+
+// What an order was actually worth, net of its discount — see lib/billLedger.ts netOf() for why
+// `total` alone overstates a discounted bill.
+const netAmount = (o: { total?: number | null; discount?: number | null; tax_rate?: number | null }) => {
+  const total = Number(o.total) || 0;
+  const disc = Number(o.discount) || 0;
+  if (disc <= 0) return total;
+  const rate = Number(o.tax_rate) > 0 ? Number(o.tax_rate) : 0;
+  return Math.round((total - disc * (1 + rate)) * 100) / 100;
+};
 
 async function requireAdmin(req: NextRequest) {
   return tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -195,7 +205,7 @@ async function postImpl(req: NextRequest) {
     // was the one that could leave "no reason recorded" on the Removals record the owner reads.
     const reason = String(body?.reason || "").trim().slice(0, 200);
     if (!reason) return NextResponse.json({ error: "A reason is required to delete a bill." }, { status: 400 });
-    const orderRows = (await sb.from("orders").select("id, total").eq("session_id", sessionId).is("deleted_at", null)).data as { id: string; total: number | null }[] | null;
+    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).is("deleted_at", null)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
     const ids = (orderRows || []).map((o) => o.id);
     const res = await softDeleteOrders(rid, ids, { actor: "Admin", actorId: null, reason });
     // …and into the Audit, the one place a person looks for "what was removed and why". The
@@ -206,7 +216,10 @@ async function postImpl(req: NextRequest) {
       await recordRemoval({
         rid, kind: "order_deleted", reason: { note: reason || null }, user: null,
         orderId: o.id, sessionId, tableNumber: sess.table_number != null ? String(sess.table_number) : null,
-        amount: Number(o.total) || 0,
+        // The value REMOVED from the books, net of the bill's own discount (2026-08-05) — the same
+        // rule lib/billLedger.ts now uses. `orders.total` carries tax on the PRE-discount subtotal,
+        // so the raw column overstated what the guest was ever asked for.
+        amount: netAmount(o),
         meta: { from: "admin bill ledger", orders_on_bill: (orderRows || []).length },
       });
     }

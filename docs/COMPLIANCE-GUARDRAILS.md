@@ -89,10 +89,28 @@ failure). Full enforcement is expected ~May 2027 — build consent in cheaply no
 
 - **Lawyer** → Aevidine Terms of Service: sole-responsibility, no-tax-advice, no-misuse, indemnity,
   audit-trail acknowledgement. (ToS is half the shield; architecture is the other half.)
-- Fix the **placeholder GSTIN** before any real bill is filed.
-- Add a real **credit-note** flow + before/after snapshots in the log.
 - Aim for the **European bar** (every sale signed / hash-chained / tamper-evident) → clears India, US
   and Canada at once, and is a selling point.
+- **One known gap (T7 sweep, 2026-08-05):** the owner dashboard/reports still gross a discount up at
+  the rate configured **right now**, while the printed bill, the Z-report and pay-in-parts use the
+  rate the order was charged at (`orders.tax_rate`, mig 284). For a discounted bill whose rate later
+  changed — or a banquet at its own rate — the owner's revenue and the guest's bill differ by
+  `discount × (rate_now − rate_charged)`. It reads a pre-aggregated rollup (`orders_daily_agg`, migs
+  211/213/266), so the fix means re-issuing five analytics functions plus a rollup column, and
+  migration 155's covering indexes would need `tax_rate` added. Deliberately NOT bundled with the
+  rest of the T7 fixes: it rewrites the owner's revenue on the free-tier hot path and needs its own
+  change with measurement. `docs/COMPLIANCE-GUARDRAILS.md` §3 "reconcile to the rupee" is what it
+  breaks.
+
+**Done since (do not re-add as to-dos):**
+
+- **Placeholder GSTIN — gone.** `billIdentity()` (`public/panels/billdoc.js`) never invents a GSTIN,
+  address or phone; an unconfigured restaurant prints no such line at all, and the dead constant that
+  held the invented values was deleted 2026-08-05. Guarded by `verify:print-format`.
+- **Credit notes — built.** A `credit_notes` table (`credit_no`, `amount`, `reason`, `actor`), the
+  `lfh_issue_credit_note(p_session, p_amount, p_reason, p_actor)` RPC, an admin route
+  (`app/api/admin/bills/route.ts`) that refuses a zero/negative amount and requires a reason, and a
+  `credit_note` audit line naming the bill and the amount.
 
 ---
 
