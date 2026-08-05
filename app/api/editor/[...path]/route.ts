@@ -2372,6 +2372,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       }
       total = splitBill(picked, parcelSet, parcelDisc).total;
 
+      // HOW IT WAS PAID, IN THE ONE SPELLING EVERY BREAKDOWN COUNTS — CHECKED BEFORE THE ROW
+      // EXISTS (2026-08-05). Two faults, one line: it wrote `String(method || "cash").slice(0, 20)`
+      // with no allow-list and a default in the WRONG CASE, so a counter-paid parcel was filed
+      // under a spelling nothing groups by (the live backup data showed 8 rows of `cash` beside 4
+      // of `Cash`, while dine-in has only ever held the canonical four). `/platform/:id/pay` was
+      // given this exact fix on 2026-08-04; the create path one function away never got it.
+      //
+      // And it is validated HERE, not after the insert: refusing later would leave an orphaned
+      // parcel on the Platform board WITH a kitchen ticket already fired for it. A request that
+      // is going to be refused must be refused before it creates anything.
+      let payMethod: string | null = null;
+      if (paid === true) {
+        const rawM = String(method || "Cash").trim();
+        const m = (PAYMENT_METHODS as readonly string[]).find((x) => x.toLowerCase() === rawM.toLowerCase());
+        if (!m) return err("Pick how it was paid.", 400);
+        payMethod = m;
+      }
       const cust = String(customer || "").trim().slice(0, 120) || "Parcel";
       const ext = `PARCEL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const ins = await sb.rpc("lfh_platform_insert", {
@@ -2393,7 +2410,7 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // here): what came off, and the reason, readable on the parcel and printed on its bill.
       const pDisc = parcelDisc > 0 ? { discount: parcelDisc, discount_note: String(body?.discountNote || "").slice(0, 200) || null } : {};
       const patch: Record<string, unknown> = { payload: { channel: "parcel", note: wholeNote || null, allergies: alg, ...pDisc } };
-      if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = String(method || "cash").slice(0, 20); }
+      if (paid === true) { patch.paid = true; patch.paid_at = new Date().toISOString(); patch.payment_method = payMethod as string; }
       if (row?.id) { const up = await sb.from("aggregator_orders").update(patch).eq("id", row.id).eq("restaurant_id", rid); if (up.error) throw new Error(up.error.message); }
       await log("manager", "parcel_place", { restaurant_id: rid, detail: `${paid === true ? "paid" : "unpaid"} · ₹${total}${parcelDisc > 0 ? ` · discount ₹${parcelDisc}` : ""}`, device_id: dev });
       // A discount is a money change, so it gets its OWN audit row too — the "who is discounting"
