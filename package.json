@@ -33,6 +33,8 @@
     "access:defaults": "npx esbuild lib/accessTree.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/accessTree.mjs --log-level=warning && node scripts/set-access-defaults.mjs",
     "verify:live": "node scripts/verify-no-fatal-ui.mjs",
     "verify:clash": "node scripts/verify-clash-coverage.mjs",
+    "verify:owner-clash": "node scripts/verify-owner-clash.mjs",
+    "verify:customer-erase": "node scripts/verify-customer-erase.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
