@@ -163,9 +163,14 @@ export default function AdminShell({ children, initialSkin }: { children: React.
             <button className="adm-icnbtn" onClick={toggleSkin} title={skin === "dark" ? "Switch to light" : "Switch to dark"} aria-label="Toggle light/dark theme">
               <i className={`fas ${skin === "dark" ? "fa-sun" : "fa-moon"}`} aria-hidden="true" />
             </button>
-            <a className="adm-icnbtn" href="/api/staff-logout" title="Sign out" aria-label="Sign out">
-              <i className="fas fa-right-from-bracket" aria-hidden="true" />
-            </a>
+            {/* A FORM, not a link (sweep 2026-08-05): signing out changes state, so it is a POST.
+                As a GET link, anything that merely pointed at /api/staff-logout could drop the
+                admin back to the guest menu mid-work. Still one tap, still works with no JS. */}
+            <form method="post" action="/api/staff-logout" style={{ display: "contents" }}>
+              <button type="submit" className="adm-icnbtn" title="Sign out" aria-label="Sign out">
+                <i className="fas fa-right-from-bracket" aria-hidden="true" />
+              </button>
+            </form>
           </div>
         </header>
 

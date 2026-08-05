@@ -175,18 +175,32 @@
     try {
       // Phone lives on the account row, the rest in the profile — two small writes, and the
       // phone one is skipped when it hasn't changed.
+      //
+      // BOTH GO THROUGH THE QUEUE NOW (sweep 2026-08-05). They were raw fetch()es, and outbox.js
+      // does not patch window.fetch — so these writes carried no action id and were never saved on
+      // the device. This screen READS offline (it is in sw.js DATA_PATHS) and then could not SAVE,
+      // losing whatever had been typed. `expect` names the value each write was editing FROM, so a
+      // manager changing the same field meanwhile is reported instead of silently overwritten.
+      var queued = false;
       if (phone !== String(me.phone || "")) {
-        var r1 = await fetch("/api/panel-profile", {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ phone: phone }),
+        var res1 = await window.LFH_PROFILE_SAVE({ phone: phone }, {
+          label: "save your phone number",
+          expect: me.id ? { table: "staff_users", id: me.id, fields: { phone: me.phone ?? null } } : null,
         });
-        var d1 = await r1.json().catch(function () { return {}; });
-        if (!r1.ok) throw new Error(d1.error || "Couldn't save your phone number.");
+        queued = queued || res1.queued;
       }
-      var r2 = await fetch("/api/panel-profile", {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ profile: profile }),
+      var res2 = await window.LFH_PROFILE_SAVE({ profile: profile }, {
+        label: "save your details",
+        // A jsonb sub-key comparison — lib/clash.ts supports "profile.<key>" precisely so a private
+        // note can be protected without firing on every unrelated key in the same column.
+        expect: me.id ? { table: "staff_users", id: me.id, fields: { "profile.notes": (me.profile || {}).notes ?? null } } : null,
       });
-      var d2 = await r2.json().catch(function () { return {}; });
-      if (!r2.ok) throw new Error(d2.error || "Couldn't save your details.");
+      queued = queued || res2.queued;
+      if (queued) {
+        if (btn) { btn.disabled = false; btn.textContent = "Save my details"; }
+        alert("Saved on this device — it will sync when you're back online.");
+        return;
+      }
       if (btn) btn.textContent = "Saved ✓";
       await load();
       render();
