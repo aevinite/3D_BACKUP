@@ -17,6 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getRestaurantBySlug } from "@/lib/tenant";
 import { getMenuBundle } from "@/lib/menuDataServer";
+import { getSettings } from "@/lib/menu";
 
 type Ctx = { params: Promise<{ restaurant: string }> };
 
@@ -25,6 +26,16 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   const r = await getRestaurantBySlug(restaurant);
   // Unknown / disabled restaurant → 404, same gate as the menu page itself.
   if (!r || !r.active) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  // MENU MASTER SWITCH — the SECOND half of the gate the comment above already claims.
+  // The page (app/r/[restaurant]/menu/page.tsx) refuses on BOTH `!active` and `!menuEnabled`;
+  // this route only ever checked the first, so a restaurant whose Menu feature is off had its
+  // page correctly answer "not found" while this endpoint still served the whole menu to anyone
+  // with the link (found on Aangan: page 404, 199 dishes over the API). Hiding a screen is never
+  // the only guard — the endpoint has to refuse too, or the switch does not mean what it says.
+  const gate = await getSettings(r.id);
+  if (!gate.menuEnabled) {
     return NextResponse.json({ error: "not found" }, { status: 404 });
   }
   try {

@@ -50,7 +50,7 @@ try {
   await svc.from("session_members").insert({ session_id: sessId, name: "Parity Selftest", role: "guest", approved: true, phone: "9990000288", token: "selftest-" + Date.now() });
 
   // ACCEPTED order: 1 served (qty1) + 1 cooking (qty2)  → truth: sv=1, ck=2, total=3
-  const o1 = (await svc.from("orders").insert({ restaurant_id: RID, table_number: TN, session_id: sessId, items: [], subtotal: 900, total: 945, status: "preparing", payment_status: "unpaid" }).select("id").single());
+  const o1 = (await svc.from("orders").insert({ restaurant_id: RID, table_number: TN, session_id: sessId, items: [], subtotal: 900, total: 945, status: "preparing", payment_status: "pending" }).select("id").single());
   if (o1.error) throw new Error("order1 insert: " + o1.error.message);
   orderIds.push(o1.data.id);
   await svc.from("order_items").insert([
@@ -59,7 +59,7 @@ try {
   ]);
 
   // CANCELLED order: 1 dish still 'ready', qty5 → the POISON that leaked into the clicked tile
-  const o2 = (await svc.from("orders").insert({ restaurant_id: RID, table_number: TN, session_id: sessId, items: [], subtotal: 2500, total: 2625, status: "cancelled", payment_status: "unpaid" }).select("id").single());
+  const o2 = (await svc.from("orders").insert({ restaurant_id: RID, table_number: TN, session_id: sessId, items: [], subtotal: 2500, total: 2625, status: "cancelled", payment_status: "pending" }).select("id").single());
   if (o2.error) throw new Error("order2 insert: " + o2.error.message);
   orderIds.push(o2.data.id);
   await svc.from("order_items").insert([

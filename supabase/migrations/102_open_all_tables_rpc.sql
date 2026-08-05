@@ -6,7 +6,12 @@
 -- single-open endpoint's logic exactly:
 --   • a table is "open" if it has a non-'closed' session;
 --   • for each table 1..table_count WITHOUT one → INSERT a session (status open, opened_by waiter,
---     opened_at + last_activity_at now) — the trg_assign_bill INSERT trigger still assigns bill_no;
+--     opened_at + last_activity_at now). NOTE (corrected 2026-08-05): this line used to say the
+--     `trg_assign_bill` INSERT trigger still assigns bill_no — it does not, and had not for 62
+--     migrations. Migration 040 DROPPED that trigger on purpose, so a table tap no longer burns a
+--     bill number; `trg_assign_bill_on_order` gives the session its number when its FIRST order
+--     lands. The behaviour here is right; only the comment was wrong. Left in place because the
+--     next person to touch this path would otherwise go hunting a trigger that does not exist;
 --   • approve any PENDING open/join requests across the floor (those tables are now open);
 --   • return how many were opened.
 -- The client pairs this with optimistic tiles (flip to "Open" instantly), so it FEELS instant too.

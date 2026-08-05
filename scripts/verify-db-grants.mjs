@@ -117,6 +117,12 @@ const ANON_ALLOWED = {
   lfh_send_otp:               "guest phone verification (answers 'disabled' while the feature is off)",
   lfh_verify_otp:             "guest phone verification",
   lfh_request_verification:   "mig-037 verification stub",
+  // Its other half. Migration 040 created BOTH and granted both to anon — a guest asks for a
+  // code with one and hands the code back with the other — but only the request half was ever
+  // in the database. The T8 sweep found it ABSENT, which no check could see: verify:db-parity
+  // compares the two stacks and both were missing it, and this file only inspects functions
+  // that exist. Restored + tenant-scoped by mig 295, so it belongs here beside its sibling.
+  lfh_check_verification:     "mig-040/295 verification stub: the guest hands their code back (answers 'disabled' while the feature is off, and fails closed with no restaurant)",
   get_order_status:           "guest polls their order's status + KOT number; no money in the result",
   set_order_table_number:     "narrow relabel: digits only, refuses session orders, derives the restaurant from the order (migs 007/051)",
 
