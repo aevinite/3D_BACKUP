@@ -117,6 +117,45 @@ const REACT_VALUE_EDITS = [
       { match: /left_on:\s*""/, why: "un-marking a leaver is the undo of that transition — the same reasoning" },
     ],
   },
+  // ── THE OWNER PANEL (added by the T9 sweep, 2026-08-05) ──────────────────────────────────────
+  // This was the footnote at the bottom of this file — "the OWNER panel's own writes … no
+  // expectation travels from these yet" — and a footnote is not a guard, which is the exact lesson
+  // the 2026-08-04 pass wrote down one block above and then repeated here.
+  //
+  // What made it matter rather than merely untidy: the owner panel has its OWN profile page
+  // (app/owner/staff/[id]/page.tsx) writing the SAME staff_users columns as the admin's
+  // StaffProfile — pay_type/pay_amount/pay_day/pay_mode included. So a person's SALARY was
+  // protected through /api/admin/users and completely open through /api/owner/staff. The check
+  // above proved the admin door; nothing proved the owner's.
+  {
+    file: "app/owner/staff/[id]/page.tsx",
+    route: "app/api/owner/staff/route.ts",
+    // `set_permissions` is a dropdown and `set_payroll`/`set_own_pay` are toggles — same split as
+    // every other pass here. `void_payment` is a one-way transition with a mandatory reason.
+    actions: ["set_job", "set_profile"],
+    exempt: [
+      { match: /in_payroll:/, why: "on/off the pay list is a toggle — the rate itself IS protected" },
+    ],
+  },
+  {
+    file: "app/owner/staff/page.tsx",
+    route: "app/api/owner/staff/route.ts",
+    // The roster's inline rename: a name and a phone number typed into a box.
+    actions: ["edit"],
+    exempt: [
+      { match: /action:\s*"set_active"/, why: "enable/disable is a toggle, visibly reflected" },
+      { match: /action:\s*"set_role"/, why: "a role change is a transition the server re-validates" },
+      { match: /action:\s*"reset_password"/, why: "issuing a new password is a transition, not a value two people type" },
+      { match: /action:\s*"set_payroll"/, why: "pay-list on/off is a toggle" },
+    ],
+  },
+  {
+    file: "app/owner/issues/page.tsx",
+    route: "app/api/owner/ratings/route.ts",
+    // The internal reply NOTE on a guest rating — a free-text box any co-owner can open on the
+    // same rating. Acknowledging is a transition and deliberately sends nothing.
+    patterns: [{ re: /body:\s*JSON\.stringify\(\{\s*id,\s*note:/, name: "reply note on a rating" }],
+  },
 ];
 
 for (const spec of REACT_VALUE_EDITS) {
@@ -140,8 +179,13 @@ for (const spec of REACT_VALUE_EDITS) {
       || (spec.patterns || []).map((p) => (p.re.test(line) ? p.name : null)).find(Boolean);
     if (!act) return;
     valueEdits++;
-    // The expectation is usually the patch() call's SECOND argument, so it can be a few lines down.
-    const window = lines.slice(i, i + 8).join(" ");
+    // The expectation is usually the patch() call's SECOND argument, so it can be a few lines DOWN
+    // — but when the call is a plain fetch() the X-LFH-Expect header sits in the `headers` object
+    // ABOVE the body line this loop matches on. Looking only forward marked two genuinely-protected
+    // owner-panel writes as unprotected (T9 sweep, 2026-08-05), and "move your code so the regex
+    // can see it" is the wrong way round. The panel pass above already judges its exemptions on the
+    // surrounding lines for the same reason; this window now does too.
+    const window = lines.slice(Math.max(0, i - 8), i + 8).join(" ");
     const ex = (spec.exempt || []).find((e) => e.match.test(line));
     // Case-INSENSITIVE on purpose: a helper that builds the expectation is usually camelCase
     // (`profileExpect(...)`), and the first version of this check missed all four of them because
@@ -160,8 +204,12 @@ console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${pr
 // they are the surfaces whose writes carry X-LFH-Expect through the offline queue. Saying so is
 // the difference between a guard and a false sense of one.
 console.log("\nNot covered by this check (by design — no expectation travels from these yet):");
-console.log("  · the OWNER panel's own writes (owner/settings, owner/staff — React, plain fetch)");
+console.log("  · owner/settings module toggles (a switch, visibly reflected; the admin owns these now)");
 console.log("  · a bill's customer name (its capture RPC is idempotent, so a repeat is harmless)");
+// THE OWNER PANEL used to be listed here as a whole, and that footnote is what let a person's
+// SALARY stay overwritable: the owner panel's own profile page writes the same staff_users columns
+// the admin's StaffProfile does, so "not covered by design" quietly covered money. Its three typed
+// surfaces (staff job/profile, the roster rename, a rating's reply note) are checked ABOVE now.
 // INVENTORY used to be listed here, and being listed here was never a defence: a shared stock-count
 // sheet is the likeliest silent overwrite in the whole product, and it sat under this footnote while
 // `POST /counts/:id/line` upserted last-wins. It is checked ABOVE now — both of its value edits, and

@@ -22,7 +22,7 @@ import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
-import { payrollLadder, inventoryLadder } from "@/lib/tableTags";
+import { payrollLadder, inventoryLadder, payrollEffectiveByRid, inventoryEffectiveByRid } from "@/lib/tableTags";
 
 export const dynamic = "force-dynamic";
 
@@ -471,9 +471,17 @@ export async function GET(req: NextRequest) {
       // read; a NULL keeps the line off the sheet entirely rather than printing a fake zero).
       let staffPay: { paidOut: number; people: number; entries: number } | null = null;
       if (type === "daysummary") {
-        const payIds = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
-        const enabled: string[] = [];
-        for (const id of payIds) if ((await payrollLadder(id)).effective) enabled.push(id);
+        // Enumerate for the ADMIN's all-restaurants sheet too (T9 sweep, 2026-08-05): `scopeIds` is
+        // [] for scope.all, so this line used to vanish from that view with no note — the identical
+        // fault the tips line above was fixed for. Cheap in practice: payroll is an opt-in module
+        // that starts OFF for every restaurant, so `enabled` is a small set, and the rung is now
+        // read for the whole list in ONE settings query instead of one round-trip each.
+        const payIds = (rid
+          ? [rid]
+          : scope.all ? await scopedRestaurantIds(scope).catch(() => [] as string[]) : scopeIds
+        ).filter(Boolean) as string[];
+        const payEff = await payrollEffectiveByRid(payIds);
+        const enabled = payIds.filter((id) => payEff[id] === true);
         if (enabled.length) {
           const per = await mapLimit(enabled, 6, (id) =>
             sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: istDateOf(from), p_to: istDateOf(to), p_bucket: "day" }));
@@ -502,7 +510,15 @@ export async function GET(req: NextRequest) {
         // (owner-panel sweep 2026-08-04). The ids must be ENUMERATED — mig 281 makes
         // lfh_owner_tips return NOTHING when both scope arguments are null, deliberately, so a
         // caller that forgets its scope gets zero instead of the platform's tips.
-        const tipIds = (rid ? [rid] : scope.all ? await scopedRestaurantIds(scope) : scopeIds).filter(Boolean) as string[];
+        // scopedRestaurantIds now THROWS rather than returning a partial list (T9 sweep,
+        // 2026-08-05). This block's own stated policy is fail-open — "a tips hiccup must never
+        // blank the sheet" — so an unreadable list drops the tips LINE (null, no trace) instead of
+        // failing the whole day sheet. It must never fall back to a partial list: that would print
+        // a tips figure that is quietly too small, which is the very thing the throw prevents.
+        const tipIds = (rid
+          ? [rid]
+          : scope.all ? await scopedRestaurantIds(scope).catch(() => [] as string[]) : scopeIds
+        ).filter(Boolean) as string[];
         if (tipIds.length) {
           // One indexed read (idx_orders_tips is partial — only orders that carry a tip).
           const t = await sb.rpc("lfh_owner_tips", {
@@ -537,9 +553,15 @@ export async function GET(req: NextRequest) {
       // module existed.
       try {
       if (type === "daysummary" || type === "sales") {
-        const invIds = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
-        const enabledInv: string[] = [];
-        for (const id of invIds) if ((await inventoryLadder(id)).effective) enabledInv.push(id);
+        // Same enumeration + one-query rung read as the staff-pay block above, for the same reason:
+        // the admin's all-restaurants sheet used to drop these money lines silently. Inventory is
+        // also an opt-in module that starts OFF, so `enabledInv` stays small.
+        const invIds = (rid
+          ? [rid]
+          : scope.all ? await scopedRestaurantIds(scope).catch(() => [] as string[]) : scopeIds
+        ).filter(Boolean) as string[];
+        const invEff = await inventoryEffectiveByRid(invIds);
+        const enabledInv = invIds.filter((id) => invEff[id] === true);
         if (enabledInv.length) {
           // Sum across the owner's inventory-enabled restaurants (each RPC is per-restaurant).
           const [sums, covs, dishes, seriesPer] = await Promise.all([

@@ -214,14 +214,36 @@ export default function StaffProfilePage() {
       .then((x) => x.json()).then((j) => setLogRows(j.actions || [])).catch(() => setLogRows([]));
   }, [tab, logRows, staff, id, withScope]);
 
-  async function call(body: Record<string, unknown>, method: "PATCH" | "POST" = "PATCH") {
+  // `expect` = "this is what the row said when I opened it" (T9 sweep, 2026-08-05). It becomes the
+  // X-LFH-Expect header and lib/clash.ts → expectClash compares it against the row NOW; if someone
+  // else changed it first the server refuses with 409 and says what it holds, instead of letting
+  // this screen quietly win. components/admin/StaffProfile.tsx has done this since 2026-08-04 —
+  // this page writes the SAME columns (including pay_amount) through /api/owner/staff and did not,
+  // so a salary was protected through the admin's door and open through the owner's. Omit it and
+  // nothing changes.
+  async function call(
+    body: Record<string, unknown>,
+    method: "PATCH" | "POST" = "PATCH",
+    expect?: { fields: Record<string, unknown> },
+  ) {
     setBusy(true);
     try {
       const r = await fetch(withScope("/api/owner/staff"), {
-        method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method,
+        headers: {
+          "Content-Type": "application/json",
+          ...(expect ? { "X-LFH-Expect": JSON.stringify({ table: "staff_users", id, fields: expect.fields }) } : {}),
+        },
+        body: JSON.stringify(body),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
+      // A refusal carries the plain sentence in `clash.plain` + what to do in `clash.todo`
+      // (lib/clash.ts). Show THOSE, not the machine code — this is the message that stops the
+      // person believing their number landed.
+      if (!r.ok) {
+        const c = d?.clash as { plain?: string; todo?: string } | undefined;
+        throw new Error(c?.plain ? `${c.plain}${c.todo ? ` ${c.todo}` : ""}` : (d.error || `Request failed (${r.status})`));
+      }
       return d;
     } finally { setBusy(false); }
   }
@@ -234,23 +256,32 @@ export default function StaffProfilePage() {
     if (String(before) === String(value)) return;              // nothing changed → no request
     setStaff((s) => (s ? { ...s, profile: { ...s.profile, [key]: value } } : s));
     try {
-      const d = await call({ id, action: "set_profile", profile: { [key]: value } });
+      // One `profile.<key>` sub-key, not the whole jsonb — comparing the blob would fire on any
+      // unrelated field someone else happened to fill in (lib/clash.ts supports the dotted form).
+      const d = await call({ id, action: "set_profile", profile: { [key]: value } }, "PATCH",
+        { fields: { [`profile.${key}`]: before } });
       setStaff((s) => (s ? { ...s, profile: d.profile, completeness: d.completeness } : s));
       setFlash(key); setTimeout(() => setFlash((f) => (f === key ? null : f)), 1600);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
       setStaff((s) => (s ? { ...s, profile: { ...s.profile, [key]: before } } : s));
+      load();                     // refuse or fail → show the truth, never our stale value
     }
   }
   async function saveJob(patch: Record<string, unknown>, key: string) {
     if (!staff) return;
     const before = { ...staff };
+    // What these boxes held when the card was opened — the money fields included. Same `?? ""`
+    // normalisation the admin profile uses, so an empty box and a null column compare equal.
+    const was = Object.fromEntries(
+      Object.keys(patch).map((k) => [k, (before as unknown as Record<string, unknown>)[k] ?? ""]),
+    );
     setStaff((s) => (s ? { ...s, ...patch } as Staff : s));
     try {
-      const d = await call({ id, action: "set_job", ...patch });
+      const d = await call({ id, action: "set_job", ...patch }, "PATCH", { fields: was });
       setStaff((s) => (s ? { ...s, completeness: d.completeness } : s));
       setFlash(key); setTimeout(() => setFlash((f) => (f === key ? null : f)), 1600);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setStaff(before); }
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setStaff(before); load(); }
   }
   async function setCap(key: string, v: string) {
     if (!staff) return;
@@ -404,8 +435,8 @@ export default function StaffProfilePage() {
                   onBlur={async (e) => {
                     const v = e.target.value.trim();
                     if (v === (staff.phone || "")) return;
-                    try { await call({ id, action: "edit", phone: v }); setFlash("phone"); setTimeout(() => setFlash(null), 1600); await load(); }
-                    catch (er) { setErr(er instanceof Error ? er.message : String(er)); }
+                    try { await call({ id, action: "edit", phone: v }, "PATCH", { fields: { phone: staff.phone ?? "" } }); setFlash("phone"); setTimeout(() => setFlash(null), 1600); await load(); }
+                    catch (er) { setErr(er instanceof Error ? er.message : String(er)); await load(); }
                   }} />
                 {flash === "phone" && <div className="sp-saved"><i className="fas fa-check" /> Saved</div>}
               </div>

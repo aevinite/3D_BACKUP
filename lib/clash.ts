@@ -95,6 +95,10 @@ const COMPARABLE_TABLES: Record<string, string> = {
   // null, which reads as "nothing to protect".
   inv_count_lines: "id",
   inv_items: "id",
+  // A guest rating's internal reply note (T9 sweep, 2026-08-05). Two co-owners can both open the
+  // same rating in the owner panel's Feedback tab and type into the same box; without this the
+  // table was unknown here, which reads as "nothing to protect" even when the screen asks.
+  feedback: "id",
 };
 
 /**

@@ -10,9 +10,9 @@
 // role only, behind the ADMIN_PASSWORD cookie gate (same as /api/owner/overview).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
-import { payrollLadder } from "@/lib/tableTags";
+import { payrollEffectiveByRid } from "@/lib/tableTags";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
@@ -235,11 +235,21 @@ export async function GET(req: NextRequest) {
   // Cash truth: money that actually left in this window, pay-list members only (a payment can
   // only exist for someone on the list). ONE indexed sum, and only for restaurants that have
   // the module — a restaurant without it gets `null` and the dashboard shows no such tile.
+  // THE ADMIN'S ALL-RESTAURANTS VIEW USED TO LOSE THIS TILE IN SILENCE (T9 sweep, 2026-08-05).
+  // `scope.all` gave an EMPTY id list, so this returned null and the staff-pay / after-staff-pay
+  // tiles simply weren't there — no figure, no note, nothing to tell the admin why. The tips line
+  // was fixed for exactly this on 2026-08-04 ("used to mean the tips line silently vanished from
+  // that view with no note") and its two neighbours were left behind. Enumerate the scope like tips
+  // does, and read the payroll rung for the whole set in ONE settings query rather than one
+  // round-trip per restaurant — that loop was fine for one restaurant and wrong for a platform.
   const staffPayExpense = async (): Promise<{ paidOut: number; people: number; entries: number } | null> => {
-    const ids = (rid ? [rid] : scope.all ? [] : scope.ids).filter(Boolean) as string[];
+    let ids: string[];
+    try {
+      ids = (rid ? [rid] : scope.all ? await scopedRestaurantIds(scope) : scope.ids).filter(Boolean) as string[];
+    } catch { return null; }   // an unreadable list must not print a figure that is too small
     if (!ids.length) return null;
-    const on: string[] = [];
-    for (const id of ids) if ((await payrollLadder(id)).effective) on.push(id);
+    const eff = await payrollEffectiveByRid(ids);
+    const on = ids.filter((id) => eff[id] === true);
     if (!on.length) return null;
     const q = await sb.rpc("lfh_staff_pay_expense", {
       p_restaurant: on.length === 1 ? on[0] : null,
@@ -436,7 +446,6 @@ export async function GET(req: NextRequest) {
     }));
     const revenue = num(tsRows.reduce((a: number, r: { revenue: number }) => a + r.revenue, 0));
     const orders = tsRows.reduce((a: number, r: { orders: number }) => a + r.orders, 0);
-    void 0; // (kept structure below unchanged — still inside the cached compute)
     // Avg order = PAID revenue ÷ PAID order count (both from paid-only sources). `orders` above
     // counts ALL non-cancelled orders (incl. open/unpaid), so revenue/orders understated the
     // average and made it drift UPWARD as open tables settled with no new orders. paid-count

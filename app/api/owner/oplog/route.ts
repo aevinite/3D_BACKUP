@@ -61,6 +61,14 @@ export async function GET(req: NextRequest) {
   // table), not the error log (owner 2026-07-26). Keep every non-error row, including rows
   // whose level is NULL (an OR so a plain `neq` doesn't silently drop the NULLs).
   q = q.or("level.is.null,level.neq.error");
+  // …nor the raw BUTTON-TAP breadcrumbs (T9 sweep, 2026-08-05). `ui_taps` rows are written by
+  // public/panels/errlog.js purely so a support person can see what someone was doing just before a
+  // crash — they are level:'info' on a normal panel, so they passed both filters above and landed in
+  // the owner's Activity list, where the editor's label renders them as "Button taps". Hundreds of
+  // those push the real staff actions off this 200-row page, which is the same "a board full of
+  // non-faults is a board nobody reads" problem the errlog noise filter exists for. They stay in the
+  // ADMIN's Everything Log, exactly like the 'admin'/'db' rows excluded above.
+  q = q.neq("action", "ui_taps");
   // Optional ?rid= — narrow to ONE selected restaurant (the top-strip restaurant pick / an
   // admin act-as one restaurant), mirroring how /api/owner/reports scopes. Only honoured when
   // that id is already in the caller's scope (an admin's scope is every restaurant), so it can

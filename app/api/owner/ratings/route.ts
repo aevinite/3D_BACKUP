@@ -6,9 +6,10 @@
 // Egress-safe: explicit columns, scoped by restaurant_id, .limit — never SELECT *.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds } from "@/lib/ownerScope";
+import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
+import { expectClash, clashJson } from "@/lib/clash";
 
 export const dynamic = "force-dynamic";
 
@@ -44,7 +45,11 @@ export async function GET(req: NextRequest) {
   // one restaurant), mirroring /api/owner/reports. Only honoured when that id is already in the
   // caller's scope, so it can only NARROW, never widen. Both the summary RPC (p_ids) and the
   // list read below scope off this same `ids` list, so the whole tab narrows together.
-  let ids = await scopedIds(scope);
+  // A half-read list would understate the star average and the "to handle" count, so it is a
+  // retryable failure rather than a wrong summary (T9 sweep, 2026-08-05).
+  let ids: string[];
+  try { ids = await scopedIds(scope); }
+  catch (e) { if (e instanceof RestaurantListIncomplete) return incompleteListResponse(); throw e; }
   const pinRid = req.nextUrl.searchParams.get("rid");
   if (pinRid) {
     if (!inScope(scope, pinRid)) return empty();
@@ -101,6 +106,14 @@ export async function PATCH(req: NextRequest) {
   const row = (await sb.from("feedback").select("id, restaurant_id").eq("id", id).maybeSingle()).data as { restaurant_id: string } | null;
   if (!row) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (!inScope(scope, row.restaurant_id)) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
+  // NO SILENT OVERWRITES (T9 sweep, 2026-08-05). `staff_note` is a free-text box any co-owner can
+  // open on the same rating, so the second save used to just win. Acknowledging is a transition and
+  // sends no expectation, so it is unaffected — only the typed note is protected.
+  {
+    const overwrite = await expectClash(req, String(row.restaurant_id || ""));
+    if (overwrite) return clashJson(overwrite);
+  }
 
   // Record WHO handled it: "admin" for the super-user OR an admin act-as session, else the
   // concrete owner id (traceable when several co-own a restaurant) — matches issues.route,

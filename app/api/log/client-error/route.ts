@@ -19,6 +19,26 @@ export const dynamic = "force-dynamic";
 const PANELS = new Set(["tablet", "kitchen", "editor", "manager", "owner", "admin", "guest", "menu"]);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAX_ERRORS_PER_DEVICE_10MIN = 5;
+// TAP BATCHES NEED THEIR OWN CEILING (T9 sweep, 2026-08-05). The error cap above was hardened for a
+// cookie-less caller last sweep, but the `taps` branch RETURNED BEFORE reaching it, so that half of
+// this public endpoint had no ceiling at all. A well-behaved client batches one write per panel per
+// ~30s (public/panels/errlog.js), i.e. ~20 in ten minutes — 40 leaves generous headroom for two
+// panels open on one device while still bounding the damage.
+const MAX_TAPS_PER_DEVICE_10MIN = 40;
+
+// How many rows this device/IP already wrote for one action in the last ten minutes. Shared by
+// both branches so the two caps can't drift apart again.
+async function recentCount(capKey: string, action: string, max: number): Promise<number> {
+  const sinceIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const { data } = await sb
+    .from("staff_actions")
+    .select("id")
+    .eq("device_id", capKey)
+    .eq("action", action)
+    .gte("created_at", sinceIso)
+    .limit(max);
+  return data?.length ?? 0;
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -50,26 +70,23 @@ export async function POST(req: NextRequest) {
     if (kind === "taps") {
       const detail = String(body.detail || "").slice(0, 1500);
       if (!detail) return NextResponse.json({ ok: true, skipped: "empty" });
+      // Same ceiling reasoning as the error branch below — see MAX_TAPS_PER_DEVICE_10MIN.
+      if (await recentCount(capKey, "ui_taps", MAX_TAPS_PER_DEVICE_10MIN) >= MAX_TAPS_PER_DEVICE_10MIN) {
+        return NextResponse.json({ ok: true, skipped: "rate_limited" });
+      }
       await sb.from("staff_actions").insert({
-        panel, action: "ui_taps", detail, device_id: device, level: "info",
+        // Written under capKey, not `device`, for exactly the reason the error row below is:
+        // the cap counts rows BY device_id, so a cookie-less caller's rows must carry the same
+        // key or its own cap would forever count zero of them.
+        panel, action: "ui_taps", detail, device_id: capKey, level: "info",
         ...(rid !== null ? { restaurant_id: rid } : { restaurant_id: null }),
       });
       return NextResponse.json({ ok: true });
     }
 
     // kind === "error": per-device (or per-IP) flood cap (protects the DB; no new table).
-    {
-      const sinceIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      const { data } = await sb
-        .from("staff_actions")
-        .select("id")
-        .eq("device_id", capKey)
-        .eq("action", "client_error")
-        .gte("created_at", sinceIso)
-        .limit(MAX_ERRORS_PER_DEVICE_10MIN);
-      if (data && data.length >= MAX_ERRORS_PER_DEVICE_10MIN) {
-        return NextResponse.json({ ok: true, skipped: "rate_limited" });
-      }
+    if (await recentCount(capKey, "client_error", MAX_ERRORS_PER_DEVICE_10MIN) >= MAX_ERRORS_PER_DEVICE_10MIN) {
+      return NextResponse.json({ ok: true, skipped: "rate_limited" });
     }
 
     const message = String(body.message || "client error").slice(0, 300);

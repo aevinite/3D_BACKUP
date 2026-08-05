@@ -394,7 +394,16 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
     <style jsx global>{`
       /* overflow must stay VISIBLE so popups escape the card (round-2 bug: overflow
          hidden clipped the dropdown). The spark clips itself via its rounded wrapper. */
-      .ow2-kpi { position: relative; padding-bottom: 30px; }
+      .ow2-kpi { position: relative; }
+      /* THE SPARKLINE BAND MUST BE RESERVED, AND THE RULE MUST WIN THE CASCADE (T9 sweep,
+         2026-08-05). The spark is absolute at bottom:0, 34px tall. This used to be
+         '.ow2-kpi { padding-bottom: 30px }' — ONE class, which loses to
+         '.owx .adm-stat { padding: 10px 14px }' in app/globals.css (two selectors). So the reserved
+         space was never 30px, it was 10px, and on the owner's 360px phone the green line was drawn
+         straight THROUGH 'vs the 30 days before' and '4184 paid, rest still open'. Measured, not
+         guessed: the caption box overlapped the spark box by 14px.
+         Three classes so it beats that rule; keep this >= the SparkArea height below, plus air. */
+      .owx .adm-stat.ow2-kpi { padding-bottom: 44px; }
       .ow2-kpi.ow2-click { cursor: pointer; text-decoration: none; color: inherit; display: block; transition: border-color .15s, transform .15s; }
       .ow2-kpi.ow2-click:hover { border-color: var(--accent); transform: translateY(-2px); }
       .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }

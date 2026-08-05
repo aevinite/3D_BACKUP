@@ -67,6 +67,18 @@ export async function POST(req: NextRequest) {
   const on = body?.on === true;
   const r = await sb.from("settings").update({ service_mode: on }).eq("restaurant_id", s.rid).select("service_mode");
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  // A WRITE THAT MATCHED NO ROW IS NOT A WRITE (T9 sweep, 2026-08-05). PostgREST answers an UPDATE
+  // that hit zero rows with `data: []` and NO error — which happens if this restaurant somehow has
+  // no `settings` row. The old code went straight on to log "took the guest menu OFFLINE" and then
+  // answered {maintenance:false}, so the badge honestly said "live" while the Activity log claimed
+  // someone had taken the menu down. A record of something that didn't happen is worse than no
+  // record, and the tap must not vanish silently either — so say so, plainly, and log nothing.
+  if (!r.data?.length) {
+    return NextResponse.json(
+      { error: "Couldn't change the menu's status — this restaurant has no settings saved yet. Ask your admin." },
+      { status: 409 },
+    );
+  }
   // TAKING THE MENU DOWN STOPS EVERY GUEST ORDERING, AND IT WAS UNRECORDED (sweep 2026-08-04).
   // Guests see "we'll be right back", the owner asks who did it, and there was no answer anywhere.
   // The write is properly GATED already (Access -> Menu -> "Put menu on maintenance" + the `who`

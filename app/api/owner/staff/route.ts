@@ -46,6 +46,7 @@ const CAP_MODULE_GATE: Record<string, (rid: string) => Promise<{ effective: bool
 };
 
 import { withIdempotency } from "@/lib/idempotency";
+import { expectClash, clashJson } from "@/lib/clash";
 
 export const dynamic = "force-dynamic";
 
@@ -559,6 +560,18 @@ async function patchImpl(req: NextRequest): Promise<Response> {
   // void_payment — cancel a ledger entry WITH a reason; the row stays, struck through
   if (action === "set_profile" || action === "set_job" || action === "set_own_pay") {
     const t = await target(s, id); if (t.err) return t.err;
+    // NO SILENT OVERWRITES — THE OWNER'S PROFILE PAGE TOO (sweep 2026-08-05, T9 finding 1).
+    // /api/admin/users got this gate in the 2026-08-04 sweep, but the OWNER panel has its OWN
+    // profile page (app/owner/staff/[id]/page.tsx) writing the SAME columns through THIS route —
+    // including pay_amount. So the identical salary field was protected through one door and
+    // wide open through the other: two co-owners setting different monthly pay a minute apart,
+    // second one silently wins, and the first screen keeps showing a number that never landed.
+    // Same one-line shape as every other dispatcher; a caller that sends no X-LFH-Expect is
+    // unaffected.
+    {
+      const overwrite = await expectClash(req, String(t.u.restaurant_id || ""));
+      if (overwrite) return clashJson(overwrite);
+    }
     if (action === "set_profile") {
       if (!t.acc.canEditProfile) return bad("Your owner hasn't given managers permission to edit staff profiles.", 403);
       const patch = body?.profile;
@@ -667,6 +680,15 @@ async function patchImpl(req: NextRequest): Promise<Response> {
   // Hierarchy: the TARGET must be below the actor's level — a manager can never
   // touch another manager's (or an owner's) account, in any way.
   if (!assignableFor(s.actor).includes(u.role)) return bad("You can't manage accounts at or above your own level.", 403);
+
+  // The same gate for the account actions below — `edit` types a name and a phone number into a
+  // box, which is a value edit by the same rule (see the note in the profile branch above).
+  // reset_password / set_active / set_role / set_permissions send no expectation, so they are
+  // untouched: each is a transition whose second attempt the handler already answers for itself.
+  {
+    const overwrite = await expectClash(req, String(u.restaurant_id || ""));
+    if (overwrite) return clashJson(overwrite);
+  }
 
   // A MANAGER'S FINER STAFF POWERS (owner, 2026-08-01). "Manage staff" used to be one yes covering
   // creating a login, resetting somebody's password and deleting them outright. Those are three

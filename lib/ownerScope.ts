@@ -122,16 +122,39 @@ export function inScope(scope: OwnerScope, restaurantId: string): boolean {
 // dropped restaurants — the identical bug the reports route's allRestaurantIds() was written
 // to page around ("a flat .limit(100) silently dropped every restaurant past the 100th").
 // ONE helper now, so a fourth copy can't drift (found by the 2026-08-04 owner-panel sweep).
+//
+// A PARTIAL LIST IS NOT A LIST (T9 sweep, 2026-08-05). This used to `break` on a read error and
+// return whatever it had, on the theory that "a partial list beats no list". For a NAME lookup that
+// would be true; but this list is what the admin's Pay Later / Customers / Ratings views SUM over,
+// so a transient error mid-paging silently produced money totals that excluded some restaurants,
+// with nothing on screen saying the answer was incomplete. That is the same class as presenting
+// saved figures as live. The sibling helper for the same job (allRestaurantIds in the reports route)
+// already threw; now both fail the same way and the caller can say "try again".
+export class RestaurantListIncomplete extends Error {
+  constructor(cause?: string) {
+    super(`Couldn't read the full restaurant list${cause ? `: ${cause}` : ""}`);
+    this.name = "RestaurantListIncomplete";
+  }
+}
+
 export async function scopedRestaurantIds(scope: OwnerScope): Promise<string[]> {
   if (!scope.all) return scope.ids;
   const ids: string[] = [];
   const PAGE = 1000;
   for (let offset = 0; ; offset += PAGE) {
     const r = await sb.from("restaurants").select("id").order("id").range(offset, offset + PAGE - 1);
-    if (r.error) break;                       // partial list beats no list on a transient read error
+    if (r.error) throw new RestaurantListIncomplete(r.error.message);
     const batch = (r.data ?? []).map((x) => x.id as string);
     ids.push(...batch);
     if (batch.length < PAGE) break;
   }
   return ids;
+}
+
+/** One shared 503 for "we couldn't read the whole list" — retryable, never a wrong total. */
+export function incompleteListResponse(): Response {
+  return Response.json(
+    { error: "Couldn't load every restaurant just now — please try again.", transient: true },
+    { status: 503 },
+  );
 }
