@@ -173,9 +173,12 @@ update the detail doc's section in the same commit.
   guard. Spec: `docs/ACCESS-MODEL.md`. Guards: `verify:access`, `verify:everything` (`--list` for
   the phase map — never hard-code phase numbers). **French House is written to; Aangan is the
   READ-ONLY control at factory defaults.**
-- **👤 One profile shape for every person** (`components/admin/StaffProfile.tsx`): read
-  `docs/STAFF-PROFILE.md` before adding anything about a person; one permission list feeds
-  profile + Access tab + write allow-list (`lib/staffCaps.ts`); unknown keys are REFUSED.
+- **👤 One profile shape for every person WHO HAS ONE — owner, manager, waiter. KITCHEN HAS NO
+  PROFILE** and that is deliberate (owner, 2026-07-29 and re-confirmed 2026-08-05: *"Don't need
+  the profile"*): `lib/staffProfileShared.ts` → `PROFILE_ROLES`. Do not "fix" the kitchen rows on
+  `/owner/staff`. Otherwise read `docs/STAFF-PROFILE.md` before adding anything about a person;
+  one permission list feeds profile + Access tab + write allow-list (`lib/staffCaps.ts`); unknown
+  keys are REFUSED.
 - **Mobile back button:** every popup/overlay registers `useBackClose(...)` (guest) or
   `LFH_BACK.layer(...)` (panels) the moment it's built — never hand-roll pushState/popstate.
 - **🙋 The owner is NOT the test subject:** drive the exact flow yourself first (headless),
@@ -212,7 +215,14 @@ update the detail doc's section in the same commit.
   `claude mcp` output to null; masked reads only. Treat a pasted key as compromised.
 - MCP servers load from `~/.claude.json` / root `.mcp.json`, NOT `.claude/settings.json`;
   config changes need a full restart.
-- Light mode works and persists (`lfh_theme`).
+- **Light mode: which surfaces even HAVE it.** The GUEST menu has a toggle (`lfh_theme`, tenant
+  menus default DARK). The manager / kitchen / tablet panels have one (`lfh_panel_theme`, default
+  LIGHT) and **a staff member's choice is remembered when they reopen the panel** — verified on
+  all three, 2026-08-05. The **owner and admin consoles are dark-only ON PURPOSE** (owner,
+  2026-08-05: *"keep let it stay like it is"*): `app/layout.tsx` tags those routes
+  `data-staffdark`, there is no toggle, and setting `lfh_theme` does nothing there. So don't write
+  "check it in the light skin" checks for `/owner` or `/aevinite` — ~35 of them were planned and
+  wasted in the T11 sweep before this was written down.
 - Staff can run a weeks-old panel: `?v=` is a content hash — `verify:panel-cache`.
 
 ## Definition of done
