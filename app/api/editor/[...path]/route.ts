@@ -461,11 +461,11 @@ const editErrMsg = (reason?: string) =>
   : reason === "sold_out" ? "That dish is sold out — can't add it."
   : reason === "unknown_item" ? "That dish isn't on the menu."
   : reason === "empty_order" ? "Nothing to add."
-  // mig 215: an open-price dish reached the server with no price typed on the line.
-  : reason === "price_required" ? "That dish needs a price typed in before it can be added."
-  // An open-price (as-per-MRP) dish carries no menu price, so the pricer refuses a line with
-  // none. Without this the raw token "price_required" reached the staff toast.
-  : reason === "price_required" ? "Type a price for that dish first — it's priced as-per-MRP."
+  // mig 215: an open-price (as-per-MRP) dish carries no menu price, so the pricer refuses a line
+  // that arrives without one. This was written TWICE, and the second copy was unreachable — so the
+  // more useful of the two sentences (the one that says WHY the dish has no price) never appeared
+  // (sweep 2026-08-05). One branch, both facts.
+  : reason === "price_required" ? "Type a price for that dish first — it's priced as-per-MRP, so it has no menu price."
   : "Couldn't edit the order — please try again.";
 
 const ORDER_STATUSES = ["received", "preparing", "served", "cancelled"];
@@ -2850,7 +2850,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // allergen distributes onto every dish, so an add/remove here marks ＋ / ✎− on
       // ALL the order's items (same rules as the per-dish endpoint).
       const prev = must(await sb.from("orders").select("allergies").eq("id", b).eq("restaurant_id", rid).maybeSingle());
-      const oldOW = new Set((Array.isArray(prev?.allergies) ? prev.allergies : []).map((x: any) => String(x).toLowerCase()));
+      // The row was READ but never checked (sweep 2026-08-05): a vanished order took the same path
+      // and answered ok:true, so an allergen typed onto a just-voided or just-moved ticket was
+      // accepted on screen and written nowhere. Same refusal as every sibling on this endpoint family.
+      if (!prev) return err("That order isn't there anymore — refresh.", 404);
+      const oldOW = new Set((Array.isArray(prev.allergies) ? prev.allergies : []).map((x: any) => String(x).toLowerCase()));
       const addedOW = allergies.filter((s) => !oldOW.has(s));
       const removedOW = [...oldOW].filter((s) => !allergies.includes(s));
       must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
@@ -3082,6 +3086,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok(cnRow);
     }
     if (a === "sessions" && c === "shift") {
+      // "Change table" IS a table operation and must follow the same ladder as its four siblings
+      // (sweep 2026-08-05). It is the FIRST item in the panel's 🧾 KOT ▾ menu and the whole button
+      // is drawn only when tableOpsOn() — so until now, hiding it was the ONLY guard: with
+      // Table & KOT operations switched off for the restaurant, a stale tab (or any direct call)
+      // could still move a whole party — session, orders, calls and bill — onto another table.
+      // orders/:id/move, sessions/:id/merge, tables/:t/pay-split and order-items/:id/move have
+      // always called this; the waiter tablet's twin was fixed for exactly this reason
+      // (tablet route: "it was ungated before, so a restaurant with table-ops set to PIN/off
+      // could still shift parties from the tablet") and the manager side was never given the
+      // same pass. tableOpsGate lets the admin super-user through, so the X-ray stays honest.
+      const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
       const to = String((body && body.to) || "").trim();
       // Validate the destination is a plain positive integer (the RPC trusts whatever arrives).
       if (!/^\d+$/.test(to) || Number(to) < 1) return err("Pick a valid table to move to.", 400);
@@ -3478,7 +3493,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "tables" && c === "unmerge") {
       const t = String(b || "").trim();
       if (!/^\d+$/.test(t)) return err("valid table required");
-      if (!(await managerCan(g, rid, "table_ops"))) return permDenied("merge or split tables");
+      // Was the PERSON half only (managerCan) with no MODULE rung (sweep 2026-08-05) — so with
+      // Table & KOT operations switched off for the restaurant, an OWNER (who passes every
+      // managerCan power automatically) could still split a merged party. tableOpsGate is both
+      // rungs in one call, exactly as its four siblings use it. Splitting and merging are the
+      // same feature; they must answer to the same switch.
+      const gateResp = await tableOpsGate(g, rid); if (gateResp) return gateResp;
       const actor = g.user?.username || g.user?.role || "manager";
       const { data, error } = await sb.rpc("lfh_staff_unmerge_table", { p_rid: rid, p_child: t, p_actor: actor });
       if (error) throw new Error(error.message);

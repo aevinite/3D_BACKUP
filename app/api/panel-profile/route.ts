@@ -20,6 +20,8 @@ import { payrollLadder } from "@/lib/tableTags";
 import { waiterTables } from "@/lib/tableAssign";
 import { completeness, hasProfile, mergeProfilePatch, SELF_PROFILE_FIELDS, todayIST } from "@/lib/staffProfile";
 import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
+import { withIdempotency } from "@/lib/idempotency";
+import { expectClash, clashJson } from "@/lib/clash";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +37,10 @@ export async function GET(req: NextRequest) {
   const limit = u.restaurant_id ? await waiterTables(u, u.restaurant_id) : null;
   const myTables = limit ? limit.tables : null;   // just the numbers for display
   const base = {
+    // Their OWN row id. Needed so the save can say what it was editing FROM (the clash gate's
+    // `expect` names a table + id) — without it the expectation is silently ignored, which reads
+    // as "protected" and isn't. Their own id on their own screen discloses nothing.
+    id: u.id,
     username: u.username, role: u.role, name: u.name, phone: u.phone,
     myTables,
     hasPin: !!u.pin_hash,
@@ -95,11 +101,30 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(out);
 }
 
-export async function POST(req: NextRequest) {
+// AT MOST ONCE + NO SILENT OVERWRITES (sweep 2026-08-05).
+//
+// This route was the one staff write surface outside both rules. The admin's twin — which edits the
+// SAME columns of the SAME row (app/api/admin/users, `set_profile`) — got the clash gate on
+// 2026-08-04 when the sweep found that expectClash "appeared in the editor/kitchen/tablet routes and
+// NOWHERE else". The PERSON'S OWN side of that same screen was left out, so first-save-wins held in
+// one direction only: a manager correcting a waiter's phone in /aevinite was correctly refused if
+// the waiter got there first, while the waiter silently overwrote the manager.
+// The wrapper also makes a replayed profile save run once, so the offline queue (see
+// public/panels/myprofile.js) can carry these writes like every other panel write.
+export const POST = withIdempotency(postImpl, "panel-profile");
+async function postImpl(req: NextRequest) {
   const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   if (!u) return NextResponse.json({ error: "not logged in" }, { status: 401 });
   let body: any = {};
   try { body = await req.json(); } catch {}
+
+  // The one clash gate for every branch below, exactly as the panel dispatchers do it: a no-op
+  // unless the screen said what it was editing FROM (the X-LFH-Expect header), so a caller that
+  // hasn't opted in is unaffected. Scoped to the person's own restaurant.
+  {
+    const overwrite = await expectClash(req, String(u.restaurant_id || ""));
+    if (overwrite) return clashJson(overwrite);
+  }
 
   // ── password change (own) — most sensitive, handled first ──────────────────
   if (body?.newPassword !== undefined) {
@@ -180,7 +205,15 @@ export async function POST(req: NextRequest) {
     const display = String(body.name || "").trim().slice(0, 80);
     const key = normalizeLoginName(display);
     if (!display || !key) return NextResponse.json({ error: "Your username can't be empty." }, { status: 400 });
-    const clash = (await sb.from("staff_users").select("id").eq("username", key).neq("id", u.id).is("deleted_at", null).limit(1)).data?.[0];
+    // Scoped to THEIR restaurant (sweep 2026-08-05). The database index is
+    // `(restaurant_id, lower(username))` — mig 091 made login names unique PER restaurant — and all
+    // four other places that check this scope it that way (app/api/admin/users l.139 + l.334,
+    // app/api/owner/staff l.505 + l.816). This one was restaurant-blind, so a waiter at Aangan was
+    // told "already taken" about a name only some other restaurant used, and no name they could
+    // type would ever free it up. Refusing a name the database would accept is a wall with nothing
+    // behind it.
+    const clash = (await sb.from("staff_users").select("id").eq("username", key)
+      .eq("restaurant_id", u.restaurant_id).neq("id", u.id).is("deleted_at", null).limit(1)).data?.[0];
     if (clash) return NextResponse.json({ error: "That username is already taken — please pick another." }, { status: 409 });
     patch.name = display;
     patch.username = key;

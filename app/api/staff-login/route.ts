@@ -10,7 +10,7 @@
 // operation log so the admin can see who tried what on the most-targeted screen.
 
 import { NextRequest, NextResponse } from "next/server";
-import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, adminPassword } from "@/lib/staffAuth";
+import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, safeEqual, adminPassword } from "@/lib/staffAuth";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { throttleStatus, throttleFail, throttleReset, throttleIsBlocked, clientIp } from "@/lib/loginThrottle";
 import { recordAlert } from "@/lib/rateLimit";
@@ -51,7 +51,15 @@ export async function POST(req: NextRequest) {
   }
 
   const expected = adminPassword();
-  if (!expected || password.length > MAX_PASSWORD_LEN || password !== expected) {
+  // Compared through the shared constant-time helper (sweep 2026-08-05). Every other secret
+  // comparison in this area already goes through safeEqual — including tokenIsValid, two lines
+  // further down in lib/staffAuth, whose own comment explains why the helper exists. The one
+  // comparison against the real typed password was the only one still using a plain `!==`.
+  // Hashing both sides first makes the compare fixed-length, which is what safeEqual needs; the
+  // length cap stays AHEAD of it so an oversize value never reaches the hash.
+  const tooLong = password.length > MAX_PASSWORD_LEN;
+  const matches = !!expected && !tooLong && safeEqual(await sha256hex(password), await sha256hex(expected));
+  if (!matches) {
     const t = await throttleFail(throttleKey, ADMIN_MAX_FAILS, ADMIN_LOCK_MS);
     await logAction("admin", "login_failed", { device_id: dev, detail: `wrong admin password from ${ip}` });
     // After N wrong tries from this device → raise a WARN-ONLY alert (mig 208) so the admin gets a
@@ -73,7 +81,12 @@ export async function POST(req: NextRequest) {
   const res = wantsJson
     ? NextResponse.json({ ok: true, next })
     : NextResponse.redirect(new URL(next, req.url), 303);
-  res.cookies.set(AUTH_COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 604800 });
-  res.cookies.set(FLAG_COOKIE, "1", { httpOnly: false, sameSite: "lax", path: "/", maxAge: 604800 });
+  // `secure` in production, matching the STAFF cookie in app/api/panel-login (sweep 2026-08-05).
+  // Both doors set httpOnly/sameSite/path/maxAge, but only the staff one asked for HTTPS-only —
+  // so the cookie guarding MORE (the whole admin console) was the looser of the two. Vercel serves
+  // HTTPS only, so nothing changes in practice; the point is that the two doors now agree.
+  const secure = process.env.NODE_ENV === "production";
+  res.cookies.set(AUTH_COOKIE, token, { httpOnly: true, sameSite: "lax", path: "/", maxAge: 604800, secure });
+  res.cookies.set(FLAG_COOKIE, "1", { httpOnly: false, sameSite: "lax", path: "/", maxAge: 604800, secure });
   return res;
 }

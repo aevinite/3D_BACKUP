@@ -38,6 +38,42 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
   };
 })();
 
+// ── ONE WAY TO SAVE A PROFILE — through the offline queue (sweep 2026-08-05) ──────────────────
+// Every write on this endpoint was a raw fetch(). outbox.js does NOT patch window.fetch — it
+// exposes LFH_OUTBOX.send(), reached only through a panel's api() — so a raw fetch carries no
+// X-LFH-Action-Id and is never saved on the device. The result: /api/panel-profile is in
+// public/sw.js DATA_PATHS, so the screen READS offline perfectly and then simply could not SAVE,
+// with nothing kept and nothing replayed. That is the opposite of the offline rule.
+//
+// `expect` rides along so the server's clash gate can answer "someone else changed this while you
+// had it open" — the admin's twin of this screen has had that since 2026-08-04.
+//
+// THE PASSWORD BOX DELIBERATELY DOES NOT USE THIS. A password change must re-verify the CURRENT
+// password against the live row and it bumps token_version (ending every session), so queueing it
+// would mean replaying a credential check against a row that has since moved. It stays on the live
+// path and says so on screen. Everything else — name, phone, PIN, personal details — is a plain
+// value that is perfectly safe to deliver late.
+window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(body, opts) {
+  var expect = opts && opts.expect ? opts.expect : null;
+  // The queue is loaded after this file, so resolve it at CALL time, not parse time.
+  if (window.LFH_OUTBOX && window.LFH_OUTBOX.send) {
+    // send() throws on a 4xx (a clash, a refused value — a person must see those) and resolves
+    // { ok:true, queued:true } when it has kept the change for later. Same contract as api().
+    var j = await window.LFH_OUTBOX.send({
+      method: "POST", path: "/api/panel-profile", body: body,
+      panel: "panel-profile", label: (opts && opts.label) || "save your profile",
+      expect: expect,
+    });
+    return { ok: true, json: j || {}, queued: !!(j && j.queued) };
+  }
+  var headers = { "Content-Type": "application/json" };
+  if (expect) headers["X-LFH-Expect"] = JSON.stringify(expect);
+  var r = await fetch("/api/panel-profile", { method: "POST", headers: headers, body: JSON.stringify(body) });
+  var d = await r.json().catch(function () { return {}; });
+  if (!r.ok) { var e = new Error(d.error || "Couldn't save."); e.status = r.status; e.data = d; throw e; }
+  return { ok: true, json: d, queued: false };
+};
+
 (function () {
   // ── per-device id (unchanged): rides on every request so the Operation log
   //    can name which physical device acted. Cookie "lfh_panel_device". ──────
@@ -201,9 +237,16 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
       }
       saveDet.disabled = true;
       try {
-        const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-        const j = await r.json();
-        if (!r.ok) { setMsg(detMsg, j.error || "Could not save.", false); return; }
+        // Through the queue (sweep 2026-08-05) so a name/phone/PIN taken with no signal is kept on
+        // the device and delivered, instead of failing with nothing saved. `expect` names what this
+        // form was editing FROM, so if a manager changed the same phone meanwhile, the server says so.
+        const res = await window.LFH_PROFILE_SAVE(payload, {
+          label: "save your details",
+          // Only when we know the row id — an expectation without one is ignored by the server,
+          // which would read as "protected" while protecting nothing.
+          expect: profile.id ? { table: "staff_users", id: profile.id, fields: { phone: profile.phone ?? null } } : null,
+        });
+        if (res.queued) { setMsg(detMsg, "Saved on this device — it will sync when you're back online.", true); return; }
         const wasSetup = profile.needsProfile;
         profile.name = name; profile.phone = phone; profile.needsProfile = false;
         if (setupPinIn) profile.hasPin = true;
@@ -211,7 +254,10 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
         setSettingsBtnLabel(false);   // setup done → the everyday "👤 Profile" wording
         // Re-render as the everyday profile card after first-login setup.
         if (wasSetup) setTimeout(openDrawer, 700);
-      } catch { setMsg(detMsg, "Network error.", false); }
+      // SAY WHAT WENT WRONG. This used to swallow everything as "Network error." — so a refused
+      // value, a taken username, and "someone else changed this while you had it open" all read as
+      // an internet problem the person could do nothing about.
+      } catch (e) { setMsg(detMsg, (e && e.message) || "Network error.", false); }
       finally { saveDet.disabled = false; }
     } }, [setup ? "Save & continue" : "Save details"]);
     const detailKids = [];
@@ -242,8 +288,14 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
           if (!curIn.value || !newIn.value) { setMsg(pwMsg, "Fill both fields.", false); return; }
           savePw.disabled = true;
           try {
+            // DELIBERATELY A LIVE FETCH, NOT THE QUEUE (sweep 2026-08-05). Every other write on
+            // this screen now goes through LFH_PROFILE_SAVE so it survives a dead connection — but a
+            // password change must check the CURRENT password against the live row and it bumps
+            // token_version, ending every session. Delivering that later would re-check a credential
+            // against a row that has since moved. So it stays live, and says so if there's no signal.
+            if (navigator.onLine === false) { setMsg(pwMsg, "You're offline — a password change needs a connection. Try again when you're back online.", false); return; }
             const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: curIn.value, newPassword: newIn.value }) });
-            const j = await r.json();
+            const j = await r.json().catch(() => ({}));
             if (!r.ok) { setMsg(pwMsg, j.error || "Could not change.", false); return; }
             setMsg(pwMsg, "Password changed — signing you out…", true);
             setTimeout(() => { location.href = "/login"; }, 900);
@@ -270,11 +322,13 @@ window.LFH_PROFILE_GET = window.LFH_PROFILE_GET || (function () {
             if (!/^\d{4,8}$/.test(pinIn.value)) { setMsg(pinMsg, "PIN must be 4–8 digits.", false); return; }
             savePin.disabled = true;
             try {
-              const r = await fetch("/api/panel-profile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: pinIn.value }) });
-              const j = await r.json();
-              if (!r.ok) { setMsg(pinMsg, j.error || "Could not save.", false); return; }
+              // Queued like the details above (sweep 2026-08-05): a PIN set with no signal is kept
+              // and delivered rather than lost. No `expect` — a PIN is write-only (the server never
+              // sends the hash back), so there is no previous value to compare against.
+              const res = await window.LFH_PROFILE_SAVE({ pin: pinIn.value }, { label: "set your PIN" });
+              if (res.queued) { setMsg(pinMsg, "Saved on this device — it will sync when you're back online.", true); return; }
               profile.hasPin = true; pinIn.value = ""; setMsg(pinMsg, "PIN saved.", true);
-            } catch { setMsg(pinMsg, "Network error.", false); }
+            } catch (e) { setMsg(pinMsg, (e && e.message) || "Network error.", false); }
             finally { savePin.disabled = false; }
           } }, [profile.hasPin ? "Change PIN" : "Set PIN"]);
           sections.push(el("div", { class: "lfh-sec" }, [

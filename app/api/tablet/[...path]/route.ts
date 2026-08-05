@@ -1302,7 +1302,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // this is the only tenant boundary — stops a foreign dish/order id being advanced.
       const updated = must(await sb.from("order_items").update(patch).eq("id", b).eq("restaurant_id", rid).select("order_id, session_id"));
       const item = updated[0];
-      if (item && item.order_id) {
+      // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS (sweep 2026-08-05). The update is scoped by
+      // rid, so it matches no row when the dish is gone — a stale tile, a KOT the manager just
+      // cancelled, a dish deleted a second earlier. This fell through to `ok({ ok: true })`: the
+      // waiter watched the dish go green, nothing moved, and the kitchen never heard about it.
+      // The kitchen and manager twins of this exact endpoint were both fixed on 2026-08-04
+      // (kitchen route ~l.315, editor route ~l.3261) and the waiter tablet — the panel standing at
+      // a stale tile most often — was the one left behind. Same answer, same words.
+      if (!item) return err("That dish isn't on this restaurant's board any more — refresh and try again.", 404);
+      if (item.order_id) {
         // Order-level status stays coarse (received/preparing/served) so the guest
         // tracker + floor never see the internal "ready": a cooked-but-unserved
         // dish keeps the order "preparing".
@@ -1355,8 +1363,35 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "orders" && c === "allergies") {
       const raw = Array.isArray(body?.allergies) ? body.allergies : [];
       const allergies = [...new Set(raw.map((x: any) => String(x || "").trim().toLowerCase()).filter(Boolean))].slice(0, 20);
-      must(await sb.from("orders").update({ allergies }).eq("id", b).eq("restaurant_id", rid));
-      await log("order_allergies", { order_id: b, detail: allergies.join(", ") || "(none)", device_id: dev });
+      // THIS USED TO BE A WEAKER TWIN OF THE MANAGER'S IDENTICAL ENDPOINT (sweep 2026-08-05).
+      // It wrote the column and nothing else, so the SAME change did less when a WAITER made it
+      // than when a manager did — and the waiter is the one standing at the table hearing about
+      // the allergy. Three things were missing, all of them things the kitchen reads:
+      //   · no existence check → an order that had just been voided or moved answered ok:true and
+      //     the avoid-list went nowhere ("a tap must never vanish in silence");
+      //   · no `edited_at` → no persistent "✎ Edited" badge on the ticket, though every other
+      //     edit on this panel stamps it (qty / note / removed / add-item all call stampEdited);
+      //   · no per-dish ＋ / ✎− marks → the cook saw no sign which dishes changed.
+      // Now identical to the manager's branch (editor route, `orders/:id/allergies`), which is the
+      // whole point: one action, one behaviour, whichever panel it came from.
+      const prev = must(await sb.from("orders").select("allergies").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!prev) return err("That order isn't there anymore — refresh.", 404);
+      const oldOW = new Set((Array.isArray(prev.allergies) ? prev.allergies : []).map((x: any) => String(x).toLowerCase()));
+      const addedOW = allergies.filter((s) => !oldOW.has(s));
+      const removedOW = [...oldOW].filter((s) => !allergies.includes(s));
+      must(await sb.from("orders").update({ allergies, edited_at: nowIso() }).eq("id", b).eq("restaurant_id", rid));
+      if (addedOW.length || removedOW.length) {
+        const items = must(await sb.from("order_items").select("id, added_allergens, removed_flag").eq("order_id", b).eq("restaurant_id", rid));
+        for (const it of items) {
+          const mark = new Set((Array.isArray(it.added_allergens) ? it.added_allergens : []).map((x: any) => String(x).toLowerCase()));
+          let rf = !!it.removed_flag;
+          for (const s of addedOW) mark.add(s);
+          for (const s of removedOW) { if (mark.has(s)) mark.delete(s); else rf = true; }
+          await sb.from("order_items").update({ added_allergens: [...mark], removed_flag: rf }).eq("id", it.id).eq("restaurant_id", rid);
+        }
+      }
+      const detail = [addedOW.length ? `added ${addedOW.join(", ")}` : "", removedOW.length ? `removed ${removedOW.join(", ")}` : ""].filter(Boolean).join("; ") || (allergies.join(", ") || "(none)");
+      await log("order_allergies", { order_id: b, detail, device_id: dev });
       return ok({ ok: true });
     }
 

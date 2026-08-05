@@ -199,6 +199,49 @@ for (const spec of REACT_VALUE_EDITS) {
 
 console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${problems} unprotected`);
 
+// ── (3) DOES THE TABLE IT NAMES ACTUALLY EXIST IN THE GATE? (sweep 2026-08-05) ────────────────
+// The two checks above ask "is an expectation sent?" and "does the route read one?" — and both can
+// be YES while the expectation is thrown away. expectClash() looks the table up in
+// COMPARABLE_TABLES and returns null for anything not listed, which reads as "nothing to protect".
+// So a new feature can wire the promised one-liner, pass this guard, and have no protection at all,
+// with nothing anywhere saying so. That is the same silent-success shape as a permission that
+// saves and is never read.
+//
+// Nothing is broken today (checked: every expectation currently sent names a listed table) — this
+// closes the door so it stays that way.
+{
+  const clashSrc = read("lib/clash.ts");
+  if (!clashSrc) { console.log("\n  ❌ lib/clash.ts — not found (if it moved, update this guard)"); problems++; }
+  else {
+    const block = clashSrc.match(/COMPARABLE_TABLES[^=]*=\s*\{([\s\S]*?)\n\};/);
+    const known = new Set([...(block ? block[1] : "").matchAll(/^\s*([a-z_][a-z0-9_]*)\s*:/gim)].map((m) => m[1]));
+    if (!known.size) { console.log("\n  ❌ could not read COMPARABLE_TABLES out of lib/clash.ts"); problems++; }
+    else {
+      // Every file that can send an expectation: the vanilla panels + the React screens above.
+      const senders = [...new Set([...PANELS, ...REACT_VALUE_EDITS.map((s) => s.file), "public/panels/maint.js", "public/panels/myprofile.js"])];
+      let namedTables = 0, badTables = 0;
+      console.log(`\nTables named in an expectation (must be listed in lib/clash.ts → COMPARABLE_TABLES):`);
+      for (const f of senders) {
+        const src = read(f);
+        if (!src) continue;
+        src.split(/\r?\n/).forEach((line, i) => {
+          // Only a line that is really building an expectation — `expect: { table: "x" …` or a
+          // `table:` sitting inside one. A bare `table:` elsewhere (a bill record's table number,
+          // a realtime channel's table filter) is not one, so require `fields`/`where` nearby.
+          const m = line.match(/table\s*:\s*["'`]([a-z_][a-z0-9_]*)["'`]/i);
+          if (!m) return;
+          const near = src.split(/\r?\n/).slice(Math.max(0, i - 4), i + 5).join(" ");
+          if (!/expect\s*:|fields\s*:|where\s*:/i.test(near)) return;   // not an expectation
+          namedTables++;
+          if (known.has(m[1])) console.log(`  ✅ ${f}:${i + 1}  ${m[1]}`);
+          else { badTables++; problems++; console.log(`  ❌ ${f}:${i + 1}  "${m[1]}" IS NOT IN COMPARABLE_TABLES — the server would ignore this expectation in silence`); }
+        });
+      }
+      console.log(`  ${namedTables} expectation table name(s) checked, ${badTables} unknown to the gate`);
+    }
+  }
+}
+
 // BE HONEST ABOUT WHAT THIS DOES NOT SEE. A green tick here has been read as "every value edit in
 // the app is protected", and it is not — this walks the three vanilla staff panels only, because
 // they are the surfaces whose writes carry X-LFH-Expect through the offline queue. Saying so is

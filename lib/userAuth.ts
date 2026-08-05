@@ -37,8 +37,28 @@ export type LoginAttempt = { username: string; role?: Role; restaurant_id?: stri
 
 // The HMAC signing key for cookies. Prefer a dedicated SESSION_SECRET; fall back
 // to the admin password so the gate still works if it isn't set separately.
-const SECRET = () =>
-  process.env.SESSION_SECRET || process.env.ADMIN_PASSWORD || process.env.STAFF_PASSWORD || "lfh-dev-secret";
+//
+// ⚠️ WHAT THAT FALLBACK COSTS, SAID OUT LOUD (sweep 2026-08-05). This key signs EVERY staff
+// cookie. On a stack where SESSION_SECRET is not set, the key IS the admin password — so changing
+// the admin password re-signs nothing and instantly invalidates every existing cookie: every
+// waiter tablet, every kitchen screen and every manager on every restaurant is logged out at once,
+// mid-service, and nothing in the admin UI warns that the field does that. Set SESSION_SECRET on
+// every deployment and the two are independent (it is set on this dev stack). The warning below
+// fires once per server start so a stack missing it is visible in the logs instead of only
+// discovered by a floor full of signed-out staff.
+let warnedNoSessionSecret = false;
+const SECRET = () => {
+  const dedicated = process.env.SESSION_SECRET;
+  if (!dedicated && !warnedNoSessionSecret) {
+    warnedNoSessionSecret = true;
+    console.warn(
+      "[auth] SESSION_SECRET is not set, so staff cookies are signed with the admin password. " +
+      "Changing ADMIN_PASSWORD will sign out every staff device on every restaurant at once. " +
+      "Set SESSION_SECRET in this deployment's env to keep the two independent.",
+    );
+  }
+  return dedicated || process.env.ADMIN_PASSWORD || process.env.STAFF_PASSWORD || "lfh-dev-secret";
+};
 
 export type StaffUser = {
   id: string; username: string; role: Role; restaurant_id: string;
