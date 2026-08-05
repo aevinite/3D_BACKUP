@@ -372,6 +372,133 @@ for (const panel of (wantPanels ? ["editor", "kitchen", "tablet"] : [])) {
   } else ok(`${file}: comments balanced (no rule is silently dropped)`);
 }
 
+// ── 10. NO HAND-WRITTEN -webkit-backdrop-filter ───────────────────────────────────────────
+//
+// CLAUDE.md has warned about this since the day it cost a long debugging round: write
+// `backdrop-filter` as ONE unprefixed line, because the Tailwind-4 / Lightning-CSS build
+// auto-prefixes it — and if you hand-add the -webkit- line yourself, the build DROPS the
+// unprefixed property entirely. The result is frosted glass that works on Safari and is
+// silently flat on Chrome/Android, which is invisible to anyone testing on an iPhone.
+//
+// It came back anyway, in FIVE rules, and was only caught by fetching the deployed stylesheet
+// and diffing it against the source (2026-08-04 sweep; fixed in ff60f389). A rule that is
+// documented, has bitten twice, and is one grep to check should not rely on memory.
+{
+  const files = ["app/globals.css"];
+  try {
+    for (const d of fs.readdirSync("public/panels", { withFileTypes: true })) {
+      if (d.isDirectory() && fs.existsSync(`public/panels/${d.name}/style.css`)) files.push(`public/panels/${d.name}/style.css`);
+    }
+  } catch { /* no panels → just globals */ }
+  const offenders = [];
+  for (const f of files) {
+    let src; try { src = fs.readFileSync(f, "utf8"); } catch { continue; }
+    // Only the app's own Tailwind-built stylesheet is affected. The panel stylesheets are
+    // served as STATIC files (no Lightning CSS), so a prefix there is harmless — but they are
+    // listed so the message can say which is which rather than pretending they are the same.
+    src.split("\n").forEach((line, i) => {
+      if (!/-webkit-backdrop-filter/.test(line)) return;
+      if (f !== "app/globals.css") return;      // static file: prefix is fine
+      offenders.push(`${f}:${i + 1}  ${line.trim().slice(0, 80)}`);
+    });
+  }
+  if (offenders.length === 0) ok("no hand-written -webkit-backdrop-filter in app/globals.css (the build adds it; adding it yourself DELETES the blur on Chrome/Android)");
+  else bad(
+    `${offenders.length} rule(s) hand-add -webkit-backdrop-filter — the Tailwind-4 build then DROPS the unprefixed property, so the frosted glass is GONE on Chrome/Android while still working on Safari`,
+    offenders.join("\n         ") + "\n         Delete the -webkit- line and keep ONE unprefixed `backdrop-filter`. See CLAUDE.md → What \"blur\" means.",
+  );
+}
+
+// ── 11. app/globals.css COMMENTS MUST BALANCE TOO ─────────────────────────────────────────
+// Check 9 does this for the PANEL stylesheets, because that is where it happened. The guest
+// app's stylesheet is 4,400+ lines and fails exactly the same way: a CSS parser recovering
+// from an unterminated comment DISCARDS the rule that follows, so a style just stops applying
+// with no error anywhere.
+{
+  const f = "app/globals.css";
+  let src = null;
+  try { src = fs.readFileSync(f, "utf8"); } catch { /* absent → skip */ }
+  if (src != null) {
+    const stripped = src.replace(/\/\*[\s\S]*?\*\//g, "");
+    if (stripped.includes("*/") || stripped.includes("/*")) {
+      const at = Math.max(stripped.indexOf("*/"), stripped.indexOf("/*"));
+      bad(`${f}: a /* … */ comment is UNBALANCED — the CSS rule after it is silently discarded`,
+        `…${stripped.slice(Math.max(0, at - 90), at + 6).replace(/\s+/g, " ")}`);
+    } else ok(`${f}: comments balanced (no rule is silently thrown away)`);
+  }
+}
+
+// ── 12. A PANEL STYLESHEET MUST NOT USE A BARE env(safe-area-inset-*) ────────────────────
+// The panels are served INSIDE an iframe, and env() does not resolve there — it reads 0. That
+// is why components/PanelFrame.tsx measures the device's real insets and pushes them in as
+// --safe-t / --safe-b, and why every panel stylesheet defines
+// `--sab: max(env(safe-area-inset-bottom, 0px), var(--safe-b, 0px))`.
+// Two rules in the editor's inventory popup used the bare env() and therefore had NO bottom
+// inset at all: the sticky save/confirm row of a stock count sat under the phone's home bar
+// (2026-08-04 sweep). Using --sat/--sab works either way, so there is no reason to write env()
+// directly below the definition itself.
+{
+  const offenders = [];
+  try {
+    for (const d of fs.readdirSync("public/panels", { withFileTypes: true })) {
+      if (!d.isDirectory() || !fs.existsSync(`public/panels/${d.name}/style.css`)) continue;
+      const f = `public/panels/${d.name}/style.css`;
+      fs.readFileSync(f, "utf8").split("\n").forEach((line, i) => {
+        if (!/env\(safe-area-inset-/.test(line)) return;
+        if (/--sa[tblr]\s*:|--safe-[tblr]/.test(line)) return;      // the definitions themselves
+        offenders.push(`${f}:${i + 1}  ${line.trim().slice(0, 90)}`);
+      });
+    }
+  } catch { /* no panels → nothing to check */ }
+  if (offenders.length === 0) ok("no panel stylesheet reads a bare env(safe-area-inset-*) (it is always 0 inside the iframe)");
+  else bad(
+    `${offenders.length} panel rule(s) use a bare env(safe-area-inset-*) — inside the panel iframe that is ALWAYS 0, so the padding does nothing and the content sits under the phone's home bar`,
+    offenders.join("\n         ") + "\n         Use var(--sab) / var(--sat) — PanelFrame.tsx pushes the device's real insets in under those names.",
+  );
+}
+
+// ── 13. A NEW STAFF-ONLY DB FUNCTION MUST REVOKE PUBLIC EXECUTE ───────────────────────────
+//
+// CLAUDE.md: "GOTCHA: new Postgres functions are PUBLIC-executable by default. Every staff-only
+// function MUST get REVOKE ... FROM PUBLIC, anon, authenticated + GRANT ... TO service_role
+// (see migration 038 — the verify run caught anon calling a staff RPC)."
+//
+// 106 of the migrations do it, so the habit is kept — but NOTHING checked it, and the one time
+// it was missed it was caught by luck. This is the cheapest possible check: a migration that
+// CREATEs a staff function must REVOKE in the same file. Only NEW files (not yet on origin/main)
+// are judged, for the same reason the migration-number check works that way — the history is
+// what it is, and the useful moment to say so is before the merge.
+if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
+  let files = [];
+  try { files = fs.readdirSync("supabase/migrations").filter((f) => f.endsWith(".sql")); } catch { /* none */ }
+  let shipped = null;
+  try {
+    shipped = new Set(execSync("git ls-tree -r origin/main --name-only supabase/migrations/ 2>/dev/null || true", { encoding: "utf8" })
+      .split("\n").map((p) => p.split("/").pop()).filter(Boolean));
+  } catch { /* no origin/main */ }
+  // A function name a GUEST is meant to call. These are public by design (the diner has no
+  // login), so requiring a REVOKE on them would be wrong — and crying wolf is how a guard
+  // gets ignored.
+  const GUEST_OK = /(^|_)(lfh_place_order|lfh_leave_feedback|lfh_join|lfh_get_|lfh_table_|lfh_request_code|lfh_verify_|lfh_set_member_name|lfh_call_waiter|lfh_menu)/i;
+  const offenders = [];
+  for (const f of files) {
+    if (shipped && shipped.size && shipped.has(f)) continue;         // already history
+    let sql = "";
+    try { sql = fs.readFileSync(`supabase/migrations/${f}`, "utf8"); } catch { continue; }
+    const created = [...sql.matchAll(/create\s+(or\s+replace\s+)?function\s+(?:public\.)?([a-z0-9_]+)/gi)].map((m) => m[2]);
+    if (!created.length) continue;
+    const staffFns = [...new Set(created)].filter((n) => !GUEST_OK.test(n));
+    if (!staffFns.length) continue;
+    if (/revoke[\s\S]{0,200}?(public|anon|authenticated)/i.test(sql)) continue;   // does it
+    offenders.push(`${f} — creates ${staffFns.slice(0, 3).join(", ")}${staffFns.length > 3 ? ` (+${staffFns.length - 3})` : ""} with no REVOKE`);
+  }
+  if (offenders.length === 0) ok("every NEW migration that creates a staff-only function also revokes public execute");
+  else bad(
+    `${offenders.length} new migration(s) create a staff-only function without revoking public execute — a new Postgres function is PUBLIC-executable by default`,
+    offenders.join("\n         ") + "\n         Add: REVOKE ALL ON FUNCTION <fn> FROM PUBLIC, anon, authenticated;\n              GRANT EXECUTE ON FUNCTION <fn> TO service_role;   (see migration 038)",
+  );
+}
+
 if (fail) {
   console.error("UI integrity guard refused this edit — it would put code on someone's screen:\n" + out.join("\n"));
   console.error("\n(The two faults this guards against BOTH shipped today: a script tag inside an HTML\n comment that printed '-->' in the manager's header, and a conflict marker committed into\n CLAUDE.md. Fix the above, then re-run: node scripts/verify-ui-integrity.mjs)");
