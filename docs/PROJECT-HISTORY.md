@@ -47,6 +47,29 @@ cuts the COST of each. Read this so neither gets undone:
   reloads is handed a floor computed BEFORE its own action — a waiter marks a table paid and
   watches the tile flick back.
 
+### CLOSED 2026-08-05 — measured, and the watch retired
+
+`check-floor-timeouts.mjs` and `docs/FLOOR-TIMEOUT-WATCH.md` existed to answer one question — did
+mig 238 actually stop the floor reads timing out? — and were designed to be deleted once answered.
+They were run on 2026-08-05 and the verdict was **FIXED**:
+
+- **Zero** floor-read statement timeouts in the **117 hours** since the change went live.
+- A whole-floor read on the biggest floor (300 tables) measured **12.9–66.3 ms** inside the
+  database. The real limit is **8s** — PostgREST logs in as `authenticator` with
+  `statement_timeout=8s`, NOT the database's 120s default — so that is ~121× headroom.
+- The floor summary is still the app's single most-called statement (53,232 calls, mean 138ms
+  cumulative), which is expected: it is what every panel reads. It is no longer near the wall.
+
+So the script, the doc and the `check:floor-timeouts` npm script are gone. Two things they knew
+that are worth keeping:
+
+- **THE TRAP:** if a floor read is already ~10–30 ms and something still times out, the remaining
+  cause is **CONTENTION**, not the query. Making it faster again achieves nothing — look for what
+  else is running at the same time (see §2).
+- ⚠️ **AV LIVE HAS THE SHARING FIX BUT NOT MIGRATION 238.** The measurement above is the BACKUP
+  database only. Giving AV live mig 238 is a schema change on a paying client's stack and needs its
+  own explicit ask, per the AV-live rule in CLAUDE.md. Nobody has asked yet.
+
 ## 2. A rush must slow the app down, never take it down (2026-08-01)
 
 **Rules now in CLAUDE.md:** a change-detector may never scan the table it guards; "server busy"
