@@ -157,6 +157,19 @@ const alive = (pid) => {
     return /verify-everything/.test(cmd);
   } catch { return false; }         // ps says it is gone
 };
+// `--force` exists for a genuinely stale lock, but it must never be QUIET about displacing a run
+// that is demonstrably alive — that is how a second suite ends up beside a first one.
+if (ARGS.includes("--force")) {
+  try {
+    const prev = JSON.parse(readFileSync(LOCK, "utf8"));
+    if (prev && prev.pid && prev.pid !== process.pid && alive(prev.pid)) {
+      console.error(
+        `\n⚠️  --force is displacing a run that is STILL ALIVE (pid ${prev.pid}, in ${prev.cwd || "an unknown folder"}).\n` +
+        `   Two full runs against one database is what took it down on 2026-07-31. If you did not\n` +
+        `   mean this, stop now (Ctrl-C) and drop --force.\n`);
+    }
+  } catch { /* no lock to displace */ }
+}
 if (!ARGS.includes("--force")) {
   try {
     const prev = JSON.parse(readFileSync(LOCK, "utf8"));
@@ -176,7 +189,33 @@ if (!ARGS.includes("--force")) {
 try {
   mkdirSync(LOCK_DIR, { recursive: true });
   writeFileSync(LOCK, JSON.stringify({ pid: process.pid, at: Date.now(), base: BASE, db: DB_REF, cwd: ROOT }, null, 1));
-  const release = () => { try { const p = JSON.parse(readFileSync(LOCK, "utf8")); if (p.pid === process.pid) rmSync(LOCK, { force: true }); } catch { /* already gone */ } };
+  // RELEASING MUST NOT ORPHAN A LIVE RUN. Observed on 2026-08-05: this file vanished while a
+  // legitimate 520-phase run was at phase 20, leaving it unprotected so a second run could have
+  // started beside it — the exact 2026-07-31 outage condition the lock exists to prevent. The
+  // hole is `--force`: it skips the check, overwrites the lock with its OWN pid, and then its
+  // exit handler matches that pid and deletes the file, taking the displaced run's protection
+  // with it. So on the way out, hand the lock BACK to whatever run is still alive rather than
+  // assuming we were the only one.
+  const liveSuitePids = () => {
+    try {
+      return execFileSync("pgrep", ["-f", "verify-everything.mjs"], { encoding: "utf8" })
+        .split("\n").map((x) => Number(x.trim()))
+        .filter((n) => n && n !== process.pid && alive(n));
+    } catch { return []; }                       // pgrep exits 1 when nothing matches
+  };
+  const release = () => {
+    try {
+      const p = JSON.parse(readFileSync(LOCK, "utf8"));
+      if (p.pid !== process.pid) return;         // someone else holds it — never touch theirs
+      const other = liveSuitePids()[0];
+      if (other) {
+        writeFileSync(LOCK, JSON.stringify({ pid: other, at: Date.now(), base: "unknown (inherited)",
+          db: DB_REF, cwd: "unknown (inherited)", note: `handed over by pid ${process.pid} on exit` }, null, 1));
+      } else {
+        rmSync(LOCK, { force: true });
+      }
+    } catch { /* already gone */ }
+  };
   process.on("exit", release);
   for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => { release(); process.exit(130); });
 } catch { /* can't write a lock → run anyway rather than block real work */ }
@@ -353,11 +392,18 @@ const restore = [];                              // () => Promise, run at the en
 // half-configured restaurant left behind by a test is worse than no test, so the same
 // restore runs on Ctrl-C and on a termination signal too.
 let cleaningUp = false;
+const restoreFailed = [];
 async function runRestore(why) {
   if (cleaningUp) return;
   cleaningUp = true;
   if (why) console.log(`\n${why} — putting every setting back before exiting…`);
-  for (const r of restore) { try { await r(); } catch (e) { console.log("  restore failed:", String(e.message).slice(0, 120)); } }
+  for (const r of restore) {
+    try { await r(); }
+    catch (e) {
+      restoreFailed.push(String(e.message).slice(0, 160));
+      console.log("  ⚠ RESTORE FAILED:", String(e.message).slice(0, 160));
+    }
+  }
   for (const id of created.orders) { try { await db(`orders?id=eq.${id}`, { method: "DELETE" }); } catch {} }
   for (const id of created.sessions) { try { await db(`sessions?id=eq.${id}`, { method: "DELETE" }); } catch {} }
   if (browser) { try { await browser.close(); } catch {} }
@@ -703,28 +749,39 @@ let SNAP = null;
  *  ensureSnap() and the snapshot phase register the exact same undo. */
 async function restoreSnapshot() {
   if (!SNAP) return;
+  // Read every group through a default. The bug above was one missing group taking the entire
+  // restore down before a single setting was put back — the safety net is worth more than a
+  // sharp failure here, and a group that genuinely vanishes shows up as its own phase failing.
+  const feat = SNAP.features || {};
+  const set = SNAP.settings || {};
+  const sec = SNAP.sections || {};
   await fetch(BASE + "/api/admin/restaurants/access-tree", {
     method: "POST", headers: HJ,
     body: JSON.stringify({ restaurant_id: (await needFH()).id, patch: {
-      features: Object.fromEntries(["reviews", "model3d", "allergies", "allergy_other", "guest_note", "favorites", "diet_filter", "ratings"].map((k) => [k, SNAP.features[k] !== false])),
+      features: Object.fromEntries(["reviews", "model3d", "allergies", "allergy_other", "guest_note", "favorites", "diet_filter", "ratings"].map((k) => [k, feat[k] !== false])),
       settings: {
-        menu_enabled: SNAP.settings.menu_enabled !== false,
-        sessions_enabled: SNAP.settings.sessions_enabled === true,
-        google_review_mode: SNAP.settings.google_review_mode || "off",
-        menu_default_layout: SNAP.settings.menu_default_layout || "grid",
-        menu_default_mode: SNAP.settings.menu_default_mode || "light",
-        menu_languages: SNAP.settings.menu_languages?.length ? SNAP.settings.menu_languages : ["en"],
-        menu_currencies: SNAP.settings.menu_currencies?.length ? SNAP.settings.menu_currencies : ["INR"],
-        khata_allowed: SNAP.settings.khata_allowed === true, khata_enabled: SNAP.settings.khata_enabled !== false,
-        takeaway_allowed: SNAP.settings.takeaway_allowed === true, takeaway_enabled: SNAP.settings.takeaway_enabled !== false,
-        banquet_allowed: SNAP.settings.banquet_allowed === true, banquet_enabled: SNAP.settings.banquet_enabled !== false,
-        payroll_allowed: SNAP.settings.payroll_allowed === true, payroll_enabled: SNAP.settings.payroll_enabled !== false,
-        inventory_allowed: SNAP.settings.inventory_allowed === true, inventory_enabled: SNAP.settings.inventory_enabled !== false,
-        auto_print_kot_allowed: SNAP.settings.auto_print_kot_allowed === true,
+        menu_enabled: set.menu_enabled !== false,
+        sessions_enabled: set.sessions_enabled === true,
+        google_review_mode: set.google_review_mode || "off",
+        menu_default_layout: set.menu_default_layout || "grid",
+        menu_default_mode: set.menu_default_mode || "light",
+        menu_languages: set.menu_languages?.length ? set.menu_languages : ["en"],
+        menu_currencies: set.menu_currencies?.length ? set.menu_currencies : ["INR"],
+        khata_allowed: set.khata_allowed === true, khata_enabled: set.khata_enabled !== false,
+        takeaway_allowed: set.takeaway_allowed === true, takeaway_enabled: set.takeaway_enabled !== false,
+        banquet_allowed: set.banquet_allowed === true, banquet_enabled: set.banquet_enabled !== false,
+        payroll_allowed: set.payroll_allowed === true, payroll_enabled: set.payroll_enabled !== false,
+        inventory_allowed: set.inventory_allowed === true, inventory_enabled: set.inventory_enabled !== false,
+        auto_print_kot_allowed: set.auto_print_kot_allowed === true,
       },
-      sections: Object.fromEntries(["menu", "ratings", "logs"].map((k) => [k, SNAP.sections[k] !== false])),
+      sections: Object.fromEntries(["menu", "ratings", "logs"].map((k) => [k, sec[k] !== false])),
       tabs: { manager: { editor: SNAP.tabs?.manager?.editor !== false, ratings: SNAP.tabs?.manager?.ratings !== false, log: SNAP.tabs?.manager?.log !== false } },
-      panels: Object.fromEntries(["manager", "kitchen", "tablet", "owner"].map((k) => [k, SNAP.panels[k] !== false])),
+      // `panels:` USED TO BE HERE AND WAS THE BUG. The four staff-app switches were removed on
+      // 2026-07-31 ("remove it completely, all panels"), so `state` has no `panels` key and the
+      // POST route accepts no `panels` patch — this line restored nothing and threw
+      // "Cannot read properties of undefined (reading 'manager')" (manager is the first key)
+      // while BUILDING the request body, so the fetch never ran and NOTHING was put back.
+      // Every run since that change silently restored nothing. Do not re-add it.
     } }),
   });
 }
@@ -2693,7 +2750,16 @@ await runRestore("");
 
 const bad = results.filter((r) => r.status !== "PASS");
 const ran = results.length;
-console.log(`${ran - bad.length}/${ran} phases passed · settings restored · nothing left behind`);
+// SAY WHAT HAPPENED, NOT WHAT WAS INTENDED. This line used to read "settings restored"
+// unconditionally — it printed directly under "restore failed", which is the self-contradicting
+// output the project's own rules call out, and it is how a broken safety net stayed invisible.
+console.log(`${ran - bad.length}/${ran} phases passed · ${restoreFailed.length ? `⚠ ${restoreFailed.length} RESTORE STEP(S) FAILED — a setting may still be changed` : "settings restored"} · nothing left behind`);
+if (restoreFailed.length) {
+  console.log(`\n⚠ THE SAFETY NET DID NOT RUN. Check the Access screen for French House before trusting`);
+  console.log(`   the next run, and fix the restore itself — a suite that cannot put settings back is`);
+  console.log(`   a suite that must not be run again:`);
+  for (const m of restoreFailed) console.log(`   · ${m}`);
+}
 if (bad.length) {
   console.log(`\n${bad.length} PROBLEM${bad.length > 1 ? "S" : ""}:`);
   for (const b of bad) console.log(`  ${b.status} phase ${b.n} — ${b.name}\n        ${b.detail}`);
