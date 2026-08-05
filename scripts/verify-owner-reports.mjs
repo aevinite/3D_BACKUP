@@ -138,6 +138,19 @@ check("no unreferenced chart exports came back",
   && !/export const RevenueBar/.test(charts) && !/export function TrendLine/.test(charts),
   "an unused chart makes its dead query look load-bearing");
 
+console.log("\n── 4b. A LABEL THAT NEVER REACHES THE DOM ──");
+// A 12-restaurant "Who earns more" drew 12 bars and 12 names with ZERO amounts: with the grow-in
+// animation on, this Bar's <LabelList> never rendered at all. That is the ONLY view an owner gets
+// past 9 restaurants, and its own comment says the money must be readable without hovering — so
+// every row had to be hovered. ColumnsChart beside it always set the flag, which is why its
+// labels were fine (owner-panel sweep, 2026-08-05).
+check("the ranking chart's bars are not animated, so their amounts render",
+  /<Bar dataKey="revenue" name=\{valueLabel\}[\s\S]{0,200}isAnimationActive=\{false\}/.test(charts),
+  "with the animation on, LabelList never reaches the DOM and the amounts silently vanish");
+check("the column chart keeps the same flag",
+  /shape=\{<Column3D \/>\} maxBarSize=\{72\} isAnimationActive=\{false\}/.test(charts),
+  "both shapes of the ranking must label their bars");
+
 console.log("\n── 5. A ONE-DAY REPORT COVERS ONE DAY ──");
 // `istDay(to − 1ms)` assumes an exclusive IST midnight; range=yesterday ends at 05:00 IST, so
 // an inventory "Yesterday" read 2026-08-03 AND 2026-08-04.
