@@ -1668,16 +1668,25 @@ function tableSeatingCardHtml(s) {
   const n = Math.max(1, parseInt(s.table_count, 10) || 12);
   const seats = s.table_seats && typeof s.table_seats === "object" ? s.table_seats : {};
   const names = s.table_names && typeof s.table_names === "object" ? s.table_names : {};
+  // ADMIN ONLY, from 2026-08-06 (owner: "manager or owner can't change table name and stuff — we
+  // set it up for them, cuz if they change, the name will be gone"). The route refuses both fields
+  // outright now, so leaving the boxes typeable would be a control that always fails — which this
+  // app treats as worse than no control at all. Read-only for everyone but the admin, and the card
+  // says WHO to ask rather than pretending it is a permission somebody could be granted.
+  // `isAdmin`, not `higherView`: an OWNER is on the wrong side of this line too.
+  const canEdit = !!(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.isAdmin);
+  const ro = canEdit ? "" : " readonly disabled";
+  const roStyle = canEdit ? "" : "opacity:.6;cursor:not-allowed;";
   let cells = "";
   for (let i = 1; i <= n; i++) {
     // Name (mig 131, display-only) + seat count (mig 111) per table — one cell each.
     cells += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;background:var(--panel-2)">
       <span style="font-weight:700;font-size:13px;min-width:26px">T${i}</span>
-      <input type="text" maxlength="24" data-path="table_names.${i}" value="${esc(names[String(i)] ?? "")}" placeholder="Name"
+      <input type="text" maxlength="24" data-path="table_names.${i}" value="${esc(names[String(i)] ?? "")}" placeholder="Name"${ro}
         title='A display name for this table (e.g. "Banquet") — bills and QR codes keep the number'
-        style="flex:1;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
-      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? floorSeatsDefault(s))}" title="Seats"
-        style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
+        style="flex:1;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);${roStyle}"/>
+      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? floorSeatsDefault(s))}" title="Seats"${ro}
+        style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);${roStyle}"/>
     </div>`;
   }
   return `<div class="card"><h3>Table setting</h3>
@@ -1687,6 +1696,11 @@ function tableSeatingCardHtml(s) {
       people can sit there — shown next to the chair icon on every tile. A table you leave
       alone uses the restaurant's default number of seats.
     </p>
+    ${canEdit ? "" : `<p style="margin:-8px 0 16px;padding:9px 11px;border-radius:9px;background:rgba(245,158,11,.12);
+      border:1px solid rgba(245,158,11,.4);color:var(--text);font-size:12.5px;line-height:1.5">
+      🔒 <b>Set by the admin.</b> Table names and seats are part of how your floor was set up —
+      they are printed on tickets and quoted back on every screen, so they are not changed during
+      service. Ask the admin if a table needs renaming.</p>`}
     <!-- NO fixed max-height (T11 desktop sweep 2026-08-05). It was 340px with overflow-y:auto, so
          with 30 tables the card showed T1-T24, SLICED the T25-T28 row in half at its bottom edge and
          put T29/T30 outside the box — with no scrollbar drawn, so nothing said there was more below
