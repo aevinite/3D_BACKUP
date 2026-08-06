@@ -403,7 +403,18 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
 
       {/* BASICS */}
       <div className="nr-sec">
-        <div className="nr-sec-h">Basics</div>
+        {/* The preset picker lives HERE, not under the Access heading (sweep T6, 2026-08-06):
+            it only chooses which PANELS and whether a sample menu is seeded now that this form
+            sets no permissions, and a control named "System defaults" sitting under "Access &
+            permissions" would read as picking a permission set that no longer exists. */}
+        <div className="nr-sec-h" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>Basics</span>
+          <select className="nr-preset" disabled={busy} value={preset} onChange={(e) => applyPreset(e.target.value as "saved" | "system")}>
+            {saved && <option value="saved">My saved setup</option>}
+            <option value="system">System defaults</option>
+          </select>
+          {preset === "saved" && saved && <span className="adm-muted" style={{ fontSize: 11.5 }}>panels and sample menu pre-filled from your last restaurant</span>}
+        </div>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Restaurant name" disabled={busy} className="nr-input" />
         <div className="nr-slug">Guest link: <code>/r/{slugPreview}/menu</code></div>
         <div className="adm-togglegrid" style={{ marginTop: 8 }}>
@@ -423,14 +434,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
           Every permission lives on ONE screen, and this form's copy of them was both a second
           vocabulary for one idea AND three real faults on every restaurant it created. */}
       <div className="nr-sec">
-        <div className="nr-sec-h" style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span>Access &amp; permissions</span>
-          <select className="nr-preset" disabled={busy} value={preset} onChange={(e) => applyPreset(e.target.value as "saved" | "system")}>
-            {saved && <option value="saved">My saved setup</option>}
-            <option value="system">System defaults</option>
-          </select>
-          {preset === "saved" && saved && <span className="adm-muted" style={{ fontSize: 11.5 }}>panels and sample menu pre-filled from your last restaurant</span>}
-        </div>
+        <div className="nr-sec-h">Access &amp; permissions</div>
         <p className="hint" style={{ margin: "6px 0 0" }}>
           A new restaurant starts on the standard setup: its guest menu on, every manager menu on,
           the extra modules (pay later, banquet, staff pay, inventory) off, waiters able to work the
