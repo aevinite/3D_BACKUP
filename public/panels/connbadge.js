@@ -82,7 +82,9 @@
       // readable ink there (~6:1) and the darkened one is not (2.82:1). !important because the ink
       // is applied as an inline style. Mirrors the same rule in components/ConnectionBadge.tsx.
       'html[data-theme="dark"] .lfh-conn-txt,html[data-theme="dark"] .lfh-conn-ms{color:var(--ink-dark)!important}',
-      'html[data-staffdark] .lfh-conn-txt,html[data-staffdark] .lfh-conn-ms{color:var(--ink-dark)!important}',
+      // data-skin, not data-staffdark: the consoles keep data-staffdark on <html> in BOTH skins,
+      // so the dark ink was being forced onto the light console (1.99:1). See ConnectionBadge.tsx.
+      '[data-skin="dark"] .lfh-conn-txt,[data-skin="dark"] .lfh-conn-ms{color:var(--ink-dark)!important}',
       ".lfh-conn-n{font-weight:800;opacity:.9}",
       ".lfh-conn-n.warn{color:#ef4444}",
       ".lfh-conn-chev{opacity:.5;flex:0 0 auto}",
