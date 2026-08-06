@@ -4,6 +4,7 @@
 // useRef holds a value that survives re-draws without causing one.
 import { useEffect, useRef, useState } from "react";
 // callWaiter sends a service request; getSettings reads restaurant on/off options.
+import { enqueueGuestCall } from "@/lib/guestOutbox";
 import { callWaiter, getSettings } from "@/lib/menu";
 import { useRestaurantId } from "@/lib/restaurant-context";
 // Helpers for checking/cleaning the table number and reading a scanned-QR table.
@@ -121,6 +122,31 @@ export default function ChefPopup() {
     // Otherwise (sessions off): send the call directly the old, simple way.
     sendingRef.current = true;
     setSending(true);
+    // NO SIGNAL? SAVE IT AND SEND IT (improvement #4, 2026-08-06). Placing an order has survived
+    // losing signal since the offline queue was written; calling a waiter — the thing a diner does
+    // when something is WRONG, and the request most likely to come from the corner of the room
+    // with thick walls — simply failed with "please try again", which is advice they cannot act on.
+    // Same queue, same at-most-once id, so a reconnect rings the floor exactly once.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      try {
+        const q = await enqueueGuestCall({ mode: "public", table: check.value, restaurantId, reason });
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
+          message: "Saved — we'll call them the moment you're back online",
+          // Only promise the automatic part when it really reached this phone's storage; if it
+          // didn't, closing the page loses it, and saying so is the whole point of `persisted`.
+          subtitle: q.persisted ? `${reason} · staff are told as soon as there's signal` : `${reason} · keep this page open`,
+          kicker: "service", icon: "🛎",
+        } }));
+        window.dispatchEvent(new Event("lfh:close-all"));
+        setTableNumber("");
+      } catch {
+        window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Couldn't save your call", subtitle: "please ask a member of staff", kicker: "service", variant: "error" } }));
+      } finally {
+        setSending(false);
+        setTimeout(() => { sendingRef.current = false; }, 800);
+      }
+      return;
+    }
     try {
       // Tell the server staff are needed at this table for this reason, and read
       // its ACTUAL answer — a blocked table or a dropped duplicate is NOT success.
