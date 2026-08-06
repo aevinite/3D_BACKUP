@@ -43,6 +43,27 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .brand .rest-name { display: inline-block; vertical-align: middle; max-width: 42vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 700; color: var(--text); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; margin-left: 8px; }
 .brand .rest-name:empty { display: none; }
 .top-actions { display: flex; gap: 10px; align-items: center; }
+/* ⋯ MORE is a PHONE affordance only — above 760px the bar has room for everything, so the three
+   set-once controls stay in place and this button does not exist as far as a mouse is concerned. */
+.kds-more-btn { display: none; }
+/* The menu itself. Anchored under the bar, and deliberately NOT inside .top-actions so the phone
+   rule that hides button words (.top-actions .btn .bw) stops applying — in a menu there is room for
+   "Wall view" to say so. Both skins come from the panel's own tokens. */
+.kds-more-pop {
+  position: absolute; top: calc(100% + 6px); right: 10px; z-index: 60;
+  min-width: 232px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 14px;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, .38);
+}
+.kds-more-pop[hidden] { display: none; }
+.kds-more-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 8px; border-radius: 10px;
+}
+.kds-more-row + .kds-more-row { margin-top: 2px; }
+.kds-more-row .kmr-label { flex: 1; font-size: 13.5px; font-weight: 600; color: var(--text); }
+/* A menu row is a comfortable target even though the control inside is an icon. */
+.kds-more-row .btn, .kds-more-row .theme-toggle { min-height: 40px; min-width: 46px; justify-content: center; }
 .clock { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 15px; }
 .btn { background: var(--panel); border: 1px solid var(--line); color: var(--text); border-radius: 10px; padding: 9px 14px; font-size: 14px; cursor: pointer; font-family: inherit; }
 .btn:hover { border-color: var(--blue); }
@@ -298,6 +319,9 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
   .clock { display: none; }
   .top-actions { gap: 5px; }
   .top-actions .btn { padding: 8px 9px; font-size: 13px; }
+  /* ⋯ appears, and the bar becomes the anchor for the menu that drops out of it. */
+  .kds-more-btn { display: inline-flex; }
+  header.topbar { position: relative; }
   /* Icon-only for the two worded buttons: 🚫 and ▦/▭ alone. That is what takes the bar from
      four rows to two — the meaning stays in title/aria-label, and both keep a 44px target. */
   .top-actions .btn .bw { display: none; }

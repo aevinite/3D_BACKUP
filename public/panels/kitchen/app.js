@@ -1263,6 +1263,135 @@ $("#dishSearch").oninput = renderDishes;
 $("#viewBtn").onclick = () => { view = view === "wall" ? "columns" : "wall"; localStorage.setItem("kds_view", view); applyView(); };
 setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
 
+// ── ⋯ MORE: the three set-once controls, off the phone bar (T4 sweep, 2026-08-06) ──────────
+// WHY THIS EXISTS. Measured on a 360px phone: `header.topbar` was 157px — a fifth of a 780px
+// screen — because nine controls were competing for a 324px row and wrapped onto THREE rows. With
+// the sound nudge that put the first ticket at y=399, so more than half the screen was chrome
+// before a cook could see any food. Nothing small fixed it: tightening the gap saved 2px, hiding
+// the connection badge's word freed 44px and still left three rows, narrowing the brand made it
+// WORSE. The controls need ~363px with gaps and there are 324px. The only real lever is fewer
+// controls, so the question was which ones a cook can afford to be one tap further from.
+//
+// The split is by WHEN they are used, not by how much they matter:
+//   · STAYS on the bar — the connection light, 🚫 Sold out, 🖨❗ printer problem, 🚩 report an
+//     issue. These are touched DURING service, some of them urgently.
+//   · MOVES in here — 🔔 sound, ▦/▭ board layout, 🌙 theme. All three are per-device preferences
+//     set once and then left alone for months (they persist in localStorage precisely because
+//     nobody re-picks them mid-rush).
+// That is the same trade the waiter tablet already makes: its ☰ drawer holds Theme while the bar
+// keeps only the action. One established pattern, not a new idea.
+//
+// The controls are MOVED, not rebuilt — the real #muteBtn / #viewBtn / #themeToggle nodes are
+// relocated, so their handlers, their ids and their state travel with them. Nothing is re-wired and
+// there is no second copy to drift (theme.js still finds #themeToggle by id; applyView() still
+// finds #viewBtn and its .bi/.bw spans). And because the menu is OUTSIDE .top-actions, the
+// word-hiding rule in the phone media block stops applying, so in here they get their words back.
+// PHONE ONLY: above 760px the bar has room, so the buttons stay where they were and ⋯ is hidden.
+const MORE_MQ = "(max-width: 760px)";
+let morePop = null, moreBackOff = null;
+// WHERE EACH CONTROL CAME FROM, recorded once before anything is moved. Restoring by "append them
+// before the ⋯ button" looked fine and quietly reordered the DESKTOP bar: a context that laid out
+// narrow first and then wide put 🔔 after 🖨❗ and 🌙 before 🚩, i.e. the bar a cook has learned
+// changed order on them for no reason. Pinning each node's original next-sibling puts every one
+// back exactly where index.html authored it, whatever route the layout took to get here.
+const MORE_HOME = new Map();
+function rememberHomes(ids) {
+  for (const id of ids) {
+    if (MORE_HOME.has(id)) continue;
+    const el = document.getElementById(id);
+    if (el && el.parentElement) MORE_HOME.set(id, el.nextElementSibling);
+  }
+}
+function buildMoreMenu() {
+  const bar = document.querySelector("header.topbar");
+  const btn = document.getElementById("moreBtn");
+  if (!bar || !btn || morePop) return;
+  morePop = document.createElement("div");
+  morePop.id = "morePop";
+  morePop.className = "kds-more-pop";
+  morePop.hidden = true;
+  morePop.setAttribute("role", "menu");
+  // A label per row: the buttons themselves are emoji-only (🔔/🔕, ▦/▭, 🌙/☀️), which reads fine
+  // as an icon in a bar and badly as a line in a menu.
+  // 🚩 joins them for CONSISTENCY, not just for room: on the waiter tablet "Report an issue" lives
+  // in the ☰ drawer (it has no bar button at phone width at all), so having it on the bar here and
+  // in a menu there would be the same job in two places. It is also an escalation a cook reaches
+  // for a few times a month, not during plating. Moving it is what reliably buys the second row
+  // back — the connection badge grows when it shows a latency reading ("663 ms" is wider than
+  // "Live"), so without this the bar fits on one row only while the network happens to be quick.
+  [["muteBtn", "New-order sound"], ["viewBtn", "Board layout"], ["themeToggle", "Theme"], ["reportIssueBtn", "Report an issue"]].forEach(([id, label]) => {
+    const row = document.createElement("div");
+    row.className = "kds-more-row";
+    const t = document.createElement("span");
+    t.className = "kmr-label";
+    t.textContent = label;
+    row.appendChild(t);
+    row.dataset.for = id;
+    morePop.appendChild(row);
+  });
+  bar.appendChild(morePop);
+  const closeMore = () => {
+    if (!morePop || morePop.hidden) return;
+    morePop.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    if (moreBackOff) { const off = moreBackOff; moreBackOff = null; off(); }
+  };
+  const openMore = () => {
+    morePop.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    // Registered with the back-stack the moment it opens, like every other overlay on this panel,
+    // so the phone's hardware Back closes the menu instead of leaving the kitchen screen.
+    moreBackOff = window.LFH_BACK ? LFH_BACK.layer("kds-more", closeMore) : null;
+  };
+  btn.onclick = (e) => { e.stopPropagation(); if (morePop.hidden) openMore(); else closeMore(); };
+  // Tapping anything inside is a real action (the moved buttons keep their own handlers) — we just
+  // close afterwards so the menu isn't left covering the board. Sound is the exception: a cook
+  // muting mid-rush may want to see the icon change and tap again, and closing under their finger
+  // is the "tap vanished" feeling, so the menu stays open for that one.
+  morePop.addEventListener("click", (e) => {
+    const row = e.target.closest(".kds-more-row");
+    if (row && row.dataset.for !== "muteBtn" && e.target.closest("button")) setTimeout(closeMore, 120);
+  });
+  document.addEventListener("click", (e) => {
+    if (morePop.hidden) return;
+    if (!e.target.closest("#morePop") && !e.target.closest("#moreBtn")) closeMore();
+  });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMore(); });
+  window.__kdsCloseMore = closeMore;   // used when the layout flips back to desktop
+}
+// Move the three controls in (phone) or back to the bar (desktop). Idempotent, so it is safe to
+// call on every media change and on boot.
+function syncMoreMenu() {
+  const acts = document.querySelector(".top-actions");
+  const btn = document.getElementById("moreBtn");
+  if (!acts || !btn) return;
+  let phone = false;
+  try { phone = window.matchMedia(MORE_MQ).matches; } catch { phone = false; }
+  const MOVERS = ["muteBtn", "viewBtn", "themeToggle", "reportIssueBtn"];
+  rememberHomes(MOVERS);
+  if (phone) {
+    buildMoreMenu();
+    if (!morePop) return;
+    for (const row of morePop.querySelectorAll(".kds-more-row")) {
+      const el = document.getElementById(row.dataset.for);
+      if (el && el.parentElement !== row) row.appendChild(el);
+    }
+  } else {
+    if (window.__kdsCloseMore) window.__kdsCloseMore();
+    // Back to the EXACT slot each one was authored in (see MORE_HOME) — never merely "into the bar".
+    for (const id of MOVERS) {
+      const el = document.getElementById(id);
+      if (!el || el.parentElement === acts) continue;
+      const home = MORE_HOME.get(id);
+      // A remembered sibling that has since left the bar would throw insertBefore, so fall back to
+      // the ⋯ button's slot, which is where these all sit anyway.
+      acts.insertBefore(el, home && home.parentElement === acts ? home : btn);
+    }
+  }
+}
+syncMoreMenu();
+try { window.matchMedia(MORE_MQ).addEventListener("change", syncMoreMenu); } catch (e) { /* older engines keep the boot layout */ }
+
 bindDelegation(); // ONE delegated click handler for all ticket buttons (survives tile patching)
 updateSoundNudge(); // show the "enable sound" affordance if this is an untouched wall display
 applyView(); // honour the saved layout (sets which <main> shows) before the first paint
