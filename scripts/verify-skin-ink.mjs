@@ -28,8 +28,25 @@ for (const [role,url] of [["admin","/aevinite"],["admin","/aevinite/health"],["a
       if(!t)return null;let cur=t,bg="rgb(255,255,255)";
       while(cur){const b=getComputedStyle(cur).backgroundColor;const m=String(b).match(/[\d.]+/g);if(m&&(m.length<4||+m[3]>0.85)){bg=b;break;}cur=cur.parentElement;}
       return {txt:t.textContent.trim().slice(0,12),color:getComputedStyle(t).color,bg,skin:document.querySelector("[data-skin]")?.getAttribute("data-skin"),theme:document.documentElement.getAttribute("data-theme")};});
+    // the popover is interaction-only, so no screenshot sweep ever sees it. Click, let React
+    // render, THEN read — reading in the same tick as the click returns null.
+    let popSame = null;
+    if (js && r) {
+      const pillInk = await p.evaluate(()=>{const e=document.querySelector(".lfh-conn-txt")||document.querySelector(".lfh-conn-ms");return e?getComputedStyle(e).color:null;});
+      // the clickable element is the pill's own <button> ancestor — `button.lfh-conn` alone misses
+      // it on the surfaces where the badge is nested differently
+      await p.evaluate(()=>{const t=document.querySelector(".lfh-conn-txt")||document.querySelector(".lfh-conn-ms");
+        const b=(t&&t.closest("button"))||document.querySelector("button.lfh-conn")||document.querySelector("[aria-expanded]");
+        if(b)b.click();});
+      await p.waitForTimeout(1200);
+      const figInk = await p.evaluate(()=>{const f=document.querySelector(".lfh-conn-pop-fig");return f?getComputedStyle(f).color:null;});
+      popSame = {pillInk, figInk, same: !!figInk && figInk===pillInk};
+    }
     const cr=r?R(P(r.color),P(r.bg)):"n/a";
-    const ok = r && +cr>=3;
+    const ok = r && +cr>=3 && (!popSame || popSame.same);
+    if (popSame && !popSame.same) console.log(popSame.figInk
+      ? `   popover ink ${popSame.figInk} does not follow the surface (pill is ${popSame.pillInk})`
+      : `   no .lfh-conn-pop-fig — the popover figure is not surface-aware (pill is ${popSame.pillInk})`);
     console.log(`${ok?"✓":"✗"} ${url.padEnd(20)} console=${cons} guest=${guest} ${js?"hydrated":"FIRSTPAINT"} → skin=${r?.skin} "${r?.txt}" ${cr}:1`);
     if(!ok) bad++;
     await c.close();
