@@ -139,6 +139,7 @@ update the detail doc's section in the same commit.
 - **Feature switches (mig 035):** `settings.features` + `useFeatures()`; four backend-only flags
   (`verification`, `payments`, `aggregators`, `gst_invoice`) stay invisible in every UI.
 - **KOT/bills (migs 036–038):** daily `kot_no`/`bill_no`; discount stored apart from totals.
+  Which of the THREE numbers is which, and why bill/invoice series have honest gaps: `docs/NUMBERING.md`.
   **New Postgres functions are PUBLIC-executable by default** — every staff-only fn needs
   REVOKE/GRANT (mig 038/267 lesson); `verify:grants` guards it.
 - **3D loading:** `lib/modelLoader.ts` singleton on `globalThis` — it is what makes "no re-fetch

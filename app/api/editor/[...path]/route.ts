@@ -1883,7 +1883,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const customers = must(await sb.from("customers").select("*").eq("restaurant_id", rid).order("last_seen_at", { ascending: false }).limit(500));
       // The blocklist read had NO limit at all. Columns named to match what the panel renders
       // (b.id / b.phone / b.table_number / b.reason) plus member_id, which unblocking needs.
-      const blocklist = must(await sb.from("blocklist").select("id, phone, table_number, member_id, reason, blocked_at").eq("restaurant_id", rid).order("blocked_at", { ascending: false }).limit(500));
+      // unban_phone / unban_requested_at are what a BLOCKED GUEST left on the "you've been
+      // blocked" wall when they asked to be let back in (mig 077). They were written by the
+      // guest RPC and selected by nobody, so the wall's promise — "leave your number and ask a
+      // member of staff" — reached no staff screen at all. Two more columns, same one query.
+      const blocklist = must(await sb.from("blocklist").select("id, phone, table_number, member_id, reason, blocked_at, device_id, unban_phone, unban_requested_at").eq("restaurant_id", rid).order("blocked_at", { ascending: false }).limit(500));
       const orders = must(await sb.from("orders").select("member_id, total, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(3000));
       const calls = must(await sb.from("waiter_calls").select("member_id, note, created_at").eq("restaurant_id", rid).not("member_id", "is", null).order("created_at", { ascending: false }).limit(3000));
       return ok({ members, customers, blocklist, orders, calls });

@@ -1,4 +1,5 @@
--- 118_restaurant_billing.sql — SaaS billing (what each restaurant PAYS US), admin-only.
+-- 122_restaurant_billing.sql — SaaS billing (what each restaurant PAYS US), admin-only.
+-- [was titled 118_ until 2026-08-06 — 118 is price_order_tenant_scope]
 --
 -- NOT restaurant food revenue (that stays owner-panel-only, CLAUDE.md hard rule).
 -- This is platform income: plan, subscription status, amount/cycle, next-due date,

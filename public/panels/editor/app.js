@@ -8017,7 +8017,9 @@ function floorHtml() {
   if (s.table_count && _tcKey) { try { localStorage.setItem(_tcKey, String(parseInt(s.table_count, 10))); } catch {} }
   // Side-panel queues now come from the slim SUMMARY aggregates (tiny — only pending rows),
   // not the full board (which is no longer fetched whole). Same shapes the cards expect.
-  const blocks = state.summary.blocklist || [];
+  // (The blocklist is NOT read here: this side panel never rendered it. The one place it shows
+  // is the Customer log tab's 🚫 Blocked panel, which has its own fetch. A `const blocks = …`
+  // sat here unused — removed rather than left looking like a wired feature.)
 
   // legend — every state + its colour. ("Bill due" was removed: payment is
   // already shown by the red/green outline, so a fill colour for it was noise.)
@@ -12071,8 +12073,35 @@ function logHtml() {
       </div>`;
   }).join("") : `<div class="sx-empty">No guests have joined a table yet.</div>`;
   const table = `<div class="logtable"><div class="logrow loghead"><div>Guest</div><div>Table</div><div>Role</div><div>Did</div><div>Status</div><div>When</div><div></div></div>${rows}</div>`;
-  const blkRows = blocks.length ? blocks.map((b) => `<div class="sx-blk"><span>${b.phone ? "📵 " + esc(b.phone) : "🚫 table " + esc(b.table_number)}${b.reason ? ` — <small>${esc(b.reason)}</small>` : ""}</span><button class="btn small" data-unblock="${esc(b.id)}">Unblock</button></div>`).join("") : `<div class="sx-empty">Nobody is blocked.</div>`;
-  const blkPanel = `<div class="sx-panel" style="margin-top:18px;max-width:560px"><h3>🚫 Blocked <span class="sub">· ${blocks.length}</span></h3>${blkRows}</div>`;
+  // A blocked guest can ask to be let back in: the "you've been blocked" wall takes a mobile
+  // number and stamps it on their block record (mig 077). Until now NOTHING here read it, so the
+  // wall's promise — "leave your number and ask a member of staff" — reached no staff screen and
+  // the guest waited on a request nobody could see. Show it, and put the people who ASKED first,
+  // because that list is a queue: it's the only reason to open this panel between bans.
+  // NOTE: .sx-blk / .sx-blk-top / .sx-blk.has-req / .sx-blk-unban were all styled for exactly
+  // this row (style.css:984-987) and never wired to any markup — the look was designed, the
+  // wiring was missed. This uses that structure rather than inventing a second one.
+  const asked = blocks.filter((b) => b.unban_requested_at).length;
+  const blkSorted = blocks.slice().sort((a, b) => (b.unban_requested_at ? 1 : 0) - (a.unban_requested_at ? 1 : 0));
+  const blkRows = blkSorted.length ? blkSorted.map((b) => {
+    // A ban can target a phone, a table, or just the DEVICE (mig 077 — the common case, since an
+    // anonymous menu browser has no phone). The device case used to fall through to the table
+    // branch and render "🚫 table " with nothing after it; say what was actually blocked.
+    const who = b.phone ? "📵 " + esc(b.phone)
+      : b.table_number ? "🚫 table " + esc(b.table_number)
+      : b.device_id ? "📱 this guest's device"
+      : "🚫 blocked";
+    const why = b.reason ? ` — <small>${esc(b.reason)}</small>` : "";
+    // The appeal line: the number they left (often the FIRST number we have for them) + when.
+    const appeal = b.unban_requested_at
+      ? `<div class="sx-blk-unban">🙋 Asked to be unblocked${b.unban_phone ? ` · ${esc(b.unban_phone)}` : ""} · ${esc(whenLabel(b.unban_requested_at))}</div>`
+      : "";
+    return `<div class="sx-blk${b.unban_requested_at ? " has-req" : ""}">`
+      + `<div class="sx-blk-top"><span>${who}${why}</span><button class="btn small" data-unblock="${esc(b.id)}">Unblock</button></div>`
+      + appeal
+      + `</div>`;
+  }).join("") : `<div class="sx-empty">Nobody is blocked.</div>`;
+  const blkPanel = `<div class="sx-panel" style="margin-top:18px;max-width:560px"><h3>🚫 Blocked <span class="sub">· ${blocks.length}${asked ? ` · ${asked} asked to be unblocked` : ""}</span></h3>${blkRows}</div>`;
   return head + table + blkPanel;
 }
 

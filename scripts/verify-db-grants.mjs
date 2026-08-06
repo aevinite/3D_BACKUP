@@ -95,7 +95,12 @@ const ANON_ALLOWED = {
   lfh_effective_tax_rate:     "the tax rate for a bill; called BY lfh_price_order (INVOKER). DEFINER since mig 300 so its settings read works",
   lfh_session_state:          "the guest's own table state, scoped by their session token",
   lfh_join_session:           "guest joins a table",
-  lfh_open_session:           "guest/waiter opens a table (legacy path, still granted)",
+  // lfh_open_session was here until 2026-08-06 with the reason "guest/waiter opens a table
+  // (legacy path, still granted)". That note recorded the grant but not the RULE: migration 021
+  // retired guest-opened tables outright ("guests do NOT open tables… staff open a table's
+  // session from the editor floor"), and this function does exactly what that forbids. It had
+  // zero callers; staff open a table through lfh_staff_open_table (service_role). Mig 304 drops
+  // it. Do not re-add the entry — a second, weaker door beside the real one is the fault.
   lfh_leave_session:          "guest leaves a table",
   lfh_touch_session:          "guest heartbeat; mig 099:108 revokes PUBLIC but keeps anon on purpose",
   lfh_get_cart:               "shared cart read, token-scoped",
@@ -328,6 +333,38 @@ function checkMigrations() {
        + `. Two files sharing a number apply in filename order, not intent order. Renumber the new one.`);
   } else {
     pass(`no new duplicate migration numbers (${dups.length} historical pairs, all verified disjoint)`);
+  }
+
+  // THE OTHER HALF OF THE SAME QUESTION (sweep 3, F6): the check above counted duplicates and
+  // could not see a HOLE. Migration 090 does not exist — 089 goes straight to 091 — and it never
+  // has: nothing was ever committed under that number. So nobody could tell "090 was skipped"
+  // from "090 was written and lost", which is a real answer to need when asking "did everything
+  // apply?". A gap is now named, with an allow-list so a known one stays quiet and a NEW one
+  // (the case that would actually mean a lost file) goes red.
+  const nums = [...new Set(Object.keys(byNum).map(Number))].filter((n) => !Number.isNaN(n)).sort((a, b) => a - b);
+  // Every hole in the sequence, with the reason it is one. Checked 2026-08-06 with
+  // `git log --all --diff-filter=A -- 'supabase/migrations/<n>_*'` — i.e. "was a file under this
+  // number EVER committed on any branch". Three kinds of answer, and only the first is boring:
+  const KNOWN_GAPS = {
+    // ── never existed: nothing was ever committed under the number, it was simply skipped ──
+    90: "never existed (the 001–150 sweep's F6)", 165: "never existed", 168: "never existed",
+    169: "never existed", 170: "never existed", 171: "never existed", 216: "never existed",
+    255: "never existed",
+    // ── written, then deliberately withdrawn ──
+    252: "252_daily_money_in_hand.sql existed and was REVERTED on purpose — 'Revert today's "
+       + "owner-reports work at the owner's request' (PR #697). The number stays spent.",
+    // ── written, then renumbered before merge (the process working as intended) ──
+    275: "was 275_refusals_carry_a_code_not_a_sentence.sql on its branch; renumbered to 278 on merge",
+    276: "was 276_private_paperwork_buckets.sql on its branch; renumbered to 279 on merge",
+  };
+  const gaps = [];
+  for (let n = nums[0]; n < nums[nums.length - 1]; n++) if (!byNum[String(n).padStart(3, "0")]) gaps.push(n);
+  const newGaps = gaps.filter((n) => !(n in KNOWN_GAPS));
+  if (newGaps.length) {
+    fail(`migration number(s) ${newGaps.join(", ")} are MISSING from the sequence — either a file was `
+       + `lost before it was committed, or the number was skipped. Say which, in KNOWN_GAPS above.`);
+  } else {
+    pass(`no unexplained gaps in the sequence (${gaps.length} known: ${gaps.join(", ") || "none"})`);
   }
 
   // THE COLLISION THAT ACTUALLY BITES (sweep F13). The 18 historical pairs are harmless — checked
