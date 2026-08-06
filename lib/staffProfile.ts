@@ -2,7 +2,6 @@
 // through lib/tableTags). It re-exports every PURE rule from lib/staffProfileShared so server
 // code has one import; anything rendered in a BROWSER must import staffProfileShared instead.
 import { payrollLadder } from "@/lib/tableTags";
-import { powerEntitlementKey } from "@/lib/ownerEntitlements";
 import { ABSENT_ON_PAY_POWERS, POWER_SEE_PAY, POWER_RECORD_PAY, POWER_EDIT_PROFILE } from "@/lib/staffProfileShared";
 
 export * from "@/lib/staffProfileShared";
@@ -37,8 +36,12 @@ export function payAccessWith(actor: ActorKind, r: RestaurantBits, moduleOn: boo
     return { moduleOn: true, canSeePay: true, canRecordPay: true, canEditProfile: true, canEditJobPay: true };
   }
   const granted = (flag: string): boolean => {
-    // rung 1a: an admin who removed the power caps everything below it
-    if (r.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
+    // The old ladder's "rung 1a" (owner_entitlements.power_<flag>) LEFT on 2026-08-06 with every
+    // other read of it. Nothing can write that key: the sole writer of owner_entitlements is the
+    // access-tree route, which allow-lists owner PAGE keys only, so the rung was permanently
+    // true. The live cap for these three payroll powers is the Payroll MODULE itself, which is
+    // checked as `moduleOn` at the top of this function — switch Payroll off and none of them
+    // exist, which is the switch the Access screen actually offers.
     const v = r.manager_permissions?.[flag];
     if (typeof v === "boolean") return v;
     return ABSENT_ON_PAY_POWERS.has(flag); // absent: on for the two low-risk powers, off for pay

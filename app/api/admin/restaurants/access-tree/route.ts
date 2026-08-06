@@ -103,10 +103,42 @@ function describeAccessPatch(patch: Record<string, any>): string {
   }
   for (const [panel, keys] of Object.entries(obj(patch.tabs)))
     for (const [k, v] of Object.entries(obj(keys))) say(nameOfBind((b) => b.t === "tab" && b.panel === panel && b.key === k), `${panel}.${k}`, v);
-  for (const [id, raw] of Object.entries(obj(patch.config)))
-    for (const [side, v] of Object.entries(obj(raw)))
-      bits.push(side === "on" ? `${nameOfBind((b) => b.t === "has" && b.id === id) || id} (whole feature): ${v === true ? "on" : "off"}`
-        : `${id}.${side}: ${JSON.stringify(v)}`);
+  // ── access_config, IN ENGLISH ────────────────────────────────────────────────────────────
+  // Everything except the `on` half used to fall through to `${id}.${side}: ${JSON.stringify(v)}`,
+  // so the Activity log recorded lines like `view_dashboard.manager_opts: {"range":"today"}`. That
+  // was survivable while nothing showed the log back; the Access screen's "Recent changes here"
+  // strip (2026-08-06) puts it in front of the admin, and the owner's standing rule is that the
+  // log reads as English. Each shape now names the ROW from the model and the value from that
+  // row's own choices, so a renamed row is renamed here too. (2026-08-06)
+  const nodeFor = (test: (b: any) => boolean) => ALL_NODES.find((n) => test(n.bind));
+  const labelOf = (node: { choices?: { value: string; label: string }[] } | undefined, v: unknown) =>
+    node?.choices?.find((c) => c.value === String(v))?.label ?? (v === true ? "on" : v === false ? "off" : String(v));
+  for (const [id, raw] of Object.entries(obj(patch.config))) {
+    for (const [side, v] of Object.entries(obj(raw))) {
+      if (side === "on") {
+        bits.push(`${nameOfBind((b) => b.t === "has" && b.id === id) || id} (whole feature): ${v === true ? "on" : "off"}`);
+        continue;
+      }
+      if (side === "tablet") {
+        const n = nodeFor((b) => b.t === "capTablet" && b.id === id);
+        bits.push(`${n?.name || id} (waiter): ${v === "pin" ? "on, with a manager PIN" : String(v)}`);
+        continue;
+      }
+      if (side === "limit") {
+        for (const [sd, num] of Object.entries(obj(v))) {
+          const n = nodeFor((b) => b.t === "limit" && b.id === id && b.side === sd);
+          bits.push(`${n?.name || `${id} limit (${sd})`}: ${num}${n?.unit || ""}`);
+        }
+        continue;
+      }
+      const m = side.match(/^(owner|manager|waiter)_opts$/);
+      if (!m) { bits.push(`${id}.${side}: ${JSON.stringify(v)}`); continue; }
+      for (const [k, val] of Object.entries(obj(v))) {
+        const n = nodeFor((b) => b.t === "opt" && b.id === id && b.side === m[1] && b.key === k);
+        bits.push(`${n?.name || `${id}.${k}`}: ${labelOf(n, val)}`);
+      }
+    }
+  }
   // A credential's VALUE never reaches the log — only that one was set or cleared.
   for (const [k, v] of Object.entries(obj(patch.creds))) bits.push(`${k} key: ${v === null ? "removed" : "saved"}`);
   return bits.slice(0, 12).join(" · ") + (bits.length > 12 ? ` · +${bits.length - 12} more` : "");
