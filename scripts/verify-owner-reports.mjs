@@ -320,5 +320,19 @@ check("both routes use it for the pay window",
   /businessDateHi\(to\)/.test(analyticsRoute) && /p_to: docDateHi\(to\)/.test(reportsRoute),
   "istDateOf on a 05:00-ending window returns tomorrow");
 
+console.log("\n── 19. A HELPER-BUILT HEADER IS STILL REACHABLE BY CSS ──");
+// Every <th> in the estate table comes out of the th() arrow helper, and styled-jsx only stamps
+// its scope class onto JSX in the component's OWN function body — so those th elements ship with
+// no jsx- class. A scoped ".hq-table th" rule compiles to ".hq-table.jsx-X th.jsx-X" and matched
+// NOTHING: measured live, a header cell computed to fontSize 13px / textTransform none /
+// position static, i.e. unstyled since it was written, and the phone column-hiding left 8 header
+// columns over 6 body cells. The descendant must be :global.
+check("the estate table's header rules reach a helper-built th",
+  /\.hq-table :global\(th\) \{/.test(dashPage) && !/^\s*\.hq-table th \{/m.test(dashPage),
+  "a scoped th selector cannot match a th the styled-jsx transform never touched");
+check("the phone column-hiding reaches the header too",
+  /\.hq-table :global\(\.hide-m\), \.hq-table :global\(\.hide-s\)/.test(dashPage),
+  "hiding only the body cells leaves the header a column or two too wide");
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }
