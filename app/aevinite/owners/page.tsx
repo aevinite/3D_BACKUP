@@ -252,6 +252,7 @@ export default function AdminOwners() {
         .own-row:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
         .own-row.sel { background: color-mix(in srgb, var(--accent) 14%, transparent); border-left-color: var(--accent); }
         .own-av { width: 38px; height: 38px; border-radius: 11px; display: grid; place-items: center; font-weight: 800; font-size: 14px; flex: none; }
+        .own-av.lg { width: 52px; height: 52px; border-radius: 14px; font-size: 19px; }
         .own-nm { display: block; font-weight: 700; font-size: 13.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .own-sub { display: block; font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .own-match { display: block; font-size: 11px; color: var(--accent); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
@@ -261,7 +262,7 @@ export default function AdminOwners() {
         /* Desktop: pinned header, list + detail scroll independently inside the admin
            main scroll-port (which has a definite height: .adm is 100dvh, .adm-main flex:1). */
         @media (min-width: 861px) {
-          :global(.adx-wrap) { height: 100%; }
+          .adx-wrap { height: 100%; }
           .own-page { height: 100%; min-height: 0; }
           .own-pane { flex: 1; min-height: 0; overflow: hidden; }
         }
@@ -367,7 +368,7 @@ function FactList({ facts, danger }: { facts: Fact[]; danger?: boolean }) {
 function OwnerChip({ owner }: { owner: Owner }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 11, padding: "11px 12px", border: "var(--border)", borderRadius: 12, background: "rgba(255,255,255,.02)" }}>
-      <span aria-hidden style={{ width: 38, height: 38, borderRadius: 11, background: `${chipColor(owner.id)}33`, color: chipColor(owner.id), display: "grid", placeItems: "center", fontWeight: 800, fontSize: 14, flex: "none" }}>{initials(owner.name)}</span>
+      <span aria-hidden className="own-av" style={{ ["--hue" as string]: chipColor(owner.id), background: `${chipColor(owner.id)}33` }}>{initials(owner.name)}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 750, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner.name}</div>
         <div style={{ fontSize: 11.5, color: "var(--muted)" }}>@{owner.username}</div>
@@ -637,7 +638,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
       {/* Hero */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "18px 20px", borderBottom: "var(--border)", background: "color-mix(in srgb, var(--accent) 5%, transparent)" }}>
         <button className="own-back" onClick={onBack} aria-label="Back to list"><i className="fas fa-arrow-left" aria-hidden="true" /></button>
-        <span aria-hidden style={{ width: 52, height: 52, borderRadius: 14, background: `${chipColor(owner.id)}33`, color: chipColor(owner.id), display: "grid", placeItems: "center", fontWeight: 800, fontSize: 19, flex: "none" }}>{initials(owner.name)}</span>
+        <span aria-hidden className="own-av lg" style={{ ["--hue" as string]: chipColor(owner.id), background: `${chipColor(owner.id)}33` }}>{initials(owner.name)}</span>
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 19, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner.name}</div>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
