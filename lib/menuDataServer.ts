@@ -25,7 +25,7 @@
 // guests must only ever see what the public policy allows, identical to before.
 
 import { unstable_cache } from "next/cache";
-import { getMenuItems, getCategories, CARD_COLUMNS, type MenuItem, type Category } from "./menu";
+import { getMenuItems, getCategories, CARD_COLUMNS, liveCategorySetOf, toCardItem, type MenuCardItem, type Category } from "./menu";
 
 // The guest menu (<MenuView>) consumes exactly the dishes + categories, so that's
 // all we cache. Settings (bubbles / maintenance / features) are deliberately NOT
@@ -34,7 +34,7 @@ import { getMenuItems, getCategories, CARD_COLUMNS, type MenuItem, type Category
 // If a future caller needs guest-safe settings cached, add the field here AND make
 // the consumer read it — and bust this tag where service_mode/bubbles are written.
 export interface MenuBundle {
-  items: MenuItem[];
+  items: MenuCardItem[];
   categories: Category[];
 }
 
@@ -47,11 +47,17 @@ function cachedBundleFor(restaurantId: string) {
       // These run on the server now. Two parallel reads, the same queries the
       // browser used to make — but ONCE per 24h per restaurant (or until an edit busts
       // guests, instead of once per guest view.
-      const [items, categories] = await Promise.all([
-        getMenuItems(restaurantId, CARD_COLUMNS), // grid needs only card fields
-        getCategories(restaurantId),
-      ]);
-      return { items, categories };
+      // ONE read of `categories`, not two. getMenuItems needs the live-category set to hide a
+      // switched-off category's dishes, and it used to fetch that set itself — while this function
+      // was already reading the very same table to put the categories in the bundle. So the
+      // categories are read FIRST and the set is derived from them (T1 improvement 10).
+      // The dish read is the slow one and it no longer waits on anything it did not wait on before:
+      // the category read is a single indexed 300-row-capped query, and the pair used to run in
+      // parallel INSIDE getMenuItems anyway.
+      const categories = await getCategories(restaurantId);
+      const items = await getMenuItems(restaurantId, CARD_COLUMNS, liveCategorySetOf(categories));
+      // Detail-only fields are stripped here, at the edge, so the cache stores the small shape too.
+      return { items: items.map(toCardItem), categories };
     },
     // Key parts: a stable prefix + the restaurant id => one cache entry per restaurant.
     ["menu-data", restaurantId],

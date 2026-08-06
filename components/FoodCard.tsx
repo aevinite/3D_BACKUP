@@ -286,10 +286,19 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
               "25-30 min" as its PLACEHOLDER, which is where a suggestion belongs.
               The row itself always renders (see `.dish-meta` min-height in globals.css) so a dish
               with neither a rating nor a time keeps the card exactly the height it is today. */}
+          {/* Built as a list and joined, rather than nested ternaries with a hand-written " • ".
+              With the invented prep time gone, either half can now be missing, and a hardcoded
+              separator would leave a card reading "• 4.5 ★" or a lonely bullet. */}
           <div className="dish-meta">
-            {features.ratings && item.reviewCount && item.reviewCount > 0 ? (
-              <>{item.rating} ★ • </>
-            ) : null}{item.time || ""}
+            {[
+              // Ratings ON: the real average, or an honest "no ratings yet" when there are none.
+              // Ratings OFF for this restaurant: neither — the slot says nothing at all, which is
+              // correct, because "no ratings yet" would imply ratings are coming.
+              features.ratings
+                ? (item.reviewCount && item.reviewCount > 0 ? `${item.rating} ★` : t.noRatingsYet)
+                : "",
+              item.time || "",   // only ever a REAL prep time; nothing is invented (see below)
+            ].filter(Boolean).join(" • ")}
           </div>
           {/* Price, formatted to the chosen currency (falls back to a $ amount) */}
           <div className="dish-price">{formatPrice(item.price, currency || DEFAULT_CURRENCY)}</div>

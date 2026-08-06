@@ -13,7 +13,9 @@ type Listener = () => void;
 class ModelLoader {
   // "loaded" remembers, for each original model URL, the local blob: link we made
   // after downloading it. A Map is a labelled lookup table (original URL -> local URL).
-  private loaded = new Map<string, string>();
+  // original URL -> { the local blob: link we made, and how many BYTES it cost }.
+  // The size rides along because the cache is budgeted in bytes, not in entries — see MAX_BYTES.
+  private loaded = new Map<string, { blob: string; size: number }>();
   // The one URL we are downloading right this moment (or null if idle).
   private inFlight: string | null = null;
   // A handle on that download so it can be CALLED OFF. Clearing the queue was never
@@ -36,13 +38,22 @@ class ModelLoader {
   private static MAX_ATTEMPTS = 2;
   // Wait 6 seconds (6000 ms) before retrying a failed download.
   private static RETRY_DELAY_MS = 6000;
-  // Keep at most this many downloaded models in memory. Each GLB is ~2–9 MB, so
-  // without a cap a guest browsing many 3D dishes in one session piles up blobs
-  // until a cheaper phone kills the tab. The `loaded` Map keeps insertion/most-
-  // recent-use order, so the OLDEST entry is evicted first (a proper LRU). The
-  // dish currently on screen is safe: the viewer re-reads it via getCachedUrl on
-  // every loader update, which moves it back to the most-recent position.
-  private static MAX_CACHED = 10;
+  // HOW MUCH MEMORY THE CACHE MAY HOLD — in BYTES, not in entries.
+  //
+  // This used to be "at most 10 models". The cap exists to stop a guest browsing many 3D dishes
+  // from piling up blobs until a cheaper phone kills the tab — and counting files cannot do that
+  // job, because the models are not the same size: a small one is ~2 MB and an optimized one up to
+  // ~9 MB, so ten entries was anywhere between ~20 MB and ~90 MB. The budget below is the number
+  // that actually matters to the phone. (T1 improvement 11, 2026-08-07.)
+  //
+  // 40 MB is deliberately roomy: the two tiers of the dish on screen (~2 MB + ~9 MB) plus a
+  // handful of neighbours the guest may go back to. `blob.size` is exact — no estimating.
+  private static MAX_BYTES = 40 * 1024 * 1024;
+  // A SECOND, much looser guard on the COUNT, so a menu of unusually tiny models can't grow the
+  // Map (and its LRU bookkeeping) without limit while staying under the byte budget.
+  private static MAX_CACHED = 24;
+  // Running total of the sizes in `loaded`, so evicting never has to add them all up again.
+  private bytes = 0;
 
   // Has this model already finished downloading? (true/false)
   isLoaded(url: string | null | undefined): boolean {
@@ -54,26 +65,36 @@ class ModelLoader {
   // have it yet. The viewer uses this instead of re-downloading the big file.
   getCachedUrl(url: string | null | undefined): string | null {
     if (!url) return null;
-    const blob = this.loaded.get(url);
-    if (blob === undefined) return null; // not downloaded yet
+    const hit = this.loaded.get(url);
+    if (hit === undefined) return null; // not downloaded yet
     // Mark as most-recently-used (delete + re-add moves it to the end of the Map)
     // so the model on screen is never the one the LRU evicts.
     this.loaded.delete(url);
-    this.loaded.set(url, blob);
-    return blob;
+    this.loaded.set(url, hit);
+    return hit.blob;
   }
 
   // Drop the least-recently-used models once we're over the cap, freeing their
   // blob memory (revokeObjectURL) so long browsing sessions don't grow forever.
   private evictIfNeeded() {
-    while (this.loaded.size > ModelLoader.MAX_CACHED) {
+    // Over the memory budget OR over the loose entry guard → drop the least-recently-used until
+    // both are satisfied. ALWAYS keep at least one entry: the model on screen is the most recent,
+    // and evicting it would make the viewer re-download the file it is currently displaying.
+    while (
+      this.loaded.size > 1 &&
+      (this.bytes > ModelLoader.MAX_BYTES || this.loaded.size > ModelLoader.MAX_CACHED)
+    ) {
       const oldest = this.loaded.keys().next().value as string | undefined; // first = LRU
       if (!oldest) break;
-      const blobUrl = this.loaded.get(oldest);
+      const hit = this.loaded.get(oldest);
       this.loaded.delete(oldest);
       this.attempts.delete(oldest);
-      if (blobUrl) { try { URL.revokeObjectURL(blobUrl); } catch {} }
+      if (hit) {
+        this.bytes -= hit.size;
+        try { URL.revokeObjectURL(hit.blob); } catch {}
+      }
     }
+    if (this.bytes < 0) this.bytes = 0; // belt and braces; a negative budget would disable eviction
   }
 
   // Have we permanently given up on this model (out of retries)? The viewer uses
@@ -227,7 +248,8 @@ class ModelLoader {
           // <model-viewer> can read instantly — this is the "download once" magic.
           const blob = await res.blob();
           const blobUrl = URL.createObjectURL(blob);
-          this.loaded.set(url, blobUrl);
+          this.loaded.set(url, { blob: blobUrl, size: blob.size });
+          this.bytes += blob.size;
           this.evictIfNeeded(); // keep memory bounded on long browsing sessions
           ok = true;
         } else {

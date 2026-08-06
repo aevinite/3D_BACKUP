@@ -32,7 +32,13 @@ export const FEATURE_DEFAULTS = {
   search: true,       // the dish search box
   languages: true,    // the language picker (off = English only)
   currency: true,     // the currency picker (off = ₹ only)
-  scrollspy: true,    // the auto-following category strip in the All view
+  // `scrollspy` USED TO LIVE HERE and was removed 2026-08-07 (T1 improvement 7). It was a switch
+  // that could not do anything: the auto-following category strip is always on — see the note in
+  // lib/accessModel.ts, "sticky category bar / scrollspy removed — always on, no toggle" — and no
+  // component has ever read this key. The editor still OFFERED it under Features, so a restaurant
+  // could switch it off, watch the strip keep following, and go looking for a bug that isn't there.
+  // A restaurant whose saved settings still carry `scrollspy` is unaffected: getFeatures spreads the
+  // DB overrides over these defaults, so the stray key just rides along unread.
   diet_filter: true,  // the Veg / Non-Veg filter group on the menu (off for pure-veg restaurants)
   // Backend-only switches (NO UI anywhere; default OFF):
   verification: false, // phone/email OTP before ordering (plumbing only)
