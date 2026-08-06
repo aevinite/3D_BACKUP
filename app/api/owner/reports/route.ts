@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, dbFail } from "@/lib/ownerScope";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
@@ -446,6 +446,8 @@ export async function GET(req: NextRequest) {
       let payments: { method: unknown; revenue: number; orders: number }[] | undefined;
       if (type === "daysummary") {
         let payRaw: Row[];
+        // Set when the ONE read this branch depends on failed — see the note in the else-branch.
+        let payUnreadable = false;
         if (!rid && !scope.all) {
           // scoped owner: ONE grouped call (mig 203) — the RPC already sums per method across
           // p_ids. Fall back to the per-restaurant merge if it errors (degrade gracefully).
@@ -459,11 +461,29 @@ export async function GET(req: NextRequest) {
           }
         } else {
           const one = await sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to });
-          payRaw = (one.data ?? []) as Row[];
+          // AN EMPTY LIST AND A FAILED READ ARE DIFFERENT SENTENCES (T9 sweep, 2026-08-06).
+          // `one.error` was never read, so a failed breakdown produced `payments: []` — which renders
+          // as a settlement table with no rows, i.e. "no money arrived by any method" on a sheet that
+          // is simultaneously showing revenue. Every other optional line on this sheet (tips,
+          // staffPay, inventory) is deliberately NULL on failure so the block is omitted entirely
+          // rather than stating a zero; the settlement split now follows its neighbours. `undefined`
+          // is exactly what `payments` starts as, so the sheet renders as it did before the line
+          // existed. The scoped-owner branch above already degrades via its own fallback.
+          if (one.error) {
+            console.error("[owner/reports] daysummary payment breakdown failed:", one.error.message);
+            payRaw = [];
+            payUnreadable = true;
+          } else {
+            payRaw = (one.data ?? []) as Row[];
+          }
         }
-        payments = payRaw
-          .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
-          .sort((a, b) => b.revenue - a.revenue);
+        // `undefined` (not []) when we couldn't read it, so the sheet omits the block entirely —
+        // exactly as it did before this line existed, and as tips/staffPay/inventory already do.
+        payments = payUnreadable
+          ? undefined
+          : payRaw
+              .map((r) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 }))
+              .sort((a, b) => b.revenue - a.revenue);
       }
       // STAFF PAY paid out in this same window (mig 220) — the day book's "money out" line.
       // Cash truth: the day the money actually left, matching the Team & pay report's cash view.
@@ -998,16 +1018,14 @@ export async function GET(req: NextRequest) {
     });
     return NextResponse.json(payload);
   } catch (e) {
-    // Supabase errors are plain objects ({code,message,…}), not Error instances — String(e)
-    // rendered "[object Object]". Surface the real message, and turn a statement-timeout
-    // (57014, the analytics scan under load) into advice the owner can act on.
-    const raw = e instanceof Error ? e.message
-      : (e && typeof e === "object" && "message" in e) ? String((e as { message: unknown }).message)
-      : String(e);
-    const code = e && typeof e === "object" && "code" in e ? String((e as { code: unknown }).code) : "";
-    const msg = (code === "57014" || /statement timeout/i.test(raw))
-      ? "This report took too long to build. Try a shorter period, or one restaurant at a time."
-      : raw;
-    return NextResponse.json({ error: msg }, { status: 500 });
+    // Supabase errors are plain objects ({code,message,…}), not Error instances — String(e) rendered
+    // "[object Object]". The statement-timeout translation this route pioneered (57014, the analytics
+    // scan under load) now lives in the shared `dbFail` helper alongside it, so the other nine owner
+    // endpoints get the same treatment instead of each shipping the raw sentence (T9 sweep,
+    // 2026-08-06). The non-timeout branch used to return `raw` — the database's own words — which is
+    // the one thing this file was already careful about for timeouts and not for anything else.
+    return dbFail("owner/reports", e, {
+      message: "Couldn't build that report just now — please try again.",
+    });
   }
 }

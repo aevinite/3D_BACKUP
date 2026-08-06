@@ -61,16 +61,23 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     if (!gate.menuEnabled) {
       return NextResponse.json({ error: "not found" }, { status: 404 });
     }
-    const bundle = await getMenuBundle(r.id);
+    // THE THIRD READ NEEDED THE SAME TREATMENT AS THE TWO ABOVE (T9 sweep, 2026-08-06). The 2026-08-05
+    // pass wrapped getRestaurantBySlug and getSettings, but the dish/category read fell through to the
+    // generic catch below — which answered `500 { error: e.message }`. Two problems with that on a
+    // diner's phone: the body is our schema ("relation ... does not exist"), and there is no
+    // `transient` flag, so the client cannot tell a passing blip from a permanent failure and does not
+    // retry. A failed menu read is exactly as transient as a failed settings read.
+    let bundle;
+    try { bundle = await getMenuBundle(r.id); } catch { return transient(); }
     // no-store on the HTTP layer: let the Next data cache (inside getMenuBundle)
     // do the dedup, not a browser/CDN cache that we can't tag-bust.
     return NextResponse.json(bundle, {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "failed to load menu" },
-      { status: 500 }
-    );
+    // Last resort only — the three reads above each answer for themselves now. Still never hands the
+    // database's own words to a guest: the detail goes to our log, the diner gets a sentence.
+    console.error("[menu-data] unexpected failure:", e instanceof Error ? e.message : e);
+    return transient();
   }
 }

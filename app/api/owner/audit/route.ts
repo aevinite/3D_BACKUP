@@ -13,7 +13,7 @@
 // hard limit — never a whole-table read. deletion_audit is indexed (restaurant_id, at DESC).
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope } from "@/lib/ownerScope";
+import { ownerScope, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
   }
 
   const r = await q;
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return dbFail("owner/audit", r.error, { message: "Couldn't load the removals record just now — please try again." });
   const rows = r.data ?? [];
 
   // Stamp each row with its restaurant NAME so a multi-restaurant owner can tell them apart

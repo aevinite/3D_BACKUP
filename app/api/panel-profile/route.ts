@@ -161,9 +161,28 @@ async function postImpl(req: NextRequest) {
     if (next === current) return NextResponse.json({ error: "New password must be different." }, { status: 400 });
     // Bump token_version → every existing cookie (incl. this one) is invalidated;
     // the user re-logs in with the new password. That's the secure, expected flow.
-    await sb.from("staff_users")
+    //
+    // A WRITE NOBODY LOOKED AT IS NOT A WRITE (T9 sweep, 2026-08-06). This `update` captured
+    // neither an error nor a row count, so a failed write (row lock, timeout, statement error) still
+    // fell through to `{ok:true, passwordChanged:true}` AND wrote a `password_change` line to the
+    // owner's Activity log. The person was told every session had ended, their OLD password went on
+    // working, and the log agreed with them — so nobody looking for the cause could find one. This is
+    // the identical fault `/api/owner/staff` `reset_password` was fixed for on 2026-07-07 ("the owner
+    // read out a password the DB never saved") and the same reasoning as `/api/maintenance`'s
+    // zero-row check ("a record of something that didn't happen is worse than no record").
+    // `.select("id")` is what makes a zero-row match visible: PostgREST answers an UPDATE that hit
+    // nothing with `data: []` and NO error.
+    const pw = await sb.from("staff_users")
       .update({ password_hash: await hashSecret(next), token_version: (u.token_version || 0) + 1 })
-      .eq("id", u.id);
+      .eq("id", u.id)
+      .select("id");
+    if (pw.error) {
+      console.error("[panel-profile] password write failed:", pw.error.message);   // detail our side
+      return NextResponse.json({ error: "Couldn't change your password — please try again." }, { status: 500 });
+    }
+    if (!pw.data?.length) {
+      return NextResponse.json({ error: "Couldn't change your password — your account wasn't found. Ask your admin." }, { status: 409 });
+    }
     // Staff-initiated change → operation log (admin resets are logged separately).
     await logAction(u.role, "password_change", {
       restaurant_id: u.restaurant_id, actor: u.name || u.username, device_id: deviceIdFrom(req),
@@ -248,7 +267,20 @@ async function postImpl(req: NextRequest) {
   const firstConfirm = !u.profile_confirmed && setupComplete;
   if (setupComplete) patch.profile_confirmed = true;
 
-  await sb.from("staff_users").update(patch).eq("id", u.id);
+  // SAME RULE AS THE PASSWORD BRANCH ABOVE (T9 sweep, 2026-08-06). This wrote a name, a login
+  // username and a PIN hash and looked at neither the error nor the row count, then logged
+  // `pin_set` / `profile_setup` / `profile_update` and answered `{ok:true}`. The visible symptom is
+  // worse here than for a password, because a PIN is only used LATER: the manager is told the PIN is
+  // set, the log says so, and the refusal arrives the next time they try to approve a discount.
+  // (The `profile` branch above already checked its error — the file disagreed with itself.)
+  const saved = await sb.from("staff_users").update(patch).eq("id", u.id).select("id");
+  if (saved.error) {
+    console.error("[panel-profile] profile write failed:", saved.error.message);   // detail our side
+    return NextResponse.json({ error: "Couldn't save that — please try again." }, { status: 500 });
+  }
+  if (!saved.data?.length) {
+    return NextResponse.json({ error: "Couldn't save that — your account wasn't found. Ask your admin." }, { status: 409 });
+  }
 
   // Operation log — STAFF edits land here; the admin's edits in /api/admin/users
   // are deliberately NOT logged. actor = their (new) name.

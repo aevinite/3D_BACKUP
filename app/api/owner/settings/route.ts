@@ -6,7 +6,7 @@
 //          token_version. That invalidates the current cookie, so the client re-logs in.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope } from "@/lib/ownerScope";
+import { ownerScope, dbFail } from "@/lib/ownerScope";
 import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@/lib/ownerEntitlements";
 import { USER_COOKIE, userFromCookie, hashSecret, verifySecret } from "@/lib/userAuth";
 import { MODULE_DEFS } from "@/lib/accessModel";
@@ -106,7 +106,7 @@ export async function PATCH(req: NextRequest) {
   if (!s?.[def.allowed]) return NextResponse.json({ error: "This feature isn't enabled for that restaurant." }, { status: 403 });
   if (!s[def.control]) return NextResponse.json({ error: "The admin hasn't handed you this switch." }, { status: 403 });
   const { error } = await sb.from("settings").update({ [def.enabled]: enabled }).eq("restaurant_id", rid);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/settings.module", error, { message: "Couldn't change that switch — please try again." });
   // A module turning itself off changes what a whole panel offers, and nothing recorded it — so with
   // two co-owners nobody could say who flipped it (sweep 2026-08-04). Unlike issues/ratings there is
   // no in-row stamp to fall back on: the settings column holds only the value.
@@ -154,7 +154,7 @@ export async function POST(req: NextRequest) {
   const { error } = await sb.from("staff_users")
     .update({ password_hash: hash, token_version: (row.token_version || 0) + 1 })
     .eq("id", owner.id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/settings.password", error, { message: "Couldn't change your password — please try again." });
   // Bumping token_version ends EVERY session on this account, so the visible symptom is "everyone
   // got logged out" with nothing to explain it. app/api/panel-profile already logs its equivalent
   // self-change as `password_change`; this one didn't (sweep 2026-08-04).

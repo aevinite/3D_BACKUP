@@ -89,7 +89,11 @@ type Records = {
 type RestA = {
   scope: "restaurant"; prev: Prev;
   restaurant: { id: string; slug: string; name: string; accentColor: string; heroTitle: string };
-  kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; openTables: number; topDish: string };
+  // `openTables: number | null` — null means the live head-count could NOT be read (T9 sweep,
+  // 2026-08-06). Nothing renders this field today (every "tables open" figure on this page comes
+  // from /api/owner/overview instead), so the type is the guard: whoever wires it up is forced to
+  // handle "we don't know" rather than printing a 0 that means "couldn't count".
+  kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; openTables: number | null; topDish: string };
   // Staff pay that LEFT in this window (mig 221). null = this restaurant doesn't have the
   // Staff-profiles-&-pay module, so no such tile is drawn at all.
   staffPay?: { paidOut: number; people: number; entries: number } | null;

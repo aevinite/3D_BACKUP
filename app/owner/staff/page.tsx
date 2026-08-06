@@ -25,6 +25,10 @@ type Staff = { id: string; username: string; role: string; name: string | null; 
   joined_on?: string | null; designation?: string | null;
   pay_type?: string | null; pay_amount?: number | null;
   paidThisMonth?: number; advanceOutstanding?: number; lastPaidOn?: string | null; payHidden?: boolean;
+  // Set by /api/owner/staff when this month's pay summary couldn't be read. The figures are then
+  // ABSENT rather than 0 — `money(undefined)` prints "₹0", so the row must say so in words instead
+  // of naming an amount nobody read (T9 sweep, 2026-08-06).
+  payUnread?: boolean;
   in_payroll?: boolean };
 type PayAccess = { moduleOn: boolean; canSeePay: boolean; canRecordPay: boolean; canEditProfile: boolean; canEditJobPay: boolean };
 
@@ -334,8 +338,16 @@ export default function OwnerStaffPage() {
                     {s.profileEligible && !s.payHidden && s.in_payroll && (s.pay_amount ? (
                       <span className="adm-muted" style={{ fontSize: 11.5 }}>
                         {money(s.pay_amount)}{s.pay_type === "monthly" ? "/mo" : s.pay_type === "daily" ? "/day" : s.pay_type === "hourly" ? "/hr" : ""}
-                        {" · "}<b style={{ color: s.paidThisMonth ? "var(--adm-ok)" : "var(--muted)" }}>{money(s.paidThisMonth)}</b> paid this month
-                        {s.advanceOutstanding ? <span style={{ color: "var(--adm-warn)" }}> · {money(s.advanceOutstanding)} advance</span> : null}
+                        {/* The RATE above is stored on the person, so it is always readable. What
+                            needed reading is this month's PAYMENTS — say so rather than print ₹0. */}
+                        {s.payUnread ? (
+                          <span style={{ color: "var(--adm-warn)" }}>{" · "}couldn&rsquo;t read this month&rsquo;s pay — refresh</span>
+                        ) : (
+                          <>
+                            {" · "}<b style={{ color: s.paidThisMonth ? "var(--adm-ok)" : "var(--muted)" }}>{money(s.paidThisMonth)}</b> paid this month
+                            {s.advanceOutstanding ? <span style={{ color: "var(--adm-warn)" }}> · {money(s.advanceOutstanding)} advance</span> : null}
+                          </>
+                        )}
                       </span>
                     ) : <span className="ost-nopay">on pay list · rate not set</span>)}
                   </div>

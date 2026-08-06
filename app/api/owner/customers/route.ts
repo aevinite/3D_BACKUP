@@ -5,7 +5,7 @@
 // columns, .in(restaurant_id), .limit, one cheap head-count for the true total.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { logAction } from "@/lib/oplog";
@@ -54,7 +54,7 @@ export async function GET(req: NextRequest) {
   if (seg === "new") q = q.lt("visits", REPEAT_MIN);
   if (seg === "blocked") q = q.eq("blocked", true);
   const { data, error } = await q;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/customers", error, { message: "Couldn't load your guest list just now — please try again." });
   const list = (data || []) as Array<{ restaurant_id: string; phone: string; name: string | null; blocked: boolean; visits: number; consent: boolean; first_seen_at: string; last_seen_at: string }>;
 
   // Restaurant names (multi-restaurant owner tells brands apart).
@@ -96,7 +96,7 @@ export async function GET(req: NextRequest) {
     const { data: hist, error: hErr } = await sb.rpc("lfh_owner_customer_bills", {
       p_restaurant_ids: ids, p_phone: detailPhone, p_limit: 20,
     });
-    if (hErr) return NextResponse.json({ error: hErr.message }, { status: 500 });
+    if (hErr) return dbFail("owner/customers.bills", hErr, { message: "Couldn't load this guest's bills just now — please try again." });
     // Read this guest's rows directly — the list above is a filtered page and may not
     // contain them (searching for someone, then opening an older guest).
     const { data: mineRaw } = await sb.from("customers").select(COLS).in("restaurant_id", ids).eq("phone", detailPhone).limit(20);
@@ -177,7 +177,7 @@ export async function DELETE(req: NextRequest) {
   await sb.from("customer_visits").delete().eq("restaurant_id", restaurantId).eq("phone", phone);
   await sb.from("customer_devices").delete().eq("restaurant_id", restaurantId).eq("phone", phone);
   const del = await sb.from("customers").delete().eq("restaurant_id", restaurantId).eq("phone", phone).select("phone");
-  if (del.error) return NextResponse.json({ error: del.error.message }, { status: 500 });
+  if (del.error) return dbFail("owner/customers.erase", del.error, { message: "Couldn't erase that guest — please try again." });
   // THE ONLY IRREVERSIBLE ERASE IN THE OWNER PANEL, AND IT WAS UNRECORDED (sweep 2026-08-04). This
   // hard-deletes the guest, their visit history and their devices — three tables, no tombstone, no
   // restore. (That is correct for a "erase my data" request under DPDP; sales rows are untouched and

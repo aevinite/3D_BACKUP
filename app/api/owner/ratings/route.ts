@@ -6,7 +6,7 @@
 // Egress-safe: explicit columns, scoped by restaurant_id, .limit — never SELECT *.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
+import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { expectClash, clashJson } from "@/lib/clash";
@@ -59,7 +59,7 @@ export async function GET(req: NextRequest) {
 
   // Summary (pre-aggregated in the DB — never scans another tenant, mig 138).
   const sum = await sb.rpc("lfh_ratings_summary", { p_ids: ids });
-  if (sum.error) return NextResponse.json({ error: sum.error.message }, { status: 500 });
+  if (sum.error) return dbFail("owner/ratings.summary", sum.error, { message: "Couldn't load your ratings just now — please try again." });
   const s = (sum.data?.[0] ?? {}) as Record<string, unknown>;
   const summary = {
     total: Number(s.total) || 0,
@@ -72,7 +72,7 @@ export async function GET(req: NextRequest) {
   let q = sb.from("feedback").select(COLS).in("restaurant_id", ids).order("created_at", { ascending: false }).limit(200);
   if (onlyUnhandled) q = q.eq("acknowledged", false);
   const { data, error } = await q;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/ratings", error, { message: "Couldn't load your ratings just now — please try again." });
 
   // Attach restaurant names (one small fetch, avoids a PostgREST embed).
   const list = (data || []) as Array<{ restaurant_id: string } & Record<string, unknown>>;
@@ -129,7 +129,7 @@ export async function PATCH(req: NextRequest) {
   // multi-MB note that then re-loads on every list fetch (egress). (audit 2026-07-07)
   if (hasNote) patch.staff_note = body.note.trim().slice(0, 1000) || null;
   const { error } = await sb.from("feedback").update(patch).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/ratings.update", error, { message: "Couldn't save that — please try again." });
   // The feedback ROW already carries acknowledged_by/at, so this was never untraceable — but it
   // never reached the unified Activity log, so "what did the owner do today?" left it out. One line
   // so the log tells the whole story (sweep 2026-08-04).

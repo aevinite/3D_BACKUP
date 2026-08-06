@@ -73,13 +73,27 @@ console.log("Owner-panel clash protection\n");
 // ── 3 · the screens send it, and show the refusal in words ────────────────────────────────────
 // A 409 the person never sees is the same as a silent overwrite from their point of view.
 {
-  for (const [f, what] of [
-    ["app/owner/staff/[id]/page.tsx", "the owner's staff profile page"],
-    ["app/owner/staff/page.tsx", "the owner's staff roster"],
-    ["app/owner/issues/page.tsx", "the rating reply note"],
+  // ── CHECK WHERE THE WRITE ACTUALLY LIVES, NOT WHERE IT USED TO (T9 sweep, 2026-08-06) ───────────
+  // The owner's staff profile stopped being a screen of its own on 2026-08-06: it is now a ~38-line
+  // mount point (app/owner/staff/[id]/page.tsx) that renders the SAME component Aevidine opens,
+  // pointed at the owner's endpoint — one shape, per docs/STAFF-PROFILE.md. The fetch that carries
+  // X-LFH-Expect and words the 409 moved with it, into components/owner/ownerProfileHost.ts. This
+  // check still grepped the page file, so it reported "sends no X-LFH-Expect" for a protection that
+  // was fully present two files away — a guard gone red for a refactor rather than a regression, and
+  // a red guard nobody can act on is one people learn to ignore.
+  //
+  // Each entry is now a LIST of the files that together own that screen's write; the check passes if
+  // the header and the plain wording are found across them. `verify:clash` independently confirms the
+  // same two call sites (ownerProfileHost.ts:63, StaffProfile.tsx:100).
+  for (const [files, what] of [
+    [["components/owner/ownerProfileHost.ts", "components/admin/StaffProfile.tsx", "app/owner/staff/[id]/page.tsx"],
+      "the owner's staff profile"],
+    [["app/owner/staff/page.tsx"], "the owner's staff roster"],
+    [["app/owner/issues/page.tsx"], "the rating reply note"],
   ]) {
-    const src = read(f);
-    if (!src) { bad(`${f} not found`); continue; }
+    const sources = files.map((f) => read(f)).filter(Boolean);
+    if (!sources.length) { bad(`${what}: none of ${files.join(", ")} found`); continue; }
+    const src = sources.join("\n");
     if (/X-LFH-Expect/.test(src)) ok(`${what} sends what it was editing from`);
     else bad(`${what} sends no X-LFH-Expect — the server has nothing to compare`);
     // clash.plain is the plain sentence lib/clash.ts writes for a person to read.

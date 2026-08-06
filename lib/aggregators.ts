@@ -12,6 +12,8 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { platformLadder } from "@/lib/tableTags";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
+// Constant-time compare + the hashing helper, the SAME two the admin login door uses (lib/staffAuth).
+import { safeEqual, sha256hex } from "@/lib/staffAuth";
 
 export type AggSource = "zomato" | "swiggy";
 
@@ -32,13 +34,26 @@ function providerEnv(source: AggSource) {
   return { key: process.env.SWIGGY_API_KEY, url: process.env.SWIGGY_API_URL, secret: process.env.SWIGGY_WEBHOOK_SECRET };
 }
 
-// Verify an inbound webhook. With no shared secret configured (today), we only
-// require the feature flag — there are no real senders yet. Once a secret is set,
-// the caller must present it in the X-Webhook-Secret header.
-export function verifyWebhook(source: AggSource, headerSecret: string | null): boolean {
+// Verify an inbound webhook: the caller must present the shared secret in the X-Webhook-Secret
+// header, compared in constant time.
+//
+// ── TWO CHANGES (T9 sweep, 2026-08-06) ──────────────────────────────────────────────────────────
+// 1. NO SECRET NOW MEANS "REFUSE", NOT "ACCEPT". This used to `return true` when no secret was
+//    configured, on the reasoning that the feature flag alone keeps things dormant. But the flag and
+//    the secret are INDEPENDENT: `aggregators` is a backend-only switch flipped by hand in the DB
+//    (that is how it is designed to be turned on), so whoever flips it before setting the env var got
+//    a live order-ingesting endpoint that accepted every inbound payload — and nothing anywhere tied
+//    the two together. A dormant integration should refuse, not welcome. Answering false here makes
+//    the route's existing 401 the honest reply, and the setup order can no longer be got wrong.
+// 2. CONSTANT-TIME COMPARE. `headerSecret === secret` was the last plain secret comparison left in
+//    this area; /api/staff-login was moved onto `safeEqual` on 2026-08-05 for exactly this reason
+//    ("the one comparison against the real typed password was the only one still using a plain
+//    `!==`"). Both sides are hashed first so the compare is fixed-length, which is what safeEqual
+//    needs — the same shape staff-login uses.
+export async function verifyWebhook(source: AggSource, headerSecret: string | null): Promise<boolean> {
   const { secret } = providerEnv(source);
-  if (!secret) return true; // dev/dormant: no secret set yet
-  return !!headerSecret && headerSecret === secret;
+  if (!secret || !headerSecret) return false;
+  return safeEqual(await sha256hex(headerSecret), await sha256hex(secret));
 }
 
 // Map a platform's raw order payload onto our platform-order shape. The real field

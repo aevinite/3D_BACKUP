@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, inScope, type OwnerScope } from "@/lib/ownerScope";
+import { ownerScope, inScope, type OwnerScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
     q = q.eq("restaurant_id", oneRid);
   }
   const { data, error } = await q;
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/issues", error, { message: "Couldn't load your complaints just now — please try again." });
   // signRows turns the stored value into a short-lived link on the way out (lib/mediaLinks.ts).
   const signed = await signRows("issue-media", (data || []) as Record<string, unknown>[], ["image_url", "audio_url"]);
 
@@ -92,7 +92,7 @@ export async function PATCH(req: NextRequest) {
     ? { status, resolved_at: new Date().toISOString(), resolved_by: who }
     : { status, resolved_at: null, resolved_by: null };
   const { error } = await sb.from("issues").update(patch).eq("id", id);
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/issues.update", error, { message: "Couldn't update that complaint — please try again." });
   // The issue ROW already carries resolved_by/at, so this was never untraceable — it just never
   // reached the unified Activity log (sweep 2026-08-04).
   await logAction("owner", status === "resolved" ? "issue_resolved" : "issue_reopened", {
@@ -129,7 +129,7 @@ async function postImpl(req: NextRequest) {
     raised_by: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
     raised_role: (scope.all || scope.admin) ? "admin" : "owner",
   });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/issues.raise", error, { message: "Couldn't raise that complaint — please try again." });
   await logAction("owner", "issue_raised", {
     restaurant_id: rid, actor: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
     detail: `raised: ${subject.slice(0, 80)}`,

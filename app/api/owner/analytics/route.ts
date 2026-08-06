@@ -6,11 +6,20 @@
 // Restaurant   → { scope:'restaurant', restaurant{}, kpis{}, timeseries[], dishes[], categories[], hourly[] }
 //
 // All aggregation is server-side via the lfh_owner_* RPCs (migration 089) — one
-// round-trip per chart, tiny pre-summed rows, never order scanning in JS. Service-
-// role only, behind the ADMIN_PASSWORD cookie gate (same as /api/owner/overview).
+// round-trip per chart, tiny pre-summed rows, never order scanning in JS.
+//
+// AUTH: ownerScope() (lib/ownerScope.ts) — a real OWNER sees only the restaurants they own, the
+// ADMIN super-user sees all, everyone else gets 401, and a real owner is further narrowed to the
+// restaurants whose "reports" section the admin still grants (the entitledSubset call below).
+// (This header used to say "Service-role only, behind the ADMIN_PASSWORD cookie gate (same as
+// /api/owner/overview)". That was wrong on both counts and had been for months: the gate is
+// ownerScope, which is a different rule with different consequences for a real owner. Its twin in
+// /api/owner/overview was corrected in the 2026-08-05 sweep and this copy was missed — so the
+// comment pointed at a file that contradicted it, which is exactly what makes the next reader "fix"
+// the wrong thing. Corrected in the T9 sweep, 2026-08-06.)
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, dbFail } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollEffectiveByRid } from "@/lib/tableTags";
 import { istDateOf } from "@/lib/staffProfileShared";
@@ -117,19 +126,11 @@ async function fpWithStaffPay(ids: string[] | null, from: string, to: string): P
   return `${base}|sp:${q.count ?? 0}:${last?.created_at ?? ""}:${last?.voided_at ?? ""}`;
 }
 
-// A thrown Supabase/PostgREST error is a plain object, not an Error — String(e) on it
-// renders the literal "[object Object]" the owner saw in the red banner. Pull the
-// human parts out instead, whatever shape arrives.
-function errText(e: unknown): string {
-  if (e instanceof Error) return e.message;
-  if (e && typeof e === "object") {
-    const o = e as Record<string, unknown>;
-    const s = [o.message, o.details, o.hint, o.code].filter((x): x is string => typeof x === "string" && !!x).join(" · ");
-    if (s) return s;
-    try { return JSON.stringify(e).slice(0, 300); } catch { /* fall through */ }
-  }
-  return String(e);
-}
+// `errText` is GONE (T9 sweep, 2026-08-06). It existed to stop a thrown PostgREST object rendering
+// as the literal "[object Object]" in the owner's red banner — a real fix, but it solved the wrong
+// half: the owner then got the database's message instead, which is just as unusable and is internal
+// to us. `dbFail` (lib/ownerScope) does the shape-handling AND keeps the detail in our log, and it
+// carries the statement-timeout advice the reports route pioneered. One helper, ten endpoints.
 
 // The previous EQUAL-LENGTH window, for the KPI ▲/▼ delta chips ("today" compares
 // against the same span of yesterday's business day, 7d against the 7 days before,
@@ -482,7 +483,15 @@ export async function GET(req: NextRequest) {
     // LIVE add-ons, outside the cache: the open-tables now-count (must never freeze)
     // and the on-demand all-time records (unbounded scan, once per restaurant).
     const openT = await sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open");
-    const kpis = { ...(restBase as { kpis: Record<string, unknown> }).kpis, openTables: openT.count || 0 };
+    // "0 TABLES OPEN" AND "WE COULDN'T COUNT" ARE DIFFERENT SENTENCES (T9 sweep, 2026-08-06).
+    // `openT.count || 0` turned a failed head-count into a confident empty floor — mid-service, on
+    // the one KPI this route deliberately keeps LIVE. `null` lets the tile show a dash instead of
+    // claiming a number nobody read (the client already renders `openTables ?? "—"`).
+    const kpis = {
+      ...(restBase as { kpis: Record<string, unknown> }).kpis,
+      openTables: openT.error ? null : (openT.count ?? 0),
+    };
+    if (openT.error) console.error("[owner/analytics] open-tables count failed:", openT.error.message);
     let records: unknown = null;
     if (wantRecords) {
       const r = await sb.rpc("lfh_owner_records", { p_restaurant_id: rid });
@@ -490,6 +499,8 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json({ ...restBase, kpis, records });
   } catch (e) {
-    return NextResponse.json({ error: errText(e) }, { status: 500 });
+    return dbFail("owner/analytics", e, {
+      message: "Couldn't load your dashboard just now — please try again.",
+    });
   }
 }
