@@ -5036,6 +5036,33 @@ async function openGstReport() {
 }
 
 // Day-close "Z report" — one tap prints the business-day totals (server-computed).
+// zNumbering(n): the day's bill numbers on the Z-report — the range, anything sitting on a
+// cancelled/deleted/voided bill, and whether any number is on NOTHING (owner, 2026-08-06).
+//
+// WHY IT IS ON THIS SHEET. A gap in the series is CORRECT — a number retires on a void and is never
+// reused (COMPLIANCE §2) — but until now nothing told the person holding the paper WHY 43 was
+// missing, so the product's strongest compliance argument was invisible at exactly the moment it
+// mattered. It reads as reassurance, not a warning: the normal outcome is one calm line saying every
+// number is accounted for, and the flagged list only names bills a person would actually ask about
+// (an ordinary settled bill is never listed — a sheet that names everything says nothing).
+// The row-drawer is passed IN because it is a local of printZReport (and carries that sheet's own
+// markup) — this helper must not grow a second way of drawing a Z-report line.
+// (No backticks in these comments: a panel comment can land inside an injected template literal and
+//  end it early, which verify:ui-integrity refuses — it has taken a panel down before.)
+function zNumbering(n, row) {
+  if (!n || !n.issued) return "";
+  let h = `<div class="sec">Bill numbers</div>`;
+  h += row("Issued today", n.from === n.to ? `#${n.from}` : `#${n.from}–${n.to} (${n.issued})`);
+  for (const f of n.flagged || []) {
+    h += `<div class="zn"><span>#${esc(f.no)}</span><span>${esc(f.note)}${f.at ? " · " + esc(f.at) : ""}</span></div>`;
+  }
+  // Printed even when empty, because "nothing is missing" is the statement worth having in writing.
+  h += (n.unaccounted || []).length
+    ? row("⚠ On no bill at all", (n.unaccounted || []).map((x) => "#" + x).join(", "))
+    : row("Every number accounted for", "✓");
+  return h;
+}
+
 async function printZReport() {
   let z;
   try { z = await api("GET", "/zreport"); } catch (e) { toast("Couldn't build the report: " + e.message, "err"); return; }
@@ -5056,11 +5083,14 @@ async function printZReport() {
   .sec{font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#777;border-bottom:1px solid #111;padding-bottom:4px;margin:14px 0 6px}
   .zr{display:flex;justify-content:space-between;padding:3px 0;font-variant-numeric:tabular-nums}
   .zr.b{font-weight:700;border-top:1px dashed #aaa;margin-top:4px;padding-top:6px}
+  /* a flagged bill number: the reason sits right of the number, smaller, one ink */
+  .zn{display:flex;justify-content:space-between;gap:8px;padding:2px 0 2px 8px;font-size:10.5px}
+  .zn span:last-child{text-align:right}
   .grand{display:flex;justify-content:space-between;border-top:2px solid #111;border-bottom:2px solid #111;margin-top:10px;padding:9px 0;font-weight:700;font-size:15px}
   .foot{text-align:center;color:#777;font-size:9px;margin-top:14px}
 </style>
 <h2>${esc(z.restaurant.name)}</h2>
-<div class="sub">DAY-CLOSE · Z REPORT${z.restaurant.gstin ? "<br/>GSTIN " + esc(z.restaurant.gstin) : ""}<br/>${esc(z.date)} · printed ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</div>
+<div class="sub">DAY-CLOSE · Z REPORT${z.restaurant.gstin ? "<br/>GSTIN " + esc(z.restaurant.gstin) : ""}<br/>${esc(z.date)} · printed ${new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })}</div>
 <div class="sec">Dine-in</div>
 ${row("Bills", di.bills)}
 ${row("Orders (KOTs)", di.orderCount)}
@@ -5106,6 +5136,7 @@ ${row("Revenue", inr(z.platform.revenue), true)}
 <div class="sec">Invoices</div>
 ${row("Generated today", z.invoicesGenerated)}
 ${row("Voided today", z.invoicesVoided)}
+${zNumbering(z.numbering, row)}
 <div class="grand"><span>GRAND TOTAL</span><span>${inr(z.grandTotal)}</span></div>
 <div class="foot">Computer-generated day-close report</div>
 <script>setTimeout(()=>print(),300)<\/script>`);

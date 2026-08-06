@@ -11,6 +11,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+// The shared bill money itself, so the stamped-rate rule can be ASKED rather than grepped for.
+import BILLDOC from "../public/panels/billdoc.js";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (p) => { try { return readFileSync(join(root, p), "utf8"); } catch { return ""; } };
@@ -270,9 +272,21 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
   // ...but the RECORDS must still contain them. Hiding a sale from the OPERATOR is a permissions
   // decision; hiding it from the day-close or the tax return is the illegal one.
   const zSlice = editorRoute.slice(editorRoute.indexOf('if (p === "zreport")'), editorRoute.indexOf('if (p === "gst-report")'));
-  zSlice && !/deleted_at/.test(zSlice)
+  // WHAT MATTERS IS THE FILTER, NOT THE WORD (T7, 2026-08-06). This banned the string `deleted_at`
+  // anywhere in the Z-report block, which is a proxy for the real rule and it went wrong the first
+  // time the sheet had an honest reason to READ that column: the day's numbering section names WHY a
+  // bill number is flagged, and "deleted" is one of the answers. Selecting the column explains a
+  // number; only a WHERE clause could shrink the takings. So the ban is now on the filter forms —
+  // which is the thing COMPLIANCE §3 actually forbids here.
+  const zFilters = /\.is\(\s*"deleted_at"\s*,\s*null\s*\)|\.not\(\s*"deleted_at"\s*,\s*"is"\s*,\s*null\s*\)|deleted_at\s*(?:is\s+)?(?:=|IS)\s*null/i.test(zSlice);
+  zSlice && !zFilters
     ? ok("the Z-report still counts deleted bills (a delete may never shrink the day's takings)")
-    : fail("the Z-report now filters deleted bills — docs/COMPLIANCE-GUARDRAILS.md requires voids and deletes to be included");
+    : fail("the Z-report now FILTERS on deleted_at — docs/COMPLIANCE-GUARDRAILS.md requires voids and deletes to be included");
+  // And specifically the query the MONEY is summed from: the paged read of the day's orders.
+  const zOrders = zSlice.slice(zSlice.indexOf('from("orders")'), zSlice.indexOf('const [invQ'));
+  zOrders && !/deleted_at/.test(zOrders)
+    ? ok("  …and the day's ORDERS read — the one the takings are summed from — is unfiltered")
+    : fail("the Z-report's orders read now mentions deleted_at — the takings must include deleted bills");
   // Only the admin can put one back, and must be able to find it whatever its age.
   const ledger = read("app/api/admin/bills/route.ts");
   /stateFilter === "deleted"\)\s*sq = sq\.not\("deleted_at", "is", null\)/.test(ledger)
@@ -410,13 +424,36 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
   /UPDATE orders o SET tax_rate = NULL/.test(m287)
     ? ok("rates already written that we do not believe are un-stamped")
     : fail("mig 287 no longer clears the implausible rates it was written to clear");
-  // and the readers must treat 0 / NULL as "fall back", never as a real rate they found
-  // The rule MOVED into /panels/billdoc.js (billMoney) on 2026-08-04, when the bill's money and its
-  // assembly were shared so the waiter panel could print at all. The panels are one-line doors onto
-  // it now, so this checks it where it lives.
-  /Number\(o\.tax_rate\) > 0/.test(read("public/panels/billdoc.js"))
-    ? ok("the shared bill money only adopts a POSITIVE stamped rate (0 and NULL fall through to the settings)")
-    : fail("the shared bill money may adopt a 0/NULL stamped rate as though it were charged");
+  // AND THE READERS MUST TREAT A STAMPED RATE CORRECTLY — ASKED OF THE CODE, NOT OF ITS TEXT.
+  //
+  // This used to be `/Number\(o\.tax_rate\) > 0/.test(read("public/panels/billdoc.js"))`. That string
+  // is still the first clause of orderTaxRate, so the check kept passing — while the BEHAVIOUR it
+  // claimed to guard had been deliberately changed underneath it (a stamped 0 from an order carrying
+  // money is now honoured, which is what stops a 0%-era bill reprinting with tax nobody charged).
+  // A guard that greps for a phrase asserts nothing once the phrase outlives the rule, and it would
+  // have gone on passing if someone reverted the fix. So it asks the function instead (T7, 2026-08-06).
+  {
+    const rateOf = BILLDOC.orderTaxRate;
+    const S = 0.05;   // what the restaurant's settings answer today
+    const cases = [
+      ["a POSITIVE stamped rate is what the order was charged", { tax_rate: 0.18, subtotal: 1000 }, 0.18],
+      ["a stamped ZERO on an order carrying money is a real rate, not a missing one", { tax_rate: 0, subtotal: 1000 }, 0],
+      ["a NULL rate falls back to the restaurant's settings", { tax_rate: null, subtotal: 1000 }, S],
+      ["an unstamped legacy row falls back to the settings", { subtotal: 1000 }, S],
+      ["a stamped 0 on a ₹0 line cannot drag a taxed bill to nothing", { tax_rate: 0, subtotal: 0 }, S],
+    ];
+    let bad = null;
+    for (const [, row, want] of cases) if (rateOf(row, S) !== want) { bad = [row, want, rateOf(row, S)]; break; }
+    bad
+      ? fail(`orderTaxRate(${JSON.stringify(bad[0])}) answered ${bad[2]}, expected ${bad[1]}`,
+        "the bill's rate is what the payment sheet asks a manager to collect")
+      : ok("the shared bill money reads a stamped rate correctly (positive / real 0 / fall back) — behaviour, not a grep");
+    // …and pay-in-parts must use that SAME function, or the paper and the split screen can disagree
+    // about what is owed while both look right on their own.
+    /BILLDOC\.orderTaxRate\(/.test(read("lib/paySplit.ts"))
+      ? ok("  …and settling a bill in parts uses that one definition, not a second copy of the rule")
+      : fail("lib/paySplit.ts decides an order's tax rate on its own again — the two drifted once already");
+  }
 }
 
 // ── AND THE TOMBSTONE HOLDS WHOEVER DID THE DELETING (mig 291) ───────────────────────────────

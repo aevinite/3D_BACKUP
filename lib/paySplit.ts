@@ -18,6 +18,9 @@
 
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { effectiveTaxRate, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
+// The rate ONE order was charged at is decided in the same file the printed bill uses, so this
+// path and the paper can never answer differently — see orderTaxRate's own note for why it moved.
+import BILLDOC from "@/public/panels/billdoc.js";
 
 export type SplitLeg = { amount: number; method: string; note?: string | null };
 export type SplitResult =
@@ -95,10 +98,16 @@ export async function settleBillInParts(
   // THE RATE EACH ORDER WAS CHARGED AT, per order (mig 284) — not one rate borrowed from whichever
   // order came first (2026-08-05). `find(> 0)` asked for the whole bill at that order's rate, so a
   // banquet at 18% sharing a session with 5% food demanded the wrong money, and it demanded it in
-  // lockstep with the same fault on the printed bill. `> 0` is kept: a genuine 0 (composition) falls
-  // through to the settings, which also answer 0. Bucketed per rate so tax still rounds ONCE per
+  // lockstep with the same fault on the printed bill. Bucketed per rate so tax still rounds ONCE per
   // rate — never per order, which drifts ±½ paise an order and can reject a correct split.
-  const rateOf = (o: MoneyRow) => (Number(o.tax_rate) > 0 ? Number(o.tax_rate) : settingsRate);
+  //
+  // ONE DEFINITION, SHARED WITH THE PAPER (2026-08-06). This used to spell the rule out here as
+  // `rate > 0 ? stamped : settings`, and the note that followed — "a genuine 0 falls through to the
+  // settings, which also answer 0" — stopped being true when billdoc.js was taught to honour a
+  // stamped ZERO from an order that carries money. The two still agreed on every input I could
+  // construct, but "agrees by luck" is not something to rest a payment screen on: had it diverged,
+  // the paper would say ₹1,000 while this refused every split until the parts made ₹1,050.
+  const rateOf = (o: MoneyRow) => BILLDOC.orderTaxRate(o, settingsRate);
   const base = rows.reduce((s, o) => {
     const r = o as MoneyRow;
     return s + (r.taxable_base == null ? (Number(r.subtotal) || 0) : (Number(r.taxable_base) || 0));

@@ -62,7 +62,12 @@
      invoice then foots to ₹400 instead of ₹399. So: round every line except the LAST and give
      the last the remainder — the same rule the owner GST report uses. (audit fix 2026-07-09) */
   function splitTax(taxWhole, comps) {
-    var list = (comps && comps.length) ? comps : [];
+    // A 0% COMPONENT CANNOT CARRY RUPEES (2026-08-06). With one such component this handed it the
+    // whole remainder and the paper printed "A 0% ₹19" — a line contradicting itself on a tax
+    // invoice, which is the same look billRows() works to avoid. Unreachable today (taxModel and
+    // lib/tax.ts both drop non-positive rates before this is called), but this function is exported
+    // and callable on its own, and the amounts it hands out are printed as GST.
+    var list = ((comps && comps.length) ? comps : []).filter(function (c) { return (Number(c && c.rate) || 0) > 0; });
     var sum = list.reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0) || 1;
     var run = 0;
     return list.map(function (c, i) {
@@ -143,7 +148,13 @@
     var nontax = Math.round(Number(d.nontax) || 0);
     var subAmount = Math.round((Number(d.subtotal) || 0) - (Number(d.nontax) || 0));
     var subtotalShown = nontax > 0 ? subAmount : Math.round(Number(d.subtotal) || 0);
-    var discount = Math.round(disc);
+    // THE PAPER NEVER PRINTS A NEGATIVE TAXABLE VALUE (2026-08-06). A discount larger than the row
+    // it comes off produced `taxable: -50` and a matching round-off — billRows(subtotal 100,
+    // discount 150) measured exactly that. Every real caller clamps first (billMoney caps a discount
+    // at its own base), but billDocHtml is also called DIRECTLY by lib/billPreview.ts and the admin
+    // preview with hand-built figures, and this function is the last thing between an arithmetic slip
+    // and a guest's hands. Clamping here changes nothing for any current caller.
+    var discount = Math.min(Math.round(disc), Math.max(0, subtotalShown));
     var taxable = subtotalShown - discount;
     var tax = (d.taxRows || []).reduce(function (a, c) { return a + (Math.round(Number(c.amt)) || 0); }, 0);
     var total = Math.round(parseFloat(d.total) || 0);
@@ -583,11 +594,11 @@
 
   /* combineBillLines(entries): the BILL shows one line per dish, not one per KOT. Grouped by
      everything a guest can see differ — title, price, options, removals, note — so "Special 1"@50
-     and "Special"@150 can never merge. The separator is a VISIBLE escape written as  rather
+     and "Special"@150 can never merge. The separator is a VISIBLE escape written as \u0001 rather
      than a raw byte: adjacent fields must not run together, and an invisible character in the
      source begs to be "tidied" away to "". */
   function combineBillLines(entries) {
-    var SEP = "";
+    var SEP = "\u0001";  // a real, visible escape — see the note above
     var out = [], at = {};
     (entries || []).forEach(function (e) {
       var sig = [e.title, e.price, JSON.stringify(e.options || null), JSON.stringify(e.removed || null), e.note || ""].join(SEP);
@@ -629,6 +640,33 @@
     return (prefix || "INV") + "/" + financialYear(when) + "/" + String(no).padStart(6, "0");
   }
 
+  /* orderTaxRate(order, settingsRate): THE rate ONE order was charged at — the single definition,
+     used by the printed bill (billMoney below) AND by settling a bill in parts (lib/paySplit.ts).
+
+     IT LIVES HERE BECAUSE IT EXISTED TWICE AND THE TWO HAD DRIFTED (2026-08-06). paySplit kept the
+     older "rate > 0 ? stamped : settings" rule while this file was taught (2026-08-05) to honour a
+     stamped ZERO from an order that carries money — the fix that stops a 0%-era bill reprinting with
+     tax nobody charged after the restaurant switches GST on. They happened to still agree on every
+     input I could construct, because each path that stamps a 0 also drives the taxable base or the
+     discount somewhere that collapses both formulas to the same total. "Agrees by luck" is not a
+     property to rely on for money: if it ever diverged the symptom is the worst kind — the paper says
+     ₹1,000 and Pay-in-parts refuses every split until the parts add to ₹1,050, a button no waiter
+     can satisfy while a guest waits. So there is one rule now, in the file that is already the
+     shared home for a bill's money.
+
+     The three cases, in order:
+       · a POSITIVE stamped rate (mig 284) — what this order was actually charged, so a banquet at
+         18% is never re-asked at the dine-in 5% and a rate corrected today cannot re-price it.
+       · a stamped ZERO on an order that carries money — a real rate, not a missing one.
+       · anything else (never stamped, or a ₹0 line) — fall back to the restaurant's settings, so a
+         ₹0 line sitting on a taxed bill cannot drag that bill's rate down to nothing. */
+  function orderTaxRate(o, settingsRate) {
+    o = o || {};
+    if (Number(o.tax_rate) > 0) return Number(o.tax_rate);
+    if (o.tax_rate != null && (parseFloat(o.subtotal) || 0) > 0) return 0;
+    return Number(settingsRate) || 0;
+  }
+
   /* billMoney(orders, settings): a bill's figures, once. Discount comes off BEFORE tax; the tax is
      charged on the TAXABLE BASE, not the subtotal (migs 270/272 — a bill can carry untaxed MRP
      lines or prices that already contain the tax); and the rate is the one the ORDER was actually
@@ -658,11 +696,7 @@
     // That is the one direction mig 284's stamp was meant to cover and did not. So a stamped 0 is
     // honoured — but only from an order that actually carries money, so a ₹0 line sitting on a
     // taxed bill still cannot drag that bill's rate down to nothing.
-    var rateOf = function (o) {
-      if (Number(o.tax_rate) > 0) return Number(o.tax_rate);
-      if (o.tax_rate != null && (parseFloat(o.subtotal) || 0) > 0) return 0;
-      return tm.rate;
-    };
+    var rateOf = function (o) { return orderTaxRate(o, tm.rate); };
     var taxableBase = 0, nontax = 0, mrpAmount = 0, hasMrp = false, grossTaxed = 0, netIncl = 0;
     // One bucket per distinct rate, so the tax is still rounded ONCE per rate (never per order —
     // that drifts ±½ paise an order and can reject a split that equals the printed bill).
@@ -883,7 +917,16 @@
       logo: a.logo || "",
       name: bi.name, addr: bi.address, phone: bi.phone, gstin: bi.gstin, footer: bi.footer,
       cancelled: voidedAll,
-      invNo: (voidedAll || sess.invoice_no == null) ? "" : invFmt(sess.invoice_no, sess.invoice_at, bi.prefix),
+      // A CANCELLED SHEET NAMES THE NUMBER IT RETIRED (2026-08-06). This dropped the Invoice row
+      // entirely on a cancelled bill, so the paper could only be tied back by its Bill no. But the
+      // compliance rule is that a voided number RETIRES and stays on the record rather than
+      // disappearing (COMPLIANCE §2, and mig 073's "the number stays on the record, never reused"),
+      // and handing an inspector a "Cancelled — no charge" sheet that names the invoice it voided is
+      // a stronger record than one that stays silent about it. "— voided" is on the same line so no
+      // one can mistake this for a live invoice; a cancelled bill that never had one still prints
+      // nothing.
+      invNo: sess.invoice_no == null ? ""
+        : invFmt(sess.invoice_no, sess.invoice_at, bi.prefix) + (voidedAll ? " — voided" : ""),
       billNo: sess.bill_no != null ? sess.bill_no : "",
       parcel: !!a.parcel,
       tableDisp: a.tableDisp || "—",
@@ -1245,6 +1288,7 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     discPct: discPct,
     billRows: billRows,
     taxModel: taxModel,
+    orderTaxRate: orderTaxRate,
     billMoney: billMoney,
     billData: billData,
     banquetDocHtml: banquetDocHtml,

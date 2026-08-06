@@ -66,7 +66,10 @@ export async function GET(req: NextRequest) {
 
   // ── Per-bill action trail (lazy, on expand) — keeps the list query lean ──────
   if (trail && isUuid(trail)) {
-    const orderRows = (await sb.from("orders").select("id").eq("session_id", trail)).data as { id: string }[] | null;
+    // Capped like every other read on this route (200 / 50 / 5000 below) — it was the one that
+    // stated no ceiling, against the module checklist's egress rule. A bill of 400 KOTs is already
+    // refused elsewhere as implausible, so 500 is far above anything real.
+    const orderRows = (await sb.from("orders").select("id").eq("session_id", trail).limit(500)).data as { id: string }[] | null;
     const orderIds = (orderRows || []).map((o) => o.id);
     // Actions linked to this bill's orders (delete/discount/revert/invoice) OR table-level
     // events on the session's table around its lifetime. order_id link is exact; the rest we
