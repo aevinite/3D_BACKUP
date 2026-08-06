@@ -1199,7 +1199,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           .eq("restaurant_id", rid).gte("created_at", since).not("bill_no", "is", null).limit(20000),
         // Parcel / delivery share the SAME counters (mig 261), so they are part of the same series
         // and a Z-report that ignored them would report every one of their numbers as a gap.
-        sb.from("aggregator_orders").select("bill_no,invoice_no,status,created_at,channel")
+        // `source` is the column that names the channel (zomato / swiggy / website / parcel) — there
+        // is no `channel` column. Selecting one that does not exist makes PostgREST reject the WHOLE
+        // query, and must() turns that into a 500, so the day-close sheet stopped building at all
+        // (shipped 2026-08-06, caught the same day by the write-test half of the T7 re-run).
+        sb.from("aggregator_orders").select("bill_no,invoice_no,status,created_at,source")
           .eq("restaurant_id", rid).gte("created_at", since).not("bill_no", "is", null).limit(20000),
       ]);
       const set = (must(setQ) || {}) as any;
@@ -1342,7 +1346,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const no = Number(a.bill_no);
         if (!Number.isFinite(no)) continue;
         seen.add(no);
-        if (a.status === "cancelled") numbered.push({ no, note: `${a.channel || "parcel"} · cancelled`, at: ist(a.created_at) });
+        if (a.status === "cancelled") numbered.push({ no, note: `${a.source || "parcel"} · cancelled`, at: ist(a.created_at) });
       }
       // The one line that matters: a number the counter handed out that NOTHING now carries. Every
       // path in this product keeps its row (soft-delete, void, cancel all leave the number attached),
