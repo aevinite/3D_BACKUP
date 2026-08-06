@@ -1172,7 +1172,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const [invQ, voidQ, platQ, setQ, legQ, numQ, numAggQ] = await Promise.all([
+      const [invQ, voidQ, platQ, setQ, legQ, numAggQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
@@ -1194,9 +1194,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // inspector reads, so it now says so out loud: the range issued today, which numbers are on
         // something other than an ordinary settled bill (and why), and — the line that actually
         // matters — whether any number in the range is on NOTHING at all.
-        // Explicit columns, scoped, limited, and only the day's own rows.
-        sb.from("sessions").select("bill_no,invoice_no,invoice_voided,void_at,deleted_at,delete_reason,table_number,closed_at,created_at")
-          .eq("restaurant_id", rid).gte("created_at", since).not("bill_no", "is", null).limit(20000),
+        //
+        // Only the PARCEL/DELIVERY half can be fetched HERE. Those rows take their number at insert,
+        // so their own created_at really is the day it was issued. The SESSIONS half cannot: bill_no
+        // is lazy (mig 040), so a date filter on sessions gets it wrong — see the numbering block
+        // below, which scopes by the day's ORDERS instead.
+        //
         // Parcel / delivery share the SAME counters (mig 261), so they are part of the same series
         // and a Z-report that ignored them would report every one of their numbers as a gap.
         // `source` is the column that names the channel (zomato / swiggy / website / parcel) — there
@@ -1323,17 +1326,41 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // money on top of the bill (never part of revenue/tax), so reported as their own figure.
       const tips = r2(orders.filter((o) => o.status !== "cancelled" && o.payment_status === "paid").reduce((a, o) => a + (Number(o.tip) || 0), 0));
 
-      // ── EVERY NUMBER ACCOUNTED FOR (see the numQ/numAggQ note above) ───────────────────────────
-      // Read-only over rows already fetched. `orders` (the whole business day, paged) is grouped by
-      // session in `groups`, so "was this bill entirely cancelled?" costs nothing extra.
+      // ── EVERY NUMBER ACCOUNTED FOR ─────────────────────────────────────────────────────────────
+      //
+      // A BILL NUMBER IS TAKEN ON THE FIRST ORDER, NOT WHEN THE TABLE OPENS — mig 040 made it lazy so
+      // a tap that never orders cannot burn one. So "today's numbered bills" is NOT "sessions created
+      // today": a table opened last night whose first order lands this morning takes TODAY's number
+      // while its own created_at says yesterday. The first version of this block filtered sessions by
+      // created_at, could not see that bill, and reported its number under "on no bill at all" — the
+      // one line here that has to be trustworthy. It was doing exactly that on the dev stack (two
+      // numbers), found when the write-test half of the T7 re-run asked the LIVE site for a real
+      // Z-report rather than trusting that the code reads correctly.
+      //
+      // The precise rule needs no date at all: a session belongs to today's series when one of TODAY's
+      // orders belongs to it. That set is already in hand, so this is one scoped read by id.
+      const daysSessionIds = [...new Set(orders.map((o) => o.session_id).filter(Boolean))] as string[];
+      const numRows = daysSessionIds.length
+        ? ((await sb.from("sessions")
+          .select("id,bill_no,invoice_no,invoice_voided,void_at,deleted_at,delete_reason,table_number,closed_at,created_at")
+          .eq("restaurant_id", rid).in("id", daysSessionIds).not("bill_no", "is", null).limit(20000)).data || [])
+        : [];
+      // Today's orders BY SESSION — cancelled ones INCLUDED, unlike `groups` above, which skips them
+      // for the money. A bill whose every order was cancelled still took a number, and "cancelled" is
+      // precisely the reason worth printing beside it.
+      const allBySession = new Map<string, any[]>();
+      for (const o of orders) {
+        if (!o.session_id) continue;
+        (allBySession.get(o.session_id) || (allBySession.set(o.session_id, []), allBySession.get(o.session_id)!)).push(o);
+      }
       const ist = (t: string | null) => (t ? new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "");
       const numbered: { no: number; note: string; at: string }[] = [];
       const seen = new Set<number>();
-      for (const s of (must(numQ) || []) as any[]) {
+      for (const s of numRows as any[]) {
         const no = Number(s.bill_no);
         if (!Number.isFinite(no)) continue;
         seen.add(no);
-        const own = groups.get(s.id as string) || [];
+        const own = allBySession.get(s.id as string) || [];
         // Only the states a person would ask about. An ordinary settled or still-running bill is
         // not listed — a sheet that names every number says nothing (the don't-cry-wolf rule).
         const why = s.deleted_at ? `deleted${s.delete_reason ? ` — ${String(s.delete_reason).slice(0, 60)}` : ""}`
