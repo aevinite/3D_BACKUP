@@ -26,6 +26,7 @@
 //   node scripts/verify-db-parity.mjs           # both halves
 //   node scripts/verify-db-parity.mjs --quiet   # only failures
 import { readFileSync, readdirSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -176,6 +177,11 @@ const lastWritten  = (k) => lastIn.get(bare(k)) ?? null;
 let failed = 0;
 const pass = (m) => { if (!QUIET) console.log("  ✓ " + m); };
 const fail = (m) => { console.log("  ✗ " + m); failed++; };
+// LOUD BUT NOT A FAILURE. Used where the honest answer is "this rig cannot tell", never to soften a
+// real fault: a warn that should have been a fail is how a guard stops guarding. The AV-live half
+// already works this way ("reported, not enforced"); this gives the migrations half the same word.
+let warned = 0;
+const warn = (m) => { console.log("  ⚠ " + m); warned++; };
 const head = (m) => console.log("\n" + m);
 
 // AV LIVE IS REPORTED, NOT ENFORCED — BACKUP IS ENFORCED (owner, 2026-08-05).
@@ -379,13 +385,50 @@ head("B. Is every live function written down in supabase/migrations?");
     const found = marks.some((m) => flatSql.includes(m));
     if (!found) handEdited.push(bare(row.name));
   }
-  handEdited.length === 0
-    ? pass("no live function body looks hand-edited away from its migration")
-    : fail(`${handEdited.length} function(s) look changed on the database without a migration: ${handEdited.slice(0, 8).join(", ")}`);
+  // "NO MIGRATION HERE MATCHES IT" IS NOT THE SAME AS "SOMEBODY EDITED THE DATABASE".
+  //
+  // Both look identical from inside this script, and the second is the accusation it used to make.
+  // On 2026-08-06 it cost real time: a 520-phase run reported `lfh_owner_dish_breakdown` as "changed
+  // on the database without a migration". It had not been. The run used a clean checkout pinned at
+  // 217c47e7, created at ~15:05; migration 304 — which rewrites exactly that function — landed at
+  // 15:11 and had already been applied to the database. So the live body matched nothing in THAT
+  // FOLDER, and the message sent the reader towards writing a migration to "capture the live body",
+  // which would have duplicated 304 and created the very drift it was trying to close.
+  //
+  // With ~20 sessions merging, a checkout is behind within minutes. So ASK before accusing: if this
+  // checkout is behind origin/main, the far likelier story is that the migration exists and is just
+  // not here yet. Sync and re-run. That is CLAUDE.md's own `npm run check:current` rule — never make
+  // an "X is broken" claim from a folder that has fallen behind — applied to the guard itself.
+  const behind = (() => {
+    try {
+      execFileSync("git", ["fetch", "origin", "--quiet"], { cwd: root, stdio: "ignore", timeout: 20_000 });
+      return Number(execFileSync("git", ["rev-list", "--count", "HEAD..origin/main"], { cwd: root }).toString().trim()) || 0;
+    } catch { return -1; }   // no git / no network: unknown, so say nothing either way
+  })();
+
+  if (handEdited.length === 0) {
+    pass("no live function body looks hand-edited away from its migration");
+  } else if (behind > 0) {
+    // Not a fail: an out-of-date folder is the reader's problem to fix, not the database's.
+    warn(
+      `${handEdited.length} function(s) match no migration IN THIS CHECKOUT — but this checkout is ` +
+        `${behind} commit(s) behind origin/main, so the migration is probably one of them: ` +
+        `${handEdited.slice(0, 8).join(", ")}. Sync (or run from a fresh checkout of origin/main) and ` +
+        `re-run before concluding anything. Do NOT write a migration to "capture the live body" — ` +
+        `that duplicates whatever is already upstream.`,
+    );
+  } else {
+    fail(
+      `${handEdited.length} function(s) look changed on the database without a migration: ` +
+        `${handEdited.slice(0, 8).join(", ")}` +
+        (behind === 0 ? " (checkout is level with origin/main, so this is real drift)" : ""),
+    );
+  }
 }
 
 const avTail = avNoted ? ` · ${avNoted} AV-live note(s) reported, not enforced (--av-strict to enforce)` : "";
+const warnTail = warned ? ` · ${warned} thing(s) this checkout could not judge — see the ⚠ line(s) above` : "";
 console.log(failed
-  ? `\n✗ ${failed} parity problem(s) — a fix that is only on one stack is not a fix${avTail}`
-  : `\n✓ backup is sound: every function is written down in migrations${avTail}`);
+  ? `\n✗ ${failed} parity problem(s) — a fix that is only on one stack is not a fix${avTail}${warnTail}`
+  : `\n✓ backup is sound: every function is written down in migrations${avTail}${warnTail}`);
 process.exit(failed ? 1 : 0);
