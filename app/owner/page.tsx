@@ -1603,9 +1603,21 @@ export default function OwnerDashboard() {
         .hq-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 0 2px; line-height: 1; }
         .hq-scroll { overflow: auto; max-height: 64vh; }
         .hq-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-        .hq-table th { position: sticky; top: 0; background: var(--card); z-index: 1; text-align: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 9px 12px; border-bottom: var(--border); white-space: nowrap; user-select: none; }
-        .hq-table th:hover { color: var(--accent); }
-        .hq-table th.l, .hq-table td.l { text-align: left; }
+        /* ── :global(th), NOT th — THE HEADER IS BUILT BY A HELPER (T5 sweep, 2026-08-06) ──
+           Every <th> in this table comes out of the th() arrow function above. styled-jsx only
+           stamps its scope class onto JSX written in the component's OWN function body, and a
+           nested arrow is a different scope — so these th elements ship as a bare
+           a bare th with no jsx- class with no jsx- class at all. A scoped .hq-table th selector
+           compiles to .hq-table.jsx-X th.jsx-X — which therefore matched NOTHING: measured on
+           the live site, a header cell computed to fontSize 13px, textTransform none,
+           position static — i.e. the whole header row had been unstyled since it was written
+           (not sticky, not uppercase, no border), and the phone column-hiding below could not
+           reach it either, leaving 8 header columns over 6 body cells. Marking the DESCENDANT
+           global keeps the scope on .hq-table (so nothing leaks out of this page) while letting
+           the rule reach a th the transform never touched. */
+        .hq-table :global(th) { position: sticky; top: 0; background: var(--card); z-index: 1; text-align: right; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 9px 12px; border-bottom: var(--border); white-space: nowrap; user-select: none; }
+        .hq-table :global(th):hover { color: var(--accent); }
+        .hq-table :global(th.l), .hq-table td.l { text-align: left; }
         .hq-table td { padding: 9px 12px; border-bottom: var(--border); text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .hq-table .rk { width: 30px; color: var(--muted); font-weight: 800; font-size: 11.5px; }
         .hq-row { cursor: pointer; }
@@ -1679,10 +1691,12 @@ export default function OwnerDashboard() {
         @media (max-width: 760px) {
           :global(.ow2-stats) { grid-template-columns: repeat(2, 1fr) !important; }
           .ow2-two, .ow2-callouts { grid-template-columns: minmax(0, 1fr); }
-          .hq-table .hide-m { display: none; }
           /* by CLASS, never by nth-child — a row whose cells don't line up 1:1 with the header
-             (the "figures hidden" row) used to lose the wrong ones (T5 sweep, 2026-08-06). */
-          .hq-table .hide-s { display: none; }
+             (the "figures hidden" row) used to lose the wrong ones. And :global, because the
+             header's th carries no jsx- scope class (see the note by .hq-table :global(th)
+             above) — without it only the BODY cells hid and the header kept 8 columns over 6.
+             (T5 sweep, 2026-08-06.) */
+          .hq-table :global(.hide-m), .hq-table :global(.hide-s) { display: none; }
           .ow2-act .who { display: none; }
         }
       `}</style>
