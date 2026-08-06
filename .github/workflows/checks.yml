@@ -60,10 +60,23 @@ jobs:
 
       # The static, read-only guards. Each one is a bug that actually reached someone's screen.
       #
-      # It was 16, and nine more static guards were sitting outside it — green, cheap, and run by
-      # nobody but a person remembering to. One of them was verify:no-ask, the guard CLAUDE.md itself
-      # names in the standing delete order, wired only to the local PostToolUse hook. That is the
-      # same shape of silence this whole file was written to end (see the header), so they are in.
+      # It was 16. Nine more green, cheap, static-looking guards were sitting outside it, run by
+      # nobody but a person remembering to — the same shape of silence this whole file exists to end
+      # (see the header). SIX of them moved in. Two did NOT, and the reason is worth writing down
+      # because the first attempt at this put them in and CI caught it within a minute:
+      #
+      #   · verify:avlive-release (verify-avlive-offline-complete.mjs) reads the CLIENT stack folder
+      #     ~/Documents/LIVE_PROJECTS/3D_Menu_Av to confirm a surgical patch landed. That folder does
+      #     not exist on a runner, so it reported all 24 files "MISSING on the client stack" and
+      #     failed. It is a POST-RELEASE check on one Mac, not a repo guard. It must never run here —
+      #     nothing in CI should reach for AV live.
+      #   · verify:no-ask reads the owner's ~/.claude/CLAUDE.md, where the standing delete order
+      #     lives. With no home config it exits 2, so it would fail every run. It guards this
+      #     machine's configuration, and the local PostToolUse hook is the right and only place
+      #     for it.
+      #
+      # The test for "does this belong in CI" is therefore not "is it fast and green here" — it is
+      # "does it read anything outside the repo".
       - name: static guards
         run: npm run -s verify:static
 
