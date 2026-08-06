@@ -250,6 +250,9 @@ function readable(col: string): string {
     table_count: "the number of tables",
     allergies: "the allergens",
     notes: "this person's private note",
+    // The internal reply on a guest rating. Without this a co-owner who was beaten to it read
+    // "someone changed the staff note", and the screen calls it the reply note.
+    staff_note: "your reply to this rating",
     id_type: "the ID on file", id_number: "the ID number",
     // Inventory, in the words the stock screens use — never the column name. "counted_base" in
     // front of a person counting tomatoes would mean nothing.

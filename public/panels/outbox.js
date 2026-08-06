@@ -50,6 +50,11 @@
   const AUTH_MAX_TRIES = 3;   // 401 — this device is signed out
   const BUSY_MAX_TRIES = 6;   // 409 {retry:true} — the server says it is still handling this id
   const NET_MAX_TRIES = 6;    // the request itself never completed, while the device says it is online
+  const SERVER_MAX_TRIES = 6; // 5xx — the server is up but keeps refusing. Was a hard-typed `5`
+                              // sitting beside these three named ones, and the DINER's queue
+                              // used 6 for the same case: four ceilings in view of each other
+                              // should read the same way, or the odd one out is the one a
+                              // future change forgets. Now they do, and both queues agree.
   // The verifier (scripts/verify-outbox-drain.mjs) shrinks the waits so a run takes seconds
   // instead of minutes. Nothing in the app sets this.
   try {
@@ -462,7 +467,7 @@
         // "sending…" spin all shift. After a few goes it becomes their decision.
         if (res.status >= 500) {
           item.tries = (item.tries || 0) + 1;
-          if (item.tries < 5) { await idbPut(item); break; }
+          if (item.tries < SERVER_MAX_TRIES) { await idbPut(item); break; }
           await moveToFailed(item, "The restaurant's system kept refusing this", {
             plain: "The system couldn't accept this after several tries.",
             todo: "Check whether it already happened; if not, do it again.",
