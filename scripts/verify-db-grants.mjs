@@ -432,6 +432,34 @@ function checkMigrations() {
   } else {
     pass("no new migration hides a cron/extension failure behind EXCEPTION WHEN OTHERS");
   }
+
+  // THE TWO MIGRATIONS THAT DAMAGE DATA ON A SECOND RUN (mig 307). seed-supabase.mjs step 1 runs
+  // EVERY file in this folder, every time, with no ledger — so a one-time migration that rewrites
+  // data is a loaded gun. 043 multiplies all money by 84 (measured: ₹36.6M -> ₹3.08bn on a second
+  // run) and 093 replaces restaurant #1's 24 permission keys with 5. Both are now wrapped in a
+  // `lfh_already_applied(...)` guard. Unwrapping either — or "tidying" the DO block away — puts
+  // the gun back, silently, and nothing else in the repo would notice.
+  {
+    const GUARDED = {
+      "043_inr_base_currency.sql": "043_inr_base_currency",
+      "093_grandfather_r1_manager_powers.sql": "093_grandfather_r1_manager_powers",
+    };
+    const bad = [];
+    for (const [file, key] of Object.entries(GUARDED)) {
+      const f = files.find((x) => x === file);
+      if (!f) { bad.push(`${file} is missing from the folder entirely`); continue; }
+      const sql = readFileSync(join(root, "supabase", "migrations", f), "utf8");
+      if (!sql.includes(`lfh_already_applied('${key}')`)) bad.push(`${file} no longer checks lfh_already_applied('${key}')`);
+    }
+    if (bad.length) {
+      fail(`a one-time DATA migration lost its re-run guard: ${bad.join("; ")}. `
+         + `seed-supabase.mjs re-runs every file in this folder, so without the guard a re-seed `
+         + `multiplies every price and bill by 84 (043) or wipes 19 of restaurant #1's permission `
+         + `keys (093). Restore the guard — see migration 307.`);
+    } else {
+      pass("the two one-time data migrations (043 ×84 money, 093 permission bag) still refuse to run twice");
+    }
+  }
 }
 
 // ── A FUNCTION A MIGRATION CREATED, THAT THE DATABASE DOES NOT HAVE ──────────────────────────

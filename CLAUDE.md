@@ -132,7 +132,13 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
   `/r/<slug>/menu`, `/q/<code>` — every guest rule must hold in all three (PR #761's lesson).
 - Menu data via `lib/menu.ts` (anon key); categories/filters are DB-driven; multilingual via
   `lib/i18n.ts`. Re-seed: `node scripts/seed-supabase.mjs` — ⚠️ it overwrites editor-made DB
-  changes; prefer running just the migration.
+  changes AND **re-runs EVERY file in `supabase/migrations`, in filename order, with no ledger**.
+  Prefer running just the one migration. Two files rewrote data on a second pass and are now
+  guarded by `lfh_applied_once` (mig 307): **043** multiplied all money ×84 again (₹36.6M →
+  ₹3.08bn, measured) and **093** replaced restaurant #1's 24 manager-permission keys with 5.
+  A NEW one-time migration that rewrites existing data must wrap itself the same way —
+  `IF lfh_already_applied('<key>') THEN RETURN; END IF;` — or a re-seed will apply it twice.
+  `verify:grants` fails if either guard is removed.
 
 ## Security gate (verified per-route 2026-08-04/05 — full route list in docs/CLAUDE-DETAIL.md)
 
