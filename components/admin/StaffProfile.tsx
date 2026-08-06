@@ -26,7 +26,7 @@
  *     (their own menu; they run a separate panel), and it is read-only because
  *     owner_entitlements is a restaurant setting, not a per-person one.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { openRestaurantPanel, actLabel } from "@/components/admin/shared";
 import { useScrollMemory } from "@/components/admin/useOverlayParam";
@@ -38,6 +38,100 @@ import {
 import {
   completeness, hasProfile, EMPLOYMENT_TYPES, PAY_TYPES, PAY_MODES, PAY_KINDS, WEEK_DAYS,
 } from "@/lib/staffProfileShared";
+
+// ── WHO IS HOSTING THIS PROFILE (2026-08-06) ─────────────────────────────────────────────────
+// The owner panel used to have its OWN person screen — a six-tab page, ~1000 lines, with its own
+// hand-written permission list. That is the "second shape" docs/STAFF-PROFILE.md forbids, and the
+// duplicate list had already drifted (three waiter rows missing, one gated on the wrong module, no
+// manager rows at all). It is deleted; the owner now opens THIS component.
+//
+// The two consoles differ only in the DOOR they knock on and in what they are allowed to do:
+//
+//                     admin (/aevinite)                owner (/owner)
+//   read              /api/admin/users?id=             /api/owner/staff?staff=
+//   write             PATCH /api/admin/users           PATCH /api/owner/staff  (some actions
+//                                                      renamed — the host translates)
+//   photo             /api/admin/users/photo           — not offered
+//   PIN / signing-in  yes (admin owns those)           — not offered
+//   remove a login    yes                              yes (refused when pay history exists)
+//
+// So the component takes a HOST: four functions plus a capability set. Everything about the
+// LAYOUT, the order of the cards and the words stays here, in one place, for both. The default
+// host is the admin one, so `<StaffProfile userId=… />` behaves exactly as it always has.
+export type ProfileHost = {
+  /** → { person, restaurant, payrollOn, payments, activity, tree? } */
+  load: () => Promise<{ ok: boolean; data: any }>;
+  patch: (payload: Record<string, unknown>, expect?: { fields: Record<string, unknown> }) => Promise<any>;
+  /** absent = this console does not hand out photos */
+  photo?: { upload: (f: File) => Promise<{ ok: boolean; error?: string }>; remove: () => Promise<{ ok: boolean; error?: string }> };
+  /** absent = no danger zone */
+  remove?: () => Promise<{ ok: boolean; error?: string }>;
+  can: {
+    /** set or clear someone's manager PIN */
+    pin: boolean;
+    /** the "signing in" card (may they reset their own password / set their own PIN) */
+    signIn: boolean;
+    /** change someone's role */
+    role: boolean;
+    /** open the panel AS this person (/api/admin/act-as/go — admin route only) */
+    visitAsPerson: boolean;
+    /** link out to /aevinite → Access & permissions (admin console only) */
+    accessLink: boolean;
+  };
+};
+
+const adminHost = (userId: string): ProfileHost => ({
+  load: async () => {
+    const r = await fetch(`/api/admin/users?id=${encodeURIComponent(userId)}`, { cache: "no-store" });
+    const j = await r.json();
+    if (r.ok && j?.person?.restaurant_id) {
+      // The restaurant's own settings — this is what "Default (…)" reads.
+      const t = await fetch(`/api/admin/restaurants/access-tree?restaurant_id=${j.person.restaurant_id}`, { cache: "no-store" })
+        .then((x) => x.json()).catch(() => null);
+      if (t && !t.error) j.tree = t.state;
+    }
+    return { ok: r.ok, data: j };
+  },
+  patch: async (payload, expect) => {
+    const r = await fetch("/api/admin/users", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(expect ? { "X-LFH-Expect": JSON.stringify({ table: "staff_users", id: userId, fields: expect.fields }) } : {}),
+      },
+      body: JSON.stringify({ id: userId, ...payload }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j.error || "That didn't save.");
+    return j;
+  },
+  photo: {
+    upload: async (f: File) => {
+      const fd = new FormData(); fd.append("id", userId); fd.append("file", f);
+      const r = await fetch("/api/admin/users/photo", { method: "POST", body: fd });
+      const j = await r.json().catch(() => ({}));
+      return { ok: r.ok, error: j.error };
+    },
+    remove: async () => {
+      const r = await fetch(`/api/admin/users/photo?id=${userId}`, { method: "DELETE" });
+      const j = await r.json().catch(() => ({}));
+      return { ok: r.ok, error: j.error };
+    },
+  },
+  remove: async () => {
+    const r = await fetch(`/api/admin/users?id=${userId}`, { method: "DELETE" });
+    const j = await r.json().catch(() => ({}));
+    return { ok: r.ok, error: j.error };
+  },
+  can: { pin: true, signIn: true, role: true, visitAsPerson: true, accessLink: true },
+});
+
+const HostCtx = createContext<ProfileHost | null>(null);
+const useHost = (): ProfileHost => {
+  const h = useContext(HostCtx);
+  if (!h) throw new Error("StaffProfile: no host in context");
+  return h;
+};
 
 // ── types ────────────────────────────────────────────────────────────────────
 type Person = {
@@ -86,9 +180,12 @@ const newActionId = () =>
 const when = (s: string | null) => (s ? new Date(s).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "never");
 
 // ═════════════════════════════════════════════════════════════════════════════
-export default function StaffProfile({ userId, onClose, onChanged }: {
+export default function StaffProfile({ userId, onClose, onChanged, host }: {
   userId: string; onClose: () => void; onChanged?: () => void;
+  /** Which console is showing this profile. Omitted = the admin console (unchanged behaviour). */
+  host?: ProfileHost;
 }) {
+  const hostRef = useMemo(() => host || adminHost(userId), [host, userId]);
   const [d, setD] = useState<Detail | null>(null);
   const [tree, setTree] = useState<TreeState | null>(null);
   const [err, setErr] = useState("");
@@ -104,16 +201,12 @@ export default function StaffProfile({ userId, onClose, onChanged }: {
   const load = useCallback(async () => {
     setErr("");
     try {
-      const r = await fetch(`/api/admin/users?id=${encodeURIComponent(userId)}`, { cache: "no-store" });
-      const j = await r.json();
-      if (!r.ok) { setErr(j.error || "Couldn't open this person."); return; }
-      setD(j);
-      // The restaurant's own settings — this is what "Default (…)" reads.
-      const t = await fetch(`/api/admin/restaurants/access-tree?restaurant_id=${j.person.restaurant_id}`, { cache: "no-store" })
-        .then((x) => x.json()).catch(() => null);
-      if (t && !t.error) setTree(t.state);
+      const { ok, data } = await hostRef.load();
+      if (!ok) { setErr(data?.error || "Couldn't open this person."); return; }
+      setD(data);
+      if (data.tree) setTree(data.tree);
     } catch { setErr("Network error — please try again."); }
-  }, [userId]);
+  }, [hostRef]);
   useEffect(() => { load(); }, [load]);
 
   const flash = (m: string) => { setNote(m); setTimeout(() => setNote((n) => (n === m ? "" : n)), 1800); };
@@ -126,25 +219,16 @@ export default function StaffProfile({ userId, onClose, onChanged }: {
   // instead of letting them overwrite it. This is the SAME one-line-at-the-call-site shape the
   // vanilla panels use — the rule just never reached the React screens, and a person's PAY was the
   // most valuable thing left unprotected. Omit it and nothing changes.
-  const patch = useCallback(async (payload: object, expect?: { fields: Record<string, unknown> }): Promise<any> => {
-    const r = await fetch("/api/admin/users", {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...(expect ? { "X-LFH-Expect": JSON.stringify({ table: "staff_users", id: userId, fields: expect.fields }) } : {}),
-      },
-      body: JSON.stringify({ id: userId, ...payload }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || "That didn't save.");
-    return j;
-  }, [userId]);
+  const patch = useCallback(
+    (payload: object, expect?: { fields: Record<string, unknown> }): Promise<any> =>
+      hostRef.patch(payload as Record<string, unknown>, expect),
+    [hostRef]);
 
   const p = d?.person;
   const isOwner = p?.role === "owner";
 
   return (
-    <>
+    <HostCtx.Provider value={hostRef}>
       <div className="stp-scrim" onClick={onClose} />
       <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Staff profile" className="stp-wrap">
         <div className="stp-sheet">
@@ -182,13 +266,13 @@ export default function StaffProfile({ userId, onClose, onChanged }: {
                 <SigningIn d={d} patch={patch} reload={load} flash={flash} onChanged={onChanged} />
                 <Activity d={d} />
                 <PrivateNote d={d} patch={patch} reload={load} flash={flash} />
-                {!isOwner ? <Danger d={d} patch={patch} reload={load} flash={flash} onClose={onClose} onChanged={onChanged} /> : null}
+                {!isOwner && hostRef.remove ? <Danger d={d} patch={patch} reload={load} flash={flash} onClose={onClose} onChanged={onChanged} /> : null}
               </main>
             </div>
           )}
         </div>
       </div>
-    </>
+    </HostCtx.Provider>
   );
 }
 
@@ -201,13 +285,12 @@ function Rail({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => 
   const [busy, setBusy] = useState(false);
   const file = useRef<HTMLInputElement>(null);
 
+  const host = useHost();
   async function upload(f: File) {
     setBusy(true);
     try {
-      const fd = new FormData(); fd.append("id", p.id); fd.append("file", f);
-      const r = await fetch("/api/admin/users/photo", { method: "POST", body: fd });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.error || "The photo didn't upload.");
+      const r = await host.photo!.upload(f);
+      if (!r.ok) throw new Error(r.error || "The photo didn't upload.");
       flash("Photo saved"); reload(); onChanged?.();
     } catch (e: any) { flash(e.message || "The photo didn't upload."); }
     finally { setBusy(false); }
@@ -215,8 +298,8 @@ function Rail({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => 
   async function removePhoto() {
     setBusy(true);
     try {
-      const r = await fetch(`/api/admin/users/photo?id=${p.id}`, { method: "DELETE" });
-      if (!r.ok) throw new Error("Couldn't remove the photo.");
+      const r = await host.photo!.remove();
+      if (!r.ok) throw new Error(r.error || "Couldn't remove the photo.");
       flash("Photo removed"); reload(); onChanged?.();
     } catch (e: any) { flash(e.message); }
     finally { setBusy(false); }
@@ -230,13 +313,20 @@ function Rail({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => 
           : { background: ROLE_COLOR[p.role] || "#64748b" }}>
           {photo ? null : (p.name || p.username).charAt(0).toUpperCase()}
         </div>
-        {/* Optional, always — a restaurant that never adds a photo just sees the initial. */}
-        <button className="stp-cam" disabled={busy} onClick={() => file.current?.click()}
-          title={photo ? "Change the photo" : "Add a photo (optional)"}>{busy ? "…" : photo ? "✎" : "＋"}</button>
-        <input ref={file} type="file" accept="image/png,image/jpeg,image/webp" hidden
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} />
+        {/* Optional, always — a restaurant that never adds a photo just sees the initial. The
+            CONTROLS appear only where the console can actually store one (the owner cockpit has no
+            photo endpoint), because a camera button that 404s is worse than no camera button. A
+            photo already on file still SHOWS everywhere — it is part of the record. */}
+        {host.photo ? (
+          <>
+            <button className="stp-cam" disabled={busy} onClick={() => file.current?.click()}
+              title={photo ? "Change the photo" : "Add a photo (optional)"}>{busy ? "…" : photo ? "✎" : "＋"}</button>
+            <input ref={file} type="file" accept="image/png,image/jpeg,image/webp" hidden
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) upload(f); e.target.value = ""; }} />
+          </>
+        ) : null}
       </div>
-      {photo ? <button className="stp-photo-rm" onClick={removePhoto}>Remove photo</button> : null}
+      {photo && host.photo ? <button className="stp-photo-rm" onClick={removePhoto}>Remove photo</button> : null}
 
       <h2>{p.name || p.username}</h2>
       <div className="stp-who">{p.designation || ROLE_LABEL[p.role] || p.role} · signs in as <b>{p.username}</b></div>
@@ -270,6 +360,7 @@ function Rail({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => 
 
 function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => void }) {
   const p = d.person;
+  const host = useHost();
   const [pwOpen, setPwOpen] = useState(false);
   const [pw, setPw] = useState("");
   const [reveal, setReveal] = useState("");
@@ -319,7 +410,10 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
         </div>
       ) : null}
 
-      {p.role === "manager" ? (
+      {/* A manager's PIN is Aevidine's to set (the owner cockpit has no route for it), so the
+          control appears only where it works. The PIN's STATE is still visible to everyone —
+          the "PIN set" chip in the rail above. */}
+      {p.role === "manager" && host.can.pin ? (
         <>
           <button className="stp-btn" onClick={() => setPinOpen((o) => !o)}>🔑 {p.hasPin ? "Change" : "Set"} manager PIN</button>
           {pinOpen ? (
@@ -347,16 +441,34 @@ function QuickActions({ d, patch, reload, flash, onChanged }: Kit & { onChanged?
           row's restaurant_id is the #1 home namespace, not "the one they run" — the Owners
           roster asks WHICH restaurant first and links from there. */}
       {d.restaurant && p.role !== "owner" ? (
-        <button className="stp-btn" onClick={visitPanel}
-          title={`Open ${d.restaurant.name}'s ${PANEL_WORD[p.role] || "panel"} exactly as ${p.name || p.username} sees it`}>
-          👁 Visit their panel
-        </button>
+        host.can.visitAsPerson ? (
+          <button className="stp-btn" onClick={visitPanel}
+            title={`Open ${d.restaurant.name}'s ${PANEL_WORD[p.role] || "panel"} exactly as ${p.name || p.username} sees it`}>
+            👁 Visit their panel
+          </button>
+        ) : (
+          /* THE OWNER'S VERSION SAYS WHAT IT ACTUALLY DOES (2026-08-05/06). The button above goes
+             through /api/admin/act-as/go, an ADMIN route, and the ?as= person pin is re-checked
+             against the admin cookie (lib/viewAsPerson) — for an owner it is ignored. So the owner
+             gets a plain link to the panel and a title that admits whose access they will see: a
+             button that answers "what can Rohit see?" wrongly is worse than one that doesn't
+             offer to. */
+          <a className="stp-btn" href={PANEL_PATH[p.role] || "/manager"} target="_blank" rel="noopener"
+            title={`Opens the ${PANEL_WORD[p.role] || "panel"} with YOUR access — not ${p.name || p.username}'s own view of it`}>
+            ↗ Open the {PANEL_WORD[p.role] || "panel"}
+          </a>
+        )
       ) : null}
       {/* ?rid=, NOT ?restaurant= — app/aevinite/access/page.tsx reads `rid`, so the old spelling
           silently opened the FIRST restaurant in the list instead of this person's. Every other
           link in the product (the Restaurants page, both staff panels, the owner shell) uses
           ?rid=; this was the one that didn't. Proven live on the deployed site, 2026-08-04. */}
-      <a className="stp-btn" href={`/aevinite/access?rid=${p.restaurant_id}`}>🔑 Access &amp; permissions</a>
+      {/* Aevidine's own screen. Absent in the owner cockpit — an owner tapping it would land on a
+          console they cannot open, and the Permissions block on the right already tells them what
+          this person may do (and who sets it). */}
+      {host.can.accessLink
+        ? <a className="stp-btn" href={`/aevinite/access?rid=${p.restaurant_id}`}>🔑 Access &amp; permissions</a>
+        : null}
       <button className="stp-btn" onClick={toggleActive}>{p.active ? "⏸ Disable this login" : "▶ Enable this login"}</button>
     </div>
   );
@@ -827,10 +939,28 @@ function Papers({ d, patch, reload, flash }: Kit) {
 // ── ⑧ signing in ─────────────────────────────────────────────────────────────
 function SigningIn({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => void }) {
   const p = d.person;
+  const host = useHost();
   async function set(key: "can_self_reset" | "can_self_set_pin", v: boolean) {
     try { await patch({ action: "set_access", [key]: v }); flash("Saved"); reload(); onChanged?.(); }
     catch (e: any) { flash(e.message); }
   }
+  // Both switches here are Aevidine's (there is no owner route for `set_access`). The card still
+  // appears in the owner's copy — this is one shape for everybody — but as the FACTS it is, not as
+  // toggles that would refuse. A dropdown that saves nothing is the dead switch the 2026-07-31
+  // access rebuild deleted; the same reasoning applies to a toggle.
+  if (!host.can.signIn) return (
+    <section className="stp-card">
+      <h3>🔐 Signing in</h3>
+      <div className="stp-facts">
+        <Row k="Can change their own password" v={p.can_self_reset ? "yes" : "no"} />
+        {p.role === "manager" ? <Row k="Can change their own manager PIN" v={p.can_self_set_pin ? "yes" : "no"} /> : null}
+        <Row k="Last seen" v={when(p.last_seen_at)} />
+        <Row k="Manager PIN" v={p.hasPin ? "set" : "not set"} />
+        <Row k="Account" v={p.active ? "active" : "disabled"} />
+      </div>
+      <div className="stp-hint" style={{ marginTop: 10 }}>Aevidine sets these two — ask us to change them.</div>
+    </section>
+  );
   return (
     <section className="stp-card">
       <h3>🔐 Signing in</h3>
@@ -902,13 +1032,13 @@ function PrivateNote({ d, patch, reload, flash }: Kit) {
 // ── ⑪ danger zone ────────────────────────────────────────────────────────────
 function Danger({ d, patch, reload, onClose, onChanged }: Kit & { onClose: () => void; onChanged?: () => void }) {
   const p = d.person;
+  const host = useHost();
   const [confirm, setConfirm] = useState(false);
   const [msg, setMsg] = useState("");
   async function del() {
     try {
-      const r = await fetch(`/api/admin/users?id=${p.id}`, { method: "DELETE" });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) { setMsg(j.error || "Delete failed."); return; }
+      const r = await host.remove!();
+      if (!r.ok) { setMsg(r.error || "Delete failed."); return; }
       onChanged?.(); onClose();
     } catch { setMsg("Network error."); }
   }
