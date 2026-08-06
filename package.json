@@ -25,6 +25,7 @@
     "verify:owner-home": "npx esbuild scripts/verify-owner-home.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/verify-owner-home.mjs --log-level=warning && node --env-file=.env.local node_modules/.cache/verify-owner-home.mjs",
     "verify:test-safety": "node scripts/verify-test-safety.mjs",
     "verify:ui": "node scripts/verify-ui-integrity.mjs",
+    "verify:server-only": "node scripts/verify-server-only-imports.mjs",
     "verify:no-ask": "node scripts/verify-no-ask-before-delete.mjs",
     "avlive:preflight": "node scripts/avlive-preflight.mjs",
     "verify:audit": "node scripts/verify-audit-coverage.mjs",

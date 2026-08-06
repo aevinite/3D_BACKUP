@@ -6,7 +6,10 @@
 // paused while hidden (egress rule); a search filters the loaded list client-side.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
-import { partialNote } from "@/lib/ownerScope";
+// From lib/partialRead, NOT lib/ownerScope: this is a "use client" file, and ownerScope reaches
+// lib/supabaseAdmin (service-role, server-only). Importing it here shipped that module to the browser
+// and crashed this page with "supabaseKey is required." (2026-08-06).
+import { partialNote } from "@/lib/partialRead";
 import { asSuffix } from "@/lib/ownerPin";
 
 const IST = "Asia/Kolkata";

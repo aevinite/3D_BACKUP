@@ -194,53 +194,10 @@ export function dbFail(
   );
 }
 
-// ── "THIS ONE FIGURE COULDN'T BE READ" (T9 improvement 2, 2026-08-06) ─────────────────────────────
-//
-// Several owner screens are built from SEVERAL reads at once: Pay Later is outstanding + collected
-// today + collected this month; the day sheet is sales + settlement + tips + wages + stock; the hub
-// is the restaurant list + two module probes. Until now a failed piece had only two endings, and both
-// were dishonest in their own way:
-//
-//   · a silent ZERO — "collected today ₹0" when nobody read it. That is a claim, and it is the shape
-//     that starts an argument with the till. (T9 findings F3, F4, F5.)
-//   · the WHOLE page as a retryable 503 — which throws away the figures that were perfectly fine.
-//     That is what F3's first fix did, and it is heavy-handed: the outstanding total was correct.
-//
-// So a payload may now carry `partial: ["collectedToday", …]` — the plain names of the parts that did
-// not load. The screen keeps everything that DID load and greys just those, with a line saying so and
-// a Refresh. `partialLabel()` turns the key into words for the person reading it.
-//
-// The rule for using it: a key belongs in `partial` when the value is ABSENT (null/undefined), never
-// when it is a real zero. If a caller cannot tell the two apart, it must not use this — it should
-// fail the request instead.
-export type PartialKey =
-  | "collectedToday" | "collectedMonth"     // Pay Later
-  | "payments" | "tips" | "staffPay" | "inventory"   // the day sheet's optional lines
-  | "modules";                               // the hub's payroll/inventory card probes
-// NOTE: the staff roster deliberately does NOT use this. A list is better served by a per-ROW marker
-// (`payUnread` on each person, shipped 2026-08-06) than by one note at the top of the page, because
-// the owner needs to know WHICH people's figures are missing, not just that some are.
-
-const PARTIAL_LABELS: Record<PartialKey, string> = {
-  collectedToday: "money collected today",
-  collectedMonth: "money collected this month",
-  payments: "how the money arrived",
-  tips: "tips",
-  staffPay: "staff pay",
-  inventory: "stock figures",
-  modules: "which features are on",
-};
-
-/** Plain words for one unread part, for a screen to put in front of a person. */
-export function partialLabel(k: string): string {
-  return PARTIAL_LABELS[k as PartialKey] ?? k;
-}
-
-/** The one sentence every screen uses, so they cannot word it eight different ways. */
-export function partialNote(keys: string[]): string {
-  if (!keys.length) return "";
-  const words = keys.map(partialLabel);
-  const list = words.length === 1 ? words[0]
-    : `${words.slice(0, -1).join(", ")} and ${words[words.length - 1]}`;
-  return `Couldn't read ${list} just now — everything else on this page is up to date.`;
-}
+// ── "this ONE figure couldn't be read" ────────────────────────────────────────────────────────────
+// The words moved to lib/partialRead.ts on 2026-08-06 and MUST stay there: they are read by
+// "use client" screens, and anything they import lands in the browser bundle. This module imports
+// lib/supabaseAdmin (service-role, server-only), so importing it from a client component broke the
+// owner's Pay Later page with "supabaseKey is required." Re-exported here so server routes can keep
+// getting everything from one place.
+export { type PartialKey, partialLabel, partialNote } from "@/lib/partialRead";
