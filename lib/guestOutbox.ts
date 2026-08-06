@@ -16,6 +16,20 @@ import { tgetFor, tsetFor, tenantSlug } from "@/lib/tenantStorage";
 export type GuestTrack = { tableNumber?: string; total?: number; itemCount?: number; items?: { title: string; qty: number }[] };
 export type GuestOrder = {
   id: string;                       // action_id (uuid) — the at-most-once key
+  // WHAT this saved thing IS (improvement #4, 2026-08-06). The queue held orders only; calling a
+  // waiter — the thing a diner does when something is WRONG, and the request most likely to come
+  // from the corner with no bars — simply failed. Absent on rows written before this existed, so
+  // it is read as "order" everywhere, which is what they are.
+  kind?: "order" | "call";
+  reason?: string;                  // the waiter-call note ("kind" === "call")
+  // The basket as a PERSON sees it — id AND name for each line (improvement #5). `items` carries
+  // ids and `track.items` carries names, and pairing them by position would work only for as long
+  // as both are built from the same array in the same order. That is exactly the kind of
+  // assumption that quietly breaks a diner's order, so the pairing is stored once, explicitly.
+  lines?: { id: string; title: string }[];
+  // Set when the server refused this order because of ONE dish, so the phone can offer to send
+  // the rest. Holds that dish's NAME, which is what the refusal names.
+  blocked?: string;
   mode: "session" | "public";
   token?: string; table?: string; restaurantId?: string; restaurantSlug?: string;
   items: unknown[]; allergies: string[];
@@ -132,6 +146,9 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
     // fires another alert at the owner. Tell them to wait, which is the thing that actually works.
     case "rate_limited": return "That's a lot of orders in a row — please wait a moment, then order again.";
     case "server_busy": return "The restaurant's system couldn't take this one.";
+    // A saved waiter call that sat too long. Telling the diner is the honest end: a waiter
+    // arriving twenty minutes late for something nobody remembers is worse than not arriving.
+    case "call_too_old": return "Your call for a server was too old to send — please call again if you still need someone.";
     case "unknown_restaurant": return "We couldn't tell which restaurant this order was for.";
     case "off_plan_table": return "That table number isn't one this restaurant has — please check it.";
     case "bad_body": return "Something was wrong with this order.";
@@ -277,6 +294,7 @@ function ensureRetry() {
 export async function enqueueGuestOrder(p: {
   mode: "session" | "public"; token?: string; table?: string; restaurantId?: string; restaurantSlug?: string;
   items: unknown[]; allergies: string[]; track?: GuestTrack; actionId?: string;
+  lines?: { id: string; title: string }[];
 }): Promise<{ ok: true; queued: true; action_id: string; persisted: boolean }> {
   ensureStarted();
   // Remember which restaurant this order belongs to NOW (we're on its page), so the
@@ -310,6 +328,34 @@ export async function enqueueGuestOrder(p: {
   return { ok: true, queued: true, action_id: item.id, persisted };
 }
 
+/**
+ * SAVE A WAITER CALL FOR LATER (improvement #4).
+ *
+ * Same machinery as a saved order — same at-most-once id, same backoff, same "never leave saved
+ * work with nothing to send it" timer — so there is one queue to reason about rather than two.
+ * The one thing that differs is that a call GOES STALE: `STALE_CALL_MS` on both sides.
+ */
+export async function enqueueGuestCall(p: {
+  mode: "session" | "public"; token?: string; table?: string; restaurantId?: string; restaurantSlug?: string;
+  reason?: string; actionId?: string;
+}): Promise<{ ok: true; queued: true; action_id: string; persisted: boolean }> {
+  ensureStarted();
+  const { actionId, ...rest } = p;
+  const item: GuestOrder = {
+    id: actionId || uuid(), kind: "call", status: "queued", at: Date.now(),
+    ...rest, restaurantSlug: p.restaurantSlug || tenantSlug(), items: [], allergies: [],
+  };
+  queued.push(item);
+  const persisted = await persist(item);
+  notify();
+  ensureRetry();
+  return { ok: true, queued: true, action_id: item.id, persisted };
+}
+
+// A saved call older than this is not worth delivering — see the same constant on the server
+// (app/api/guest/call-waiter/route.ts). Caught here first so a stale one never leaves the phone.
+const STALE_CALL_MS = 10 * 60 * 1000;
+
 // How long ONE send may wait for an answer before we treat it as "no answer" and let the
 // backoff try again. This was missing entirely, and it was the one write path in the app with
 // no deadline (the staff queue has had one since 2026-08-01, and the diner's ONLINE order got
@@ -333,7 +379,23 @@ function sendDeadline(): AbortSignal | undefined {
   } catch { return undefined; }
 }
 
+const isCall = (it: GuestOrder) => it.kind === "call";
+
 function doPost(item: GuestOrder) {
+  if (isCall(item)) {
+    return fetch("/api/guest/call-waiter", {
+      method: "POST",
+      signal: sendDeadline(),
+      headers: {
+        "Content-Type": "application/json",
+        "X-LFH-Action-Id": item.id,      // rings the floor ONCE however many times this is sent
+      },
+      // `at` is when the DINER TAPPED, not when the phone got round to it — the server refuses a
+      // call that has gone stale, because a waiter walking over for something nobody remembers is
+      // worse than not going.
+      body: JSON.stringify({ mode: item.mode, token: item.token, table: item.table, restaurantId: item.restaurantId, reason: item.reason, at: item.at }),
+    });
+  }
   return fetch("/api/guest/place-order", {
     method: "POST",
     signal: sendDeadline(),
@@ -385,8 +447,26 @@ export async function flushGuestOutbox() {
   flushing = true;
   let progressed = false;
   try {
-    while (queued.length && !isOffline()) {
-      const item = queued[0];
+    // WALK THE QUEUE — one stuck order must not hold the next (improvement #6).
+    //
+    // This took queued[0] and `break`ed, so a second basket could not go until the first had spent
+    // all six of its rounds (about four minutes) — and the diner, who had just re-ordered BECAUSE
+    // the first seemed not to work, watched both sit still.
+    //
+    // Skipping is safe here in a way it is not for staff edits: two baskets are independent
+    // ORDERS, not two changes to one value. Each becomes its own ticket, so the only thing
+    // reordering costs is which one gets the lower ticket number. A staff discount landing after a
+    // payment would be wrong; a second order landing first is merely a different order of service.
+    let idx = 0;
+    while (idx < queued.length && !isOffline()) {
+      const item = queued[idx];
+      // Too old to be worth ringing the floor for — say so instead of sending it.
+      if (isCall(item) && Date.now() - (item.at || 0) > STALE_CALL_MS) {
+        // `queued: true` like every other refusal that reaches this file: it is a SAVED thing being
+        // turned down later, and the guard in verify:order-retry holds the whole queue to that.
+        await moveToFailed(item, reasonMsg("call_too_old", { queued: true }));
+        notify(); continue;
+      }
       let res: Response;
       try { res = await doPost(item); }
       catch {
@@ -396,7 +476,7 @@ export async function flushGuestOutbox() {
         // retried in silence for the life of the tab: the order sat on "Waiting" with the diner
         // never told and nothing to tap. Bounded now, exactly like the staff queue.
         item.netTries = (item.netTries || 0) + 1;
-        if (item.netTries < NET_MAX_TRIES) { await persist(item); break; }
+        if (item.netTries < NET_MAX_TRIES) { await persist(item); idx++; continue; }
         await moveToFailed(item, "We couldn't reach the restaurant — please order again.");
         notify(); continue;
       }
@@ -412,13 +492,15 @@ export async function flushGuestOutbox() {
       // also used to `break` forever with no counter.
       if (res.status === 409 && j?.retry) {
         item.busyTries = (item.busyTries || 0) + 1;
-        if (item.busyTries < BUSY_MAX_TRIES) { await persist(item); break; }
+        if (item.busyTries < BUSY_MAX_TRIES) { await persist(item); idx++; continue; }
         await moveToFailed(item, "The restaurant's system is still busy with this one — please order again.");
         notify(); continue;
       }
       if (res.status === 409 && j?.clash?.plain) {          // the table moved on while offline
         await moveToFailed(item, j.clash.plain); notify(); continue;
       }
+      // A CALL succeeds with no order_id — there is nothing to track, the floor just knows.
+      if (res.ok && j?.ok && isCall(item)) { progressed = true; await removeItem(item.id); notify(); continue; }
       if (res.ok && j?.ok && j.order_id) { progressed = true; recordActive(item, j.order_id as string); await removeItem(item.id); notify(); continue; }
       // Already placed on a prior sync whose reply we lost. The server echoes the original
       // order_id back with the duplicate, so we can still show it to the guest.
@@ -439,7 +521,7 @@ export async function flushGuestOutbox() {
       // diner has to be able to see it and act, exactly as staff can.
       if (!res.ok && res.status >= 500) {
         item.tries = (item.tries || 0) + 1;
-        if (item.tries < SERVER_MAX_TRIES) { await persist(item); break; }
+        if (item.tries < SERVER_MAX_TRIES) { await persist(item); idx++; continue; }
         await moveToFailed(item, "The restaurant's system didn't take this one — please order again.");
         notify(); continue;
       }
@@ -453,6 +535,14 @@ export async function flushGuestOutbox() {
       // NAME THE DISH where the server named one. This passed no dish at all, so a saved order
       // refused for a sold-out dish read "A dish sold out while you were offline" when the
       // server had told us exactly which one. dishFor() keeps an id out of the sentence.
+      // ONE DISH IS THE PROBLEM, not the basket (improvement #5). sold_out / hidden_item /
+      // unknown_item all name a single dish, and the whole order was thrown away for it — a table
+      // of six losing everything because one dish ran out, and rebuilding the basket by hand.
+      // Remember which line it was so the phone can offer to send the rest.
+      const oneDish = dishFor(j?.reason, j?.item, item.items) || (typeof j?.item === "string" ? j.item : "");
+      if (oneDish && ["sold_out", "hidden_item", "unknown_item"].includes(String(j?.reason))) {
+        item.blocked = oneDish;
+      }
       await moveToFailed(item, reasonMsg(j?.reason, { queued: true, dish: dishFor(j?.reason, j?.item, item.items) })); notify(); continue;
     }
   } finally {
@@ -463,6 +553,37 @@ export async function flushGuestOutbox() {
 }
 
 export async function dismissGuestFailed(id: string) { await removeItem(id); notify(); }
+
+/**
+ * SEND THE REST OF THE BASKET, WITHOUT THE DISH THAT WAS REFUSED (improvement #5).
+ *
+ * A saved order refused because ONE dish sold out used to cost the diner the whole basket: a table
+ * of six lost everything for one item and had to build it again from scratch, on a phone, having
+ * already waited. Everything needed to do better is already on the device — the lines, their names
+ * and the id they were saved under — so this drops the offending line and queues what is left.
+ *
+ * A NEW at-most-once id on purpose: this is a DIFFERENT order from the one the server refused, and
+ * reusing the old id would let the server's memory of that refusal answer for it.
+ */
+export async function orderRestWithout(id: string): Promise<{ ok: boolean; left: number }> {
+  const it = failed.find((x) => x.id === id);
+  if (!it || !it.blocked) return { ok: false, left: 0 };
+  const drop = String(it.blocked).trim().toLowerCase();
+  const keptLines = (it.lines || []).filter((l) => String(l.title || "").trim().toLowerCase() !== drop);
+  const keptIds = new Set(keptLines.map((l) => l.id));
+  const keptItems = (it.items || []).filter((x) => keptIds.has(String((x as { id?: string })?.id || "")));
+  // Nothing left, or we cannot tell the lines apart → don't guess at a diner's order.
+  if (!keptLines.length || !keptItems.length) return { ok: false, left: 0 };
+  await removeItem(it.id);
+  await enqueueGuestOrder({
+    mode: it.mode, token: it.token, table: it.table, restaurantId: it.restaurantId, restaurantSlug: it.restaurantSlug,
+    items: keptItems, allergies: it.allergies || [], lines: keptLines,
+    track: { ...(it.track || {}), itemCount: keptItems.length, items: keptLines.map((l) => ({ title: l.title, qty: 1 })) },
+  });
+  notify();
+  void flushGuestOutbox();
+  return { ok: true, left: keptItems.length };
+}
 
 /**
  * Put ONE failed order back in the queue and try it now. The diner had no way at all to do this —

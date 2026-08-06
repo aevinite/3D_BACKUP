@@ -687,7 +687,7 @@ export default function CartPanel() {
       // OFFLINE: save the order on-device and send it automatically on reconnect
       // (at-most-once via the guest outbox, using the SAME key as the online path).
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
-        const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
+        const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: itemsS, allergies, track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id, lines: cart.map((it) => ({ id: it.id, title: it.title })) });
         // ONLY promise durability when the phone actually stored it. When storage refuses
         // (private browsing, no room), the order is real and WILL send — but it lives in memory
         // only, so closing the tab loses it, and saying "we'll send it automatically" would be a
@@ -753,7 +753,7 @@ export default function CartPanel() {
           // Their `orderItems()` / `allergyPayload()` helpers (they replaced the inline builders
           // on main) + this branch's honest wording: only promise durability when the phone
           // actually stored it.
-          const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: orderItems(), allergies: allergyPayload(), track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id });
+          const q = await enqueueGuestOrder({ mode: "public", table: tableTrim, restaurantId, restaurantSlug: tenantSlug(), items: orderItems(), allergies: allergyPayload(), track: { tableNumber: tableTrim, total: totalUsd, itemCount, items: cart.map((it) => ({ title: it.title, qty: it.qty })) }, actionId: orderKeyRef.current.id, lines: cart.map((it) => ({ id: it.id, title: it.title })) });
           window.dispatchEvent(new CustomEvent("lfh:toast", { detail: q.persisted
             ? { message: "Saved — sending your order now", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" }
             : { message: "Saved — keep this page open", subtitle: "the kitchen is very busy; it goes through by itself", kicker: "order", icon: "⏳", variant: "success" } }));

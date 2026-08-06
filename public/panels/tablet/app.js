@@ -147,7 +147,19 @@ const api = async (method, path, body, opts) => {
 // success/failure toast, and skip the post-write GET (which would reject offline).
 const isQueued = (r) => !!(r && r.queued === true);
 // Accurate whether offline (syncs on reconnect) or online-with-a-pending-queue (syncs now).
+// WHAT TO SAY WHEN A WRITE WAS SAVED INSTEAD OF SENT (improvement #3).
+// One sentence used to cover four quite different situations, and "Saved ✓ — syncing
+// automatically" is only true for one of them. The queue knows which (`why`, returned by
+// LFH_OUTBOX.send), so say it: a waiter who hears "saved" about something the kitchen has not got
+// may never chase it, and the busy case is exactly when that matters.
 const OFFLINE_SAVED_MSG = "Saved ✓ — syncing automatically.";
+const savedMsg = (r) => {
+  const why = r && r.why;
+  if (why === "busy") return "Saved ✓ — the system is busy, so the kitchen hasn't got it yet.";
+  if (why === "slow") return "Saved ✓ — the system hasn't confirmed it yet.";
+  if (why === "behind") return "Saved ✓ — it'll go once this table's earlier change has.";
+  return OFFLINE_SAVED_MSG;                 // "offline", and anything we don't recognise
+};
 // WHAT TO SHOW A WAITER for a failed write. A clash arrives as
 // { error: "clash_changed_elsewhere", clash: { plain, todo } } — `e.message` is the CODE, so a
 // clash on a LIVE write (two people on the same dish at once, the common case) read as
@@ -386,7 +398,7 @@ async function actGated(method, path, body, opts = {}) {
       }
       if (!pin) return; // cancelled
     }
-    if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — skip the offline GET + the success toast
+    if (isQueued(r)) { toast(savedMsg(r)); return; }  // #2: saved offline — skip the offline GET + the success toast
     await load();
     if (typeof opts.onSuccess === "function") { try { opts.onSuccess(); } catch (e) {} }
     else if (opts.toast) toast(opts.toast);
@@ -1816,7 +1828,7 @@ function renderPanel() {
     const c = (state.data.calls || []).find((x) => x.id === id);
     try {
       const r = await api("POST", `/calls/${id}/attend`);
-      if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }
+      if (isQueued(r)) { toast(savedMsg(r)); return; }
       await load();
       // A mis-tapped "Done" silently drops a real guest call — offer a takeback (2026-07-22).
       if (window.LFH_UNDO) LFH_UNDO.show({
@@ -2495,7 +2507,7 @@ async function runOptimistic(mutate, fn, onSuccess) {
   try {
     mutate(); renderFloor(); renderPanel();
     const r = await fn();
-    if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: saved offline — not a failure, and load() would no-op
+    if (isQueued(r)) { toast(savedMsg(r)); return; }  // #2: saved offline — not a failure, and load() would no-op
     done = true;
   }
   // On failure the optimistic mutate() must be REVERTED by the reconciling load() below. But if the
@@ -2513,7 +2525,7 @@ async function runOptimistic(mutate, fn, onSuccess) {
 const act = async (fn) => {
   try {
     const r = await fn();
-    if (isQueued(r)) { toast(OFFLINE_SAVED_MSG); return; }  // #2: offline queue — friendly note, skip the offline GET
+    if (isQueued(r)) { toast(savedMsg(r)); return; }  // #2: offline queue — friendly note, skip the offline GET
     await load();
   } catch (e) {
     // Someone else changed the same thing first: say so plainly and refresh, rather than

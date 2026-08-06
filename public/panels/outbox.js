@@ -43,6 +43,7 @@
   // Don't flush more than this often just because the person keeps switching tabs.
   let WAKE_MIN_GAP_MS = 4000;
   let retryStep = 0;
+  let nextTryAt = 0;   // ms since epoch of the next scheduled flush (0 = none pending)
   let lastWakeAt = 0;
   let paused = false; // test-only; see __pause below
   // A saved change may not sit in a silent retry loop forever. After this many rounds of the
@@ -50,6 +51,12 @@
   const AUTH_MAX_TRIES = 3;   // 401 — this device is signed out
   const BUSY_MAX_TRIES = 6;   // 409 {retry:true} — the server says it is still handling this id
   const NET_MAX_TRIES = 6;    // the request itself never completed, while the device says it is online
+  // HOW MUCH ONE DEVICE MAY HOLD (improvement #1). Nothing bounded this: a tablet left with no
+  // signal piled up changes until the browser's own storage refused — and that refusal landed on
+  // the NEWEST change, the one the waiter was making, while the oldest sat there safely. The
+  // diner's phone has stopped at 25 since it was written; a tablet does far more per shift, so
+  // this is higher, and the OLDEST goes first with the person told, never a silent drop.
+  const MAX_QUEUED = 200;
   const SERVER_MAX_TRIES = 6; // 5xx — the server is up but keeps refusing. Was a hard-typed `5`
                               // sitting beside these three named ones, and the DINER's queue
                               // used 6 for the same case: four ceilings in view of each other
@@ -193,6 +200,21 @@
   // something taken on this device hasn't reached the kitchen yet — so an offline order
   // is never invisible. Returns null when an action can't be tied to one table (those
   // stay visible in the top bar + the "waiting" list instead).
+  // EVERY table a change touches — a move has TWO (improvement #9). `tableOf` answers "whose work
+  // is this?" (the source), which is right for ordering; but the ⏳ mark answered the same
+  // question, so a ticket on its way to table 7 left table 7 showing nothing at all and the
+  // waiter looking at it had no idea something was coming.
+  function tablesOf(item) {
+    const out = [];
+    const from = tableOf(item);
+    if (from != null) out.push(String(from));
+    try {
+      const to = (item.body || {}).to;
+      if (to != null && String(to) !== "" && String(to) !== String(from)) out.push(String(to));
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+
   function tableOf(item) {
     try {
       var b = item.body || {};
@@ -204,6 +226,22 @@
     } catch (e) { /* ignore */ }
     return null;
   }
+
+  // WHAT MUST STAY IN ORDER WITH WHAT (improvements #2 + #6, 2026-08-06).
+  //
+  // The queue was strictly first-in-first-out across the WHOLE device, and that is stricter than
+  // the rule it was written for. The bug it exists to stop is real and specific: a queued discount
+  // and a later "Mark paid" on the SAME BILL must not swap, or the bill settles at the wrong
+  // amount. Two changes on two DIFFERENT tables have no such relationship — yet one stuck change
+  // held up every other table's work behind it, for as long as six rounds of backoff (~4 minutes),
+  // on the busiest device in the building.
+  //
+  // So ordering is kept per TABLE. Everything the queue can't tie to a table (a parcel, a floor
+  // issue, a settings save) shares one bucket and stays strictly ordered with itself — "I can't
+  // tell" must never be read as "these are independent", which is the same direction every other
+  // judgement in this pipeline takes.
+  const UNTABLED = "\u0000untabled";
+  function orderKey(it) { const t = tableOf(it); return t == null ? UNTABLED : String(t); }
 
   // `replay` = this is a change coming OUT of the queue (it was saved on the device
   // earlier), not a live write. Only a replay is clash-checked on the server, which is
@@ -251,6 +289,18 @@
     item.status = "queued";
     item.why = why || item.why || "offline";
     queued.push(item);
+    // Over the ceiling → the OLDEST goes to "Needs you" (never deleted): it is the one least
+    // likely to still be wanted, and the person can see it and decide. Marked non-retryable
+    // because re-sending something this old against a floor that has moved on is exactly what
+    // the clash gate would refuse anyway.
+    while (queued.length > MAX_QUEUED) {
+      const oldest = queued[0];
+      await moveToFailed(oldest, "This waited too long to send", {
+        plain: "This device is holding more unsent changes than it can keep, so the oldest one was set aside.",
+        todo: "Check whether it still needs doing, and do it again if so.",
+        retryable: false,
+      });
+    }
     const persisted = await idbPut(item);
     if (!persisted) unsafeStore = true;   // the bar says so; see the note on unsafeStore
     notify();
@@ -304,7 +354,7 @@
     const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now(), expect: expect || null };
 
     // Known offline → don't even try; queue straight away.
-    if (navigator.onLine === false) { const p = await enqueue(item, "offline"); return { ok: true, queued: true, action_id: item.id, persisted: p }; }
+    if (navigator.onLine === false) { const p = await enqueue(item, "offline"); return { ok: true, queued: true, action_id: item.id, persisted: p, why: "offline" }; }
 
     // FIFO GUARD (#6): if earlier actions are STILL waiting to sync, this new write must
     // NOT be sent directly ahead of them — that let a fresh "Mark paid" commit before a
@@ -318,8 +368,15 @@
     // into Needs-you, "Mark paid" then commits at the FULL amount, and the person taps Try again
     // on the discount afterwards, applying it to an already-settled bill. Anything still owed to
     // this table has to clear before a later change to it can be sent.
-    if (queued.length || failed.some(function (f) { return f.retryable !== false; })) {
-      const p = await enqueue(item, "behind"); flush(); return { ok: true, queued: true, action_id: item.id, persisted: p };
+    // …and it is judged PER TABLE now (see orderKey): a change for table 5 waits behind other
+    // work for table 5, and sails past a stuck change for table 9. `failed` still counts, and for
+    // the original reason — a retryable change that ran out of automatic attempts leaves `queued`
+    // for the "Needs you" list, and if that did not count here, a later "Mark paid" for the SAME
+    // table would go straight to the server ahead of a discount the person is about to retry.
+    const key = orderKey(item);
+    const owed = function (it) { return orderKey(it) === key; };
+    if (queued.some(owed) || failed.some(function (f) { return f.retryable !== false && owed(f); })) {
+      const p = await enqueue(item, "behind"); flush(); return { ok: true, queued: true, action_id: item.id, persisted: p, why: "behind" };
     }
 
     let res;
@@ -329,8 +386,12 @@
       // Genuine network failure (offline / DNS / dropped) → save for later.
       // A timeout while the browser still believes it is online is a SLOW system, not an
       // offline device — do not let the bar call it one.
-      const p = await enqueue(item, navigator.onLine === false ? "offline" : "slow");
-      return { ok: true, queued: true, action_id: item.id, persisted: p };
+      const why = navigator.onLine === false ? "offline" : "slow";
+      const p = await enqueue(item, why);
+      // WHY it is waiting travels back to the caller (improvement #3). The panels toasted one
+      // sentence — "Saved ✓ — syncing automatically" — for four quite different situations, and a
+      // waiter who hears "saved" about something the kitchen has not got may not chase it.
+      return { ok: true, queued: true, action_id: item.id, persisted: p, why };
     }
     // We got a response → behave exactly like the old api() helper.
     //
@@ -353,7 +414,7 @@
     if (res.status >= 500) {
       const p = await enqueue(item, "busy");
       flush();
-      return { ok: true, queued: true, busy: true, action_id: item.id, persisted: p };
+      return { ok: true, queued: true, busy: true, action_id: item.id, persisted: p, why: "busy" };
     }
     const j = await res.json().catch(() => null);
     // Carry the parsed body + status on the error so callers can read server flags
@@ -373,20 +434,36 @@
     flushing = true;
     let progressed = false; // did anything actually get through this round?
     try {
-      while (queued.length && navigator.onLine !== false) {
-        const item = queued[0];
+      // WALK THE QUEUE, DON'T STOP AT THE FIRST OBSTACLE (improvements #2 + #6).
+      //
+      // This used to take queued[0] and `break` the whole drain the moment anything was not
+      // delivered — so one change the server kept refusing held every other table's work on the
+      // device for the rest of its backoff. Now a stuck change parks its OWN table (see orderKey)
+      // and the walk carries on to the next one, which is exactly the promise the per-table rule
+      // in send() makes: table 9 being stuck is not table 5's problem.
+      //
+      // `stalled` is per ROUND, not persistent: the next flush starts fresh and retries everything
+      // in order again. `i` only advances when the item is still in the queue — a delivered or
+      // failed item is spliced out, so the next one has already taken its index.
+      const stalled = new Set();
+      let i = 0;
+      while (i < queued.length && navigator.onLine !== false) {
+        const item = queued[i];
+        const key = orderKey(item);
+        // An earlier change for this same table did not get through this round. Sending a LATER
+        // one now is the exact swap the ordering rule exists to prevent.
+        if (stalled.has(key)) { i++; continue; }
         let res;
         try { res = await doFetch(item, true); } // true = a saved change being replayed
         catch (netErr) {
           // Genuinely offline → stop and keep the queue; that is what it is for.
-          if (navigator.onLine === false) break;
+          if (navigator.onLine === false) break;   // genuinely offline → stop the whole round
           // ONLINE and still not getting through (each attempt timing out, a request dropped
           // every time). This was the last path that could loop forever in silence — and a
-          // change stuck in "waiting" is the worst place for it, because the FIFO rule then
-          // diverts every later save on this device behind it and a waiting row has no
+          // change stuck in "waiting" is the worst place for it, because a waiting row has no
           // buttons. Same treatment as the signed-out and still-busy cases beside it.
           item.netTries = (item.netTries || 0) + 1;
-          if (item.netTries < NET_MAX_TRIES) { await idbPut(item); break; }
+          if (item.netTries < NET_MAX_TRIES) { await idbPut(item); stalled.add(key); i++; continue; }
           await moveToFailed(item, "The restaurant's system didn't answer", {
             plain: "The system didn't answer, several times over.",
             todo: "Check whether it already happened; if not, do it again.",
@@ -399,6 +476,8 @@
         // signed out, the person has to be told, or their work waits behind a spinner all shift.
         if (res.status === 401) {
           item.authTries = (item.authTries || 0) + 1;
+          // Signed out is a DEVICE-wide problem, not this table's: nothing else will get through
+          // either, so park the whole round rather than walking the queue to fail every item.
           if (item.authTries < AUTH_MAX_TRIES) { await idbPut(item); break; }
           await moveToFailed(item, "This device is signed out", {
             plain: "This device was signed out, so this couldn't be sent.",
@@ -446,7 +525,7 @@
             // seconds (a stale claim is taken over after 30s — lib/idempotency.ts), so if it
             // keeps saying it, something is wrong and a person should hear about it.
             item.busyTries = (item.busyTries || 0) + 1;
-            if (item.busyTries < BUSY_MAX_TRIES) { await idbPut(item); break; }
+            if (item.busyTries < BUSY_MAX_TRIES) { await idbPut(item); stalled.add(key); i++; continue; }
             await moveToFailed(item, "The system is still working on this one", {
               plain: "The system says it is still busy with this change.",
               todo: "Check whether it already happened; if not, do it again.",
@@ -467,7 +546,7 @@
         // "sending…" spin all shift. After a few goes it becomes their decision.
         if (res.status >= 500) {
           item.tries = (item.tries || 0) + 1;
-          if (item.tries < SERVER_MAX_TRIES) { await idbPut(item); break; }
+          if (item.tries < SERVER_MAX_TRIES) { await idbPut(item); stalled.add(key); i++; continue; }
           await moveToFailed(item, "The restaurant's system kept refusing this", {
             plain: "The system couldn't accept this after several tries.",
             todo: "Check whether it already happened; if not, do it again.",
@@ -499,7 +578,7 @@
   // spreads out instead of pulsing. `progressed` = something actually synced, which means the
   // server is healthy again, so go straight back to fast retries.
   function scheduleRetry(progressed) {
-    clearTimeout(retryTimer); retryTimer = null;
+    clearTimeout(retryTimer); retryTimer = null; nextTryAt = 0;
     if (paused) return;                                  // test-only: hold the automatic retry
     if (!queued.length) { retryStep = 0; return; }
     if (progressed) retryStep = 0;
@@ -515,6 +594,7 @@
       : Math.min(RETRY_BASE_MS * Math.pow(2, retryStep - 1), RETRY_MAX_MS);       // then 15s, 30s, 60s…
     const wait = Math.round(base * (0.75 + Math.random() * 0.5));
     retryStep = Math.min(retryStep + 1, 8);
+    nextTryAt = Date.now() + wait;
     retryTimer = setTimeout(flush, wait);
   }
 
@@ -602,18 +682,18 @@
     pendingForTable: function (t) {
       if (t == null) return [];
       const key = String(t);
-      return queued.concat(failed).filter((it) => tableOf(it) === key);
+      return queued.concat(failed).filter((it) => tablesOf(it).indexOf(key) >= 0);
     },
     // { "5": 2, "7": 1 } — how many unsent changes each table is carrying.
     pendingByTable: function () {
       const out = {};
       queued.concat(failed).forEach((it) => {
-        const t = tableOf(it);
-        if (t != null) out[t] = (out[t] || 0) + 1;
+        tablesOf(it).forEach((t) => { out[t] = (out[t] || 0) + 1; });
       });
       return out;
     },
     tableOf,
+    tablesOf,
     // THE ONE LIST of "why the server said no", so the manager panel's live toast and the
     // "Needs you" sheet can never word the same refusal differently (see REASONS above).
     REASONS,
@@ -626,8 +706,7 @@
       const out = {};
       failed.forEach((it) => {
         if (it.retryable !== false) return;
-        const t = tableOf(it);
-        if (t != null) out[t] = (out[t] || 0) + 1;
+        tablesOf(it).forEach((t) => { out[t] = (out[t] || 0) + 1; });
       });
       return out;
     },
@@ -637,6 +716,11 @@
     // WHEN the oldest thing still waiting was done (ms since epoch, 0 = nothing waiting).
     // The bar uses it to stop saying "Sending…" about work that has plainly stopped moving.
     waitingSince: () => queued.reduce((a, it) => (a && a < it.at ? a : it.at), 0),
+    // WHEN THE NEXT ATTEMPT IS DUE (improvement #8). The bar decided "this is stuck" purely on
+    // age — 90 seconds — while the backoff between rounds runs out to two minutes. So the honest
+    // wait between two normal tries was being announced as a fault, on a healthy connection: the
+    // cry-wolf shape this bar has already been fixed for once. It can ask now instead of guessing.
+    nextTryAt: () => nextTryAt,
     isFlushing: () => flushing,
     // TRUE once anything failed to reach this device's storage — so what is waiting will NOT
     // survive a reload, and the bar has to say so rather than promise "syncing automatically".

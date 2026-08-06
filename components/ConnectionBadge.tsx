@@ -17,7 +17,7 @@
 // time is dominated by heavy analytics query time, not connection latency).
 import { useLayoutEffect, useRef, useState } from "react";
 import { useConnection, latencyTier, LATENCY_FRESH_MS } from "@/lib/connectionStatus";
-import { useGuestOutbox, dismissGuestFailed, retryGuestFailed, type GuestOrder } from "@/lib/guestOutbox";
+import { useGuestOutbox, dismissGuestFailed, retryGuestFailed, type GuestOrder, orderRestWithout } from "@/lib/guestOutbox";
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the popover first
 
 type View = {
@@ -252,6 +252,15 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
                       "Dismiss", i.e. throw the order away. An order that failed for a reason that
                       has since passed (the system was busy, the dish came back) could not be sent
                       without building the whole basket again. */}
+                  {/* ONE DISH WAS THE PROBLEM — offer the rest (improvement #5). A table of six
+                      used to lose the whole basket because one item ran out, and had to rebuild it
+                      by hand. Shown ONLY when the phone still knows which line to drop and there
+                      is something left after dropping it, so the button can never do nothing. */}
+                  {o.blocked && (o.lines || []).length > 1 && (
+                    <button className="lfh-conn-go" onClick={() => orderRestWithout(o.id)}>
+                      Order the rest
+                    </button>
+                  )}
                   <button className="lfh-conn-go" onClick={() => retryGuestFailed(o.id)}>Try again</button>
                   <button className="lfh-conn-x" onClick={() => dismissGuestFailed(o.id)}>Dismiss</button>
                 </span>

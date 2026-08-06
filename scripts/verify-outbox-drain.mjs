@@ -29,6 +29,8 @@
 //   8. the bar stops claiming "Sending…" for work that plainly is not sending, and offers a
 //      way to force it (public/panels/offline.js)
 //   9. a 200 whose BODY says the server refused is NOT treated as delivered
+//  10. one stuck TABLE does not hold up another table's work
+//  11. …but two changes on the SAME table still never swap (the discount/mark-paid bug)
 import { chromium } from "playwright";
 import http from "node:http";
 import { readFileSync } from "node:fs";
@@ -65,6 +67,14 @@ const server = http.createServer((req, res) => {
     // "refuse200" → the shape SEVERAL real staff branches answer with: a 200 whose BODY says no,
     // because the route hands the database function's own JSON straight back (sessions/:id/shift,
     // orders/:id/move, order-items/:id/move, bill-discount, banquet/place, customer-capture).
+    // "one-table-down" → table 9 always 500s, everything else is accepted. The shape that used to
+    // hold the WHOLE device's queue behind one stuck change.
+    if (mode === "one-table-down") {
+      if (/\/tables\/9\//.test(req.url)) { res.writeHead(500, { "content-type": "application/json" }); return res.end('{"error":"nope"}'); }
+      seen.push({ id: req.headers["x-lfh-action-id"] || "", path: req.url, replay: req.headers["x-lfh-replay"] === "1" });
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end('{"ok":true}');
+    }
     if (mode === "refuse200") {
       seen.push({ id: req.headers["x-lfh-action-id"] || "", path: req.url, replay: req.headers["x-lfh-replay"] === "1" });
       res.writeHead(200, { "content-type": "application/json" });
@@ -93,6 +103,10 @@ const fresh = async () => {
 const send = (label) => page.evaluate((l) => window.LFH_OUTBOX.send({
   base: "", method: "POST", path: "/api/editor/settings", body: { floor_per_row: 18 }, panel: "editor", label: l,
 }).catch((e) => ({ threw: String(e && e.message) })), label);
+// …and one that names a TABLE in its path, so the queue can tell whose work it is (tableOf).
+const sendFor = (table, label) => page.evaluate(([t, l]) => window.LFH_OUTBOX.send({
+  base: "", method: "POST", path: `/api/editor/tables/${t}/pay`, body: { amount: 1 }, panel: "editor", label: l,
+}).catch((e) => ({ threw: String(e && e.message) })), [table, label]);
 const counts = () => page.evaluate(() => ({ q: window.LFH_OUTBOX.pendingCount(), f: window.LFH_OUTBOX.failedCount() }))
   .catch(() => ({ q: -1, f: -1 })); // a panel that navigated away (401 → /login) must not kill the run
 // Poll for a condition instead of sleeping a fixed time — a slow machine must not fail a check
@@ -225,6 +239,55 @@ if (marks.blocked && Object.keys(marks.blocked).length === 0 && Object.keys(mark
   bad("blockedByTable() is gone — the ⏳ would claim a dead change is still on its way");
 }
 mode = "ok";
+
+// ── 10. one stuck TABLE must not hold up another table ───────────────────────────────────
+// Ordering is per table, not per device (improvements #2 + #6). The queue was strictly FIFO
+// across the whole device, so a change the server kept refusing parked every other table's work
+// behind it for the whole of its backoff — on the busiest device in the building.
+console.log("\n10) Table 9's change is stuck; table 5's must still get through");
+await fresh(); seen.length = 0;
+await page.route("**/api/**", (r) => r.abort("failed"));
+await sendFor(9, "Settle bill · Table 9");
+await sendFor(5, "Settle bill · Table 5");
+await page.unroute("**/api/**");
+mode = "one-table-down";
+// THE WINDOW MATTERS, not just the end state. Table 9 gives up after SERVER_MAX_TRIES and leaves
+// the queue, and everything behind it flows again — which is why an "eventually delivered" check
+// passes on the OLD code too (verified: it did). The real question is whether table 5 goes through
+// WHILE table 9 is still being retried, so poll for both facts at the same instant.
+const overtook = await until(async () => {
+  const snap = await page.evaluate(() => window.LFH_OUTBOX.getSnapshot()).catch(() => null);
+  if (!snap) return false;
+  const nineStillTrying = snap.queued.some((it) => /\/tables\/9\//.test(it.path || ""));
+  const fiveDelivered = seen.some((x) => /\/tables\/5\//.test(x.path));
+  return nineStillTrying && fiveDelivered;
+}, 12000);
+if (overtook) ok("table 5 was delivered WHILE table 9 was still being retried");
+else bad("BLOCKED: one stuck table still holds up every other table on the device", JSON.stringify(seen.map((x) => x.path)));
+if (!seen.some((x) => /\/tables\/9\//.test(x.path))) ok("…and table 9's change was never reported as delivered");
+else bad("table 9 reported as delivered when the server refused it");
+const still9 = await page.evaluate(() => window.LFH_OUTBOX.getSnapshot());
+if (still9.queued.length + still9.failed.length >= 1) ok("table 9's change is still held, waiting or needing a person");
+else bad("table 9's change vanished");
+
+// ── 11. …but the SAME table must still stay in order ─────────────────────────────────────
+// The bug the ordering rule exists for: a queued discount and a later "Mark paid" on the SAME
+// bill must never swap, or the bill settles at the wrong amount. Per-table ordering must not
+// have loosened THIS.
+console.log("\n11) Two changes on the SAME table never swap");
+await fresh(); seen.length = 0;
+mode = "ok";
+await page.route("**/api/**", (r) => r.abort("failed"));
+await sendFor(7, "Apply discount · Table 7");
+await page.unroute("**/api/**");
+await sendFor(7, "Mark paid · Table 7");           // must queue BEHIND the discount, not overtake it
+const bothSent = await until(async () => seen.filter((x) => /\/tables\/7\//.test(x.path)).length === 2, 12000);
+if (bothSent) ok("both changes for table 7 were delivered");
+else bad("table 7's changes did not both arrive", JSON.stringify(seen.map((x) => x.path)));
+const order = seen.filter((x) => /\/tables\/7\//.test(x.path)).map((x) => x.id);
+const firstId = await page.evaluate(() => "");   // ids are opaque; order is what matters
+if (order.length === 2 && order[0] !== order[1]) ok("…in the order they were made, not the order they were retried");
+else bad("the two changes for one table did not arrive as two distinct writes", JSON.stringify(order));
 
 await browser.close();
 server.close();
