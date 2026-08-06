@@ -122,7 +122,7 @@ export default function AdminCommand() {
               measured 2.31:1 — the least readable label in the console, on its most urgent button.
               Darkened here only (the token keeps its value everywhere else) so white sits at
               ~5.7:1 and it still reads as a danger button, not a warning chip. */}
-          <Link href="/aevinite/repair" className="adm-btn"
+          <Link href="/aevinite/repair" className={`adm-btn${fixCount > 0 ? " danger" : ""}`}
             style={fixCount > 0 ? { background: "color-mix(in srgb, var(--adm-danger) 72%, #000)", borderColor: "color-mix(in srgb, var(--adm-danger) 72%, #000)", color: "#fff", fontWeight: 700, boxShadow: "0 0 0 3px color-mix(in srgb, var(--adm-danger) 25%, transparent)" } : undefined}
             title={fixCount > 0 ? `${fixCount} to fix — app errors from the last 24h plus problems staff reported and nobody has solved. Separate from the "Staff-raised issues" count, which is only the reports.` : "Repair page — report a problem or use the repair tools"}>
             <i className={`fas ${fixCount > 0 ? "fa-triangle-exclamation" : "fa-screwdriver-wrench"}`} style={{ marginRight: 7 }} aria-hidden="true" />

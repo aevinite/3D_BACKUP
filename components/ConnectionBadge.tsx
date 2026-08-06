@@ -293,8 +293,13 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
         /* On a DARK surface the tint composites to near-black, so the bright state colour is the
            readable one (~6:1) and the darkened ink is not (2.82:1). !important because the ink
            above is an inline style, which a normal rule cannot beat. */
-        :global(html[data-staffdark]) .lfh-conn-txt,
-        :global(html[data-staffdark]) .lfh-conn-ms,
+        /* Key off surfaces that are ACTUALLY dark. data-staffdark is on <html> and stays true on
+           /owner and /aevinite in BOTH skins — those consoles carry their skin on a wrapper
+           ([data-skin]) — so using it forced the dark-surface ink onto the LIGHT console and
+           "Connected" measured 1.99:1 there (my own regression, caught 2026-08-06). data-skin
+           handles the consoles; data-theme handles the guest menu and the panels. */
+        :global([data-skin="dark"]) .lfh-conn-txt,
+        :global([data-skin="dark"]) .lfh-conn-ms,
         :global(html[data-theme="dark"]) .lfh-conn-txt,
         :global(html[data-theme="dark"]) .lfh-conn-ms { color: var(--ink-dark) !important; }
         .lfh-conn-n { font-weight: 800; opacity: 0.9; }

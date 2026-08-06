@@ -3740,6 +3740,12 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 .adm-btn:disabled { opacity: .55; cursor: default; }
 .adm-btn.primary { background: var(--accent-grad); border-color: transparent; color: #fff; box-shadow: 0 8px 18px -8px var(--accent); }
 .adm-btn.danger { background: var(--adm-danger); border-color: transparent; color: #fff; }
+/* !important because something upstream still wins over BOTH this rule and the inline colour on
+   the dashboard's "Fix problems" link: measured rgb(17,24,39) — the light skin's near-black body
+   text — on the dark-red fill, i.e. 1.78:1 (2026-08-06). Same shape as the guest card's "+" glyph,
+   where a blanket `color: inherit !important` reset beat an explicit colour. A filled danger button
+   always wants white on it, in both skins, so state it once and be done. */
+.adm .adm-btn.danger, .adm a.adm-btn.danger { color: #fff !important; }
 .adm-btn.ok { background: var(--adm-ok); border-color: transparent; color: #fff; }
 .adm-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 13px; border-radius: 11px; border: var(--border); background: var(--bg); color: var(--text); font-size: 13.5px; font-weight: 600; cursor: pointer; text-align: left; transition: background .15s; }
 .adm-toggle:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
@@ -3920,7 +3926,12 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   --accent-grad: linear-gradient(120deg, #2563eb 0%, #7c3aed 52%, #fb7185 100%);
   --accent-glow: rgba(37,99,235,0.18);
   --adm-cta: #d97706;
-  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706;
+  /* One step darker than the dark-skin values: in LIGHT these are drawn as TEXT on a pale
+     tint of themselves, where #16a34a/#d97706 measured 2.1-2.8:1 across every status pill
+     in both consoles (2026-08-06). Green-700/amber-700/red-700 clear 4.5:1 on those tints
+     and are the same hues, so nothing changes meaning. The DARK blocks keep the brighter
+     values — bright-on-dark was already fine there. */
+  --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309;
   --elev: 0 1px 2px rgba(16,24,40,.04); --elev-hi: 0 1px 2px rgba(16,24,40,.04);
   --ac-line: #e5e8ee; --ac-card: #ffffff; --ac-muted: #6b7280;
   --ac-accent: #2563eb; --ac-off: #e5e8ee;
@@ -4272,7 +4283,12 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   --accent: #059669; --accent-dim: rgba(5,150,105,0.6);
   --accent-grad: #059669; --accent-glow: rgba(5,150,105,0.18);
   --own-cta: #d97706;
-  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706;
+  /* One step darker than the dark-skin values: in LIGHT these are drawn as TEXT on a pale
+     tint of themselves, where #16a34a/#d97706 measured 2.1-2.8:1 across every status pill
+     in both consoles (2026-08-06). Green-700/amber-700/red-700 clear 4.5:1 on those tints
+     and are the same hues, so nothing changes meaning. The DARK blocks keep the brighter
+     values — bright-on-dark was already fine there. */
+  --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309;
   --elev: 0 1px 2px rgba(16,24,40,.04);
   background: var(--bg);
 }
