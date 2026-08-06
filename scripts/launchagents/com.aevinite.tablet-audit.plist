@@ -5,9 +5,16 @@
     <key>Label</key>
     <string>com.aevinite.tablet-audit</string>
 
+    <!-- WHAT LAUNCHD STARTS, AND WHY IT IS NODE (fixed 2026-08-06 — read scripts/launchagents/run-job.mjs).
+         This used to be `/bin/zsh <the .sh>` and it had been dying INSTANTLY every night with
+         `zsh: can't open input file`. macOS TCC protects ~/Documents and /bin/zsh has no Full Disk
+         Access, so launchd could stat the script but never read it. /opt/homebrew/bin/node DOES
+         have it (which is why com.aevinite.live-fix-watcher works), and a zsh it spawns inherits
+         that access — both measured with probe agents. Do not put /bin/zsh back here. -->
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/zsh</string>
+        <string>/opt/homebrew/bin/node</string>
+        <string>/Users/aevinite/Documents/Projects/backup_Menu/scripts/launchagents/run-job.mjs</string>
         <string>/Users/aevinite/Documents/Projects/backup_Menu/scripts/nightly-tablet-audit.sh</string>
     </array>
 

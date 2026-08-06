@@ -27,6 +27,20 @@ const eslintConfig = defineConfig([
     // just noise (require() imports, unused vars in old code, etc.).
     "reference/**",
     "public/**",
+    // NOT SOURCE, AND IT MADE THE GATE USELESS (added 2026-08-06, T10 sweep).
+    //
+    // `npm run lint` is bare `eslint`, so it walks the whole folder — including `.claude/worktrees/`,
+    // where parallel sessions keep FULL checkouts of this repo. Measured: 23,559 problems and
+    // **1,476 errors**, of which 1,475 came from another session's worktree and one from
+    // temp-admin-console. Scoped to real source it is 0 errors / 373 warnings.
+    //
+    // That is worse than a slow lint: CLAUDE.md's definition of done tells every session to run this
+    // command, so the gate printed a 25,000-line wall of somebody else's problems and taught people
+    // to ignore it. The one real warning in the app was invisible in the noise. CI never saw it
+    // because worktrees are untracked, which is exactly why it went unnoticed.
+    ".claude/**",
+    "temp-admin-analytics/**",
+    "temp-admin-console/**",
   ]),
   {
     // Deliberate rule choices for this codebase. NONE of these change runtime

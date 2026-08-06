@@ -58,6 +58,17 @@ jobs:
       - name: unit tests
         run: npm run -s test:money && npm run -s test:errors && npm run -s test:units
 
-      # The 16 static, read-only guards. Each one is a bug that actually reached someone's screen.
+      # The static, read-only guards. Each one is a bug that actually reached someone's screen.
+      #
+      # It was 16, and nine more static guards were sitting outside it — green, cheap, and run by
+      # nobody but a person remembering to. One of them was verify:no-ask, the guard CLAUDE.md itself
+      # names in the standing delete order, wired only to the local PostToolUse hook. That is the
+      # same shape of silence this whole file was written to end (see the header), so they are in.
       - name: static guards
         run: npm run -s verify:static
+
+      # Separate because its npm alias bundles lib/accessTree.ts + lib/staffCaps.ts with esbuild
+      # first — running scripts/verify-access-model.mjs bare reads whatever stale bundle is in
+      # node_modules/.cache and reports on code that is no longer there.
+      - name: access model
+        run: npm run -s verify:access

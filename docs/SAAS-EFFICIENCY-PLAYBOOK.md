@@ -79,6 +79,35 @@ A new feature may **never** reintroduce a whole-board read. Before merging confi
 - **Per-table fetch + merge** dedup'd by **row id** (never table_number alone).
 - **No poll faster than 60s;** realtime per restaurant; channels drop on hidden/idle.
 - **Verify in the Network tab** that one change refetches ONLY that table.
+- **If you put a CACHE in front of the read, clear it with `{ expire: 0 }`** — see §3a.
+
+### 3a. A cache in front of a breadcrumb is where cross-panel updates die
+
+Everything above makes the *write* announce itself. None of it helps if the *read* is answered from
+a cache that has not been told. This is its own failure mode and it cost a full round to find
+(PR #824 / migration 299), so it belongs in the checklist and not only in three code comments.
+
+**The rule: `revalidateTag(tag, { expire: 0 })`, never `revalidateTag(tag, "max")`.**
+
+`"max"` is the stale-while-revalidate profile: it serves **one more stale read** and refreshes
+behind it. On a menu edit that is exactly the read the next panel makes, so a manager changes a
+price, the guest menu (or the kitchen board) answers from the old copy once, and it looks as though
+the breadcrumb never fired. `{ expire: 0 }` drops it outright.
+
+Live call sites, all three deliberately identical — copy one when you add a fourth:
+
+| where | why it clears |
+|---|---|
+| `app/api/editor/[...path]/route.ts` (`bustMenuCache`) | a manager edits a dish |
+| `app/api/kitchen/[...path]/route.ts` | the kitchen marks something sold out |
+| `app/api/admin/restaurants/access-tree/route.ts` | the admin changes what a restaurant may show |
+
+Two more things that are easy to get wrong here:
+- **The edge cache is NOT purged by `revalidateTag`** — `app/api/r/[restaurant]/menu-data/route.ts`
+  carries the note; an owner edit needs its own cache-busting on that path.
+- **`unstable_cache` / `revalidateTag` only intercept reads that run ON THE SERVER**
+  (`lib/menuDataServer.ts`). A client-side fetch is not in that cache and does not need clearing —
+  and will not be fixed by clearing it either.
 
 ---
 

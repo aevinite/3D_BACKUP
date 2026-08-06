@@ -120,7 +120,7 @@ branch is just git's word for the code line and exists in BOTH stacks).
 - **Secrets discipline applies doubly to `.env.AV.live`:** never print, echo, or
   commit any value from it; masked reads only.
 
-## 💸 BILLING-COMPLIANCE GUARDRAIL — pointer only, load `docs/COMPLIANCE-GUARDRAILS.md` when touching billing (2026-07-25)
+## 💸 BILLING COMPLIANCE — load `docs/COMPLIANCE-GUARDRAILS.md` when touching billing (pointer only, 2026-07-25)
 
 Aevidine is a billing/POS tool: the makers stay safe ONLY while it **cannot secretly hide a sale**
 (India CGST §132 — PetPooja is being raided for exactly this). So if the owner (or a client via him)
@@ -207,7 +207,7 @@ top there's nothing behind it to frost. Use this exact recipe for any "blur".
   build then DROPS the property entirely and the blur silently vanishes (cost us
   a long debugging round). The build auto-prefixes for Safari on its own.
 
-## SaaS multi-tenant architecture (approved 2026-06-25, since built — plan: `docs/SAAS-ARCHITECTURE-PLAN.html`)
+## SaaS architecture (multi-tenant, approved 2026-06-25, since built — plan: `docs/SAAS-ARCHITECTURE-PLAN.html`)
 
 Many restaurants, ONE backend, every feature enable/disable-able PER RESTAURANT; frontends may
 differ completely per restaurant (white-label). The live technical rules — all still binding:
@@ -232,7 +232,7 @@ differ completely per restaurant (white-label). The live technical rules — all
   NOT a rewrite. Switching to subdomains happens ONLY on the owner's explicit go.
 - Build order + the subdomain switch detail: `docs/PROJECT-HISTORY.md` §9.
 
-### EVERY new feature is a toggleable, permission-scoped MODULE (owner, 2026-06-25)
+### EVERY new feature = a toggleable, permission-scoped MODULE — the 11-point checklist (owner, 2026-06-25)
 Planned future systems (CONTEXT ONLY — do NOT build until told): **inventory management,
 staff analysis/performance, staff payments/payroll** — and more (this list will grow).
 
@@ -314,7 +314,7 @@ reinvent (dataviz skill agrees: "a single value is a stat tile, not a one-bar ch
 - **New time charts MUST route through `populated()` / `NotEnough` / `ScrollX`** (or
   replicate the three behaviours). Pairs with the adaptive-time-axis tick-thinning rule.
 
-## Stack at a glance
+## Stack & app map
 
 - Next 16.2.6, App Router, async `params`. React 19.2.4. TS strict.
 - Tailwind 4 (postcss). GSAP (npm-only, imported in `HeroTitle.tsx` + `IntroSplash.tsx` — the old "npm + CDN duplication" bug is gone; there is no GSAP CDN tag).
@@ -380,6 +380,32 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
 
 `ADMIN_PASSWORD` is in `.env.local` (must also be set in the Vercel project env for the gate to
 work in prod). **If you re-introduce a middleware, update this section in the same commit.**
+
+## Operational rules — one line each; open the detail/doc BEFORE working in that area
+
+CLAUDE.md carries these as one-liners; this is where each one's full text lives. They are separate
+sections below rather than one long list, because each was written the day its bug reached someone.
+
+| CLAUDE.md one-liner | its section here |
+|---|---|
+| Feature switches (mig 035) | `## Feature switches (migration 035)` |
+| KOT / bills (migs 036–038) | `## KOT / bills / billing depth (migrations 036–038)` |
+| 3D loading / `lib/modelLoader.ts` | `## Architecture cheat sheet` + `## Known gotchas (read before editing)` |
+| Charts are DYNAMIC | `## Charts / graphs must be DYNAMIC — never a lonely 1-bar plot` |
+| Analytics snapshot cache | `## Analytics / dashboards MUST use the compute-on-view snapshot cache` |
+| Never trip our own rate limits | `## 🚦 NEVER set off the app's own limits while building or testing` |
+| A tap must never vanish | `## 👆 A USER'S TAP MUST NEVER VANISH IN SILENCE` |
+| A table shows only its own party | `## 🪑 A TABLE SHOWS ONLY ITS OWN PARTY` |
+| Floor reads are shared | `## 🧾 THE FLOOR IS READ ONCE AND SHARED — a write MUST drop that snapshot` |
+| A rush slows the app, never takes it down | `## 🌊 A RUSH MUST SLOW THE APP DOWN, NEVER TAKE IT DOWN` |
+| Offline layer is LIVE | `## Offline sync — connection light + offline queue` · `docs/OFFLINE-SYNC.md` |
+| Access model v2 | `## 🔑 ACCESS & PERMISSIONS WAS REBUILT` · `docs/ACCESS-MODEL.md` |
+| One profile shape per person | `## 👤 EVERY PERSON WHO HAS A PROFILE HAS THE SAME ONE` · `docs/STAFF-PROFILE.md` |
+| Mobile back button | `## Mobile hardware BACK button — every screen & popup is a "back step"` |
+| The owner is not the test subject | `## 🙋 I AM NOT THE TEST SUBJECT` |
+| "Check phone/tablet view" | `## "Check phone view" / "check tablet view" — open a LIVE Chrome` |
+| A green suite ≠ the screen is right | `## 🩺 A GREEN TEST SUITE IS NOT EVIDENCE THAT THE SCREEN IS RIGHT` |
+| Never ask permission to delete | `~/.claude/CLAUDE.md` (owner-level, standing) · guard `npm run verify:no-ask` |
 
 ## Feature switches (migration 035)
 
@@ -932,12 +958,24 @@ capacity — they mean a burst QUEUES and drains instead of collapsing.
   realtime DELTA in place instead of refetching the whole per-table slice. Only build if the owner
   still notices the lag. Full write-up: `docs/PROJECT-HISTORY.md` §11.
 
-## Definition of done for code changes
+## Definition of done (for code changes)
 
-- Type-check passes (`npm run lint` or Next's built-in checker).
+- Type-check passes (**`npm run typecheck`**). `npm run lint` is bare ESLint — it does not check types, and it is a separate gate that must also pass.
 - If the change touches 3D model loading, `verify-cache.mjs` still passes.
 - If the change touches UI, run the page in Chrome MCP and screenshot or
   describe what's now visible. Don't claim "it works" from source alone.
+
+## 🚦 Deploying & the folder ladder (pointer — invoke `ship-safety` AT the moment of deploying)
+
+Three sections carry this, in the order you need them:
+
+1. `## 🚦 DEPLOY LOCK — one session deploys at a time` — the lock ritual, below.
+2. `## 🥇 BACKUP-1 IS **UPSTREAM** — everything lands there first`, including
+   `### 📥 THE MAC FOLDER MUST NEVER FALL BEHIND BACKUP-1` (`npm run check:current`).
+3. `## Deployment (ONE target now)` — the target names and the backup-2 fallback steps.
+
+Load the `ship-safety` skill at the moment of deploying, not before: it holds the branch-per-task,
+rebase and conflict-integration rules, and the "whatever you start, you end" process ownership.
 
 ## 🚦 DEPLOY LOCK — one session deploys at a time (owner, 2026-07-25 — pointer only, load the detail ONLY when deploying)
 

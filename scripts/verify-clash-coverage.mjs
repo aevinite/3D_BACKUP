@@ -122,20 +122,27 @@ const REACT_VALUE_EDITS = [
   // expectation travels from these yet" — and a footnote is not a guard, which is the exact lesson
   // the 2026-08-04 pass wrote down one block above and then repeated here.
   //
-  // What made it matter rather than merely untidy: the owner panel has its OWN profile page
+  // What made it matter rather than merely untidy: the owner panel used to have its OWN profile page
   // (app/owner/staff/[id]/page.tsx) writing the SAME staff_users columns as the admin's
   // StaffProfile — pay_type/pay_amount/pay_day/pay_mode included. So a person's SALARY was
   // protected through /api/admin/users and completely open through /api/owner/staff. The check
   // above proved the admin door; nothing proved the owner's.
+  //
+  // THAT PAGE IS GONE (2026-08-06 convergence — docs/STAFF-PROFILE.md). It is now a 38-line mount
+  // point that renders components/admin/StaffProfile, so this entry matched ZERO call sites and
+  // printed a single reassuring line about the route: a vacuous spec, found by the T10 sweep the
+  // same day. The call sites are covered by the StaffProfile pass above — but the owner console's
+  // expectation now travels through a THIRD hop that no pass watched:
+  // components/owner/ownerProfileHost.ts, whose patch() is what actually builds the X-LFH-Expect
+  // header for /api/owner/staff. Delete that one line and every owner-side pay and profile edit
+  // goes back to silent last-write-wins, with this file still printing "0 unprotected".
+  //
+  // So the host is what is checked now. It is a translation layer, not a screen, so the property is
+  // "it forwards the expectation it was handed" rather than "each call site passes one".
   {
-    file: "app/owner/staff/[id]/page.tsx",
+    file: "components/owner/ownerProfileHost.ts",
     route: "app/api/owner/staff/route.ts",
-    // `set_permissions` is a dropdown and `set_payroll`/`set_own_pay` are toggles — same split as
-    // every other pass here. `void_payment` is a one-way transition with a mandatory reason.
-    actions: ["set_job", "set_profile"],
-    exempt: [
-      { match: /in_payroll:/, why: "on/off the pay list is a toggle — the rate itself IS protected" },
-    ],
+    patterns: [{ re: /"X-LFH-Expect":\s*JSON\.stringify/, name: "forwards the expectation to /api/owner/staff" }],
   },
   {
     file: "app/owner/staff/page.tsx",
@@ -174,11 +181,13 @@ for (const spec of REACT_VALUE_EDITS) {
   // template literals needs — `api("POST", `/counts/${id}/line`)` contains no quoted action, so
   // the string form silently matched NOTHING and the file looked covered when it was not.
   const lines = src.split(/\r?\n/);
+  let matchedHere = 0;
   lines.forEach((line, i) => {
     const act = (spec.actions || []).find((a) => line.includes(`"${a}"`))
       || (spec.patterns || []).map((p) => (p.re.test(line) ? p.name : null)).find(Boolean);
     if (!act) return;
     valueEdits++;
+    matchedHere++;
     // The expectation is usually the patch() call's SECOND argument, so it can be a few lines DOWN
     // — but when the call is a plain fetch() the X-LFH-Expect header sits in the `headers` object
     // ABOVE the body line this loop matches on. Looking only forward marked two genuinely-protected
@@ -195,6 +204,25 @@ for (const spec of REACT_VALUE_EDITS) {
     else if (ex) { console.log(`  ➖ ${spec.file}:${i + 1}  ${act} — exempt: ${ex.why}`); }
     else { problems++; console.log(`  ❌ ${spec.file}:${i + 1}  ${act} — VALUE EDIT WITH NO EXPECTATION\n       ${line.trim().slice(0, 110)}`); }
   });
+
+  // A SPEC THAT MATCHES NOTHING IS A SPEC THAT HAS STOPPED GUARDING (added 2026-08-06, T10 sweep).
+  //
+  // This is the disease, not a symptom. The entry for app/owner/staff/[id]/page.tsx sat here for
+  // weeks after that page became a 38-line mount point: zero call sites matched, so the loop above
+  // contributed nothing, and the file printed one cheerful line about the route and moved on. The
+  // same thing had already happened once before with inventory.js, where a string-matched action
+  // never appeared in a template-literal call — the comment above records it.
+  //
+  // Twice is a pattern. A spec is a claim that this file contains value edits; if it does not, either
+  // the code moved (update the spec) or the writes are gone (delete it). Both are decisions someone
+  // has to make, and neither is "carry on printing green".
+  if (!matchedHere) {
+    problems++;
+    console.log(
+      `  ❌ ${spec.file} — this spec matched NOTHING, so it is guarding nothing.\n` +
+        `       Either the code moved (fix the actions/patterns) or the writes are gone (delete the spec).`,
+    );
+  }
 }
 
 console.log(`\n${valueEdits} value-edit call site(s): ${covered} protected, ${problems} unprotected`);

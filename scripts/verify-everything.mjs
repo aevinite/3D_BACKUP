@@ -2338,14 +2338,36 @@ phase("a bill that was deleted is still counted in the day's sales", async () =>
     "the reports query filters out archived rows — a deleted bill would vanish from the numbers");
 });
 phase("deleting a bill is a soft delete, never a hard one", async () => {
-  const files = ["app/api/editor/[...path]/route.ts", "app/api/owner/[...path]/route.ts"].filter((f) => existsSync(join(ROOT, f)));
+  // THIS USED TO CHECK ONE FILE AND THINK IT CHECKED TWO (fixed 2026-08-06, T10 sweep).
+  //
+  // It named `app/api/editor/[...path]/route.ts` and `app/api/owner/[...path]/route.ts` and ran them
+  // through `.filter(existsSync)`. The owner API has never been a catch-all route — it is twelve
+  // separate files — so that path silently dropped and the phase scanned a single file. Worse, the
+  // route that actually deletes and restores bills, app/api/admin/bills/route.ts, was never in the
+  // list at all.
+  //
+  // This is the automated check standing behind CLAUDE.md's billing-compliance block (India CGST
+  // §132 — the PetPooja summons). A compliance check must not be a list somebody forgot to extend,
+  // so it now walks every API route and every lib/ helper. `.filter(existsSync)` is gone: a path
+  // that stops existing is now reported, not skipped.
+  const walk = (dir, out = []) => {
+    for (const e of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+      const rel = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(rel, out);
+      else if (/\.ts$/.test(e.name)) out.push(rel);
+    }
+    return out;
+  };
+  const files = [...walk("app/api"), ...walk("lib")];
+  ok(files.length > 100, `scanned ${files.length} route/helper files`);
   const bad = [];
   for (const f of files) {
     const t = readFileSync(join(ROOT, f), "utf8");
-    // A DELETE against sessions/invoices would erase a sale — the compliance line.
-    if (/from\(\s*["']sessions["']\s*\)\s*\.delete\(/.test(t)) bad.push(f);
+    // A DELETE against sessions/invoices would erase a sale — the compliance line. `bills` and
+    // `invoices` are checked too: a later rename must not walk out from under this.
+    if (/from\(\s*["'`](?:sessions|invoices|bills)["'`]\s*\)[\s\S]{0,200}?\.delete\(/.test(t)) bad.push(f);
   }
-  ok(!bad.length, `${bad.join(", ")} hard-deletes a session row`);
+  ok(!bad.length, `${bad.join(", ")} hard-deletes a bill/session row — a sale would disappear from the books`);
 });
 phase("the trail that records who deleted a bill is real and in use", async () => {
   // There is no bill_audit table — migration 188 deliberately did NOT add a database-level
