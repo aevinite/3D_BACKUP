@@ -3807,6 +3807,27 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 .adm-logrow:last-child { border-bottom: 0; }
 .adm-logrow.head { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; background: color-mix(in srgb, var(--accent) 6%, transparent); }
 .adm-chip { font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px; text-transform: uppercase; white-space: nowrap; }
+/* ── ONE RULE FOR EVERY HUE-ON-ITS-OWN-TINT CHIP IN THE LIGHT CONSOLES ──────────────────────
+   The pattern all over both consoles is `background: color-mix(<hue> 16%, transparent);
+   color: <hue>` — a role colour, an owner's avatar colour, a status tone. Bright-on-dark reads
+   fine. On the LIGHT skin it becomes a mid-tone on a pale wash of the SAME hue, which measured
+   1.98-2.92:1 across .rp, .rp-panel, .own-av, .adm-chip and the status labels (live, 2026-08-06).
+   Every one of those call sites now also passes its hue as `--hue`, so this darkens the TEXT only
+   and leaves the wash exactly as designed. The hue is unchanged — a manager chip is still tan, an
+   owner's avatar still their colour — it is the same colour taken darker so it can be read.
+   Elements with no --hue fall back to currentColor, i.e. no change. */
+/* The hue arrives ONLY as --hue (never as an inline `color`, which would beat these rules and was
+   exactly why a first attempt did nothing). CSS owns the colour in both skins. */
+.rp, .rp-panel, .own-av, .hue-ink, .so-role, .blz-chip[style*="--hue"] { color: var(--hue, currentColor); }
+/* .adm-chip keeps its old dark-skin look (the hue lifted toward the body text) as the base. */
+.adm-chip { color: color-mix(in srgb, var(--hue, currentColor) 78%, var(--text)); }
+[data-skin="light"] .rp,
+[data-skin="light"] .rp-panel,
+[data-skin="light"] .own-av,
+[data-skin="light"] .adm-chip,
+[data-skin="light"] .so-role,
+[data-skin="light"] .hue-ink,
+[data-skin="light"] .blz-chip[style*="--hue"] { color: color-mix(in srgb, var(--hue, currentColor) 52%, #000); }
 .adm-muted { color: var(--muted); }
 .adm-empty { padding: 40px 16px; text-align: center; color: var(--muted); }
 /* ── Coming-soon page + overview teaser cards + nav "soon" chip ───────────── */
@@ -4228,7 +4249,7 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 /* Health page's status pills (latency / db / realtime). */
 .adx-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; }
 .adx-pill.good { background: color-mix(in srgb, var(--adm-ok) 18%, transparent); color: var(--adm-ok); }
-.adx-pill.warn { background: color-mix(in srgb, #d97706 18%, transparent); color: #d97706; }
+.adx-pill.warn { background: color-mix(in srgb, var(--adm-warn) 18%, transparent); color: var(--adm-warn); }  /* was a hard-coded #d97706, so it missed the light-skin token darkening — 2.63:1 (2026-08-06) */
 .adx-pill.bad { background: color-mix(in srgb, var(--adm-danger) 18%, transparent); color: var(--adm-danger); }
 .adx-pill .dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
 

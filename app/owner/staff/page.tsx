@@ -507,6 +507,9 @@ export default function OwnerStaffPage() {
         .ost-pn { font-weight: 700; font-size: 13.5px; }
         .ost-rolebadge { font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .03em; padding: 3px 8px; border-radius: 999px; background: rgba(128,128,128,.18); color: var(--muted); }
         .ost-rolebadge[data-role="manager"] { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+        /* The owner console's light --accent (#059669) on an 18% wash of itself was 2.92:1
+           (2026-08-06). Darker, same hue; the wash stays. */
+        :global([data-skin="light"]) .ost-rolebadge[data-role="manager"] { color: color-mix(in srgb, var(--accent) 62%, #000); }
         .ost-disabled { font-size: 10.5px; color: var(--adm-danger, #c0392b); font-weight: 700; }
         .ost-actions { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; margin-top: 8px; }
         .ost-editrow { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; padding-top: 8px; border-top: var(--border); }
