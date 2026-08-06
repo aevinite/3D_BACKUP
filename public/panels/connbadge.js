@@ -85,6 +85,9 @@
       // data-skin, not data-staffdark: the consoles keep data-staffdark on <html> in BOTH skins,
       // so the dark ink was being forced onto the light console (1.99:1). See ConnectionBadge.tsx.
       '[data-skin="dark"] .lfh-conn-txt,[data-skin="dark"] .lfh-conn-ms{color:var(--ink-dark)!important}',
+      // A light console beats the document-level dark rule — see ConnectionBadge.tsx for the
+      // lfh_theme=dark + aevidine_skin=light combination that exposed this.
+      'html [data-skin="light"] .lfh-conn-txt,html [data-skin="light"] .lfh-conn-ms{color:var(--ink-light)!important}',
       ".lfh-conn-n{font-weight:800;opacity:.9}",
       ".lfh-conn-n.warn{color:#ef4444}",
       ".lfh-conn-chev{opacity:.5;flex:0 0 auto}",
@@ -191,9 +194,9 @@
     if (v.ms != null) {
       msEl.innerHTML = ""; msEl.appendChild(document.createTextNode(String(v.ms)));
       var u = el("span", "lfh-conn-unit", " ms"); msEl.appendChild(u);
-      msEl.className = "lfh-conn-ms"; msEl.style.color = v.text; msEl.style.setProperty("--ink-dark", v.color); msEl.style.display = "";
+      msEl.className = "lfh-conn-ms"; msEl.style.color = v.text; msEl.style.setProperty("--ink-dark", v.color); msEl.style.setProperty("--ink-light", v.text); msEl.style.display = "";
     } else {
-      msEl.textContent = v.label; msEl.className = "lfh-conn-txt"; msEl.style.color = v.text; msEl.style.setProperty("--ink-dark", v.color); msEl.style.display = "";
+      msEl.textContent = v.label; msEl.className = "lfh-conn-txt"; msEl.style.color = v.text; msEl.style.setProperty("--ink-dark", v.color); msEl.style.setProperty("--ink-light", v.text); msEl.style.display = "";
     }
     // waiting-to-sync count
     var waiting = outbox.queued.length, failed = outbox.failed.length;
