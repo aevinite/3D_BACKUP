@@ -1,4 +1,4 @@
--- 048_staff_order_opens_session.sql
+-- 049_staff_order_opens_session.sql   [was titled 048_ until 2026-08-06]
 -- BUG: a waiter-tablet order for a table with NO open session was inserted with
 -- session_id = NULL ("orphan order"). The floor brain (lfh_floor_state) ignores
 -- session-less orders when sessions are ON ("stale leftovers → Free"), so the

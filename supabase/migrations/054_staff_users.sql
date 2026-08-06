@@ -1,4 +1,4 @@
--- 053_staff_users.sql — per-user staff logins with roles (Phase 1 auth). Service-
+-- 054_staff_users.sql — per-user staff logins with roles (Phase 1 auth). Service-
 -- role only; NEVER exposed to the guest anon key. Passwords/PINs stored as sha256
 -- hex (hashed in the API via lib/staffAuth.sha256hex).
 CREATE TABLE IF NOT EXISTS staff_users (

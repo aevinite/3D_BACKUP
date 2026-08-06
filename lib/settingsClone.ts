@@ -146,6 +146,12 @@ export function cleanClonedSettings(
   // inherit the flagship's maintenance state — else creating a restaurant while #1 is in
   // maintenance would silently ship the new one offline. (mig 004.)
   base.service_mode = false;
+  // Phone OTP before ordering: OFF. Migration 018 shelved the feature and turned it off on
+  // restaurant #1, but left the COLUMN default at true — and `lfh_place_order` refuses every
+  // guest order with 'otp_required' while it is on. Today a clone inherits #1's `false`, so this
+  // line changes nothing; it exists so the safety is a written decision instead of a property of
+  // whatever the flagship happens to be set to. (Mig 304 fixes the column default to match.)
+  base.require_otp = false;
   // Guest feature flags: start empty so the new restaurant uses the code defaults
   // (lib/features.ts), not #1's current on/off choices.
   base.features = {};

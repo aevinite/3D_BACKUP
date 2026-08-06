@@ -203,10 +203,18 @@ export const joinSession = (table: string, name: string | null, lat: number | nu
 // Is THIS device (or phone) banned? The guest app calls this on load to decide
 // whether to show the full "you're banned" screen instead of the menu (migration 077).
 export const checkBan = (restaurantId?: string) => rpc("lfh_check_ban", { p_device: getGuestDeviceId(), p_phone: null, p_restaurant_id: restaurantId ?? null });
-// A banned guest leaves a mobile number to ask staff to unban them; it surfaces on
-// the manager's ban panel (migration 077).
-export const requestUnban = (phone: string) =>
-  rpc("lfh_request_unban", { p_device: getGuestDeviceId(), p_phone: phone });
+// A banned guest leaves a mobile number to ask staff to unban them; it shows on the
+// manager's Customer log → 🚫 Blocked list as "🙋 asked to be unblocked" (migs 077/304).
+// The restaurant is passed so the request only touches THIS restaurant's block record —
+// a ban is per-restaurant (mig 142) and until mig 304 the appeal was not, so one café's
+// guest wrote their number onto another café's row.
+// Answers { ok } — ok:false means nothing matched, so the caller must NOT claim it was sent.
+export const requestUnban = (phone: string, restaurantId?: string) =>
+  rpc("lfh_request_unban", {
+    p_device: getGuestDeviceId(),
+    p_phone: phone,
+    p_restaurant_id: restaurantId ?? null,
+  });
 // Fetch the current state of a session (who's in it, status, etc.) by token.
 // SINGLE-FLIGHT: several widgets (status card, shared bill, owner-approve) each
 // refetch on the same realtime tick, firing 2–3 identical lfh_session_state calls

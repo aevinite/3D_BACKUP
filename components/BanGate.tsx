@@ -26,6 +26,7 @@ export default function BanGate() {
   const [requested, setRequested] = useState(false);    // has an unblock request already gone in?
   const [phone, setPhone] = useState("");               // the number the guest types
   const [sending, setSending] = useState(false);        // request in flight
+  const [failed, setFailed] = useState(false);          // the server matched no block record
 
   // Ask the server on mount, and re-ask when the tab is refocused — so the moment
   // staff unblock them, the wall lifts on their next look without a manual reload.
@@ -56,13 +57,18 @@ export default function BanGate() {
   if (!banned) return null;
 
   // Send the unblock request: stamp the guest's number onto their blocklist row.
+  // ONLY claim it was sent when the server says a row actually changed (mig 304). It used to
+  // answer ok:true unconditionally, so the guest saw "✓ sent" for a request that wrote nothing
+  // and then waited for staff who had nothing to see — a tap reporting success it never had.
   const submit = async () => {
     const p = phone.trim();
     if (p.length < 5 || sending) return;
     setSending(true);
-    const r = await requestUnban(p);
+    setFailed(false);
+    const r = await requestUnban(p, restaurantId);
     setSending(false);
     if (r.ok) setRequested(true);
+    else setFailed(true); // refuse visibly rather than pretend
   };
 
   return (
@@ -90,6 +96,11 @@ export default function BanGate() {
             <button className="ban-btn" disabled={sending || phone.trim().length < 5} onClick={submit}>
               {sending ? "Sending…" : "Request unblock"}
             </button>
+            {failed && (
+              <p className="ban-fail" role="status">
+                We couldn&apos;t match that number to this block. Please speak to a member of staff.
+              </p>
+            )}
           </div>
         )}
       </div>

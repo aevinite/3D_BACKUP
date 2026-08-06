@@ -26,8 +26,11 @@ Source of truth for DDL stays `supabase/migrations/*.sql` (also copied under
 | features | jsonb | NO | '{}' |
 | gstin | text | YES | |
 | tax_rate | numeric | YES | |
-| tax_inclusive | boolean | YES | |
 | invoice_prefix | text | YES | |
+
+<!-- tax_inclusive (mig 037) was dropped by mig 304: superseded by price_tax_mode (mig 270),
+     read by no code, NULL on every row. Whether prices include tax is `price_tax_mode`. -->
+
 
 ### sessions  — a table's dining session (open/closed = "is this table busy")
 | column | type | null | default |

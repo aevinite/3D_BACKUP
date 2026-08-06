@@ -1,4 +1,5 @@
--- 119_admin_platform_analytics.sql — cross-restaurant OPERATIONAL analytics for
+-- 123_admin_platform_analytics.sql — cross-restaurant OPERATIONAL analytics for
+-- [was titled 119_ until 2026-08-06 — 119 is tax_rate_consistency]
 -- the admin panel (Analytics, per-restaurant Report, System health). NO revenue —
 -- order COUNTS only (CLAUDE.md hard rule: no food-revenue anywhere in /aevinite).
 -- Mirrors the 089_owner_analytics.sql pattern: all aggregation done in ONE grouped

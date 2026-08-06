@@ -1,4 +1,5 @@
--- 146 — lfh_admin_restaurant_health(): one-glance "is this restaurant alive?" signal
+-- 149 — lfh_admin_restaurant_health(): one-glance "is this restaurant alive?" signal
+-- [was titled 146 until 2026-08-06 — 146 is requests_cleanup_restaurant_scope]
 -- for the admin Restaurants list, computed for EVERY restaurant in ONE round-trip.
 --
 -- The admin panel shows NO earnings (hard rule), so this returns only ACTIVITY signals,

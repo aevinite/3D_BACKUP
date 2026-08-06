@@ -3931,6 +3931,9 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
 .ban-btn { width: 100%; padding: 13px 16px; font-size: 15px; font-weight: 700; border: none; border-radius: 12px; cursor: pointer; background: var(--accent, #c9a35b); color: #1a140e; }
 .ban-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 .ban-done { font-size: 14px; line-height: 1.5; color: #16a34a; font-weight: 600; margin: 4px 0 0; }
+/* The honest refusal: the number matched no block record, so we say so instead of a green ✓
+   the guest would wait on (mig 304). Amber, not red — nothing went wrong, it just isn't a match. */
+.ban-fail { font-size: 13px; line-height: 1.5; color: #b45309; font-weight: 600; margin: 8px 0 0; }
 
 /* ════════════════════════════════════════════════════════════════════════════
    ADMIN OPS CONSOLE SKIN (redesign 2026-07-04) — scoped to `.adm.adx`, the
