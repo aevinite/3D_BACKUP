@@ -32,6 +32,8 @@ const migrationSrcWith = (needle) => {
 const editor = read("public/panels/editor/app.js");
 const billdoc = read("public/panels/billdoc.js");
 const tablet = read("public/panels/tablet/app.js");
+// The ONE refusal-wording list, shared by every panel's queue (moved here 2026-08-06).
+const outbox = read("public/panels/outbox.js");
 const editorRoute = read("app/api/editor/[...path]/route.ts");
 const tabletRoute = read("app/api/tablet/[...path]/route.ts");
 
@@ -126,8 +128,18 @@ check("manager: the Change-table row says 'unmerge first' on a merged party (bot
   (editor.match(/why: mergeGroupLabel\(t\) \? "unmerge first"/g) || []).length >= 2);
 check("manager: no shift picker offers a merged child as a free table",
   (editor.match(/&& !mergeParentOf\(i\)/g) || []).length >= 2);
-check("manager: refusal reasons are shown in plain words (KOT_REASON_TEXT)",
-  /const KOT_REASON_TEXT = \{/.test(editor) && /KOT_REASON_TEXT\[r\.reason\]/.test(editor));
+// The LIST moved to public/panels/outbox.js (2026-08-06) so the waiter tablet and the "Needs you"
+// sheet speak the same sentences as the manager's toast instead of showing raw codes — this used
+// to assert the object literal lived in editor/app.js, which was checking WHERE it is rather than
+// THAT it works. Now: the one list exists, the manager still looks reasons up in it, and — new —
+// the merge refusals this file is about are actually IN it, which the old check never verified.
+check("the refusal wording is one shared list (outbox.js REASONS), not a per-panel copy",
+  /const REASONS = \{/.test(outbox) && /reasonText\(/.test(outbox) && /REASONS,/.test(outbox));
+check("manager: refusal reasons are shown in plain words (KOT_REASON_TEXT reads that list)",
+  /const KOT_REASON_TEXT = \(window\.LFH_OUTBOX && window\.LFH_OUTBOX\.REASONS\)/.test(editor)
+  && /KOT_REASON_TEXT\[r\.reason\]/.test(editor));
+check("…and the merge refusals are in it, in words (party_merged / merged_child)",
+  /party_merged: "[^"]{15,}"/.test(outbox) && /merged_child: "[^"]{15,}"/.test(outbox));
 check("tablet: the Change-table row says 'unmerge first' on a merged party",
   /mergeGroupLabel\(t\) \? "Change table — unmerge first"/.test(tablet));
 check("tablet route: shiftErrMsg speaks the two merge refusals",
