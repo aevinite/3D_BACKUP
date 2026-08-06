@@ -153,7 +153,7 @@ export default function AdminOwners() {
         {/* No-owner warning */}
         {unowned.length > 0 && (
           <div style={{ ...card, padding: 11, marginTop: 10, borderColor: "#b45309", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 13, color: "#fcd34d" }}><i className="fas fa-triangle-exclamation" style={{ marginRight: 7 }} aria-hidden="true" />{unowned.length === 1 ? "1 restaurant has" : `${unowned.length} restaurants have`} no owner:</span>
+            <span className="hue-ink" style={{ ["--hue" as string]: "#fcd34d", fontSize: 13 }}><i className="fas fa-triangle-exclamation" style={{ marginRight: 7 }} aria-hidden="true" />{unowned.length === 1 ? "1 restaurant has" : `${unowned.length} restaurants have`} no owner:</span>
             {unowned.map((r) => <span key={r.id} style={{ ...chip, borderColor: "#b45309" }}><span style={{ ...dot, background: chipColor(r.id) }} />{r.name}</span>)}
           </div>
         )}
@@ -197,9 +197,9 @@ export default function AdminOwners() {
               const match = matchedRestaurant(o, query.trim().toLowerCase());
               return (
                 <button key={o.id} className={`own-row${on ? " sel" : ""}`} onClick={() => setSelId(o.id)}>
-                  <span aria-hidden className="own-av" style={{ background: `${chipColor(o.id)}33`, color: chipColor(o.id) }}>{initials(o.name)}</span>
+                  <span aria-hidden className="own-av" style={{ ["--hue" as string]: chipColor(o.id), background: `${chipColor(o.id)}33` }}>{initials(o.name)}</span>
                   <span style={{ minWidth: 0, flex: 1, textAlign: "left" }}>
-                    <span className="own-nm">{o.name}{!o.active && <span style={{ fontSize: 10.5, color: "#fca5a5", fontWeight: 600 }}> · off</span>}</span>
+                    <span className="own-nm">{o.name}{!o.active && <span className="hue-ink" style={{ fontSize: 10.5, ["--hue" as string]: "#fca5a5", fontWeight: 600 }}> · off</span>}</span>
                     <span className="own-sub">@{o.username} · {o.restaurants.length} restaurant{o.restaurants.length === 1 ? "" : "s"}</span>
                     {match && <span className="own-match"><i className="fas fa-store" style={{ fontSize: 8.5, marginRight: 4 }} aria-hidden="true" />owns {match}</span>}
                   </span>
@@ -342,7 +342,7 @@ function ModalShell({ id, onClose, width = 460, label, children }: {
 function ModalHead({ tone, icon, title, sub, subColor }: { tone: Tone; icon: string; title: string; sub?: string; subColor?: string }) {
   return (
     <div style={{ display: "flex", gap: 14, alignItems: "flex-start", padding: "20px 20px 4px" }}>
-      <span aria-hidden style={{ width: 46, height: 46, borderRadius: 13, display: "grid", placeItems: "center", fontSize: 19, flex: "none", background: TONE[tone].bg, color: TONE[tone].c }}><i className={`fas ${icon}`} /></span>
+      <span aria-hidden className="hue-ink" style={{ width: 46, height: 46, borderRadius: 13, display: "grid", placeItems: "center", fontSize: 19, flex: "none", background: TONE[tone].bg, ["--hue" as string]: TONE[tone].c }}><i className={`fas ${icon}`} /></span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <h2 style={{ fontSize: 18, fontWeight: 800, letterSpacing: "-.01em", margin: 0 }}>{title}</h2>
         {sub ? <p style={{ fontSize: 12.5, color: subColor || "var(--muted)", margin: "3px 0 0", lineHeight: 1.5 }}>{sub}</p> : null}
@@ -372,7 +372,7 @@ function OwnerChip({ owner }: { owner: Owner }) {
         <div style={{ fontWeight: 750, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner.name}</div>
         <div style={{ fontSize: 11.5, color: "var(--muted)" }}>@{owner.username}</div>
       </div>
-      <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 999, background: owner.active ? TONE.ok.bg : TONE.danger.bg, color: owner.active ? TONE.ok.c : TONE.danger.c }}>{owner.active ? "Active" : "Suspended"}</span>
+      <span className="hue-ink" style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: ".04em", textTransform: "uppercase", padding: "3px 8px", borderRadius: 999, background: owner.active ? TONE.ok.bg : TONE.danger.bg, ["--hue" as string]: owner.active ? TONE.ok.c : TONE.danger.c }}>{owner.active ? "Active" : "Suspended"}</span>
     </div>
   );
 }
@@ -641,7 +641,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 19, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner.name}</div>
           <div style={{ fontSize: 12, color: "var(--muted)" }}>
-            @{owner.username} · {owner.active ? <span style={{ color: "#34d399", fontWeight: 700 }}>Active</span> : <span style={{ color: "#f87171", fontWeight: 700 }}>Suspended</span>}
+            @{owner.username} · {owner.active ? <span className="hue-ink" style={{ ["--hue" as string]: "#34d399", fontWeight: 700 }}>Active</span> : <span className="hue-ink" style={{ ["--hue" as string]: "#f87171", fontWeight: 700 }}>Suspended</span>}
             · created {created ? new Date(created).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "—"} · seen {seen(owner.lastSeenAt)}
           </div>
         </div>
@@ -685,7 +685,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
                 <i className="fas fa-eye" style={ic} aria-hidden="true" />Visit panel</a>
             );
           })()}
-          <button style={{ ...actBtn, color: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
+          <button className="hue-ink" style={{ ...actBtn, ["--hue" as string]: owner.active ? "#fca5a5" : "#86efac" }} disabled={busy}
             onClick={() => setConfirm(owner.active ? {
               tone: "danger", icon: "fa-ban", ctaLabel: "Suspend owner", ctaTone: "danger",
               title: `Suspend ${owner.name}?`, sub: "Reversible — you can restore them any time.", ownerChip: true,
@@ -734,7 +734,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
               <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "11px 13px", border: "var(--border)", borderRadius: 11, flexWrap: "wrap" }}>
                 <span aria-hidden style={{ width: 30, height: 30, borderRadius: 8, background: chipColor(r.id), flex: "none" }} />
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}{!r.active && <span style={{ fontSize: 10.5, color: "#fca5a5", fontWeight: 600 }}> · suspended</span>}</div>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}{!r.active && <span className="hue-ink" style={{ fontSize: 10.5, ["--hue" as string]: "#fca5a5", fontWeight: 600 }}> · suspended</span>}</div>
                   <div style={{ fontSize: 11.5, marginTop: 1 }}>
                     {r.primary
                       ? <span style={{ color: "#fbbf24", fontWeight: 700 }}><i className="fas fa-star" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Primary owner</span>
@@ -751,13 +751,13 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
                 {!r.primary && (
                   <button style={{ ...actBtn, color: "#fbbf24", padding: "7px 10px" }} disabled={busy}
                     title={`Make ${owner.name} the primary owner of ${r.name}`}
-                    onClick={() => makePrimary(r)}><i className="fas fa-star" style={ic} aria-hidden="true" />Make primary</button>
+                    onClick={() => makePrimary(r)}><i className="fas fa-star" style={ic} aria-hidden="true" /><span className="hue-ink" style={{ ["--hue" as string]: "#60a5fa" }}>Make primary</span></button>
                 )}
                 <a style={{ ...actBtn, textDecoration: "none", color: "#60a5fa", padding: "7px 10px" }}
                   title={`Open ${owner.name}'s owner panel for ${r.name} (no password, invisible to them)`}
                   href={panelHref(r.id, owner.id)} target="_blank" rel="noreferrer">
                   <i className="fas fa-eye" style={ic} aria-hidden="true" />Open panel</a>
-                <button aria-label={`Remove ${r.name}`} disabled={busy} style={{ ...actBtn, color: "#fca5a5", padding: "7px 10px" }} onClick={() => detachRestaurant(r)}><i className="fas fa-xmark" style={ic} aria-hidden="true" /></button>
+                <button aria-label={`Remove ${r.name}`} disabled={busy} className="hue-ink" style={{ ...actBtn, ["--hue" as string]: "#fca5a5", padding: "7px 10px" }} onClick={() => detachRestaurant(r)}><i className="fas fa-xmark" style={ic} aria-hidden="true" /></button>
               </div>
             ))}
             {owner.restaurants.length === 0 && <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "6px 2px" }}>No restaurants yet — assign one above.</div>}
@@ -907,7 +907,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
                       <span aria-hidden style={{ width: 17, height: 17, borderRadius: 5, border: on ? 0 : "1.5px solid var(--muted)", background: on ? "#22c55e" : "transparent", color: "#052e16", display: "grid", placeItems: "center", fontSize: 10, fontWeight: 900, flexShrink: 0 }}>{on ? <i className="fas fa-check" /> : null}</span>
                       <span style={{ ...dot, background: chipColor(r.id) }} />
                       <span style={{ flex: 1 }}>{r.name}</span>
-                      <span style={{ fontSize: 11, color: r.hasOwner ? "var(--muted)" : "#fcd34d" }}>{r.hasOwner ? "has an owner" : "no owner yet"}</span>
+                      <span className={r.hasOwner ? undefined : "hue-ink"} style={r.hasOwner ? { fontSize: 11, color: "var(--muted)" } : { ["--hue" as string]: "#fcd34d", fontSize: 11 }}>{r.hasOwner ? "has an owner" : "no owner yet"}</span>
                     </button>
                   );
                 })}

@@ -29,7 +29,7 @@ type Summary = { total: number; avg: number; dist: number[]; unhandled: number }
 const wrap: React.CSSProperties = { overflowWrap: "anywhere", wordBreak: "break-word" };
 const IST = "Asia/Kolkata"; // every date shown here is in India time, like the rest of the panel
 const Stars = ({ n }: { n: number }) => (
-  <span aria-label={`${n} out of 5`} style={{ color: "#f5a623", letterSpacing: 1 }}>
+  <span aria-label={`${n} out of 5`} className="hue-ink" style={{ ["--hue" as string]: "#f5a623", letterSpacing: 1 }}>
     {"★".repeat(n)}<span style={{ color: "var(--border, #ccc)" }}>{"★".repeat(5 - n)}</span>
   </span>
 );

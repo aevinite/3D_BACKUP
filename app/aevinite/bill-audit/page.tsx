@@ -30,6 +30,9 @@ type InvEvent = { event: string; no: number | null; reason: string | null; actor
 type CNote = { no: number; amount: number; reason: string | null; actor: string | null; at: string };
 type Expanded = { trail: TrailEvent[]; invoiceHistory: InvEvent[]; creditNotes: CNote[] } | "loading";
 
+// `tone` is drawn as TEXT (the state label, its icon, the stat card). On the LIGHT console these
+// mid-tones on white measured 2.15-2.28:1, so every place that paints one passes it as --hue and
+// the .hue-ink rule in globals.css darkens the text per skin.
 const META: Record<BillState, { label: string; tone: string; icon: IconName }> = {
   running:   { label: "Running",       tone: "#22c55e", icon: "running" },
   settled:   { label: "Settled",       tone: "#3b82f6", icon: "settled" },
@@ -240,7 +243,7 @@ export default function AdminBills() {
         <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")}>All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? totalAll : "\u2014"}</span></button>
         {ORDER.map((k) => (
           <button key={k} className="blz-chip" onClick={() => setState(k)} style={chip(state === k, META[k].tone)}>
-            <span style={{ color: META[k].tone, display: "inline-flex" }}><Ico n={META[k].icon} s={14} /></span>
+            <span className="hue-ink" style={{ ["--hue" as string]: META[k].tone, display: "inline-flex" }}><Ico n={META[k].icon} s={14} /></span>
             {META[k].label} <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? (counts[k] || 0) : "\u2014"}</span>
           </button>
         ))}
@@ -398,7 +401,7 @@ function Stat({ icon, tone, k, v, sub, calculating }: { icon: IconName; tone: st
   return (
     <div className="adm-card blz-stat" style={{ padding: "14px 16px" }}>
       <div style={{ fontSize: 11.5, color: "var(--muted)", textTransform: "uppercase", letterSpacing: ".6px", marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ color: tone, display: "inline-flex" }}><Ico n={icon} s={14} /></span>{k}
+        <span className="hue-ink" style={{ ["--hue" as string]: tone, display: "inline-flex" }}><Ico n={icon} s={14} /></span><span className="hue-ink" style={{ ["--hue" as string]: tone }}>{k}</span>
       </div>
       <div className="fit-num" style={{ fontSize: 22, fontWeight: 700, letterSpacing: "-.5px", fontVariantNumeric: "tabular-nums", opacity: calculating ? 0.45 : 1 }}>
         {calculating ? "—" : v}
@@ -478,9 +481,12 @@ function Trail({ e, openedAt, rest }: { e: Expanded | undefined; openedAt: strin
 }
 
 function chip(active: boolean, tone?: string): React.CSSProperties {
-  return {
-    border: active ? `1px solid ${tone || "var(--accent)"}` : "var(--border)",
-    background: active ? `color-mix(in srgb, ${tone || "var(--accent)"} 18%, transparent)` : "transparent",
-    color: active ? (tone || "var(--accent)") : "var(--muted)", fontWeight: active ? 700 : 600,
-  };
+  // No inline `color` on the active chip — it would outrank the per-skin rules in globals.css. The
+  // tone travels as --hue instead; .blz-chip picks it up and the light skin darkens it. ("Closed
+  // unpaid" was 2.15:1 on the light console, 2026-08-06.)
+  return active
+    ? { border: `1px solid ${tone || "var(--accent)"}`,
+        background: `color-mix(in srgb, ${tone || "var(--accent)"} 18%, transparent)`,
+        ["--hue" as string]: tone || "var(--accent)", fontWeight: 700 }
+    : { border: "var(--border)", background: "transparent", color: "var(--muted)", fontWeight: 600 };
 }

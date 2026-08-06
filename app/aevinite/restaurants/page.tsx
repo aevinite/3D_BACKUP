@@ -250,7 +250,7 @@ export default function AdminRestaurants() {
                   return (
                     <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }} title={hs.note}>
                       <span style={{ width: 8, height: 8, borderRadius: "50%", background: hs.color, flexShrink: 0 }} />
-                      <span style={{ fontSize: 12.5, color: hs.color, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hs.label}</span>
+                      <span className="hue-ink" style={{ ["--hue" as string]: hs.color, fontSize: 12.5, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hs.label}</span>
                       {health[r.id]?.open_issues ? <span className="adm-chip" title={`${health[r.id].open_issues} open issue(s)`} style={{ background: "color-mix(in srgb, var(--adm-danger) 18%, transparent)", color: "var(--adm-danger)", fontSize: 10, padding: "1px 6px" }}>{health[r.id].open_issues}</span> : null}
                     </span>
                   );

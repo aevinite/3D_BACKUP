@@ -1126,6 +1126,9 @@ export function TreeStyle() {
   }
   .at-count { font-size:11.5px; font-weight:800; color:var(--muted); background:var(--bg); border:var(--border); padding:5px 9px; border-radius:8px; white-space:nowrap; flex:none; font-variant-numeric:tabular-nums; }
   .at-count.all { color:#34d399; border-color:color-mix(in srgb,#34d399 42%,transparent); background:color-mix(in srgb,#34d399 12%,transparent); }
+  /* #34d399 as TEXT on a 12% wash of itself measured 2.89:1 on the light console (2026-08-06).
+     Same hue, taken darker — the wash is untouched. */
+  :global([data-skin="light"]) .at-count.all { color: color-mix(in srgb, #34d399 52%, #000); }  /* :global() — styled-jsx scopes a bare selector and it matched nothing */
 
   /* ── BOXES (owner, 2026-07-31: "make sure all have box like that, well structured") ────────
      Every setting is a box, and a setting's sub-settings are boxes INSIDE its box, so the
@@ -1187,6 +1190,10 @@ export function TreeStyle() {
   /* The section header's counter chip picks up the run too when everything inside is on. */
   .acc2-sect .at-count.all { color:#dd649e; border-color:color-mix(in srgb,#dd649e 45%,transparent);
     background:color-mix(in srgb,#dd649e 12%,transparent); }
+  /* #dd649e as text on a 12% wash of itself = 2.89:1 on the light console (2026-08-06). Same pink,
+     darker, wash untouched. This is the rule that actually paints it — the .at-count.all above is
+     overridden here for section headers, which is why darkening only that one changed nothing. */
+  :global([data-skin="light"]) .acc2-sect .at-count.all { color: color-mix(in srgb, #dd649e 58%, #000); }
 
   .at-box { position:relative; border:1.5px solid color-mix(in srgb, var(--lvl) 30%, transparent); border-radius:14px;
     background:color-mix(in srgb, var(--lvl) 5%, color-mix(in srgb, var(--card) 78%, var(--bg))); padding:13px 14px; }

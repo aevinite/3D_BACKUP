@@ -61,9 +61,12 @@ export function panelLabel(panel: string | null | undefined): string {
  *  it mixes toward light grey, so nothing there looks different. */
 export function panelChipStyle(panel: string | null | undefined): React.CSSProperties {
   const c = PANEL_COLOR[panel || ""] || "#888";
+  // No inline `color`: an inline colour beats the stylesheet, and the per-skin mix has to be
+  // decided in CSS (see the .adm-chip rules in app/globals.css). Mixing 78% with var(--text)
+  // lightens nicely on dark but left "Kitchen"/"Manager" at 2.62-2.85:1 on the light console.
   return {
     background: `color-mix(in srgb, ${c} 22%, transparent)`,
-    color: `color-mix(in srgb, ${c} 78%, var(--text))`,
+    ["--hue" as string]: c,
   };
 }
 // EVERY action code the app can write needs a line here (2026-08-03). The Activity log used to

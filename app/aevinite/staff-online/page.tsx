@@ -163,7 +163,7 @@ export default function AdminStaffOnline() {
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div className="so-name">{u.name || u.username}</div>
                   <div className="so-meta">
-                    <span className="so-role" style={{ color, borderColor: color }}>{ROLE_LABEL[u.role] || u.role}</span>
+                    <span className="so-role" style={{ ["--hue" as string]: color, borderColor: color }}>{ROLE_LABEL[u.role] || u.role}</span>
                     <span className="so-rest">{u.restaurantName || "—"}</span>
                   </div>
                   <div className={`so-status${hot ? " hot" : ""}`}>

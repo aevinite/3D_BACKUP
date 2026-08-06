@@ -422,7 +422,7 @@ export default function AdminRepair() {
                         <i className="fas fa-rotate-left" aria-hidden="true" style={{ marginRight: 4 }} />came back after the fix
                       </span>
                     ) : null}
-                    <span className="rp-panel" style={{ color, borderColor: color }}>{PANEL_NAME[a.panel] || a.panel}</span>
+                    <span className="rp-panel" style={{ ["--hue" as string]: color, borderColor: color }}>{PANEL_NAME[a.panel] || a.panel}</span>
                     {a.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{a.restaurant_name}</span> : null}
                     <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(g.latest)}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
                   </div>
