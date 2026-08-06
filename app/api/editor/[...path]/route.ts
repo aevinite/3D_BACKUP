@@ -1375,14 +1375,26 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         seen.add(no);
         if (a.status === "cancelled") numbered.push({ no, note: `${a.source || "parcel"} · cancelled`, at: ist(a.created_at) });
       }
-      // The one line that matters: a number the counter handed out that NOTHING now carries. Every
-      // path in this product keeps its row (soft-delete, void, cancel all leave the number attached),
-      // so this list should always be empty — which is exactly why it is worth printing. If it ever
-      // is not, that is the question to ask, and the sheet asks it rather than staying quiet.
+      // NO "IS ANY NUMBER MISSING?" ALARM HERE — REMOVED AFTER IT CRIED WOLF TWICE (2026-08-06).
+      //
+      // The intent was good: state on the day-close sheet that every number the counter issued is
+      // accounted for. Making that claim TRUE needs two things this handler cannot have. First, the
+      // authoritative count of numbers issued today, which lives in `daily_counters`, not in whatever
+      // rows are still findable — inferring a range from min/max of what we can see turns any
+      // unfindable row into an accusation. Second, the guarantee that no row is ever hard-deleted:
+      // true of every path in the product (soft-delete, void and cancel all keep the number attached)
+      // but NOT of the dev stack, where cleanup scripts really do remove orders.
+      //
+      // Measured on the live backup: the first version named 2 numbers, the second — after being
+      // scoped correctly for lazy bill_no — named 25. Both were wrong, and a day-close sheet that
+      // accuses a restaurant of a missing sale is worse than one that stays quiet about it (the
+      // don't-cry-wolf rule). So the sheet now states only what it can prove: the range it can see,
+      // and every number sitting on a cancelled / deleted / voided bill WITH its reason and time —
+      // which is what the owner actually asked for ("nothing tells you WHY 43 is missing").
+      //
+      // If the alarm is ever wanted, the honest way in is `daily_counters` as the range, not this.
       const lo = seen.size ? Math.min(...seen) : 0;
       const hi = seen.size ? Math.max(...seen) : 0;
-      const unaccounted: number[] = [];
-      for (let n = lo; n <= hi && seen.size; n++) if (!seen.has(n)) unaccounted.push(n);
       numbered.sort((a, b) => a.no - b.no);
 
       return ok({
@@ -1390,7 +1402,6 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         numbering: {
           from: lo, to: hi, issued: seen.size,
           flagged: numbered.slice(0, 200),
-          unaccounted: unaccounted.slice(0, 200),
         },
         date: new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }), since,
         dineIn: { orderCount, bills: groups.size, gross: r2(gross), discount: r2(disc), taxable: r2(taxable), tax: r2(tax), net: r2(net),
