@@ -395,6 +395,20 @@ console.log("\n── the bill a person is actually handed (T7 sweep) ──");
       ? ok("a soft-deleted order is not charged on the bill")
       : bad(`a soft-deleted order is still billed (total ${BILLDOC.billMoney(os, S5).total}, expected 105)`,
         "the paper charges for a line every ledger says is not there");
+    // …AND IT IS NOT PRINTED EITHER. The check above only ever asked billMoney, so it passed for
+    // months while billData still listed the tombstoned dish in the ITEM ROWS: the paper showed
+    // A(500) + B(100) over a Subtotal of 100 and a TOTAL of 105 — rows that contradict their own
+    // total on a document headed "Tax Invoice", which is the exact fault class billRows() exists to
+    // prevent (T7 sweep, 2026-08-06). The rows and the money must drop the SAME orders.
+    {
+      const d = BILLDOC.billData({ settings: S5, restaurant: { slug: "x" }, orders: os, tableDisp: "5", session: {} });
+      const titles = (d.lines || []).map((l) => l.title);
+      const rowSum = (d.lines || []).reduce((a, l) => a + (parseFloat(l.price) || 0) * Math.max(1, parseInt(l.qty, 10) || 1), 0);
+      !titles.includes("A") && titles.includes("B") && rowSum === 100
+        ? ok("  …and it is not PRINTED either — the item rows add up to the subtotal")
+        : bad(`a soft-deleted order still prints: rows ${JSON.stringify(titles)} summing to ${rowSum}, subtotal ${d.subtotal}`,
+          "a guest is handed a bill listing a dish they are not charged for, and it cannot be added up");
+    }
   }
 
   // 4. A REPRINT KEEPS THE BILL'S OWN DATE. It was always `new Date()`, so a reprint stamped today

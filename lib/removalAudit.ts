@@ -26,7 +26,9 @@ import type { StaffUser } from "@/lib/userAuth";
  *  Guarded by scripts/verify-audit-coverage.mjs. */
 export type RemovalKind =
   | "order_cancelled"     // a KOT voided — nothing charged to the guest
-  | "order_deleted"       // a bill taken out of the reports (tombstoned, restorable)
+  | "order_deleted"       // a bill taken off the manager's working list (tombstoned, restorable —
+                          //   it STAYS in the reports, the Z-report and the tax return; see
+                          //   lib/accessTree.ts's delete_bill row for why the wording matters)
   | "dish_removed"        // one dish taken off a live order
   | "qty_reduced"         // a dish's quantity lowered on a live order
   | "menu_item_deleted"   // a dish / category / tag taken off the menu

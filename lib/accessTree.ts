@@ -201,7 +201,17 @@ const ACTIONS: ActionDef[] = [
   // reopen row and the percentage cap INSIDE the discount row — his words: "there will be a
   // drop down for reopen bill how much minute is set… you could able to go inside and change".
   { id: "delete_bill", name: "Delete a bill", flag: "delete_bill", mgrDef: false, pin: true,
-    what: "Takes a bill out of the reports. The number is NOT reused — the next bill still takes the next number — and nothing is erased: the bill stays in the records and in the audit, it simply stops counting towards sales." },
+    // WHAT IT ACTUALLY DOES — the old wording promised the illegal button (2026-08-06). It read
+    // "Takes a bill out of the reports … it simply stops counting towards sales", which is not what
+    // the code does and is the one capability this product's whole compliance argument refuses
+    // (docs/COMPLIANCE-GUARDRAILS.md §2, "hide sales from the Z-report"). A delete funnels through
+    // lib/softDelete.ts, which stamps deleted_at/by/reason and touches NEITHER status NOR
+    // payment_status — so the Z-report (deliberately unfiltered, see the editor route's own note at
+    // /stats · /zreport · gst-report) and every owner money function still count the sale. What it
+    // really does is take the bill off the manager's working list. This sentence is what an admin
+    // reads while deciding whether to hand a manager the strongest removal in the product, so it has
+    // to describe the product we actually built rather than the one that gets founders summoned.
+    what: "Takes a bill off the manager's working list. The number is NOT reused — the next bill still takes the next number — and nothing is erased or hidden: the bill stays in the records, in the audit, in the Z-report and in the tax return, and an admin can restore it." },
   // DEFAULT OFF (owner, 2026-08-02, superseding his earlier same-day word that it ships on):
   // "reopening the bill will be off only, by default — permission will be off for all the
   // restaurants." The 5-minute window below still applies wherever an admin switches it ON.

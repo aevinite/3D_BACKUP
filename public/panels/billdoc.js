@@ -448,6 +448,12 @@
 // dotted rule. Those are the lines a cook must read correctly on a rushed pass, so they were the
 // worst place to keep grey. Hierarchy is size, as on the bill; nothing here is under 12px.
 + "      .kl{font-size:14px;padding:4px 0;border-bottom:1px solid #000}.kl .q{font-weight:700;margin-right:6px}.kl i{font-style:normal;color:#000;font-size:12px}\n"
+// …AND THE PER-LINE NOTE, which was the one size left to the browser (2026-08-06). It is emitted in
+// a bare <small>, so it inherited the UA's 0.83em off the 14px line — measured 11.67px in Chrome,
+// under the 12px floor this ticket's own rule states two comments up. That note is the guest's
+// specific instruction ("no onion for the child"), i.e. the line a cook most needs to read on a
+// rushed pass, and it was the smallest text on the paper. Pinned like every other size here.
++ "      .kl small{font-size:12px}\n"
 + "      .al{margin-top:8px;font-weight:700;font-size:13px;border:1px solid #000;padding:4px}\n"
 // The duplicate banner (owner, 2026-08-04: "reprint … like duplicate in big words on top").
 // Big, bordered, uppercase — a reprinted ticket must be impossible to mistake for a fresh
@@ -764,7 +770,18 @@
     var s = a.settings || {};
     var orders = a.orders || [];
     var m = a.money || billMoney(orders, s);
-    var live = orders.filter(function (o) { return o.status !== "cancelled"; });
+    // THE ITEM ROWS AND THE MONEY MUST DROP THE SAME ORDERS (2026-08-06). billMoney() was taught
+    // on 2026-08-05 to exclude a soft-deleted order from the subtotal, the tax and the TOTAL; this
+    // list — which is what actually gets PRINTED as the item rows — was left filtering only
+    // `cancelled`, while the comment below already claimed otherwise. So a tombstoned line stayed on
+    // the paper when its money did not: one live ₹200 order beside a deleted ₹100 one printed rows
+    // adding to ₹300 over a Subtotal of ₹200 and a TOTAL of ₹210, on a document headed "Tax
+    // Invoice", with no round-off row able to explain the gap. Both panel doors happen to strip
+    // soft-deletes before they get here (the editor route's `oq.is("deleted_at", null)` and
+    // lib/liveBoard), so nothing reached it today — but a bill's rows and its total may not sit one
+    // filter apart from disagreeing (COMPLIANCE §3, reconcile to the rupee). Same predicate as
+    // billMoney now; verify:print-format asserts the ROWS, not just the total.
+    var live = orders.filter(function (o) { return o.status !== "cancelled" && !o.deleted_at; });
     var bi = billIdentity(s, a.restaurant || {});
 
     /* A CANCELLED BILL IS NOT A TAX INVOICE (2026-08-05).
@@ -779,8 +796,8 @@
        listing what was ordered (a void record nobody can read is no record at all) and
        charging nothing. Nothing is hidden — the compliance rule is that a cancelled sale stays
        visible, not that it prints as a tax invoice. */
-    // Explicitly "every order was CANCELLED", not "live is empty": since T7's fix `live` also
-    // drops soft-deleted orders, and a tombstoned bill is a different thing from a voided sale.
+    // Explicitly "every order was CANCELLED", not "live is empty": `live` also drops soft-deleted
+    // orders (see above), and a tombstoned bill is a different thing from a voided sale.
     var voidedAll = orders.length > 0 && orders.every(function (o) { return o.status === "cancelled"; });
     if (voidedAll) live = orders;   // show what WAS ordered; the money below stays ₹0
 
@@ -793,7 +810,19 @@
     var cust = printCust ? (row.bill_cust_name || named.customer_name || "") : "";
     var phoneRaw = printCust ? String(row.bill_cust_phone || "").replace(/\D/g, "") : "";
     // 10 digits print as "98250 12345" — easier to read back to a guest than one long run.
-    var custPhone = phoneRaw.length === 10 ? phoneRaw.slice(0, 5) + " " + phoneRaw.slice(5) : phoneRaw;
+    //
+    // A COUNTRY CODE MUST NOT COST THE GROUPING (2026-08-06). The grouping applied at EXACTLY ten
+    // digits, so a number stored as "+91 98250 12345" printed as "919825012345" — the "+" stripped,
+    // the 91 kept, and the 5+5 gone, which reads like a wrong number rather than the guest's own on
+    // the one row that exists to be read back to them. Not hypothetical: lib/billCustomer.ts stores
+    // up to FIFTEEN digits and only enforces a minimum of ten, so a 12-digit value is ordinary
+    // accepted input. So: peel a leading 91 (12 digits) or a leading trunk 0 (11) down to the
+    // national number, then group. Anything else prints as-is rather than being guessed at — a
+    // number we cannot confidently parse is safer whole than wrongly chopped.
+    var phone10 = phoneRaw.length === 12 && phoneRaw.slice(0, 2) === "91" ? phoneRaw.slice(2)
+      : phoneRaw.length === 11 && phoneRaw.charAt(0) === "0" ? phoneRaw.slice(1)
+      : phoneRaw;
+    var custPhone = phone10.length === 10 ? phone10.slice(0, 5) + " " + phone10.slice(5) : phoneRaw;
 
     var sess = a.session || {};
     var pct = Math.round(m.rate * 10000) / 100;
@@ -972,8 +1001,15 @@ function banquetDocHtml(a) {
   const isA4 = P.size === "a4";
   const W = isA4 ? 210 : 148, H = isA4 ? 297 : 210;
   const when = new Date(b.issued_at || Date.now());
-  const dstr = when.toLocaleDateString("en-GB").replace(/\//g, "-");
-  const tstr = when.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }).toUpperCase().replace(" ", "");
+  // PINNED TO IST, NOT THE PRINTING DEVICE (2026-08-06). These read the device's own time zone —
+  // and `[]` left it the 12h/24h choice too — so the SAME banquet invoice printed two different
+  // dates: issued_at 2026-08-05T19:30:00Z came out "06-08-2026 01:00AM" on an India-set device and
+  // "05-08-2026 03:30PM" on one set to New York. The thermal bill had exactly this fixed on
+  // 2026-08-05 (see dateStr in billData) and this sheet was left behind — on the product's
+  // largest-value document, headed "Tax Invoice", whose date decides which GST period the sale
+  // falls in. One time zone everywhere, like the money and the logs.
+  const dstr = when.toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }).replace(/\//g, "-");
+  const tstr = when.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }).toUpperCase().replace(" ", "");
   const sub = Number(b.subtotal) || 0, disc = Number(b.discount) || 0;
   const taxAmt = Number(b.tax) || 0, total = Number(b.total) || 0;
   const recv = Number(b.received) || 0;
@@ -1055,14 +1091,17 @@ function banquetDocHtml(a) {
   const terms = [];
   for (const a of (b.advances || [])) {
     if (Number(a.amt) > 0) {
-      const d = a.date ? new Date(a.date).toLocaleDateString("en-GB") : "";
+      const d = a.date ? new Date(a.date).toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }) : "";
       terms.push(`${esc(String(a.mode || "").toUpperCase())} PAY${d ? " DT." + d : ""} — ${bq0(a.amt)}/-`);
     }
   }
   if (b.remark) terms.push(esc(b.remark));
   const fnBits = [];
   if (b.func) fnBits.push(esc(b.func));
-  if (b.fn_date) fnBits.push(new Date(b.fn_date).toLocaleDateString("en-GB") + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
+  // IST here too — see the `dstr`/`tstr` note above. A bare date like "2026-08-01" is parsed as
+  // midnight UTC, so on a device set behind UTC it printed as 31/07/2026: an advance receipt and a
+  // function date both a day out on the same sheet as the invoice date they are meant to support.
+  if (b.fn_date) fnBits.push(new Date(b.fn_date).toLocaleDateString("en-GB", { timeZone: "Asia/Kolkata" }) + (b.fn_from ? ` ${esc(b.fn_from)}${b.fn_to ? "–" + esc(b.fn_to) : ""}` : ""));
   if (b.pax) fnBits.push(b.pax + (b.func || b.fn_date ? " pax" : " plates"));
   const fnLead = fnBits.length && (b.func || b.fn_date) ? "Function: " : "";
   const toBits = [];
