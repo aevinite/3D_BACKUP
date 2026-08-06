@@ -208,8 +208,8 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
             slow — and get the plain word. The number is still one tap away in the panel below,
             which is where a detail belongs. */}
         {v.ms != null && !guest
-          ? <span className="lfh-conn-ms" style={{ color: v.text, ["--ink-dark" as string]: v.color }}>{v.ms}<span className="lfh-conn-unit"> ms</span></span>
-          : <span className="lfh-conn-txt" style={{ color: v.text, ["--ink-dark" as string]: v.color }}>{v.label}</span>}
+          ? <span className="lfh-conn-ms" style={{ color: v.text, ["--ink-dark" as string]: v.color, ["--ink-light" as string]: v.text }}>{v.ms}<span className="lfh-conn-unit"> ms</span></span>
+          : <span className="lfh-conn-txt" style={{ color: v.text, ["--ink-dark" as string]: v.color, ["--ink-light" as string]: v.text }}>{v.label}</span>}
         {extra && <span className={`lfh-conn-n${failed ? " warn" : ""}`}>· {extra}</span>}
         <svg className="lfh-conn-chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
@@ -302,6 +302,12 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
         :global([data-skin="dark"]) .lfh-conn-ms,
         :global(html[data-theme="dark"]) .lfh-conn-txt,
         :global(html[data-theme="dark"]) .lfh-conn-ms { color: var(--ink-dark) !important; }
+        /* …but a LIGHT console wins over the document-level rule above. Anyone who has ever used the
+           guest menu in dark carries lfh_theme=dark, which makes html[data-theme="dark"] true
+           everywhere — including inside a light console, where the bright ink measured 1.99:1 on 25
+           of 31 screens (live re-run, 2026-08-06). The nearest surface decides. */
+        :global(html [data-skin="light"]) .lfh-conn-txt,
+        :global(html [data-skin="light"]) .lfh-conn-ms { color: var(--ink-light) !important; }
         .lfh-conn-n { font-weight: 800; opacity: 0.9; }
         .lfh-conn-n.warn { color: #ef4444; }
         .lfh-conn-chev { opacity: 0.5; flex: 0 0 auto; }

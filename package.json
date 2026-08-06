@@ -91,7 +91,8 @@
     "verify:tablet-parity": "node scripts/verify-tablet-parity.mjs",
     "verify:tablet-wants-in": "node scripts/verify-tablet-wants-in.mjs",
     "test": "npm run -s test:money && npm run -s test:errors && npm run -s test:units",
-    "verify:closed-session": "node scripts/verify-closed-session-orders.mjs"
+    "verify:closed-session": "node scripts/verify-closed-session-orders.mjs",
+    "verify:skin-ink": "node scripts/verify-skin-ink.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
