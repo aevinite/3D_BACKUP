@@ -331,6 +331,8 @@ function UsersStyle() {
   .usp-row .pi { flex:1; min-width:0; }
   .usp-row .nm { display:flex; align-items:center; gap:7px; font-size:14.5px; font-weight:700; color:var(--text); }
   .usp-row .nm em { font-style:normal; font-size:10.5px; font-weight:700; color:#fca5a5; background:color-mix(in srgb,#ef4444 16%,transparent); padding:2px 7px; border-radius:20px; }
+  /* #fca5a5 on its own 16% wash reads 1.54:1 on the light console — same red, dark enough to read. */
+  [data-skin="light"] .usp-row .nm em { color: color-mix(in srgb, #ef4444 62%, #000); }
   .usp-row .nm .pin { font-size:12px; }
   .usp-row .mt { display:block; font-size:12px; color:var(--muted); margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .usp-row .rp { font-size:11px; font-weight:800; padding:4px 10px; border-radius:20px; flex:none; }

@@ -3541,7 +3541,12 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
    hardcoded navy). Lives at /aevinite/*. Scoped under .adm so it never leaks.
    ════════════════════════════════════════════════════════════════════════════ */
 .adm {
-  --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-warn: #c98a2b;
+  /* --adm-accent was used in 10 places (rate-limits + repair) and DEFINED NOWHERE, so it always fell
+   back to #e8a13c — the dark-surface amber — leaving the LIVE/AUDIT badges at 1.91:1 on the light
+   console. Same family as the --ink bug: a token name nobody ever declared. Defining it fixes all
+   10 call sites at once. #8f5a0a is 5.05:1 on the badge's own 18% wash and keeps the golden-amber
+   identity, distinct from --adm-warn. */
+      --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-warn: #c98a2b; --adm-accent: #e8a13c;
   display: flex; height: 100dvh; width: 100%; overflow: hidden;
   background: var(--bg); color: var(--text);
   font-family: 'Inter', system-ui, sans-serif;
@@ -3557,7 +3562,7 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   --text: #15151d; --muted: #6b7280; --muted2: rgba(24,24,27,0.10);
   --accent: #6d28d9; --accent-dim: rgba(109,40,217,0.6);
   --accent-grad: linear-gradient(135deg,#8b5cf6 0%,#6366f1 100%); --accent-glow: rgba(109,40,217,0.18);
-  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706;
+  --adm-ok: #16a34a; --adm-danger: #dc2626; --adm-warn: #d97706; --adm-accent: #8f5a0a;
   --elev: 0 1px 2px rgba(16,24,40,.05), 0 14px 30px -18px rgba(20,16,50,.30);
   --elev-hi: 0 16px 40px -14px rgba(20,16,50,.34);
   background:
@@ -3570,7 +3575,7 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   --text: #eaf2ff; --muted: #5b6680; --muted2: rgba(234,242,255,0.12);
   --accent: #22d3ee; --accent-dim: rgba(34,211,238,0.6);
   --accent-grad: linear-gradient(135deg,#22d3ee,#0ea5e9); --accent-glow: rgba(34,211,238,0.40);
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   --elev: 0 1px 0 rgba(255,255,255,.04); --elev-hi: 0 0 0 1px var(--accent-glow), 0 22px 48px -24px #000;
   background:
     linear-gradient(#0a0e1a 1px, transparent 1px) 0 0 / 46px 46px,
@@ -3948,7 +3953,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent-grad: linear-gradient(120deg, #0066ff 0%, #8b5cf6 50%, #ff5e7e 100%);
   --accent-glow: rgba(59,130,246,0.32);
   --adm-cta: #d97706;
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   --elev: 0 1px 0 rgba(255,255,255,.03); --elev-hi: 0 1px 0 rgba(255,255,255,.03);
   /* Access-control page tokens (it styles inline with --ac-* fallbacks). */
   --ac-line: #1d2430; --ac-card: #10141b; --ac-muted: #8b94a7;
@@ -3975,7 +3980,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      in both consoles (2026-08-06). Green-700/amber-700/red-700 clear 4.5:1 on those tints
      and are the same hues, so nothing changes meaning. The DARK blocks keep the brighter
      values — bright-on-dark was already fine there. */
-  --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309;
+  --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
   --elev: 0 1px 2px rgba(16,24,40,.04); --elev-hi: 0 1px 2px rgba(16,24,40,.04);
   --ac-line: #e5e8ee; --ac-card: #ffffff; --ac-muted: #6b7280;
   --ac-accent: #2563eb; --ac-off: #e5e8ee;
@@ -4314,7 +4319,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      (the admin's purple) keep #fff via the default below. */
   --accent-on: #06251a;
   --own-cta: #d97706;
-  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24;
+  --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   --elev: 0 1px 0 rgba(255,255,255,.03);
   background: var(--bg);
   font-size: 13.5px;
@@ -4332,7 +4337,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      in both consoles (2026-08-06). Green-700/amber-700/red-700 clear 4.5:1 on those tints
      and are the same hues, so nothing changes meaning. The DARK blocks keep the brighter
      values — bright-on-dark was already fine there. */
-  --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309;
+  --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
   --elev: 0 1px 2px rgba(16,24,40,.04);
   background: var(--bg);
 }
@@ -4609,7 +4614,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
     --border: 1px solid #cccccc; --border-c: #cccccc;
     --text: #111111; --muted: #555555; --muted2: #f2f2f2;
     --accent: #047857; --accent-dim: #047857; --accent-grad: #047857; --accent-glow: transparent;
-    --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309;
+    --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
     --elev: none;
     background: #ffffff !important; color: #111111 !important; color-scheme: light !important;
   }

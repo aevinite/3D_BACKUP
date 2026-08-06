@@ -321,8 +321,8 @@ export default function AdminBills() {
                     <b style={{ fontVariantNumeric: "tabular-nums" }}>{b.billNo != null ? `#${b.billNo}` : "—"}</b>
                     <span style={{ color: "var(--muted)", margin: "0 6px" }}>·</span>
                     <span style={{ color: "var(--muted)" }}>{b.restaurantName}</span>
-                    {b.invoiceGens > 1 && <span title={`Invoice re-issued ${b.invoiceGens} times`} style={{ marginLeft: 8, fontSize: 10.5, padding: "2px 7px", borderRadius: 6, fontWeight: 700, background: "color-mix(in srgb, #f59e0b 18%, transparent)", color: "#f59e0b" }}>re-issued ×{b.invoiceGens}</span>}
-                    {b.invoiceVoided && <span title="Invoice currently voided (reopened)" style={{ marginLeft: 8, fontSize: 10.5, padding: "2px 7px", borderRadius: 6, fontWeight: 700, background: "color-mix(in srgb, #f59e0b 14%, transparent)", color: "#f59e0b", display: "inline-flex", alignItems: "center", gap: 4 }}><Ico n="reopen" s={11} />reopened</span>}
+                    {b.invoiceGens > 1 && <span title={`Invoice re-issued ${b.invoiceGens} times`} style={{ marginLeft: 8, fontSize: 10.5, padding: "2px 7px", borderRadius: 6, fontWeight: 700, background: "color-mix(in srgb, #f59e0b 18%, transparent)", ["--hue" as string]: "#f59e0b" }} className="hue-ink">re-issued ×{b.invoiceGens}</span>}
+                    {b.invoiceVoided && <span title="Invoice currently voided (reopened)" style={{ marginLeft: 8, fontSize: 10.5, padding: "2px 7px", borderRadius: 6, fontWeight: 700, background: "color-mix(in srgb, #f59e0b 14%, transparent)", ["--hue" as string]: "#f59e0b", display: "inline-flex", alignItems: "center", gap: 4 }} className="hue-ink"><Ico n="reopen" s={11} />reopened</span>}
                   </span>
                   <span style={{ color: "var(--muted)", fontSize: 12.5 }}>{b.table ? `T${b.table}` : "—"}</span>
                   <span style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", textAlign: "right", textDecoration: del ? "line-through" : undefined, opacity: del ? 0.7 : 1 }}>{inr(b.amount)}</span>
