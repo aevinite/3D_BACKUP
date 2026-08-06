@@ -123,7 +123,7 @@ export function LogDetailModal({ row, onClose, showRestaurant = true }: { row: A
           {isPin && (
             <Section title="Manager PIN" accent="#d4af37">
               <Field label={pinShared ? "Shared PIN of" : "Authorised by"}>
-                <span style={{ fontWeight: 700, color: pinShared ? "var(--adm-warn, #f59e0b)" : "#d4af37" }}>🔑 {row.actor}</span>
+                <span className="hue-ink" style={{ fontWeight: 700, ["--hue" as string]: pinShared ? "var(--adm-warn)" : "#d4af37" }}>🔑 {row.actor}</span>
               </Field>
               {pinShared && <Field label="Note">This PIN belongs to more than one manager — any of them could have entered it.</Field>}
             </Section>
