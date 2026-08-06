@@ -58,6 +58,30 @@ jobs:
       - name: unit tests
         run: npm run -s test:money && npm run -s test:errors && npm run -s test:units
 
-      # The 16 static, read-only guards. Each one is a bug that actually reached someone's screen.
+      # The static, read-only guards. Each one is a bug that actually reached someone's screen.
+      #
+      # It was 16. Nine more green, cheap, static-looking guards were sitting outside it, run by
+      # nobody but a person remembering to — the same shape of silence this whole file exists to end
+      # (see the header). SIX of them moved in. Two did NOT, and the reason is worth writing down
+      # because the first attempt at this put them in and CI caught it within a minute:
+      #
+      #   · verify:avlive-release (verify-avlive-offline-complete.mjs) reads the CLIENT stack folder
+      #     ~/Documents/LIVE_PROJECTS/3D_Menu_Av to confirm a surgical patch landed. That folder does
+      #     not exist on a runner, so it reported all 24 files "MISSING on the client stack" and
+      #     failed. It is a POST-RELEASE check on one Mac, not a repo guard. It must never run here —
+      #     nothing in CI should reach for AV live.
+      #   · verify:no-ask reads the owner's ~/.claude/CLAUDE.md, where the standing delete order
+      #     lives. With no home config it exits 2, so it would fail every run. It guards this
+      #     machine's configuration, and the local PostToolUse hook is the right and only place
+      #     for it.
+      #
+      # The test for "does this belong in CI" is therefore not "is it fast and green here" — it is
+      # "does it read anything outside the repo".
       - name: static guards
         run: npm run -s verify:static
+
+      # Separate because its npm alias bundles lib/accessTree.ts + lib/staffCaps.ts with esbuild
+      # first — running scripts/verify-access-model.mjs bare reads whatever stale bundle is in
+      # node_modules/.cache and reports on code that is no longer there.
+      - name: access model
+        run: npm run -s verify:access

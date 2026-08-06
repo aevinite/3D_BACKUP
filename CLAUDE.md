@@ -85,8 +85,9 @@ One shared DB, POOL model: every tenant row carries `restaurant_id`, **RLS enfor
 the DB level** (never app-code filtering alone). Schema changes are ADDITIVE (default → backfill →
 enforce). Scoped queries only (`WHERE restaurant_id=…`), realtime keyed per restaurant, dashboards
 read pre-aggregated tables, business rules live in RPCs/route handlers. Routing is path-based
-(`/r/<slug>/t/<table>`) through ONE resolver (`lib/tenant.ts`) built to switch to subdomains by
-config, not rewrite. Redis/queues/replicas are Stage-3 — do NOT add early.
+(`/r/<slug>/menu?table=N` — the QR encodes the slug in the PATH and the table as a query; the route
+folder is `app/r/[restaurant]/…`, there is no `/t/` segment) through ONE resolver (`lib/tenant.ts`)
+built to switch to subdomains by config, not rewrite. Redis/queues/replicas are Stage-3 — do NOT add early.
 
 ### EVERY new feature = a toggleable, permission-scoped MODULE — the 11-point checklist (apply automatically)
 
@@ -126,7 +127,8 @@ config, not rewrite. Redis/queues/replicas are Stage-3 — do NOT add early.
 ## Security gate (verified per-route 2026-08-04/05 — full route list in docs/CLAUDE-DETAIL.md)
 
 **There is NO `middleware.ts` — deliberate.** The gate moved per-route: `/aevinite` layout +
-all 43 `/api/admin/*` routes check `tokenIsValid` before any DB call; panel APIs use
+all 49 `/api/admin/*` routes check `tokenIsValid` before any DB call (counted 2026-08-06;
+`find app/api/admin -name route.ts | wc -l` must equal the number that grep `tokenIsValid`); panel APIs use
 `requireRole()` (re-checks entitlement every request); `/api/owner/*` uses `ownerScope()`.
 The deliberately-public list is COMPLETE in the detail doc — an API route absent from it must
 have a gate. `ADMIN_PASSWORD` must be set in Vercel env. If you re-introduce a middleware,
@@ -170,7 +172,8 @@ update the detail doc's section in the same commit.
   staff outbox on a misreading.
 - **🔑 Access model v2 (the 4-rung ladder is RETIRED):** a toggle exists only where the owner
   listed one (`lib/accessTree.ts`); only the ADMIN holds permissions; hiding is never the only
-  guard. Spec: `docs/ACCESS-MODEL.md`. Guards: `verify:access`, `verify:everything` (`--list` for
+  guard. Spec: `docs/ACCESS-MODEL.md`; **still-unbuilt owner asks: `docs/ACCESS-REDESIGN-SPEC.md`
+  (13 open `☐`)**. Guards: `verify:access`, `verify:everything` (`--list` for
   the phase map — never hard-code phase numbers). **French House is written to; Aangan is the
   READ-ONLY control at factory defaults.**
 - **👤 One profile shape for every person WHO HAS ONE — owner, manager, waiter. KITCHEN HAS NO
@@ -214,7 +217,7 @@ update the detail doc's section in the same commit.
 - **Deployment target:** one repo → `aevinite/3D_BACKUP` → Vercel `3-d-backup` auto-deploys
   `main`. The old separate editor repo is retired.
 
-## Known gotchas (one line each — stories in docs/CLAUDE-DETAIL.md / PROJECT-HISTORY)
+## Known gotchas (one line each — stories in docs/CLAUDE-DETAIL.md `## Known gotchas` and `docs/PROJECT-HISTORY.md §12`)
 
 - **Don't narrow `boardSig`** (kitchen/tablet redraw fingerprint) back to a field list — new
   volatile columns go in `RT_VOLATILE`; guarded by `scripts/verify-board-sig.mjs`.
@@ -241,6 +244,7 @@ update the detail doc's section in the same commit.
 
 ## Definition of done
 
-- Type-check passes (`npm run lint`). 3D-loading changes → `node scripts/verify-cache.mjs` still
+- Type-check passes (**`npm run typecheck`** — `npm run lint` is bare ESLint and does NOT check
+  types; it is a separate, also-required gate). 3D-loading changes → `node scripts/verify-cache.mjs` still
   passes. UI changes → seen running in Chrome (real app, right role, non-#1 restaurant too),
   never claimed from source alone. The relevant `verify:*` guards stay green.

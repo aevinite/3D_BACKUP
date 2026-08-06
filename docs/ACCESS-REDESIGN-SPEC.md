@@ -1,5 +1,10 @@
 # Access screen — the outstanding list (owner, 2026-08-01)
 
+> ✅ **LIVE WORKING SPEC — not history.** 13 of the lines below are still `☐`. Linked from
+> `CLAUDE.md`'s Access rule. Until 2026-08-06 the only pointer to this file lived inside
+> `docs/SESSION-CONTEXT.md`, which carries a "do not follow this for new work" banner — so these 13
+> owner requests were invisible to any session that obeyed it.
+
 Working spec. **Delete this file once every line is built and verified.**
 `☐` not started · `☑` done · ❓ = I am guessing, confirm.
 

@@ -24,7 +24,7 @@
 //   Static checks, no server or database needed. Run against another checkout with
 //   --repo <path> (used to check AV live without adding a file to that repo).
 //   Usage: node scripts/verify-floor-share.mjs [--repo /path/to/repo]
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -131,20 +131,86 @@ for (const r of ROUTES) {
 }
 
 // EVERY OTHER ROUTE THAT CHANGES THE FLOOR must drop the snapshot too — even the ones that never
-// READ it. The list above only covered the two panels that do both, so the kitchen route (a ✓ on a
-// dish moves a tile to "Ready"), the guest's own order route and an admin bill delete/restore all
-// wrote to the floor for a year with nothing to notice. A guard that only looks where the fix
-// already is cannot catch the next one, so this list is by "does it change what a tile says".
-const WRITE_ROUTES = [
-  { file: "app/api/kitchen/[...path]/route.ts", panel: "kitchen", what: "a ✓ moves a tile to Ready" },
-  { file: "app/api/guest/place-order/route.ts", panel: "guest order", what: "a diner's order lands on a table" },
-  { file: "app/api/admin/bills/route.ts", panel: "admin bills", what: "deleting or restoring a bill changes the tile" },
+// READ it. The list used to be three hardcoded paths, and the comment here claimed it was written
+// "by does it change what a tile says" rather than "where the fix already is". It wasn't: it was
+// still a list, and on 2026-08-06 the T10 sweep found the fourth route it had never heard of —
+// app/api/admin/repair/route.ts cancels an order, re-fires it, force-closes a table and moves an
+// order's timestamp, with no invalidation at all, while this file printed 24/24.
+//
+// So it is not a list any more. WALK app/api, find every route that WRITES to a table the floor is
+// built from, and require each one to drop the snapshot. The next route to touch a tile is covered
+// the day it is written, which is the only version of this check that stays true.
+//
+// EXEMPT is for the genuine exceptions and each one carries its reason, the same way
+// verify-clash-coverage.mjs justifies its own. Adding a path here is a decision someone has to
+// write down; deleting the discovery is not an option.
+const FLOOR_TABLES = ["orders", "order_items", "sessions", "table_sessions", "tables", "table_merges"];
+const WRITE_CALL = new RegExp(
+  `from\\(\\s*["'\`](?:${FLOOR_TABLES.join("|")})["'\`]\\s*\\)[\\s\\S]{0,400}?\\.(?:insert|update|upsert|delete)\\(`,
+);
+// Nothing is excused today. The mechanism exists so that a genuine exception is a decision someone
+// writes down, instead of the discovery being narrowed until it stops finding things.
+const EXEMPT = [];
+
+// DISCOVERY CANNOT SEE AN RPC. A route that moves a tile by calling a database function
+// (lfh_place_order, lfh_void_invoice, closeSession…) never names a table, so the scan below walks
+// straight past it. app/api/guest/place-order/route.ts is exactly that shape — a diner's order lands
+// on a table through an RPC — and the old hardcoded list DID check it, so dropping to discovery
+// alone would have quietly removed a real check while adding others.
+//
+// Two mechanisms, on purpose: everything that writes a table is found automatically, and the
+// RPC-shaped ones are named here with what they change. Only this second list can rot, and it is
+// three lines long.
+const RPC_WRITERS = [
+  { file: "app/api/guest/place-order/route.ts", what: "a diner's order lands on a table (via lfh_place_order)" },
 ];
-for (const r of WRITE_ROUTES) {
-  const src = read(r.file);
-  if (!src) { check(`${r.panel} route found`, false, r.file); continue; }
-  check(`${r.panel}: its writes drop the floor snapshot`, /invalidateFloor\(/.test(src),
-    /invalidateFloor\(/.test(src) ? "" : `${r.what} — without this a device can read a floor older than its own action`);
+
+function walkRoutes(dir, out = []) {
+  for (const e of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
+    const rel = `${dir}/${e.name}`;
+    if (e.isDirectory()) walkRoutes(rel, out);
+    else if (e.name === "route.ts") out.push(rel);
+  }
+  return out;
+}
+
+{
+  const routes = existsSync(join(ROOT, "app/api")) ? walkRoutes("app/api").sort() : [];
+  check("app/api could be walked, so this check is really looking at every route", routes.length > 20,
+    `${routes.length} route file(s)`);
+
+  const writers = [];
+  for (const rel of routes) {
+    const src = read(rel);
+    if (!src) continue;
+    // A route that only writes through a shared helper (closeSession, softDeleteOrders…) is caught
+    // too, because the helper's own callers still have to drop the snapshot for their restaurant.
+    if (WRITE_CALL.test(src)) writers.push(rel);
+  }
+  check("at least the known floor-writing routes were found", writers.length >= 4, `${writers.length} writer(s)`);
+
+  const missing = [];
+  for (const rel of writers) {
+    const ex = EXEMPT.find((e) => e.file === rel);
+    if (ex) continue;
+    if (!/invalidateFloor\(/.test(read(rel) || "")) missing.push(rel);
+  }
+  check(
+    `every route that writes a floor table drops the snapshot (${writers.length} found by scanning)`,
+    missing.length === 0,
+    missing.length
+      ? `${missing.join(", ")} — a device can be handed a floor older than its own action. Add ` +
+        `invalidateFloor(rid), or add the path to EXEMPT in this file with the reason it cannot move a tile.`
+      : "",
+  );
+
+  // The RPC-shaped writers the scan cannot see.
+  for (const r of RPC_WRITERS) {
+    const src = read(r.file);
+    if (!src) { check(`${r.file} found`, false, "if it moved, update RPC_WRITERS in this guard"); continue; }
+    check(`${r.file} drops the floor snapshot`, /invalidateFloor\(/.test(src),
+      /invalidateFloor\(/.test(src) ? "" : `${r.what} — without this a device can read a floor older than its own action`);
+  }
 }
 
 // PROPERTY 4 — a restricted reader must narrow a COPY, never the shared object.

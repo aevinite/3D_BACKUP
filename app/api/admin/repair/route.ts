@@ -18,6 +18,7 @@ import { withIdempotency } from "@/lib/idempotency";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { softDeleteOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
+import { invalidateFloor } from "@/lib/floorSummary";
 
 export const dynamic = "force-dynamic";
 
@@ -52,6 +53,10 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({ sessions: sessRes.data ?? [], orders: ordRes.data ?? [] });
 }
 
+// Which restaurant this request is repairing, so the after-write floor drop below knows what to
+// clear. Keyed by the request object exactly like the panel routes do it.
+const writeRid = new WeakMap<NextRequest, string>();
+
 async function handler(req: NextRequest) {
   const gate = await requireAdmin(req); if (gate !== true) return gate;
   let body: Record<string, unknown> = {};
@@ -66,6 +71,20 @@ async function handler(req: NextRequest) {
   // Shared logger: every repair is a warn-level admin diary line, tagged repair_<op>.
   const logRepair = (action: string, fields: { order_id?: string | null; table_number?: string | null; detail?: string }) =>
     logAction("admin", action, { restaurant_id: rid, level: "warn", detail: reason + (fields.detail ? ` — ${fields.detail}` : ""), order_id: fields.order_id ?? null, table_number: fields.table_number ?? null });
+
+  // EVERY op here changes what a floor tile says — void a bill, delete or re-fire an order,
+  // force-close a jammed table, move an order's time. The manager and waiter panels share ONE
+  // whole-floor read for 1.5s (lib/floorSummary.ts), so without this the admin does the surgery and
+  // every device polling in that window is still handed the floor from before it, showing the
+  // cancelled order or the stuck table as if nothing happened. Dropped BEFORE the write, and again
+  // AFTER it lands: another device's poll can land in the gap and re-share the pre-write floor,
+  // which is the half the panel routes learned to close on 2026-08-04.
+  //
+  // Found by the T10 sweep, 2026-08-06: this route had no invalidation at all, and verify:floor's
+  // hardcoded three-route list did not know it existed, so the guard printed 24/24 the whole time.
+  // That list is now derived from the code — see scripts/verify-floor-share.mjs.
+  invalidateFloor(rid);
+  writeRid.set(req, rid);
 
   try {
     // ── Void a bill (reopen an invoiced bill; number kept in the record) ──────────
@@ -181,4 +200,15 @@ async function handler(req: NextRequest) {
   }
 }
 
-export const POST = withIdempotency(handler, "admin");
+// The after-write drop (see the note inside handler()). Same shape as the panel routes'
+// invalidateFloorAfter(): the rid rides on the REQUEST, never on a module-level variable. A `let`
+// here would be shared by every concurrent request, so two admins repairing two restaurants at
+// once would drop each other's snapshot and leave their own stale — the opposite of the fix.
+async function dropFloorAfter(req: NextRequest): Promise<NextResponse> {
+  const res = await handler(req);
+  const rid = writeRid.get(req);
+  if (rid) invalidateFloor(rid);
+  return res;
+}
+
+export const POST = withIdempotency(dropFloorAfter, "admin");

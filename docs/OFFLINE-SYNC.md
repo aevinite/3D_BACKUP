@@ -116,10 +116,22 @@ could have deleted the header from `outbox.js` and switched off first-save-wins 
 edit in the app, with every test still green (the coverage script only checks the CALL SITES).
 
 What is actually true:
-- `expectClash()` is `lib/clash.ts:92-141`, called once per panel dispatcher
-  (`tablet:620`, `editor:1563`, `kitchen:180`).
-- Fourteen call sites populate it, and **`npm run verify:clash` fails the build** when a value
-  edit doesn't (`scripts/verify-clash-coverage.mjs`).
+- `expectClash()` is exported from `lib/clash.ts` and called from each panel's write dispatcher —
+  `app/api/{tablet,editor,kitchen}/[...path]/route.ts` (the editor route calls it twice, once for
+  POST and once for PATCH).
+- **`npm run verify:clash` fails the build** when a value edit doesn't send one
+  (`scripts/verify-clash-coverage.mjs`), and it prints the live tally: as of 2026-08-06 that is
+  **35 value-edit call sites, 27 protected, 0 unprotected**.
+- The owner console reaches `/api/owner/staff` through a THIRD hop —
+  `components/owner/ownerProfileHost.ts` → `patch()` builds the `X-LFH-Expect` header. That file is
+  now watched by the guard too; it was not, and deleting one line there would have switched
+  first-save-wins off for every owner-side pay and profile edit with the guard still green.
+
+> **DO NOT WRITE LINE NUMBERS HERE.** This paragraph used to pin `lib/clash.ts:92-141`,
+> `tablet:620`, `editor:1563`, `kitchen:180` and "fourteen call sites". By 2026-08-06 every one of
+> those was wrong (`clash.ts:119`; tablet 723; editor 2072 **and** 4309; kitchen 249; 27 sites) — in
+> the one paragraph in this file marked as dangerous to get wrong. Name the file and the symbol; run
+> `npm run verify:clash` for the count.
 - `CLAUDE.md` → NEW-FEATURE CHECKLIST item 11 makes it mandatory for every new feature.
 - It is sent on **live** writes too, not only replays — two people editing the same dish at the
   same moment is the common case.
@@ -245,6 +257,10 @@ to an offline-only test — keep online assertions in any test you add here.
 `138_action_idempotency.sql` (this feature) is the only migration 138 on `main`. A parallel
 session's guest-ratings code briefly had comments *mislabelling* its migration as "mig 138" —
 its real backing is **migration 140** (`140_owner_audit_fixes.sql`, present + applied); the
-comments were corrected. No functional collision occurred, but it's a near-miss: **always use
-the next FREE migration number** (`ls supabase/migrations | sort | tail`) — parallel sessions
-collide on numbers easily.
+comments were corrected. No functional collision occurred there — but "near-miss" undersold it:
+**measured 2026-08-06, 18 of the 310 migration files share a number with another one** (057, 068,
+116, 121, 122, 130, 145, 155, 181, 190, 196, 202, 203, 208, 221, 227, 228, 229). Nothing is broken —
+they are applied and the applier sorts deterministically — but the convention has not been holding,
+so do not assume it has. **Always use the next FREE number**
+(`ls supabase/migrations | sort -n | tail -1`); `verify:ui` fails a duplicate that is not on `main`
+yet, and grandfathers the ones that already are.

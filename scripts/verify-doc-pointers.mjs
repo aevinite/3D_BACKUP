@@ -9,10 +9,12 @@
  *
  * Checks:
  *   1. every `docs/…` / `.claude/…` file referenced by CLAUDE.md exists
- *   2. every `docs/PROJECT-HISTORY.md §N` reference resolves to a real §N heading
+ *   2. every `docs/PROJECT-HISTORY.md §N` reference resolves to a real §N heading — and a bare
+ *      PROJECT-HISTORY mention with no §N is itself reported, because that is a pointer to 309 lines
  *   3. every `npm run <script>` named in CLAUDE.md exists in package.json
  *   4. CLAUDE.md has not silently regrown past its budget (it is re-read on every request)
  *   5. AGENTS.md stays a pointer — never a second, drifting copy of the rules
+ *   6. every CLAUDE.md heading really has its full text under the SAME heading in CLAUDE-DETAIL.md
  *
  * Run: node scripts/verify-doc-pointers.mjs   (npm run verify:pointers)
  */
@@ -24,11 +26,23 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const R = (p) => path.join(ROOT, p);
 const read = (p) => fs.readFileSync(R(p), "utf8");
 
-// CLAUDE.md is loaded before the user types a word, on EVERY request of EVERY session.
-// 25k is deliberately a little above the ~19k it sits at, so ordinary rule additions are
-// fine and only a real regrowth (a narrative moving back in) trips it.
-const TOKEN_BUDGET = 25_000;
-const BYTES_PER_TOKEN = 3.6;
+// CLAUDE.md is loaded before the user types a word, on EVERY request of EVERY session, so its size
+// is a real cost and this is the only thing watching it.
+//
+// IT WAS WATCHING THE WRONG NUMBER (fixed 2026-08-06, T10 sweep). It read:
+//
+//     const TOKEN_BUDGET = 25_000;   // "deliberately a little above the ~19k it sits at"
+//     const BYTES_PER_TOKEN = 3.6;
+//
+// The ~19k in that comment is the file's BYTE count. In the guard's own maths 18,729 bytes is ~5,200
+// tokens, so the budget was not "a little above" anything — it tripped at 90,000 bytes, five times
+// the file. docs/CLAUDE-DETAIL.md is 76,800 bytes, i.e. the pre-split CLAUDE.md would have measured
+// ~21k "tokens" and sailed through. The one check that exists to stop the narrative moving back in
+// could not have detected it happening.
+//
+// So: BYTES, compared with a plain number, and both printed. No conversion to guess at. 24 KB is
+// ~28% above today's file — room for ordinary rule additions, not room for a second document.
+const BYTE_BUDGET = 24_000;
 
 const claude = read("CLAUDE.md");
 const fails = [];
@@ -107,7 +121,61 @@ if (!fs.existsSync(R(HIST))) {
   for (const n of [...want].sort((a, b) => a - b)) {
     if (!have.has(n)) fails.push(`CLAUDE.md cites ${HIST} §${n}, but that section does not exist`);
   }
-  notes.push(`${want.size} §-references into PROJECT-HISTORY, all resolve (${have.size} sections exist)`);
+  // A BARE MENTION IS NOT A POINTER (added 2026-08-06, T10 sweep). This check reported
+  // "0 §-references, all resolve" — a green tick on a loop with nothing to iterate. Meanwhile
+  // CLAUDE.md's Known-gotchas heading says the stories are "in docs/CLAUDE-DETAIL.md /
+  // PROJECT-HISTORY" and gives no section at all, so a session is sent to 309 lines and 12 numbered
+  // sections to find one story. The check existed to keep those pointers alive; there were none left.
+  const mentions = [...claude.matchAll(/PROJECT-HISTORY(?:\.md)?(.{0,12})/g)];
+  const bare = mentions.filter((m) => !/^`?\s*§\s*\d/.test(m[1]));
+  if (bare.length) {
+    fails.push(
+      `CLAUDE.md mentions PROJECT-HISTORY ${bare.length} time(s) with no §N. A pointer to a ` +
+        `${hist.split("\n").length}-line file is not a pointer — cite the section, e.g. ` +
+        `\`docs/PROJECT-HISTORY.md §7\`.`,
+    );
+  }
+  notes.push(`${want.size} §-reference(s) into PROJECT-HISTORY, all resolve (${have.size} sections exist)`);
+}
+
+/* 2b — the SAME-HEADINGS promise --------------------------------------------------------
+ * CLAUDE.md's own preamble says: "the complete, unabridged text of every rule below lives in
+ * docs/CLAUDE-DETAIL.md under the SAME headings … open its section there BEFORE acting."
+ *
+ * Nothing checked that, and on 2026-08-06 it was true for 4 of 12 headings. `## Operational rules`
+ * — the twenty one-liners a session uses most — had no counterpart at all, and neither did
+ * `## 🚦 Deploying & the folder ladder`. A session that follows the instruction literally searches
+ * the detail doc, finds nothing, concludes the detail does not exist, and acts on the one-liner.
+ * That is precisely the failure the 2026-08-05 split was meant to prevent.
+ *
+ * Matched on the heading TEXT up to the first "(" — the detail doc habitually adds a date in
+ * brackets ("Owner working agreements (2026-06-26 — FOLLOW EVERY TIME)") and that is fine; what is
+ * not fine is a different name, or no section at all. Comparison ignores case and punctuation so a
+ * stray dash never fails the build.
+ */
+{
+  const DETAIL = "docs/CLAUDE-DETAIL.md";
+  if (!fs.existsSync(R(DETAIL))) {
+    fails.push(`${DETAIL} is missing — every "full text under the same heading" pointer is dead`);
+  } else {
+    const norm = (h) =>
+      h.replace(/\(.*$/, "").replace(/[^a-z0-9]+/gi, " ").trim().toLowerCase();
+    const detailHeads = new Set(
+      [...read(DETAIL).matchAll(/^#{2,3}\s+(.+)$/gm)].map((m) => norm(m[1])).filter(Boolean),
+    );
+    const claudeHeads = [...claude.matchAll(/^#{2,3}\s+(.+)$/gm)].map((m) => m[1]);
+    const orphans = claudeHeads.filter((h) => !detailHeads.has(norm(h)));
+    if (orphans.length) {
+      fails.push(
+        `CLAUDE.md promises every rule's full text sits under the SAME heading in ${DETAIL}, but ` +
+          `${orphans.length} heading(s) have no counterpart there:\n` +
+          orphans.map((h) => `      · ${h}`).join("\n") +
+          `\n      Rename the section in ${DETAIL} to match, or change the promise in CLAUDE.md.`,
+      );
+    } else {
+      notes.push(`${claudeHeads.length} CLAUDE.md headings, every one resolves in ${DETAIL}`);
+    }
+  }
 }
 
 /* 3 — npm scripts named in CLAUDE.md exist --------------------------------------------- */
@@ -120,14 +188,14 @@ for (const s of [...named].sort()) {
 notes.push(`${named.size} npm scripts named, all exist`);
 
 /* 4 — budget --------------------------------------------------------------------------- */
-const tokens = Math.round(claude.length / BYTES_PER_TOKEN);
-if (tokens > TOKEN_BUDGET) {
+if (claude.length > BYTE_BUDGET) {
   fails.push(
-    `CLAUDE.md is ~${tokens} tokens, over the ${TOKEN_BUDGET} budget. It is re-read on every ` +
-      `request of every session, so narrative belongs in ${HIST}, not here.`,
+    `CLAUDE.md is ${claude.length} bytes, over the ${BYTE_BUDGET} budget. It is re-read on every ` +
+      `request of every session, so narrative belongs in docs/CLAUDE-DETAIL.md or ${HIST}, not here. ` +
+      `Move a section out rather than raising this number — raising it is how the last budget stopped working.`,
   );
 } else {
-  notes.push(`CLAUDE.md ~${tokens} tokens (budget ${TOKEN_BUDGET})`);
+  notes.push(`CLAUDE.md ${claude.length} bytes (budget ${BYTE_BUDGET})`);
 }
 
 /* 5 — AGENTS.md stays a pointer -------------------------------------------------------- */

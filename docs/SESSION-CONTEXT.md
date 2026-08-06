@@ -1,13 +1,20 @@
-> ⚠️ **HISTORY — not a current specification.** a rolling session handoff, not a specification.
-> Kept because it records why things were built this way. Do not follow it for new work; the
-> live rules are in `CLAUDE.md`. (Banner added 2026-08-04: eleven finished documents were sitting
-> in `docs/` beside the load-bearing ones with nothing to tell them apart.)
+> ⚠️ **HISTORY — the SNAPSHOT below is stale; the LIST it points at is not.** This was a rolling
+> session handoff last written 2026-08-02, so nothing in it describes today's tree — read `CLAUDE.md`
+> for the live rules. (Banner added 2026-08-04: eleven finished documents were sitting in `docs/`
+> beside the load-bearing ones with nothing to tell them apart. Corrected 2026-08-06: the banner
+> said "do not follow it for new work" four lines above the body saying "this is the live working
+> state", and the only pointer anywhere to 13 unbuilt owner requests was inside the paragraph the
+> banner had just told you to ignore.)
+>
+> **The one thing here that is still live:** `docs/ACCESS-REDESIGN-SPEC.md` — an owner working spec
+> from 2026-08-01 with **13 items not yet built**. It is now linked from `CLAUDE.md`'s Access rule,
+> so it no longer depends on anyone reading this file.
 
-# SESSION CONTEXT — read this FIRST after any compaction
+# SESSION CONTEXT — a snapshot from 2026-08-02 (stale)
 
-Last written 2026-08-02. **This is the live working state.** After a compaction, read this and
-`docs/ACCESS-REDESIGN-SPEC.md` before doing anything. Delete both only when everything is built,
-verified and merged.
+Everything below was true on 2026-08-02 and has not been maintained since. Treat it as history.
+For what is still outstanding, read `docs/ACCESS-REDESIGN-SPEC.md`; delete that file only when every
+line in it is built, verified and merged.
 
 ---
 
