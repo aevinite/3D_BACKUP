@@ -152,6 +152,17 @@ export function taxModel(settings: Record<string, unknown>): TaxModel;
 /** A bill's figures. Discount BEFORE tax, tax on the TAXABLE BASE (not the subtotal), at the rate
  *  the order was actually charged at (orders.tax_rate, mig 284). */
 export function billMoney(orders: Record<string, unknown>[], settings: Record<string, unknown>): BillMoney;
+/** THE rate ONE order was charged at — the single definition, shared by the printed bill and by
+ *  settling a bill in parts (`lib/paySplit.ts`), because it existed twice and had drifted.
+ *
+ *  A positive stamped rate wins (mig 284). A stamped ZERO from an order that carries money is a
+ *  real rate, not a missing one — that is what stops a 0%-era bill reprinting with tax nobody
+ *  charged once the restaurant switches GST on. Anything else falls back to `settingsRate`, so a
+ *  ₹0 line on a taxed bill cannot drag the whole bill's rate to nothing. */
+export function orderTaxRate(
+  order: { tax_rate?: number | null; subtotal?: number | string | null } | null | undefined,
+  settingsRate: number,
+): number;
 /** Everything the paper needs, assembled once. Pass what only the panel knows. */
 export function billData(a: {
   settings?: Record<string, unknown>;

@@ -1172,7 +1172,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const [invQ, voidQ, platQ, setQ, legQ] = await Promise.all([
+      const [invQ, voidQ, platQ, setQ, legQ, numQ, numAggQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
@@ -1185,6 +1185,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // from what was collected (mig 285). Scoped, explicit columns, limited.
         sb.from("session_payments").select("amount,method,reversed_at").eq("restaurant_id", rid)
           .gte("created_at", since).limit(20000),
+        // IS EVERY NUMBER ACCOUNTED FOR? (owner, 2026-08-06 — "show gaps on the Z-report".)
+        //
+        // Gaps in the bill/invoice series are CORRECT here: a number retires on a void and is never
+        // reused (mig 073, mig 261, COMPLIANCE §2). Both migrations reason that a gap is always
+        // explainable "because the cancelled row is visible and auditable" — true, but only for
+        // someone who knows to go and look. This is the day-close sheet a manager signs and an
+        // inspector reads, so it now says so out loud: the range issued today, which numbers are on
+        // something other than an ordinary settled bill (and why), and — the line that actually
+        // matters — whether any number in the range is on NOTHING at all.
+        // Explicit columns, scoped, limited, and only the day's own rows.
+        sb.from("sessions").select("bill_no,invoice_no,invoice_voided,void_at,deleted_at,delete_reason,table_number,closed_at,created_at")
+          .eq("restaurant_id", rid).gte("created_at", since).not("bill_no", "is", null).limit(20000),
+        // Parcel / delivery share the SAME counters (mig 261), so they are part of the same series
+        // and a Z-report that ignored them would report every one of their numbers as a gap.
+        sb.from("aggregator_orders").select("bill_no,invoice_no,status,created_at,channel")
+          .eq("restaurant_id", rid).gte("created_at", since).not("bill_no", "is", null).limit(20000),
       ]);
       const set = (must(setQ) || {}) as any;
       // Effective rate = sum of named tax components (CGST/SGST/…), else the fallback
@@ -1302,7 +1318,49 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Tips collected today = SUM(orders.tip) over PAID, non-cancelled orders. Tips are EXTRA staff
       // money on top of the bill (never part of revenue/tax), so reported as their own figure.
       const tips = r2(orders.filter((o) => o.status !== "cancelled" && o.payment_status === "paid").reduce((a, o) => a + (Number(o.tip) || 0), 0));
+
+      // ── EVERY NUMBER ACCOUNTED FOR (see the numQ/numAggQ note above) ───────────────────────────
+      // Read-only over rows already fetched. `orders` (the whole business day, paged) is grouped by
+      // session in `groups`, so "was this bill entirely cancelled?" costs nothing extra.
+      const ist = (t: string | null) => (t ? new Date(t).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }) : "");
+      const numbered: { no: number; note: string; at: string }[] = [];
+      const seen = new Set<number>();
+      for (const s of (must(numQ) || []) as any[]) {
+        const no = Number(s.bill_no);
+        if (!Number.isFinite(no)) continue;
+        seen.add(no);
+        const own = groups.get(s.id as string) || [];
+        // Only the states a person would ask about. An ordinary settled or still-running bill is
+        // not listed — a sheet that names every number says nothing (the don't-cry-wolf rule).
+        const why = s.deleted_at ? `deleted${s.delete_reason ? ` — ${String(s.delete_reason).slice(0, 60)}` : ""}`
+          : (own.length > 0 && own.every((o: any) => o.status === "cancelled")) ? "cancelled"
+            : s.invoice_voided === true ? "invoice voided, number retired"
+              : "";
+        if (why) numbered.push({ no, note: `T${s.table_number ?? "?"} · ${why}`, at: ist(s.deleted_at || s.void_at || s.closed_at || s.created_at) });
+      }
+      for (const a of (must(numAggQ) || []) as any[]) {
+        const no = Number(a.bill_no);
+        if (!Number.isFinite(no)) continue;
+        seen.add(no);
+        if (a.status === "cancelled") numbered.push({ no, note: `${a.channel || "parcel"} · cancelled`, at: ist(a.created_at) });
+      }
+      // The one line that matters: a number the counter handed out that NOTHING now carries. Every
+      // path in this product keeps its row (soft-delete, void, cancel all leave the number attached),
+      // so this list should always be empty — which is exactly why it is worth printing. If it ever
+      // is not, that is the question to ask, and the sheet asks it rather than staying quiet.
+      const lo = seen.size ? Math.min(...seen) : 0;
+      const hi = seen.size ? Math.max(...seen) : 0;
+      const unaccounted: number[] = [];
+      for (let n = lo; n <= hi && seen.size; n++) if (!seen.has(n)) unaccounted.push(n);
+      numbered.sort((a, b) => a.no - b.no);
+
       return ok({
+        // The day's numbering, stated plainly so "why is 43 missing?" has an answer on the sheet.
+        numbering: {
+          from: lo, to: hi, issued: seen.size,
+          flagged: numbered.slice(0, 200),
+          unaccounted: unaccounted.slice(0, 200),
+        },
         date: new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }), since,
         dineIn: { orderCount, bills: groups.size, gross: r2(gross), discount: r2(disc), taxable: r2(taxable), tax: r2(tax), net: r2(net),
           // MRP / nil-rated turnover, shown as its own line so the day's takings still add up
