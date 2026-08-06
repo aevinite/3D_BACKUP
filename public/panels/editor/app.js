@@ -7058,21 +7058,15 @@ function mergeGroupLabel(t) {
 // so a manager who opened Change table just as another device closed that party read the words
 // "Couldn't shift: session_closed". Every code below is one the RPC can really return; if you add
 // a reason to any of those functions, add its sentence here in the same commit.
-const KOT_REASON_TEXT = {
-  party_merged: "this party spans merged tables — unmerge first, then move it",
-  merged_child: "that table is joined with another and shares its bill — unmerge it first",
-  target_occupied: "that table already has a party on it",
-  target_invoiced: "that table's bill is already invoiced — void it first",
-  source_invoiced: "this bill is already invoiced — void it first",
-  order_paid: "that KOT is already paid — settled money doesn't move",
-  same_table: "that's the same bill it is on now",
-  // …the three that used to reach a person as a raw code, all from lfh_staff_shift_table:
-  no_session: "that table's party is gone — refresh and try again",
-  session_closed: "this table has already been closed — refresh and try again",
-  bad_table: "that isn't a valid table number",
-  // merge's own "the target has nobody on it" (mapped server-side too, kept so both agree)
-  target_not_open: "that table has no party — use Change table to move there instead",
-};
+// THE LIST ITSELF NOW LIVES IN public/panels/outbox.js (window.LFH_OUTBOX.REASONS), and is read
+// from there rather than kept here twice. The same refusals reach a person by TWO routes — this
+// panel's live toast, and the "Needs you" sheet when a saved change is refused on its way out —
+// and while the wording lived only here, the second route showed the raw code and the waiter
+// tablet had no map at all. One copy, in the file every panel's queue drains through, so the two
+// can't drift. (outbox.js is loaded before this file in all three panels' index.html.)
+// The fallback is for the impossible case of this panel running without the queue helper; it
+// keeps the panel working rather than printing "undefined" at someone.
+const KOT_REASON_TEXT = (window.LFH_OUTBOX && window.LFH_OUTBOX.REASONS) || {};
 
 // IS THIS TABLE BUSY? — answered by exactly what the FLOOR SHOWS, never by the raw server state
 // (owner, 2026-08-01: "see table 30 look[s] close[d] but at back-end it say[s] it's open — only
@@ -14995,6 +14989,14 @@ const bootPaint = () => { renderCatFilter(); renderList(); renderEditor(); start
 // A read came from this device rather than the server: refetch the board once, quietly, so
 // a single slow reply can't leave the panel showing older data than it needs to.
 window.addEventListener("lfh:stale-refresh", () => { try { pollOrders(); } catch (err) {} });
+// SAVED CHANGES HAVE JUST DRAINED — pull the true server state. The kitchen and the waiter
+// tablet have listened for this since the queue was written (kitchen/app.js, tablet/app.js);
+// the manager panel never did, so after its queue emptied the board kept whatever the
+// optimistic UI had put there until realtime fired or the 60s backstop came round. A change
+// the server ALTERED or REFUSED fires no realtime event at all, so nothing corrected it —
+// this is the panel most likely to be showing a picture that is quietly wrong.
+window.addEventListener("lfh:outbox-flushed", () => { if (!document.hidden) { try { pollOrders(); } catch (err) {} } });
+
 
 loadAll()
   .then(bootPaint)

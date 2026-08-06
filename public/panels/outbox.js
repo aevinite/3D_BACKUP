@@ -87,27 +87,74 @@
   }
   // Await the TRANSACTION completing (not just the request) so an action can't be
   // lost if the tab is reloaded/killed the instant after it's queued offline.
+  //
+  // Resolves TRUE when the change really reached this device's storage and FALSE when it did
+  // not (private browsing, storage full, a locked-down tablet profile). It used to swallow the
+  // failure and resolve either way, so `enqueue()` reported success and the panel toasted
+  // "Saved ✓ — syncing automatically" for a change that existed only in a JavaScript variable
+  // and died on the next reload. The DINER's queue was fixed for exactly this
+  // (lib/guestOutbox.ts idbWrite → `persisted`); the staff queue was left on the old behaviour.
+  // The caller decides what to say; this just stops lying about it.
   function idbWrite(fn) {
     return db().then((d) => new Promise((resolve, reject) => {
       const tx = d.transaction(STORE, "readwrite");
       fn(tx.objectStore(STORE));
-      tx.oncomplete = () => resolve();
+      tx.oncomplete = () => resolve(true);
       tx.onerror = () => reject(tx.error);
       tx.onabort = () => reject(tx.error);
-    })).catch(() => {}); // IDB blocked (private mode etc.) → in-memory only
+    })).catch(() => false); // IDB blocked (private mode etc.) → in-memory only, and SAY so
   }
-  async function idbPut(item) { await idbWrite((store) => store.put(item)); }
+  async function idbPut(item) { return await idbWrite((store) => store.put(item)); }
   async function idbDel(id) { await idbWrite((store) => store.delete(id)); }
+
+  // ── WHY THE SERVER SAID NO, in words a waiter reads ─────────────────────────
+  // THE ONE LIST, and it lives here because this file is the one place every panel's queue
+  // drains through. It used to live only in the manager panel (KOT_REASON_TEXT in
+  // editor/app.js), which reads it back OUT of here now — so there is a single copy and the
+  // waiter tablet gets the same sentences for free instead of the raw code it had before.
+  //
+  // Each entry is a FRAGMENT, so it reads correctly both in the manager's live toast
+  // ("Couldn't shift: that table already has a party on it") and in the "Needs you" sheet
+  // ("It couldn't be applied — that table already has a party on it.").
+  //
+  // Every code below is one the table-ops database functions really answer with
+  // (lfh_staff_shift_table, lfh_staff_move_order, lfh_staff_move_order_item — migs 166/264).
+  // If you add a reason to any of those, add its sentence here in the same commit.
+  const REASONS = {
+    party_merged: "this party spans merged tables — unmerge first, then move it",
+    merged_child: "that table is joined with another and shares its bill — unmerge it first",
+    target_occupied: "that table already has a party on it",
+    target_invoiced: "that table's bill is already invoiced — void it first",
+    source_invoiced: "this bill is already invoiced — void it first",
+    order_paid: "that KOT is already paid — settled money doesn't move",
+    order_cancelled: "that order was cancelled",
+    same_table: "that's the same bill it is on now",
+    no_session: "that table's party is gone — refresh and try again",
+    no_order: "that order is no longer there — refresh and try again",
+    item_not_found: "that dish is no longer on the order",
+    order_not_found: "that order is no longer there — refresh and try again",
+    session_closed: "this table has already been closed — refresh and try again",
+    bad_table: "that isn't a valid table number",
+    target_not_open: "that table has no party — use Change table to move there instead",
+  };
+  function reasonText(code) { return (code && REASONS[code]) || ""; }
 
   // ── helpers ─────────────────────────────────────────────────────────────────
   const uuid = () => (self.crypto && self.crypto.randomUUID)
     ? self.crypto.randomUUID()
     : "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === "x" ? r : (r & 3 | 8)).toString(16); });
 
+  // THIS DEVICE COULDN'T WRITE TO ITS OWN STORAGE. Sticky for the life of the page, because it
+  // is a property of the device (private browsing, storage full, a locked-down profile), not of
+  // one change. Surfaced in the bar rather than in each of the ~16 "Saved ✓" toasts across the
+  // three panels: the bar is the one surface whose whole job is saying what is actually true,
+  // and a per-toast fix is a fix that misses the call site added next month.
+  let unsafeStore = false;
+
   function notify() {
     // `syncing` = a replay round is ACTUALLY in flight. The bar must not say "Sending…"
     // purely because the count is above zero.
-    const snap = { queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length, syncing: flushing };
+    const snap = { queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length, syncing: flushing, unsafeStore: unsafeStore };
     listeners.forEach((fn) => { try { fn(snap); } catch (e) {} });
     // Also fire a DOM event so the connection badge / any UI can react without importing us.
     try { window.dispatchEvent(new CustomEvent("lfh:outbox-changed", { detail: snap })); } catch (e) {}
@@ -191,11 +238,16 @@
   // because the system was slow, refusing, or because earlier changes were still waiting is
   // NOT an offline change, and calling it one is how the panel told the owner he had no
   // internet while the connection light beside it read 462 ms (2026-08-02).
+  //
+  // Returns whether the change reached this device's STORAGE. `false` = it is queued in memory
+  // and will send, but closing or reloading the panel loses it — so a caller must not promise
+  // "we'll send it automatically". See idbWrite().
   async function enqueue(item, why) {
     item.status = "queued";
     item.why = why || item.why || "offline";
     queued.push(item);
-    await idbPut(item);
+    const persisted = await idbPut(item);
+    if (!persisted) unsafeStore = true;   // the bar says so; see the note on unsafeStore
     notify();
     // NEVER leave saved work with nothing to send it. This one line is the whole of the
     // 2026-08-02 fault: a write that died mid-flight was saved here and then simply waited,
@@ -203,6 +255,7 @@
     // and neither of those happens when the connection never actually dropped. The owner
     // watched "Sending 3 saved changes…" on a healthy connection while nothing was being sent.
     ensureRetry();
+    return persisted;
   }
 
   // There is a timer pending for whatever is in the queue — or there is about to be.
@@ -246,7 +299,7 @@
     const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now(), expect: expect || null };
 
     // Known offline → don't even try; queue straight away.
-    if (navigator.onLine === false) { await enqueue(item, "offline"); return { ok: true, queued: true, action_id: item.id }; }
+    if (navigator.onLine === false) { const p = await enqueue(item, "offline"); return { ok: true, queued: true, action_id: item.id, persisted: p }; }
 
     // FIFO GUARD (#6): if earlier actions are STILL waiting to sync, this new write must
     // NOT be sent directly ahead of them — that let a fresh "Mark paid" commit before a
@@ -261,7 +314,7 @@
     // on the discount afterwards, applying it to an already-settled bill. Anything still owed to
     // this table has to clear before a later change to it can be sent.
     if (queued.length || failed.some(function (f) { return f.retryable !== false; })) {
-      await enqueue(item, "behind"); flush(); return { ok: true, queued: true, action_id: item.id };
+      const p = await enqueue(item, "behind"); flush(); return { ok: true, queued: true, action_id: item.id, persisted: p };
     }
 
     let res;
@@ -271,11 +324,19 @@
       // Genuine network failure (offline / DNS / dropped) → save for later.
       // A timeout while the browser still believes it is online is a SLOW system, not an
       // offline device — do not let the bar call it one.
-      await enqueue(item, navigator.onLine === false ? "offline" : "slow");
-      return { ok: true, queued: true, action_id: item.id };
+      const p = await enqueue(item, navigator.onLine === false ? "offline" : "slow");
+      return { ok: true, queued: true, action_id: item.id, persisted: p };
     }
     // We got a response → behave exactly like the old api() helper.
-    if (res.status === 401) { location.href = "/login"; throw new Error("login"); }
+    //
+    // SIGNED OUT MID-TAP: keep the work, THEN go to the sign-in page. This used to throw the
+    // change away, which made a shift login that expired between two taps the one way to lose
+    // a discount / a close / an order outright — while the IDENTICAL tap made with no signal
+    // survived, because the replay loop treats a 401 as "keep it and tell them" (see the 401
+    // branch in flush(), which says so in as many words). IndexedDB outlives the navigation, so
+    // this replays itself the moment they sign back in, which is what that branch already
+    // promises. The throw is unchanged, so callers behave exactly as before.
+    if (res.status === 401) { await enqueue(item, "signedout"); location.href = "/login"; throw new Error("login"); }
     // THE SERVER IS UP BUT CAN'T TAKE IT (5xx) → this is not a rejection, so don't hand the
     // person an error and drop their work. Save it and let the replay loop deliver it, which is
     // exactly what that loop already does for the SAME statuses once an action is queued
@@ -285,9 +346,9 @@
     // 4xx is deliberately NOT included: that is the server refusing on the merits (a clash, a
     // closed table, a limit), and a person must see it rather than have it retried behind them.
     if (res.status >= 500) {
-      await enqueue(item, "busy");
+      const p = await enqueue(item, "busy");
       flush();
-      return { ok: true, queued: true, busy: true, action_id: item.id };
+      return { ok: true, queued: true, busy: true, action_id: item.id, persisted: p };
     }
     const j = await res.json().catch(() => null);
     // Carry the parsed body + status on the error so callers can read server flags
@@ -341,7 +402,38 @@
           });
           notify(); continue;
         }
-        if (res.ok) { progressed = true; await removeItem(item.id); notify(); continue; } // sent (incl. server-dedup ok:true,duplicate:true)
+        // A 2xx ALONE IS NOT "IT WENT THROUGH". Several staff branches report a refusal INSIDE
+        // a 200, because they hand the database function's own JSON straight back:
+        // `sessions/:id/shift`, `orders/:id/move`, `order-items/:id/move`,
+        // `sessions/:id/bill-discount`, `banquet/place` and `customer-capture` all answer
+        // `{ ok:false, reason:'order_paid' | 'session_closed' | 'target_occupied' | … }` with a 200.
+        //
+        // This used to remove the change on `res.ok` alone, so every one of those VANISHED: a
+        // waiter moved a KOT while offline, the queue drained, the server said "that order is
+        // already paid" — and the ⏳ on the table simply disappeared. No toast, no row in "Needs
+        // you", nothing to tap. Every signal the waiter had said it worked; the KOT was still on
+        // the old table. (The live path was always fine — each call site checks `r.ok` itself.)
+        //
+        // The DINER's queue has had this exact check since it was written (lib/guestOutbox.ts:
+        // "A DUPLICATE THAT SAYS ok:false IS NOT A PLACED ORDER"), and lib/idempotencyRule.ts
+        // fixed the SERVER half of the same shape — it refuses to REMEMBER a 200 that says no.
+        // The staff queue was the last place still reading the status and ignoring the answer.
+        if (res.ok) {
+          const j = await res.json().catch(() => null);
+          if (j && j.ok === false) {
+            const why = reasonText(j.reason);
+            await moveToFailed(item, "The system wouldn't accept this", {
+              plain: why ? "It couldn't be applied — " + why + "." : "The system wouldn't accept this change.",
+              todo: "Nothing was applied. Check that table and do it again if it's still needed.",
+              // NOT retryable, for the same reason a clash isn't: every code above is a state
+              // that has already moved on, so sending the identical change again can only fail
+              // the same way. A person has to look at how things are NOW.
+              retryable: false,
+            });
+            notify(); continue;
+          }
+          progressed = true; await removeItem(item.id); notify(); continue; // sent (incl. server-dedup ok:true,duplicate:true)
+        }
         if (res.status === 409) {
           const j = await res.json().catch(() => null);
           if (j && j.retry) {
@@ -517,6 +609,23 @@
       return out;
     },
     tableOf,
+    // THE ONE LIST of "why the server said no", so the manager panel's live toast and the
+    // "Needs you" sheet can never word the same refusal differently (see REASONS above).
+    REASONS,
+    reasonText,
+    // Everything on ONE table that came back needing a person and cannot be re-sent as-is
+    // (a clash, or a refusal the server has already settled). The tables mark those
+    // differently from work that is genuinely still on its way — "not sent yet" on a change
+    // that can never be sent is the same cry-wolf fault the top bar was fixed for.
+    blockedByTable: function () {
+      const out = {};
+      failed.forEach((it) => {
+        if (it.retryable !== false) return;
+        const t = tableOf(it);
+        if (t != null) out[t] = (out[t] || 0) + 1;
+      });
+      return out;
+    },
     getSnapshot: () => ({ queued: queued.slice(), failed: failed.slice(), count: queued.length + failed.length }),
     pendingCount: () => queued.length,
     failedCount: () => failed.length,
@@ -524,6 +633,9 @@
     // The bar uses it to stop saying "Sending…" about work that has plainly stopped moving.
     waitingSince: () => queued.reduce((a, it) => (a && a < it.at ? a : it.at), 0),
     isFlushing: () => flushing,
+    // TRUE once anything failed to reach this device's storage — so what is waiting will NOT
+    // survive a reload, and the bar has to say so rather than promise "syncing automatically".
+    storageFailed: () => unsafeStore,
     // TEST-ONLY (scripts/verify-outbox-drain.mjs): hold the automatic retry so a check can
     // prove that a specific signal — coming back to the tab, tapping Send now — is what
     // delivered the change. Nothing in the app calls these.

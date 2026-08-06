@@ -213,10 +213,12 @@ to an offline-only test — keep online assertions in any test you add here.
       verified headless + via the server route so far).
 - [ ] **Guest: only place-order is queued.** Other guest writes (call waiter, requests, cart
       set) are NOT offline-queued yet — extend `lib/guestOutbox.ts` + a route per action if
-      wanted (same at-most-once pattern). Note the rest of `lib/session.ts` still has **no
-      timeout on any RPC**: ordering was moved onto the guarded path
-      (`placeSessionOrderSafe`), but join / approve / leave / cart-merge / waiter-call can still
-      hang on a swamped system. Same treatment, one at a time.
+      wanted (same at-most-once pattern). The **deadline** half of this is DONE — the 15s guard
+      moved into the shared `rpc()` helper in `lib/session.ts` (`SESSION_TIMEOUT_MS`), so join /
+      approve / leave / cart-merge / waiter-call can no longer hang on a swamped system. (This
+      entry used to say they had "no timeout on any RPC"; that stopped being true and nobody
+      updated it.) What is still outstanding is only the QUEUE: those actions fail visibly
+      instead of being saved and re-sent.
 - [ ] **An offline order shows as "waiting to send", not as a live ticket** (waiter panel
       table detail + a ⏳ mark on the tile). This is deliberate: fabricating a ticket would
       mean fabricating a bill line, and a bill must only ever show what the kitchen really
@@ -224,8 +226,10 @@ to an offline-only test — keep online assertions in any test you add here.
       must still be visibly excluded from every total.
 - [ ] **3D models don't work offline** (multi-MB GLBs from Supabase Storage are deliberately
       not cached). Guest menu text/images do.
-- [ ] **Clash checks are table-scoped.** Actions with no table (parcel, banquet standalone,
-      menu edits) are not clash-checked — a stale menu edit can still win last-write.
+- [ ] **The REPLAY clash check is table-scoped.** Actions with no table (parcel, banquet
+      standalone) are not covered by `replayClash`. **Menu edits no longer belong on this list** —
+      they carry a field-level expectation (`buildEditExpect` in `public/panels/editor/app.js`), so
+      a stale dish, price or table-name edit is refused rather than winning last-write.
 - [x] **OWNER DECISION (settled):** with no internet, a device that is still signed in opens the
       saved screens without reaching the login middleware (a service worker answering from
       cache never does). Bounded to 2 hours and wiped on sign-in/sign-out. If the owner wants
@@ -240,6 +244,15 @@ to an offline-only test — keep online assertions in any test you add here.
 - [x] **Duplicate-ack carries the original body** (done) — `action_idempotency.result` stores the
       completed reply, so a duplicate echoes the original `order_id` and the guest tracker can
       still follow that order (`lib/idempotency.ts`, `lib/guestOutbox.ts`).
+- [x] **A REFUSAL IS NEVER TREATED AS A SUCCESS BY THE STAFF QUEUE** (done, 2026-08-06) — the
+      drain in `public/panels/outbox.js` removed a change on the HTTP status alone, and several
+      staff branches report a refusal inside a **200** (they hand the database function's JSON
+      straight back: `sessions/:id/shift`, `orders/:id/move`, `order-items/:id/move`,
+      `bill-discount`, `banquet/place`, `customer-capture`). So a saved change the server turned
+      down was deleted with nothing on screen. It now reads the body, the same way the diner's
+      queue always has, and the refusal reaches "These changes need you" with the reason in plain
+      words. The wording list is `REASONS` in that file — ONE copy, which the manager panel's
+      `KOT_REASON_TEXT` now reads from. Guarded by `npm run verify:outbox` §9.
 - [x] **A REFUSAL IS NEVER REMEMBERED** (done, and the rule matters more than the fix) — a handler
       that answers `{ok:false}` inside a **200** used to be stored as "done", so the diner's next
       tap on the same basket replayed the refusal instead of reaching the kitchen. The decision
@@ -247,8 +260,9 @@ to an offline-only test — keep online assertions in any test you add here.
       the status is under 400 **and** the body doesn't say it refused. Rows written before the fix
       heal themselves on next use. Guarded by `npm run verify:order-retry`.
       **If you add a handler that reports a refusal in a 200 body, this is what protects it.**
-- [ ] **Prune `action_idempotency`** — rows accumulate; add a periodic cleanup of rows older
-      than a day (index on `created_at` already exists).
+- [x] **Prune `action_idempotency`** (done, 2026-08-04) — `maybePrune()` in `lib/idempotency.ts`
+      fires on roughly one write in two hundred and calls `lfh_prune_action_idempotency`
+      (migration 268): bounded, fire-and-forget, no timer touching idle data.
 - [ ] Consider surfacing a staff "waiting to sync" drawer entry when a queued action **fails**
       more visibly (currently in the badge dropdown only).
 

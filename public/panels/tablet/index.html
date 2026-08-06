@@ -69,15 +69,15 @@
   <script src="/panels/maint.js?v=dc98e6aa"></script>
   <script src="/panels/realtime.js?v=9708934b"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=d2aaaaf0"></script>
+  <script src="/panels/outbox.js?v=208efac4"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=c1df4baa"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and after backstack.js
        is available for the back button. -->
-  <script src="/panels/swreg.js?v=3b3117cc"></script>
-  <script src="/panels/offline.js?v=c4f73723"></script>
+  <script src="/panels/swreg.js?v=c82762b3"></script>
+  <script src="/panels/offline.js?v=21ff58ea"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
@@ -96,6 +96,6 @@
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
   <script src="/panels/billdoc.js?v=7df1bca8"></script>
-  <script src="app.js?v=9ef4c9b3"></script>
+  <script src="app.js?v=7a030c39"></script>
 </body>
 </html>

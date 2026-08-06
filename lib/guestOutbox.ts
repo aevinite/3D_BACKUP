@@ -115,6 +115,8 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
     case "sold_out": return q
       ? (dish ? `${dish} sold out while you were offline.` : "A dish sold out while you were offline.")
       : (dish ? `Sold out: ${dish} — please remove it to order.` : "A dish just sold out — please remove it to order.");
+    // `dish` here is only ever a real NAME — see dishFor() below for why that matters on this
+    // one reason in particular.
     case "unknown_item": return dish
       ? `${dish} is no longer on the menu — please remove it.`
       : "A dish is no longer on the menu — please remove it.";
@@ -149,6 +151,36 @@ export function refusalOf(err: unknown): { reason?: string; dish?: string } {
     reason: (msg.match(/Order failed:\s*([a-z_]+)/) || [])[1],
     dish: (msg.match(/\(([^)]+)\)/) || [])[1],
   };
+}
+
+/**
+ * THE DISH TO NAME IN A REFUSAL — a NAME, or nothing. Never an id.
+ *
+ * Every refusal that names a dish sends its TITLE (`lfh_price_order` → `v_mi.title` for
+ * sold_out and price_required) except ONE: `unknown_item` fires precisely because the row was
+ * not found, so all the server has left to send is the id it was asked for. On any restaurant
+ * that isn't #1 that id is `<slug>__<8 hex>` (the tenant-namespaced id the editor route mints),
+ * so the diner was reading:
+ *
+ *     “paneer-tikka__a1b2c3d4” is no longer on the menu — please remove it.
+ *
+ * — a machine string in front of a customer, and one that matches nothing on their screen, so
+ * "please remove it" could not be acted on either. reasonMsg's own rule ("NEVER echo a code we
+ * don't have words for") guarded the `reason` slot and not the `item` slot beside it.
+ *
+ * So the id is resolved against the basket the phone is still holding. If it maps to a dish the
+ * diner can see, name that; if it doesn't, say the general sentence and name nothing.
+ */
+export function dishFor(
+  reason: string | undefined,
+  token: string | undefined,
+  items?: ReadonlyArray<{ id?: string; title?: string } | unknown>,
+): string | undefined {
+  if (!token) return undefined;
+  if (reason !== "unknown_item") return token;   // already a title
+  const hit = (items || []).find((i) => String((i as { id?: string })?.id || "") === token);
+  const title = (hit as { title?: string } | undefined)?.title;
+  return title ? String(title) : undefined;
 }
 
 // Record a successfully-sent order into the guest's active-orders list so the normal
@@ -360,7 +392,7 @@ export async function flushGuestOutbox() {
       // below, where the already-consumed stream yielded null — so a clash message never
       // reached the guest.
       const j = await res.json().catch(() => null) as
-        | { ok?: boolean; order_id?: string; duplicate?: boolean; reason?: string; retry?: boolean; clash?: { plain?: string } }
+        | { ok?: boolean; order_id?: string; duplicate?: boolean; reason?: string; item?: string; retry?: boolean; clash?: { plain?: string } }
         | null;
       // Idempotency says a request under this id is in flight → wait and try again. A stale claim
       // is taken over after 30s (lib/idempotency.ts), so if it KEEPS saying this something is
@@ -384,7 +416,7 @@ export async function flushGuestOutbox() {
       // an order the diner had been promised would send simply vanished — no ticket, no entry in
       // their list, no message. Now it is surfaced like any other refusal.
       if (res.ok && j?.duplicate) {
-        if (j.ok === false) { await moveToFailed(item, reasonMsg(j.reason, { queued: true })); notify(); continue; }
+        if (j.ok === false) { await moveToFailed(item, reasonMsg(j.reason, { queued: true, dish: dishFor(j.reason, j.item, item.items) })); notify(); continue; }
         progressed = true;
         if (j.order_id) recordActive(item, j.order_id as string);
         await removeItem(item.id); notify(); continue;
@@ -406,7 +438,10 @@ export async function flushGuestOutbox() {
       // closed while you were offline") instead of an instruction aimed at someone standing at the
       // screen right now ("please ask your server"). The two live paths pass no flag and get the
       // present tense, which is correct for them.
-      await moveToFailed(item, reasonMsg(j?.reason, { queued: true })); notify(); continue;
+      // NAME THE DISH where the server named one. This passed no dish at all, so a saved order
+      // refused for a sold-out dish read "A dish sold out while you were offline" when the
+      // server had told us exactly which one. dishFor() keeps an id out of the sentence.
+      await moveToFailed(item, reasonMsg(j?.reason, { queued: true, dish: dishFor(j?.reason, j?.item, item.items) })); notify(); continue;
     }
   } finally {
     flushing = false;

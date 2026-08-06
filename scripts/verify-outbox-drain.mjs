@@ -28,6 +28,7 @@
 //   7. it is delivered EXACTLY ONCE, under its original id (the at-most-once promise holds)
 //   8. the bar stops claiming "Sending…" for work that plainly is not sending, and offers a
 //      way to force it (public/panels/offline.js)
+//   9. a 200 whose BODY says the server refused is NOT treated as delivered
 import { chromium } from "playwright";
 import http from "node:http";
 import { readFileSync } from "node:fs";
@@ -61,6 +62,14 @@ const server = http.createServer((req, res) => {
   req.on("end", () => {
     if (mode === "signout") { res.writeHead(401, { "content-type": "application/json" }); return res.end('{"error":"login"}'); }
     if (mode === "working") { res.writeHead(409, { "content-type": "application/json" }); return res.end('{"error":"sync_in_progress","retry":true}'); }
+    // "refuse200" → the shape SEVERAL real staff branches answer with: a 200 whose BODY says no,
+    // because the route hands the database function's own JSON straight back (sessions/:id/shift,
+    // orders/:id/move, order-items/:id/move, bill-discount, banquet/place, customer-capture).
+    if (mode === "refuse200") {
+      seen.push({ id: req.headers["x-lfh-action-id"] || "", path: req.url, replay: req.headers["x-lfh-replay"] === "1" });
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end('{"ok":false,"reason":"order_paid"}');
+    }
     seen.push({ id: req.headers["x-lfh-action-id"] || "", path: req.url, replay: req.headers["x-lfh-replay"] === "1" });
     res.writeHead(200, { "content-type": "application/json" });
     res.end('{"ok":true}');
@@ -182,6 +191,40 @@ if (btn.some((t) => /send now/i.test(t))) ok("and it offers a Send now button");
 await page.unroute("**/api/**");
 await page.evaluate(() => { window.LFH_OUTBOX.__resume && window.LFH_OUTBOX.__resume(); return window.LFH_OUTBOX.flush(); });
 if (await until(async () => (await counts()).q === 0, 6000)) ok("Send now delivers it"); else bad("Send now did not deliver it");
+
+// ── 9. a 200 whose BODY says no is NOT "it went through" ─────────────────────────────────
+// THE FAULT: the drain removed a change on `res.ok` alone. A waiter moved a KOT while offline,
+// the queue drained, the server answered 200 {ok:false,reason:'order_paid'} — and the change was
+// deleted with no toast, no row in "Needs you", and the ⏳ gone from the table. Every signal said
+// it worked. The diner's queue has always checked the body (lib/guestOutbox.ts); this one didn't.
+console.log("\n9) The server answers 200, but the BODY says it refused");
+await fresh(); seen.length = 0;
+await page.route("**/api/**", (r) => r.abort("failed"));
+await send("Move KOT to table 7");
+await page.unroute("**/api/**");
+mode = "refuse200";
+const surfaced = await until(async () => (await counts()).f === 1, 12000);
+if (surfaced) ok("the refusal reaches a person instead of vanishing"); else bad("SILENTLY DROPPED: a refused change was removed as if it had been sent");
+if ((await counts()).q === 0) ok("…and it is no longer counted as still-sending"); else bad("it is still sitting in the queue");
+const refusal = await page.evaluate(() => window.LFH_OUTBOX.getSnapshot().failed[0] || {});
+if (/already paid/i.test(refusal.plain || "")) ok(`it says WHY in plain words ("${refusal.plain}")`);
+else bad("the reason is missing or is a raw code", JSON.stringify(refusal.plain));
+if (refusal.retryable === false) ok("and it is not offered a pointless Try again — the state has moved on");
+else bad("a settled refusal was marked retryable");
+// The tile mark must separate "still going out" from "this needs you", or the floor contradicts
+// the bar above it.
+const marks = await page.evaluate(() => ({
+  pending: window.LFH_OUTBOX.pendingByTable(),
+  blocked: window.LFH_OUTBOX.blockedByTable ? window.LFH_OUTBOX.blockedByTable() : null,
+}));
+if (marks.blocked && Object.keys(marks.blocked).length === 0 && Object.keys(marks.pending).length === 0) {
+  ok("a change with no table carries no tile mark either way");
+} else if (marks.blocked) {
+  ok("the floor can tell 'needs you' apart from 'still sending'");
+} else {
+  bad("blockedByTable() is gone — the ⏳ would claim a dead change is still on its way");
+}
+mode = "ok";
 
 await browser.close();
 server.close();

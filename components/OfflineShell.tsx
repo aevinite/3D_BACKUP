@@ -59,8 +59,21 @@ export default function OfflineShell() {
         // showed "this screen hasn't been opened on this device yet". Verified on the deployed
         // site: the shell only appeared from the SECOND visit. One request, skipped entirely when
         // the page is already stored (the worker checks), and only once we are controlled.
+        // WHAT THIS PAGE IS MADE OF, so the worker can save the code as well as the document.
+        // On a device's FIRST visit the chunks are fetched before the worker controls the client,
+        // so it never sees them and `lfh-asset` stays empty — measured on the deployed site. An
+        // offline reload then served the saved HTML with no CSS and no JS. `performance` already
+        // has the list; nothing extra is measured or requested here.
+        const pageAssets = (): string[] => {
+          try {
+            return performance.getEntriesByType("resource")
+              .filter((r) => ["script", "link", "css", "font", "img"].includes((r as PerformanceResourceTiming).initiatorType))
+              .map((r) => r.name)
+              .filter((n) => n.startsWith(location.origin));
+          } catch { return []; }
+        };
         const warm = () => {
-          navigator.serviceWorker.controller?.postMessage({ type: "LFH_WARM_SHELL", url: location.href });
+          navigator.serviceWorker.controller?.postMessage({ type: "LFH_WARM_SHELL", url: location.href, assets: pageAssets() });
         };
         if (navigator.serviceWorker.controller) warm();
         // A brand-new registration claims the client a moment later, so wait for that instead of

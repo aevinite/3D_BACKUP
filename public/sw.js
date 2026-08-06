@@ -68,6 +68,10 @@ const ASSET_TIMEOUT_MS = 25000;
 // Caps, so no cache can grow without limit (SHELL collects a key per visited URL, ASSET
 // one per chunk of every deploy). Oldest entries go first.
 const CAPS = { data: 150, shell: 60, asset: 400 };
+// How many missing files one first-visit warm may store (see LFH_WARM_SHELL). A page loads
+// roughly 30-40 chunks; this leaves headroom without ever letting a single message walk a long
+// list, and it stays well inside CAPS.asset.
+const WARM_ASSET_MAX = 80;
 const MAX_DATA_BYTES = 3_000_000; // don't cache a huge report payload
 
 // A saved copy is only good for so long. After this, being offline shows the "no internet"
@@ -222,6 +226,46 @@ self.addEventListener("message", (e) => {
         // Same rule as handleNav: only a real rendered page, never a redirect or an error.
         if (res && res.ok && res.status === 200 && res.type !== "opaqueredirect") await putStamped(SHELL, key, res);
       } catch { /* best-effort: being unable to pre-save must never affect the page */ }
+    })());
+    // …AND THE CODE THAT MAKES THAT PAGE A PAGE.
+    //
+    // Saving the HTML was only half the fix, and the missing half made the common case LOOK
+    // worse rather than better. Measured on the deployed site, fresh device, one visit to a guest
+    // menu: SHELL held the document, and `lfh-asset` DID NOT EXIST AT ALL — the chunks were
+    // fetched before this worker took control of the client, so it never saw them. Cut the
+    // network and reload and the saved HTML is served, then every /_next/static/ request goes to
+    // cacheFirst(), misses, hits the network and throws. The diner gets the document with NO CSS
+    // and NO JavaScript: black Times-serif text on white, "CATEGORIESSlide" run together, no
+    // dishes — measurably worse-looking than the branded "Can't open this screen" page they would
+    // have got if nothing had been saved at all. That is exactly the moment this layer exists for:
+    // scan the QR, walk to a table with thick walls, pull to refresh.
+    //
+    // So the page also tells us the same-origin files it just loaded, and we store the ones we
+    // are missing. Deliberately ADDITIVE — it changes no caching RULE, so no VERSION bump (a bump
+    // would wipe every device's caches, which is the opposite of what this is for). It only ever
+    // fills a cache that is otherwise empty: anything already stored is skipped, so this costs
+    // one round of small immutable files on a device's FIRST visit and nothing on any visit after.
+    const assets = e.data && e.data.assets;
+    if (Array.isArray(assets) && assets.length) e.waitUntil((async () => {
+      try {
+        const cache = await caches.open(ASSET);
+        let stored = 0;
+        for (const raw of assets.slice(0, WARM_ASSET_MAX)) {
+          if (stored >= WARM_ASSET_MAX) break;
+          let u;
+          try { u = new URL(raw, self.location.origin); } catch { continue; }
+          // The same exclusions the fetch router applies, so warming can never pull in a write,
+          // an auth route, a multi-megabyte model, or another origin's file.
+          if (u.origin !== self.location.origin) continue;
+          if (u.pathname.startsWith("/api/")) continue;   // reads are cached when they happen; never re-fetch one here (egress)
+          if (isNever(u.pathname) || isBigMedia(u.pathname) || isDevPlumbing(u.pathname)) continue;
+          if (await cache.match(u.href, { ignoreVary: true })) continue;
+          try {
+            const res = await fetch(u.href, { credentials: "same-origin" });
+            if (res && res.ok) { await putStamped(ASSET, u.href, res); stored++; }
+          } catch { /* one asset failing must not stop the rest */ }
+        }
+      } catch { /* best-effort, exactly like the shell warm above */ }
     })());
   }
 });

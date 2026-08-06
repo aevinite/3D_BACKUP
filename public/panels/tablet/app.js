@@ -358,6 +358,15 @@ const allergyPrompt = (already) => new Promise((resolve) => {
 // frictionless when no PIN is configured yet, or for the admin super-user); if the
 // server answers "manager PIN required", prompt once and retry with it. Reloads on
 // success; a cancelled PIN aborts silently; real errors toast.
+// DOES THE SERVER WANT A MANAGER PIN? Read the FLAG it sends, not the sentence.
+// The gate answers `{ error: "A manager PIN is required for this.", needPin: true }` with a 403
+// (app/api/tablet/[...path]/route.ts), and this panel's api() was extended specifically to carry
+// that body through on the error — its comment above says so, naming `needPin`. Six places still
+// matched the PROSE anyway, so rewording the server's sentence to "A manager's PIN is required"
+// would have silently stopped the PIN prompt appearing at all and turned every gated action into
+// a bare error. CLAUDE.md: branch on server reason CODES, not prose. The text test is kept as a
+// fallback ONLY for a stack whose server predates the flag.
+const wantsPin = (e) => !!(e && ((e.data && e.data.needPin === true) || /manager pin/i.test(String(e.message || ""))));
 async function actGated(method, path, body, opts = {}) {
   try {
     let r;
@@ -367,12 +376,12 @@ async function actGated(method, path, body, opts = {}) {
     try {
       r = await api(method, path, body, apiOpts);
     } catch (e) {
-      if (!/manager pin/i.test(String(e && e.message))) throw e;
+      if (!wantsPin(e)) throw e;
       let pin = await pinPrompt(opts.message);
       while (pin) {
         try { r = await api(method, path, { ...(body || {}), managerPin: pin }, apiOpts); break; }
         catch (e2) {
-          if (/manager pin/i.test(String(e2 && e2.message))) { pin = await pinPrompt(opts.message, "That PIN didn't match — try again."); continue; }
+          if (wantsPin(e2)) { pin = await pinPrompt(opts.message, "That PIN didn't match — try again."); continue; }
           throw e2;
         }
       }
@@ -3011,13 +3020,13 @@ function openTagSheet(t) {
           await api("POST", `/tables/${t}/tag`, { tag });
         } catch (e) {
           // 'pin' mode: the server asks for a manager PIN — same round-trip as actGated.
-          if (!/manager pin/i.test(String(e && e.message))) throw e;
+          if (!wantsPin(e)) throw e;
           let pin = await pinPrompt("Enter a manager PIN to mark this table.");
           let okd = false;
           while (pin) {
             try { await api("POST", `/tables/${t}/tag`, { tag, managerPin: pin }); okd = true; break; }
             catch (e2) {
-              if (/manager pin/i.test(String(e2 && e2.message))) { pin = await pinPrompt("Enter a manager PIN to mark this table.", "That PIN didn't match — try again."); continue; }
+              if (wantsPin(e2)) { pin = await pinPrompt("Enter a manager PIN to mark this table.", "That PIN didn't match — try again."); continue; }
               throw e2;
             }
           }
@@ -4936,12 +4945,12 @@ function renderBanquetBody() {
       try {
         r = await api("POST", "/banquet/place", { table: t, lines });
       } catch (e) {
-        if (!/manager pin/i.test(String(e && e.message))) throw e;
+        if (!wantsPin(e)) throw e;
         let pin = await pinPrompt("Banquet billing needs a manager PIN.");
         while (pin) {
           try { r = await api("POST", "/banquet/place", { table: t, lines, managerPin: pin }); break; }
           catch (e2) {
-            if (/manager pin/i.test(String(e2 && e2.message))) { pin = await pinPrompt("Banquet billing needs a manager PIN.", "That PIN didn't match — try again."); continue; }
+            if (wantsPin(e2)) { pin = await pinPrompt("Banquet billing needs a manager PIN.", "That PIN didn't match — try again."); continue; }
             throw e2;
           }
         }

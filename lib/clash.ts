@@ -164,6 +164,14 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
   const cols = [...new Set(keys.map((k) => k.split(".")[0]))];
 
   try {
+    // THE ONE ROW WHOSE ID *IS* THE TENANT KEY. `settings` is one row per restaurant, so the
+    // scope line below deliberately skips it — which left it as the only comparison in this file
+    // reading whatever restaurant the SCREEN named, with nothing here confirming it was the
+    // caller's own. Every real sender passes its own (editor/app.js buildEditExpect takes the id
+    // off the row it loaded), so nothing was wrong — but a refusal quotes the value it found, so
+    // the one comparison that could cross a restaurant boundary was also the one that reads a
+    // value back out. Answer "nothing to compare" instead, exactly like an unknown table.
+    if (idCol === "restaurant_id" && id !== rid) return null;
     let q = sb.from(table).select(cols.join(", "));
     if (id) q = q.eq(idCol, id);
     else for (const [col, v] of where) q = q.eq(col, v);
@@ -246,7 +254,11 @@ function readable(col: string): string {
     // Inventory, in the words the stock screens use — never the column name. "counted_base" in
     // front of a person counting tomatoes would mean nothing.
     counted_base: "the counted quantity",
-    reorder_level: "the reorder level",
+    // The ordering levels, in the words the stock form prints beside each box (mig 221 calls
+    // them par_qty / min_qty). `reorder_level` used to sit here and matched NO column on any
+    // table — a plain-words name for a field nothing could ever send.
+    par_qty: "the par level",
+    min_qty: "the urgent-below level",
     purchase_factor: "the pack size",
     purchase_uom: "the unit it's bought in",
   };
