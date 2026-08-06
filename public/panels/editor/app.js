@@ -906,6 +906,9 @@ function renderList() {
       const active = !bulk && state.sel && !state.isNew && recKey(r) === recKey(state.sel); // row being edited
       const hidden = state.tab !== "items" && r.active === false; // greyed-out "hidden from menu" rows
       const soldOut = isItems && Array.isArray(r.tags) && r.tags.includes("sold-out"); // 86'd dish
+      // …and whether it is OFF the menu entirely, which the list never showed — a manager
+      // hunting "why can't the guest see this dish?" should not have to open every one.
+      const hiddenDish = isItems && Array.isArray(r.tags) && r.tags.includes("hidden");
       // Build the little thumbnail on the left of each list row: a photo for
       // dishes, a coloured icon for categories, an emoji for filters.
       let thumb;
@@ -923,7 +926,7 @@ function renderList() {
           ${bulk ? `<span class="bulk-cb ${checked ? "on" : ""}" aria-hidden="true">${checked ? "✓" : ""}</span>` : ""}
           ${thumb}
           <div class="meta">
-            <b>${esc(recLabel(r))}${state.tab === "items" && r.dish_no != null ? ` <span class="dish-no">#${esc(String(r.dish_no))}</span>` : ""}${soldOut ? '<span class="badge-off">sold out</span>' : ""}${hidden ? '<span class="badge-off">hidden</span>' : ""}</b>
+            <b>${esc(recLabel(r))}${state.tab === "items" && r.dish_no != null ? ` <span class="dish-no">#${esc(String(r.dish_no))}</span>` : ""}${soldOut ? '<span class="badge-off">sold out</span>' : ""}${hidden ? '<span class="badge-off">hidden</span>' : ""}${hiddenDish ? '<span class="badge-hidden">off menu</span>' : ""}</b>
             <small>${esc(recKey(r) || "")}</small>
           </div>
         </li>`
@@ -1288,6 +1291,24 @@ function formItems(it) {
         ? "🚫 Not available right now — tap to make available"
         : "✅ Available — tap to mark not available"}
     </button>
+    ${/* HIDDEN — the third state (owner, 2026-08-06). Sold-out and hidden are different promises:
+          sold-out still SHOWS on the guest menu wearing its badge ("we have this, not today"),
+          hidden is not on the menu at all ("as far as you're concerned it doesn't exist"). They
+          are separate toggles rather than one three-way picker because they are genuinely
+          independent — a dish can be off the menu AND out of stock — and because a picker would
+          have made the common tap (86 a dish mid-service) slower. Staff can still order a hidden
+          dish, which is the whole point of it, so the line below says so rather than leaving a
+          manager to guess. */""}
+    <button type="button" class="avail-toggle ${(it.tags || []).includes("hidden") ? "hid" : "vis"}" data-action="toggleHidden">
+      ${(it.tags || []).includes("hidden")
+        ? "🙈 Hidden from the menu — tap to put it back"
+        : "👁 On the menu — tap to hide it from guests"}
+    </button>
+    <p class="avail-note">
+      ${(it.tags || []).includes("hidden")
+        ? "Guests don't see this dish at all. Your staff can still add it to a bill."
+        : "“Not available” still shows on the menu with a Sold out badge. “Hidden” takes it off the menu completely."}
+    </p>
     ${/* Open price rides "Change a price": it decides what the guest pays just as much as the
           Price box does, and the server drops both together. The hint moves inside the wrapper
           so hiding the switch can't leave its explanation behind on its own. */""}
@@ -5940,6 +5961,12 @@ function handleAction(action, arg, node) {
     it.tags = it.tags || [];
     const i = it.tags.indexOf("sold-out");
     if (i >= 0) it.tags.splice(i, 1); else it.tags.push("sold-out");
+  } else
+  if (action === "toggleHidden") {
+    // Same shape as sold-out on purpose: one tag, flipped in place, saved with the dish.
+    it.tags = it.tags || [];
+    const i = it.tags.indexOf("hidden");
+    if (i >= 0) it.tags.splice(i, 1); else it.tags.push("hidden");
   } else
   if (action === "addIngredient") (it.ingredients = it.ingredients || []).push({ emoji: "", name: "" });
   else if (action === "rmIngredient") it.ingredients.splice(Number(arg), 1);

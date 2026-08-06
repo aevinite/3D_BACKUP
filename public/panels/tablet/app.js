@@ -3392,7 +3392,13 @@ function dishBtnHtml(d) {
   // Total this dish across ALL its cart lines (a dish can now appear on several
   // lines — e.g. plain + "no nuts"), so the badge shows the true count.
   const inCartQty = state.cart.filter((l) => l.id === d.id).reduce((s, l) => s + l.qty, 0);
-  return `<button class="dish ${out ? "out" : ""} ${inCartQty ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
+  // OFF THE GUEST MENU, still orderable here (mig 306, owner 2026-08-06). A hidden dish is an
+  // off-menu special / staff meal / something served on request: the diner never sees it, the
+  // waiter still can. It must be LABELLED, or a waiter reads the tile as a normal dish and can't
+  // tell why the table's own phone doesn't list it.
+  const offMenu = (d.tags || []).includes("hidden");
+  return `<button class="dish ${out ? "out" : ""} ${offMenu ? "offmenu" : ""} ${inCartQty ? "in" : ""}" data-dish="${esc(d.id)}" ${out ? "disabled" : ""}>
+    ${offMenu ? `<span class="doffmenu" title="Not on the guest menu — you can still add it">OFF MENU</span>` : ""}
     ${out ? "" : `<span class="dedit" data-dishedit="${esc(d.id)}" role="button" aria-label="Quantity / allergy" title="Set quantity or allergy">✎</span>`}
     <span class="dname">${esc(d.title)}</span>
     <span class="drow">
@@ -3502,6 +3508,9 @@ function updateDishAvailability() {
     const out = (d.tags || []).includes("sold-out");
     btn.classList.toggle("out", out);
     btn.disabled = out;
+    // …and the off-menu mark, for the same reason the price is mirrored here: a menu change
+    // landing mid-order must not leave the tile telling the waiter something that is no longer true.
+    btn.classList.toggle("offmenu", (d.tags || []).includes("hidden"));
     const priceEl = btn.querySelector(".dprice");
     // MIRROR dishBtnHtml() EXACTLY, including the open-price case (T4 sweep, 2026-08-04). This
     // patcher wrote inr(dishPrice(d)) unconditionally, so when a menu change landed while the

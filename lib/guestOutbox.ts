@@ -122,6 +122,11 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
       : "A dish is no longer on the menu — please remove it.";
     // mig 253: the dish is priced by staff at order time, so it cannot be self-ordered.
     case "staff_priced_item": return "One dish needs a member of staff — its price is set when you order, so please ask your server.";
+    // mig 306: the dish was taken OFF the menu. Deliberately worded like unknown_item rather than
+    // like sold_out — "sold out" would promise it is coming back, and hidden makes no such promise.
+    case "hidden_item": return dish
+      ? `${dish} isn't on the menu — please remove it to order.`
+      : "A dish isn't on the menu any more — please remove it to order.";
     case "empty_order": return q ? "The order was empty." : "There's nothing in your order yet.";
     // The refusal that MUST never say "try again": doing so trips the same per-table limit and
     // fires another alert at the owner. Tell them to wait, which is the thing that actually works.
