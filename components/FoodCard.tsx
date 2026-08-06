@@ -277,11 +277,19 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           {/* Rating (real average) and prep time. Dishes with no reviews yet
               show only the prep time — no invented stars, no extra badges
               (the owner rejected a "New" badge here on 2026-06-10). The whole
-              rating disappears when the restaurant switches ratings off. */}
+              rating disappears when the restaurant switches ratings off.
+              NO INVENTED PREP TIME. This used to be `item.time || "25-30 min"`, and because
+              `time` is blank for whole menus, EVERY dish told the diner "25-30 min" — measured on
+              restaurant #1: all 59 cards, espresso included (guest sweep T1, 2026-08-06). A number
+              a guest plans their evening around has to be real or absent; the same reasoning
+              removed the fake per-dish star rating. The editor's Prep time field keeps
+              "25-30 min" as its PLACEHOLDER, which is where a suggestion belongs.
+              The row itself always renders (see `.dish-meta` min-height in globals.css) so a dish
+              with neither a rating nor a time keeps the card exactly the height it is today. */}
           <div className="dish-meta">
             {features.ratings && item.reviewCount && item.reviewCount > 0 ? (
               <>{item.rating} ★ • </>
-            ) : null}{item.time || "25-30 min"}
+            ) : null}{item.time || ""}
           </div>
           {/* Price, formatted to the chosen currency (falls back to a $ amount) */}
           <div className="dish-price">{formatPrice(item.price, currency || DEFAULT_CURRENCY)}</div>

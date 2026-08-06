@@ -39,6 +39,46 @@ export function accentPaletteCss(accentColor: string): string {
   return lines.join(";") + ";";
 }
 
+// ── THE PAGE ITSELF, for a restaurant that has only picked an accent ────────────────────────
+// accentPaletteCss above re-colours the accent FAMILY. Everything else a page is made of —
+// `--bg`, `--card`, `--text`, `--muted`, `--border` — was still whatever globals.css :root says,
+// and globals.css says restaurant #1: `--bg: #1a0f09  /* deep espresso-brown (logo brown family) */`
+// in dark and `#faf3e8` / text `#3c2a1e` in light. Measured on the deployed site (guest sweep T1,
+// 2026-08-06): Green Bowl (green) and Sakura Sushi (pink) both opened on French House's cream page
+// with French House brown body text, because neither has a full `theme` object — only an accent.
+// `buildCanvasBlock` in lib/brandTheme.ts already fixes this for tenants that DO set a theme; this
+// is the same fix for the far commoner case of a tenant that never set one.
+//
+// A NEUTRAL BASE + A WHISPER OF THE BRAND, not a guess at a palette. The base is a true neutral
+// (near-black / near-white), so contrast is predictable whatever colour the owner chose; the accent
+// is mixed in at 6–12% purely so the page feels like it belongs to the brand. Measured contrast:
+// #f2f3f5 on the dark base ≈ 16:1, #1f2328 on the light base ≈ 14:1 — both far past AA.
+//
+// WHY `html[data-theme=…]` AND NOT `:root`: `html, body { background: var(--bg) }` sits ABOVE #app
+// in the tree, and globals.css declares the #1 values at `[data-theme="light"]` (specificity 0,1,0)
+// which ties with `:root`. `html[data-theme="light"]` is 0,1,1, so it wins outright — the same
+// specificity trap documented in CLAUDE.md's known gotchas. It stays BELOW a themed tenant's own
+// `[data-theme] #app.brand-themed` block (0,2,1), so an owner who has set a real palette still wins.
+export function accentCanvasCss(accentColor: string): string {
+  if (!hexToRgbTriplet(accentColor)) return ""; // unparseable → change nothing, keep today's look
+  const mix = (pct: number, base: string) => `color-mix(in srgb, ${accentColor} ${pct}%, ${base})`;
+  const dark = [
+    `--bg:${mix(8, "#0d0d10")}`,
+    `--card:${mix(12, "#17171c")}`,
+    `--text:#f2f3f5`,
+    `--muted:rgba(235, 238, 245, 0.62)`,
+    `--border:1px solid ${mix(30, "transparent")}`,
+  ].join(";");
+  const light = [
+    `--bg:${mix(6, "#ffffff")}`,
+    `--card:#ffffff`,
+    `--text:#1f2328`,
+    `--muted:${mix(55, "#4a4f57")}`,
+    `--border:1px solid ${mix(26, "transparent")}`,
+  ].join(";");
+  return `html[data-theme="dark"]{${dark};}html[data-theme="light"]{${light};}`;
+}
+
 // The soft brand-coloured ATMOSPHERE wash for the menu PAGE background only (a
 // top glow + faint tint over the whole menu, so each restaurant feels its own).
 // Kept off :root on purpose — it's a page backdrop, not a widget colour.

@@ -279,14 +279,25 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Live: when the owner edits the menu (dish/price/sold-out/category) or flips a
   // feature in admin, refetch gently within ~1s. Guests subscribe to the 'menu'
   // topic only — never the staff order firehose.
+  //
+  // THIS IS ALSO THE FIRST LOAD. useRealtime ends its mount effect with
+  // `topics.forEach(run)` — "initial load — fire IMMEDIATELY" — so this handler runs once
+  // synchronously on mount, before any breadcrumb arrives. The effect below used to call
+  // refreshMenu() as well, and neither knew about the other: EVERY guest menu load fetched
+  // /api/r/<slug>/menu-data TWICE (measured on the deployed site, 2 page requests, 39.6 KB
+  // each on restaurant #1) and refreshed the feature switches twice. `menuReqRef` dropped
+  // the older reply so nothing ever looked wrong — it was pure waste, on the one read this
+  // project calls "the #1 scaling-cost lever" (guest sweep T1, 2026-08-06).
+  //
+  // Ordering is what makes ONE call safe: this hook is declared ABOVE the effect below, and
+  // React runs mount effects in declaration order, so the fetch still starts at exactly the
+  // same moment it did before. If you ever move this call, move the fetch with it.
   useRealtime({ menu: () => { refreshMenu(); refreshFeatures(restaurantId); } }, restaurantId);
 
   // The main "load everything" effect — runs once when the page first appears.
-  // It fetches the dishes and categories, restores where you last were, and
-  // starts listening for favorite changes.
+  // It restores where you last were and starts listening for favorite changes.
+  // The dishes/categories fetch belongs to the hook above — see the note there.
   useEffect(() => {
-    refreshMenu();
-
     // Restore the rest of the browse state so Back from a dish lands you exactly
     // where you left: view mode, sort, diet, search. (Category is handled above.)
     try {
@@ -433,49 +444,71 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // the space directly above one is that card's picture, never another control.
     let scrollIdle: ReturnType<typeof setTimeout> | undefined;
     const BELL_MAX_LIFT = 260; // a sanity cap, so a surprising layout can never fling it away.
-    // Deliberately roomy: a control is <=96px and the bell is <=58px, so ONE clearing move costs up
-    // to ~164px, and a card's favourite button sits above its add button — measured, both needed.
     // Deliberately BOX INTERSECTION, not elementFromPoint. The first attempt at this probed the
     // bell's centre point and always came back with the bell's own <i> icon — whose nearest
     // button/anchor ancestor is null, because the bell is a div — so it read "nothing underneath"
     // and never lifted. Rectangles have no such blind spot, and they also catch a PARTIAL overlap,
     // which a single centre probe misses entirely.
-    const CTL_MAX = 96; // a dish's own control is this small; a whole-card link is far bigger and
-                        // must not be treated as an obstruction or the bell would never sit still
-    // Does anything tappable overlap the bell where it sits RIGHT NOW?
-    const bellObstruction = (bell: HTMLElement): number => {
-      const b = bell.getBoundingClientRect();
-      if (!b.width) return Infinity;
-      let highestTop = Infinity;
+    //
+    // WHAT COUNTS AS SOMETHING TO CLEAR, and why the size test had to go.
+    // It used to be "anything tappable up to 96px", which let the bell treat a full-width control
+    // as thin air. So the lift walked upward clearing the dish's "+" and its favourite button, ran
+    // out of room at 256px of its 260px cap, and PARKED ON `.cat-group-head` — the button that
+    // folds a category. Measured on the deployed site at 360×780, both restaurants: the bell's box
+    // overlapped "Coffee (6)" by 48px, elementFromPoint in that overlap returned the bell, and an
+    // ordinary tap there rang for a waiter while the category stayed open (guest sweep T1,
+    // 2026-08-06). One tap-theft had been traded for another.
+    //
+    // The only thing the old size test was really trying to exclude is the WHOLE-CARD LINK — a
+    // 160×261 <a> that covers the entire tile. A floating button overlapping part of a picture is
+    // what floating buttons do; overlapping a CONTROL is what steals a tap. So exclude that link by
+    // what it IS, and treat every other control as real, whatever its width.
+    const isCardLink = (el: HTMLElement) => el.classList.contains("item-card-link");
+    // Every control's box, read in ONE pass. The candidate lifts below are then pure arithmetic
+    // against this array — no second layout read — so scanning many positions costs no more than
+    // the single check did.
+    const controlBoxes = (): DOMRect[] => {
+      const out: DOMRect[] = [];
       document.querySelectorAll<HTMLElement>("button, [role='button'], a").forEach((el) => {
         if (el.closest(".chef-call")) return; // the bell and its icon are not obstructions
+        if (isCardLink(el)) return;           // the tile itself is scenery, not a control
         const r = el.getBoundingClientRect();
-        if (!r.width || r.width > CTL_MAX || r.height > CTL_MAX) return;
-        const overlaps = r.left < b.right && b.left < r.right && r.top < b.bottom && b.top < r.bottom;
-        if (overlaps && r.top < highestTop) highestTop = r.top;
+        if (r.width && r.height) out.push(r);
       });
-      return highestTop;
+      return out;
     };
+    const hits = (boxes: DOMRect[], left: number, right: number, top: number, bottom: number) =>
+      boxes.some((r) => r.left < right && left < r.right && r.top < bottom && top < r.bottom);
+    // FIND A RESTING PLACE THAT COVERS NO CONTROL AT ALL — searching upward in small steps rather
+    // than hopping "just past the highest thing in the way". The old hop is what overshot into a
+    // category header: clearing one control lands you wherever that puts you, which may be worse.
+    // A scan simply asks each candidate "is anything tappable here?" and takes the first clean one.
+    const STEP = 8;
     const settleBell = () => {
       const bell = document.querySelector<HTMLElement>(".chef-call");
       if (!bell) return;
+      const boxes = controlBoxes();
+      const cur = bell.getBoundingClientRect();
+      if (!cur.width) return;
+      const lift = parseFloat(bell.style.getPropertyValue("--bell-lift")) || 0;
       // STABILITY FIRST: if where it sits now is already clear, leave it completely alone. Without
       // this the lift is recomputed from zero on every scroll-stop and the bell visibly hops around
       // the screen as the guest browses — trading a covered button for a restless one.
-      if (bellObstruction(bell) === Infinity) return;
-      bell.style.removeProperty("--bell-lift"); // it IS overlapping — re-measure from rest
-      // Several passes: clearing one control moves the bell onto whatever is above it, and on a
-      // dish card that is the favourite button (measured — the first version capped out here and
-      // only landed clear by luck). Each pass is a handful of rectangle reads, and it stops the
-      // moment nothing overlaps.
-      for (let pass = 0; pass < 4; pass++) {
-        const highestTop = bellObstruction(bell);
-        if (highestTop === Infinity) return; // clear — stop here and leave it
-        const b = bell.getBoundingClientRect();
-        const current = parseFloat(bell.style.getPropertyValue("--bell-lift")) || 0;
-        const lift = Math.min(current + Math.ceil(b.bottom - highestTop + 10), BELL_MAX_LIFT);
-        bell.style.setProperty("--bell-lift", `${lift}px`);
+      if (!hits(boxes, cur.left, cur.right, cur.top, cur.bottom)) return;
+      // Rest position = where it would sit with no lift at all.
+      const restTop = cur.top + lift, restBottom = cur.bottom + lift;
+      for (let want = 0; want <= BELL_MAX_LIFT; want += STEP) {
+        if (!hits(boxes, cur.left, cur.right, restTop - want, restBottom - want)) {
+          if (want === 0) bell.style.removeProperty("--bell-lift");
+          else bell.style.setProperty("--bell-lift", `${want}px`);
+          return;
+        }
       }
+      // NOTHING within reach is clean (a very short screen, or a wall of controls). Go back to the
+      // corner the owner designed rather than staying parked mid-screen on a heading: at rest the
+      // bell is at least where a guest expects to find it, and the scroll step-aside below still
+      // uncovers whatever is under it while they are moving.
+      bell.style.removeProperty("--bell-lift");
     };
     const markScrolling = () => {
       document.body.classList.add("menu-scrolling");
@@ -570,7 +603,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // The check is a handful of rectangle reads and returns immediately once the bell is clear, so
     // it costs what the scroll-spy beside it costs, and it self-heals for lazy images, a category
     // fold, a filter change and a language switch alike.
-    const tick = setInterval(() => { computeSpy(); settleBell(); }, 600);
+    // …and skip the whole tick while the tab is hidden. Both halves are pure layout maths about a
+    // screen nobody is looking at, and every other timer in the guest app already checks this
+    // (AppShell's 60s settings poll, useRealtime's safety poll). The `settleBell` on wake is
+    // covered by the resize/scroll handlers and by the next tick.
+    const tick = setInterval(() => { if (document.hidden) return; computeSpy(); settleBell(); }, 600);
     // Run once on mount so the shrink starts at the right value if we restored a
     // scrolled position. Cleanup: stop listening + cancel the pending frame/timer.
     onScroll();
@@ -1091,13 +1128,19 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                       <i className="fas fa-mug-saucer fav-howto-pic"></i>
                       <span className="fav-howto-heart"><i className="fas fa-heart"></i></span>
                     </div>
-                    <span className="fav-howto-cue">tap to save</span>
+                    <span className="fav-howto-cue">{t.favTapToSave}</span>
                   </div>
                   <h3 className="fav-empty-title">{t.noFavourites}</h3>
+                  {/* The sentence comes from the dictionary with a `{heart}` token where the ♥ goes,
+                      so each language can put it where its own grammar wants it. This whole line
+                      used to be hardcoded English under a translated headline (guest sweep T1). */}
                   <p className="fav-empty-sub">
-                    Open any dish, then tap the{" "}
-                    <i className="fas fa-heart" aria-hidden="true"></i> at the{" "}
-                    <b>top-right</b> — it stays saved here for next time.
+                    {t.noFavouritesSub.split("{heart}").map((part, i) => (
+                      <span key={i}>
+                        {i > 0 && <i className="fas fa-heart" aria-hidden="true"></i>}
+                        {part}
+                      </span>
+                    ))}
                   </p>
                 </>
               ) : (
@@ -1144,7 +1187,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           // below the search box and thinks the page broke (bug fix 2026-07-06).
           <div className="fav-empty" role="status">
             <h3 className="fav-empty-title">
-              {q ? t.noSearchResults.replace("{q}", searchQuery.trim()) : t.noMatch}
+              {/* split/join, NOT .replace(): String.replace treats `$&`, "$`" and `$'` in the
+                  REPLACEMENT as instructions, and here the guest types the replacement. Measured
+                  on the deployed site: typing `$&` printed `No dishes found for “{q}”` — the app's
+                  own placeholder — and "$`" printed the whole message nested inside itself
+                  (guest sweep T1, 2026-08-06). split/join copies the text verbatim. */}
+              {q ? t.noSearchResults.split("{q}").join(searchQuery.trim()) : t.noMatch}
             </h3>
             <p className="fav-empty-sub">
               {q ? t.noSearchResultsSub : t.noMatchSub}

@@ -74,6 +74,12 @@ export interface Translations {
   noDishesYet: string;
   noDishesYetSub: string;
   noFavourites: string;
+  // The Favourites empty screen used to translate its HEADLINE and then tell the guest what to
+  // do about it in hardcoded English — on a menu that offers Hindi (guest sweep T1, 2026-08-06).
+  // `noFavouritesSub` carries a `{heart}` token where the ♥ icon is drawn, so the sentence can be
+  // ordered naturally in each language instead of being glued together from fragments.
+  noFavouritesSub: string;
+  favTapToSave: string;      // the little cue under the how-to card
   noMatch: string;
   noMatchSub: string;
   noSearchResults: string;   // takes the typed term, e.g. `No dishes found for “{q}”`
@@ -87,6 +93,8 @@ const translations: Record<LanguageCode, Translations> = {
     noDishesYet: "No dishes on the menu yet",
     noDishesYetSub: "This restaurant hasn\u2019t added any dishes. Please check back soon.",
     noFavourites: "No favourites yet",
+    favTapToSave: "tap to save",
+    noFavouritesSub: "Open any dish, then tap the {heart} at the top-right \u2014 it stays saved here for next time.",
     noMatch: "No dishes match these filters.",
     noMatchSub: "Try turning a filter off.",
     noSearchResults: "No dishes found for \u201c{q}\u201d",
@@ -152,6 +160,8 @@ const translations: Record<LanguageCode, Translations> = {
     noDishesYet: "Noch keine Gerichte auf der Karte",
     noDishesYetSub: "Dieses Restaurant hat noch keine Gerichte hinzugef\u00fcgt. Bitte schauen Sie bald wieder vorbei.",
     noFavourites: "Noch keine Favoriten",
+    favTapToSave: "zum Speichern tippen",
+    noFavouritesSub: "\u00d6ffnen Sie ein Gericht und tippen Sie oben rechts auf das {heart} \u2014 es bleibt hier gespeichert.",
     noMatch: "Keine Gerichte passen zu diesen Filtern.",
     noMatchSub: "Schalten Sie einen Filter aus.",
     noSearchResults: "Keine Gerichte gefunden f\u00fcr \u201e{q}\u201c",
@@ -217,6 +227,8 @@ const translations: Record<LanguageCode, Translations> = {
     noDishesYet: "Aucun plat au menu pour l\u2019instant",
     noDishesYetSub: "Ce restaurant n\u2019a pas encore ajout\u00e9 de plats. Revenez bient\u00f4t.",
     noFavourites: "Aucun favori pour l\u2019instant",
+    favTapToSave: "touchez pour enregistrer",
+    noFavouritesSub: "Ouvrez un plat, puis touchez le {heart} en haut \u00e0 droite \u2014 il reste enregistr\u00e9 ici.",
     noMatch: "Aucun plat ne correspond \u00e0 ces filtres.",
     noMatchSub: "Essayez de d\u00e9sactiver un filtre.",
     noSearchResults: "Aucun plat trouv\u00e9 pour \u00ab\u202f{q}\u202f\u00bb",
@@ -282,6 +294,8 @@ const translations: Record<LanguageCode, Translations> = {
     noDishesYet: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0623\u0637\u0628\u0627\u0642 \u0641\u064a \u0627\u0644\u0642\u0627\u0626\u0645\u0629 \u0628\u0639\u062f",
     noDishesYetSub: "\u0644\u0645 \u064a\u0636\u0641 \u0647\u0630\u0627 \u0627\u0644\u0645\u0637\u0639\u0645 \u0623\u064a \u0623\u0637\u0628\u0627\u0642 \u0628\u0639\u062f. \u064a\u0631\u062c\u0649 \u0627\u0644\u0639\u0648\u062f\u0629 \u0642\u0631\u064a\u0628\u064b\u0627.",
     noFavourites: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0645\u0641\u0636\u0644\u0627\u062a \u0628\u0639\u062f",
+    favTapToSave: "\u0627\u0636\u063a\u0637 \u0644\u0644\u062d\u0641\u0638",
+    noFavouritesSub: "\u0627\u0641\u062a\u062d \u0623\u064a \u0637\u0628\u0642\u060c \u062b\u0645 \u0627\u0636\u063a\u0637 \u0639\u0644\u0649 {heart} \u0641\u064a \u0627\u0644\u0623\u0639\u0644\u0649 \u2014 \u0633\u064a\u0628\u0642\u0649 \u0645\u062d\u0641\u0648\u0638\u064b\u0627 \u0647\u0646\u0627.",
     noMatch: "\u0644\u0627 \u062a\u0648\u062c\u062f \u0623\u0637\u0628\u0627\u0642 \u062a\u0637\u0627\u0628\u0642 \u0647\u0630\u0647 \u0627\u0644\u0645\u0631\u0634\u062d\u0627\u062a.",
     noMatchSub: "\u062c\u0631\u0651\u0628 \u0625\u064a\u0642\u0627\u0641 \u0623\u062d\u062f \u0627\u0644\u0645\u0631\u0634\u062d\u0627\u062a.",
     noSearchResults: "\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u0639\u062b\u0648\u0631 \u0639\u0644\u0649 \u0623\u0637\u0628\u0627\u0642 \u0644\u0640 \u201c{q}\u201d",
@@ -347,6 +361,8 @@ const translations: Record<LanguageCode, Translations> = {
     noDishesYet: "\u092e\u0947\u0928\u0942 \u092e\u0947\u0902 \u0905\u092d\u0940 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902",
     noDishesYetSub: "\u0907\u0938 \u0930\u0947\u0938\u094d\u091f\u0949\u0930\u0947\u0902\u091f \u0928\u0947 \u0905\u092d\u0940 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902 \u091c\u094b\u0921\u093c\u093e \u0939\u0948\u0964 \u0915\u0943\u092a\u092f\u093e \u091c\u0932\u094d\u0926 \u0939\u0940 \u0926\u094b\u092c\u093e\u0930\u093e \u0926\u0947\u0916\u0947\u0902\u0964",
     noFavourites: "\u0905\u092d\u0940 \u0915\u094b\u0908 \u092a\u0938\u0902\u0926\u0940\u0926\u093e \u0928\u0939\u0940\u0902",
+    favTapToSave: "\u0938\u0939\u0947\u091c\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u091f\u0948\u092a \u0915\u0930\u0947\u0902",
+    noFavouritesSub: "\u0915\u094b\u0908 \u092d\u0940 \u0935\u094d\u092f\u0902\u091c\u0928 \u0916\u094b\u0932\u0947\u0902, \u092b\u093f\u0930 \u090a\u092a\u0930 \u0926\u093e\u0908\u0902 \u0913\u0930 {heart} \u092a\u0930 \u091f\u0948\u092a \u0915\u0930\u0947\u0902 \u2014 \u092f\u0939 \u092f\u0939\u093e\u0901 \u0938\u0939\u0947\u091c\u093e \u0930\u0939\u0947\u0917\u093e\u0964",
     noMatch: "\u0907\u0928 \u092b\u093c\u093f\u0932\u094d\u091f\u0930 \u0938\u0947 \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u092e\u0947\u0932 \u0928\u0939\u0940\u0902 \u0916\u093e\u0924\u093e\u0964",
     noMatchSub: "\u0915\u094b\u0908 \u090f\u0915 \u092b\u093c\u093f\u0932\u094d\u091f\u0930 \u092c\u0902\u0926 \u0915\u0930\u0915\u0947 \u0926\u0947\u0916\u0947\u0902\u0964",
     noSearchResults: "\u201c{q}\u201d \u0915\u0947 \u0932\u093f\u090f \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902 \u092e\u093f\u0932\u093e",
@@ -412,6 +428,8 @@ const translations: Record<LanguageCode, Translations> = {
     noDishesYet: "\uc544\uc9c1 \uba54\ub274\uc5d0 \uc694\ub9ac\uac00 \uc5c6\uc2b5\ub2c8\ub2e4",
     noDishesYetSub: "\uc774 \uc2dd\ub2f9\uc740 \uc544\uc9c1 \uc694\ub9ac\ub97c \ub4f1\ub85d\ud558\uc9c0 \uc54a\uc558\uc2b5\ub2c8\ub2e4. \uacf1 \ub2e4\uc2dc \ud655\uc778\ud574 \uc8fc\uc138\uc694.",
     noFavourites: "\uc990\uaca8\ucc3e\uae30\uac00 \uc544\uc9c1 \uc5c6\uc2b5\ub2c8\ub2e4",
+    favTapToSave: "\ub20c\ub7ec\uc11c \uc800\uc7a5",
+    noFavouritesSub: "\uc694\ub9ac\ub97c \uc5f4\uace0 \uc624\ub978\ucabd \uc704\uc758 {heart}\ub97c \ub204\ub974\uc138\uc694 \u2014 \uc5ec\uae30\uc5d0 \uc800\uc7a5\ub429\ub2c8\ub2e4.",
     noMatch: "\uc774 \ud544\ud130\uc5d0 \ub9de\ub294 \uc694\ub9ac\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.",
     noMatchSub: "\ud544\ud130\ub97c \ud558\ub098 \uaebc\ubcf4\uc138\uc694.",
     noSearchResults: "\u201c{q}\u201d\uc5d0 \ub300\ud55c \uc694\ub9ac\ub97c \ucc3e\uc744 \uc218 \uc5c6\uc2b5\ub2c8\ub2e4",

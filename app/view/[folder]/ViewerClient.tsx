@@ -11,7 +11,7 @@ import { modelLoader } from "@/lib/modelLoader";     // 3D model download manage
 import { modelWatchlist } from "@/lib/modelWatchlist"; // tracks who's waiting on a model (for toasts)
 import { getMenuItem, getSettings, type MenuItem } from "@/lib/menu"; // fetch one dish's details
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant"; // resolve the restaurant this viewer belongs to
-import { accentPaletteCss } from "@/lib/accent"; // restaurant colour for the viewer chrome
+import { accentPaletteCss, accentCanvasCss } from "@/lib/accent"; // restaurant colour + page canvas
 import { allergenIcon, allergenLabel } from "@/lib/allergens"; // allergen icon + label
 import { formatPrice, getCurrency, getLanguage, setLanguage, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format"; // money formatting
 import { useBackClose } from "@/lib/backStack"; // phone back button closes overlays first
@@ -153,7 +153,9 @@ export default function ViewerClient({ folder }: { folder: string }) {
           // accent palette at :root here too. Only non-#1 restaurants carry an
           // accent_color, so #1 keeps its gold.
           if (r.id !== DEFAULT_RESTAURANT_ID && r.accentColor && !cancelled) {
-            setAccentCss(`:root{${accentPaletteCss(r.accentColor)}}`);
+            // Canvas first, accent family second — same pairing as the menu and the dish page, so the
+            // 3D screen is not the one surface still wearing restaurant #1's brown.
+            setAccentCss(`${accentCanvasCss(r.accentColor)}:root{${accentPaletteCss(r.accentColor)}}`);
           }
         }
       }

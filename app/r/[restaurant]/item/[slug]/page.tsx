@@ -6,7 +6,7 @@
 import { notFound } from "next/navigation";
 import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { getMenuItem, getSettings } from "@/lib/menu";
-import { accentPaletteCss } from "@/lib/accent";
+import { accentPaletteCss, accentCanvasCss } from "@/lib/accent";
 import ItemClient from "@/app/item/[slug]/ItemClient";
 
 // White-label: a dish link's tab title + share preview must read as THIS
@@ -18,7 +18,20 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   if (!r) return { title: "Menu" };
   const dish = await getMenuItem(slug, r.id).catch(() => null);
   const title = dish?.title ? `${dish.title} — ${r.name}` : `${r.name} — Menu`;
-  return { title };
+  // A TITLE ALONE IS NOT WHITE-LABEL. Next inherits every field a page doesn't set, so returning
+  // only the title left the root layout's "Aevidine — the all-in-one platform that runs your
+  // restaurant" as the description of a shared DISH link, with no preview image (guest sweep T1,
+  // 2026-08-06). The dish's own description is the honest blurb; its photo is the honest image.
+  const description = dish?.description?.trim()
+    ? `${dish.description.trim()} — at ${r.name}.`
+    : `View ${dish?.title || "the menu"} at ${r.name}.`;
+  const image = dish?.image || r.logoUrl || null;
+  return {
+    title,
+    description,
+    ...(r.logoUrl ? { icons: { icon: r.logoUrl } } : {}),
+    openGraph: { title, description, type: "website", ...(image ? { images: [{ url: image }] } : {}) },
+  };
 }
 
 export default async function RestaurantItemPage({
@@ -47,7 +60,12 @@ export default async function RestaurantItemPage({
   // accent palette at :root here (non-#1 only) so the dish page matches its own menu.
   // #1 passes nothing and keeps its hand-tuned gold from globals.css.
   const accentCss =
-    r.id !== DEFAULT_RESTAURANT_ID && r.accentColor ? `:root{${accentPaletteCss(r.accentColor)}}` : "";
+    r.id !== DEFAULT_RESTAURANT_ID && r.accentColor
+      // The canvas travels with the accent (lib/accent.ts → accentCanvasCss). Without it the dish
+      // page kept restaurant #1's cream/brown page while the MENU it was opened from had the
+      // tenant's own — the two screens would no longer match (guest sweep T1, 2026-08-06).
+      ? `${accentCanvasCss(r.accentColor)}:root{${accentPaletteCss(r.accentColor)}}`
+      : "";
   return (
     <>
       {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
