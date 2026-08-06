@@ -129,6 +129,30 @@ if (existsSync(LOCAL)) {
   notes.push(`no .claude/settings.local.json in ${ROOT} (gitignored — normal in a worktree or fresh clone), so the live-stack denies were not checked here`);
 }
 
+// ── 4 · the QUOTE TEST is still in place (owner, 2026-08-06) ────────────────────────────────
+// Added after I released to AV live without being asked, by reading my OWN earlier sentence as his
+// permission. The written rule alone did not stop that — so both halves of the replacement are
+// asserted here: the mechanical check must EXIST, and the rule naming the forbidden move must
+// still be in CLAUDE.md. Deleting either is how the next session repeats it.
+{
+  const PREFLIGHT = join(ROOT, "scripts/avlive-preflight.mjs");
+  if (!existsSync(PREFLIGHT)) {
+    fails.push(`scripts/avlive-preflight.mjs is GONE — that is the quote test, the only mechanical thing standing between an inferred "yes" and a change on a paying client's restaurant`);
+  } else {
+    const src = readFileSync(PREFLIGHT, "utf8");
+    if (!/NOT_AUTHORISATION/.test(src) || !/back\\s\?up/.test(src)) {
+      fails.push(`scripts/avlive-preflight.mjs no longer refuses the phrases already mistaken for a yes ("make it live on backup", "do what is left", a bare yes) — those cases ARE the check`);
+    }
+  }
+  const PROJECT_MD = join(ROOT, "CLAUDE.md");
+  if (existsSync(PROJECT_MD)) {
+    const md = readFileSync(PROJECT_MD, "utf8");
+    if (!/QUOTE TEST/i.test(md)) {
+      fails.push(`CLAUDE.md no longer carries the QUOTE TEST rule — without it a session can again read its own earlier sentence as the owner's permission for the live client stack`);
+    }
+  }
+}
+
 // ── report ──────────────────────────────────────────────────────────────────────────────────
 if (fails.length) {
   console.error("verify:no-ask FAILED — the owner's 2026-08-06 standing order is at risk:");
