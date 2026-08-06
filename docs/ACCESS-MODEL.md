@@ -122,6 +122,15 @@ A pure group — a restaurant can always issue a bill, so there is no on/off. Wh
 | **Format of parcel bill** | — | The same, for a parcel: no table, says PARCEL. |
 | **Bill design editor** | — | **LEFT TO BUILD**: ships as a labelled preview, stores nothing. |
 
+> **What is genuinely unbuilt, and how to tell.** A row that is not built yet carries
+> `leftToBuild: true` in `lib/accessTree.ts`, and the screen prints a **Left to build** tag next
+> to its name. There are exactly **two**: `bill_designer` (this row) and `inventory_in_reports`
+> (A7's cost line). Nothing else in this document is a promise — if a paragraph here describes a
+> control and no node carries the flag, the paragraph is wrong and the tree is right. That is how
+> A6's "show payroll cost in reports" sub-option survived in prose for days after it had stopped
+> existing (corrected 2026-08-06). `npm run verify:access` fails on a `bind: "none"` row that is
+> neither a group nor labelled, so a third unbuilt row cannot appear without saying so on screen.
+
 All three tax rows are **admin-only** (owner, 2026-08-04): no owner and no manager screen offers them.
 
 ---

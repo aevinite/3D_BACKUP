@@ -152,9 +152,33 @@ function Style() {
   .acc2-sw { display:flex; align-items:center; gap:12px; padding:10px 12px; border-radius:11px; background:var(--bg); }
   .acc2-sw-b { flex:1; min-width:0; } .acc2-sw .nm { font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px; }
   .acc2-sw .ds { font-size:12px; color:var(--muted); margin-top:2px; line-height:1.5; }
-  .acc2-toggle { width:44px; height:26px; border-radius:99px; background:var(--muted2); border:var(--border); position:relative; cursor:pointer; flex:none; transition:background .2s; }
-  .acc2-toggle span { position:absolute; top:2px; left:2px; width:20px; height:20px; border-radius:99px; background:var(--muted); transition:transform .2s, background .2s; }
+  /* AN OFF SWITCH MUST NOT LOOK FILLED (2026-08-06). The off track was var(--muted2), which in
+     the LIGHT console skin paints a heavy dark-grey pill on a near-white card — and a filled pill
+     is what almost every app uses to mean ON. On the one screen where misreading on/off costs a
+     restaurant a feature, that is the wrong signal. Off is now hollow (the page background inside
+     a visible border) and on is solid accent, so the two differ by FILL as well as by knob
+     position — which also means they still tell apart without colour. */
+  .acc2-toggle { width:44px; height:26px; border-radius:99px; background:var(--bg); border:1.5px solid var(--muted2); position:relative; cursor:pointer; flex:none; transition:background .2s, border-color .2s; }
+  .acc2-toggle span { position:absolute; top:2px; left:2px; width:19px; height:19px; border-radius:99px; background:var(--muted); transition:transform .2s, background .2s; }
   .acc2-toggle.on { background:var(--accent); border-color:var(--accent); } .acc2-toggle.on span { transform:translateX(18px); background:#fff; }
-  @media (max-width:640px) { .acc2-head-r { width:100%; } .acc2-rsel { flex:1; } }
+  @media (max-width:640px) {
+    .acc2-head-r { width:100%; } .acc2-rsel { flex:1; }
+    /* THE SECTION HEADER STOPS BEING THREE COLUMNS ON A PHONE (2026-08-06). At 360px the icon
+       took the left, the count chip and chevron the right, and the one-sentence blurb was
+       squeezed into a ~40% middle column — six wrapped lines with empty space under the icon,
+       eating a third of the first screen before a single switch appeared. The title row keeps
+       its icon and controls; the blurb drops to full width underneath. */
+    .acc2-sh { flex-wrap:wrap; row-gap:5px; padding:12px 13px; gap:10px; }
+    /* display:contents so the TITLE and the BLURB become flex items of the header itself —
+       they are wrapped in one span in the markup, and without this the blurb stays trapped in
+       the narrow middle column and the whole exercise does nothing. A plain span with no role
+       is the safe case for display:contents; its text stays exactly where it was in the tree. */
+    .acc2-sh-t { display:contents; }
+    .acc2-gi.lg { order:0; }
+    .acc2-sh h2 { order:1; flex:1 1 auto; min-width:0; }
+    .acc2-sh .at-count { order:2; }
+    .acc2-sh .acc2-chev { order:3; }
+    .acc2-sh p { order:4; flex:1 0 100%; margin:0; }
+  }
   `}</style>;
 }

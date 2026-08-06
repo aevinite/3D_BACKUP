@@ -46,11 +46,34 @@ try {
     // ?restaurant_id=, which the page IGNORES, so every run silently tested the alphabetically
     // FIRST restaurant (Aangan, the QA control) instead of the one resolved above — and a drifted
     // switch on Aangan read as a search bug (found 2026-08-02).
-    await p.goto(`${BASE}/aevinite/access?rid=${rid}`, { waitUntil: "domcontentloaded" });
-    await sleep(6000);
+    // A TRANSPORT HICCUP IS NOT A PRODUCT FAULT (2026-08-06 — the same lesson
+    // scripts/verify-access-live.mjs learned on 2026-08-05, and this script never got).
+    // One flaky first load against the deployed site printed "✗ the search bar is on the page",
+    // which reads as "the search is broken" — it passed 30/30 on an immediate re-run. A red line
+    // that isn't a real fault is how a real one gets skimmed past.
+    //
+    // So the PAGE LOAD retries, with backoff + jitter like every other retry in this codebase,
+    // and only on the transport shape: the page failed to load, or it loaded without its own
+    // markup (which is what a 502 through the edge looks like from here). A page that loads and
+    // is WRONG is never retried — that is the product talking, and it must fail on the first try.
     const box = p.locator('input[aria-label="Find a setting"]');
-    ok("the search bar is on the page", (await box.count()) === 1);
-    if ((await box.count()) !== 1) { await ctx.close(); continue; }
+    const LOAD_TRIES = 3;
+    let loaded = false, lastWhy = "";
+    for (let i = 1; i <= LOAD_TRIES; i++) {
+      try {
+        await p.goto(`${BASE}/aevinite/access?rid=${rid}`, { waitUntil: "domcontentloaded" });
+        await sleep(6000);
+        if ((await box.count()) === 1) { loaded = true; break; }
+        lastWhy = "the page came back without the Access screen on it";
+      } catch (e) { lastWhy = e.message.slice(0, 80); }
+      if (i < LOAD_TRIES) {
+        const wait = Math.round(700 * i * (0.75 + Math.random() * 0.5));
+        console.log(`       (transport: ${lastWhy} — retry ${i}/${LOAD_TRIES - 1} in ${wait}ms)`);
+        await sleep(wait);
+      }
+    }
+    ok("the search bar is on the page", loaded, loaded ? "" : lastWhy);
+    if (!loaded) { await ctx.close(); continue; }
 
     const overflow = await p.evaluate(() => Math.max(0, document.documentElement.scrollWidth - document.documentElement.clientWidth));
     ok("nothing spills off the side", overflow <= 4, `${overflow}px`);

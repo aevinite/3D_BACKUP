@@ -4028,10 +4028,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const touches = (ks: string[]) => body && typeof body === "object" && ks.some((k) => k in (body as object));
         if (offList.includes("tables") && touches(["table_names", "table_seats"]))
           return permDenied("change the tables");
-        if (offList.includes("billing") && touches(["gstin", "restaurant_name", "restaurant_address", "restaurant_phone", "invoice_prefix", "bill_footer", "tax_components"]))
-          return permDenied("change the bill");
-        if (offList.includes("sessions") && touches(["sessions_enabled", "require_location", "require_otp", "geo_lat", "geo_lng", "geo_radius_m"]))
-          return permDenied("change the dining-session rules");
+        // THE "billing" AND "sessions" BRANCHES LEFT HERE ON 2026-08-06. managerSettingsOff() can
+        // only ever return tables / users / access (MANAGER_SETTINGS), so neither could fire —
+        // and the allow-list a few lines below already refuses a manager sending any of those
+        // fields at all. Two refusals for switches the model retired imply those switches still
+        // exist, which is exactly how a future session "restores" one.
       }
       if (a === "settings" && g.user && g.user.role === "manager" && body && typeof body === "object") {
         // THE `table_assign.manager_opts` GATE LEFT THIS BLOCK (sweep T6, 2026-08-06). It read

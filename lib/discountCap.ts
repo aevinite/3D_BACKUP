@@ -1,8 +1,14 @@
 // Per-role discount %-cap (owner 2026-07-24). The admin sets, per restaurant, the most a role
 // may take off a bill in one go — stored in restaurants.access_config.give_discounts.limit
-// { owner, manager, waiter } as a percentage of the PRE-TAX base (subtotal). Server-enforced so
-// a hand-formed request can't exceed it. The admin super-user (role null) is never capped, and
-// the OWNER has no cap row on the Access screen, so an owner stays uncapped.
+// { manager, waiter } as a percentage of the PRE-TAX base (subtotal). Server-enforced so a
+// hand-formed request can't exceed it.
+//
+// AN OWNER HAS NO CEILING AT ALL (owner, 2026-08-06 — asked directly, answered "owner should not
+// have discount ceiling"). This used to READ access_config.give_discounts.limit.owner, and both
+// French House and Aangan had 100 sitting in there from the old model — a number no row on the
+// Access screen can show or change, so it could only ever have been a silent cap that appeared
+// from nowhere. The Access screen offers a cap for the manager and the waiter and nothing else;
+// this now answers the same. The admin super-user (role null) is uncapped for the same reason.
 //
 // NOTHING STORED now falls back to the MODEL default the Access screen displays (owner,
 // 2026-08-02: "discount bill percentage will be fifty percent" for every restaurant — manager
@@ -11,12 +17,14 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { NODE_BY_ID, defOf } from "@/lib/accessTree";
 
-export type DiscountRole = "owner" | "manager" | "waiter";
+export type DiscountRole = "manager" | "waiter";
 
 // Map a staff role to the cap bucket. tablet = waiter. kitchen/unknown → waiter (most restrictive).
+// `null` = nobody caps this person: the admin super-user, and the OWNER (their own restaurant,
+// their own money — the owner's word, 2026-08-06).
 export function discountRole(role: string | null | undefined): DiscountRole | null {
   if (!role) return null;                       // admin super-user — uncapped
-  if (role === "owner") return "owner";
+  if (role === "owner") return null;            // the owner — uncapped, and no row offers one
   if (role === "manager") return "manager";
   return "waiter";                              // tablet (and any other staff)
 }
@@ -29,7 +37,7 @@ export async function discountCapPct(rid: string, role: DiscountRole | null): Pr
   if (typeof v === "number") return v;          // the admin set one → honour it
   // Absent → the default the Access screen shows for that role (one rule, both sides read it).
   const node = role === "manager" ? NODE_BY_ID["mgr_give_discounts_cap"]
-    : role === "waiter" ? NODE_BY_ID["wtr_give_discounts_cap"] : null;
+    : NODE_BY_ID["wtr_give_discounts_cap"];
   const d = node ? Number(defOf(node)) : NaN;
   return Number.isFinite(d) && d > 0 ? d : null;
 }

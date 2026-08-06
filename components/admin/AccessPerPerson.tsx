@@ -40,6 +40,13 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
   const [roleFilter, setRoleFilter] = useState("all");
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
   const [err, setErr] = useState("");
+  // THE RAIL COLLAPSES ON A PHONE ONCE YOU HAVE PICKED SOMEBODY (2026-08-06). Below 820px the
+  // person list stacks ABOVE the card, so on a restaurant with eight staff you scrolled past
+  // every name before the first permission appeared — on the tab whose whole point is ONE
+  // person's exceptions. Open by default (you have to choose someone first), then it folds into
+  // a "Choose a person ▾" button the moment you do. Desktop is untouched: there the rail is a
+  // sticky column beside the card and hiding it would only take something away.
+  const [pickerOpen, setPickerOpen] = useState(true);
 
   const load = useCallback((id: string) => {
     if (!id) return;
@@ -106,7 +113,14 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
       {err ? <div className="acc2-warn"><div>{err}</div></div> : null}
 
       <div className="app-wrap">
-        <aside className="app-rail">
+        {/* PHONE ONLY (display:none above 820px) — the fold handle for the rail below it. It
+            names who is showing, so the collapsed state still answers "whose permissions am I
+            looking at?" without opening anything. */}
+        <button type="button" className="app-pick" aria-expanded={pickerOpen} onClick={() => setPickerOpen((v) => !v)}>
+          <span className="who">{person ? (person.name || person.username) : "Choose a person"}</span>
+          <span className="cta">{pickerOpen ? "Close" : "Change"}</span>
+        </button>
+        <aside className={`app-rail ${pickerOpen ? "" : "folded"}`}>
           <input className="app-search" placeholder="Find a person…" value={query} onChange={(e) => setQuery(e.target.value)} />
           <div className="app-chips">
             {["all", "manager", "tablet", "kitchen", "owner"].map((r) => (
@@ -117,7 +131,7 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
             ))}
           </div>
           {people.length ? people.map((u) => (
-            <button key={u.id} className={`app-prow ${person?.id === u.id ? "on" : ""}`} onClick={() => setPersonId(u.id)}>
+            <button key={u.id} className={`app-prow ${person?.id === u.id ? "on" : ""}`} onClick={() => { setPersonId(u.id); setPickerOpen(false); }}>
               <span className="av" style={{ background: ROLE_COLOR[u.role] || "#888" }}>{(u.name || u.username).slice(0, 1).toUpperCase()}</span>
               <span className="nm">
                 {u.name || u.username}
@@ -277,11 +291,21 @@ export function PerPersonStyle() {
   .app-segs button { min-height:30px; padding:0 10px; border:none; border-radius:7px; background:transparent; color:var(--muted); font-weight:700; font-size:11.5px; cursor:pointer; white-space:nowrap; }
   .app-segs button.on { background:var(--accent); color:#fff; }
   .app-segs button.def.on { background:var(--muted2); color:var(--text); }
+  /* The fold handle is a PHONE control only — on desktop the rail is a sticky column beside the
+     card and there is nothing to fold. */
+  .app-pick { display:none; }
   @media (max-width:820px) {
     .app-wrap { grid-template-columns:1fr; }
     .app-rail { position:static; max-height:none; }
     .app-cap { flex-direction:column; }
     .app-segs { justify-content:flex-start; }
+    .app-pick { display:flex; align-items:center; justify-content:space-between; gap:10px; width:100%; min-height:46px; padding:0 14px; margin:0 0 10px; border-radius:12px; border:var(--border); background:var(--card); color:var(--text); font-size:14px; font-weight:700; cursor:pointer; }
+    .app-pick .who { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    .app-pick .cta { flex:none; font-size:12px; font-weight:800; color:var(--accent); }
+    /* Folded = the whole rail is out of the way, so the card is the first thing on the screen.
+       display:none rather than height:0 — a list nobody can reach should not be in the tab order
+       or read out by a screen reader either. */
+    .app-rail.folded { display:none; }
   }
   `}</style>;
 }

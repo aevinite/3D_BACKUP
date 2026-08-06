@@ -178,6 +178,30 @@ function helpImages(node: Node): string[] {
 }
 
 /** "On by default" / "Off by default" / the default value, in words. */
+// ── ONE SENTENCE ON THE ROW, THE REST BEHIND THE ⓘ (owner's rule, applied one level down) ──
+//
+// On 2026-08-03 the owner deleted the words-only row: "an explanation is not a setting and does
+// not get a box on this screen… you can add that in the i button". Several rows were still doing
+// the same thing inside their own description — "Quick order — send to a table" spells out four
+// separate on/off combinations, 107 words, permanently on screen — so the list read as prose
+// rather than as settings, and the genuinely important line at the top got lost in it.
+//
+// Done HERE rather than by re-writing eighteen blocks of text, because that is the change that
+// cannot lose anything: the ⓘ still opens the WHOLE thing, word for word, and the search still
+// matches on the whole thing (it reads the model, not the screen). The row keeps the first
+// sentence, which is the one every one of these was written to lead with.
+const ROW_TEXT_MAX_WORDS = 45;
+function rowText(n: Node): { text: string; more: boolean } {
+  const full = (n.what || "").trim();
+  const words = full.split(/\s+/).length;
+  if (words <= ROW_TEXT_MAX_WORDS) return { text: full, more: false };
+  // Split on a sentence end followed by a space. A first "sentence" that is the whole thing
+  // (no full stop anywhere) is left alone — shortening it would cut a word in half.
+  const first = full.split(/(?<=[.!?])\s+/)[0] || "";
+  if (!first || first.split(/\s+/).length >= words) return { text: full, more: false };
+  return { text: first, more: true };
+}
+
 function defaultLine(node: Node): string {
   const d = node.def;
   if (d === undefined) return "";
@@ -196,8 +220,12 @@ function defaultLine(node: Node): string {
 // which also left its "Who may do it" child editable instead of greyed and stopped the search
 // from ever saying "needs Put menu on maintenance". The save path was already correct (HAS_IDS
 // allow-lists it), so nobody could reach a switch that would have worked.
+// "panel" and "menu" LEFT this list on 2026-08-06. Both Bind variants were deleted from the model
+// on 2026-08-04 and no node can carry them — but scripts/verify-access-model.mjs check 15 PARSES
+// this exact list to prove every row renders a control someone can tap, so dead names in it make
+// the guard's own input untrustworthy. Keep it equal to the boolean binds Control() really draws.
 const isBoolBind = (n: Node) =>
-  ["feature", "setting", "module", "panel", "channel", "grant", "section", "tab", "menu", "ratingsMaster", "has"].includes(n.bind.t);
+  ["feature", "setting", "module", "channel", "grant", "section", "tab", "ratingsMaster", "has"].includes(n.bind.t);
 
 /** Does this row read as "on"? Used for the parent gate and the section counter. A row with
  *  no switch of its own (a pure group, e.g. Format / Bill) is always "on" so its children show. */
@@ -212,6 +240,26 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
   const [st, setSt] = useState<TreeState | null>(null);
   const [saving, setSaving] = useState<"" | "saving" | "saved" | "err">("");
   const [err, setErr] = useState("");
+  // ── WHAT WAS CHANGED HERE, RECENTLY (2026-08-06) ──────────────────────────────────────────
+  // Every save on this screen already writes an English line to the activity log —
+  // "Menu → 3D dish viewer: off · Manager → Delete a bill: on" (describeAccessPatch in
+  // app/api/admin/restaurants/access-tree/route.ts). Nothing ever showed it back. Each tap here
+  // saves instantly, so there is no confirm step and no history: flip four switches and there is
+  // no way to see what you just did, and no way to tell an odd behaviour tomorrow from a change
+  // you made today. The information already exists; this only stops throwing it away.
+  //
+  // EGRESS: one scoped read on OPEN (and once after a successful save), never a poll. Five rows,
+  // `action=access_change` matched by EQUALITY on top of the existing
+  // (restaurant_id, created_at DESC) index — not the ?q= ILIKE, which would also match any row
+  // whose detail merely said "access". The route already sends an explicit column list.
+  const [recent, setRecent] = useState<{ id: string; detail: string | null; created_at: string }[]>([]);
+  const loadRecent = useCallback((id: string) => {
+    if (!id) return;
+    fetch(`/api/admin/oplog?restaurant_id=${id}&action=access_change&limit=5`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { actions: [] }))
+      .then((d) => setRecent(Array.isArray(d.actions) ? d.actions : []))
+      .catch(() => { /* the strip is a convenience — never break the screen over it */ });
+  }, []);
   // CLOSED by default (owner, 2026-07-31: "by default dropdown should be close"). Each header
   // carries a counter, so you can see what a section holds without opening it.
   // WHERE YOU WERE, ACROSS A REFRESH (owner, 2026-08-01: "whatever dropdown was open closes and it
@@ -245,7 +293,7 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
       .then((d) => { if (d.error) setErr(d.error); else { setErr(""); setSt(d.state as TreeState); } })
       .catch(() => setErr("Couldn't load this restaurant's settings."));
   }, []);
-  useEffect(() => { setSt(null); load(rid); }, [rid, load]);
+  useEffect(() => { setSt(null); setRecent([]); load(rid); loadRecent(rid); }, [rid, load, loadRecent]);
 
   // Optimistic: merge locally for an instant repaint, then POST the identical patch. On a
   // refusal we reload from the server rather than leave the screen showing a value that
@@ -266,9 +314,10 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
         }
         setErr("");
         if (stamp === flash.current) { setSaving("saved"); setTimeout(() => { if (stamp === flash.current) setSaving(""); }, 1400); }
+        loadRecent(rid);   // the line the server just wrote — one scoped read, only after a save that landed
       })
       .catch(() => { setSaving("err"); setErr("That change didn't save — the connection dropped."); load(rid); });
-  }, [rid, load]);
+  }, [rid, load, loadRecent]);
 
   /**
    * Save an API key. Deliberately NOT `save()`: that merges the patch into local state for an
@@ -431,6 +480,7 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
 
   return (
     <>
+      <RecentChanges rows={recent} />
       <div className="at-head">
         <AccessSearch
           isOn={(n) => isOn(n, st)}
@@ -477,6 +527,42 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
 }
 
 /** Merge two patches (the node's own + the Ratings mirror) without losing either branch. */
+/** The last five changes anyone made on THIS restaurant's Access screen, in the words the
+ *  server already wrote. Nothing is fetched for it beyond one scoped, limited read; it renders
+ *  nothing at all until there is something to show, so a restaurant nobody has configured yet
+ *  sees no empty box. */
+function RecentChanges({ rows }: { rows: { id: string; detail: string | null; created_at: string }[] }) {
+  const [open, setOpen] = useState(false);
+  if (!rows.length) return null;
+  const when = (iso: string) => {
+    const d = new Date(iso); if (isNaN(d.getTime())) return "";
+    const mins = Math.round((Date.now() - d.getTime()) / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+    return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+  };
+  const shown = open ? rows : rows.slice(0, 1);
+  return (
+    <div className="at-recent">
+      <button type="button" className="at-recent-h" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        <span className="at-recent-t">Recent changes here</span>
+        <span className="at-recent-c">{rows.length}</span>
+        <span className={`acc2-chev ${open ? "o" : ""}`} aria-hidden="true"><Icon n="chevron" s={14} /></span>
+      </button>
+      <ul className={open ? "open" : ""}>
+        {shown.map((r) => (
+          <li key={r.id}>
+            <span className="w">{when(r.created_at)}</span>
+            <span className="d">{r.detail || "settings saved"}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function applyTwo(a: TreePatch, b: TreePatch): TreePatch {
   if (!Object.keys(b).length) return a;
   const out: any = { ...a };
@@ -592,7 +678,21 @@ function Row({ node, st, depth, openNode, setOpenNode, set, onInfo, flashId }: {
             {node.leftToBuild ? <span className="at-tag build">Left to build</span> : null}
             {node.fresh && !node.leftToBuild ? <span className="at-tag new">New</span> : null}
           </div>
-          <div className="ds">{node.what}</div>
+          {(() => {
+            const rt = rowText(node);
+            return (
+              <div className="ds">
+                {rt.text}
+                {rt.more ? (
+                  /* Not a silent truncation — it SAYS there is more and opens the same ⓘ sheet
+                     the corner button opens. stopPropagation because the whole row header is a
+                     button that folds the row; a tap meant for "more" must not close it. */
+                  <button type="button" className="at-more"
+                    onClick={(e) => { e.stopPropagation(); onInfo(node); }}>more</button>
+                ) : null}
+              </div>
+            );
+          })()}
           {node.link ? (
             <a className="at-link" href={node.link.href}><Icon n="link" s={13} /> {node.link.label}</a>
           ) : null}
@@ -1110,6 +1210,22 @@ export function TreeStyle() {
      here" without inventing a second meaning. --lvl is set per level below; the fallback covers
      the section header, which has no level of its own. */
   .at-box, .at-chip, .at-opt, .at-tw { --hov: var(--lvl, var(--accent)); }
+  .at-recent { background:var(--card); border:var(--border); border-radius:12px; margin:0 0 12px; overflow:hidden; }
+  .at-recent-h { display:flex; align-items:center; gap:9px; width:100%; padding:9px 13px; border:0; background:transparent; color:var(--text); cursor:pointer; text-align:left; }
+  .at-recent-t { font-size:12.5px; font-weight:800; letter-spacing:.01em; }
+  .at-recent-c { font-size:11px; font-weight:800; color:var(--muted); background:var(--bg); border:var(--border); border-radius:7px; padding:2px 7px; margin-left:auto; font-variant-numeric:tabular-nums; }
+  .at-recent ul { list-style:none; margin:0; padding:0 13px 10px; display:flex; flex-direction:column; gap:6px; }
+  .at-recent li { display:flex; gap:10px; align-items:baseline; font-size:12px; line-height:1.45; }
+  .at-recent .w { flex:none; color:var(--muted); font-weight:700; min-width:74px; }
+  /* A SAVE CAN NAME DOZENS OF ROWS AT ONCE — the defaults tool writes one line listing every
+     switch it touched ("…· +64 more"). Collapsed, that turned a one-glance strip into a wall of
+     text, which is the opposite of the point. Two lines while it is folded, all of it when you
+     open it. max-height rather than -webkit-line-clamp on purpose: this build drops hand-written
+     -webkit- properties (the frosted-glass lesson), and a clamp that silently vanished would put
+     the wall straight back. */
+  .at-recent .d { color:var(--text); word-break:break-word; max-height:2.9em; overflow:hidden; }
+  .at-recent ul.open .d { max-height:none; }
+  @media (max-width:640px) { .at-recent li { flex-direction:column; gap:1px; } .at-recent .w { min-width:0; } }
   .acc2-main, .at-head { --hov: var(--accent); }
   .at-head { display:flex; align-items:center; gap:12px; flex-wrap:wrap; min-height:38px; margin:0 0 10px; }
   .at-head .acc2-save { margin-left:auto; }
@@ -1345,6 +1461,8 @@ export function TreeStyle() {
   .at-box-t.clickable:focus-visible { outline:2px solid var(--lvl); outline-offset:3px; }
   .at-tw.o { transform:rotate(180deg); color:var(--accent); }
   .at-tw:hover { color:var(--hov); }
+  .at-more { border:0; background:none; padding:0 0 0 5px; margin:0; font:inherit; font-weight:700; color:var(--hov); cursor:pointer; text-decoration:underline; text-underline-offset:2px; }
+  .at-more:hover { opacity:.8; }
   .at-i { display:grid; place-items:center; width:20px; height:20px; border:none; background:none; color:var(--muted); cursor:pointer; flex:none; }
   .at-i:hover { color:var(--hov); }
   /* Top-right corner, out of the controls' way, and out of the name's way. */
