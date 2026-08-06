@@ -1,5 +1,5 @@
 {
-  "$comment": "MCP servers are NOT configured here \u2014 Claude Code reads them from ~/.claude.json (via `claude mcp add`) or a root .mcp.json, not from settings.json. The supabase MCP is registered in ~/.claude.json (project scope).",
+  "$comment": "MCP servers are NOT configured here — Claude Code reads them from ~/.claude.json (via `claude mcp add`) or a root .mcp.json, not from settings.json. The supabase MCP is registered in ~/.claude.json (project scope).",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -22,12 +22,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "IN=$(cat); rc=0; D=\"$CLAUDE_PROJECT_DIR/scripts\"; MISSING=\"\"; for g in verify-tap-guard.mjs verify-test-safety.mjs verify-ui-integrity.mjs verify-audit-coverage.mjs verify-order-retry.mjs; do if [ ! -f \"$D/$g\" ]; then MISSING=\"$MISSING $g\"; continue; fi; printf '%s' \"$IN\" | node \"$D/$g\" --hook || rc=2; done; [ -n \"$MISSING\" ] && echo \"note: guard(s) not in this checkout, so they did NOT run:$MISSING\" >&2; exit $rc",
+            "command": "IN=$(cat); rc=0; D=\"$CLAUDE_PROJECT_DIR/scripts\"; MISSING=\"\"; for g in verify-tap-guard.mjs verify-test-safety.mjs verify-ui-integrity.mjs verify-audit-coverage.mjs verify-order-retry.mjs verify-no-ask-before-delete.mjs; do if [ ! -f \"$D/$g\" ]; then MISSING=\"$MISSING $g\"; continue; fi; printf '%s' \"$IN\" | node \"$D/$g\" --hook || rc=2; done; [ -n \"$MISSING\" ] && echo \"note: guard(s) not in this checkout, so they did NOT run:$MISSING\" >&2; exit $rc",
             "timeout": 45,
-            "statusMessage": "Checking taps, test safety, UI integrity, audit coverage + ordering/offline..."
+            "statusMessage": "Checking taps, test safety, UI integrity, audit coverage, ordering/offline + the no-ask-before-delete order..."
           }
         ]
       }
     ]
-  }
+  },
+  "permissions": {
+    "ask": []
+  },
+  "$comment_permissions_ask": "Deliberately EMPTY and must stay empty (owner, 2026-08-06): he never wants to be asked before something is deleted or removed — least of all in bypass-permissions mode. An `ask` rule is the one setting that can re-introduce that prompt. Guarded by scripts/verify-no-ask-before-delete.mjs, which also refuses to let the live-stack `deny` rules in settings.local.json be removed in the name of 'stop asking me'."
 }
