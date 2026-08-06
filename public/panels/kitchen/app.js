@@ -9,7 +9,7 @@
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-const state = { orders: [], items: [], dishes: [], platform: [], platformAccept: false, tableNames: {}, knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
+const state = { orders: [], items: [], dishes: [], platform: [], platformAccept: false, tableNames: {}, tableTags: {}, knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
 // Platform (Zomato/Swiggy/Website/Parcel) source badges shown on a platform ticket.
 const PLAT_META = {
   zomato:   { label: "ZOMATO",  cls: "z" },
@@ -78,12 +78,14 @@ const tshort = (t) => tname(t) || `T${t}`;              // tight spots (ticket h
 // T7, never "Table 7" (owner, 2026-08-05: "it should always be T7"). A table with a NAME set
 // shows the name instead. One short form everywhere — panels, tickets and the printed bill.
 const tlong = (t) => (t == null || t === "" ? "T?" : (tname(t) || `T${t}`)); // prints, toasts
-// A PARCEL has no table at all, so where a ticket says which table it is for, it says
-// PARCEL instead (owner, 2026-08-02). Without this a parcel printed as "T?" / "Tnull",
-// which tells a cook nothing and looks like a fault. The KOT number is untouched — a parcel
-// still carries its own ticket number.
-const isParcelOrder = (o) => !!o && o.source === "parcel";
-const whereFor = (o, long) => (isParcelOrder(o) ? "PARCEL" : long ? tlong(o && o.table_number) : tshort(o && o.table_number));
+// WHERE a ticket is for. There is deliberately NO parcel case here (T4 sweep, 2026-08-06):
+// this used to branch on `o.source === "parcel"` and print "PARCEL", but `orders` has no
+// `source` column, so the branch could never once run. A parcel is not an `orders` row at all —
+// it lives in `aggregator_orders` and is drawn by platTicketHtml(), which shows a PARCEL source
+// badge and no table. Keeping an unreachable branch that reads a non-existent column is worse
+// than not having one: it reads as handled. `tlong`'s "T?" is the real guard for a row with no
+// table (a banquet bill with the table left blank), and that one IS reachable.
+const whereFor = (o, long) => (long ? tlong(o && o.table_number) : tshort(o && o.table_number));
 // How old a ticket is, in the words a cook reads. GUARDED against a missing or unparseable
 // timestamp (T4 sweep, 2026-08-04): this used to do the arithmetic blind, so `null` printed
 // "496071h 45m" (the 1970 epoch) and a garbage value printed "NaNh NaNm" — straight into the
@@ -266,10 +268,16 @@ function ticketHtml(o, rows) {
   // Special table type (mig 166): a small coloured badge next to the table number so
   // cooks know to prioritise (👑 VIP · 🏠 Family · 🤝 Owner's guest). Read-only here.
   const TAG_BADGE = { vip: ["👑 VIP", "#8b5cf6"], family: ["🏠 FAMILY", "#e11d48"], guest: ["🤝 GUEST", "#aab4c4"] };
-  const tb = TAG_BADGE[o.tag];
-  const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${o.tag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
+  // THE MARK BELONGS TO THE TABLE, NOT THE ORDER (fixed 2026-08-06, T4 sweep). This read `o.tag`
+  // for the whole life of the feature — and `orders` has no `tag` column, so the badge was never
+  // once drawn and a cook had no way to see that table 6 was the owner's guest. The board now
+  // ships `tableTags` ({ "6": "vip" }) the same way it ships `tableNames`, and the ticket looks
+  // its own table up. A parcel has no table, so it has no mark either.
+  const ttag = (state.tableTags || {})[String(o.table_number)] || "";
+  const tb = TAG_BADGE[ttag];
+  const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${ttag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="${isParcelOrder(o) ? "Parcel — no table" : `T${esc(o.table_number)}`}">${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageClass(o.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="T${esc(o.table_number)}">${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageClass(o.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
@@ -645,7 +653,7 @@ function reprintOrder(id) {
   // swallowed every failure, so a cook who tapped 🖨 after a paper jam was told the ticket was on
   // its way and no paper came out.
   if (printKot(o, rows, state.restaurant, { reprint: dup })) {
-    if (!dup) printedIds.add(o.id); // a manual FIRST print counts — the next tap is a duplicate
+    if (!dup) { printedIds.add(o.id); savePrintedIds(); } // a manual FIRST print counts — the next tap is a duplicate
     toast(`${dup ? "Reprinting (marked DUPLICATE)" : "Printing"} KOT #${o.kot_no ?? "—"} · ${tlong(o.table_number)}`);
   } else toast(`Couldn't print KOT #${o.kot_no ?? "—"} — check the printer, then try again.`);
 }
@@ -754,6 +762,7 @@ function boardSig(d) {
     // must repaint the board — the orders themselves don't change, so without this the ticket
     // would keep showing the old label until the cook manually refreshed.
     state.tableNames,
+    state.tableTags,   // drawn on the ticket header too — see tableTagMap in the kitchen route
   ]);
 }
 let lastSig = null;
@@ -816,6 +825,13 @@ async function loadTables(tables) {
 
   const freshOrders = dedupeById(slices.flatMap((s) => (s && s.orders) || []));
   const freshItems = dedupeById(slices.flatMap((s) => (s && s.items) || []));
+  // The special-table marks ride on the TARGETED response too, and they have to: marking a table
+  // VIP writes `table_tags`, and that breadcrumb NAMES the table — so this targeted path is what
+  // answers it, not a full board read. Taking the whole map (not a per-table merge) is what lets a
+  // mark being REMOVED disappear as well; every slice carries the same restaurant-wide map, so the
+  // last one is as good as the first. (T4 sweep fix, 2026-08-06)
+  const freshTags = slices.map((s) => s && s.tableTags).filter((m) => m && typeof m === "object").pop();
+  if (freshTags) state.tableTags = freshTags;
 
   // CHIME — detect a brand-new dine-in order in the slice BEFORE touching
   // knownIds, then ADD each fresh order's id to the baseline (never reassign it — a
@@ -882,7 +898,7 @@ function printKot(order, itemRows, restaurant, opts) {
     const rname = restDisplayName(restaurant).replace(/\*/g, "") || "Kitchen";
     // The table as the FLOOR knows it — its name when the owner gave it one ("A1"), else
     // "Table 7". Printing the raw number on a renamed table sends staff to the wrong table.
-    const tlab = whereFor(order, true);   // "PARCEL" on a parcel, the table's floor name otherwise
+    const tlab = whereFor(order, true);   // the table as the FLOOR knows it ("A1"), or "T?" when a bill has no table
     const kot = order.kot_no != null ? order.kot_no : "—";
     const when = order.created_at ? new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
     const rows = (itemRows && itemRows.length)
@@ -952,7 +968,27 @@ function logKotPrintFailure(e) {
 //    being silently lost, and don't flood all at once.
 //  • Prints are SERIALIZED (spaced) so a burst doesn't stack N blocking dialogs at once
 //    in a non-kiosk browser (partially mitigates M7; kiosk mode prints silently anyway).
-const printedIds = new Set();
+//  • It SURVIVES A RELOAD, on this device (fixed 2026-08-06, T4 sweep). It used to be a plain
+//    in-memory Set, so reloading the kitchen screen — or reopening the tab next shift — forgot
+//    every ticket it had ever printed. The consequence was on PAPER, not on screen: the manual 🖨
+//    stamps the big "*** REPRINT · DUPLICATE ***" banner from this Set, so after a reload a cook
+//    tapping 🖨 on an already-printed ticket got a second identical ticket with NO duplicate mark
+//    — exactly the two-tickets-on-the-rail confusion the banner was added for on 2026-08-04.
+//    (The manager's queued reprints were always safe: they carry `reprint` on the print_jobs row.)
+//    Keyed per device, which is the honest claim: "this screen has printed this ticket before."
+const PRINTED_KEY = "kds_printed_ids";
+const printedIds = new Set((() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PRINTED_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((x) => typeof x === "string") : [];
+  } catch { return []; }   // a corrupt/absent value simply starts empty, exactly as before
+})());
+// Write the Set back after every change. Cheap (a few hundred short ids at most, and it only runs
+// when a ticket is actually printed or pruned), and wrapped because a device with storage disabled
+// must still print — it just forgets across reloads, which is the old behaviour, not a new fault.
+const savePrintedIds = () => {
+  try { localStorage.setItem(PRINTED_KEY, JSON.stringify([...printedIds])); } catch { /* private mode / quota — fall back to in-memory only */ }
+};
 // When this panel booted. Used so a brand-new order that arrives DURING the first /board
 // fetch (the ~1s boot window) is recognised as genuinely new and still auto-prints — the
 // old code seeded EVERY order on first load as "already printed", so a KOT placed in that
@@ -1068,7 +1104,7 @@ function printQueue(queue, allItems, restaurant) {
       // deploy leaving billdoc.js missing, say) consumed the ticket forever: the order never
       // printed and never would, on any later pass. A failure now leaves it pending — the same
       // treatment a hidden tab already gets — and tells the cook once, rather than never.
-      if (printKot(o, (allItems || []).filter((it) => it.order_id === o.id), restaurant)) printedIds.add(o.id);
+      if (printKot(o, (allItems || []).filter((it) => it.order_id === o.id), restaurant)) { printedIds.add(o.id); savePrintedIds(); }
       else notePrintTrouble();
     }
     if (i < queue.length) setTimeout(step, 400);
@@ -1113,6 +1149,10 @@ async function load() {
   // Table display names FIRST — before any auto-print below, or a ticket printed in the
   // boot window would fall back to the raw number on a renamed table.
   state.tableNames = data.tableNames || {};
+  // Which tables are marked VIP / Family / Owner's guest (mig 166). Set alongside the names and
+  // BEFORE any auto-print below, for the same reason: a ticket printed in the boot window should
+  // carry the mark it is entitled to.
+  state.tableTags = data.tableTags || {};
   // Chime only for orders we have NEVER seen (not on the very first load) — dine-in
   // 'received', a GUEST order born 'preparing' (auto-accepted follow-up, mig 164 —
   // member_id set; waiter orders have member_id null and stay silent), OR a
@@ -1134,9 +1174,18 @@ async function load() {
     // printed, so an order placed in the ~1s boot window was silently never printed.
     // Invalid/missing created_at is treated as pre-existing (seeded) so a bad timestamp can
     // never spew an old ticket. (audit 2026-07-07)
-    for (const o of data.orders) {
-      const t = new Date(o.created_at).getTime();
-      if (!Number.isFinite(t) || t < BOOT_TS) printedIds.add(o.id);
+    // ONLY SEED WHEN SOMETHING WOULD ACTUALLY HAVE PRINTED IT (2026-08-06). Seeding says "assume
+    // this ticket already came out", and on a kitchen with auto-print OFF nothing ever did — so
+    // seeding made `printedIds` claim a print that never happened, and the manual 🖨 then branded
+    // the cook's genuine FIRST ticket "*** REPRINT · DUPLICATE ***". That is the exact lie the
+    // reprint path warns about forty lines up. With auto-print off there is nothing to retro-print
+    // either (autoPrintNew returns immediately), so the seed has no other job here.
+    if (data.autoPrintKot) {
+      for (const o of data.orders) {
+        const t = new Date(o.created_at).getTime();
+        if (!Number.isFinite(t) || t < BOOT_TS) printedIds.add(o.id);
+      }
+      savePrintedIds();   // one write for the whole seeding pass, not one per order
     }
     // Print any order that landed during boot (created after BOOT_TS, still 'received' and
     // not seeded above). Safe: printedIds guards against a double-print on the next pass.
@@ -1153,7 +1202,7 @@ async function load() {
   // (served/cancelled) can never reappear as a new 'received', so forgetting it can't cause a
   // reprint — this stops the Set growing forever. Only prune the ones no longer on the board.
   // (knownIds is already replaced with the current board `ids` each full load, so it's bounded.)
-  if (printedIds.size > 500) { for (const id of printedIds) if (!ids.has(id)) printedIds.delete(id); }
+  if (printedIds.size > 500) { for (const id of printedIds) if (!ids.has(id)) printedIds.delete(id); savePrintedIds(); }
   state.dishes = data.dishes;
   // Re-apply the LEGACY-order optimistic overlay so a just-ALL-READY'd legacy order (dishes
   // in orders[].items, no order_items rows) doesn't revert to cooking when this refetch

@@ -302,6 +302,18 @@ html[data-theme="light"] .alg-add{ color:#15803d; }
      four rows to two — the meaning stays in title/aria-label, and both keep a 44px target. */
   .top-actions .btn .bw { display: none; }
   .top-actions .btn .bi { font-style: normal; }
+  /* …AND the injected "👤 Profile" button, which is not one of ours (T4 sweep, 2026-08-06).
+     maint.js appends #staffSettingsBtn to every panel's top bar and gives it `.ssb-i`/`.ssb-t`
+     spans expressly so "each panel's CSS targets [data-mode="profile"] .ssb-t" — the manager
+     panel does exactly that (editor/style.css) and the kitchen never got the rule. So the one
+     control the kitchen does NOT own was the only one still spending 75px on a word, and it sat
+     alone on a THIRD row: measured 157px of top bar at 360px, with the first ticket pushed to
+     y=399 of a 780px screen. Dropping the word is what the rule above already does for our own
+     two buttons, and the drawer it opens names itself.
+     The one-time "👋 Finish setup" state keeps its words on purpose — data-mode tells them apart,
+     and aria-label carries the full wording either way, so nothing is hidden from a screen reader. */
+  #staffSettingsBtn[data-mode="profile"] .ssb-t { display: none; }
+  #staffSettingsBtn[data-mode="profile"] { padding: 8px 9px; }
   /* …and the brand drops its generic sub-label ("live orders") so its row stops wrapping. The
      RESTAURANT's own name is the part that must survive a narrow screen — no tenant may lose its
      branding — so the throwaway words go, exactly as the tablet's top bar already does it. */

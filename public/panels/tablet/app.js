@@ -90,7 +90,6 @@ const state = {
   cart: [],             // [{ id, title, price, qty }]
   cat: "",              // active category chip in order mode ("" = all)
   dishSearch: "",       // the dish-search text in order mode
-  note: "",             // one note for the whole order
   floorFilter: "all",   // which tables the floor shows: all | needs | open | free
   quick: false,         // ⚡ quick order: build the order first, pick the table at the END
   allergies: "",        // order-level allergies (comma list), applied to the whole order
@@ -990,7 +989,7 @@ function ttagOf(t) {
 // re-render after the slice lands. Mirrors the manager selecting a table. (owner 2026-06-27)
 async function selectTable(t) {
   state.table = String(t);
-  state.ordering = false; state.quick = false; state.cart = []; state.note = ""; state.allergies = ""; state.dishSearch = "";
+  state.ordering = false; state.quick = false; state.cart = []; state.allergies = ""; state.dishSearch = "";
   // Also drop any ADD-TO-ORDER / view-order / per-order EDIT state — it belongs to the table we're
   // leaving. Without this, "＋ Add dish" then tapping another tile left addToOrderId pointing at the
   // OLD table's order, so dishes meant for the new table were appended to the old bill + kitchen
@@ -3878,7 +3877,7 @@ function openQuickDest() {
 }
 
 // The phone VIEW-ORDER screen (owner 2026-07-05): a separate screen (like the guest
-// menu) with the added items, ONE allergy/note field for the kitchen and SEND — reached
+// menu) with the added items, the whole-order ALLERGY CHIPS and SEND — reached
 // from the browse screen's floating "View order" pill. Desktop never sets viewOrder.
 function renderViewOrder() {
   const p = $("#panel");
@@ -4019,14 +4018,20 @@ async function sendOrder(dest) {
         };
       }),
       allergies: [...new Set(orderAllergies)],
-      note: state.note.trim() || null,
+      // NO order-level `note` (removed 2026-08-06, T4 sweep). There was a `state.note` here that
+      // nothing ever wrote — the whole-order free-text box was replaced by allergy chips on
+      // 2026-08-04, deliberately, because "birthday cake" typed into it printed as "no birthday
+      // cake" on the ticket. So this always sent null, while the comment on the view-order screen
+      // still promised a note field, sending the next reader looking for a control that isn't
+      // there — and leaving live plumbing for someone to reconnect free text to the wrong place.
+      // A real note belongs to a DISH and travels on its line (see buildBody's per-item `note`).
     }, extra || {});
     const place = (extra) => api("POST", "/order", buildBody(extra));
     // A finished send (real ticket OR safely queued offline): drop the back steps + reset.
     const finishSent = () => {
       if (voBackOff) { voBackOff(); voBackOff = null; }
       if (omBackOff) { omBackOff(); omBackOff = null; }
-      state.ordering = false; state.cart = []; state.viewOrder = false; state.note = ""; state.allergies = ""; state._omTop = 0;
+      state.ordering = false; state.cart = []; state.viewOrder = false; state.allergies = ""; state._omTop = 0;
       state.quick = false;
     };
     const wasQuick = state.quick;
@@ -4742,10 +4747,16 @@ window.addEventListener("online", () => load().catch(() => {}));
     // don't have the feature at all (found in the 2026-07-30 sweep).
     '<div class="dw-row" id="dwMeRow" hidden style="display:none"><span>My profile &amp; pay</span><button class="btn small" id="dwMe" type="button">Open</button></div>' +
     '<div class="dw-row"><span>Theme</span><button class="btn small" id="dwTheme" type="button">Light / Dark</button></div>' +
+    // 🚩 REPORT AN ISSUE — and it has to be HERE, not only on the top bar (T4 sweep, 2026-08-06).
+    // The top bar's 🚩 is display:none below 600px, and this drawer had no equivalent row, so a
+    // waiter working the floor from a PHONE — a layout this panel builds on purpose — had no way at
+    // all to flag a spill or a broken card machine. The theme toggle is hidden at the same width and
+    // has always had a row here; that is the pattern, and 🚩 was the one thing missing from it.
+    '<div class="dw-row"><span>Report an issue</span><button class="btn small" id="dwIssue" type="button">🚩 Open</button></div>' +
     // #5: clock lives here on phones (moved off the cramped top bar; desktop keeps it on the bar).
     '<div class="dw-row"><span>Time</span><span class="dw-prof" id="dwClock">…</span></div>' +
     // Build tag: lets the owner confirm at a glance he's on the latest code (rules out a stale cache). (audit 2026-07-09)
-    '<div class="dw-row"><span>Build</span><span class="dw-prof">tablet-20260722kot1</span></div>' +
+    '<div class="dw-row"><span>Build</span><span class="dw-prof" id="dwBuild">…</span></div>' +
     // Spacer pins the buttons below to the drawer's bottom whichever of them are visible.
     '<div style="flex:1"></div>' +
     // Banquet module (mig 130): shown only when the admin entitlement AND the
@@ -4785,6 +4796,9 @@ window.addEventListener("online", () => load().catch(() => {}));
   backdrop.onclick = closeDrawer;
   drawer.querySelector(".dw-close").onclick = closeDrawer;
   drawer.querySelector("#dwTheme").onclick = () => document.getElementById("themeToggle")?.click();
+  // Close the drawer first, then open the issue sheet — it registers its own back layer, and
+  // leaving the drawer open underneath would stack two layers for one hardware Back press.
+  { const isb = drawer.querySelector("#dwIssue"); if (isb) isb.onclick = () => { closeDrawer(); if (window.LFH_ISSUE) LFH_ISSUE.open({ api, rid: PANEL_RID, notify: (m) => toast(m, true) }); }; }
   { const meBtn = drawer.querySelector("#dwMe"); if (meBtn) meBtn.onclick = () => { closeDrawer(); if (window.LFH_ME) window.LFH_ME.open(); }; }
   const bqDrawerBtn = drawer.querySelector("#dwBanquet");
   if (bqDrawerBtn) bqDrawerBtn.onclick = () => { closeDrawer(); openBanquet(); };
@@ -4808,6 +4822,22 @@ window.addEventListener("online", () => load().catch(() => {}));
     ov.querySelector(".set-close").onclick = closeSheet;
     ov.onclick = (e) => { if (e.target === ov) closeSheet(); };
   }
+  // THE BUILD TAG READS THE CODE, IT IS NOT TYPED (fixed 2026-08-06, T4 sweep). It used to be the
+  // literal 'tablet-20260722kot1', frozen since 22 July while this panel changed many times — so the
+  // one field whose whole job is "am I on the latest code, or a stale cache?" gave the same answer
+  // either way, which is worse than having no field. app.js is loaded as `app.js?v=<content hash>`
+  // (verify:panel-cache keeps that hash honest), so the hash IS the answer: it changes exactly when
+  // the file does. Falls back to "unknown" rather than inventing a version.
+  (function setBuildTag() {
+    const out = drawer.querySelector("#dwBuild");
+    if (!out) return;
+    let v = "";
+    try {
+      const me = [...document.querySelectorAll('script[src*="app.js"]')].pop();
+      v = me ? (new URL(me.src, location.href).searchParams.get("v") || "") : "";
+    } catch (e) { v = ""; }
+    out.textContent = v ? "tablet " + v : "tablet (unknown)";
+  })();
   const ham = document.getElementById("hamburger"); if (ham) ham.onclick = openDrawer;
   // ⚡ Quick order — the persistent top-bar door (build first, pick the table last).
   const qob = document.getElementById("quickOrderBtn"); if (qob) qob.onclick = openQuickOrder;
