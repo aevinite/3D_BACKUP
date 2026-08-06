@@ -46,6 +46,16 @@ descriptions, and cannot be disabled. Several sessions have died to it. Wording 
   which restaurant/panel, what the client will SEE, what it touches underneath, and a yes/no.
   **One yes = that one change only.** The ONLY exception: the owner himself names the thing
   ("put X on AV live") — that is the permission for exactly X.
+- **🚨 THE QUOTE TEST — the only thing that counts as that permission (owner, 2026-08-06, after I
+  got it wrong).** Before ANY AV-live action, paste HIS sentence. If you cannot copy a line **the
+  owner typed**, in **the message that authorised this action**, containing **"AV live" / "client
+  site" / "live site" / "aevinite.shop"** — then you are NOT authorised. Full text + the exact
+  rationalisation that must never be repeated: `docs/CLAUDE-DETAIL.md`. In short, all four are
+  FORBIDDEN as authorisation: inheriting a yes from **your own** earlier sentence (he replied to
+  *your* words, not to AV live); "do what is left" / "finish it" / "do it all" where only YOU ever
+  said the remaining item was AV live; a yes given for backup, reused for live ("make it live on
+  backup" is permission for BACKUP — it is the opposite of an AV-live yes); and an older AV-live
+  yes for a different change. Preflight: `npm run avlive:preflight -- "<his exact words>"`.
 - **Even READING AV live — announce it in chat first.** Never point a dev server/script/seed at
   AV LIVE keys. Never print/echo/commit anything from `.env.AV.live` — masked reads only.
 - **ONE migrations folder** (`supabase/migrations/` here) is the source of truth for BOTH DBs;
