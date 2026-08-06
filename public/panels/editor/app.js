@@ -5071,16 +5071,18 @@ async function openGstReport() {
 }
 
 // Day-close "Z report" — one tap prints the business-day totals (server-computed).
-// zNumbering(n): the day's bill numbers on the Z-report — the range, and anything sitting on a
-// cancelled / deleted / voided bill, each with its reason and time (owner, 2026-08-06).
+// zNumbering(n): the day's bill numbers on the Z-report — how many were issued, anything sitting on a
+// cancelled / deleted / voided bill (with its reason and time), and whether every number is accounted
+// for (owner, 2026-08-06).
 //
 // WHY IT IS ON THIS SHEET. A gap in the series is CORRECT — a number retires on a void and is never
 // reused (COMPLIANCE §2) — but until now nothing told the person holding the paper WHY 43 was
 // missing, so the product's strongest compliance argument was invisible at exactly the moment it
 // mattered. It reads as record, not warning: the flagged list only names bills a person would actually
-// ask about (an ordinary settled bill is never listed — a sheet that names everything says nothing),
-// and it makes NO claim about whether a number is missing, because proving that needs the counter
-// table and guessing at it cried wolf twice (see the endpoint's note).
+// ask about — an ordinary settled bill is never listed, because a sheet that names everything says
+// nothing. The "accounted for" verdict is only trustworthy because `issued` comes from the counter the
+// bill trigger bumps; two earlier versions inferred it from the rows they could see and accused the
+// restaurant of a missing sale twice in one day (see the endpoint's note).
 // The row-drawer is passed IN because it is a local of printZReport (and carries that sheet's own
 // markup) — this helper must not grow a second way of drawing a Z-report line.
 // (No backticks in these comments: a panel comment can land inside an injected template literal and
@@ -5092,10 +5094,16 @@ function zNumbering(n, row) {
   for (const f of n.flagged || []) {
     h += `<div class="zn"><span>#${esc(f.no)}</span><span>${esc(f.note)}${f.at ? " · " + esc(f.at) : ""}</span></div>`;
   }
-  // NO "every number accounted for / on no bill at all" LINE — see the endpoint's note. Proving that
-  // claim needs the counter table, and inferring it from the rows we can see made the sheet accuse the
-  // restaurant of a missing sale twice in one day. What is left is only what can be shown: the range,
-  // and each number with a reason beside it.
+  // THE VERDICT LINE. "issued" now comes from the counter the bill trigger itself bumps, so 1..issued
+  // really is the day's series and a number missing from it really is unexplained — the two earlier
+  // versions guessed that range from the rows they could see and accused the restaurant wrongly twice.
+  // Printed even when clean, because "nothing is missing" is the statement worth having in writing on
+  // a sheet a manager signs. Worded as a count of numbers, never as a claim about money.
+  const missing = n.unaccountedTotal || (n.unaccounted || []).length;
+  h += missing
+    ? row(`⚠ Not on any bill (${missing})`, (n.unaccounted || []).map((x) => "#" + x).join(", ")
+      + (missing > (n.unaccounted || []).length ? " …" : ""))
+    : row("Every number accounted for", "✓");
   return h;
 }
 

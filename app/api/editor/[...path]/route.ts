@@ -19,7 +19,7 @@ import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
 import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
-import { businessDayStartIso } from "@/lib/businessDay";
+import { businessDayStartIso, businessDayDate } from "@/lib/businessDay";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
@@ -1172,7 +1172,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (page.length === 0) break;
         from += page.length;
       }
-      const [invQ, voidQ, platQ, setQ, legQ, numAggQ] = await Promise.all([
+      const [invQ, voidQ, platQ, setQ, legQ, cntQ, numAggQ] = await Promise.all([
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("invoice_at", since).limit(50000),     // invoices GENERATED today
         sb.from("sessions").select("id").eq("restaurant_id", rid).gte("void_at", since).limit(50000),        // invoices VOIDED today
         sb.from("aggregator_orders").select("total,status").eq("restaurant_id", rid).gte("created_at", since).limit(5000),
@@ -1200,6 +1200,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // is lazy (mig 040), so a date filter on sessions gets it wrong — see the numbering block
         // below, which scopes by the day's ORDERS instead.
         //
+        // HOW MANY NUMBERS WERE HANDED OUT TODAY — ASKED, NOT INFERRED (2026-08-06, third attempt).
+        //
+        // `daily_counters` is the row the bill trigger itself bumps, so its `n` IS the count of bill
+        // numbers issued for this restaurant today. Two earlier versions of this section guessed the
+        // range from the min/max of whatever rows they could still find, which turns any row they
+        // could not see into an accusation — they named 2 wrong numbers, then 25. The counter cannot
+        // be wrong about its own count, so the range comes from here and nowhere else.
+        // Keyed exactly as lfh_business_day() keys it (see businessDayDate).
+        sb.from("daily_counters").select("n").eq("restaurant_id", rid).eq("key", "bill")
+          .eq("day", businessDayDate()).maybeSingle(),
         // Parcel / delivery share the SAME counters (mig 261), so they are part of the same series
         // and a Z-report that ignored them would report every one of their numbers as a gap.
         // `source` is the column that names the channel (zomato / swiggy / website / parcel) — there
@@ -1337,14 +1347,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // numbers), found when the write-test half of the T7 re-run asked the LIVE site for a real
       // Z-report rather than trusting that the code reads correctly.
       //
-      // The precise rule needs no date at all: a session belongs to today's series when one of TODAY's
-      // orders belongs to it. That set is already in hand, so this is one scoped read by id.
+      // …so BOTH doors are used, and the set is their UNION: a session counts as today's if one of
+      // TODAY's orders belongs to it (catches the overnight table), OR it was created today (catches a
+      // bill whose orders have since been removed by something outside the app). Using either alone
+      // under-counts, and every number it under-counts becomes a false accusation below.
+      const SESSION_NUM_COLS = "id,bill_no,invoice_no,invoice_voided,void_at,deleted_at,delete_reason,table_number,closed_at,created_at";
       const daysSessionIds = [...new Set(orders.map((o) => o.session_id).filter(Boolean))] as string[];
-      const numRows = daysSessionIds.length
-        ? ((await sb.from("sessions")
-          .select("id,bill_no,invoice_no,invoice_voided,void_at,deleted_at,delete_reason,table_number,closed_at,created_at")
-          .eq("restaurant_id", rid).in("id", daysSessionIds).not("bill_no", "is", null).limit(20000)).data || [])
-        : [];
+      const [byOrderQ, byDayQ] = await Promise.all([
+        daysSessionIds.length
+          ? sb.from("sessions").select(SESSION_NUM_COLS).eq("restaurant_id", rid).in("id", daysSessionIds).not("bill_no", "is", null).limit(20000)
+          : Promise.resolve({ data: [] as any[] }),
+        sb.from("sessions").select(SESSION_NUM_COLS).eq("restaurant_id", rid).gte("created_at", since).not("bill_no", "is", null).limit(20000),
+      ]);
+      const numById = new Map<string, any>();
+      for (const r of [...((byOrderQ as any).data || []), ...((byDayQ as any).data || [])]) numById.set(r.id, r);
+      const numRows = [...numById.values()];
       // Today's orders BY SESSION — cancelled ones INCLUDED, unlike `groups` above, which skips them
       // for the money. A bill whose every order was cancelled still took a number, and "cancelled" is
       // precisely the reason worth printing beside it.
@@ -1375,33 +1392,36 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         seen.add(no);
         if (a.status === "cancelled") numbered.push({ no, note: `${a.source || "parcel"} · cancelled`, at: ist(a.created_at) });
       }
-      // NO "IS ANY NUMBER MISSING?" ALARM HERE — REMOVED AFTER IT CRIED WOLF TWICE (2026-08-06).
+      // IS EVERY NUMBER ACCOUNTED FOR — THE RANGE COMES FROM THE COUNTER (owner, 2026-08-06, after I
+      // got this wrong twice by guessing at it).
       //
-      // The intent was good: state on the day-close sheet that every number the counter issued is
-      // accounted for. Making that claim TRUE needs two things this handler cannot have. First, the
-      // authoritative count of numbers issued today, which lives in `daily_counters`, not in whatever
-      // rows are still findable — inferring a range from min/max of what we can see turns any
-      // unfindable row into an accusation. Second, the guarantee that no row is ever hard-deleted:
-      // true of every path in the product (soft-delete, void and cancel all keep the number attached)
-      // but NOT of the dev stack, where cleanup scripts really do remove orders.
+      // `issued` is `daily_counters.n`: the row the bill trigger itself bumps, so it is the count of
+      // numbers handed out today and it cannot be wrong about its own count. The numbers run 1..issued.
+      // Both earlier versions inferred that range from the min/max of the rows they could find, which
+      // makes any row they cannot see look like a hidden sale — they named 2 wrong numbers, then 25.
       //
-      // Measured on the live backup: the first version named 2 numbers, the second — after being
-      // scoped correctly for lazy bill_no — named 25. Both were wrong, and a day-close sheet that
-      // accuses a restaurant of a missing sale is worse than one that stays quiet about it (the
-      // don't-cry-wolf rule). So the sheet now states only what it can prove: the range it can see,
-      // and every number sitting on a cancelled / deleted / voided bill WITH its reason and time —
-      // which is what the owner actually asked for ("nothing tells you WHY 43 is missing").
-      //
-      // If the alarm is ever wanted, the honest way in is `daily_counters` as the range, not this.
-      const lo = seen.size ? Math.min(...seen) : 0;
-      const hi = seen.size ? Math.max(...seen) : 0;
+      // What we look for is therefore a number in 1..issued that NOTHING carries. Every path in the
+      // product keeps its row (soft-delete, void and cancel all leave the number attached), so on a
+      // real restaurant this is empty — which is exactly why it is worth printing. It is stated as a
+      // COUNT plus the numbers, never as an accusation about money, and the flagged list above already
+      // explains the ordinary reasons a number is not on a live bill.
+      const issued = Math.max(0, Number((cntQ as any)?.data?.n) || 0);
+      const unaccounted: number[] = [];
+      for (let n = 1; n <= issued; n++) if (!seen.has(n)) unaccounted.push(n);
+      const lo = issued > 0 ? 1 : 0;
+      // The counter's own ceiling, not the highest number we happened to find — those differ exactly
+      // when something is unaccounted for, which is the case this section exists to show.
+      const hi = issued;
       numbered.sort((a, b) => a.no - b.no);
 
       return ok({
         // The day's numbering, stated plainly so "why is 43 missing?" has an answer on the sheet.
         numbering: {
-          from: lo, to: hi, issued: seen.size,
+          from: lo, to: hi, issued,
+          onFile: seen.size,                    // how many of those numbers we can actually see
           flagged: numbered.slice(0, 200),
+          unaccounted: unaccounted.slice(0, 200),
+          unaccountedTotal: unaccounted.length, // the real count, even if the list above is capped
         },
         date: new Date().toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata" }), since,
         dineIn: { orderCount, bills: groups.size, gross: r2(gross), discount: r2(disc), taxable: r2(taxable), tax: r2(tax), net: r2(net),
