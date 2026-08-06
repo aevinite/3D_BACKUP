@@ -391,7 +391,54 @@ export const SOLD_OUT_TAG = "sold-out";
 export const HIDDEN_TAG = "hidden";
 export const isHidden = (tags?: string[] | null): boolean => Array.isArray(tags) && tags.includes(HIDDEN_TAG);
 
-export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID, columns: string = "*"): Promise<MenuItem[]> {
+/**
+ * The active-category set derived from an ALREADY-FETCHED category list, so a caller that has just
+ * read the categories does not make getMenuItems read the same table a second time.
+ *
+ * getCategories() already filters `active = true`, so its slugs ARE the live set. An empty list maps
+ * to null, matching activeCategorySlugs(): "we cannot tell, so do not filter" — filtering on an empty
+ * set would blank the entire menu, which is far worse than showing one extra dish.
+ * (T1 improvement 10, 2026-08-07.)
+ */
+/**
+ * WHAT THE GRID ACTUALLY NEEDS — the dish shape the guest menu is served.
+ *
+ * The cached bundle used to ship the full `MenuItem`, and because `mapRow` fills every column it
+ * was NOT asked for with an empty default, each dish still carried `longDescription: ""`,
+ * `nutrition: {…}`, `ingredients: []`, `reviews: []`, `relatedSlugs: []`. Measured on restaurant #1:
+ * 39.4 KB, of which 7.8 KB (20%) was those five empties — on the single busiest thing a guest
+ * downloads. Nothing on the menu reads them; the dish page fetches the full row separately.
+ * (T1 improvement 9, 2026-08-07.)
+ *
+ * An `Omit` rather than a hand-written field list, so a column added to MenuItem tomorrow reaches
+ * the cards automatically and only these five stay out. It lives HERE and not in lib/menuDataServer
+ * because the guest menu is a client component and that file imports `next/cache`.
+ */
+export type MenuCardItem = Omit<MenuItem, "longDescription" | "nutrition" | "ingredients" | "reviews" | "relatedSlugs">;
+
+/** The detail-only keys the card shape drops. One list, used by the type above and the mapper below. */
+const DETAIL_ONLY = ["longDescription", "nutrition", "ingredients", "reviews", "relatedSlugs"] as const;
+
+/** Strip the detail-only keys off one dish, for the payload the menu grid is sent. */
+export function toCardItem(it: MenuItem): MenuCardItem {
+  const out = { ...it } as Record<string, unknown>;
+  for (const k of DETAIL_ONLY) delete out[k];
+  return out as MenuCardItem;
+}
+
+export function liveCategorySetOf(categories: Category[]): Set<string> | null {
+  return categories.length ? new Set(categories.map((c) => c.slug)) : null;
+}
+
+export async function getMenuItems(
+  restaurantId: string = DEFAULT_RESTAURANT_ID,
+  columns: string = "*",
+  // Pass the live set when you ALREADY hold the categories (see liveCategorySetOf) and this skips the
+  // extra `categories` read below. `undefined` means "fetch it yourself", which is what every other
+  // caller does and is exactly today's behaviour. Deliberately NOT the same as `null`, which is the
+  // real answer "we could not tell, so do not filter".
+  liveCatsIn?: Set<string> | null,
+): Promise<MenuItem[]> {
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
   // requests — no extra waiting). Ratings failing must never hide the menu, so
   // its error is swallowed and dishes just show as unrated.
@@ -403,7 +450,10 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID,
     supabase.from("menu_items").select(columns).eq("restaurant_id", restaurantId).order("sort_order").limit(2000),
     // .limit() added per the egress rule — every read is capped, this one was not.
     supabase.from("item_ratings").select("item_slug, avg_rating, review_count").eq("restaurant_id", restaurantId).limit(2000),
-    activeCategorySlugs(restaurantId), // runs in parallel, so it costs no extra wait
+    // Skipped entirely when the caller handed us the set it already had (T1 improvement 10):
+    // lib/menuDataServer.ts reads the categories anyway to put them in the bundle, so asking
+    // the same table twice to build one menu was pure duplication.
+    liveCatsIn !== undefined ? liveCatsIn : activeCategorySlugs(restaurantId),
   ]);
   if (items.error) throw new Error(`Failed to load menu: ${items.error.message}`);
   // Index the aggregates by slug for a quick lookup while mapping each dish.

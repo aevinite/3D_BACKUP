@@ -36,6 +36,10 @@ const BackQuitDialog     = dynamic(() => import("@/components/BackQuitDialog"), 
 const PointerCaptureGuard = dynamic(() => import("@/components/PointerCaptureGuard"), { ssr: false });
 const BanGate            = dynamic(() => import("@/components/BanGate"),            { ssr: false });
 const CustomerGreeter    = dynamic(() => import("@/components/CustomerGreeter"),    { ssr: false });
+// The diner's view of orders saved on their own phone while offline (T1 improvement 12). Renders
+// nothing at all until the guest outbox has something in it, so it costs a guest with a working
+// connection nothing beyond its own small chunk.
+const GuestOutboxChip    = dynamic(() => import("@/components/GuestOutboxChip"),    { ssr: false });
 
 // Staff routes never get guest chrome. Two shapes must both be caught:
 //  - the flat admin routes (/manager, /kitchen, /tablet, /login, …), and
@@ -72,6 +76,7 @@ export default function GuestChrome() {
       <PointerCaptureGuard />
       <BanGate />
       <CustomerGreeter />
+      <GuestOutboxChip />
     </>
   );
 }

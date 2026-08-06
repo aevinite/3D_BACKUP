@@ -5390,7 +5390,10 @@ const FEATURE_CATALOG = [
   { key: "search",       def: true, icon: "🔎", label: "Dish search",      desc: "The search box at the top of the menu." },
   { key: "languages",    def: true, icon: "🌐", label: "Languages",        desc: "The language picker (6 languages). Off = English only." },
   { key: "currency",     def: true, icon: "💱", label: "Currency picker",  desc: "Guests can view prices in other currencies. Off = ₹ only." },
-  { key: "scrollspy",    def: true, icon: "📜", label: "Auto category bar", desc: "The category strip that follows the guest as they scroll the All view." },
+  // "Auto category bar" (key: scrollspy) was REMOVED here 2026-08-07 (T1 improvement 7). The strip
+  // that follows the guest is always on and nothing reads that key, so this toggle could be turned
+  // off and the strip would carry on following - a switch that lies is worse than no switch. See
+  // lib/features.ts, where the default was removed at the same time.
 ];
 
 // The current value of one switch: the DB override if present, else its default.

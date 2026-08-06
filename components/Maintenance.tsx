@@ -4,8 +4,13 @@
 // The flagship (#1) logo, shown ONLY for restaurant #1. Every other restaurant
 // passes its OWN logo (or none) so this screen can never leak French House
 // branding onto another tenant (the white-label rule; audit fix 2026-07-06).
-const DEFAULT_LOGO =
-  "https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png";
+//
+// SERVED FROM OUR OWN public/, not from littlefrenchhouse.in. It used to be a hardcoded URL on
+// that WordPress site — an outside host nobody here controls, on the ONE screen you least want a
+// broken image, and cross-origin so the offline layer deliberately never caches it. `public/
+// lfh-logo.png` is the identical file (same sha256, 35,633 bytes — checked, not assumed) and is
+// what IntroSplash has always used. (T1 improvement 13, 2026-08-07.)
+const DEFAULT_LOGO = "/lfh-logo.png";
 
 // The whole-screen "we're temporarily closed / under maintenance" page.
 // AppShell swaps the normal menu out for this when Service Mode is switched on,

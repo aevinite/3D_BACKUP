@@ -722,7 +722,13 @@ body.menu-scrolling .chef-call {
    icon FADES + COLLAPSES its height as the bar shrinks, reclaiming the space so
    the small state is text-only (like the old pills). Scroll-linked, no snap. */
 .cat-card .cat-icon {
-  color: var(--accent);
+  /* --cat-color is the colour the owner picked for THIS category in the editor's colour
+     picker; it falls back to the restaurant's accent when none was chosen, which is what
+     every category looked like before. The picker had been saving to the database since it
+     was built and NOTHING read the value: MenuView set --cat-color inline and no rule ever
+     used it, so an owner could set eight category colours and see none of them.
+     (T1 improvement 6, 2026-08-07.) */
+  color: var(--cat-color, var(--accent));
   max-height: calc(24px * (1 - var(--shrink, 0)));
   opacity: calc(1 - var(--shrink, 0));
   margin-bottom: calc(6px * (1 - var(--shrink, 0)));
@@ -730,7 +736,10 @@ body.menu-scrolling .chef-call {
   transition: color 0.25s var(--ease), transform 0.25s var(--ease), filter 0.25s var(--ease);
 }
 .cat-card.active {
-  background: var(--accent-grad);
+  /* Same idea for the selected chip's fill. No category colour set -> the accent gradient,
+     exactly as before; a colour set -> a gradient built from it, so the bar reads as the
+     owner arranged it. */
+  background: var(--cat-grad, var(--accent-grad));
   border-color: transparent;
   transform: translateY(-2px);
   /* No shadow — it cast a murky halo that made the neighbouring borders show. */
@@ -740,14 +749,19 @@ body.menu-scrolling .chef-call {
   box-shadow: none;
 }
 .cat-card.active .cat-icon {
-  color: #ffffff;
+  /* --cat-on is white or near-black, chosen in MenuView from the CATEGORY colour's own
+     brightness, because that colour is now whatever the owner picked and a fixed ink cannot
+     be readable on both a pale yellow and a dark brown. Absent (no category colour) -> the
+     hardcoded value this rule always had, so nothing changes for a restaurant that never set
+     colours. (T1 improvement 6.) */
+  color: var(--cat-on, #ffffff);
   filter: none;
   transform: scale(1.08);
 }
-.cat-card.active .cat-name { color: #ffffff; font-weight: 800; }
+.cat-card.active .cat-name { color: var(--cat-on, #ffffff); font-weight: 800; }
 /* dark mode: black icon, white text on gold active card */
-[data-theme="dark"] .cat-card.active .cat-icon { color: #1a0f0a; }
-[data-theme="dark"] .cat-card.active .cat-name { color: #ffffff; }
+[data-theme="dark"] .cat-card.active .cat-icon { color: var(--cat-on, #1a0f0a); }
+[data-theme="dark"] .cat-card.active .cat-name { color: var(--cat-on, #ffffff); }
 .cat-card:hover:not(.active) {
   transform: translateY(-2px);
   /* THEME-TRIAL: hover border follows the accent instead of a hardcoded gold */
@@ -766,7 +780,7 @@ body.menu-scrolling .chef-call {
 .cat-name {
   font-size: 10px; color: var(--muted); font-weight: 600; transition: all 0.3s;
 }
-.cat-card.active .cat-name { color: #1a0f0a; font-weight: 800; }
+.cat-card.active .cat-name { color: var(--cat-on, #1a0f0a); font-weight: 800; }
 .cat-card:hover .cat-name { color: var(--text); }
 
 /* --- SEARCH & FILTERS --- */
@@ -839,6 +853,11 @@ body.menu-frost .nav {
 .search-result-img { width: 42px; height: 42px; border-radius: 9px; object-fit: cover; flex: none; background: rgba(212,165,116,0.08); }
 .search-result-name { flex: 1; min-width: 0; color: var(--text); font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .search-result-cat { color: var(--muted); font-size: 12px; flex: none; text-transform: capitalize; }
+/* The suggestion row's right-hand column: price on top, category under it (T1 improvement 5).
+   Right-aligned and flex:none so the dish NAME keeps every remaining pixel and still ellipsises
+   rather than pushing the price off a 360px screen. */
+.search-result-side { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex: none; }
+.search-result-price { color: var(--accent-ink, var(--accent)); font-size: 13px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
 [data-theme="light"] .search-dropdown { background: #fff; }
 .search-input {
   /* THEME-TRIAL: follow --card so the search bar matches the theme (was a hardcoded brown) */
@@ -1449,7 +1468,11 @@ body.menu-frost .nav {
   background: rgba(250, 243, 232, 0.7);
 }
 [data-theme="light"] .cat-card.active {
-  background: var(--accent-grad);
+  /* Same fallback chain as the base rule above, or this LIGHT-skin override (which is more
+     specific) would win and the selected chip would ignore the category colour in light mode
+     only. That is exactly what happened on the first attempt: --cat-grad was set correctly on
+     the element and the chip still painted accent gold. (T1 improvement 6.) */
+  background: var(--cat-grad, var(--accent-grad));
 }
 [data-theme="light"] .item-card { 
   background: rgba(250, 243, 232, 0.7);
@@ -3455,6 +3478,66 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
   .mini-cart-price { margin-left: auto; }
 }
 @media (prefers-reduced-motion: reduce) { .mini-cart { animation: none; } }
+
+/* GUEST OUTBOX CHIP (components/GuestOutboxChip.tsx, T1 improvement 12) - the diner's view of
+   orders saved on their own phone while offline.
+   THE BOTTOM-LEFT CORNER IS A SHARED STACK. This chip is the bottom of it and lifts the order
+   tracker above itself via the data-lfh-outbox body flag - the same trick MiniCart already plays
+   on the tracker. It also clears the offline strip (--lfh-offbar-h), because the moment this chip
+   is on screen is exactly the moment that strip is too. */
+.gob-chip {
+  position: fixed; left: 16px; z-index: 62;
+  bottom: calc(16px + var(--lfh-offbar-h, 0px) + env(safe-area-inset-bottom, 0px));
+  display: inline-flex; align-items: center; gap: 8px;
+  max-width: min(300px, calc(100vw - 100px));   /* never reaches the waiter bell on the right */
+  padding: 10px 14px; border-radius: 999px; cursor: pointer;
+  background: color-mix(in srgb, var(--card) 92%, transparent); border: var(--border);
+  color: var(--text); font: 700 12.5px/1.2 inherit; text-align: left;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.28); backdrop-filter: blur(10px);
+}
+.gob-chip i { color: var(--accent); flex: none; }
+.gob-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Something the diner has to decide about reads as a warning, not as background progress. */
+.gob-chip.gob-failed { border-color: rgba(239,68,68,0.55); }
+.gob-chip.gob-failed i { color: #ef4444; }
+/* Above the mini-cart when the guest also has a basket on the go. */
+body[data-lfh-minicart] .gob-chip {
+  bottom: calc(84px + var(--lfh-offbar-h, 0px) + env(safe-area-inset-bottom, 0px));
+}
+/* ...and the order tracker steps up over the chip, keeping the same order every time:
+   chip (saved on this phone) < tracker (orders the kitchen HAS) < the rest of the screen. */
+body[data-lfh-outbox] .order-tracker { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + env(safe-area-inset-bottom, 0px)); }
+
+/* ABOVE THE WAITER BELL. The bell is z-index 100, so at 63 the sheet opened UNDERNEATH it and the
+   bell floated over the "Remove" button and the footer line (seen at 360px). 200 is the guest
+   app's existing modal layer (.overlay), and still far below the session gate (7000) and the
+   offline strip (99990) - which the sheet clears by reserving --lfh-offbar-h anyway. */
+.gob-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.35); }
+.gob-sheet {
+  position: fixed; left: 12px; right: 12px; z-index: 201;
+  bottom: calc(16px + var(--lfh-offbar-h, 0px) + env(safe-area-inset-bottom, 0px));
+  max-width: 420px; max-height: min(66vh, 520px); overflow-y: auto;
+  background: var(--card); border: var(--border); border-radius: 18px; padding: 6px 14px 12px;
+  box-shadow: 0 18px 50px rgba(0,0,0,0.45); color: var(--text);
+}
+.gob-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 0 6px; font-weight: 800; font-size: 13px; }
+.gob-x { background: none; border: none; color: var(--muted); font-size: 15px; cursor: pointer; padding: 4px 6px; }
+.gob-row { display: flex; align-items: flex-start; gap: 10px; padding: 10px 0; border-top: var(--border); }
+.gob-row-main { flex: 1; min-width: 0; }
+.gob-row-title { font-size: 13px; font-weight: 700; }
+.gob-row-sub { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.gob-why { color: #ef4444; font-weight: 600; }
+.gob-row-acts { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.gob-btn { border-radius: 999px; padding: 7px 12px; font-size: 11.5px; font-weight: 800; cursor: pointer; border: var(--border); white-space: nowrap; }
+.gob-btn:disabled { opacity: 0.6; cursor: default; }
+.gob-retry { background: var(--accent-grad); color: var(--accent-on, #fff); border-color: transparent; }
+.gob-drop { background: transparent; color: var(--muted); }
+.gob-spin { color: var(--muted); flex: none; }
+.gob-spin i { animation: gobSpin 1.4s linear infinite; }
+@keyframes gobSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .gob-spin i { animation: none; } }
+.gob-foot { font-size: 11px; color: var(--muted); padding-top: 10px; border-top: var(--border); }
 
 /* detail/edit sheet opened by tapping the strip */
 .ot-sheet {

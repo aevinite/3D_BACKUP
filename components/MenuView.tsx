@@ -6,7 +6,7 @@
 // React's built-in tools: useState (remember a value), useEffect (run code at
 // certain times, like after the page appears), useRef (a value that survives
 // re-draws without causing one).
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 // Link = Next's fast, no-full-reload navigation between pages.
 import Link from "next/link";
 // AppShell = the shared outer frame/chrome around the menu content.
@@ -24,11 +24,14 @@ import {
   CARD_COLUMNS,
   getCategories,
   localized,
-  type MenuItem,
+  type MenuCardItem,
   type Category,
 } from "@/lib/menu";
 // Language helpers: t = translated text strings; lang = the current language.
 import { useTranslation, useLanguage } from "@/lib/i18n";
+// Prices for the search suggestions (T1 improvement 5). Same helpers the dish cards use, so a
+// suggestion and the card it points at can never quote different money.
+import { formatPrice, getCurrency, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format";
 // Remembers the table number scanned from a QR code, for the cart/waiter.
 import { setScannedTable } from "@/lib/table";
 import { tget } from "@/lib/tenantStorage";
@@ -40,8 +43,11 @@ import { useRealtime } from "@/lib/useRealtime";
 // The default restaurant id, to keep restaurant #1's chrome byte-for-byte identical.
 import { DEFAULT_RESTAURANT_ID, DEFAULT_RESTAURANT_SLUG } from "@/lib/tenant";
 
-// The card list works with the full MenuItem shape from the data layer.
-type FoodItem = MenuItem;
+// The card list works with the CARD shape — the full dish row minus the five detail-only fields the
+// grid never reads (long description, nutrition, ingredients, reviews, related slugs). The cached
+// endpoint stopped sending them, so saying MenuItem here would be the type promising data that is
+// deliberately not on the wire. See lib/menu.ts -> MenuCardItem. (T1 improvement 9.)
+type FoodItem = MenuCardItem;
 
 // Sort options. Each re-orders the list rather than hiding dishes. ("Popular"
 // was removed — owner's call; Chef's Special replaced it, but as a FILTER, not
@@ -60,6 +66,22 @@ const DIETS = [
 // Small helper: turn a dish's rating (stored as text) into a number so we can
 // sort by it. If it's missing/garbled, treat it as 0.
 const ratingOf = (it: FoodItem) => parseFloat(it.rating) || 0;
+// WHICH INK READS ON A CATEGORY'S OWN COLOUR. The selected chip fills with the colour the owner
+// picked, and that can be anything from pale yellow to dark brown — so the icon and label can't use
+// one fixed ink. WCAG relative luminance, the same maths the rest of the app's contrast checks use:
+// a light fill gets near-black, a dark fill gets white. (T1 improvement 6, 2026-08-07.)
+function inkOn(hex: string): string {
+  const h = hex.trim().replace(/^#/, "");
+  const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+  if (!/^[0-9a-fA-F]{6}$/.test(full)) return "#ffffff"; // unparseable → today's default
+  const ch = (i: number) => {
+    const v = parseInt(full.slice(i, i + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const lum = 0.2126 * ch(0) + 0.7152 * ch(2) + 0.0722 * ch(4);
+  return lum > 0.42 ? "#1a0f0a" : "#ffffff";
+}
+
 
 // This is the menu page, shown at "/menu". It's the main browsing screen.
 export default function MenuView({ restaurantId, restaurantSlug, restaurantName, logoText, heroTitle, tagline, accentColor, theme, logoUrl, qrTable, defaultLayout }: { restaurantId: string; restaurantSlug?: string; restaurantName?: string; logoText?: string; heroTitle?: string; tagline?: string; accentColor?: string; theme?: Record<string, unknown>; logoUrl?: string; qrTable?: string; /* Access → Menu → Format → Default layout: what a first-time guest sees. Resolved on
@@ -110,6 +132,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // Only show skeletons if loading is actually slow — avoids a flash on fast /
   // cached loads where the data is ready almost immediately.
   const [showSkeleton, setShowSkeleton] = useState(false);
+  // The currency the search suggestions price in. Mirrors FoodCard: read once on mount, then
+  // follow the `lfh:currency-changed` broadcast, so switching currency re-prices the dropdown
+  // at the same moment it re-prices the cards behind it.
+  const [searchCurrency, setSearchCurrency] = useState<CurrencyMeta | null>(null);
+  useEffect(() => {
+    setSearchCurrency(getCurrency());
+    const onCur = () => setSearchCurrency(getCurrency());
+    window.addEventListener("lfh:currency-changed", onCur);
+    return () => window.removeEventListener("lfh:currency-changed", onCur);
+  }, []);
 
   // QR deep-link: a table's sticker opens /menu?table=N. Capture it once (also
   // accept ?t=N) so the cart + chef can pre-fill the table — the guest never
@@ -143,7 +175,13 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     slug: c.slug,
     name: localized(c.name, lang),
     icon: c.icon || "fa-utensils",
-    color: c.color || "#d4a574",
+    // NULL when the owner never picked one, so the CSS fallback (`var(--cat-color, var(--accent))`)
+    // does the deciding. It used to default to the literal `"#d4a574"` — restaurant #1's gold — on
+    // every tenant, and it was written into a variable NO rule read, so the editor's per-category
+    // colour picker had never actually done anything. Now: colour set → that colour; nothing set →
+    // this restaurant's own accent, which is what the bar has always looked like.
+    // (T1 improvement 6, 2026-08-07.)
+    color: c.color || null,
   }));
 
   // Tapping a category NEVER narrows the menu — it always keeps the full grouped
@@ -903,7 +941,17 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   // scroll-spy) — there's no "selected" category anymore.
                   aria-selected={spyCat === cat.slug}
                   className={`cat-card ${spyCat === cat.slug ? "active" : ""}`}
-                  style={{ ["--cat-color" as string]: cat.color }}
+                  // Only emitted when this category HAS a colour — an absent variable is what lets
+                  // the stylesheet fall back to the restaurant's accent. `--cat-grad` is the same
+                  // colour as a gradient for the selected chip's fill, built the way lib/accent.ts
+                  // builds the accent one so the two look like siblings.
+                  style={cat.color
+                    ? ({
+                        ["--cat-color" as string]: cat.color,
+                        ["--cat-grad" as string]: `linear-gradient(135deg, ${cat.color} 0%, color-mix(in srgb, ${cat.color} 82%, #000) 100%)`,
+                        ["--cat-on" as string]: inkOn(cat.color),
+                      } as CSSProperties)
+                    : undefined}
                   // Tapping a category just smooth-scrolls to its section — always
                   // the full grouped menu, never narrowing to one category.
                   onClick={() => scrollToCategory(cat.slug)}
@@ -926,9 +974,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                 flagship (#1) only; every OTHER restaurant gets a neutral, accent-tinted
                 search glyph — never leak #1's logo onto another tenant's menu (white-label). */}
             {isDefault ? (
+              // From our OWN public/, not littlefrenchhouse.in. Same file (identical sha256), but
+              // no dependency on an outside WordPress site and it works offline like everything
+              // else. See components/Maintenance.tsx for the full note. (T1 improvement 13.)
               <img
                 className="search-logo"
-                src="https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/LFH-Logo_200x200-e1612862168838.png"
+                src="/lfh-logo.png"
                 alt=""
                 aria-hidden="true"
               />
@@ -965,8 +1016,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   >
                     <img className="search-result-img" src={r.image} alt="" loading="lazy" decoding="async" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
                     <span className="search-result-name">{r.title}</span>
-                    <span className="search-result-cat">
-                      {localized(dbCategories.find((c) => c.slug === r.category)?.name, lang) || r.category}
+                    {/* PRICE, then the category under it. A guest searching the menu is usually
+                        price-hunting, and the suggestion row showed photo/name/category only — so
+                        finding out what a dish cost meant opening it or clearing the search. The two
+                        share one right-hand column so the row keeps its height and the name keeps
+                        its space on a 360px phone. (T1 improvement 5, 2026-08-07.) */}
+                    <span className="search-result-side">
+                      <span className="search-result-price">{formatPrice(r.price, searchCurrency || DEFAULT_CURRENCY)}</span>
+                      <span className="search-result-cat">
+                        {localized(dbCategories.find((c) => c.slug === r.category)?.name, lang) || r.category}
+                      </span>
                     </span>
                   </Link>
                 ))}
