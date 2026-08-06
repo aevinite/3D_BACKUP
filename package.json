@@ -96,7 +96,8 @@
     "verify:skin-ink": "node scripts/verify-skin-ink.mjs",
     "verify:dead-css": "node scripts/verify-dead-css.mjs",
     "verify:sweep-extras": "node scripts/verify-sweep-extras.mjs",
-    "verify:css-tokens": "node scripts/verify-css-tokens.mjs"
+    "verify:css-tokens": "node scripts/verify-css-tokens.mjs",
+    "verify:void-party": "node scripts/verify-void-on-joined-party.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
