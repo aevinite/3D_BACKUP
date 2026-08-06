@@ -107,6 +107,9 @@ export default function AdminBills() {
   const [qLive, setQLive] = useState("");   // what is typed; `q` is what has been submitted
   const [more, setMore] = useState<Bill[]>([]);   // pages after the first
   const [moreBusy, setMoreBusy] = useState(false);
+  // THE SERVER OWNS THE CURSOR (2026-08-06) — see the note at loadMore. This holds whatever the last
+  // page handed back, so paging never re-derives a boundary from the rows on screen.
+  const [cursor, setCursor] = useState<string | null>(null);
 
   const qsFor = useCallback((extra?: Record<string, string>) => {
     const p = new URLSearchParams();
@@ -128,6 +131,7 @@ export default function AdminBills() {
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't load.");
       setD(j); setMore([]);              // a new filter starts a fresh first page
+      setCursor(j?.nextBefore ?? null);  // …and a fresh cursor with it
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
   }, [qsFor]);
   useEffect(() => { load(); }, [load]);
@@ -137,8 +141,13 @@ export default function AdminBills() {
   const autoRefresh = useCallback(() => { if (!pagedIn) load(); }, [pagedIn, load]);
   useActiveAutoRefresh(autoRefresh, 60000);
 
-  // The oldest bill currently on screen is the cursor for the next page.
-  const nextBefore = more.length ? more[more.length - 1].at : (d?.nextBefore ?? null);
+  // USE THE SERVER'S CURSOR — never one re-derived from the rows on screen (2026-08-06).
+  // This read `more[last].at`, i.e. `closed_at ?? created_at`, while the endpoint pages on
+  // `created_at`. For a settled bill closed_at is later than created_at, so "Load more" asked for a
+  // boundary the rows already shown satisfied: it re-listed bills, and where a session had been open
+  // for days before closing it returned the SAME page forever, so older bills were unreachable.
+  // The endpoint now returns the created_at it actually sorted by; we just carry it back.
+  const nextBefore = cursor;
   const loadMore = async () => {
     if (!nextBefore || moreBusy) return;
     setMoreBusy(true);
@@ -147,6 +156,8 @@ export default function AdminBills() {
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't load more.");
       setMore((m) => [...m, ...((j.bills || []) as Bill[])]);
+      // Advance to the next page's cursor, and stop when the server says there is no more.
+      setCursor((j?.nextBefore as string | null) ?? null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setMoreBusy(false); }
   };
 

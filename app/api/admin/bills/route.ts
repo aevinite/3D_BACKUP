@@ -168,10 +168,25 @@ export async function GET(req: NextRequest) {
 
   if (stateFilter) bills = bills.filter((b) => b.state === stateFilter);
 
-  // The cursor for "Load more": the oldest bill on this page. Null once a page comes back short,
-  // which is how the UI knows it has reached the end rather than guessing from the count.
+  // The cursor for "Load more". Null once a page comes back short, which is how the UI knows it has
+  // reached the end rather than guessing from the count.
+  //
+  // IT MUST BE THE COLUMN WE SORT AND FILTER ON (2026-08-06). This handed back
+  // `bills[last].at`, which is `closed_at ?? created_at` (lib/billLedger.ts), while the query orders
+  // by and filters on `created_at` alone. For any settled bill closed_at > created_at, so the next
+  // page asked for `created_at < closed_at_of_the_oldest_row` — a boundary LATER than that row's own
+  // created_at, which the rows already on screen satisfy. Two real failures: a table opened 20:00 and
+  // closed 21:30 re-returned the last 90 minutes of bills as "more"; and a session created three days
+  // ago but closed today made page 2 identical to page 1, so "Load more" could never reach older
+  // bills at all — on the one screen whose job is proving no sale quietly vanished (this file's own
+  // header: "THE ADMIN MUST BE ABLE TO REACH A DELETED BILL AT ANY TIME").
+  //
+  // Taken from the last SESSION of the unfiltered page, not the last surviving BillRecord: `bills` has
+  // just been narrowed by `stateFilter` above, so on e.g. "Pay-later" a page of 200 sessions holding
+  // 3 matches would otherwise hand back the 3rd match's timestamp and re-scan the same window forever.
+  // Rolling truly-empty sessions out of `bills` (the orderCount/billNo filter) had the same effect.
   const full = sessions.length >= limit;
-  const nextBefore = full && bills.length ? bills[bills.length - 1].at || null : null;
+  const nextBefore = full && sessions.length ? sessions[sessions.length - 1].created_at || null : null;
 
   const restaurants = (restsQ.data || []).map((r) => ({ id: r.id, name: r.name })).sort((a, b) => a.name.localeCompare(b.name));
   return NextResponse.json({
