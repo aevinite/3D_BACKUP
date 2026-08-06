@@ -11,7 +11,7 @@ import { getSettings } from "@/lib/menu";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { supabase } from "@/lib/supabase";
 import { sanitizeBrandTheme, buildModeBlock, buildCanvasBlock } from "@/lib/brandTheme";
-import { accentPaletteCss, accentBackground } from "@/lib/accent";
+import { accentPaletteCss, accentBackground, accentCanvasCss } from "@/lib/accent";
 
 // The accent palette now lives in lib/accent.ts so the 3D viewer (a separate
 // route outside this shell) can emit the SAME variables. See that file for the
@@ -159,7 +159,13 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
   // document-wide no matter where this <style> sits. Only non-#1 restaurants pass
   // accentColor, so #1's gold is never overridden. The menu-page background wash
   // stays a page backdrop (below), not a :root variable.
-  const rootAccentCss = accentColor ? `:root{${accentPaletteCss(accentColor)}}` : "";
+  // The accent FAMILY at :root, plus the PAGE ITSELF (bg/card/text/muted/border) derived from the
+  // same accent — because a tenant with only an accent was still sitting on restaurant #1's brown
+  // canvas (guest sweep T1, 2026-08-06; see lib/accent.ts → accentCanvasCss). The canvas block is
+  // emitted FIRST so a tenant that has set a real `theme` still overrides it below.
+  const rootAccentCss = accentColor
+    ? `${accentCanvasCss(accentColor)}:root{${accentPaletteCss(accentColor)}}`
+    : "";
   const pageBg = accentColor ? accentBackground(accentColor) : null;
 
   return (

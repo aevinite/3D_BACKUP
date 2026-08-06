@@ -486,8 +486,16 @@ export interface Settings {
   features: Record<string, boolean>;
   // The restaurant's effective tax rate as a DECIMAL (e.g. 0.05 = 5%), derived from
   // its named tax components (or the fallback rate, or 5%) — see lib/tax.ts. The guest
-  // cart uses this so the quoted GST matches the actual bill (was hardcoded 5%). Only
-  // the single number is exposed to guests, never the component labels/GSTIN.
+  // cart uses this so the quoted GST matches the actual bill (was hardcoded 5%).
+  //
+  // WHAT ACTUALLY CROSSES THE WIRE. This used to claim "only the single number is exposed to
+  // guests, never the component labels" — which is not true and was never true: `lfh_guest_settings`
+  // is `to_jsonb(row)` MINUS a denylist (mig 282), and `tax_components` is not on that denylist, so
+  // the named components DO arrive in the browser (measured, guest sweep T1 2026-08-06). They have
+  // to: `effectiveTaxRate` SUMS them and only falls back to the flat `tax_rate` when there are none,
+  // so hiding them would silently quote a different GST than the bill charges. They are also printed
+  // on every bill, so they are not a secret. `gstin`, the address and the phone ARE on the denylist —
+  // that half of the old sentence was right. Only this `Settings` SHAPE keeps just the number.
   taxRate: number;
   // ── the three price behaviours (migration 270) ─────────────────────────────
   // Are the prices typed into the menu NET (GST added on top), GROSS (GST already inside),

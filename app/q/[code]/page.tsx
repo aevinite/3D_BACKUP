@@ -51,12 +51,33 @@ const resolveCode = cache(async function resolveCode(codeRaw: string) {
   return { r, slug: rest.slug, table: row.table_number, settings };
 });
 
+// WHITE-LABEL, ALL THREE DOORS. This used to return the title (and an icon) and nothing else, so
+// Next filled the rest in from the root layout — meaning a diner who shared their table's QR link
+// got the restaurant's name as the headline and "Aevidine — the all-in-one platform that runs your
+// restaurant" as the blurb, with no preview image. Measured on the deployed site (guest sweep T1,
+// 2026-08-06). That is the SaaS pitch on a restaurant's own link: exactly the bug
+// `/r/<slug>/menu` was fixed for (audit bugs #8/#14), never carried across to here.
+// Kept deliberately identical to the tenant menu route's wording so the two doors preview the same.
 export async function generateMetadata({ params }: { params: Promise<{ code: string }> }): Promise<Metadata> {
   const { code } = await params;
   const hit = await resolveCode(code);
-  if (!hit) return { title: "Menu" };
+  // A dead code must not advertise itself either — a neutral title, and no platform description.
+  if (!hit) return { title: "Menu", description: "This QR code isn’t active." };
   const title = hit.r.name ? `${hit.r.name} — Menu` : "Menu";
-  return { title, ...(hit.r.logoUrl ? { icons: { icon: hit.r.logoUrl } } : {}) };
+  const description = hit.r.tagline
+    ? `${hit.r.tagline} — view the menu and order at ${hit.r.name}.`
+    : `View the menu and order at ${hit.r.name}.`;
+  return {
+    title,
+    description,
+    ...(hit.r.logoUrl ? { icons: { icon: hit.r.logoUrl } } : {}),
+    openGraph: {
+      title,
+      description,
+      type: "website",
+      ...(hit.r.logoUrl ? { images: [{ url: hit.r.logoUrl }] } : {}),
+    },
+  };
 }
 
 export default async function TableQrPage({ params }: { params: Promise<{ code: string }> }) {

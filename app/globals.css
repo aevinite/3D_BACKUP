@@ -1273,6 +1273,11 @@ body.menu-frost .nav {
 [data-theme="light"] .item-card:hover .dish-name { color: #8b5a2b; }
 .dish-meta { 
   font-size: 11px; color: var(--muted); margin-bottom: 8px; display: flex; align-items: center; gap: 10px;
+  /* Always reserve the line, even with nothing in it. A dish with no real prep time and no
+     reviews now renders an EMPTY meta row (FoodCard no longer invents "25-30 min"), and a
+     flex box with no children collapses to zero height, which would pull the price up and
+     make that one card shorter than its neighbours. */
+  min-height: 1.35em;
 }
 .dish-price {
   font-family: 'Inter', sans-serif;

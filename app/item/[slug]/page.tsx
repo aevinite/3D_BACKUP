@@ -10,7 +10,18 @@ import { getMenuItem, getSettings } from "@/lib/menu";
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const dish = await getMenuItem(slug).catch(() => null);
-  return { title: dish?.title ? `${dish.title} — My Little French House` : "My Little French House — Menu" };
+  const title = dish?.title ? `${dish.title} — My Little French House` : "My Little French House — Menu";
+  // Same reason as the /r/<slug>/item twin: a page that sets only a title inherits the platform
+  // description from app/layout.tsx, so a shared dish link read as the SaaS pitch (guest sweep T1,
+  // 2026-08-06). Restaurant #1 gets its own sentence and the dish's own photo.
+  const description = dish?.description?.trim()
+    ? `${dish.description.trim()} — at My Little French House.`
+    : `View ${dish?.title || "the menu"} at My Little French House.`;
+  return {
+    title,
+    description,
+    openGraph: { title, description, type: "website", ...(dish?.image ? { images: [{ url: dish.image }] } : {}) },
+  };
 }
 
 // This is the dish detail page, shown at addresses like "/item/croissant".
