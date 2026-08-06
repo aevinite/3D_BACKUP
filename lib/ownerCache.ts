@@ -34,6 +34,34 @@ export type Cached<T> = T & { cachedAt: string; cached: boolean };
 
 const DEFAULT_MAX_AGE_SEC = 300; // ~5 min: within this a snapshot counts as fresh
 
+// Is a stored snapshot still fresh? An UNPARSEABLE computed_at must count as STALE, not fresh.
+// This used to be a bare `Date.now() - Date.parse(row) >= maxAgeMs`: with a corrupt timestamp
+// that is `NaN >= maxAgeMs` → false → the row was treated as fresh FOREVER and never
+// revalidated, while the guard inside revalidate() used the opposite comparison and disagreed
+// about the same row (T5 sweep, 2026-08-06). One helper, so both sides can't drift again.
+function isFresh(computedAt: unknown, maxAgeMs: number): boolean {
+  const t = Date.parse(String(computedAt));
+  return Number.isFinite(t) && Date.now() - t < maxAgeMs;
+}
+
+// ── Housekeeping, piggy-backed — NOT a cron (the project rule is "never a blind cron") ──────
+// owner_analytics_cache is keyed by scope+report+range+the RESOLVED window day, so the reports
+// route mints a brand-new row for every viewed combination every IST day. Nothing ever deleted
+// the old ones: mig 196 added a `last_viewed_at` column and an index on it, and then no reader.
+// So the table grew a whole report payload per key per day, forever (T5 sweep, 2026-08-06).
+// This rides along on a COLD compute (already the rare, already-slow path), at most once an
+// hour per instance, and is fire-and-forget — a failed sweep must never affect the response.
+const SWEEP_EVERY_MS = 3600_000;
+const KEEP_DAYS = 30;
+let lastSweep = 0;
+function sweepStaleRows(): void {
+  const now = Date.now();
+  if (now - lastSweep < SWEEP_EVERY_MS) return;
+  lastSweep = now;
+  const cutoff = new Date(now - KEEP_DAYS * 86_400_000).toISOString();
+  void sb.from(TABLE).delete().lt("last_viewed_at", cutoff).then(() => {}, () => {});
+}
+
 // Serve `key` from the cache. Behaviour:
 //   • row exists, fresh (< maxAgeSec) → return it (one row read, no work).
 //   • row exists, stale → return it INSTANTLY, and refresh in the background for next time
@@ -61,7 +89,7 @@ export async function cachedOwnerPayload<T extends object>(opts: {
     inflight.add(key);
     try {
       const cur = (await sb.from(TABLE).select("computed_at, fingerprint").eq("cache_key", key).maybeSingle()).data;
-      if (cur && Date.now() - Date.parse(cur.computed_at as string) < maxAgeMs) return; // someone beat us
+      if (cur && isFresh(cur.computed_at, maxAgeMs)) return; // someone beat us
       if (fingerprint && cur) {
         const fp = await fingerprint().catch(() => null);
         if (fp && fp === cur.fingerprint) { // unchanged → just mark fresh, no recompute
@@ -85,7 +113,7 @@ export async function cachedOwnerPayload<T extends object>(opts: {
 
   if (existing?.payload) {
     void sb.from(TABLE).update({ last_viewed_at: nowIso() }).eq("cache_key", key).then(() => {}, () => {});
-    const stale = Date.now() - Date.parse(existing.computed_at as string) >= maxAgeMs;
+    const stale = !isFresh(existing.computed_at, maxAgeMs);
     if (stale) {
       // Return the stale snapshot NOW; refresh after the response is sent (no user wait).
       // Fall back to a detached promise if after() isn't in a request context (e.g. a script).
@@ -100,6 +128,7 @@ export async function cachedOwnerPayload<T extends object>(opts: {
   // instead of their sum (a manual Refresh used to pay both back-to-back). A fingerprint
   // taken during the compute is safe either way: at worst the next check sees "changed"
   // once more and does one extra recompute — it can never mark stale data fresh.
+  sweepStaleRows();   // rare path, fire-and-forget — see the note above
   const [payload, fp] = await Promise.all([
     compute(),
     fingerprint ? fingerprint().catch(() => null) : Promise.resolve(null),

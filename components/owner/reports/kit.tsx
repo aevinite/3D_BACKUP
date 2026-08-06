@@ -260,7 +260,11 @@ export function ReportsStyles() {
       .rs-ov-toggle { display: inline-flex; background: var(--muted2); border-radius: 999px; padding: 3px; gap: 3px; }
       .rs-ov-toggle button { border: none; background: none; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; padding: 5px 16px; border-radius: 999px; cursor: pointer; transition: background .18s ease, color .18s ease; }
       .rs-ov-toggle button:hover { color: var(--text); }
-      .rs-ov-toggle button.on { background: var(--accent); color: #fff; }
+      /* --accent-on, not #fff: the owner console's accent is a LIGHT emerald — white on it
+         measures 2.54:1 in the dark skin and 3.77:1 in the light one, so you cannot tell which
+         option is selected. .rs-tc-toggle was moved to this token on 2026-08-05 and its
+         siblings were missed (T5 sweep, 2026-08-06). */
+      .rs-ov-toggle button.on { background: var(--accent); color: var(--accent-on, #fff); }
       .rs-ov-chart { margin-top: 8px; }
       .rs-ov-empty { height: 210px; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
       /* Shared toggle-chart (bar/line) header — used by the hub + every time-based report. */

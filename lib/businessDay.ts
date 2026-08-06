@@ -19,3 +19,23 @@ export function businessDayStartIso(now: Date = new Date()): string {
   // Convert that IST wall-clock instant back to real UTC.
   return new Date(boundary.getTime() - IST_OFFSET_MIN * 60000).toISOString();
 }
+
+/**
+ * The LAST IST calendar date a window ending at `toIso` actually covers, for anything filed
+ * against a business day rather than an instant (a day's staff payments, a purchase bill, a
+ * waste slip).
+ *
+ * A business-day window ends at 05:00 IST the NEXT morning, so a plain "shift to IST and take
+ * the date" — which is what `istDateOf` does — hands back TOMORROW. That is how a salary
+ * recorded on Tuesday morning ended up counted on Monday's day sheet, so neither day
+ * reconciled against the till (T5 sweep, 2026-08-06). Stepping the 5-hour rollover back first
+ * lands a business-day window on its own date and leaves every "…to now" window on today.
+ *
+ * This is the SAME rule as `docDateHi()` in the owner reports route and `lfh_doc_date_hi()` in
+ * migration 288 — keep all three in lockstep.
+ */
+export function businessDateHi(toIso: string): string {
+  const t = Date.parse(toIso);
+  if (!Number.isFinite(t)) return new Date(Date.now() + IST_OFFSET_MIN * 60000).toISOString().slice(0, 10);
+  return new Date(t + IST_OFFSET_MIN * 60000 - ROLLOVER_HOUR * 3600_000 - 1).toISOString().slice(0, 10);
+}

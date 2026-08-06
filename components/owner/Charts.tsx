@@ -15,7 +15,12 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid, LabelList,
 } from "recharts";
 
-const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-US");
+// en-IN, the SAME grouping as components/admin/shared → inr, which every tile, table and
+// legend in this console uses. This file used to keep its own en-US copy, so hovering the
+// revenue chart showed ₹8,359,670 where the KPI card above it said ₹83,59,670 — and inside
+// one MoneyTip the amount was en-US while the orders line below it was en-IN (T5 sweep,
+// 2026-08-06). Kept local (not imported) so the chart kit stays dependency-free.
+const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
 const compact = (v: number) =>
   "₹" + (v >= 100000 ? (v / 100000).toFixed(1).replace(/\.0$/, "") + "L"
        : v >= 1000   ? (v / 1000).toFixed(1).replace(/\.0$/, "") + "k"
@@ -118,7 +123,9 @@ function CountTip({ active, payload, label }: any) {
     <TipBox>
       {label != null && <div style={{ color: "var(--muted)", marginBottom: 4 }}>{label}</div>}
       {payload.map((p: { name: string; value: number }, i: number) => (
-        <div key={i}><b>{p.name}</b>: {p.value}</div>
+        // grouped, like every other number in the console — a 12,345-order bucket used to
+        // print "12345" (T5 sweep, 2026-08-06).
+        <div key={i}><b>{p.name}</b>: {(Number(p.value) || 0).toLocaleString("en-IN")}</div>
       ))}
     </TipBox>
   );
@@ -130,6 +137,13 @@ export function AreaTrend({ data, lines, height = 260 }: {
   lines: { key: string; name: string; color: string }[];
   height?: number;
 }) {
+  // A gradient id must be unique PER CHART INSTANCE, not per series key — the same lesson
+  // ToggleChart learned on 2026-08-04 (duplicate <linearGradient> ids mean the second one is
+  // ignored and both charts fill from the FIRST). Two AreaTrends can already co-exist (the
+  // main trend and the restaurant drawer's), and today they happen to use different keys, so
+  // nothing is visibly wrong — this stops the next one being a silent mis-fill. Same for
+  // RevMonthCompare and Column3D below. (T5 sweep, 2026-08-06.)
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   if (!data.length || !lines.length) return <Empty />;
   const values = data.flatMap((row) => lines.map((l) => Number(row[l.key]) || 0));
   const single = lines.length === 1;
@@ -163,7 +177,7 @@ export function AreaTrend({ data, lines, height = 260 }: {
           <AreaChart data={data} margin={{ left: 4, right: 10, top: 8, bottom: 4 }}>
             <defs>
               {lines.map((l) => (
-                <linearGradient key={l.key} id={`own-g-${cssId(l.key)}`} x1="0" y1="0" x2="0" y2="1">
+                <linearGradient key={l.key} id={`own-g-${cssId(l.key)}-${uid}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={l.color} stopOpacity={0.36} />
                   <stop offset="100%" stopColor={l.color} stopOpacity={0.02} />
                 </linearGradient>
@@ -178,7 +192,7 @@ export function AreaTrend({ data, lines, height = 260 }: {
             {lines.map((l) => (
               <Area key={l.key} type="monotone" dataKey={l.key} name={l.name} stroke={l.color}
                 strokeWidth={2.5} dot={false} activeDot={{ r: 5, strokeWidth: 2, stroke: "var(--card)" }}
-                fill={single ? `url(#own-g-${cssId(l.key)})` : "transparent"} />
+                fill={single ? `url(#own-g-${cssId(l.key)}-${uid})` : "transparent"} />
             ))}
           </AreaChart>
         </ResponsiveContainer>
@@ -196,6 +210,7 @@ export function RevMonthCompare({ data, height = 260, curName, prevName, curColo
   data: Record<string, unknown>[];
   height?: number; curName: string; prevName: string; curColor?: string; prevColor?: string;
 }) {
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");   // instance-scoped gradient id (see AreaTrend)
   if (!data.length) return <Empty />;
   const hasPrev = data.some((d) => (Number(d.prev) || 0) > 0);
   const values = data.flatMap((d) => [Number(d.cur) || 0, ...(hasPrev ? [Number(d.prev) || 0] : [])]);
@@ -211,7 +226,7 @@ export function RevMonthCompare({ data, height = 260, curName, prevName, curColo
       value={populated(activity) === 1 ? inr(soleValue(activity)) : undefined}
       hint="A month-on-month comparison needs takings on more than one day — it fills in as the month goes on." />;
   }
-  const gid = "own-g-monthcur";
+  const gid = `own-g-monthcur-${uid}`;
   return (
     <div>
       <div className="own-legend" role="list">
@@ -314,11 +329,12 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
 // blurry on the client site). Crisp rounded column, full colour at the top fading gently
 // toward the base — the exact look from the approved design demo.
 function Column3D(props: {
-  x?: number; y?: number; width?: number; height?: number; fill?: string; index?: number;
+  x?: number; y?: number; width?: number; height?: number; fill?: string; index?: number; uid?: string;
 }) {
-  const { x = 0, y = 0, width = 0, height = 0, fill = "#888", index = 0 } = props;
+  const { x = 0, y = 0, width = 0, height = 0, fill = "#888", index = 0, uid = "" } = props;
   if (height <= 0 || width <= 0) return null;
-  const gid = `we-col-${index}`;
+  // `uid` scopes the gradient to THIS chart instance — see the AreaTrend note.
+  const gid = `we-col-${uid}-${index}`;
   return (
     <g>
       <defs>
@@ -333,6 +349,7 @@ function Column3D(props: {
 }
 
 function ColumnsChart({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: string) => void }) {
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");   // instance-scoped gradient ids (see AreaTrend)
   const max = Math.max(1, ...data.map((d) => d.revenue));
   // The amount above each column is THEME text, never a fixed colour. It used to say
   // `var(--ink)` — a variable this app has never defined anywhere — so the invalid
@@ -357,7 +374,7 @@ function ColumnsChart({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: st
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: AXIS }} interval={0} angle={-28} textAnchor="end" height={74} />
           <YAxis domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} width={46} allowDecimals={false} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
-          <Bar dataKey="revenue" name="Revenue" shape={<Column3D />} maxBarSize={72} isAnimationActive={false}
+          <Bar dataKey="revenue" name="Revenue" shape={<Column3D uid={uid} />} maxBarSize={72} isAnimationActive={false}
             cursor={onSelect ? "pointer" : undefined}
             onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>
             <LabelList dataKey="revenue" position="top" formatter={((value: unknown) => compact(Number(value))) as never} style={{ fill: "var(--text)", fontSize: 11, fontWeight: 700 }} />

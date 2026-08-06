@@ -23,6 +23,7 @@ import { ownerScope, scopedRestaurantIds, dbFail } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollEffectiveByRid } from "@/lib/tableTags";
 import { istDateOf } from "@/lib/staffProfileShared";
+import { businessDateHi } from "@/lib/businessDay";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
@@ -118,10 +119,20 @@ const fpFor = (ids: string[] | null, from: string, to: string) =>
 // One tiny indexed count + the newest row's timestamps, appended to the orders fingerprint.
 async function fpWithStaffPay(ids: string[] | null, from: string, to: string): Promise<string | null> {
   const base = await fpFor(ids, from, to);
-  if (!ids || !ids.length || base === null) return base;
-  const q = await sb.from("staff_payments")
-    .select("created_at, voided_at", { count: "exact" })
-    .in("restaurant_id", ids).order("created_at", { ascending: false }).limit(1);
+  if (base === null) return base;
+  // `ids` is NULL for the ADMIN's all-restaurants view, and this used to bail out on that —
+  // so the admin's "Staff pay out" / "After staff pay" tiles (which staffPayExpense() DOES
+  // render for that scope) never invalidated on a recorded salary and sat on an old figure
+  // until an ORDER happened to move the fingerprint. That is the very bug the header note above
+  // describes fixing for a scoped owner (T5 sweep, 2026-08-06). A NULL scope simply means
+  // "every restaurant", so ask the same question without the filter — staff_payments is small
+  // and the column is indexed.
+  // NULL = every restaurant (admin). An EMPTY array is a different thing — a scoped owner with
+  // nothing entitled — and must NOT fall through to a platform-wide read.
+  if (ids && !ids.length) return base;
+  const q0 = sb.from("staff_payments").select("created_at, voided_at", { count: "exact" });
+  const q = await (ids ? q0.in("restaurant_id", ids) : q0)
+    .order("created_at", { ascending: false }).limit(1);
   const last = (q.data || [])[0] as { created_at?: string; voided_at?: string | null } | undefined;
   return `${base}|sp:${q.count ?? 0}:${last?.created_at ?? ""}:${last?.voided_at ?? ""}`;
 }
@@ -254,15 +265,28 @@ export async function GET(req: NextRequest) {
     if (!on.length) return null;
     const q = await sb.rpc("lfh_staff_pay_expense", {
       p_restaurant: on.length === 1 ? on[0] : null,
-      p_from: istDateOf(from), p_to: istDateOf(to),
+      // businessDateHi, NOT istDateOf: a business-day window ends at 05:00 IST the next
+      // morning, so istDateOf handed back TOMORROW and a salary recorded the next morning was
+      // counted into the previous day (T5 sweep, 2026-08-06 — see lib/businessDay).
+      p_from: istDateOf(from), p_to: businessDateHi(to),
       p_ids: on.length === 1 ? null : on,
     });
     const r = (q.data || [])[0] as Record<string, unknown> | undefined;
     if (!r) return { paidOut: 0, people: 0, entries: 0 };
     return { paidOut: num(r.paid_out), people: Number(r.people) || 0, entries: Number(r.entries) || 0 };
   };
-  // cache keys must distinguish two different custom windows
-  const rangeKey = range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}` : range;
+  // ── THE KEY MUST CARRY THE RESOLVED WINDOW, NOT JUST ITS NAME (T5 sweep, 2026-08-06) ──────
+  // This used to be the bare range name, so "today" and "30d" were the SAME cache key today as
+  // yesterday. Snapshots are served stale-while-revalidate — the stored value ships first and
+  // refreshes behind it — so the first dashboard open after the 05:00-IST business-day rollover
+  // showed YESTERDAY'S completed day labelled "Today", and the first open after IST midnight
+  // showed a 30-day window ending yesterday. The sibling reports route added exactly this guard
+  // after the 2026-07-27 audit ("the first open of a new day served YESTERDAY'S 30-day window")
+  // and this route was never given it, so the two halves of the same KPI row could disagree.
+  // `from` is the resolved window start, so the key changes the moment the window does.
+  const rangeKey = range === "custom"
+    ? `custom:${sp.get("from")}:${sp.get("to")}`
+    : `${range}:${from.slice(0, 10)}`;
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
   const prevTsWin = compare ? prevTsWindowFor(range, from, to) : null;
 
@@ -326,10 +350,19 @@ export async function GET(req: NextRequest) {
       // scoped owner leaks every other tenant's payment totals (cross-tenant leak, found
       // + fixed 2026-07-04). Admin (scope.all) may sum all; a scoped owner sums ONLY
       // their own restaurants (one tiny call each) and we merge by method.
+      // ── DEGRADE GRACEFULLY, like the sibling reports route (T5 sweep, 2026-08-06) ──────────
+      // These two fan-outs used to `throw r.error` on the FIRST failing restaurant, which threw
+      // out of the cached compute and 500'd the whole request — one restaurant's slow payment or
+      // category RPC blanked every chart, every KPI and every OTHER restaurant's numbers. The
+      // reports route has had the opposite policy since the 2026-07-09 audit ("keep the
+      // restaurants that succeeded… only surface an error when EVERY one failed"), and the
+      // heatmap in this very file is excluded from its throw loop for exactly this reason. Keep
+      // what answered; only a TOTAL failure is an error.
       const pmByMethod = new Map<string, { method: string; revenue: number; orders: number }>();
       const pmRes = await pmP;
-      for (const r of pmRes) {
-        if (r.error) throw r.error;
+      const pmOk = pmRes.filter((r) => !r.error);
+      if (!pmOk.length && pmRes.length) throw pmRes.find((r) => r.error)?.error || new Error("Payment breakdown failed");
+      for (const r of pmOk) {
         for (const row of (r.data ?? []) as Record<string, unknown>[]) {
           const m = String(row.method ?? "");
           const cur = pmByMethod.get(m) || { method: m, revenue: 0, orders: 0 };
@@ -349,8 +382,9 @@ export async function GET(req: NextRequest) {
       const catRes = catScopedP ? await catScopedP : await mapLimit(
         (rev.data ?? []).map((r: Record<string, unknown>) => r.restaurant_id as string),
         FANOUT, (id: string) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
-      for (const r of catRes) {
-        if (r.error) throw r.error;
+      const catOk = catRes.filter((r) => !r.error);       // same degrade-gracefully rule as above
+      if (!catOk.length && catRes.length) throw catRes.find((r) => r.error)?.error || new Error("Category breakdown failed");
+      for (const r of catOk) {
         for (const row of (r.data ?? []) as Record<string, unknown>[]) {
           const c = String(row.category ?? "Other");
           const cur = catByName.get(c) || { category: c, qty: 0, revenue: 0 };

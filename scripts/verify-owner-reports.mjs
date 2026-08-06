@@ -111,9 +111,23 @@ check("the export uses buildFiling too",
 check("'The split' prints the filing table's own column totals",
   /filingRows\.length \? compTotals :/.test(reportsPage),
   "two independent roundings on one page = two different CGST figures");
+// `taxableFor` joined `taxableValue` on 2026-08-06 (T5 sweep): the per-ROW figure now depends on
+// whether the period has a MATERIAL exempt portion at all, so both files call taxableFor and both
+// get that yes/no from the same exemptIsMaterial. Accept either name — what matters is that
+// neither file derives it locally.
+const derivesTaxable = (src) => /\btaxable(Value|For)\(/.test(src);
 check("the taxable value has one shared derivation",
-  /export function taxableValue/.test(taxFiling) && /taxableValue\(/.test(reportsPage) && /taxableValue\(/.test(sectionExport),
+  /export function taxableValue/.test(taxFiling) && derivesTaxable(reportsPage) && derivesTaxable(sectionExport),
   "screen, CSV and paper must agree on what is taxable");
+// A rounding residue is not exempt supply. `taxable` is recovered as tax ÷ rate and both sides are
+// already rounded, so net − taxable never lands on zero — a restaurant selling nothing exempt was
+// permanently told it had ₹111 of MRP sales to file separately (T5 sweep, 2026-08-06). The
+// materiality test has to live in lib/ and be asked by BOTH renderers, or the tile, the filing
+// table and the exported sheet go back to printing three different taxable bases.
+check("'exempt sales' has a tolerance, and it is shared",
+  /export function exemptIsMaterial/.test(taxFiling) && /export function taxableFor/.test(taxFiling)
+    && /exemptIsMaterial\(/.test(reportsPage) && /exemptIsMaterial\(/.test(sectionExport),
+  "rounding dust must never be printed as a GST-exempt supply");
 
 console.log("\n── 4. NOTHING IS FETCHED THAT NOTHING RENDERS ──");
 // Two RPCs ran on every restaurant-dashboard compute, returned 4 and 56 rows, were read by no
@@ -216,6 +230,95 @@ check("every owner aggregate route is snapshot-cached",
 check("cache keys are built from the authorized scope",
   /scopeKeyOf\(rid, scope\.all, scopeIds\)/.test(reportsRoute),
   "a key from raw request params would cross one owner's snapshot with another's");
+
+console.log("\n── 11. ONE MONEY, ONE GROUPING (T5 sweep, 2026-08-06) ──");
+// This console writes INDIAN money: components/admin/shared → inr is en-IN and so is nfmt.
+// AnimatedNumber's parseFormatted took an already-formatted string apart and re-grouped it as
+// en-US "because ₹ means inr and inr is en-US" — it isn't — so every <Stat> in the Studio printed
+// ₹8,359,670 above a table saying ₹83,59,670, and the Tax report's headline disagreed with its own
+// CGST/SGST split on a panel captioned "ready to copy into a return".
+const animNum = read("components/owner/AnimatedNumber.tsx");
+// Match the CODE, not the prose: this file keeps a note explaining what en-US did here, and a
+// guard that forbids the word would force the next author to delete the explanation.
+check("AnimatedNumber never regroups money as en-US",
+  !/toLocaleString\("en-US"\)/.test(animNum) && !/locale: "en-US"/.test(animNum),
+  "the Studio's headline number must match the table under it");
+check("the chart kit groups rupees the same way as the tiles",
+  /toLocaleString\("en-IN"\)/.test(charts) && !/toLocaleString\("en-US"\)/.test(charts),
+  "a tooltip that disagrees with the tile above it is two answers to one question");
+
+console.log("\n── 12. A COST LINE ONLY SITS BESIDE A MATCHING GRAIN ──");
+// lfh_inv_cost_series is always day- or month-grained and returns a "YYYY-MM-DD" STRING. On an
+// HOUR window the client's istKey sliced each hour down to its day, so all 24 hourly bars matched
+// the one cost row and the chart drew the whole day's supplier spend twenty-four times.
+check("the sales cost overlay refuses an hour-grain window",
+  /grainMatches/.test(reportsPage) && /bucket === "day" \|\| bucket === "month"/.test(reportsPage),
+  "a daily cost row repeated under every hour is not a cost line");
+
+console.log("\n── 13. A CACHE KEY CARRIES ITS WINDOW, NOT JUST ITS NAME ──");
+// "today" and "30d" were the SAME analytics key today as yesterday, and snapshots ship stale-first
+// — so the first open after the 05:00 rollover showed yesterday's completed day labelled "Today".
+check("the analytics key embeds the resolved window start",
+  /\$\{range\}:\$\{from\.slice\(0, 10\)\}/.test(analyticsRoute),
+  "a sliding range must mint a new key when the window slides");
+check("a corrupt cache timestamp counts as STALE",
+  /function isFresh/.test(read("lib/ownerCache.ts")) && /Number\.isFinite\(t\)/.test(read("lib/ownerCache.ts")),
+  "NaN >= maxAge is false, which made an unparseable row fresh forever");
+check("the snapshot table gets swept",
+  /sweepStaleRows/.test(read("lib/ownerCache.ts")),
+  "one payload row per scope per report per range per DAY, kept forever");
+
+console.log("\n── 14. ONE SLOW RESTAURANT IS NOT A BROKEN DASHBOARD ──");
+// These two fan-outs threw on the FIRST failing restaurant, out of the cached compute and into a
+// 500 — every chart and every OTHER restaurant's numbers gone. The reports route has degraded
+// gracefully since the 2026-07-09 audit and the heatmap here is excluded from its throw loop.
+check("the payment fan-out degrades gracefully",
+  /const pmOk = pmRes\.filter/.test(analyticsRoute) && !/for \(const r of pmRes\) \{\s*\n\s*if \(r\.error\) throw/.test(analyticsRoute),
+  "one restaurant's slow RPC must not blank the whole dashboard");
+check("the category fan-out degrades gracefully",
+  /const catOk = catRes\.filter/.test(analyticsRoute),
+  "same rule as its sibling above");
+
+console.log("\n── 15. YOU CAN READ WHICH OPTION IS SELECTED ──");
+// The owner accent is a LIGHT emerald: white on it is 2.54:1 dark / 3.77:1 light. --accent-on
+// (#06251a) exists for exactly this and .rs-tc-toggle was moved to it on 2026-08-05; four
+// siblings kept hard-coding #fff.
+for (const [label, src] of [["the dish-ranking toggle", read("components/owner/reports/DishReports.tsx")],
+                            ["the inventory toggles", invReports],
+                            ["the hub overview toggle", kit],
+                            ["the dashboard dish sort", dashPage]])
+  check(`${label} uses --accent-on, not white`,
+    !/background: var\(--accent\); color: #fff/.test(src),
+    "white on the light emerald accent is unreadable in both skins");
+
+console.log("\n── 16. A DEEP LINK LANDS ON THE REPORT IT NAMES ──");
+// The dashboard's staff-pay tiles link to ?open=team and say "Open the full report"; openAlias had
+// no `team` key, so `map[k] ?? null` dropped the owner on the catalogue instead.
+check("openAlias covers every report key",
+  ["daysummary", "sales", "payments", "tax", "items", "timing", "team", "inventory"]
+    .every((k) => new RegExp(String.raw`\b${k}: \{ sel:`).test(reportsPage)),
+  "a KPI tile that promises a report must open that report");
+
+console.log("\n── 17. A HALF-FINISHED TODAY IS NOT THE QUIETEST DAY ──");
+// Every ranged report ends at `now`, so its last bucket is part-finished — handed to BestWorst it
+// always won "Quietest day" and dragged the trend pill down with it (measured: "6 Aug · ₹5,124 ·
+// 0% of the period" under "Trending down · 34%"). The chart still draws it; the ranking doesn't.
+check("the best/quietest ranking drops the still-running bucket",
+  /const settled = /.test(reportsPage) && /lastIsRunning/.test(reportsPage),
+  "the current day must not be ranked against finished ones");
+check("and the panel says it left it out",
+  /droppedPartial/.test(read("components/owner/reports/Insights.tsx")) && /droppedPartial/.test(reportsPage),
+  "dropping a bucket silently is its own kind of wrong");
+
+console.log("\n── 18. STAFF PAY LANDS ON THE DAY IT LEFT ──");
+// A business-day window ends at 05:00 IST the NEXT morning, so istDateOf(to) handed back TOMORROW
+// and a salary recorded the next morning was counted on the previous day's sheet.
+check("a shared business-day high bound exists",
+  /export function businessDateHi/.test(read("lib/businessDay.ts")),
+  "three copies of this rule is how they drift");
+check("both routes use it for the pay window",
+  /businessDateHi\(to\)/.test(analyticsRoute) && /p_to: docDateHi\(to\)/.test(reportsRoute),
+  "istDateOf on a 05:00-ending window returns tomorrow");
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }

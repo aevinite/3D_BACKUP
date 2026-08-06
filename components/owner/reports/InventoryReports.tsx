@@ -92,7 +92,11 @@ export function InvReportStyles() {
       .rs-metric button { border: none; background: none; color: var(--muted); font: inherit; font-size: 11.5px;
         font-weight: 700; padding: 5px 13px; border-radius: 999px; cursor: pointer; transition: background .16s ease, color .16s ease; }
       .rs-metric button:hover { color: var(--text); }
-      .rs-metric button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+      /* --accent-on, not #fff: the owner console's accent is a LIGHT emerald — white on it
+         measures 2.54:1 in the dark skin and 3.77:1 in the light one, so you cannot tell which
+         option is selected. .rs-tc-toggle was moved to this token on 2026-08-05 and its
+         siblings were missed (T5 sweep, 2026-08-06). */
+      .rs-metric button[aria-pressed="true"] { background: var(--accent); color: var(--accent-on, #fff); }
       /* the honesty callouts — a real box, because these carry the caveat for every % above */
       .rs-note.warn, .rs-note.ok { display: block; margin: 12px 0; padding: 10px 13px; border-radius: 11px;
         font-size: 12.5px; line-height: 1.55; color: var(--text); border: 1px solid; }

@@ -64,7 +64,11 @@ function RankStyles() {
       .rs-metric { display: inline-flex; background: var(--muted2); border-radius: 999px; padding: 3px; gap: 3px; }
       .rs-metric button { border: none; background: none; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 700; padding: 5px 13px; border-radius: 999px; cursor: pointer; transition: background .16s ease, color .16s ease; }
       .rs-metric button:hover { color: var(--text); }
-      .rs-metric button.on { background: var(--accent); color: #fff; }
+      /* --accent-on, not #fff: the owner console's accent is a LIGHT emerald — white on it
+         measures 2.54:1 in the dark skin and 3.77:1 in the light one, so you cannot tell which
+         option is selected. .rs-tc-toggle was moved to this token on 2026-08-05 and its
+         siblings were missed (T5 sweep, 2026-08-06). */
+      .rs-metric button.on { background: var(--accent); color: var(--accent-on, #fff); }
       .rs-callout { display: flex; gap: 12px; align-items: flex-start; border: 1px solid color-mix(in srgb, var(--adm-warn) 40%, var(--border-c)); background: color-mix(in srgb, var(--adm-warn) 9%, var(--card)); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; }
       .rs-callout .cico { width: 34px; height: 34px; flex-shrink: 0; border-radius: 10px; display: grid; place-items: center; background: color-mix(in srgb, var(--adm-warn) 18%, transparent); color: var(--adm-warn); font-size: 15px; }
       .rs-callout .ctxt b { font-size: 13px; font-weight: 800; }
