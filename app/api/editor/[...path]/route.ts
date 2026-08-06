@@ -646,6 +646,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // owner opening the manager panel — those see greyed (not hidden) disabled items.
         // (In the simulate mode actor is already "manager", so this resolves false.)
         higherView: actor === "admin" || actor === "owner",
+        // THE ADMIN, specifically — not "a higher role". The floor definition (table names and
+        // seat counts) is admin-owned as of 2026-08-06, and the OWNER is on the wrong side of that
+        // line too, so `higherView` (which is true for an owner) cannot answer this question. The
+        // panel greys the Table setting card for everyone but the admin; the route refuses it for
+        // everyone but the admin either way — this only stops the screen offering a dead control.
+        isAdmin: actor === "admin",
         simulated: simulate,
         // WHOSE panel this is, when the admin came in through a person's profile. The
         // ribbon says the name — and it says it only because the SERVER confirmed the
@@ -4061,11 +4067,27 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // that does not exist.
         if ("floor_layout_mode" in body || "floor_per_row" in body)
           return err("How the floor is laid out — including how many tables sit on a row — is set by the admin only.", 403);
-        // Anything ELSE under settings is admin-owned now — a manager may not send it at all.
-        const allowed = new Set(["table_names", "table_seats"]);
+        // …AND SO ARE THE TABLES THEMSELVES (owner, 2026-08-06: "manager or owner can't change
+        // table name and stuff — we set it up for them, cuz if they change, the name will be
+        // gone"). Naming and seating the floor is part of setting a restaurant UP, not part of
+        // running a shift: the names are printed on KOTs, spoken on the floor and quoted back in
+        // every refusal, so one person renaming T5 to "Patio" mid-service changes what every
+        // other screen and every ticket says, and the old name is simply gone with nothing to
+        // restore it from. The whole floor definition is admin-owned now — layout, row width,
+        // names and seats — which is also what makes it consistent: it was odd that a manager
+        // could rename a table but not move it.
+        // Same wording shape as the line above: say WHO sets it, never "you don't have
+        // permission", because there is no permission to ask anyone for.
+        if ("table_names" in body || "table_seats" in body)
+          return err("Table names and seat counts are set by the admin only — ask them to change the floor.", 403);
+        // …and with names and seats gone there is nothing left a manager may send here at all.
+        // The allow-list is deliberately not kept as an empty Set: an empty allow-list reads like
+        // an oversight, and the next person to add a manager-editable setting should have to
+        // think about WHERE it belongs rather than dropping a key into a list that survived only
+        // because nobody deleted it. If one is ever wanted again, bring the Set back with it.
         for (const k of Object.keys(body)) {
           if (k === "id" || k === "restaurant_id") continue;
-          if (!allowed.has(k)) return permDenied("change that setting");
+          return permDenied("change that setting");
         }
       }
       if (a === "settings" && body && typeof body === "object") {

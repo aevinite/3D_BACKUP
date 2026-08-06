@@ -104,6 +104,36 @@
 
   function debounce(fn, ms) { let t; return () => { clearTimeout(t); t = setTimeout(fn, ms); }; }
 
+  // A BURST COALESCES HARDER THAN A TRICKLE (improvement #12, 2026-08-06).
+  //
+  // The plain 200ms debounce above collapses a Preparing→Ready→Served flurry into one refetch,
+  // which is what makes the boards feel instant. What it does NOT collapse is a device DRAINING
+  // its offline queue: those replays go one at a time, each awaiting its own round trip, so twenty
+  // saved changes arrive spread over several seconds — every one of them outside the 200ms window,
+  // and every one of them a full refetch on every other screen in the restaurant. That is the
+  // moment a reconnecting tablet costs the most, and the moment everything else is busiest.
+  //
+  // So the window STRETCHES while events keep coming, and only then: the first few are handled on
+  // the same 200ms as before (a normal shift is untouched, which is the point), and once a genuine
+  // burst is under way the wait grows to a cap so the twenty become a handful. `MAX` is deliberately
+  // near a second rather than several — a live board that lags is its own fault.
+  const BURST_AFTER = 4;      // events coalesced before we start stretching
+  const BURST_MAX_MS = 1200;  // …and never wait longer than this, however long the burst runs
+  function burstDebounce(fn, ms) {
+    let t = null, seen = 0, firstAt = 0;
+    return () => {
+      const now = Date.now();
+      if (!t) firstAt = now;
+      seen++;
+      clearTimeout(t);
+      // Past the threshold, wait longer — but never past MAX measured from the FIRST event of the
+      // burst, so a continuous stream still repaints roughly once a second instead of never.
+      const stretched = seen >= BURST_AFTER ? Math.min(ms * seen, BURST_MAX_MS) : ms;
+      const capped = Math.max(0, Math.min(stretched, BURST_MAX_MS - (now - firstAt)));
+      t = setTimeout(() => { t = null; seen = 0; fn(); }, capped);
+    };
+  }
+
   async function start(opts) {
     opts = opts || {};
     // Normalise to a { topic: handler } map. Back-compat with {topics, onEvent}:
@@ -143,7 +173,7 @@
         metrics.refetch_count++;
         try { await handlers[topic](detail); } catch (e) { metrics.sync_failures++; }
       };
-      firePerTopic[topic] = debounce(run, 200); // coalesce a burst into one refetch; 200ms feels instant while still collapsing a Preparing→Ready→Served burst
+      firePerTopic[topic] = burstDebounce(run, 200); // 200ms for a normal flurry; stretches to ~1.2s while a real burst (a device draining its offline queue) is running — see burstDebounce
     });
     // Record one breadcrumb's scope, then schedule the (debounced) refetch.
     const noteEvent = (topic, row) => {

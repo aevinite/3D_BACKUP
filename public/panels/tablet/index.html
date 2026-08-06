@@ -6,7 +6,7 @@
   <title>Waiter tablet</title>
   <!-- Inline emoji favicon so the browser stops 404-ing on /favicon.ico. -->
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧑‍🍳</text></svg>">
-  <link rel="stylesheet" href="style.css?v=2281d7e3">
+  <link rel="stylesheet" href="style.css?v=fd90cb7a">
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -67,9 +67,9 @@
     </div>
   </div>
   <script src="/panels/maint.js?v=dc98e6aa"></script>
-  <script src="/panels/realtime.js?v=9708934b"></script>
+  <script src="/panels/realtime.js?v=cd12a059"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=208efac4"></script>
+  <script src="/panels/outbox.js?v=31f8999f"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=c1df4baa"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
@@ -77,7 +77,7 @@
        offline.js must load AFTER outbox.js (it reads the queue) and after backstack.js
        is available for the back button. -->
   <script src="/panels/swreg.js?v=c82762b3"></script>
-  <script src="/panels/offline.js?v=21ff58ea"></script>
+  <script src="/panels/offline.js?v=48b7b89a"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
   <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
@@ -96,6 +96,6 @@
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
   <script src="/panels/billdoc.js?v=d2e0ad7c"></script>
-  <script src="app.js?v=3c7f8bd2"></script>
+  <script src="app.js?v=a62fc605"></script>
 </body>
 </html>

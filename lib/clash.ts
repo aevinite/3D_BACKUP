@@ -250,6 +250,9 @@ function readable(col: string): string {
     table_count: "the number of tables",
     allergies: "the allergens",
     notes: "this person's private note",
+    // The internal reply on a guest rating. Without this a co-owner who was beaten to it read
+    // "someone changed the staff note", and the screen calls it the reply note.
+    staff_note: "your reply to this rating",
     id_type: "the ID on file", id_number: "the ID number",
     // Inventory, in the words the stock screens use — never the column name. "counted_base" in
     // front of a person counting tomatoes would mean nothing.
@@ -280,6 +283,33 @@ const parse = (v: unknown): number => {
  * Returns null when the change may proceed (the overwhelming majority of calls), or the
  * clash to answer with.
  */
+
+// WHAT THE RESTAURANT CALLS THAT TABLE (improvement #10, owner 2026-08-06: "fully dynamic").
+//
+// Every sentence below used to say "Table 5". A restaurant that has named its floor sees the NAME
+// everywhere else — the tile, the KOT, the printed bill, the toast — so a refusal quoting the raw
+// number is the one place a waiter has to translate, on a floor where no table is called 5.
+//
+// Read live from settings.table_names, never stored anywhere: that is what makes a rename land
+// everywhere at once, including on old bills and reports, with nothing to migrate. (No bill or
+// report row has ever held a table NAME — they all keep the number and resolve it for display,
+// which is why renaming is safe in the first place.)
+//
+// Costs ONE small read, and only on the path that is already about to refuse somebody — the live
+// write path never reaches here, so nothing normal pays for it. Falls back to "Table N" on any
+// problem, which is exactly what it said before.
+async function tableLabel(rid: string, t: string): Promise<string> {
+  const plain = `Table ${t}`;
+  try {
+    const res = await sb.from("settings").select("table_names").eq("restaurant_id", rid).maybeSingle();
+    const names = (res.data as { table_names?: Record<string, string> } | null)?.table_names;
+    const name = names && typeof names === "object" ? String(names[String(t)] ?? "").trim() : "";
+    // A named table is spoken about by its name alone ("Patio"), because that is what is written
+    // on it. The number is what the bill and the QR keep, and staff do not need both here.
+    return name || plain;
+  } catch { return plain; }
+}
+
 export async function replayClash(
   req: NextRequest,
   rid: string,
@@ -314,10 +344,11 @@ export async function replayClash(
       // A DIFFERENT PARTY is on this table now. This is the one that would silently put
       // the previous guests' dishes onto these guests' bill.
       if (started > queuedAt.getTime() + 1000) {
+        const label = await tableLabel(rid, t);
         return {
           code: "clash_new_party",
-          plain: `Table ${t} has a different party now — this was for the guests who were sitting there when you did it.`,
-          todo: `Nothing was applied. If it's still needed, do it again for table ${t} as it is now.`,
+          plain: `${label} has a different party now — this was for the guests who were sitting there when you did it.`,
+          todo: `Nothing was applied. If it's still needed, do it again for ${label} as it is now.`,
           retryable: false,
         };
       }
@@ -329,10 +360,11 @@ export async function replayClash(
       // With no timestamp there is no way to show the person acted first, and the safe answer to
       // "I can't tell" is to ask a human — never to write to a table that has been settled.
       if (isClosed && !closed) {
+        const label = await tableLabel(rid, t);
         return {
           code: "clash_table_closed",
-          plain: `Table ${t} has been closed and billed since you did this.`,
-          todo: `Nothing was applied. If these dishes were served, add them to a new bill for table ${t}.`,
+          plain: `${label} has been closed and billed since you did this.`,
+          todo: `Nothing was applied. If these dishes were served, add them to a new bill for ${label}.`,
           retryable: false,
         };
       }
@@ -340,10 +372,11 @@ export async function replayClash(
       // The bill was closed / settled AFTER the person acted. Re-opening a settled bill
       // from a stale device is exactly what must never happen.
       if (isClosed && closed > queuedAt.getTime()) {
+        const label = await tableLabel(rid, t);
         return {
           code: "clash_table_closed",
-          plain: `Table ${t} was closed and billed after you did this${a === "order" ? " — the order never reached the kitchen" : ""}.`,
-          todo: `Nothing was applied. If these dishes were served, add them to a new bill for table ${t}.`,
+          plain: `${label} was closed and billed after you did this${a === "order" ? " — the order never reached the kitchen" : ""}.`,
+          todo: `Nothing was applied. If these dishes were served, add them to a new bill for ${label}.`,
           retryable: false,
         };
       }

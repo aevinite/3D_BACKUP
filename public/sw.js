@@ -120,8 +120,13 @@ const LOGOUT = /^\/api\/(panel|staff)-logout/; // the only two logout routes tha
 // Read families worth remembering for offline (panel + dashboard + guest-menu reads).
 const DATA_PATHS = [
   /^\/api\/editor\//, /^\/api\/tablet\//, /^\/api\/kitchen\//, /^\/api\/admin\//,
-  /^\/api\/owner\//, /^\/api\/guest\//, /^\/api\/inventory\//, /^\/api\/menu/,
+  /^\/api\/owner\//, /^\/api\/guest\//, /^\/api\/inventory\//,
+  // `/^\/api\/menu/` used to sit here and matched NOTHING — there is no /api/menu route; the
+  // guest menu has always been served by /api/r/<restaurant>/menu-data, the entry below. A dead
+  // pattern is worse than a missing one: it reads as "guest menu reads are covered here", which
+  // is exactly the sort of line a later session trusts instead of checking.
   /^\/api\/r\//,            // guest menu data per restaurant
+  /^\/api\/blocked/,         // the blocked-staff screen — it came up empty with no internet
   /^\/api\/panel-profile/,  // who am I → the ⚙/👤 button still appears offline
   /^\/api\/maintenance/,    // maintenance flag → panels don't misjudge it offline
   /^\/api\/rt-config/,      // realtime config → reconnects the instant we're back

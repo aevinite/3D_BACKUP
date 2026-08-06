@@ -165,6 +165,8 @@
       ".lfh-off-acts button{border:0;border-radius:9px;padding:9px 13px;font:800 12px/1 system-ui,sans-serif;cursor:pointer}",
       ".lfh-off-ok{background:#22c55e;color:#052e16}",
       ".lfh-off-ghost{background:rgba(127,127,127,.22);color:inherit}",
+      /* armed = "tap again to discard". Red, because the next tap destroys the change. */
+      ".lfh-off-ghost.is-armed{background:#dc2626;color:#fff}",
       ".lfh-off-empty{margin-top:14px;padding:14px;border-radius:12px;background:rgba(34,197,94,.1);",
       "  border:1px solid rgba(34,197,94,.35);color:#16a34a;font-weight:800;text-align:center}",
       /* the ⏳ mark on a table carrying unsent work */
@@ -363,8 +365,29 @@
         again.addEventListener("click", function () { if (window.LFH_OUTBOX) window.LFH_OUTBOX.retryOne(it.id); });
         acts.appendChild(again);
       }
+      // THROWING WORK AWAY ASKS ONCE — INLINE, never a popup (owner, 2026-08-06: "no extra
+      // click"). "Not needed anymore" sits next to "Try again" and is not undoable: one slip on a
+      // phone, mid-service, and a change nobody has seen is gone for good. A confirm DIALOG would
+      // be the usual answer and the wrong one here — this sheet is already the place that explains
+      // what happened, so the question belongs in the same row, on the same tap the person was
+      // already making. The button becomes its own confirmation and reverts after a few seconds,
+      // so a mis-tap costs nothing and a deliberate one costs one more tap in the same spot.
       var done = el("button", "lfh-off-ghost", "Not needed anymore"); done.type = "button";
-      done.addEventListener("click", function () { if (window.LFH_OUTBOX) window.LFH_OUTBOX.dismiss(it.id); });
+      var armed = null;
+      done.addEventListener("click", function () {
+        if (armed) {                                   // second tap → really discard
+          clearTimeout(armed); armed = null;
+          if (window.LFH_OUTBOX) window.LFH_OUTBOX.dismiss(it.id);
+          return;
+        }
+        done.classList.add("is-armed");
+        done.textContent = "Tap again to discard";
+        armed = setTimeout(function () {               // …and forget it if they walk away
+          armed = null;
+          done.classList.remove("is-armed");
+          done.textContent = "Not needed anymore";
+        }, 4000);
+      });
       acts.appendChild(done);
       row.appendChild(acts);
       body.appendChild(row);

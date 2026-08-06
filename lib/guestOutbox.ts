@@ -122,6 +122,11 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
       : "A dish is no longer on the menu — please remove it.";
     // mig 253: the dish is priced by staff at order time, so it cannot be self-ordered.
     case "staff_priced_item": return "One dish needs a member of staff — its price is set when you order, so please ask your server.";
+    // mig 306: the dish was taken OFF the menu. Deliberately worded like unknown_item rather than
+    // like sold_out — "sold out" would promise it is coming back, and hidden makes no such promise.
+    case "hidden_item": return dish
+      ? `${dish} isn't on the menu — please remove it to order.`
+      : "A dish isn't on the menu any more — please remove it to order.";
     case "empty_order": return q ? "The order was empty." : "There's nothing in your order yet.";
     // The refusal that MUST never say "try again": doing so trips the same per-table limit and
     // fires another alert at the owner. Tell them to wait, which is the thing that actually works.
@@ -479,6 +484,40 @@ function ensureStarted() {
   started = true;
   window.addEventListener("online", () => { void flushGuestOutbox(); });
   window.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") void flushGuestOutbox(); });
+  // …and FOCUS, the fourth signal the staff queue has always had. It overlaps heavily with
+  // visibilitychange on a phone, but not completely: unlocking a phone with this tab already
+  // visible fires focus and not visibilitychange, and that is precisely the moment a diner picks
+  // their phone back up to see whether the order went. Costs one extra flush attempt per unlock,
+  // and flushGuestOutbox returns immediately when there is nothing queued.
+  window.addEventListener("focus", () => { void flushGuestOutbox(); });
+  // DON'T CREATE A DATABASE ON A PHONE THAT NEVER QUEUES ANYTHING (improvement #17).
+  // Measured on the deployed site: `lfh_guest_outbox` existed after a plain menu visit, because
+  // the connection badge subscribes on mount and the restore pass opened it. Harmless, but every
+  // diner's phone gained a database it would never use.
+  //
+  // The obvious fix — a localStorage "this device has queued before" marker — is the WRONG one:
+  // clear site data selectively, or have the marker evicted on its own, and a genuinely saved
+  // order would never be restored. Losing a diner's order to save an empty database is a bad
+  // trade. `indexedDB.databases()` answers the question without creating anything, so we only
+  // open when there is really something to restore. Where it isn't supported (Firefox) we do
+  // exactly what we did before, which is the safe direction.
+  void (async () => {
+    try {
+      const list = (indexedDB as { databases?: () => Promise<{ name?: string }[]> }).databases;
+      if (typeof list === "function") {
+        const dbs = await list.call(indexedDB);
+        if (Array.isArray(dbs) && !dbs.some((d) => d?.name === DB_NAME)) {
+          notify();          // nothing was ever saved on this device — publish the empty snapshot and stop
+          return;
+        }
+      }
+    } catch { /* can't tell → fall through and open it, exactly as before */ }
+    restoreQueue();
+  })();
+}
+
+/** Read back whatever this device saved in an earlier session and get it moving again. */
+function restoreQueue() {
   idbAll().then((all) => {
     queued = all.filter((x) => x.status !== "failed").sort((a, b) => a.at - b.at);
     failed = all.filter((x) => x.status === "failed");

@@ -359,6 +359,25 @@ function inLiveCategory<T extends { category: string }>(items: T[], live: Set<st
   return live ? items.filter((i) => live.has(i.category)) : items;
 }
 
+/**
+ * THE THREE STATES A DISH CAN BE IN (owner, 2026-08-06).
+ *
+ *   on the menu   nothing set
+ *   SOLD OUT      tag "sold-out" — still ON the menu, wearing its badge, not orderable today
+ *   HIDDEN        tag "hidden"   — not on the guest menu at all, as if it were never printed
+ *
+ * The difference matters to a diner: "sold out" tells them the dish exists and to ask again
+ * tomorrow; hidden tells them nothing, because they never see it. Staff DO still see a hidden
+ * dish and may put it on a bill (an off-menu special, a staff meal, something served on request),
+ * so the filtering lives in the GUEST read only — the panels have their own API.
+ *
+ * Both are tags rather than columns so the editor's existing tag plumbing carries them, and so a
+ * dish can be sold-out AND hidden without two flags disagreeing.
+ */
+export const SOLD_OUT_TAG = "sold-out";
+export const HIDDEN_TAG = "hidden";
+export const isHidden = (tags?: string[] | null): boolean => Array.isArray(tags) && tags.includes(HIDDEN_TAG);
+
 export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID, columns: string = "*"): Promise<MenuItem[]> {
   // Fetch the dishes AND the real-review aggregates at the same time (parallel
   // requests — no extra waiting). Ratings failing must never hide the menu, so
@@ -383,7 +402,11 @@ export async function getMenuItems(restaurantId: string = DEFAULT_RESTAURANT_ID,
   // Waiter/manager panels read their own API and DO show these.
   // Then drop anything whose category is switched off, so a hidden category's dishes can't
   // come back through search / "you might also like" / the prev-next arrows.
-  const mapped = ((items.data ?? []) as any[]).map((row) => mapRow(row, aggBySlug.get(row.slug))).filter((it) => !it.openPrice);
+  // …and drop HIDDEN dishes, for the same reason and in the same place as open-price ones: a
+  // guest must never receive a dish the restaurant has taken off its menu, not even to filter it
+  // out in the browser. (Sold-out dishes stay — they are meant to be seen wearing their badge.)
+  const mapped = ((items.data ?? []) as any[]).map((row) => mapRow(row, aggBySlug.get(row.slug)))
+    .filter((it) => !it.openPrice && !isHidden(it.tags));
   return inLiveCategory(mapped, liveCats);
 }
 
@@ -411,6 +434,11 @@ export async function getMenuItem(slug: string, restaurantId: string = DEFAULT_R
   // reach one by typing/sharing its /item/<slug> URL either. Answer "no such dish" (the page
   // 404s) rather than showing a dish a guest can never order: staff set its price at the table.
   if (mapped.openPrice) return null;
+  // A HIDDEN dish is not on the menu, so its own page must not open either — otherwise a guest
+  // who kept a link (or a QR pointing at a retired special) walks straight past the grid filter
+  // and can add it to a basket. Same answer as a dish that does not exist, which is the honest
+  // one: as far as this diner is concerned, it doesn't.
+  if (isHidden(mapped.tags)) return null;
   // Same for a dish whose CATEGORY is switched off: hidden on the menu means gone, including
   // by its own shared URL. A null set = we couldn't tell, so don't hide anything.
   if (liveCats && !liveCats.has(mapped.category)) return null;

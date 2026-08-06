@@ -684,6 +684,14 @@ html[data-theme="dark"] .dash-card .kchip.dn { color: #f08c8c; }
 }
 .avail-toggle.on { background: rgba(74,222,128,0.14); border-color: rgba(74,222,128,0.5); color: #4ade80; }
 .avail-toggle.off { background: rgba(239,68,68,0.14); border-color: rgba(239,68,68,0.5); color: #ef4444; }
+/* HIDDEN is not an ERROR, so it must not wear the red that means "sold out". Slate for "on the
+   menu" (a calm, unremarkable state) and amber for "hidden" — the same amber the offline bar uses
+   for "this needs your attention", because a dish nobody can see usually does. */
+.avail-toggle.vis { background: rgba(148,163,184,0.12); border-color: rgba(148,163,184,0.45); color: #94a3b8; }
+.avail-toggle.hid { background: rgba(245,158,11,0.16); border-color: rgba(245,158,11,0.55); color: #f59e0b; }
+.avail-note { margin: 6px 2px 0; font-size: 12px; line-height: 1.45; opacity: .72; }
+.badge-hidden { margin-left: 6px; padding: 1px 6px; border-radius: 999px; font-size: 10.5px; font-weight: 800;
+  background: rgba(245,158,11,0.18); color: #f59e0b; vertical-align: middle; }
 
 /* waiter calls panel */
 .calls-panel {
@@ -3173,6 +3181,12 @@ html[data-theme="light"] .ord-pill.new{ color:#b45309; }
 html[data-theme="light"] .tp-pill-prep, html[data-theme="light"] .sx-tag-open,
 html[data-theme="light"] .tbl-active .tbl-num, html[data-theme="light"] .tbl-active .tbl-state{ color:#1d4ed8; }
 html[data-theme="light"] .khata-due{ color:#0369a1; }
+/* The two new dish states in the LIGHT skin. The dark-skin colours (#94a3b8 slate, #f59e0b amber)
+   are picked for a dark card and drop to roughly 2:1 on white — the exact fault the sweep keeps
+   finding. Darkened one step each so both read on the light panel too. */
+html[data-theme="light"] .avail-toggle.vis{ color:#475569; }
+html[data-theme="light"] .avail-toggle.hid,
+html[data-theme="light"] .badge-hidden{ color:#b45309; }
 
 /* ═══════════════════════════════════════════════════════════════════════
    MOBILE (phone) — make the manager panel usable on a small screen. The panel

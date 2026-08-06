@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=9dc0f455" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=bbccaf7f" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -121,16 +121,16 @@
        Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
   <script src="/panels/vendor/chart.umd.min.js?v=4.4.7"></script>
   <script src="/panels/maint.js?v=dc98e6aa"></script>
-  <script src="/panels/realtime.js?v=9708934b"></script>
+  <script src="/panels/realtime.js?v=cd12a059"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=208efac4"></script>
+  <script src="/panels/outbox.js?v=31f8999f"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=c1df4baa"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
   <script src="/panels/swreg.js?v=c82762b3"></script>
-  <script src="/panels/offline.js?v=21ff58ea"></script>
+  <script src="/panels/offline.js?v=48b7b89a"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
@@ -160,6 +160,6 @@
   <script src="/panels/billdoc.js?v=d2e0ad7c"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=35a2cf2e"></script>
+  <script src="/panels/editor/app.js?v=0b414d33"></script>
 </body>
 </html>

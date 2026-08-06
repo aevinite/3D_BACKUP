@@ -906,6 +906,9 @@ function renderList() {
       const active = !bulk && state.sel && !state.isNew && recKey(r) === recKey(state.sel); // row being edited
       const hidden = state.tab !== "items" && r.active === false; // greyed-out "hidden from menu" rows
       const soldOut = isItems && Array.isArray(r.tags) && r.tags.includes("sold-out"); // 86'd dish
+      // …and whether it is OFF the menu entirely, which the list never showed — a manager
+      // hunting "why can't the guest see this dish?" should not have to open every one.
+      const hiddenDish = isItems && Array.isArray(r.tags) && r.tags.includes("hidden");
       // Build the little thumbnail on the left of each list row: a photo for
       // dishes, a coloured icon for categories, an emoji for filters.
       let thumb;
@@ -923,7 +926,7 @@ function renderList() {
           ${bulk ? `<span class="bulk-cb ${checked ? "on" : ""}" aria-hidden="true">${checked ? "✓" : ""}</span>` : ""}
           ${thumb}
           <div class="meta">
-            <b>${esc(recLabel(r))}${state.tab === "items" && r.dish_no != null ? ` <span class="dish-no">#${esc(String(r.dish_no))}</span>` : ""}${soldOut ? '<span class="badge-off">sold out</span>' : ""}${hidden ? '<span class="badge-off">hidden</span>' : ""}</b>
+            <b>${esc(recLabel(r))}${state.tab === "items" && r.dish_no != null ? ` <span class="dish-no">#${esc(String(r.dish_no))}</span>` : ""}${soldOut ? '<span class="badge-off">sold out</span>' : ""}${hidden ? '<span class="badge-off">hidden</span>' : ""}${hiddenDish ? '<span class="badge-hidden">off menu</span>' : ""}</b>
             <small>${esc(recKey(r) || "")}</small>
           </div>
         </li>`
@@ -1288,6 +1291,24 @@ function formItems(it) {
         ? "🚫 Not available right now — tap to make available"
         : "✅ Available — tap to mark not available"}
     </button>
+    ${/* HIDDEN — the third state (owner, 2026-08-06). Sold-out and hidden are different promises:
+          sold-out still SHOWS on the guest menu wearing its badge ("we have this, not today"),
+          hidden is not on the menu at all ("as far as you're concerned it doesn't exist"). They
+          are separate toggles rather than one three-way picker because they are genuinely
+          independent — a dish can be off the menu AND out of stock — and because a picker would
+          have made the common tap (86 a dish mid-service) slower. Staff can still order a hidden
+          dish, which is the whole point of it, so the line below says so rather than leaving a
+          manager to guess. */""}
+    <button type="button" class="avail-toggle ${(it.tags || []).includes("hidden") ? "hid" : "vis"}" data-action="toggleHidden">
+      ${(it.tags || []).includes("hidden")
+        ? "🙈 Hidden from the menu — tap to put it back"
+        : "👁 On the menu — tap to hide it from guests"}
+    </button>
+    <p class="avail-note">
+      ${(it.tags || []).includes("hidden")
+        ? "Guests don't see this dish at all. Your staff can still add it to a bill."
+        : "“Not available” still shows on the menu with a Sold out badge. “Hidden” takes it off the menu completely."}
+    </p>
     ${/* Open price rides "Change a price": it decides what the guest pays just as much as the
           Price box does, and the server drops both together. The hint moves inside the wrapper
           so hiding the switch can't leave its explanation behind on its own. */""}
@@ -1647,16 +1668,25 @@ function tableSeatingCardHtml(s) {
   const n = Math.max(1, parseInt(s.table_count, 10) || 12);
   const seats = s.table_seats && typeof s.table_seats === "object" ? s.table_seats : {};
   const names = s.table_names && typeof s.table_names === "object" ? s.table_names : {};
+  // ADMIN ONLY, from 2026-08-06 (owner: "manager or owner can't change table name and stuff — we
+  // set it up for them, cuz if they change, the name will be gone"). The route refuses both fields
+  // outright now, so leaving the boxes typeable would be a control that always fails — which this
+  // app treats as worse than no control at all. Read-only for everyone but the admin, and the card
+  // says WHO to ask rather than pretending it is a permission somebody could be granted.
+  // `isAdmin`, not `higherView`: an OWNER is on the wrong side of this line too.
+  const canEdit = !!(typeof XRAY_WHO !== "undefined" && XRAY_WHO && XRAY_WHO.isAdmin);
+  const ro = canEdit ? "" : " readonly disabled";
+  const roStyle = canEdit ? "" : "opacity:.6;cursor:not-allowed;";
   let cells = "";
   for (let i = 1; i <= n; i++) {
     // Name (mig 131, display-only) + seat count (mig 111) per table — one cell each.
     cells += `<div style="display:flex;align-items:center;gap:6px;padding:8px 10px;border-radius:8px;background:var(--panel-2)">
       <span style="font-weight:700;font-size:13px;min-width:26px">T${i}</span>
-      <input type="text" maxlength="24" data-path="table_names.${i}" value="${esc(names[String(i)] ?? "")}" placeholder="Name"
+      <input type="text" maxlength="24" data-path="table_names.${i}" value="${esc(names[String(i)] ?? "")}" placeholder="Name"${ro}
         title='A display name for this table (e.g. "Banquet") — bills and QR codes keep the number'
-        style="flex:1;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
-      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? floorSeatsDefault(s))}" title="Seats"
-        style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text)"/>
+        style="flex:1;min-width:0;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);${roStyle}"/>
+      <input type="number" min="1" max="30" data-path="table_seats.${i}" value="${esc(seats[String(i)] ?? floorSeatsDefault(s))}" title="Seats"${ro}
+        style="width:56px;padding:5px 6px;border-radius:6px;border:1px solid var(--line);background:var(--panel);color:var(--text);${roStyle}"/>
     </div>`;
   }
   return `<div class="card"><h3>Table setting</h3>
@@ -1666,6 +1696,11 @@ function tableSeatingCardHtml(s) {
       people can sit there — shown next to the chair icon on every tile. A table you leave
       alone uses the restaurant's default number of seats.
     </p>
+    ${canEdit ? "" : `<p style="margin:-8px 0 16px;padding:9px 11px;border-radius:9px;background:rgba(245,158,11,.12);
+      border:1px solid rgba(245,158,11,.4);color:var(--text);font-size:12.5px;line-height:1.5">
+      🔒 <b>Set by the admin.</b> Table names and seats are part of how your floor was set up —
+      they are printed on tickets and quoted back on every screen, so they are not changed during
+      service. Ask the admin if a table needs renaming.</p>`}
     <!-- NO fixed max-height (T11 desktop sweep 2026-08-05). It was 340px with overflow-y:auto, so
          with 30 tables the card showed T1-T24, SLICED the T25-T28 row in half at its bottom edge and
          put T29/T30 outside the box — with no scrollbar drawn, so nothing said there was more below
@@ -5940,6 +5975,12 @@ function handleAction(action, arg, node) {
     it.tags = it.tags || [];
     const i = it.tags.indexOf("sold-out");
     if (i >= 0) it.tags.splice(i, 1); else it.tags.push("sold-out");
+  } else
+  if (action === "toggleHidden") {
+    // Same shape as sold-out on purpose: one tag, flipped in place, saved with the dish.
+    it.tags = it.tags || [];
+    const i = it.tags.indexOf("hidden");
+    if (i >= 0) it.tags.splice(i, 1); else it.tags.push("hidden");
   } else
   if (action === "addIngredient") (it.ingredients = it.ingredients || []).push({ emoji: "", name: "" });
   else if (action === "rmIngredient") it.ingredients.splice(Number(arg), 1);

@@ -405,6 +405,13 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 .dish { display: flex; flex-direction: column; align-items: stretch; gap: 6px; text-align: left; background: var(--bg); border: 1px solid var(--line); border-radius: 11px; padding: 9px 11px; min-height: 90px; cursor: pointer; color: var(--text); font-family: inherit; transition: border-color .12s, background .12s, transform .08s; }
 .dish:hover:not(.out) { border-color: var(--gold, #b8923f); }
 .dish:active:not(.out) { transform: scale(.97); }
+/* OFF MENU (mig 306): a dish the guest cannot see but the waiter can still add. Amber, NOT the
+   red that means sold-out — it is not a refusal, it is a note. `position:relative` so the chip
+   can sit in the corner; the tile is a flex column, so the chip is taken out of flow. */
+.dish.offmenu { position: relative; border-color: rgba(245,158,11,.55); }
+.doffmenu { position: absolute; top: 5px; right: 6px; padding: 1px 5px; border-radius: 999px;
+  background: rgba(245,158,11,.9); color: #3b1d00; font: 800 9px/1.5 system-ui, sans-serif;
+  letter-spacing: .3px; pointer-events: none; }
 .dish.in { border-color: var(--blue); background: color-mix(in srgb, var(--blue) 9%, var(--bg)); }
 .dish.out { opacity: 0.4; cursor: not-allowed; }
 .dname { font-size: 13.5px; font-weight: 600; line-height: 1.3; }
