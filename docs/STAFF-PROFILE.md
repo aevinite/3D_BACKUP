@@ -26,28 +26,49 @@ should see this and arrange in this structure only."*
 **data:** `GET/PATCH /api/admin/users` (+ `POST /api/admin/users/photo`)
 **Opened from:** `/aevinite → Users` (tap a person) and `/aevinite → Owners → Full profile`.
 
-**There is a SECOND screen about a person, and you need to know what is and is not shared**
-(2026-08-05). The OWNER panel has its own person page — `app/owner/staff/[id]/page.tsx`, opened
-from `/owner/staff` → "Open profile" — with a tabbed layout (Personal · Job & pay · Payments ·
-Access · Performance · Activity) rather than this dossier.
+**BOTH CONSOLES OPEN THIS ONE COMPONENT** (2026-08-06 — the convergence is done).
 
-- **The PERMISSIONS half is now shared and must stay that way.** That page renders the rows
-  `/api/owner/staff?staff=<id>` sends, and the route builds them from **`lib/staffCaps`** +
-  `lib/accessState` — the same list, the same folder names, the same `Default (On) · On ·
-  [On + manager PIN] · Off` dropdown, the same `capVisible` hiding of rows the restaurant does
-  not have. It kept a private hand-written list until 2026-08-05 and that list had drifted: six
-  waiter rows where the model has nine (**table types, khata and banquet were missing, so an owner
-  had nowhere to set them**), khata greyed by the wrong module so the screen offered a switch the
-  server refused, and **no manager rows at all** — an owner could not see what their own manager
-  was allowed to do. **Never reintroduce a role's permission list inside a panel.**
-- **The LAYOUT is still not this dossier**, and that is a known open item, not an accident: making
-  the owner page use `components/admin/StaffProfile.tsx` means giving that component an API
-  adapter (it is bound to `/api/admin/users` + the admin-only photo endpoint) rather than copying
-  it, which would make a third shape. Decide it deliberately; don't half-converge it.
-- `lib/accessState.ts` → `accessStateFor(rid)` is the ONE reader of a restaurant's permission
-  state. It is not a gate: the caller proves its right to that restaurant first.
+The owner cockpit used to have a second person screen: `app/owner/staff/[id]/page.tsx`, ~1160 lines,
+six tabs, with its own hand-written permission list that had drifted from the model (three waiter
+rows missing — table types, khata, banquet — khata gated on the wrong module, and **no manager rows
+at all**, so an owner could not see what their own manager was allowed to do). That page is gone. It
+is now a 38-line mount point that renders THIS component.
 
----
+**How one component serves two consoles.** `StaffProfile` takes an optional `host` (`ProfileHost`):
+four functions — `load`, `patch`, `photo?`, `remove?` — plus a `can` set. Omit it and you get the
+admin host, unchanged. `components/owner/ownerProfileHost.ts` is the owner's, and it is the ONLY
+place the two differ:
+
+| | admin (`/aevinite`) | owner (`/owner`) |
+|---|---|---|
+| read | `/api/admin/users?id=` | `/api/owner/staff?staff=` |
+| write | `PATCH /api/admin/users` | `PATCH /api/owner/staff` (actions translated, below) |
+| photo | yes | not offered — no endpoint on that side |
+| manager PIN · signing-in switches | yes | shown as FACTS, not dead toggles |
+| "Visit their panel" (act-as) | yes | a plain link, with a title saying it opens with YOUR access |
+| "Access & permissions" link | yes | absent — it points into `/aevinite` |
+| remove the login | yes | yes (refused when pay history exists) |
+
+**The two routes do not name every action the same way**, so the owner host translates rather than
+letting the component branch: `set_job {job:{…}}` → flat fields · `set_job {in_payroll}` →
+`set_payroll` · `set_permissions {k:""}` → `{k:null}`. If you add an action to one route, add it to
+the other or teach the host about it — do NOT add a second code path in the component.
+
+**Rules that keep this honest**
+- `/api/owner/staff?staff=` answers in the component's language: `person`, `payrollOn`, `payments`,
+  `activity`, and `tree` (the restaurant's permission state, which is the "(On)" inside
+  "Default (On)"). **`creds` are stripped from that tree** — masked API-key hints have no reason to
+  reach an owner's browser.
+- The activity card is gated by the SAME `logs` entitlement as the owner's own Activity page; off →
+  an empty list plus `activityOff`, so the card says so instead of implying the person did nothing.
+- A capability the host does not have must make the CONTROL absent, never present-and-refusing —
+  that is the dead switch the 2026-07-31 access rebuild deleted.
+- `lib/accessState.ts` → `accessStateFor(rid)` is the ONE reader of a restaurant's permission state
+  (both routes use it). It is not a gate: the caller proves its right to that restaurant first.
+
+Verified running on both consoles: a waiter shows 9 rows in 2 folders with `On + manager PIN`; a
+manager shows 3 folders / 7 dropdowns; the admin copy is byte-for-byte the same layout with its
+photo button, PIN control and signing-in toggles intact.
 
 ## The shape — do not invent a second one
 

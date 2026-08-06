@@ -24,7 +24,7 @@ import { logAction } from "@/lib/oplog";
 // `capsForRole()` (lib/staffCaps), the one list the Access screen and the admin write route use.
 // A second hand-picked constant is what let `delete_bill` be a manager row on screen and an
 // "Unknown permission" here (fixed 2026-08-04).
-import { mergeOwnerEntitlements, powerEntitled } from "@/lib/ownerEntitlements";
+import { mergeOwnerEntitlements, powerEntitled, entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { managerSettingsOff } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
@@ -442,7 +442,44 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
 
   // Performance is OWNER-ONLY (owner's call 2026-07-29 — a manager gets no access to it).
   if (perfQ) out.performance = (((await perfQ).data || []) as any[]).find((x) => x.staff_id === id) || null;
-  out.capGroups = await capGroupsFor(u.role, u.restaurant_id, u.permissions);
+
+  // ── THE SHARED PROFILE'S SHAPE (2026-08-06) ────────────────────────────────────────────────
+  // The owner cockpit now opens the SAME component the admin console does
+  // (components/admin/StaffProfile — docs/STAFF-PROFILE.md's one shape), so this answer speaks
+  // that component's language as well as the older keys:
+  //   person      the row (it reads d.person everywhere)
+  //   payrollOn   whether the pay card exists at all for this restaurant
+  //   activity    the "what they did lately" card — 20 rows, scoped to this person
+  //   tree        what the RESTAURANT gives their role, which is the "(On)" inside "Default (On)"
+  // `tree` replaces the capGroups array added a day earlier: the component derives its rows from
+  // lib/staffCaps against this state, exactly as the admin's copy does, so the two cannot drift.
+  // CREDS ARE STRIPPED. accessStateFor returns masked "••••1234" hints of a restaurant's Zomato /
+  // Swiggy keys; nothing on a person's profile shows them, so they have no business travelling to
+  // this browser at all.
+  const tree = await accessStateFor(u.restaurant_id);
+  if (tree) out.tree = { ...tree, creds: {} };
+  out.person = acc.canSeePay ? person : withoutPay(person);
+  out.payrollOn = acc.moduleOn === true;
+  // ACTIVITY — the same rows, the same rules, the same gate as the owner's own Activity page
+  // (/api/owner/oplog): the table is `staff_actions`; the admin's own actions and direct-database
+  // footprints are excluded, so are app FAULTS and the raw button-tap breadcrumbs. And it is gated
+  // by the SAME "logs" entitlement — a per-person feed that ignored it would be a way around a
+  // switch Aevidine turned off, which is precisely what "hiding is never the only guard" forbids
+  // in reverse. Switched off → an empty list plus a flag, so the card says so instead of claiming
+  // this person has done nothing.
+  const logsOn = (s.actor === "admin")
+    || (await logViewSubset(await entitledSubset([u.restaurant_id], "logs"), "activity")).length > 0;
+  if (!logsOn) { out.activity = []; out.activityOff = true; }
+  else {
+    const acts = await sb.from("staff_actions")
+      .select("action, detail, created_at, panel")
+      .eq("restaurant_id", u.restaurant_id).eq("actor_id", id)
+      .not("panel", "in", "(admin,db)")
+      .or("level.is.null,level.neq.error")
+      .neq("action", "ui_taps")
+      .order("created_at", { ascending: false }).limit(20);
+    out.activity = acts.data || [];
+  }
   return ok(out);
 }
 
