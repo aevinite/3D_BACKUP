@@ -58,7 +58,7 @@
   <script src="/panels/maint.js?v=c4b11ae5"></script>
   <script src="/panels/realtime.js?v=3a9eadca"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=31f8999f"></script>
+  <script src="/panels/outbox.js?v=7b2405a7"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=c1df4baa"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
@@ -66,7 +66,7 @@
        offline.js must load AFTER outbox.js (it reads the queue) and after backstack.js
        is available for the back button. -->
   <script src="/panels/swreg.js?v=c82762b3"></script>
-  <script src="/panels/offline.js?v=48b7b89a"></script>
+  <script src="/panels/offline.js?v=01332551"></script>
   <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
   <script src="/panels/errlog.js?v=c845b17b"></script>

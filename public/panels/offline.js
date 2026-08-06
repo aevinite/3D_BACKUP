@@ -188,6 +188,8 @@
 
   // ── the bar ──────────────────────────────────────────────────────────────────
   // Decide the single most important thing to say right now.
+  function waiting_count(_) { return box.queued.length; }
+  function waiting_count_title(n) { return n + (n === 1 ? " change is waiting" : " changes are waiting"); }
   function barState() {
     var failed = box.failed.length, waiting = box.queued.length;
     if (failed) {
@@ -209,7 +211,22 @@
       var since = (window.LFH_OUTBOX && window.LFH_OUTBOX.waitingSince) ? window.LFH_OUTBOX.waitingSince() : 0;
       // A tap on "Send now" earns a genuine "Sending…" for a few seconds — that round really is
       // in flight, and a button that appears to do nothing is the same fault in a smaller box.
-      var stuck = since && (Date.now() - since) > STUCK_MS && (Date.now() - nudgedAt) > 8000;
+      // …AND ONLY IF NOTHING IS ACTUALLY DUE (improvement #8). Age alone was the wrong test: the
+      // backoff between two normal rounds runs out to two minutes, so a perfectly healthy queue
+      // waiting for its next try was announced as "hasn't sent yet — the connection looks fine",
+      // which is the cry-wolf fault this bar was already fixed for once. If a retry is scheduled
+      // and not overdue, this is a WAIT, not a fault — say when it will go instead.
+      var nextAt = (window.LFH_OUTBOX && window.LFH_OUTBOX.nextTryAt) ? window.LFH_OUTBOX.nextTryAt() : 0;
+      var dueIn = nextAt ? nextAt - Date.now() : 0;
+      var waiting = dueIn > 1500;                       // a real gap, not the last moment before it fires
+      var stuck = since && (Date.now() - since) > STUCK_MS && (Date.now() - nudgedAt) > 8000 && !waiting;
+      if (!stuck && waiting && since && (Date.now() - since) > STUCK_MS) {
+        return { tone: "tone-sync",
+                 title: waiting_count_title(waiting_count(waiting)),
+                 sub: "Saved on this device since " + fmtTime(since) + " — next try in about "
+                      + Math.max(1, Math.round(dueIn / 1000)) + "s. Tap Send now if you'd rather not wait.",
+                 action: "Send now", onAction: sendNow, alt: "See" };
+      }
       if (stuck) {
         return { tone: "tone-stale",
                  title: waiting + (waiting === 1 ? " change hasn't sent yet" : " changes haven't sent yet"),

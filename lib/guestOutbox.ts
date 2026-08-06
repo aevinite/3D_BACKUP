@@ -385,8 +385,19 @@ export async function flushGuestOutbox() {
   flushing = true;
   let progressed = false;
   try {
-    while (queued.length && !isOffline()) {
-      const item = queued[0];
+    // WALK THE QUEUE — one stuck order must not hold the next (improvement #6).
+    //
+    // This took queued[0] and `break`ed, so a second basket could not go until the first had spent
+    // all six of its rounds (about four minutes) — and the diner, who had just re-ordered BECAUSE
+    // the first seemed not to work, watched both sit still.
+    //
+    // Skipping is safe here in a way it is not for staff edits: two baskets are independent
+    // ORDERS, not two changes to one value. Each becomes its own ticket, so the only thing
+    // reordering costs is which one gets the lower ticket number. A staff discount landing after a
+    // payment would be wrong; a second order landing first is merely a different order of service.
+    let idx = 0;
+    while (idx < queued.length && !isOffline()) {
+      const item = queued[idx];
       let res: Response;
       try { res = await doPost(item); }
       catch {
@@ -396,7 +407,7 @@ export async function flushGuestOutbox() {
         // retried in silence for the life of the tab: the order sat on "Waiting" with the diner
         // never told and nothing to tap. Bounded now, exactly like the staff queue.
         item.netTries = (item.netTries || 0) + 1;
-        if (item.netTries < NET_MAX_TRIES) { await persist(item); break; }
+        if (item.netTries < NET_MAX_TRIES) { await persist(item); idx++; continue; }
         await moveToFailed(item, "We couldn't reach the restaurant — please order again.");
         notify(); continue;
       }
@@ -412,7 +423,7 @@ export async function flushGuestOutbox() {
       // also used to `break` forever with no counter.
       if (res.status === 409 && j?.retry) {
         item.busyTries = (item.busyTries || 0) + 1;
-        if (item.busyTries < BUSY_MAX_TRIES) { await persist(item); break; }
+        if (item.busyTries < BUSY_MAX_TRIES) { await persist(item); idx++; continue; }
         await moveToFailed(item, "The restaurant's system is still busy with this one — please order again.");
         notify(); continue;
       }
@@ -439,7 +450,7 @@ export async function flushGuestOutbox() {
       // diner has to be able to see it and act, exactly as staff can.
       if (!res.ok && res.status >= 500) {
         item.tries = (item.tries || 0) + 1;
-        if (item.tries < SERVER_MAX_TRIES) { await persist(item); break; }
+        if (item.tries < SERVER_MAX_TRIES) { await persist(item); idx++; continue; }
         await moveToFailed(item, "The restaurant's system didn't take this one — please order again.");
         notify(); continue;
       }
