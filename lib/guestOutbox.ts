@@ -135,6 +135,13 @@ export function reasonMsg(reason?: string, opts?: { dish?: string; queued?: bool
     case "unknown_restaurant": return "We couldn't tell which restaurant this order was for.";
     case "off_plan_table": return "That table number isn't one this restaurant has — please check it.";
     case "bad_body": return "Something was wrong with this order.";
+    // The two size ceilings (T9 improvement 7, 2026-08-06). A real basket never reaches them, so the
+    // wording assumes something went wrong on the phone rather than blaming the person's appetite —
+    // and it tells them the one thing that works: ask a member of staff.
+    case "order_too_big": return q
+      ? "This saved order was too large to send — please ask a member of staff."
+      : "That's too many items for one order — please send it in two, or ask a member of staff.";
+    case "allergies_too_long": return "The allergy note was too long to send — please shorten it, or tell a member of staff.";
     // NEVER echo a code we don't have words for. An unrecognised reason is a machine word (or,
     // worse, a database message) and means nothing to a diner — say the honest general thing and
     // let the server log carry the detail.

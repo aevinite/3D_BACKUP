@@ -28,9 +28,20 @@ export async function GET(req: NextRequest) {
     // Admin super-user → the per-tab pin wins over the browser-wide act-as cookie.
     restaurantId = req.nextUrl.searchParams.get("rid") || req.cookies.get(ADMIN_ACT_COOKIE)?.value || DEFAULT_RESTAURANT_ID;
   }
-  return NextResponse.json({
-    url: process.env.NEXT_PUBLIC_SUPABASE_URL || "",
-    anonKey: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-    restaurantId,
-  });
+  // ── SAY SO WHEN LIVE UPDATES CANNOT START (T9 improvement 6, 2026-08-06) ────────────────────────
+  // With the two public values missing this used to answer 200 with empty strings. The panel then
+  // opened a WebSocket to nowhere, silently never received a breadcrumb, and looked completely
+  // normal — so "the board isn't updating" had no visible cause anywhere. A 503 with a plain reason
+  // lets the connection badge tell the truth, and is the honest status for a dependency that isn't
+  // configured. Not a secret: it only reveals that an env var is unset on this deployment.
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+  if (!url || !anonKey) {
+    console.error("[rt-config] live updates are not configured — NEXT_PUBLIC_SUPABASE_URL/ANON_KEY missing");
+    return NextResponse.json(
+      { error: "Live updates aren't set up on this server.", unconfigured: true, restaurantId },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
+    );
+  }
+  return NextResponse.json({ url, anonKey, restaurantId }, { headers: { "Cache-Control": "no-store" } });
 }

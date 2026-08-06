@@ -52,11 +52,30 @@ type Body = {
   allergies?: string[];
 };
 
+// ── A SENSIBLE CEILING ON WHAT ONE ORDER MAY CARRY (T9 improvement 7, 2026-08-06) ────────────────
+//
+// `items` and `allergies` used to be passed through with no size limit at all, and the allergy
+// free-text had no length cap on THIS path (the ＋ Other chip stores whatever was typed). A real
+// diner never comes near these numbers — the biggest genuine basket on the stack is a few dozen
+// lines — but this route accepts a body that was SAVED ON A PHONE and replayed later, so a corrupted
+// outbox entry or a buggy client could hand Postgres a huge payload to parse and store.
+//
+// Deliberately generous, and deliberately a REFUSAL rather than a silent trim: quietly dropping
+// lines would send someone food they didn't order, or leave off an allergy they did declare. The
+// codes are worded in lib/guestOutbox.ts → reasonMsg.
+const MAX_ITEMS = 200;
+const MAX_ALLERGIES = 40;
+const MAX_ALLERGY_LEN = 200;
+
 async function postImpl(req: NextRequest): Promise<Response> {
   let b: Body;
   try { b = (await req.json()) as Body; } catch { return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 }); }
   const items = Array.isArray(b.items) ? b.items : [];
   const allergies = Array.isArray(b.allergies) ? b.allergies : [];
+  if (items.length > MAX_ITEMS) return NextResponse.json({ ok: false, reason: "order_too_big" }, { status: 400 });
+  if (allergies.length > MAX_ALLERGIES || allergies.some((a) => typeof a === "string" && a.length > MAX_ALLERGY_LEN)) {
+    return NextResponse.json({ ok: false, reason: "allergies_too_long" }, { status: 400 });
+  }
 
   if (b.mode === "session") {
     if (!b.token) return NextResponse.json({ ok: false, reason: "invalid_token" }, { status: 400 });

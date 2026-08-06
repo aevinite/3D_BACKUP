@@ -23,6 +23,12 @@ async function getClient(): Promise<SupabaseClient> {
   if (clientPromise) return clientPromise;
   clientPromise = (async () => {
     const cfg = await (await fetch("/api/rt-config", { cache: "no-store" })).json();
+    // See the note in public/panels/realtime.js: a 503 { unconfigured:true } is a real answer, and
+    // passing its empty values into createClient would surface as "Invalid URL" (T9 improvement 6).
+    if (cfg?.unconfigured || !cfg?.url || !cfg?.anonKey) {
+      clientPromise = null;   // let the next caller try again once it is configured
+      throw new Error("Live updates are not set up on this server");
+    }
     // worker:true keeps the websocket heartbeat alive in a Web Worker so a
     // backgrounded phone tab doesn't silently drop the connection (see lib/supabase.ts).
     return createClient(cfg.url, cfg.anonKey, { realtime: { worker: true, params: { eventsPerSecond: 10 } } });

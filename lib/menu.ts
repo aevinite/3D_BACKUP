@@ -32,16 +32,23 @@ export interface MenuItem {
   modelSmallUrl?: string;
   modelOptimizedUrl?: string;
   description: string;
-  longDescription: string;
+  // ── DETAIL-ONLY, and OPTIONAL on purpose (T9 improvement 15, 2026-08-06) ──────────────────────
+  // A dish CARD never draws these. The grid reads CARD_COLUMNS, which correctly leaves the columns
+  // out — but mapRow used to invent a default for each one anyway, so every card shipped five empty
+  // fields plus a nutrition object of four empty strings. Measured on the live menu: ~3.6 KB of
+  // structure nobody renders, in a 39.6 KB payload, on every guest of every restaurant — and this is
+  // the hottest read in the product. They are now ABSENT when the column was not selected, and
+  // unchanged when it was (the dish page and the 3D viewer read a full row, so they see no change).
+  longDescription?: string;
   rating: string;       // average of REAL reviews ("" when there are none yet -> UI shows "New")
   reviewCount: number;  // how many real reviews exist (from the item_ratings view)
   time: string;
-  nutrition: { calories: string; protein: string; carbs: string; sugar?: string };
-  ingredients: { emoji: string; name: string }[];
+  nutrition?: { calories: string; protein: string; carbs: string; sugar?: string };
+  ingredients?: { emoji: string; name: string }[];
   // deviceId lets the UI replace THIS device's previous review when the guest
   // re-rates (the DB upserts; the on-screen list must do the same).
-  reviews: { name: string; rating: number; text: string; deviceId?: string }[];
-  relatedSlugs: string[];
+  reviews?: { name: string; rating: number; text: string; deviceId?: string }[];
+  relatedSlugs?: string[];
   tags: string[];
   allergens: string[];
   searchAlias: string; // hidden synonyms for search (e.g. "caesar, healthy")
@@ -111,6 +118,9 @@ export function localized(text: LocalizedText | undefined, lang: string): string
 // the dish page read this same view, so the two can never disagree.
 type RatingAgg = { item_slug: string; avg_rating: number | string | null; review_count: number | null };
 
+/** Was this column part of the SELECT? (absent key ≠ null value — see mapRow's note) */
+const has = (row: any, col: string) => row != null && Object.prototype.hasOwnProperty.call(row, col);
+
 function mapRow(row: any, agg?: RatingAgg): MenuItem {
   return {
     id: row.id,
@@ -128,17 +138,20 @@ function mapRow(row: any, agg?: RatingAgg): MenuItem {
     modelSmallUrl: row.model_small_url ?? undefined,
     modelOptimizedUrl: row.model_optimized_url ?? undefined,
     description: row.description ?? "",
-    longDescription: row.long_description ?? "",
+    // `has(...)` = the column was actually SELECTED. Absent → omit the key entirely (a card does not
+    // draw it). Present but NULL → keep today's default, so a full-row read is byte-for-byte what it
+    // has always been. The distinction is the whole point: this must shrink the CARD payload only.
+    ...(has(row, "long_description") ? { longDescription: row.long_description ?? "" } : {}),
     // Rating comes ONLY from real reviews now (the old per-dish seed number was
     // fake). Empty string = no reviews yet; the UI shows a "New" badge instead.
     // toFixed(1) so the card says "5.0" exactly like the dish page does.
     rating: agg?.avg_rating != null ? Number(agg.avg_rating).toFixed(1) : "",
     reviewCount: agg?.review_count ?? 0,
     time: row.time ?? "",
-    nutrition: row.nutrition ?? { calories: "", protein: "", carbs: "", sugar: "" },
-    ingredients: row.ingredients ?? [],
-    reviews: row.reviews ?? [],
-    relatedSlugs: row.related_slugs ?? [],
+    ...(has(row, "nutrition") ? { nutrition: row.nutrition ?? { calories: "", protein: "", carbs: "", sugar: "" } } : {}),
+    ...(has(row, "ingredients") ? { ingredients: row.ingredients ?? [] } : {}),
+    ...(has(row, "reviews") ? { reviews: row.reviews ?? [] } : {}),
+    ...(has(row, "related_slugs") ? { relatedSlugs: row.related_slugs ?? [] } : {}),
     tags: row.tags ?? [],
     allergens: row.allergens ?? [],
     searchAlias: row.search_alias ?? "",

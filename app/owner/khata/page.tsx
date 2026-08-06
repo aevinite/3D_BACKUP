@@ -6,6 +6,7 @@
 // paused while hidden (egress rule); a search filters the loaded list client-side.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { inr } from "@/components/admin/shared";
+import { partialNote } from "@/lib/ownerScope";
 import { asSuffix } from "@/lib/ownerPin";
 
 const IST = "Asia/Kolkata";
@@ -14,7 +15,10 @@ type Person = {
   id: string; restaurant_id: string; restaurantName: string; name: string; phone: string | null;
   note: string | null; outstanding: number; billCount: number; oldestKhataAt: string; bills: Bill[];
 };
-type Summary = { totalOutstanding: number; peopleCount: number; billCount: number; collectedMonth: number; collectedToday: number };
+// `collectedMonth` / `collectedToday` are `number | null` (T9 improvement 2, 2026-08-06): NULL means
+// that figure could not be read, and the key is named in the payload's `partial` list. It is NOT a
+// zero — showing "₹0 collected today" for a read that failed is a claim about the till.
+type Summary = { totalOutstanding: number; peopleCount: number; billCount: number; collectedMonth: number | null; collectedToday: number | null };
 
 const fmt = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", timeZone: IST });
 const ageDays = (iso: string) => {
@@ -28,6 +32,9 @@ export default function OwnerKhata() {
 
   const [customers, setCustomers] = useState<Person[] | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
+  // Which figures the server could NOT read this time (T9 improvement 2). Cleared on every load, so
+  // a passing blip disappears from the screen the moment it stops happening.
+  const [partial, setPartial] = useState<string[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -39,6 +46,7 @@ export default function OwnerKhata() {
       const j = await (await fetch(`/api/owner/khata${qs}`, { cache: "no-store" })).json();
       if (j.error) throw new Error(j.error);
       setCustomers(j.customers || []); setSummary(j.summary || null); setErr(null);
+      setPartial(Array.isArray(j.partial) ? j.partial : []);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, [scopePin]);
 
@@ -66,9 +74,19 @@ export default function OwnerKhata() {
       <div className="adm-stats" style={{ marginBottom: 14 }}>
         <div className="adm-stat"><div className="k">Outstanding now</div><div className="v">{summary ? inr(summary.totalOutstanding) : "…"}</div></div>
         <div className="adm-stat"><div className="k">People who owe</div><div className="v">{summary ? summary.peopleCount.toLocaleString("en-IN") : "…"}</div></div>
-        <div className="adm-stat"><div className="k">Collected today</div><div className="v">{summary ? inr(summary.collectedToday) : "…"}</div></div>
-        <div className="adm-stat"><div className="k">Collected this month</div><div className="v">{summary ? inr(summary.collectedMonth) : "…"}</div></div>
+        {/* A figure that could NOT be read shows a dash, not ₹0 — and the note below says which
+            one and offers Refresh. `inr(0)` and "we didn't read it" must never look the same. */}
+        <div className="adm-stat"><div className="k">Collected today</div><div className="v">{!summary ? "…" : summary.collectedToday === null ? "—" : inr(summary.collectedToday)}</div></div>
+        <div className="adm-stat"><div className="k">Collected this month</div><div className="v">{!summary ? "…" : summary.collectedMonth === null ? "—" : inr(summary.collectedMonth)}</div></div>
       </div>
+
+      {partial.length > 0 && (
+        <div className="adm-card" style={{ marginBottom: 14, borderColor: "var(--adm-warn)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-warn)" }} aria-hidden="true" />
+          <span style={{ flex: 1, minWidth: 200 }}>{partialNote(partial)}</span>
+          <button className="adm-btn" onClick={() => load()}><i className="fas fa-rotate" aria-hidden="true" /> Try again</button>
+        </div>
+      )}
 
       <div className="adm-card">
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
