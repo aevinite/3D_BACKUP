@@ -1062,6 +1062,19 @@ function banquetDocHtml(a) {
   // like that" — a banquet bill ALWAYS prints as a tax invoice with the per-line taxable
   // value + CGST/SGST columns. The receiver's GSTIN line only shows when there is one.
   const b2b = true;
+  // THE TABLE'S NAME REACHES THIS PAPER TOO (T3 sweep, 2026-08-06). A banquet booked ON a table
+  // carries that table's number (mig 130), and this sheet printed the bare digit — so a restaurant
+  // that renamed T5 to "Terrace 2" got "Table 5" on the banquet's tax invoice while its thermal
+  // bill and its KOT both said "Terrace 2" (they resolve the name via tableDisp / tablePrintLabel).
+  // Resolved HERE rather than at the call sites so both of them — the manager panel's
+  // printBanquetBill and the admin's "See the banquet bill" preview — get it for free and cannot
+  // drift apart, which is the whole reason this document only exists once.
+  const bqTableDisp = (function () {
+    const t = String(b.table_number == null ? "" : b.table_number).trim();
+    if (!t) return "";
+    const nm = (((s.table_names || {})[t]) || "").trim();
+    return nm || t;
+  })();
   const hasCustGstin = !!String(b.cust_gstin || "").trim();
   // named tax components, or the historical CGST+SGST halves; the last one takes the
   // remainder so the printed lines always foot to the tax on the total.
@@ -1244,7 +1257,7 @@ function banquetDocHtml(a) {
           <div><div class="lbl">Dated</div><div class="v">${esc(dstr)}</div></div>
           ${b.hall ? `<div><div class="lbl">Banq. Name</div><div class="v">${esc(b.hall)}</div></div>` : ""}
           <div><div class="lbl">Time</div><div class="v">${esc(tstr)}</div></div>
-          ${b.table_number ? `<div><div class="lbl">Table</div><div class="v">${esc(String(b.table_number))}</div></div>` : ""}
+          ${bqTableDisp ? `<div><div class="lbl">Table</div><div class="v">${esc(bqTableDisp)}</div></div>` : ""}
         </div></td>
       </tr>
       ${toBits.length || terms.length || fnBits.length ? `<tr>

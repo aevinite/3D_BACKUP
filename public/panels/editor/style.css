@@ -1160,18 +1160,26 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
 /* floor tiles — outline AND fill tint vary per state via --c */
 /* ── TABLES PER ROW (admin-set, mig 226 — replaced the old S/M/L buttons) ───────────
    --per-row is written inline on the grid by app.js from settings.floor_per_row.
-   It is a TARGET, not a hard rule, and this is the whole trick that stops a big
-   restaurant breaking the layout:
 
-     ideal column width = (available width − the gaps) / --per-row
-     (the old version also took max(...) with a 44px tappability floor — removed 2026-08-01)
+   ⚠️ REWRITTEN 2026-08-06 (T3 sweep). What stood here described the OPPOSITE of what the rule
+   below does — it said --per-row was "a TARGET, not a hard rule", fed to `auto-fill` as a minimum
+   column width so the grid would "quietly drop to fewer" columns on a narrow screen. It also had a
+   later edit spliced into the middle of a sentence, so it no longer parsed as English, and it
+   still described re-flowing "as the side panel is dragged" — a side panel deleted on 2026-07-31.
+   The same wrong story was repeated in app.js's floorPerRow() and in lib/floorLayout.ts; all three
+   are corrected. This matters because the two things that actually keep a dense floor usable (the
+   hard column count here, and the 72px floor + sideways scroll in the <=1040px block below) both
+   look like accidents if you believe the old text, and deleting either puts every tile's buttons
+   back to 0×0.
 
-   Feed that minimum to auto-fill and the grid gives exactly --per-row columns while
-   the width allows it, then quietly drops to fewer rather than shrinking a tile past
-   (history) it used to fall back to fewer columns on a phone — it no longer does
-   slivers; no JS measures anything, and it re-flows live as the side panel is
-   dragged or the window resizes. auto-fill (not auto-fit) keeps a short last row's
-   tiles their normal size instead of stretching a lone tile across the whole row. */
+   THE RULE, as it really is: EXACTLY --per-row columns, at every width, on every device. The owner
+   ruled out adapting the count, twice ("I want how much table can I put in a particular one row …
+   adjust according to screen size and all that shit doesn't count here"). minmax(0, 1fr) lets a
+   tile shrink as far as the row demands; the tile then SHEDS DETAIL on the way down via the
+   container queries further down this file (the decorative ＋, then the sub-line, then the button
+   labels, then the action row) while the table number and the state colour never go. Below tablet
+   width the <=1040px block stops the shrinking at a measured 72px and scrolls the grid sideways
+   instead — the grid only, so the header stays put. Nothing in JS measures anything. */
 .ftile-grid {
   --per-row: 6;         /* overwritten inline per restaurant; this is the fallback */
   /* The gap scales with the DENSITY, not the viewport: at 30 per row a fixed 14px gutter is
@@ -1255,6 +1263,38 @@ html[data-theme="light"] .ftile.ft-ready {
 html[data-theme="light"] .ft-status {
   background: color-mix(in srgb, var(--c) 22%, transparent);
   border-color: color-mix(in srgb, var(--c) 38%, transparent); }
+
+/* ── THE WORDS ON THE FLOOR, IN THE LIGHT SKIN (T3 sweep, measured 2026-08-06) ──────────────────
+   The manager panel's default skin is LIGHT, and five things on the floor were below the 4.5:1
+   readability minimum for text this small. Measured on the real page at 1280px, colour resolved
+   through a canvas (so `color(srgb …)` is handled — a naive rgb() parser reports nonsense for these
+   color-mix results, which is how they stayed unnoticed):
+
+     ＋ Take order label + its ＋      9.5px bold   2.88:1   ← the floor's primary action
+     a busy tile's "3/3 served"       10px bold    3.39:1
+     the seat count "4"               9px bold     3.78:1
+     the legend + INSIDE:/OUTLINE:    11px         4.18:1
+     the stat labels OCCUPIED / …     9.5px        4.18:1
+
+   The dark skin measures 6.8:1 for the same legend, so this is light-skin-only: every one of these
+   is either `var(--muted)` (#897a61 — fine at 13px, thin at 9px) or a color-mix that leans most of
+   the way to a mid-tone colour and then sits on a pale tint of the SAME colour. The ＋ Take order
+   case is the worst because it is gold ink on a gold-tinted button.
+   Fixes below change the LIGHT skin only: the dark theme, every size, every state colour and the
+   gradients are all untouched. The state HUE survives in each case — only how far the ink leans
+   towards --text changes, which is what buys the contrast. */
+html[data-theme="light"] .floor-legend,
+html[data-theme="light"] .lgcap,
+html[data-theme="light"] .floor-head .fstat-l,
+html[data-theme="light"] .fstat-l,
+html[data-theme="light"] .ft-seats { color: #6b5d46; }
+html[data-theme="light"] .lgcap { opacity: 1; }   /* .75 of a pale ink was half the problem */
+/* The tile's live line ("0/6 served", "Free"): keep the state hue, but let the dark text carry it. */
+html[data-theme="light"] .ft-linenum,
+html[data-theme="light"] .ft-line-plain .ft-linenum { color: color-mix(in srgb, var(--c) 42%, var(--text)); }
+/* ＋ Take order: gold ink on a gold button is the one combination that cannot work on cream. */
+html[data-theme="light"] .ft-take { color: color-mix(in srgb, var(--gold) 26%, var(--text)); }
+html[data-theme="light"] .ft-take:hover { color: var(--text); }
 
 /* ── A TILE IS A SQUARE (owner, 2026-07-30) ─────────────────────────────────────────
    It used to keep a fixed min-height while the grid narrowed it, so a small tile went
@@ -1517,6 +1557,27 @@ html[data-theme="light"] .ft-status {
 .ft-take:hover { background: color-mix(in srgb, var(--gold) 28%, var(--panel-2)); border-color: var(--gold); color: var(--text); }
 .ft-take-x { font-weight: 800; }
 .ft-take-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The SHORT label, for the band where "Take order" cannot fit (see the container ladder below).
+   Hidden by default — exactly one of the three (＋ / "Take order" / "Order") is ever shown. */
+.ft-take-s { display: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ── WHICH FACE DOES ＋ Take order WEAR? (T3 sweep, measured 2026-08-06) ─────────────────────
+   Three faces, exactly one shown: "＋ Take order" · "Order" · "＋". The choice depends on how much
+   room the row really has, which is the tile's width MINUS whatever else is in the row — so the
+   number of controls matters as much as the width, and the width alone was deciding it.
+   Two things were wrong and both put a clipped or empty button on the floor:
+     · at 1920px a 133.9px tile still ellipsed "Take order" to "Take ord…" whenever 🧾 Bill shared
+       the row, because the decorative ＋ ate ~14px of an 84px button;
+     · a FINISHED tile carries three controls (⏻ · ＋ · 🧾) at every size, so it was the tightest
+       tile on the floor and got no special handling above 88px.
+   ⚠️ EVERY RULE IN THIS LADDER IS WRITTEN AT `.ftile …` DEPTH ON PURPOSE. The container bands
+   further down do NOT raise specificity, so a bare `.ft-take-x` there (0,1,0) loses to anything
+   written `.ftile:has(…) .ft-take-x` (0,3,0) up here — which is how the first cut of this fix
+   produced an EMPTY button on a dense floor: the word was gone with the band and the ＋ was still
+   suppressed from up here. Keep the depth uniform and let source order decide. */
+.ftile:has(.ft-ico-bill) .ft-take-x { display: none; }   /* the word beats the decoration */
+/* A finished tile is the crowded one at ANY size — it takes the short label from the start. */
+.ftile.ft-finished .ft-take-t { display: none; }
+.ftile.ft-finished .ft-take-s { display: inline; }
 /* Square icon buttons: the ✓ accept and the 🖨 bill. Same height as the take button so the
    row reads as one control strip. */
 /* THE ICON BUTTONS ARE A SHARE OF THE TILE, NEVER A FIXED SIZE (owner, 2026-08-02: "for all no.
@@ -1604,16 +1665,37 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
    ~95px here. Getting that wrong once hid the button's label at the default size.
    As the tile shrinks it sheds detail in priority order — it never grows taller and never
    clips: first the sub-line goes to one line and the decorative ＋ goes (the WORD is the
-   information), and only when even that won't fit does the label give way to the ＋. */
+   information), and only when even that won't fit does the label give way to the ＋.
+
+   ⚠️ RE-MEASURED 2026-08-06 (T3 sweep), because the note above was written against a tile that
+   is not the one that ships. The default is 12 per row, and 12 per row on a 1280px laptop —
+   the commonest screen this panel is opened on — is a 94.6px tile with an 80.6px container, NOT
+   ~95px inside. So at the shipped default the floor fell straight through the 88px band and
+   BOTH button labels were hidden: the floor's primary action rendered as a bare ＋ beside a bare
+   receipt glyph, on every laptop, all the time. The words only ever appeared on a ~1920px monitor.
+   That is the opposite of this tile's own stated rule, quoted twice from the owner: "never make
+   take order button small", "＋ Take order must remain the BIGGEST control on every tile".
+   The fix keeps the ladder and adds one rung — a SHORT label for the band where the full one
+   genuinely cannot fit. Measured room for text in that band: 80.6 inner − 22 (bill glyph) − 4
+   (gap) − 10 (the button's own padding) = ~44px. "Take order" needs ~52px at 9.5px bold, so it
+   really doesn't fit and the old band was right to drop it; "Order" needs ~27px and fits with
+   room to spare. A word beats a glyph, which is this ladder's whole premise. */
 @container (max-width: 120px) {
   .ft-meta { -webkit-line-clamp: 1; }
-  .ft-take-x { display: none; }
+  .ftile .ft-take-x { display: none; }
 }
+/* 88 → 76px: the full label cannot fit, so the SHORT one carries it. The ＋ stays hidden here —
+   it is decoration and the word needs the room (same trade the finished tile already makes). */
 @container (max-width: 88px) {
   .ft-bill-t { display: none; }        /* the receipt glyph alone still reads as "bill" */
-  .ft-take-t { display: none; }
-  .ft-take-x { display: inline; } /* out of room for the word — the ＋ is the fallback */
-  .ftile.ft-finished .ft-take-x { display: inline; } /* …including on a finished tile */
+  .ftile .ft-take-t { display: none; }
+  .ftile .ft-take-s { display: inline; }   /* "Order" — a word, where "Take order" would ellipse */
+  .ftile .ft-take-x { display: none; }
+  /* …EXCEPT on a finished tile, whose three controls (⏻ · ＋ · 🧾) leave the take button 33px here.
+     Measured: even "Order" ellipses at that width, and a clipped word is the one thing this ladder
+     exists to avoid. Three controls means the glyph, as it always has. */
+  .ftile.ft-finished .ft-take-s { display: none; }
+  .ftile.ft-finished .ft-take-x { display: inline; }
   .ft-seats { display: none; }
 }
 /* Genuinely tiny (a deliberately dense floor): the sub-line goes, then the state WORD. What
@@ -1627,6 +1709,14 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
    ✓ Close all live in full size. */
 @container (max-width: 76px) {
   .ftile.ft-finished .ft-ico-bill { display: none; }  /* keep ✕ close + ＋, the two that matter here */
+  /* Below here not even "Order" fits, so the ＋ is the fallback — a button with neither would be
+     an empty box. This is the rung that used to start at 88px. Written at the SAME depth as the
+     `:has(.ft-ico-bill)` suppression above so source order decides and the ＋ genuinely comes back;
+     a bare `.ft-take-x` here lost to it and left the button empty. */
+  .ftile .ft-take-s { display: none; }
+  .ftile:has(.ft-ico-bill) .ft-take-x { display: inline; }
+  .ftile .ft-take-x { display: inline; }
+  .ftile.ft-finished .ft-take-x { display: inline; }
 }
 @container (max-width: 64px) {
   .ft-meta { display: none; }

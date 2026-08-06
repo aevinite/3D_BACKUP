@@ -1,28 +1,40 @@
 // Floor layout — the ONE place the "tables per row" rules live (mig 226).
 //
-// The admin sets how many table tiles sit on a row in the manager's floor view.
-// Everything that touches that number (the admin form, the admin save route, the
-// live preview, and the manager panel CSS) reads these constants so they can
-// never drift apart.
+// The admin sets how many table tiles sit on a row in the manager's floor view. Everything that
+// touches that number reads these constants so they can never drift apart: the admin form
+// (components/admin/RestaurantSettings.tsx), the admin save route
+// (app/api/admin/restaurants/settings/route.ts) and the manager panel's own settings write
+// (app/api/editor/[...path]/route.ts) all clamp through clampPerRow below.
 //
-// THE OWNER'S NUMBER WINS (owner, 2026-07-31: "I will tell you how much tables I want in a
-// particular row — you have to make it dynamic, such that even if you have to make it very
-// small, you will make it very small"). It used to be a polite TARGET: the grid refused to
-// squeeze a tile below a readability floor and quietly handed back FEWER columns than asked
-// for, so setting 16 got you 14 and nobody could see why. Now the tile shrinks to fit and
-// sheds detail as it goes (the panel CSS drops the decorative ＋, then the sub-line, then the
-// button's label, then the status text — the state COLOUR and the table number always survive).
+// THE OWNER'S NUMBER WINS, AND IT IS NOT A TARGET (owner, 2026-07-31: "I will tell you how much
+// tables I want in a particular row — you have to make it dynamic, such that even if you have to
+// make it very small, you will make it very small"; and 2026-08-01: "I want how much table can I
+// put in a particular one row … adjust according to screen size and all that shit doesn't count
+// here"). The grid draws EXACTLY this many columns at every width:
+// `grid-template-columns: repeat(var(--per-row), minmax(0, 1fr))`.
 //
-// TILE_MIN_PX is no longer a readability limit, it is the last-resort TAPPABILITY limit: only
-// when the asked-for columns would make a tile smaller than a finger does the grid give back a
-// column. On a desktop that never triggers for a sane number; on a 390px phone it is what stops
-// "16 per row" turning into 16 unusable slivers.
-// THE ALLOWED CHOICES — and there is no typing anywhere any more. The owner picked "2 up to 12
-// only" on 2026-08-02 ("don't keep a number where I can add anything"), so both screens that set
-// this render a DROP-DOWN of exactly these values: the admin's Floor layout card
-// (components/admin/RestaurantSettings.tsx) and the manager's own Settings card
-// (public/panels/editor/app.js → numSel + its own copy of these constants). A value outside the
-// range is now unreachable by a person, not merely clamped after the fact.
+// ⚠️ WHAT IT DOES **NOT** DO — this box said the opposite until 2026-08-06 and the wrong version
+// was quoted in two other files (T3 sweep). It does NOT hand back columns on a narrow screen.
+// There is no auto-fill and no tappability floor deciding the column count. On a phone the floor
+// keeps all N columns and **scrolls sideways** instead (the `@media (max-width: 1040px)` block in
+// public/panels/editor/style.css pins each tile to a measured 72px minimum and puts the x-scroll on
+// the GRID, never an ancestor, so the floor header stays still while only the tables move).
+// Measured on a 360px phone at 12 per row: 12 columns, 72px tiles, 930px of grid inside a 332px
+// window. What shrinking DOES cost is detail, shed in priority order by container queries in that
+// stylesheet: the decorative ＋, then the sub-line, then the button labels, then the whole action
+// row — the table number and its state COLOUR always survive.
+//
+// (There is no TILE_MIN_PX here any more. It claimed to be that give-a-column-back limit, was
+// imported by nothing, and pointed at a CSS variable `--ftile-floor` that has never existed. The
+// real minimum is the 72px in the stylesheet's 1040px block, measured against the point where the
+// action row collapses to 0×0 — one number, in the file that enforces it.)
+//
+// THE ALLOWED CHOICES — and there is no typing anywhere. The owner picked "2 up to 12 only" on
+// 2026-08-02 ("don't keep a number where I can add anything"), so the ONE screen that sets this
+// renders a DROP-DOWN of exactly these values: the admin's Floor layout card. The MANAGER panel
+// only ever READS the number — its own card was removed on 2026-08-02 ("that will be only set by
+// admin"). (The editor API still clamps `floor_per_row` if it is ever posted; that is deliberate
+// defence in depth, not a second door for a person.)
 //
 // ⚠️ THE DATABASE'S CHECK CONSTRAINT (settings_floor_per_row_range) IS THE OUTER BOUND, and
 // migration 265 set it to 2..30. Keep the constraint >= the max below — WIDER than the UI is
@@ -35,14 +47,13 @@
 export const FLOOR_PER_ROW_MIN = 2;
 export const FLOOR_PER_ROW_MAX = 12;
 export const FLOOR_PER_ROW_DEFAULT = 12; // compact by default (owner, 2026-07-31): the floor is
-// full-width now that the right-hand panel is gone, so 12 lands each tile around 115px — the
-// dense "see the whole restaurant at once" look he asked for. Was 6, which reproduced the old
-// S/M/L "M" density back when a 300–460px rail ate the width.
-
-// The narrowest a table tile may ever get before the grid gives a column back. 44px is the
-// touch-target minimum — below it a tile is not a button any more, whatever it displays.
-// Mirrored in public/panels/editor/style.css (--ftile-floor); keep them in step.
-export const TILE_MIN_PX = 44;
+// full-width now that the right-hand panel is gone, so 12 lands each tile around 115px on a wide
+// monitor — the dense "see the whole restaurant at once" look he asked for. Was 6, which reproduced
+// the old S/M/L "M" density back when a 300–460px rail ate the width.
+// NOTE the width dependence, because it decides whether the tile can carry WORDS: 12 per row is
+// ~145px per tile at 1920px, ~95px at 1280px, and 72px on a phone. The button labels drop below
+// ~88px of tile (see the container queries in the panel stylesheet), so on a 1280px laptop the
+// default already lands in the icon-only band.
 
 /** Clamp anything (form input, DB value, URL param) into the allowed range. */
 export function clampPerRow(v: unknown): number {

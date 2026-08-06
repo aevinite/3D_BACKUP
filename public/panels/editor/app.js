@@ -3453,21 +3453,46 @@ function ordersKhataHtml() {
 // NEXT party's food joins the walk-out's session — inheriting its bill number and whoever
 // the bill was made out to. (A party with no orders renders as a free tile either way, so
 // the mistake would have been invisible until someone printed the bill.)
+//
+// ⚠️ IT ENDS A WHOLE PARTY, SO IT MUST SEE A WHOLE PARTY (T3 sweep, 2026-08-06) ─────────────
+// This used to gather its orders by TABLE NUMBER alone. On a joined party (mig 249) the child's
+// food keeps its own table number while living on the PARENT's session — so called on the table
+// that holds the bill, the list missed the partner tables' food entirely, and the `force: true`
+// close below then handed that session to migration 232's trigger, which cancels + archives
+// EVERY unpaid live order on it. One voided ticket at T6 wiped out T7's cooking food and the
+// party's bill, with no confirm anywhere (its only caller passes `silent: true`).
+// Two changes: the party is the unit, and it REFUSES VISIBLY rather than forcing a close while
+// anything the trigger would destroy is still there.
 async function freeTable(t, opts = {}) {
-  const ids = (state.data.orders || []).filter((o) => !o.archived && (o.table_number || "").trim() === String(t)).map((o) => o.id);
-  const sess = openSessionForTable(t);
+  // Every table served as one party with t (just [t] when nothing is merged).
+  const partyT = partyTablesOf(t);
+  const ids = (state.data.orders || []).filter((o) => !o.archived && partyT.includes((o.table_number || "").trim())).map((o) => o.id);
+  const sess = openSessionForTable(mergeParentOf(t) || t) || openSessionForTable(t);
   if (!ids.length && !sess) return;
-  if (!opts.silent && !(await confirmDialog(`Free T${t}? Its ${ids.length} settled ${ids.length === 1 ? "order" : "orders"} leave the floor (kept in records).`, "Free table"))) return;
+  // THE GUARD, matching migration 232's own WHERE clause exactly (`status <> 'cancelled' AND
+  // payment_status <> 'paid'`): those are the rows the close trigger would cancel and archive.
+  // A cancelled or fully-paid leftover is what `force` exists for and is safe to sweep; anything
+  // else is live food or unpaid money on someone's table, and freeing over it is never right.
+  const wouldDestroy = (state.data.orders || []).filter((o) =>
+    !o.archived && partyT.includes((o.table_number || "").trim())
+    && o.status !== "cancelled" && o.payment_status !== "paid");
+  if (wouldDestroy.length) {
+    const where = [...new Set(wouldDestroy.map((o) => (o.table_number || "").trim()))].filter((x) => String(x) !== String(t));
+    toast(`${tableLabel(t)} still has ${wouldDestroy.length} live order${wouldDestroy.length > 1 ? "s" : ""}${where.length ? ` (on ${where.map((x) => tableLabel(x)).join(", ")})` : ""} — void or settle ${wouldDestroy.length > 1 ? "them" : "it"} first`, "err");
+    return;
+  }
+  if (!opts.silent && !(await confirmDialog(`Free ${tableLabel(t)}? Its ${ids.length} settled ${ids.length === 1 ? "order" : "orders"} leave the floor (kept in records).`, "Free table"))) return;
   try {
     for (const id of ids) await api("PATCH", "/orders/" + id, { archived: true });
     (state.data.orders || []).forEach((o) => { if (ids.includes(o.id)) o.archived = true; });
-    // force: the orders left here are cancelled/settled, so the server's "still owes money /
-    // still cooking" guard has nothing to protect — without force it would refuse a table
-    // whose food was cancelled unmade, and the table would sit on the floor forever.
+    // force: the orders left here are cancelled/settled (the guard above proved it), so the
+    // server's "still owes money / still cooking" rule has nothing to protect — without force it
+    // would refuse a table whose food was cancelled unmade, and the table would sit on the floor
+    // forever.
     if (sess) { try { await api("POST", "/sessions/" + sess.id + "/close", { force: true }); } catch (e) { /* orders are already off the floor; the tile reads free */ } }
     await loadSessions();
-    toast(`T${t} is free`, "ok");
-  } catch (e) { toast("Could not free: " + e.message, "err"); }
+    toast(`${tableLabel(t)} is free`, "ok");
+  } catch (e) { toast("Could not free: " + errText(e), "err"); }
 }
 
 // The 30-minute grace window for undoing a settled bill (migration 112) — must
@@ -3607,8 +3632,18 @@ async function cancelOrder(id) {
   const o = (state.data.orders || []).find((x) => x.id === id);
   const t = (o && o.table_number ? o.table_number : "").trim();
   if (!t) return;
-  // Any non-cancelled, non-archived order still live at this table?
-  const stillActive = (state.data.orders || []).some((x) => !x.archived && (x.table_number || "").trim() === t && x.status !== "cancelled");
+  // ANY LIVE ORDER LEFT ON THE WHOLE PARTY? (T3 sweep, 2026-08-06.)
+  //
+  // This asked "at this table NUMBER" — and on a joined party that is the wrong question. A merged
+  // child's orders keep their own table number but live on the PARENT's session (mig 249), so on
+  // the table that HOLDS the bill the answer was always "nothing left", and freeTable() went on to
+  // force-close the party's session; migration 232's trigger then cancelled and archived the
+  // partner table's live, unpaid food. Voiding one ticket at T6 silently took T7's cooking food and
+  // the party's bill with it, with nothing asked (freeTable is called `silent`).
+  // The party's slices have to be in memory to answer this honestly — a partner table whose slice
+  // was never fetched looks empty, which is the same wrong answer by a different route.
+  await ensurePartySlices(t);
+  const stillActive = partyOrders(t).some((x) => !x.archived && x.status !== "cancelled");
   if (!stillActive) await freeTable(t, { silent: true });
 }
 
@@ -5412,7 +5447,15 @@ function renderEditor() {
         o.allergies = [...cur];          // flip the screen now
         opBegin(id); renderEditor();
         try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); }
-        catch (e) { toast("Couldn't update allergens: " + e.message, "err"); }
+        catch (e) {
+          // Same rule as the table detail's copy of this chip row (T3 sweep, 2026-08-06): put the
+          // refused allergen BACK on screen, and say why in words rather than showing the raw
+          // `clash_changed_elsewhere` code. This is a safety field — it may never read as set when
+          // the order does not carry it.
+          o.allergies = wasAllergies; renderEditor();
+          const clash = e && e.data && e.data.clash;
+          toast(clash ? clash.plain : "Couldn't update allergens: " + errText(e), "err", undefined, clash ? 9000 : undefined);
+        }
         finally { opEnd(id); }
       };
     });
@@ -7791,7 +7834,13 @@ function floorTileHtml(i) {
   // tile ("never make take order button small"). It only exists on a finished table, so on every
   // other tile the row is unchanged.
   const acts = (finishedHere ? `<button class="ft-ico ft-ico-close" data-close-table="${mergedTo || i}" title="Everything served and the bill is paid — close ${esc(tableLabel(i))} and free it" aria-label="Close ${esc(tableLabel(i))}"><i class="fas fa-power-off" aria-hidden="true"></i></button>` : "")
-    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span></button>`)
+    // THREE FACES, ONE BUTTON, EXACTLY ONE SHOWN (T3 sweep, 2026-08-06). The stylesheet's container
+    // ladder picks between them by how wide the tile actually is: "Take order" while it fits, then
+    // the short "Order" (because 12-per-row on a 1280px laptop — the shipped default — leaves ~44px
+    // of text room, enough for a word but not that word), then the bare ＋ on a genuinely dense
+    // floor. Before this the middle rung didn't exist, so every laptop showed the ＋ and the owner's
+    // "never make take order button small" was only honoured on a 1920px monitor.
+    + (isEmpty ? "" : `<button class="ft-take" data-take-order="${i}" title="Add another order for ${esc(tableLabel(i))}"><span class="ft-take-x">＋</span><span class="ft-take-t">Take order</span><span class="ft-take-s">Order</span></button>`)
     + (hasNew ? `<button class="ft-ico ft-ico-go" data-quick-accept="${i}" title="Accept the new order" aria-label="Accept the new order"><i class="fas fa-check"></i></button>` : "")
     // The printer wears its OWN colour, never the table's state colour (owner, 2026-08-01: "print
     // notification icon should have its own COLOUR"). On a green Served tile it was a green button
@@ -7872,7 +7921,12 @@ function floorTableList(baseN) {
   const extras = Object.keys(tiles)
     .map((k) => parseInt(k, 10))
     .filter((k) => Number.isFinite(k) && k > baseN)
-    .filter((k) => { const st = (tiles[String(k)] || {}).state; return st && st !== "free"; })
+    // A JOINED TABLE IS NOT A FREE ONE (T3 sweep, 2026-08-06). A merged child has no session of its
+    // own — its party lives on the parent — so the summary reports its state as `free` (mig 238's
+    // `belong` CTE needs a session id). Without the merge test, a merged child numbered above the
+    // table count fell through this filter and vanished off the floor while its party was live,
+    // taking the one tile that reaches its Unmerge with it.
+    .filter((k) => { const st = (tiles[String(k)] || {}).state; return (st && st !== "free") || !!mergeParentOf(k); })
     .sort((a, b) => a - b);
   return out.concat(extras);
 }
@@ -7891,9 +7945,19 @@ function floorStatsHtml() {
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
   let cOcc = 0, cPay = 0, cNew = 0, cCall = 0;
-  for (const i of floorTableList(n)) {
+  // ONE list, built once — it is walked twice below and every tile costs a tableTileState() call.
+  const drawnList = floorTableList(n);
+  for (const i of drawnList) {
     const { st, pay, hasNew, hasCall } = tableTileState(i);
-    if (st !== "free" && st !== "req") cOcc++;
+    // A JOINED TABLE IS OCCUPIED, whatever the server calls it (T3 sweep, 2026-08-06). A merged
+    // child has no session of its own, so mig 238 reports its state as `free` — while the tile
+    // right beside this number is drawn purple and obviously busy. With T6+T7 joined and six
+    // people on them, the header read "Occupied 1/30" over two full tables, and a number that
+    // disagrees with the picture beside it is a number staff stop trusting.
+    // MONEY IS DELIBERATELY NOT WIDENED: the party's whole bill already rides on the table that
+    // holds it, so counting the child in "To pay" too would show two bills where there is one.
+    const joined = !!mergeParentOf(i);
+    if (joined || (st !== "free" && st !== "req")) cOcc++;
     if (pay === "red" || st === "bill") cPay++;
     if (hasNew) cNew++;
     if (hasCall) cCall++;
@@ -7903,7 +7967,7 @@ function floorStatsHtml() {
   // a table that was removed) used to be counted anyway — and now that the queue card is gone
   // it would sit in "Needs you" forever with nothing on screen to answer it. A number nobody
   // can act on teaches staff to ignore the number.
-  const drawn = new Set(floorTableList(n).map(String));
+  const drawn = new Set(drawnList.map(String));
   const atTable = (x) => drawn.has(String(x && x.table_number));
   const reqN = (state.summary.requests || []).filter(atTable).length;
   const joinN = (state.summary.joiners || []).filter(atTable).length;
@@ -7985,10 +8049,20 @@ function customFloorHtml(plan, n) {
 // a manager's desktop each remembered a different size and no admin could set it, so the
 // number is now one ADMIN-owned per-restaurant setting (settings.floor_per_row, mig 226).
 //
-// It is a target, not a hard rule. The CSS turns it into a MINIMUM column width and lets
-// auto-fill drop columns when the width isn't there (see .ftile-grid), so a phone or a
-// narrow window shows fewer per row rather than a row of unreadable slivers. That is what
-// keeps a 300-table restaurant usable on any screen.
+// ⚠️ IT IS A HARD RULE, NOT A TARGET (corrected in the T3 sweep, 2026-08-06 — this box said the
+// exact opposite for five weeks, and lib/floorLayout.ts and the stylesheet repeated it). The CSS
+// draws EXACTLY this many columns at every width: `repeat(var(--per-row), minmax(0, 1fr))`. There
+// is no auto-fill and nothing drops a column on a narrow screen — the owner ruled that out twice
+// ("adjust according to screen size and all that shit doesn't count here"). What a phone does
+// instead is keep all N columns at a measured 72px minimum and SCROLL SIDEWAYS, with the x-scroll
+// on the grid alone so the floor header stays still (the `@media (max-width: 1040px)` block in
+// style.css). Measured at 360px / 12 per row: 12 columns, 72px tiles, 930px of grid in a 332px box.
+// Believing the old version is how someone deletes that 1040px block as redundant, and the tile's
+// buttons go back to 0×0 — which is what it was written to fix.
+// What shrinking costs is DETAIL, shed in priority order by the container queries in style.css:
+// the decorative ＋, then the sub-line, then the button labels (below ~88px of tile — so a 1280px
+// laptop at the default 12 is already in the icon-only band), then the whole action row. The table
+// number and its state colour never go.
 // Mirrors lib/floorLayout.ts — 2..12, picked from a fixed list, and the ONLY place it is picked
 // is the admin panel (components/admin/RestaurantSettings.tsx → Floor layout). The manager panel
 // READS this number and never sets it: its own card was removed on 2026-08-02 ("that will be only
@@ -8339,18 +8413,19 @@ function bindFloorDelegation() {
     if ((b = e.target.closest("[data-bill-preview]"))) { openBillPreview(b.dataset.billPreview); return; }
     if ((b = e.target.closest("[data-close-table]"))) { closeFinishedTable(b.dataset.closeTable); return; }
     if ((b = e.target.closest("[data-quick-accept]")))   { acceptTableOrders(b.dataset.quickAccept); return; }
-    if ((b = e.target.closest("[data-quick-attend]")))   { attendTableCalls(b.dataset.quickAttend); return; }
-    if ((b = e.target.closest("[data-quick-requests]"))) { openFloatingTable(b.dataset.quickRequests); return; }
-    if ((b = e.target.closest("[data-quick-pay]")))      { markTablePaid(b.dataset.quickPay); return; }
-    // Requests card — joiner rows (member actions) + open/join/access requests.
-    if ((b = e.target.closest("[data-mem-approve]")))    { memberAction(b.dataset.memApprove, "approve"); return; }
-    if ((b = e.target.closest("[data-mem-deny]")))       { memberAction(b.dataset.memDeny, "remove"); return; }
-    if ((b = e.target.closest("[data-mem-head]")))       { makeHead(b.dataset.memHead); return; }
-    if ((b = e.target.closest("[data-mem-ban]")))        { banMember(b.dataset.memBan, b.dataset.banPhone); return; }
-    if ((b = e.target.closest("[data-req-approve]")))    { resolveRequest(b.dataset.reqApprove, "approved"); return; }
-    if ((b = e.target.closest("[data-req-deny]")))       { resolveRequest(b.dataset.reqDeny, "denied"); return; }
-    // Needs card — Done resolves a single waiter call.
-    if ((b = e.target.closest("[data-call-attend]")))    { attendCall(b.dataset.callAttend); return; }
+    // ── WHAT USED TO BE HERE, AND WHY IT ISN'T (T3 sweep, 2026-08-06) ─────────────────────────
+    // Eight more branches sat here and not one of them could ever fire:
+    //   · [data-quick-attend] / [data-quick-pay] / [data-quick-requests] — NO tile emits these.
+    //     floorTileHtml's action row is close / take-order / quick-accept / bill-preview and
+    //     nothing else; the side-panel cards these three belonged to went with the panel itself
+    //     on 2026-07-31.
+    //   · [data-mem-*] / [data-req-*] / [data-call-attend] — these ARE rendered, but only inside
+    //     tablePanelParts, and the very first line of this handler returns for anything inside
+    //     [data-table-detail]. bindTablePanel wires them directly, which is the whole reason for
+    //     that early return.
+    // Dead code that reads as live wiring costs real time: it made markTablePaid and attendCall
+    // look like they had a floor entry point they do not have. If a floor-level (non-detail) card
+    // ever comes back, wire it HERE and say so — don't restore these on the assumption they worked.
     // TILE SELECT last — only reached when no button above matched.
     const tile = e.target.closest("[data-floor-table]");
     if (tile) {
@@ -8472,8 +8547,9 @@ function bindFloor() {
   ed.querySelectorAll("[data-qop]").forEach((b) => (b.onclick = () =>
     openTakeOrder(null, null, b.dataset.qop === "parcel" ? { parcel: true } : { quick: true })));
   ed.querySelectorAll("[data-parcel-tile]").forEach((b) => (b.onclick = () => openParcelTile(b.dataset.parcelTile)));
-  // Waiter sections (migs 222-225) — same editor as Settings → Tables, reachable from the floor.
-  { const sb = ed.querySelector("#floorSections"); if (sb) sb.onclick = () => openSectionsModal(); }
+  // (No #floorSections binding — the 👥 "Who serves what" button left the floor on 2026-07-31
+  //  ("I do not want this option completely on top") and its ONE home is Settings → Access. The
+  //  binding outlived the button by five weeks; removed in the T3 sweep, 2026-08-06.)
   // (No Open all / Close all bindings — the buttons no longer exist; see bulkCard.)
   { const kb = ed.querySelector("#floorKot"); if (kb) kb.onclick = () => openKotTablePicker(); }
   // Printer-trouble strip (mig 269): ✓ Resolved closes the event/job; "Print here instead"
@@ -10394,13 +10470,21 @@ function openShiftPicker(t, sess) {
   document.querySelector(".shift-overlay")?.remove();
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   const free = [];
-  // "Free to move to" = not THIS table, not currently open, AND with no pending "wants in"
-  // request (summaryTableOpen treats a request-only table as not-open, so without this a shift
-  // could land on a table a guest is waiting to open, stranding their request).
+  // "Free to move to" = not THIS table, no party row on it at all, AND with no pending "wants in"
+  // request (a request-only table reads as not-open, so without this a shift could land on a table
+  // a guest is waiting to open, stranding their request).
   const reqTables = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number)));
   // A merged CHILD is not a free table (mig 264): its own summary tile reads "free" (its party
   // lives on the parent), but shifting onto it would land a second party on a joined table.
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !summaryTableOpen(i) && !reqTables.has(String(i)) && !mergeParentOf(i)) free.push(i); }
+  //
+  // ⚠️ tableHasAnyParty, NOT summaryTableOpen (T3 sweep, 2026-08-06). The two are not the same
+  // question and this door had the wrong one: summaryTableOpen reads the NORMALISED tile state, and
+  // normalizeTileState turns a party row with no guests and no orders ('waiting') into **Free** —
+  // so this list offered a table that already holds a party, the server refused with
+  // `target_occupied`, and the manager was told a table the floor draws as Free "already has a party
+  // on it". tableHasAnyParty exists precisely for this (see its own comment) and the DESKTOP door
+  // — openKotColumns → freeTables() — has always used it. Two doors, one answer.
+  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !tableHasAnyParty(i) && !reqTables.has(String(i)) && !mergeParentOf(i)) free.push(i); }
   const grid = free.length
     ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">T${i}</button>`).join("")
     : `<div class="muted" style="padding:14px">No free tables to move to right now.</div>`;
@@ -11540,7 +11624,16 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
       await api("POST", `/orders/${order.id}/discount`, { amount, note: amount > 0 ? note : "" }, { expect: { table: "orders", id: order.id, fields: { discount: Number(order.discount || 0) } } });
       await loadSessions(); if (rerender) rerender();
       toast(amount > 0 ? `Discount ${inr(amount)} applied — they pay ${inr(payFor(amount))}` : "Discount removed", "ok");
-    } catch (e) { toast("Failed: " + e.message, "err"); }
+    } catch (e) {
+      // SOMEONE ELSE DISCOUNTED THIS BILL FIRST — say so in words (T3 sweep, 2026-08-06). This
+      // write sends `expect`, so the server refuses rather than overwriting, and it sends back a
+      // ready-made sentence in `clash.plain`. `e.message` is the CODE, so a manager read
+      // "Failed: clash_changed_elsewhere" and had no idea their discount hadn't saved. Same shape
+      // as editQty a few hundred lines below — the one pattern for a refused value edit.
+      const clash = e && e.data && e.data.clash;
+      toast(clash ? clash.plain : "Failed: " + errText(e), "err", undefined, clash ? 9000 : undefined);
+      if (clash) { await loadSessions(); if (rerender) rerender(); }
+    }
   };
   wrap.querySelector(".disc-apply").onclick = () => save(discAmount);
   const removeBtn = wrap.querySelector(".disc-remove"); if (removeBtn) removeBtn.onclick = () => save(0);
@@ -11693,7 +11786,17 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     if (cur.has(slug)) cur.delete(slug); else cur.add(slug);
     o.allergies = [...cur]; if (rerender) rerender(); // flip the screen now
     try { await api("POST", `/orders/${id}/allergies`, { allergies: o.allergies }, { expect: { table: "orders", id, fields: { allergies: wasAllergies } } }); await loadSessions(); if (rerender) rerender(); }
-    catch (e) { toast("Couldn't update allergens: " + e.message, "err"); }
+    catch (e) {
+      // AN ALLERGEN THE SERVER REFUSED MUST NOT STAY ON THE SCREEN (T3 sweep, 2026-08-06).
+      // Two faults here, and this is a safety field: the chip was flipped optimistically two lines
+      // up and the failure path neither put it back nor refetched, so the screen showed "no peanuts"
+      // set while the order did not carry it; and the message was `e.message`, which for a clash is
+      // the raw code `clash_changed_elsewhere`. Revert first, then say it in words.
+      o.allergies = wasAllergies; if (rerender) rerender();
+      const clash = e && e.data && e.data.clash;
+      toast(clash ? clash.plain : "Couldn't update allergens: " + errText(e), "err", undefined, clash ? 9000 : undefined);
+      if (clash) { await loadSessions(); if (rerender) rerender(); }
+    }
   }));
   // Add a dish to THIS order: a compact dish-picker modal → /orders/:id/add-item.
   root.querySelectorAll("[data-add-dish-order]").forEach((b) => (b.onclick = () => openAddDishModal(b.dataset.addDishOrder, rerender)));
