@@ -172,6 +172,10 @@
       "  background:#f59e0b;color:#3b1d00;font:800 10.5px/1.35 system-ui,sans-serif;pointer-events:none;",
       "  box-shadow:0 2px 6px rgba(0,0,0,.3)}",
       ".lfh-has-pending{outline:2px dashed rgba(245,158,11,.75);outline-offset:-2px}",
+      /* the ⚠ mark: this one has STOPPED and wants a person, so it is red and solid rather
+         than the amber dashed "still going out" — the two must not read the same */
+      ".lfh-pend-chip.is-blocked{background:#dc2626;color:#fff}",
+      ".lfh-needs-you{outline:2px solid rgba(220,38,38,.85);outline-offset:-2px}",
       "@media(prefers-reduced-motion:reduce){.lfh-offbar-dot{animation:none}}"
     ].join("\n");
     var s = document.createElement("style"); s.id = "lfh-off-style"; s.textContent = css;
@@ -218,6 +222,20 @@
       // (The TITLE is left exactly as it was: the "Sending… while nothing is being sent" problem
       // is already handled above by the stuck threshold + Send now. Only the reason changes.)
       var offlineMade = box.queued.every(function (it) { return !it.why || it.why === "offline"; });
+      // …AND NEVER SAY "SAVED" ABOUT SOMETHING THIS DEVICE COULD NOT SAVE. When IndexedDB is
+      // refused (private browsing, storage full, a locked-down tablet profile) the queue holds
+      // the change in memory only, so closing or reloading the panel loses it — while every
+      // toast on the way in said "Saved ✓ — syncing automatically". The queue now reports that
+      // (LFH_OUTBOX.storageFailed), and it belongs here rather than in each of the ~16 toasts
+      // across the three panels, because this bar is the one surface whose job is saying what is
+      // actually true — and a per-toast fix misses the call site added next month.
+      var unsafe = !!(window.LFH_OUTBOX && window.LFH_OUTBOX.storageFailed && window.LFH_OUTBOX.storageFailed());
+      if (unsafe) {
+        return { tone: "tone-bad",
+                 title: waiting + (waiting === 1 ? " change is NOT saved on this device" : " changes are NOT saved on this device"),
+                 sub: "This device won't let the app store them, so closing this panel would lose them. Keep it open until they've gone.",
+                 action: "See" };
+      }
       return { tone: "tone-sync",
                title: "Sending " + waiting + (waiting === 1 ? " saved change" : " saved changes") + "…",
                sub: offlineMade
@@ -400,29 +418,52 @@
   // and the waiter grid (.tile[data-t]) — so it keeps working when those renderers
   // change. It only runs while something is actually waiting, so a normal shift pays
   // nothing for it.
+  // "STILL ON ITS WAY" AND "THIS NEEDS YOU" ARE NOT THE SAME MARK.
+  // Both lists were counted together, so a change the server had already REFUSED — a clash, or a
+  // table-op it settled ("that KOT is already paid") — kept an amber ⏳ reading "Saved on this
+  // device — not sent yet" on the tile for the rest of the shift, because a non-retryable row sits
+  // in `failed` until somebody taps "Not needed anymore". A waiter glancing at the floor read
+  // that as work still going out, while the bar three inches above it said "1 change needs you".
+  // Two marks now: ⏳ for work genuinely in flight, ⚠ for work that has stopped and wants a person.
   var stampTimer = null;
   function stampTiles() {
-    var byTable = (window.LFH_OUTBOX && window.LFH_OUTBOX.pendingByTable) ? window.LFH_OUTBOX.pendingByTable() : {};
+    var ob = window.LFH_OUTBOX;
+    var byTable = (ob && ob.pendingByTable) ? ob.pendingByTable() : {};
+    var blockedBy = (ob && ob.blockedByTable) ? ob.blockedByTable() : {};
     var tiles = document.querySelectorAll("[data-t],[data-floor-table]");
     for (var i = 0; i < tiles.length; i++) {
       var tile = tiles[i];
       var t = tile.getAttribute("data-t") || tile.getAttribute("data-floor-table");
-      var n = byTable[String(t)] || 0;
+      var blocked = blockedBy[String(t)] || 0;
+      // pendingByTable counts BOTH lists, so take the blocked ones back out to get what is
+      // really still trying.
+      var n = Math.max(0, (byTable[String(t)] || 0) - blocked);
       var chip = tile.querySelector(".lfh-pend-chip");
-      if (!n) {
+      if (!n && !blocked) {
         if (chip) chip.remove();
         tile.classList.remove("lfh-has-pending");
+        tile.classList.remove("lfh-needs-you");
         continue;
       }
-      tile.classList.add("lfh-has-pending");
+      tile.classList.toggle("lfh-has-pending", n > 0);
+      tile.classList.toggle("lfh-needs-you", blocked > 0);
       if (!chip) {
         chip = el("span", "lfh-pend-chip");
-        chip.title = "Saved on this device — not sent yet";
         if (getComputedStyle(tile).position === "static") tile.style.position = "relative";
         tile.appendChild(chip);
       }
-      chip.textContent = n > 1 ? "⏳ " + n : "⏳";
-      chip.setAttribute("aria-label", n + (n === 1 ? " change" : " changes") + " on this table not sent yet");
+      // A table can carry both; the one that needs a PERSON is the one worth showing.
+      if (blocked) {
+        chip.className = "lfh-pend-chip is-blocked";
+        chip.title = "Couldn't be applied — tap the bar above to see why";
+        chip.textContent = blocked > 1 ? "⚠ " + blocked : "⚠";
+        chip.setAttribute("aria-label", blocked + (blocked === 1 ? " change" : " changes") + " on this table need you");
+      } else {
+        chip.className = "lfh-pend-chip";
+        chip.title = "Saved on this device — not sent yet";
+        chip.textContent = n > 1 ? "⏳ " + n : "⏳";
+        chip.setAttribute("aria-label", n + (n === 1 ? " change" : " changes") + " on this table not sent yet");
+      }
     }
   }
   function syncStamping() {

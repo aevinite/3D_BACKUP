@@ -38,6 +38,7 @@
     "verify:customer-erase": "node scripts/verify-customer-erase.mjs",
     "verify:outbound": "node scripts/verify-outbound-honesty.mjs",
     "verify:offline": "node scripts/verify-offline.mjs",
+    "verify:warm-shell": "node scripts/verify-warm-shell.mjs",
     "verify:recycle-name": "node scripts/verify-recycle-name.mjs",
     "verify:customers": "node scripts/verify-customers.mjs",
     "check:current": "node scripts/check-folder-current.mjs",

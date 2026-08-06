@@ -10,7 +10,7 @@ import { getSettings, createOrder, isServerBusy, updateOrderTableNumber, taxRule
 import { splitBill, resolveTaxMode, isMrpDish } from "@/lib/tax";
 // offline: save order, send on reconnect. reasonMsg/refusalOf are the ONE place that turns a
 // refusal code into words a diner can act on — shared with the queue and the session gate.
-import { enqueueGuestOrder, reasonMsg, refusalOf } from "@/lib/guestOutbox";
+import { enqueueGuestOrder, reasonMsg, refusalOf, dishFor } from "@/lib/guestOutbox";
 import { useRestaurantId } from "@/lib/restaurant-context";
 import { ALLERGENS, allergenIcon, allergenLabel } from "@/lib/allergens";
 // Per-restaurant feature switches: the allergy section can be turned off.
@@ -774,7 +774,11 @@ export default function CartPanel() {
       // another "limit reached" alert about a diner following our own instruction.
       const { reason, dish } = refusalOf(err);
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: {
-        message: reasonMsg(reason, { dish }),
+        // dishFor(): `unknown_item` is the one refusal whose token is the dish's ID rather than
+        // its name (the row was not found, so the server has nothing else to send) — and on any
+        // restaurant but #1 that id reads "paneer-tikka__a1b2c3d4". The basket is still on this
+        // phone, so resolve it to the name the diner can actually see, or name nothing at all.
+        message: reasonMsg(reason, { dish: dishFor(reason, dish, cart) }),
         kicker: "order",
         variant: "error",
       } }));

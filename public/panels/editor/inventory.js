@@ -350,9 +350,20 @@
           // what this form was opened on, so the second save is refused and told, not silently
           // preferred. A NEW ingredient has no row to overwrite, so it needs no expectation.
           await inv("POST", isNew ? "/items" : "/items/" + it.id, payload, null, isNew ? undefined : {
+            // All FIVE typed values this form carries, not just two. The comment above has
+            // always claimed "name, pack size AND reorder levels" were protected, but only the
+            // first two were ever sent — so two managers editing the same ingredient's par or
+            // urgent-below level at once still silently overwrote each other, and no guard could
+            // see it (verify:clash asks whether an expectation is SENT, not whether it covers the
+            // form). The ordering levels are `par_qty` / `min_qty` (mig 221) and are held here in
+            // BASE units, exactly as the payload sends them, so the comparison is like-for-like.
+            // The server caps at 8 fields (lib/clash.ts), so five is comfortably inside it.
             expect: { table: "inv_items", id: it.id, fields: {
               name: String(it.name || ""),
               purchase_factor: Number(it.purchase_factor),
+              purchase_uom: String(it.purchase_uom || ""),
+              par_qty: it.par_qty ?? null,
+              min_qty: it.min_qty ?? null,
             } },
           });
           toastMsg(isNew ? "Ingredient added" : "Saved");

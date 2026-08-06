@@ -32,10 +32,21 @@
       // of that. The worker can only store a page whose navigation it handled, so on a device's
       // first load the panel HTML was never saved: lose signal, reload, and a waiter got the
       // "hasn't been opened on this device yet" screen mid-service. Ask for it explicitly.
+      // What this panel is made of, so the worker saves the CODE as well as the document — on a
+      // first visit the chunks load before it controls the page, so it never sees them and an
+      // offline reload rendered unstyled HTML. performance already holds the list.
+      function pageAssets() {
+        try {
+          return performance.getEntriesByType("resource")
+            .filter(function (r) { return ["script", "link", "css", "font", "img"].indexOf(r.initiatorType) >= 0; })
+            .map(function (r) { return r.name; })
+            .filter(function (n) { return n.indexOf(location.origin) === 0; });
+        } catch (e) { return []; }
+      }
       function warm() {
         try {
           if (navigator.serviceWorker.controller) {
-            navigator.serviceWorker.controller.postMessage({ type: "LFH_WARM_SHELL", url: location.href });
+            navigator.serviceWorker.controller.postMessage({ type: "LFH_WARM_SHELL", url: location.href, assets: pageAssets() });
           }
         } catch (e) { /* never throw into the panel */ }
       }
