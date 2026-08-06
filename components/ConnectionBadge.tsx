@@ -208,8 +208,8 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
             slow — and get the plain word. The number is still one tap away in the panel below,
             which is where a detail belongs. */}
         {v.ms != null && !guest
-          ? <span className="lfh-conn-ms" style={{ color: v.text, ["--ink-dark" as string]: v.color, ["--ink-light" as string]: v.text }}>{v.ms}<span className="lfh-conn-unit"> ms</span></span>
-          : <span className="lfh-conn-txt" style={{ color: v.text, ["--ink-dark" as string]: v.color, ["--ink-light" as string]: v.text }}>{v.label}</span>}
+          ? <span className="lfh-conn-ms" style={{ ["--ink-dark" as string]: v.color, ["--ink-light" as string]: v.text }}>{v.ms}<span className="lfh-conn-unit"> ms</span></span>
+          : <span className="lfh-conn-txt" style={{ ["--ink-dark" as string]: v.color, ["--ink-light" as string]: v.text }}>{v.label}</span>}
         {extra && <span className={`lfh-conn-n${failed ? " warn" : ""}`}>· {extra}</span>}
         <svg className="lfh-conn-chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
       </button>
@@ -293,22 +293,13 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
         /* On a DARK surface the tint composites to near-black, so the bright state colour is the
            readable one (~6:1) and the darkened ink is not (2.82:1). !important because the ink
            above is an inline style, which a normal rule cannot beat. */
-        /* Key off surfaces that are ACTUALLY dark. data-staffdark is on <html> and stays true on
-           /owner and /aevinite in BOTH skins — those consoles carry their skin on a wrapper
-           ([data-skin]) — so using it forced the dark-surface ink onto the LIGHT console and
-           "Connected" measured 1.99:1 there (my own regression, caught 2026-08-06). data-skin
-           handles the consoles; data-theme handles the guest menu and the panels. */
-        :global([data-skin="dark"]) .lfh-conn-txt,
-        :global([data-skin="dark"]) .lfh-conn-ms,
-        :global(html[data-theme="dark"]) .lfh-conn-txt,
-        :global(html[data-theme="dark"]) .lfh-conn-ms { color: var(--ink-dark) !important; }
-        /* …but a LIGHT console wins over the document-level rule above. Anyone who has ever used the
-           guest menu in dark carries lfh_theme=dark, which makes html[data-theme="dark"] true
-           everywhere — including inside a light console, where the bright ink measured 1.99:1 on 25
-           of 31 screens (live re-run, 2026-08-06). The nearest surface decides. */
-        :global(html [data-skin="light"]) .lfh-conn-txt,
-        :global(html [data-skin="light"]) .lfh-conn-ms { color: var(--ink-light) !important; }
-        .lfh-conn-n { font-weight: 800; opacity: 0.9; }
+        /* The ink itself is NOT here. styled-jsx injects this <style> on hydration, and the pill
+           is server-rendered, so any colour that lives only in here leaves the first paint wearing
+           whatever the inline style said — which on the dark console was the LIGHT ink at 2.82:1
+           (14 admin screens, live run 2026-08-06). Skin-aware ink now lives in globals.css, which
+           ships in <head> and is therefore already applied on that first paint. Do not move it
+           back in here. */
+.lfh-conn-n { font-weight: 800; opacity: 0.9; }
         .lfh-conn-n.warn { color: #ef4444; }
         .lfh-conn-chev { opacity: 0.5; flex: 0 0 auto; }
 

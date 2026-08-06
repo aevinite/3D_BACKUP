@@ -3819,6 +3819,26 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
 /* The hue arrives ONLY as --hue (never as an inline `color`, which would beat these rules and was
    exactly why a first attempt did nothing). CSS owns the colour in both skins. */
 .rp, .rp-panel, .own-av, .hue-ink, .so-role, .blz-chip[style*="--hue"] { color: var(--hue, currentColor); }
+
+/* ── The connection pill's ink ────────────────────────────────────────────────────────────────
+   Lives HERE, not in ConnectionBadge's styled-jsx, because the badge is server-rendered while
+   styled-jsx only injects its <style> on hydration. With the ink in the component, the first
+   paint wore the inline colour instead: on the DARK console that was the light ink on a dark
+   header (2.82:1 across 14 admin screens) and on the guest menu 2.95:1 — a readability flash
+   that got worse the slower the connection, which is why it came and went between runs.
+   The tier colours still arrive inline as --ink-dark / --ink-light (they are in the server HTML);
+   only the CHOICE between them is made here.
+     · default = a light surface
+     · [data-skin="dark"] = the owner/admin consoles; html[data-theme="dark"] = guest + panels
+     · a LIGHT console must beat the document-level dark rule, and `html[data-theme="dark"] .x`
+       scores (0,3,1) — so the light-console rule carries a matching descendant `html`. */
+.lfh-conn-txt, .lfh-conn-ms { color: var(--ink-light, currentColor); }
+[data-skin="dark"] .lfh-conn-txt,
+[data-skin="dark"] .lfh-conn-ms,
+html[data-theme="dark"] .lfh-conn-txt,
+html[data-theme="dark"] .lfh-conn-ms { color: var(--ink-dark, currentColor); }
+html [data-skin="light"] .lfh-conn-txt,
+html [data-skin="light"] .lfh-conn-ms { color: var(--ink-light, currentColor); }
 /* .adm-chip keeps its old dark-skin look (the hue lifted toward the body text) as the base. */
 .adm-chip { color: color-mix(in srgb, var(--hue, currentColor) 78%, var(--text)); }
 [data-skin="light"] .rp,

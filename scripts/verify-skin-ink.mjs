@@ -14,20 +14,23 @@ const P=s=>{const m=String(s).match(/-?[\d.]+/g);const k=/^color\(\s*srgb/i.test
 const R=(a,b)=>((Math.max(lum(...a),lum(...b))+.05)/(Math.min(lum(...a),lum(...b))+.05)).toFixed(2);
 const br=await chromium.launch();
 for (const [role,url] of [["admin","/aevinite"],["admin","/aevinite/health"],["admin","/aevinite/recycle"],["owner","/owner"],["owner","/owner/reports"]]) {
-  for (const [cons,guest] of [["light","dark"],["light","light"],["dark","dark"]]) {
-    const c=await br.newContext({viewport:{width:1280,height:900},serviceWorkers:"block"});
+  // `js:false` reproduces the FIRST PAINT: server HTML + <head> CSS only, no hydration. The ink
+  // used to live in styled-jsx, which injects on hydration, so this is the frame that measured
+  // 2.82:1 on the dark console while the settled state read a healthy 6.21:1.
+  for (const [cons,guest,js] of [["light","dark",true],["light","light",true],["dark","dark",true],["dark","dark",false],["light","light",false]]) {
+    const c=await br.newContext({viewport:{width:1280,height:900},serviceWorkers:"block",javaScriptEnabled:js});
     if(role==="admin") await c.addCookies([adminCookie(B)]); else await loginAs(c,role,B);
     await c.addCookies([{name:"aevidine_skin",value:cons,url:B}]);
     const p=await c.newPage();
     await p.addInitScript(`try{localStorage.setItem("aevidine_skin","${cons}");localStorage.setItem("lfh_theme","${guest}")}catch(e){}`);
-    await p.goto(B+url,{waitUntil:"domcontentloaded",timeout:60000}); await p.waitForTimeout(role==="admin"?7500:9500);
+    await p.goto(B+url,{waitUntil:"domcontentloaded",timeout:60000}); await p.waitForTimeout(js?(role==="admin"?7500:9500):1500);
     const r=await p.evaluate(()=>{const t=document.querySelector(".lfh-conn-txt")||document.querySelector(".lfh-conn-ms");
       if(!t)return null;let cur=t,bg="rgb(255,255,255)";
       while(cur){const b=getComputedStyle(cur).backgroundColor;const m=String(b).match(/[\d.]+/g);if(m&&(m.length<4||+m[3]>0.85)){bg=b;break;}cur=cur.parentElement;}
       return {txt:t.textContent.trim().slice(0,12),color:getComputedStyle(t).color,bg,skin:document.querySelector("[data-skin]")?.getAttribute("data-skin"),theme:document.documentElement.getAttribute("data-theme")};});
     const cr=r?R(P(r.color),P(r.bg)):"n/a";
     const ok = r && +cr>=3;
-    console.log(`${ok?"✓":"✗"} ${url.padEnd(20)} console=${cons} guestKey=${guest} → skin=${r?.skin} theme=${r?.theme} "${r?.txt}" ${cr}:1`);
+    console.log(`${ok?"✓":"✗"} ${url.padEnd(20)} console=${cons} guest=${guest} ${js?"hydrated":"FIRSTPAINT"} → skin=${r?.skin} "${r?.txt}" ${cr}:1`);
     if(!ok) bad++;
     await c.close();
   }
