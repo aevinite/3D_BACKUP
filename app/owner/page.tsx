@@ -84,7 +84,24 @@ type TsPrevRow = { bucket: string; revenue: number };
 type Pay = { method: string; revenue: number; orders: number };
 type HeatRow = { dow: number; hr: number; orders: number; revenue: number };
 type Prev = { revenue: number; orders: number } | null;
-type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; paymentMethods: Pay[]; heatmap?: HeatRow[]; categories?: { category: string; qty: number; revenue: number }[]; prev: Prev; cachedAt?: string; staffPay?: { paidOut: number; people: number; entries: number } | null };
+// The "we couldn't read part of this" strip a chart card shows when the group total is incomplete.
+// Deliberately INSIDE the affected card rather than a page-level banner: the owner needs to know
+// WHICH chart is short, not merely that something somewhere failed.
+function PartialStrip({ keys }: { keys?: string[] }) {
+  if (!keys || !keys.length) return null;
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "0 0 8px", fontSize: 12.5, color: "var(--adm-warn)" }}>
+      <i className="fas fa-triangle-exclamation" aria-hidden="true" />
+      <span>Some restaurants didn&rsquo;t answer, so this total is incomplete. Tap Refresh to try again.</span>
+    </div>
+  );
+}
+
+type GroupA = { scope: "group"; restaurantRevenue: GroupRev[]; timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; paymentMethods: Pay[]; heatmap?: HeatRow[]; categories?: { category: string; qty: number; revenue: number }[]; prev: Prev; cachedAt?: string;
+  // Named figures the server could NOT read this time (lib/partialRead). A chart built from only
+  // SOME of the group is still drawn — but it must say so, or a total that is too small reads as
+  // fact (T9 finding F18, 2026-08-07).
+  partial?: string[]; staffPay?: { paidOut: number; people: number; entries: number } | null };
 type Dish = { title: string; qty: number; revenue: number };
 type Records = {
   bestDay?: { date: string; revenue: number } | null;
@@ -1405,6 +1422,7 @@ export default function OwnerDashboard() {
                   title in two brands is a different product). Saying so is what was missing
                   (T5 sweep, 2026-08-06). */}
               <div className="ow2-ct"><span>Revenue by category <span className="mut">· added up across {restScopeText}</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "categories")} />
               {(pl(globalRange) as GroupA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as GroupA).categories!} />
                 : <div className="adm-empty">Loading…</div>}
@@ -1421,6 +1439,7 @@ export default function OwnerDashboard() {
             </div>
             <div className="adm-card">
               <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · {restScopeText}</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "payments")} />
               {(pl(globalRange) as GroupA | undefined)?.paymentMethods
                 ? <PaymentDonut data={(pl(globalRange) as GroupA).paymentMethods} />
                 : <div className="adm-empty">Loading…</div>}
