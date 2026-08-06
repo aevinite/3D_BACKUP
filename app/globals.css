@@ -3551,7 +3551,27 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
    console. Same family as the --ink bug: a token name nobody ever declared. Defining it fixes all
    10 call sites at once. #8f5a0a is 5.05:1 on the badge's own 18% wash and keeps the golden-amber
    identity, distinct from --adm-warn. */
-      --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-warn: #c98a2b; --adm-accent: #e8a13c;
+      /* ── The ORPHAN tokens ────────────────────────────────────────────────────────────────────
+     Eight names the console code reads that nothing ever declared, so the hard-coded fallback won
+     in BOTH skins. Two of them were plainly broken and no scan could see it, because they style
+     surfaces that only exist after a click:
+       · .as-list  (the Access search dropdown)  background: var(--adm-pop, #171a20)  → a near-BLACK
+         panel with `color: inherit`, i.e. dark text on near-black on the LIGHT console.
+       · .xray-zpop (the owner x-ray zone popover) background: var(--adm-card, #fff) → a WHITE panel
+         with `color: inherit`, i.e. light text on white on the DARK console.
+     Each is an ALIAS of a token that already resolves per skin, so one declaration here serves both:
+     custom-property substitution is lazy, so `var(--card)` is resolved at USE time against whichever
+     skin block is in effect — no value is duplicated and no new colour is invented.
+     Guarded by scripts/verify-css-tokens.mjs. */
+  --adm-line: var(--border-c);
+  --adm-bad: var(--adm-danger);
+  --adm-surface: var(--card);
+  --adm-muted: var(--muted);
+  --adm-field: var(--muted2);
+  --adm-pop: var(--card);
+  --adm-card: var(--card);
+  --ow-accent: var(--accent);
+  --adm-ok: #2e9e5b; --adm-danger: #d14b48; --adm-warn: #c98a2b; --adm-accent: #e8a13c;
   display: flex; height: 100dvh; width: 100%; overflow: hidden;
   background: var(--bg); color: var(--text);
   font-family: 'Inter', system-ui, sans-serif;

@@ -11,20 +11,17 @@
 //   · --adm-accent   10 call sites, LIVE/AUDIT badges at 1.91:1 on the light console
 //   · --adm-muted-fg 12 call sites, "window closed" at 2.42:1 on the light console
 //
-// KNOWN_UNDECLARED below is a deliberate, temporary list: these are backgrounds/borders rather than
-// text, so the runtime contrast scan does not flag them, and declaring eight of them unmeasured
-// risks regressing the dark console. They should be declared (or their call sites switched to a
-// real token) as a measured follow-up — remove each from this list as it is done. Adding a NEW
-// undeclared token is what this guard exists to stop.
+// KNOWN_UNDECLARED is now EMPTY: the eight background/border orphans were declared as aliases of
+// tokens that already resolve per skin (--adm-pop: var(--card) and friends). Two of them were
+// genuinely broken and invisible to every scan, because they style surfaces that only exist after a
+// click — a near-BLACK search dropdown on the light console, a WHITE popover on the dark one. If you
+// ever need to park one here again, say why and how it was measured.
 //
 //   node scripts/verify-css-tokens.mjs
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-const KNOWN_UNDECLARED = new Set([
-  "--adm-line", "--adm-bad", "--adm-surface", "--adm-muted",
-  "--adm-field", "--adm-pop", "--adm-card", "--ow-accent",
-]);
+const KNOWN_UNDECLARED = new Set([]);   // emptied 2026-08-06 — all eight are now declared as per-skin aliases in globals.css
 
 const ROOTS = ["app", "components", "public/panels"];
 const EXT = /\.(tsx|ts|css|js|html)$/;
@@ -72,4 +69,4 @@ if (missing.length) {
 if (fixed.length) {
   console.log(`Note: now declared, remove from KNOWN_UNDECLARED in this script: ${fixed.join(", ")}`);
 }
-console.log(`OK — every --adm-*/--ow-* token that is read is declared (${used.size} read, ${KNOWN_UNDECLARED.size} known-undeclared background tokens still to do).`);
+console.log(`OK — every --adm-*/--ow-* token that is read is declared (${used.size} read${KNOWN_UNDECLARED.size ? `, ${KNOWN_UNDECLARED.size} parked` : ""}).`);

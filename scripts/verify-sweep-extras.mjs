@@ -202,6 +202,82 @@ async function ctx(role){
   }
 }
 
+// ── 5475-5478 · SURFACES THAT ONLY EXIST AFTER A CLICK, IN BOTH SKINS ────────
+// A whole-page contrast scan cannot open a dropdown or a popover, so its silence about them means
+// nothing. Two were unreadable in OPPOSITE skins (live, 2026-08-06) because their background came
+// from a token nothing declared, so the hard-coded fallback applied in BOTH skins:
+//   · the Access search dropdown   (--adm-pop  → #171a20) 1.02:1 on the LIGHT console
+//   · the owner x-ray zone popover (--adm-card → #fff)    1.20:1 on the DARK console
+// No eval() in the page (the console sends a CSP) and the owner console needs an OWNER session —
+// an admin cookie does not render .adm.owx.
+{
+  const lum=(r,g,b)=>{const f=x=>{x/=255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4)};return .2126*f(r)+.7152*f(g)+.0722*f(b)};
+  const PC=v=>{const m=String(v).match(/-?[\d.]+/g);const k=/^color\(\s*srgb/i.test(String(v))?255:1;return [+m[0]*k,+m[1]*k,+m[2]*k]};
+  const RATIO=(a,b)=>((Math.max(lum(...a),lum(...b))+.05)/(Math.min(lum(...a),lum(...b))+.05));
+  let id=5475;
+  for (const skin of ["light","dark"]) {
+    // (a) the Access search dropdown, as an admin
+    const ca = await br.newContext({viewport:{width:1280,height:900},serviceWorkers:"block"});
+    await ca.addCookies([adminCookie(B),{name:"aevidine_skin",value:skin,url:B}]);
+    const pa = await ca.newPage();
+    await pa.addInitScript(`try{localStorage.setItem("aevidine_skin","${skin}")}catch(e){}`);
+    await pa.goto(B+"/aevinite/access",{waitUntil:"domcontentloaded",timeout:90000});
+    await pa.waitForTimeout(9000);
+    const box = pa.locator(".as-input").first();
+    if (!(await box.count())) no(String(id++),`Access search results are readable [${skin}]`,"no .as-input on /aevinite/access");
+    else {
+      await box.click();
+      await box.type("ta",{delay:110});      // real keystrokes — assigning .value skips React
+      await pa.waitForTimeout(1600);
+      const r = await pa.evaluate(()=>{
+        const l=document.querySelector(".as-list"); if(!l) return {open:false};
+        let cur=l,bg=null;
+        while(cur){const b=getComputedStyle(cur).backgroundColor;const m=String(b).match(/[\d.]+/g);
+          if(m&&(m.length<4||+m[3]>=.95)){bg=b;break}cur=cur.parentElement}
+        const item=l.querySelector(".as-nm")||l.querySelector(".as-item");
+        return {open:true,n:l.querySelectorAll(".as-item").length,panel:bg,
+                txt:item?item.textContent.trim().slice(0,24):null,
+                fg:item?getComputedStyle(item).color:null};
+      });
+      if (!r.open || !r.fg || !r.panel) no(String(id++),`Access search results are readable [${skin}]`,
+            !r.open?"dropdown did not open":!r.fg?"dropdown open but empty":"no opaque panel background found");
+      else {
+        const cr=RATIO(PC(r.fg),PC(r.panel));
+        cr>=3 ? ok(String(id++),`Access search results are readable [${skin}]`,`${r.n} items, ${cr.toFixed(2)}:1`)
+              : no(String(id++),`Access search results are readable [${skin}]`,`${cr.toFixed(2)}:1 — ${r.fg} on ${r.panel}`);
+      }
+    }
+    await ca.close();
+
+    // (b) the owner x-ray zone popover, as the OWNER, built from the rules it ships with
+    const co = await br.newContext({viewport:{width:1280,height:900},serviceWorkers:"block"});
+    await loginAs(co,"owner",B);
+    await co.addCookies([{name:"aevidine_skin",value:skin,url:B}]);
+    const po = await co.newPage();
+    await po.addInitScript(`try{localStorage.setItem("aevidine_skin","${skin}")}catch(e){}`);
+    await po.goto(B+"/owner",{waitUntil:"domcontentloaded",timeout:90000});
+    await po.waitForTimeout(10000);
+    const q = await po.evaluate(()=>{
+      const host=document.querySelector(".adm.owx")||document.querySelector(".adm"); if(!host) return null;
+      const el=document.createElement("div"); el.className="xray-zpop";
+      el.innerHTML='<button class="zrow">zone<small>off</small></button>';
+      host.appendChild(el);
+      let cur=el,bg=null;
+      while(cur){const b=getComputedStyle(cur).backgroundColor;const m=String(b).match(/[\d.]+/g);
+        if(m&&(m.length<4||+m[3]>=.95)){bg=b;break}cur=cur.parentElement}
+      const row=el.querySelector(".zrow"), sm=el.querySelector("small");
+      const v={panel:bg,rowFg:getComputedStyle(row).color,smFg:getComputedStyle(sm).color};
+      el.remove(); return v;
+    });
+    if (!q || !q.panel) no(String(id++),`owner x-ray popover is readable [${skin}]`, q?"no opaque panel background found":"no .adm host on /owner");
+    else {
+      const a=RATIO(PC(q.rowFg),PC(q.panel)), b2=RATIO(PC(q.smFg),PC(q.panel));
+      Math.min(a,b2)>=3 ? ok(String(id++),`owner x-ray popover is readable [${skin}]`,`${a.toFixed(2)}:1 / ${b2.toFixed(2)}:1`)
+                        : no(String(id++),`owner x-ray popover is readable [${skin}]`,`${a.toFixed(2)}:1 / ${b2.toFixed(2)}:1 on ${q.panel}`);
+    }
+    await co.close();
+  }
+}
 await br.close();
 console.log(`\nSKIPPED-PHASE RUN: ${pass} pass · ${fail} fail`);
 process.exit(fail?1:0);
