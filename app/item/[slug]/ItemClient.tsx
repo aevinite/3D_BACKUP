@@ -37,26 +37,28 @@ interface FoodItem {
   modelSmallUrl?: string;
   modelOptimizedUrl?: string;
   description: string;
-  longDescription: string;
+  // Optional to match lib/menu.ts's MenuItem (T9 improvement 15, 2026-08-06): the detail-only fields
+  // are ABSENT on a card-shaped read and present on a full-row read, which is what this page does.
+  longDescription?: string;
   rating: string;
   reviewCount?: number;   // real-review count from the aggregate (audit fix 2026-07-06)
   time: string;
-  nutrition: {
+  nutrition?: {
     calories: string;
     protein: string;
     carbs: string;
     sugar?: string;
   };
-  ingredients: {
+  ingredients?: {
     emoji: string;
     name: string;
   }[];
-  reviews: {
+  reviews?: {
     name: string;
     rating: number;
     text: string;
   }[];
-  relatedSlugs: string[];
+  relatedSlugs?: string[];
   allergens: string[];
   tags: string[];  // filter slugs this dish matches; "sold-out" means it can't be ordered
   options?: { name: string; type: "single" | "multi"; choices: { label: string; price: number }[] }[];
@@ -733,19 +735,19 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           .some((v) => v != null && String(v).trim() !== "" && String(v).trim() !== "—") && (
         <div className="stats-row" id="stats-row">
           <div className="stat-box">
-            <div className="stat-num">{item.nutrition.calories}</div>
+            <div className="stat-num">{item.nutrition?.calories}</div>
             <div className="stat-label">{t.cal}</div>
           </div>
           <div className="stat-box">
-            <div className="stat-num">{item.nutrition.protein}</div>
+            <div className="stat-num">{item.nutrition?.protein}</div>
             <div className="stat-label">{t.protein}</div>
           </div>
           <div className="stat-box">
-            <div className="stat-num">{item.nutrition.carbs}</div>
+            <div className="stat-num">{item.nutrition?.carbs}</div>
             <div className="stat-label">{t.carbs}</div>
           </div>
           <div className="stat-box">
-            <div className="stat-num">{item.nutrition.sugar ?? '—'}</div>
+            <div className="stat-num">{item.nutrition?.sugar ?? '—'}</div>
             <div className="stat-label">{t.sugar}</div>
           </div>
         </div>
@@ -770,7 +772,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           {descExpanded && <div className="ing-inside-label">{t.ingredients}</div>}
           {descExpanded && <div className="ingredients-row" id="tags-row">
             {/* Draw a colored chip for each ingredient. */}
-            {item.ingredients.map((ingItem, i) => {
+            {(item.ingredients ?? []).map((ingItem, i) => {
               // Pick a color for this ingredient's emoji (alternating between
               // its two choices), falling back to a default beige if unknown.
               if (!emojiIndexMap[ingItem.emoji]) emojiIndexMap[ingItem.emoji] = 0;

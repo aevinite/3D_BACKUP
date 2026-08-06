@@ -63,10 +63,29 @@ export async function GET(req: NextRequest) {
   // module (mig 166 table_tags, mig 167 banquet); add new modules to MODULE_DEFS.
   if (modIds.length) {
     const modCols = MODULE_DEFS.flatMap((d) => [d.allowed, d.control, d.enabled]);
+    // ── PAGED, NOT A FLAT .limit(200) (T9 improvement 10, 2026-08-06) ────────────────────────────
+    // This read used to end in `.limit(200)`. An owner past 200 restaurants would silently lose the
+    // module toggles for the rest — the switches would simply not be on the page, with nothing
+    // saying so, which is the exact class `scopedRestaurantIds` was written to page around ("a flat
+    // .limit(100) silently dropped every restaurant past the 100th"). Unreachable today; closed
+    // before it isn't, because the symptom is invisible.
+    //
+    // Chunked by INPUT ids rather than range(), because the filter is an `.in(...)` list: a URL with
+    // a thousand ids in it is its own problem, so this also keeps each request small.
     // Dynamic column list → supabase can't infer the row shape; cast via unknown.
-    const rows = ((await sb.from("settings")
-      .select(["restaurant_id", ...modCols].join(", "))
-      .in("restaurant_id", modIds).limit(200)).data || []) as unknown as Record<string, unknown>[];
+    const CHUNK = 200;
+    const rows: Record<string, unknown>[] = [];
+    for (let i = 0; i < modIds.length; i += CHUNK) {
+      const part = await sb.from("settings")
+        .select(["restaurant_id", ...modCols].join(", "))
+        .in("restaurant_id", modIds.slice(i, i + CHUNK));
+      // A failed chunk must not quietly hide a switch the admin handed over, so say so rather than
+      // render a page that is missing toggles for no visible reason.
+      if (part.error) return dbFail("owner/settings.modules", part.error, {
+        message: "Couldn't load your feature switches just now — please try again.",
+      });
+      rows.push(...((part.data || []) as unknown as Record<string, unknown>[]));
+    }
     const nameOf = new Map(restaurants.map((r) => [r.id, r.name]));
     for (const s of rows as Record<string, unknown>[]) {
       for (const def of MODULE_DEFS) {

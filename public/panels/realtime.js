@@ -86,6 +86,12 @@
     const p = sbPromise = (async () => {
       const cfg = await (await fetch("/api/rt-config" + (RT_RID_Q ? "?rid=" + encodeURIComponent(RT_RID_Q) : ""), { cache: "no-store" })).json();
       RT_RID = cfg.restaurantId || ""; // this panel's restaurant → cross-tenant event filter (noteEvent)
+      // NOT CONFIGURED IS ITS OWN ANSWER (T9 improvement 6, 2026-08-06). /api/rt-config now replies
+      // 503 { unconfigured:true } when the public Supabase values are missing, instead of 200 with
+      // empty strings. Throw a sentence a human can read rather than handing undefined to
+      // createClient, which failed with "Invalid URL" and looked like a bug in our own code. The
+      // rejection is memo-dropped below, so a later wake() genuinely retries.
+      if (cfg.unconfigured || !cfg.url || !cfg.anonKey) throw new Error("Live updates are not set up on this server");
       // SELF-HOSTED: import the Supabase client from OUR origin (built by
       // scripts/build-vendor.mjs), not the jsdelivr CDN. A restaurant's wifi can be
       // slow or block public CDNs, which made the panel hang or silently fall back

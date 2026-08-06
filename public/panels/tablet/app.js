@@ -4822,7 +4822,13 @@ window.addEventListener("online", () => load().catch(() => {}));
     Object.assign(ov.style, { position: "fixed", inset: "0", background: "rgba(4,8,18,.66)", backdropFilter: "blur(3px)", zIndex: "99990", display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" });
     ov.innerHTML = `<div style="width:min(92vw,360px);background:var(--panel);color:var(--text);border-radius:16px;padding:18px 18px calc(18px + var(--sab));box-shadow:0 20px 60px rgba(0,0,0,.5);font-family:system-ui,sans-serif">
       <div style="display:flex;align-items:center;gap:10px;margin:0 0 14px"><h3 style="margin:0;font-size:16px;font-weight:800;flex:1">⚙️ Settings</h3><button class="set-close" aria-label="Close" style="background:var(--panel-2);border:0;color:var(--text);border-radius:8px;width:40px;height:40px;font-size:16px;cursor:pointer">✕</button></div>
-      <a class="dw-btn danger" href="/api/panel-logout" style="margin-top:0">Sign out</a>
+      <!-- A FORM, not a link (T9 improvement 13, 2026-08-06): /api/panel-logout is POST-only now,
+           because a GET that ends a session fires from anything that merely POINTS at the URL — a
+           waiter could be signed out mid-service. Same change AdminShell made for /api/staff-logout.
+           The route answers 303 → /login, so this still works with no JavaScript. -->
+      <form method="post" action="/api/panel-logout" style="margin:0">
+        <button type="submit" class="dw-btn danger" style="margin-top:0;width:100%">Sign out</button>
+      </form>
       <div class="muted" style="font-size:12px;margin-top:10px">More settings will live here soon.</div>
     </div>`;
     document.body.appendChild(ov);

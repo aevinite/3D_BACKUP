@@ -34,7 +34,25 @@ export async function GET(req: NextRequest) {
   // hold from their own profile screen, without asking a manager. Read-only here; only a
   // manager/owner/admin can change it. null = not restricted (the module is off for this
   // restaurant, or they aren't a waiter) → the screen shows nothing about sections.
-  const limit = u.restaurant_id ? await waiterTables(u, u.restaurant_id) : null;
+  // ── EVERYTHING INDEPENDENT STARTS AT ONCE (T9 improvement 14, 2026-08-06) ──────────────────────
+  // Opening this screen used to be five trips to Mumbai one after another: the waiter-tables read,
+  // the payroll rung, the staff row, the payments list, then the pay-summary RPC. None of the first
+  // three needs any of the others, so they were pure waiting — visible as a pause on restaurant wifi.
+  // They are kicked off together here and awaited where they were already needed; the two PAY reads
+  // further down were already parallel with each other.
+  const tablesP = u.restaurant_id ? waiterTables(u, u.restaurant_id) : Promise.resolve(null);
+  const ladderP = u.restaurant_id && hasProfile(u.role) ? payrollLadder(u.restaurant_id) : null;
+  // `.then(x => x, ...)`-style catch attached IMMEDIATELY: if the payroll gate below returns early,
+  // this read is never awaited, and a floating rejected promise becomes an unhandled rejection that
+  // can take the whole serverless invocation down. Resolving to an error-shaped object instead keeps
+  // the early return harmless, and the one place that reads it already handles a null row.
+  const rowP = u.restaurant_id && hasProfile(u.role)
+    ? sb.from("staff_users")
+        .select("profile, joined_on, designation, employment_type, shift_label, weekly_off, pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay, in_payroll")
+        .eq("id", u.id).maybeSingle()
+        .then((r) => r, (e) => { console.error("[panel-profile] own row read failed:", e?.message ?? e); return { data: null }; })
+    : null;
+  const limit = await tablesP;
   const myTables = limit ? limit.tables : null;   // just the numbers for display
   const base = {
     // Their OWN row id. Needed so the save can say what it was editing FROM (the clash gate's
@@ -53,12 +71,10 @@ export async function GET(req: NextRequest) {
   // Only when the restaurant HAS the feature and their role gets a profile (kitchen doesn't).
   // A person always sees THEIR OWN salary and payments unless the owner switched that off for
   // them — it's their money, and the ledger is what settles "you never paid me".
-  if (!u.restaurant_id || !hasProfile(u.role)) return NextResponse.json({ ...base, profileModule: false });
-  if (!(await payrollLadder(u.restaurant_id)).effective) return NextResponse.json({ ...base, profileModule: false });
+  if (!u.restaurant_id || !hasProfile(u.role) || !ladderP || !rowP) return NextResponse.json({ ...base, profileModule: false });
+  if (!(await ladderP).effective) return NextResponse.json({ ...base, profileModule: false });
 
-  const row = (await sb.from("staff_users")
-    .select("profile, joined_on, designation, employment_type, shift_label, weekly_off, pay_type, pay_amount, pay_day, pay_mode, pay_extras, can_see_own_pay, in_payroll")
-    .eq("id", u.id).maybeSingle()).data as Record<string, any> | null;
+  const row = (await rowP).data as Record<string, any> | null;
   const c = completeness({ ...(row || {}), phone: u.phone });
   const out: Record<string, unknown> = {
     ...base,

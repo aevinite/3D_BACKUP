@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, scopedRestaurantIds, dbFail } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
@@ -341,6 +341,9 @@ export async function GET(req: NextRequest) {
     // The "daysummary" report reads the SAME money payload and additionally bundles the
     // payment-mode settlement (one extra RPC per restaurant) so the day sheet is one round-trip.
     if (type === "sales" || type === "tax" || type === "discounts" || type === "cancellations" || type === "daysummary") {
+      // Which optional parts of this sheet could NOT be read (T9 improvement 2, 2026-08-06). Named
+      // in the payload as `partial` so the screen can say so instead of just having one fewer block.
+      const partialKeys: PartialKey[] = [];
       // One bucketed fetch — reused for the main window AND for the sparse auto-drill
       // (below), so both go through the identical scope/merge/mapping path.
       const salesRows = async (f: string, t: string, bkt: string) => {
@@ -473,6 +476,11 @@ export async function GET(req: NextRequest) {
             console.error("[owner/reports] daysummary payment breakdown failed:", one.error.message);
             payRaw = [];
             payUnreadable = true;
+            // NAME IT, don't just omit it (T9 improvement 2, 2026-08-06). Leaving the block out was
+            // already better than an empty table that reads as "no money came in" — but the sheet
+            // then simply had one fewer section and nothing said why. `partial` puts a sentence on
+            // the page: "couldn't read how the money arrived".
+            partialKeys.push("payments");
           } else {
             payRaw = (one.data ?? []) as Row[];
           }
@@ -634,7 +642,8 @@ export async function GET(req: NextRequest) {
         }
       }
       } catch { inventory = null; costSeries = null; }
-      return { type, range, bucket, rows, totals, tax, payments, staffPay, tips, inventory, costSeries, drillBucket, drillRows };
+      return { type, range, bucket, rows, totals, tax, payments, staffPay, tips, inventory, costSeries, drillBucket, drillRows,
+        ...(partialKeys.length ? { partial: partialKeys } : {}) };
     }
 
     // ── breakdown reports: dishes / categories / payments / hourly ──

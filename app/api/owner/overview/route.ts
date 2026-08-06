@@ -19,7 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, dbFail } from "@/lib/ownerScope";
+import { ownerScope, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { getOwnerEntitlementsUnion, mergeOwnerEntitlements, entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic"; // always fresh — these are live numbers
@@ -102,24 +102,36 @@ export async function GET(req: NextRequest) {
   // Which optional MODULES this owner has anywhere in their set (mig 220). Used by the
   // Reports hub to hide the "Team & pay" card completely for a restaurant that doesn't have
   // the feature — a card that opens onto "not enabled" is dead UI.
+  // ── A CARD MUST NOT VANISH BECAUSE A READ BLIPPED (T9 improvement 11, 2026-08-06) ─────────────
+  // Both probes below used to destructure `data` only and ignore `error`. A failed settings read
+  // therefore looked identical to "no restaurant has this feature", so the "Team & pay" or
+  // "Inventory & stock" card silently disappeared from the Reports hub — the owner's hub changing
+  // shape for a reason nobody can see. The two states are now told apart:
+  //   read OK  → true/false exactly as before (hide a card nobody can use — that part was right);
+  //   read FAILED → keep the card VISIBLE and name `modules` in `partial`, so the hub can show the
+  //                 "couldn't read which features are on" note instead of quietly rearranging.
+  // Showing a card that might open onto "not enabled" is the kinder failure: the owner sees a real
+  // sentence either way, instead of hunting for a card that was there yesterday.
   const modIds = scope.all ? [] : scope.ids;
+  const partial: PartialKey[] = [];
   let payroll = scope.all || !!scope.admin;   // admin sees every card (X-ray)
-  if (!payroll && modIds.length) {
-    const { data: setRows } = await sb.from("settings")
-      .select("payroll_allowed, payroll_owner_control, payroll_enabled").in("restaurant_id", modIds);
-    payroll = (setRows || []).some((r: Record<string, unknown>) =>
-      r.payroll_allowed === true && (r.payroll_owner_control !== true || r.payroll_enabled !== false));
-  }
-
-  // Same treatment for the inventory module (mig 221/227): the Reports hub hides the
-  // "Inventory & stock" card completely when no owned restaurant has the feature, so it
-  // can never open onto a "not enabled" wall.
   let inventory = scope.all || !!scope.admin;
-  if (!inventory && modIds.length) {
-    const { data: invRows } = await sb.from("settings")
-      .select("inventory_allowed, inventory_owner_control, inventory_enabled").in("restaurant_id", modIds);
-    inventory = (invRows || []).some((r: Record<string, unknown>) =>
-      r.inventory_allowed === true && (r.inventory_owner_control !== true || r.inventory_enabled !== false));
+  if ((!payroll || !inventory) && modIds.length) {
+    // ONE read for both modules — they were two round-trips over the same rows.
+    const probe = await sb.from("settings")
+      .select("payroll_allowed, payroll_owner_control, payroll_enabled, inventory_allowed, inventory_owner_control, inventory_enabled")
+      .in("restaurant_id", modIds);
+    if (probe.error) {
+      console.error("[owner/overview] module probe failed:", probe.error.message);
+      partial.push("modules");
+      payroll = true; inventory = true;        // keep the cards; the note explains why
+    } else {
+      const rows = (probe.data || []) as Record<string, unknown>[];
+      const on = (r: Record<string, unknown>, a: string, c: string, e: string) =>
+        r[a] === true && (r[c] !== true || r[e] !== false);
+      if (!payroll) payroll = rows.some((r) => on(r, "payroll_allowed", "payroll_owner_control", "payroll_enabled"));
+      if (!inventory) inventory = rows.some((r) => on(r, "inventory_allowed", "inventory_owner_control", "inventory_enabled"));
+    }
   }
 
   return NextResponse.json({
@@ -127,5 +139,6 @@ export async function GET(req: NextRequest) {
     totals: { ...totals, restaurantCount: restaurants.length },
     entitlements,
     modules: { payroll, inventory },
+    ...(partial.length ? { partial } : {}),
   });
 }

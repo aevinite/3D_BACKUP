@@ -12,7 +12,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { sendOwnerAlert, alertText } from "@/lib/alerts";
-import { clientIp } from "@/lib/loginThrottle";
+import { capKeyFor, recentActionCount } from "@/lib/publicCap";
 
 export const dynamic = "force-dynamic";
 
@@ -26,19 +26,10 @@ const MAX_ERRORS_PER_DEVICE_10MIN = 5;
 // panels open on one device while still bounding the damage.
 const MAX_TAPS_PER_DEVICE_10MIN = 40;
 
-// How many rows this device/IP already wrote for one action in the last ten minutes. Shared by
-// both branches so the two caps can't drift apart again.
-async function recentCount(capKey: string, action: string, max: number): Promise<number> {
-  const sinceIso = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-  const { data } = await sb
-    .from("staff_actions")
-    .select("id")
-    .eq("device_id", capKey)
-    .eq("action", action)
-    .gte("created_at", sinceIso)
-    .limit(max);
-  return data?.length ?? 0;
-}
+// The 10-minute window both branches count in. The COUNT itself and the "who is calling" decision
+// now live in lib/publicCap (T9 improvement 18, 2026-08-06) — the same two helpers /api/guest/limit-hit
+// uses, so the two public write paths cannot drift apart on what a caller is or how it is counted.
+const WINDOW_MS = 10 * 60 * 1000;
 
 export async function POST(req: NextRequest) {
   try {
@@ -56,8 +47,10 @@ export async function POST(req: NextRequest) {
     const ridRaw = typeof body.rid === "string" ? body.rid : "";
     const rid = UUID.test(ridRaw) ? ridRaw : null;
 
-    // Device id from the per-panel cookie (set by /panels/maint.js). The rate cap keys on it.
-    const device = req.cookies.get("lfh_panel_device")?.value || null;
+    // WHO is calling: the per-panel device cookie (set by /panels/maint.js) when there is one, else
+    // the server-derived IP. That decision now lives in ONE place — capKeyFor (lib/publicCap) — which
+    // /api/guest/limit-hit uses too, so the two public write paths cannot disagree about it.
+    //
     // THE CAP MUST APPLY WHETHER OR NOT THERE IS A COOKIE (sweep 2026-08-04). This endpoint is
     // PUBLIC, and the flood cap below used to sit inside `if (device)`. A caller with no cookie was
     // therefore uncapped: every request wrote a level:'error' row, so the admin's Logs and Repair
@@ -65,13 +58,13 @@ export async function POST(req: NextRequest) {
     // errors off the first page — the same "a board full of non-faults is a board nobody reads"
     // reasoning the errlog noise filter was built on. The IP is derived server-side (never from the
     // body) and is only ever used as this counter's key.
-    const capKey = device || `ip:${clientIp(req)}`;
+    const capKey = capKeyFor(req);
 
     if (kind === "taps") {
       const detail = String(body.detail || "").slice(0, 1500);
       if (!detail) return NextResponse.json({ ok: true, skipped: "empty" });
       // Same ceiling reasoning as the error branch below — see MAX_TAPS_PER_DEVICE_10MIN.
-      if (await recentCount(capKey, "ui_taps", MAX_TAPS_PER_DEVICE_10MIN) >= MAX_TAPS_PER_DEVICE_10MIN) {
+      if (await recentActionCount(capKey, "ui_taps", WINDOW_MS, MAX_TAPS_PER_DEVICE_10MIN) >= MAX_TAPS_PER_DEVICE_10MIN) {
         return NextResponse.json({ ok: true, skipped: "rate_limited" });
       }
       await sb.from("staff_actions").insert({
@@ -85,7 +78,7 @@ export async function POST(req: NextRequest) {
     }
 
     // kind === "error": per-device (or per-IP) flood cap (protects the DB; no new table).
-    if (await recentCount(capKey, "client_error", MAX_ERRORS_PER_DEVICE_10MIN) >= MAX_ERRORS_PER_DEVICE_10MIN) {
+    if (await recentActionCount(capKey, "client_error", WINDOW_MS, MAX_ERRORS_PER_DEVICE_10MIN) >= MAX_ERRORS_PER_DEVICE_10MIN) {
       return NextResponse.json({ ok: true, skipped: "rate_limited" });
     }
 

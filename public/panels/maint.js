@@ -99,6 +99,26 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
     maintOn = turnOn;
   }
 
+  // SIGN OUT — a POST, then go to /login (T9 improvement 13, 2026-08-06).
+  //
+  // /api/panel-logout is POST-only now: as a GET it ended a session from anything that merely
+  // POINTED at the URL, so a waiter could be dropped out mid-service. These two buttons used to be
+  // `location.href = "/api/panel-logout"`.
+  //
+  // A TAP MUST NEVER VANISH (CLAUDE.md). So this does not depend on the request succeeding: whatever
+  // happens — offline, 500, a timeout — the browser still ends up at /login, which is the thing the
+  // person asked for, and where a stale cookie is answered anyway. A form would be simpler but these
+  // are buttons built by el() inside a drawer, and one of them sits behind a confirm().
+  async function signOut() {
+    // A hard ceiling so a hung request cannot leave the person staring at a button that did nothing.
+    const stop = setTimeout(() => { location.href = "/login"; }, 4000);
+    try {
+      await fetch("/api/panel-logout", { method: "POST", cache: "no-store", redirect: "manual" });
+    } catch { /* offline / refused — we go to /login regardless */ }
+    clearTimeout(stop);
+    location.href = "/login";
+  }
+
   // ── small DOM helpers ──────────────────────────────────────────────────────
   const topbar = () => document.querySelector(".topbar .top-actions") || document.querySelector(".topbar");
   function el(tag, props, kids) {
@@ -366,12 +386,12 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
 
       // — log out —
       sections.push(el("div", { class: "lfh-sec" }, [
-        el("button", { class: "lfh-bt", style: { background: "#991b1b", width: "100%" }, onClick: () => { location.href = "/api/panel-logout"; } }, ["Sign out"]),
+        el("button", { class: "lfh-bt", style: { background: "#991b1b", width: "100%" }, onClick: () => signOut() }, ["Sign out"]),
       ]));
     } else {
       // — first-login: a quiet "not you?" escape + reassuring footer (no full menu) —
       sections.push(el("div", { class: "lfh-sec", style: { paddingTop: "4px" } }, [
-        el("button", { class: "lfh-ghost", onClick: () => { if (confirm("Sign out and sign in as someone else?")) location.href = "/api/panel-logout"; } }, ["Not you? Sign out"]),
+        el("button", { class: "lfh-ghost", onClick: () => { if (confirm("Sign out and sign in as someone else?")) signOut(); } }, ["Not you? Sign out"]),
       ]));
       sections.push(el("div", { class: "lfh-foot" }, ["🔒 Visible only to you and your team"]));
     }

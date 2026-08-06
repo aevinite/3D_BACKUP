@@ -509,9 +509,16 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                 <i className="fas fa-arrow-rotate-left" aria-hidden="true" />
               </button>
             ) : (
-              <a className="adm-icnbtn" href="/api/panel-logout" title="Sign out" aria-label="Sign out">
-                <i className="fas fa-right-from-bracket" aria-hidden="true" />
-              </a>
+              /* A FORM, not a link (T9 improvement 13, 2026-08-06): signing out changes state, so it
+                 is a POST. As a GET link, anything that merely pointed at /api/panel-logout — a
+                 prefetch, a stray redirect — could sign the owner out mid-work. Same shape
+                 components/admin/AdminShell.tsx adopted for /api/staff-logout on 2026-08-05: still
+                 one tap, still works with no JavaScript. */
+              <form method="post" action="/api/panel-logout" style={{ display: "contents" }}>
+                <button type="submit" className="adm-icnbtn" title="Sign out" aria-label="Sign out">
+                  <i className="fas fa-right-from-bracket" aria-hidden="true" />
+                </button>
+              </form>
             )}
           </div>
         </header>

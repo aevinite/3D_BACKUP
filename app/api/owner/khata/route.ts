@@ -9,7 +9,7 @@
 // mig-184 RPCs as the manager panel, so the two views can never disagree on what's owed.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, type PartialKey } from "@/lib/ownerScope";
 import { khataLadder } from "@/lib/tableTags";
 import { businessDayStartIso } from "@/lib/businessDay";
 
@@ -66,16 +66,25 @@ export async function GET(req: NextRequest) {
   // which is a different statement from "we couldn't read it". The same reasoning as this route's own
   // `scopedRestaurantIds` catch a few lines up ("answered as a retryable failure rather than a wrong
   // figure") and as `RestaurantListIncomplete` itself. All three reads are now one verdict.
-  const readFailed = outQ.error || collMonthQ.error || collTodayQ.error;
-  if (readFailed) {
+  //
+  // ── REFINED (T9 improvement 2, 2026-08-06) ────────────────────────────────────────────────────
+  // Making ALL THREE one verdict removed the wrong number, but it threw away two correct ones: if a
+  // collection read blips, "total outstanding" was perfectly readable and the owner lost the whole
+  // page for it. Now only the OUTSTANDING read — the one this screen exists for — fails the request.
+  // A failed collection figure is reported as ABSENT (null) and named in `partial`, so the page shows
+  // what is owed and greys just the collected tiles. Still never a fabricated ₹0.
+  if (outQ.error) {
     // The database's own words stay our side — the owner gets a sentence they can act on (the rule
     // /api/maintenance was fixed for on 2026-08-05).
-    console.error("[owner/khata] read failed:", readFailed.message);
+    console.error("[owner/khata] outstanding read failed:", outQ.error.message);
     return NextResponse.json(
       { error: "Couldn't load the Pay Later figures just now — please try again.", transient: true },
       { status: 503 },
     );
   }
+  const partial: PartialKey[] = [];
+  if (collMonthQ.error) { console.error("[owner/khata] month collected failed:", collMonthQ.error.message); partial.push("collectedMonth"); }
+  if (collTodayQ.error) { console.error("[owner/khata] today collected failed:", collTodayQ.error.message); partial.push("collectedToday"); }
 
   const rows = (outQ.data || []) as Array<{
     restaurant_id: string; khata_customer_id: string; name: string; phone: string | null;
@@ -97,8 +106,11 @@ export async function GET(req: NextRequest) {
     if (r.khata_at && r.khata_at < c.oldestKhataAt) c.oldestKhataAt = r.khata_at;
   }
   const customers = [...byCust.values()].sort((a, b) => b.outstanding - a.outstanding);
-  const sumColl = (q: { data: unknown }) =>
-    Math.round(((q.data || []) as Array<{ collected: number }>).reduce((s, c) => s + (Number(c.collected) || 0), 0) * 100) / 100;
+  // NULL, not 0, when the read failed — `partial` above names it and the page greys that tile.
+  // `q.data || []` reducing to 0 is exactly the fabricated figure this whole block exists to stop.
+  const sumColl = (q: { data: unknown; error: unknown }): number | null =>
+    q.error ? null
+      : Math.round(((q.data || []) as Array<{ collected: number }>).reduce((s, c) => s + (Number(c.collected) || 0), 0) * 100) / 100;
 
   const summary = {
     totalOutstanding: Math.round(customers.reduce((s, c) => s + c.outstanding, 0) * 100) / 100,
@@ -107,5 +119,7 @@ export async function GET(req: NextRequest) {
     collectedMonth: sumColl(collMonthQ),
     collectedToday: sumColl(collTodayQ),
   };
-  return NextResponse.json({ summary, customers });
+  // `partial` rides along only when something is genuinely missing, so a healthy response is
+  // byte-for-byte what it was before this change.
+  return NextResponse.json({ summary, customers, ...(partial.length ? { partial } : {}) });
 }

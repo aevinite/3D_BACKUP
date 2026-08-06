@@ -831,15 +831,15 @@ export default function ViewerClient({ folder }: { folder: string }) {
         </div>
         <div className="srow">
           <div>
-            <div className="sv" id="stat-cal">{menuItem?.nutrition.calories || config?.stats?.calories || "—"}</div>
+            <div className="sv" id="stat-cal">{menuItem?.nutrition?.calories || config?.stats?.calories || "—"}</div>
             <div className="sl">{t.cal}</div>
           </div>
           <div>
-            <div className="sv" id="stat-pro">{menuItem?.nutrition.protein || config?.stats?.protein || "—"}</div>
+            <div className="sv" id="stat-pro">{menuItem?.nutrition?.protein || config?.stats?.protein || "—"}</div>
             <div className="sl">{t.protein}</div>
           </div>
           <div>
-            <div className="sv" id="stat-carb">{menuItem?.nutrition.carbs || config?.stats?.carbs || "—"}</div>
+            <div className="sv" id="stat-carb">{menuItem?.nutrition?.carbs || config?.stats?.carbs || "—"}</div>
             <div className="sl">{t.carbs}</div>
           </div>
           <div>
@@ -880,11 +880,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
               {showPrice(menuItem.price)}
             </div>
             {menuItem.longDescription && <p className="vinfo-desc">{menuItem.longDescription}</p>}
-            {menuItem.ingredients.length > 0 && (
+            {(menuItem.ingredients?.length ?? 0) > 0 && (
               <>
                 <div className="vinfo-label">{t.ingredients}</div>
                 <div className="vinfo-chips">
-                  {menuItem.ingredients.map((ing, i) => (
+                  {(menuItem.ingredients ?? []).map((ing, i) => (
                     <span key={i} className="vinfo-chip">{ing.emoji} {ing.name}</span>
                   ))}
                 </div>
