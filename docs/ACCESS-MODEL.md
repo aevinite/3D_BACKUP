@@ -179,6 +179,21 @@ menu, permission for manager, manager settings."*
 Off ⇒ the row's tab/section is gone for a real manager and the server refuses its endpoints.
 
 ## SECTION C — OWNER'S MENU
+
+**NINE pages, not five (corrected 2026-08-06).** `Access` · `Edit menu` · `Reports` · `Customers` ·
+`Rating review` · `Audit & logs` · `Feedback & complaints` · `Manager mode` · `Settings`.
+
+Four of them — **Reports, Customers, Feedback & complaints, Settings** — were enforced with no row
+anywhere: `OwnerShell` gates the nav on `owner_entitlements.{reports,customers,issues,settings}`
+and `/api/owner/{analytics,customers,issues,settings}` all refuse through `entitledSubset()`, but
+the only screen that ever wrote them was the New-restaurant form's access block. When that block
+was removed on 2026-08-06 they became settable by nothing at all, and a restaurant carrying an old
+stored `false` would have had its owner locked out of a page with nothing able to give it back.
+They now have rows, the same way `Access` (the `staff` key) got its one switch in the rebuild for
+exactly this reason. All four default ON, and an absent key already read as ON, so no restaurant
+changed. The owner panel's own "this section is off" popover deep-links to
+`/aevinite/access?focus=<key>` — until this, that link landed on a page with no such row.
+
 `Edit menu` · `Ratings` · `Audit & logs` (renamed from Audit, 2026-08-02 — the section key
 stays `logs`; the old duplicate "Activity log" child bound the SAME switch twice and is
 gone; its sub-options are the page's two VIEWS — **Removals record** · **Activity log** —
@@ -254,3 +269,21 @@ and the chosen ones also appear at the bottom of the dashboard.)*
 
 **Dev/test (`3-d-backup`) only.** AV live keeps the old model until a separate, explicitly
 asked-for release — flipping ~45 switches to always-on would change a paying client's app.
+
+---
+
+## The old ladder's `power_<flag>` rung is GONE (2026-08-06)
+
+`owner_entitlements.power_<flag>` was the pre-rebuild "may the admin allow this power at all"
+check. It is **unwritable by any code path**: the sole writer of `owner_entitlements` is the
+access-tree route, which allow-lists from `SECTION_ENTITLEMENTS` (owner PAGE keys only), and the
+New-restaurant form's copy of the old ladder was deleted the same day. Every `power_<flag>` is
+therefore permanently absent, every read of it was permanently "allowed", and it was a **second
+cap on an idea that already has a switch** — `access_config[flag].on`, the Feature half of that
+row on this screen.
+
+All five readers were deleted (`app/api/editor` ×3, `app/api/inventory`, `lib/staffProfile`,
+`app/api/owner/staff`), and each names the live cap in its place. `managerCan()` now applies
+**three** rungs, not four: the feature half → the person's own override → the restaurant's grant.
+Do not wire it back: an admin-level "does this restaurant have it" is a `has` row in
+`lib/accessTree.ts`, which is switchable, visible and audited.

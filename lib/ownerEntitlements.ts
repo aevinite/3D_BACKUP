@@ -60,10 +60,20 @@ export type OwnerSectionKey = (typeof OWNER_SECTION_KEYS)[number];
 export { MANAGER_POWER_FLAGS };
 export const powerEntitlementKey = (flag: string) => `power_${flag}`;
 
-// The authoritative "is this feature available for this restaurant AT ALL?" check
-// (rung 1a of the ladder), reading a RAW owner_entitlements JSONB value. Absent = ON,
-// so no existing restaurant changes when a new flag is added. The admin turns this OFF
-// to remove the feature from a restaurant entirely (hides every rung below).
+// ⚠️ RETIRED 2026-08-06 — KEPT ONLY SO THE KEY SHAPE IS STILL DOCUMENTED. NOTHING READS THESE.
+//
+// `power_<flag>` was the OLD ladder's "may the admin allow this power at all" rung. It is now
+// unwritable by any code path in the product: the one and only writer of owner_entitlements is
+// app/api/admin/restaurants/access-tree/route.ts, which allow-lists from SECTION_ENTITLEMENTS —
+// owner PAGE keys — and the New-restaurant form's copy of the old ladder went on 2026-08-06.
+// So every power_<flag> is permanently absent, every read of it was permanently "allowed", and
+// it was a SECOND cap on an idea that already has a switch: access_config[flag].on, the Feature
+// half of that row on the Access screen. Two mechanisms for one idea is what the access model
+// exists to remove, so the five readers (editor ×3, inventory, staffProfile, owner/staff) were
+// deleted and each says where the live cap lives instead.
+//
+// Do not wire this back up. If a power needs an admin-level "does this restaurant have it",
+// that is a `has` row in lib/accessTree.ts — which is switchable, visible and audited.
 export function powerEntitled(rawEntitlements: unknown, flag: string): boolean {
   const key = powerEntitlementKey(flag);
   const v = rawEntitlements && typeof rawEntitlements === "object" ? (rawEntitlements as Record<string, unknown>)[key] : undefined;

@@ -26,7 +26,6 @@ import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { panelRestaurantId } from "@/lib/panelScope";
 import { inventoryLadder } from "@/lib/tableTags";
 import { panelFailure } from "@/lib/panelFailure";
-import { powerEntitlementKey } from "@/lib/ownerEntitlements";
 import { managerGrantValue, isConfigurableGrant } from "@/lib/accessTree";
 
 export const dynamic = "force-dynamic";
@@ -74,7 +73,11 @@ async function invCan(g: { user: StaffUser | null }, rid: string, flag: "inv_sto
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  if (isConfigurableGrant(flag) && r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
+  // The old ladder's admin cap (power_<flag>) left on 2026-08-06 — nothing can write
+  // owner_entitlements except the access-tree route, and that allow-lists owner PAGE keys only,
+  // so this was permanently true. The live cap for a configurable grant is access_config[flag].on,
+  // checked above, which is the Feature half of that row on the Access screen. (Same change as
+  // app/api/editor/[...path]/route.ts — the two must answer a manager identically.)
   const ov = u.permissions?.[flag];
   if (ov === "on" || ov === "pin") return true;
   if (ov === "off") return false;

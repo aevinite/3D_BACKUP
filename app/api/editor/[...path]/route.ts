@@ -38,7 +38,7 @@ import { worthLogging, pgError } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
 import { panelFailure } from "@/lib/panelFailure";
-import { MANAGER_POWER_FLAGS, powerEntitlementKey, getOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { MANAGER_POWER_FLAGS, getOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
@@ -70,7 +70,7 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 // super-user (g.user===null) and the OWNER always may; a plain manager only if the
 // owner switched that capability flag ON for this restaurant (mig 091 + the owner's
 // "Staff & powers" page) AND the admin still entitles that power at all (mig 133 —
-// power_<flag> in owner_entitlements; absent = entitled). Both columns come back in
+// the row's own Feature half). Both columns come back in
 // ONE select, so the ladder check adds no extra round trip. Enforces give_discounts /
 // void_bills / edit_menu / view_dashboard server-side so hiding a button is never
 // the only guard.
@@ -82,10 +82,13 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
     // from the ADMIN rung (owner, 2026-07-25): when the admin turns menu editing OFF the
     // owner also drops to a read-only "View menu" — matching the ladder (a rung that's off
     // is refused by the server, not merely hidden). No extra DB read for any other power.
-    if (flag !== "edit_menu") return true;
-    const e = (await sb.from("restaurants").select("owner_entitlements").eq("id", rid).maybeSingle()).data as
-      { owner_entitlements?: Record<string, boolean> } | null;
-    return e?.owner_entitlements?.[powerEntitlementKey("edit_menu")] !== false;
+    // The owner's menu-editing cascade used to read owner_entitlements.power_edit_menu, which no
+    // screen has been able to write since the old ladder went — so it answered "allowed" for every
+    // restaurant, always. The ADMIN's real switch for menu editing is the Feature half of
+    // Access → Manager → Edit menu (access_config.menus.manager.editor) plus the owner's own
+    // "Edit menu" page row (owner_entitlements.menu), and both are enforced where they belong.
+    // Reading a key nothing can set is the dead-switch shape this model removes. (2026-08-06)
+    return true;
   }
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: Record<string, { on?: boolean }> } | null;
@@ -94,10 +97,16 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   // the first — switched off, nobody has it whatever their own default or override says, which is
   // why it is checked before them. Absent means ON, so nothing changes until it is switched off.
   if (r?.access_config?.[flag]?.on === false) return false;
-  // The admin cap from the OLD ladder. It is still honoured for a power the Access screen still
-  // offers — but a RETIRED power's cap is unreachable now (no screen writes power_*), so an old
-  // stored `false` would lock a manager out forever with nothing able to undo it.
-  if (isConfigurableGrant(flag) && r?.owner_entitlements?.[powerEntitlementKey(flag)] === false) return false;
+  // THE OLD LADDER'S ADMIN CAP IS GONE (sweep T6, 2026-08-06). `power_<flag>` was the pre-rebuild
+  // "may the admin allow this power at all" rung, and it is now unwritable by ANY code path: the
+  // one and only writer of owner_entitlements is the access-tree route, which allow-lists from
+  // SECTION_ENTITLEMENTS (owner PAGE keys), and the create form's copy went on 2026-08-06. So the
+  // key is permanently absent, this line was permanently true, and it was a second cap on an idea
+  // that already has a switch — `access_config[flag].on`, checked immediately above, which IS the
+  // Feature half of the row on the Access screen. Two mechanisms for one idea is what this model
+  // exists to remove. Verified before deleting: no restaurant on the backup stack has any
+  // power_<flag> stored false, so this changes nothing for anyone today, and nothing can write
+  // one tomorrow.
   // Per-person override (access panel → Per person, mig 115 staff_users.permissions):
   // an individual's setting WINS over the restaurant-wide owner→manager grant, but never
   // over the admin cap above. 'on'/'pin' = allow this person, 'off' = deny them, absent/
@@ -126,15 +135,16 @@ async function platformOrParcelCan(g: { user: StaffUser | null }, rid: string, s
 
 // Activity-log visibility (owner 2026-07-24, access panel "Activity log" power). Deliberately
 // NON-BREAKING: a manager keeps the log UNLESS the admin or owner has EXPLICITLY switched
-// view_logs off in the access panel (owner_entitlements.power_view_logs === false, or
-// manager_permissions.view_logs === false). An absent flag = keep it (every restaurant that
+// view_logs off in the access panel (manager_permissions.view_logs === false). An absent flag =
+// keep it (every restaurant that
 // never touched the new panel is unchanged). Owner + admin (no staff cookie) always see it.
 async function canViewLogs(g: { user: StaffUser | null }, rid: string): Promise<boolean> {
   const u = g.user;
   if (!u || u.role === "owner") return true;
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean> } | null;
-  if (r?.owner_entitlements?.power_view_logs === false) return false;   // admin removed the whole power
+  // (power_view_logs left with the rest of the old admin-cap rung on 2026-08-06 — see managerCan.
+  //  The admin's switch for this menu is the Feature half of Access → Manager → Audit & logs.)
   // Per-person override (mig 115) — same precedence as managerCan: the individual's
   // setting wins over the restaurant-wide grant but never over the admin cap above (it
   // was accepted by set_permissions but never read here — a stored-but-dead key, fixed
@@ -596,20 +606,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const flags = Array.from(new Set([...MANAGER_POWER_FLAGS, ...GRANT_FLAGS]));
       const cfgOn = (r?.access_config || {}) as Record<string, { on?: boolean }>;
       for (const flag of flags) {
-        // The same four rungs managerCan() applies, in the same order, so what the panel
-        // SHOWS and what the server ALLOWS can never disagree:
+        // The same THREE rungs managerCan() applies, in the same order, so what the panel SHOWS
+        // and what the server ALLOWS can never disagree:
         //   1. the feature half — does the restaurant have the thing at all
-        //   2. the admin cap on a configurable grant
-        //   3. this person's own override
-        //   4. otherwise the restaurant's grant (managerGrantValue = the one rule)
-        const entitled = ents[powerEntitlementKey(flag)] !== false;
+        //   2. this person's own override
+        //   3. otherwise the restaurant's grant (managerGrantValue = the one rule)
+        // (There were four until 2026-08-06. The old `power_<flag>` admin cap left both sides
+        //  together — see managerCan — so this stays in step with it rather than drifting into
+        //  showing a power the server would refuse, or hiding one it would allow.)
         const hasFeature = cfgOn[flag]?.on !== false;
         let granted = managerGrantValue(flag, perms[flag]);
         const ov = myOv[flag];
         if (ov === "on" || ov === "pin") granted = true;
         else if (ov === "off") granted = false;
-        effectivePowers[flag] = hasFeature && entitled && granted;
-        offByAdmin[flag] = !entitled || !hasFeature;
+        effectivePowers[flag] = hasFeature && granted;
+        offByAdmin[flag] = !hasFeature;
       }
       // Feature-module rung (canonical ladder): a capability whose MODULE is off for this
       // restaurant renders nothing anywhere in the panel — the power flags above are the

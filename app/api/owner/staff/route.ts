@@ -24,7 +24,7 @@ import { logAction } from "@/lib/oplog";
 // `capsForRole()` (lib/staffCaps), the one list the Access screen and the admin write route use.
 // A second hand-picked constant is what let `delete_bill` be a manager row on screen and an
 // "Unknown permission" here (fixed 2026-08-04).
-import { mergeOwnerEntitlements, powerEntitled, entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
+import { mergeOwnerEntitlements, entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { managerSettingsOff } from "@/lib/accessTree";
 import { enabledOwnedRestaurantIds, OwnedLookupFailed } from "@/lib/panelAccess";
 import { banquetLadder, tableTagsLadder, khataLadder, tableOpsLadder, takeOrdersLadder, parcelLadder } from "@/lib/tableTags";
@@ -918,8 +918,15 @@ async function patchImpl(req: NextRequest): Promise<Response> {
         } else { // manager-power override
           if (u.role !== "manager")
             return bad("These per-person powers apply to manager accounts.", 400);
-          if (!powerEntitled(await ents(), k))
-            return bad("The admin hasn't allowed this power for the restaurant — you can't grant it.", 403);
+          // The admin's "may this restaurant have this power at all" rung is
+          // access_config[flag].on — the Feature half of the row on the Access screen — and
+          // managerCan() enforces it on every request this override could ever affect. It used to
+          // be checked here as powerEntitled(power_<flag>), a key nothing has been able to write
+          // since the old ladder went, so the refusal could never fire. (sweep T6, 2026-08-06)
+          const feat = (await sb.from("restaurants").select("access_config").eq("id", u.restaurant_id).maybeSingle())
+            .data?.access_config as Record<string, { on?: boolean }> | null;
+          if (feat?.[k]?.on === false)
+            return bad("That feature is switched off for this restaurant by the admin — you can't grant it.", 403);
         }
       }
       merged[k] = String(v); noted.push(`${k}→${v}`);

@@ -146,15 +146,31 @@ async function dashRail(frame) {
   }));
 }
 
-// The one rule, checked identically for every viewer: Today is there, Yesterday is there when
-// (and only when) this restaurant's Access setting reaches that far, and NOTHING wider exists.
+// The one rule, checked identically for every viewer, and it depends on the REACH:
+//
+//   reach "today"            → there is NO rail at all. A picker with one option is a control
+//                              with nothing to choose, which is the dead control this model
+//                              removes — dashRangeToggleHtml() returns "" and that is CORRECT.
+//   reach "today_yesterday"  → BOTH rows, and nothing wider than yesterday, ever.
+//
+// THIS CHECK USED TO DEMAND "Today is there" UNCONDITIONALLY (fixed 2026-08-06). Every restaurant
+// starts on today-only, so the guard failed three times on a panel that was behaving exactly as
+// designed — on main, on the deployed backup, for who knows how long. A red line that is not a
+// real fault is how a real one gets skimmed past, which is the same lesson verify-access-search
+// learned the same day. The wider-than-yesterday rule is unchanged and still absolute: the owner
+// deleted the 30-day and Year rows on 2026-08-03 ("there is literally no need for it").
 function checkRail(who, rail) {
   const wide = rail.keys.filter((k) => k !== "today" && k !== "yesterday");
   check(`${who}: no wider-than-yesterday range row exists at all`, wide.length === 0, JSON.stringify(rail.keys));
-  check(`${who}: Today row is there`, rail.shown.includes("today"), JSON.stringify(rail.shown));
   const wantY = rail.reach === "today_yesterday";
-  check(`${who}: Yesterday row ${wantY ? "IS" : "is NOT"} offered (setting says ${rail.reach})`,
-    rail.shown.includes("yesterday") === wantY, JSON.stringify(rail.shown));
+  if (!wantY) {
+    check(`${who}: no day-picker at all when the reach is today-only`, rail.keys.length === 0,
+      `rail keys: ${JSON.stringify(rail.keys)} — a one-option picker is a control with nothing to choose`);
+    return;
+  }
+  check(`${who}: Today row is there`, rail.shown.includes("today"), JSON.stringify(rail.shown));
+  check(`${who}: Yesterday row IS offered (setting says ${rail.reach})`,
+    rail.shown.includes("yesterday"), JSON.stringify(rail.shown));
 }
 const SCREENS = ["general", "tables", "dash"];
 

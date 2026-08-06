@@ -818,6 +818,30 @@ export const SECTIONS: Section[] = [
             what: "The owner's Staff & powers page — create staff logins and set what each person may do." },
           { id: "own_menu", name: "Edit menu", def: true, bind: { t: "section", key: "menu" },
             what: "The owner's own Menu page — the same dishes/categories editor, in the owner panel." },
+          // ── THE FOUR PAGES THAT WERE ENFORCED WITH NO ROW (sweep T6, 2026-08-06) ──────────
+          // reports / customers / issues / settings are real owner pages: OwnerShell gates the
+          // nav on them and /api/owner/{analytics,customers,issues,settings} all refuse through
+          // entitledSubset(). They had NO switch anywhere. The only screen that ever wrote them
+          // was the New-restaurant form's access block, so once that was removed (2026-08-06) an
+          // admin could not set them at all — and a restaurant carrying an old stored `false`
+          // would have had an owner locked out of a page with nothing able to give it back.
+          //
+          // The precedent is `own_access` directly above: the rebuild found "staff" enforced-
+          // but-unswitchable and gave it its one switch. These four are the same shape and were
+          // simply missed. The owner panel even sends you HERE for them — its "this section is
+          // off" popover deep-links to /aevinite/access?focus=<ent> (OwnerShell), which until now
+          // landed on a page with no such row.
+          //
+          // def: true everywhere, and an absent key already reads as ON, so adding these rows
+          // changes nothing for any restaurant until somebody deliberately switches one off.
+          { id: "own_reports", name: "Reports", def: true, bind: { t: "section", key: "reports" },
+            what: "The owner's Reports page — sales, tax, payments, dishes, staff and the day book. This is also what gates the money figures behind it, so switching it off hides the numbers, not just the link." },
+          { id: "own_customers", name: "Customers", def: true, bind: { t: "section", key: "customers" },
+            what: "The owner's Customers page — the guests who have given a name or a number, what they have spent, and the blocklist. Nothing about a guest stops being RECORDED when this is off; it only stops being shown." },
+          { id: "own_issues", name: "Feedback & complaints", def: true, bind: { t: "section", key: "issues" },
+            what: "The page where the owner reads what guests complained about and marks it handled. Off removes the page — the complaints are still collected and still reach the manager panel." },
+          { id: "own_settings", name: "Settings", def: true, bind: { t: "section", key: "settings" },
+            what: "The owner's own Settings page — their panel's appearance, their password, and what their restaurant has switched on. It is not a permissions screen: an owner configures no permission anywhere." },
           // Renamed from "Ratings" (owner, 2026-08-02: "rating review").
           { id: "own_ratings", name: "Rating review", def: true, bind: { t: "section", key: "ratings" },
             what: "The owner's Rating review page — guest stars and written feedback." },
