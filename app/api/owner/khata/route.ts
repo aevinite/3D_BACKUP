@@ -58,7 +58,24 @@ export async function GET(req: NextRequest) {
     sb.rpc("lfh_khata_collected", { p_restaurant_ids: moduleIds, p_from: istMonthStartIso(), p_to: nowIso }),
     sb.rpc("lfh_khata_collected", { p_restaurant_ids: moduleIds, p_from: businessDayStartIso(), p_to: nowIso }),
   ]);
-  if (outQ.error) return NextResponse.json({ error: outQ.error.message }, { status: 500 });
+  // A HALF-READ MONEY FIGURE IS THE THING THIS FILE ALREADY REFUSES TO PRINT (T9 sweep,
+  // 2026-08-06). Only `outQ` was checked. `collMonthQ` / `collTodayQ` went straight into
+  // `sumColl()`, which reduces `q.data || []` — so an errored collection read became a confident
+  // "collected today ₹0" printed beside a correct "total outstanding". That is a cash-reconciliation
+  // number: the owner compares it against the till, and ₹0 says "nobody paid off their khata today",
+  // which is a different statement from "we couldn't read it". The same reasoning as this route's own
+  // `scopedRestaurantIds` catch a few lines up ("answered as a retryable failure rather than a wrong
+  // figure") and as `RestaurantListIncomplete` itself. All three reads are now one verdict.
+  const readFailed = outQ.error || collMonthQ.error || collTodayQ.error;
+  if (readFailed) {
+    // The database's own words stay our side — the owner gets a sentence they can act on (the rule
+    // /api/maintenance was fixed for on 2026-08-05).
+    console.error("[owner/khata] read failed:", readFailed.message);
+    return NextResponse.json(
+      { error: "Couldn't load the Pay Later figures just now — please try again.", transient: true },
+      { status: 503 },
+    );
+  }
 
   const rows = (outQ.data || []) as Array<{
     restaurant_id: string; khata_customer_id: string; name: string; phone: string | null;

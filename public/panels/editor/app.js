@@ -6252,6 +6252,9 @@ const OP_ACTION_LABELS = {
   // sentences. The guard now reads both branches; these are the codes it was missing.
   payroll_add: "Put on the payroll", payroll_remove: "Took off the payroll",
   staff_enable: "Enabled a staff member",
+  // T9 sweep, 2026-08-06: renaming a login was not recorded at all until now (it changes the name
+  // the person signs in with). Labelled here in the same breath so the new code can never print raw.
+  staff_rename: "Changed a staff login name",
   issue_resolved: "Resolved a complaint", issue_reopened: "Reopened a complaint",
   restaurant_reactivate: "Reactivated a restaurant", restaurant_suspend: "Suspended a restaurant",
   error_reopened: "Reopened a problem",

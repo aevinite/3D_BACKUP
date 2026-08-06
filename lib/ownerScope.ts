@@ -158,3 +158,38 @@ export function incompleteListResponse(): Response {
     { status: 503 },
   );
 }
+
+// ── NEVER HAND THE DATABASE'S OWN WORDS TO AN OWNER (T9 sweep, 2026-08-06) ────────────────────────
+//
+// Nine owner endpoints each wrote their own `{ error: error.message }` 500 — the raw
+// PostgREST/Postgres sentence. `/api/maintenance` was fixed for exactly this on 2026-08-05: *"a
+// malformed ?rid= put 'invalid input syntax for type uuid' on a manager's screen — meaningless to
+// them, and internal to us."* Nothing here is dangerous; it just sends an owner to support holding a
+// sentence about our schema instead of a "please try again".
+//
+// `/api/owner/reports` already modelled the right shape by translating a statement timeout (57014)
+// into advice, so that case is folded in here rather than left as a tenth local copy.
+//
+// Retryable by default (503 + `transient`), because that is what a read failure almost always is and
+// it tells the client it may try again. Pass `status: 500` for a genuinely non-retryable one.
+export function dbFail(
+  where: string,
+  err: unknown,
+  opts?: { message?: string; status?: number },
+): Response {
+  const raw = err instanceof Error ? err.message
+    : (err && typeof err === "object" && "message" in err) ? String((err as { message: unknown }).message)
+    : String(err);
+  const code = err && typeof err === "object" && "code" in err ? String((err as { code: unknown }).code) : "";
+  // The detail stays OUR side — this is the only place it is allowed to appear.
+  console.error(`[${where}] read failed${code ? ` (${code})` : ""}:`, raw);
+  // A statement timeout is the one database condition an owner CAN act on, so it keeps its advice.
+  const timedOut = code === "57014" || /statement timeout/i.test(raw);
+  const message = timedOut
+    ? "That took too long to build. Try a shorter period, or one restaurant at a time."
+    : (opts?.message ?? "Couldn't load that just now — please try again.");
+  return Response.json(
+    { error: message, transient: !timedOut },
+    { status: opts?.status ?? (timedOut ? 504 : 503) },
+  );
+}

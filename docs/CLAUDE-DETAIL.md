@@ -376,7 +376,25 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
   - `/api/rt-config` returns only the PUBLIC Supabase url + anon key (already shipped inside the
     guest bundle) plus which restaurant the caller's panel belongs to. No cookie → restaurant #1.
   - `/api/aggregators/webhook/<source>` is an inbound POST from Zomato/Swiggy, so it cannot carry
-    our cookie; it is dormant until the `aggregators` flag is on and verifies a shared secret.
+    our cookie; it is dormant until the `aggregators` flag is on, and it now REFUSES unless a shared
+    secret is configured AND matches (constant-time). Before 2026-08-06 a missing secret meant
+    "accept", so turning the flag on before setting the env var opened it — the flag and the secret
+    are independent switches, and only one of them was doing any work.
+- **Doors and no-op reads** (the OTHER complete list — these are absent from the list above and
+  correctly have no login gate, because they either ARE the login door or answer nothing. Added
+  2026-08-06: the rule "an API route absent from here must have a gate" was pointing a future audit at
+  four correct routes):
+  - `/api/staff-login` — the ADMIN door. Its own protection is the IP-keyed lockout
+    (`lib/loginThrottle`, mig 151) + a constant-time compare, not a cookie.
+  - `/api/panel-login` — the STAFF door. Protected by the per-username rate limit (mig 205) and
+    `loginUser`'s per-account lockout; an unknown restaurant slug gets the same generic refusal as a
+    wrong password, so it never confirms which slugs exist.
+  - `/api/panel-logout` / `/api/staff-logout` — clearing your own cookie needs no permission.
+    `/api/staff-logout` is POST-only (2026-08-05: a GET that changes state fires from anything that
+    merely POINTS at it); `/api/panel-logout` still offers both shapes.
+  - `/api/panel-profile` **GET** — deliberately answers `200 {staff:false}` with no cookie rather than
+    401, because the admin's super-access view has no per-user profile and a 401 there filed a fake
+    problem in the error log on all six panels (2026-07-28). Its **POST** does require a login.
 
 `ADMIN_PASSWORD` is in `.env.local` (must also be set in the Vercel project env for the gate to
 work in prod). **If you re-introduce a middleware, update this section in the same commit.**

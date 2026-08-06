@@ -19,7 +19,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope } from "@/lib/ownerScope";
+import { ownerScope, dbFail } from "@/lib/ownerScope";
 import { getOwnerEntitlementsUnion, mergeOwnerEntitlements, entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic"; // always fresh — these are live numbers
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
   // (admin). The `allow` filter below stays as cheap defense-in-depth.
   const pIds = scope.all ? null : scope.ids;
   const { data, error } = await sb.rpc("lfh_owner_overview", { p_ids: pIds });
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return dbFail("owner/overview", error, { message: "Couldn't load your restaurants just now — please try again." });
 
   // Numerics arrive as strings over the wire — coerce once here so the client
   // gets clean numbers and the totals add up.

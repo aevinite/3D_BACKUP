@@ -328,6 +328,21 @@ export async function GET(req: NextRequest) {
   const payable = s.restaurants.filter((r) => accessByRid[r.id]?.canSeePay);
   const paySummaries = await Promise.all(
     payable.map((r) => sb.rpc("lfh_staff_pay_summary", { p_restaurant: r.id, p_from: from, p_to: to })));
+  // A ZEROED SALARY IS A CLAIM, NOT AN ABSENCE (T9 sweep, 2026-08-06). Nothing inspected `error`
+  // here, so a failed summary left that restaurant out of the `money` map and every one of its
+  // people fell back to `paidThisMonth: 0` — the roster then printed "₹0 paid this month" for
+  // people who HAD been paid. That is the shape that starts a "you never paid me" argument, and it
+  // is the same fault this very block's comment argues against ("a stale money figure is worse than
+  // a small live query"): a silently zeroed one is worse than either.
+  //
+  // The roster is mostly NOT money, so a pay blip must not fail the whole screen (unlike
+  // /api/owner/khata, where the page IS the money). Instead the figures are left OFF the row and
+  // `payUnread` says why, so the screen can state it plainly instead of stating a zero.
+  const payUnread = paySummaries.some((q) => q.error);
+  if (payUnread) {
+    console.error("[owner/staff] pay summary read failed:",
+      paySummaries.find((q) => q.error)?.error?.message);   // detail our side, not the owner's screen
+  }
   for (const { data } of paySummaries) {
     for (const row of (data || []) as any[]) {
       money[row.staff_id] = { paid: Number(row.paid || 0), advance: Number(row.advance_outstanding || 0), last: row.last_paid_on || null };
@@ -345,9 +360,12 @@ export async function GET(req: NextRequest) {
       ...u,
       profileEligible: eligible,
       completeness: eligible ? { filled: c.filled, total: c.total } : null,
-      paidThisMonth: m?.paid ?? 0,
-      advanceOutstanding: m?.advance ?? 0,
-      lastPaidOn: m?.last ?? null,
+      // When the summary couldn't be read, send NO figure at all + the reason. `money(undefined)`
+      // renders "₹0" just like `money(0)` does, so leaving the key out is not enough on its own —
+      // `payUnread` is what lets the screen say "couldn't read" instead of naming an amount.
+      ...(payUnread
+        ? { payUnread: true }
+        : { paidThisMonth: m?.paid ?? 0, advanceOutstanding: m?.advance ?? 0, lastPaidOn: m?.last ?? null }),
     };
     return acc?.canSeePay ? row : withoutPay(row);
   });
@@ -926,6 +944,26 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     if (!Object.keys(patch).length) return bad("Nothing to change.");
     const { error } = await sb.from("staff_users").update(patch).eq("id", id);
     if (error) return bad("Couldn't save those changes — please try again.", 500);
+    // THE ONE CHANGE HERE THAT STOPS SOMEONE SIGNING IN, AND IT WAS UNRECORDED (T9 sweep,
+    // 2026-08-06). `username` IS the login key (normalizeLoginName, unique per restaurant), so a
+    // rename means the name that person has always typed no longer works. Every sibling action in
+    // this handler logs — staff_create, staff_reset_password, staff_enable/disable, staff_set_role,
+    // staff_set_permissions, staff_profile_edit, staff_job_edit, staff_delete — and this one didn't,
+    // so "my login stopped working" had no answer anywhere in the Activity log.
+    // BOTH names are recorded, because the OLD one is what the person will tell you they were using.
+    // (The admin's twin at app/api/admin/users `edit` stays deliberately unlogged — admin actions
+    // are kept out of this log on purpose, per the standing "admin = top power, invisibly" rule.)
+    if (patch.username && patch.username !== u.username) {
+      await logAction("owner", "staff_rename", {
+        restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId,
+        detail: `login name "${u.username}" → "${patch.username}"${patch.phone !== undefined ? " (phone also updated)" : ""}`,
+      });
+    } else if (patch.phone !== undefined) {
+      await logAction("owner", "staff_profile_edit", {
+        restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId,
+        detail: `updated "${u.username}" phone number`,
+      });
+    }
     return ok({ ok: true });
   }
   return bad("Unknown action.");

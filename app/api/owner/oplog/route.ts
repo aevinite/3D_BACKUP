@@ -14,7 +14,7 @@
 // a hard limit — never a whole-table read.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope } from "@/lib/ownerScope";
+import { ownerScope, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset, mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 
@@ -99,7 +99,7 @@ export async function GET(req: NextRequest) {
   }
 
   const r = await q;
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return dbFail("owner/oplog", r.error, { message: "Couldn't load the activity log just now — please try again." });
   let rows = r.data ?? [];
 
   // Stamp each row with its restaurant NAME so a multi-restaurant owner can tell them apart

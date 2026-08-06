@@ -23,7 +23,10 @@ export async function POST(req: NextRequest, ctx: Ctx) {
   if (!(await aggregatorsEnabled())) {
     return NextResponse.json({ ok: false, disabled: true }, { status: 200 });
   }
-  if (!verifyWebhook(source as AggSource, req.headers.get("x-webhook-secret"))) {
+  // `await` MATTERS: verifyWebhook is async now (it hashes both sides for a constant-time compare).
+  // Without it this would test a Promise — always truthy — and the 401 would be unreachable, which is
+  // the exact fault /api/issue-media shipped with until the 2026-08-04 sweep found it.
+  if (!(await verifyWebhook(source as AggSource, req.headers.get("x-webhook-secret")))) {
     return NextResponse.json({ error: "bad signature" }, { status: 401 });
   }
   let payload: Record<string, unknown> = {};

@@ -70,9 +70,26 @@ export async function signOne(bucket: PrivateBucket, stored: string | null | und
 }
 
 /**
- * Sign the named fields on every row, in ONE pass, mutating a COPY. Signing is a local HMAC in
- * supabase-js (no network call per link), so a list of 300 rows costs microseconds — but the calls
- * are still batched with Promise.all so nothing serialises.
+ * Sign the named fields on every row, in ONE pass, mutating a COPY.
+ *
+ * ── ONE REQUEST, NOT ONE PER LINK (T9 sweep, 2026-08-06) ────────────────────────────────────────
+ * This used to `Promise.all` a per-row `signOne`, justified by a comment that said *"signing is a
+ * local HMAC in supabase-js (no network call per link), so a list of 300 rows costs microseconds"*.
+ * That is not what the installed client does: `createSignedUrl` posts to
+ * `/storage/v1/object/sign/<path>` — one HTTP round-trip per link
+ * (node_modules/@supabase/storage-js → StorageFileApi.createSignedUrl). So the owner's
+ * Inventory → Expenses report, capped at 300 photographed slips, fired up to 300 concurrent requests
+ * to Supabase Storage on a single open, and the merged multi-restaurant branch did it again.
+ *
+ * That mattered because the calling route caps every OTHER fan-out at 6–8 for precisely this reason
+ * ("a bare Promise.all fires them all at once and can saturate the pool / time out", audit
+ * 2026-07-07) — the cap was skipped HERE because of the false premise. A wrong comment that reads
+ * like a finished decision is worse than no comment.
+ *
+ * `createSignedUrls` (plural) signs a whole list of paths in ONE request, so that is what this uses
+ * now: collect the distinct paths, sign them together, map the results back. Failure behaviour is
+ * unchanged — anything that can't be signed keeps its original stored value, so a Storage hiccup
+ * degrades one image rather than failing the report.
  *
  * Usage at the end of a route, right before the response:
  *     const out = await signRows("inv-media", rows, ["photo_url"]);
@@ -84,16 +101,54 @@ export async function signRows<T extends Record<string, unknown>>(
 ): Promise<T[]> {
   const list = rows || [];
   if (!list.length) return list as T[];
-  return Promise.all(list.map(async (row) => {
-    let copy: T | null = null;                      // only clone a row that actually has media
+
+  // 1. Collect the DISTINCT object paths that actually need signing. Distinct matters: the same slip
+  //    can appear on two rows, and there is no reason to pay for it twice.
+  const pathByValue = new Map<string, string>();     // stored value → object path
+  for (const row of list) {
+    for (const f of fields) {
+      const v = row?.[f];
+      if (typeof v !== "string" || !v || pathByValue.has(v)) continue;
+      const path = pathOf(bucket, v);
+      if (path) pathByValue.set(v, path);
+    }
+  }
+  if (!pathByValue.size) return list as T[];
+
+  // 2. ONE call for all of them.
+  //    Results are matched back by the `path` each entry carries, NOT by array index: two different
+  //    stored forms (a bare path and an old full public URL) can resolve to the SAME object path, and
+  //    a short or reordered response would otherwise shift every link onto the wrong row — which
+  //    would put one restaurant's expense slip on another's line. Each entry has its own `error`, so
+  //    one bad path does not spoil the batch.
+  const valuesByPath = new Map<string, string[]>();
+  for (const [value, path] of pathByValue) {
+    const arr = valuesByPath.get(path);
+    if (arr) arr.push(value); else valuesByPath.set(path, [value]);
+  }
+  const signedByValue = new Map<string, string>();
+  try {
+    const { data, error } = await sb.storage.from(bucket).createSignedUrls([...valuesByPath.keys()], TTL_SECONDS);
+    if (!error && data) {
+      for (const d of data) {
+        if (!d?.signedUrl || d.error || !d.path) continue;
+        for (const value of valuesByPath.get(d.path) ?? []) signedByValue.set(value, d.signedUrl);
+      }
+    }
+  } catch { /* fall through — every value simply keeps its stored form */ }
+  if (!signedByValue.size) return list as T[];
+
+  // 3. Map back, cloning only the rows that actually changed (unchanged rows keep their identity).
+  return list.map((row) => {
+    let copy: T | null = null;
     for (const f of fields) {
       const v = row?.[f];
       if (typeof v !== "string" || !v) continue;
-      const signed = await signOne(bucket, v);
-      if (signed === v) continue;
+      const signed = signedByValue.get(v);
+      if (!signed || signed === v) continue;
       copy = copy ?? ({ ...row } as T);
       (copy as Record<string, unknown>)[f] = signed;
     }
     return copy ?? row;
-  }));
+  });
 }
