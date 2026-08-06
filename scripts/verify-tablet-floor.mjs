@@ -503,9 +503,18 @@ await F.waitForSelector(".set-overlay", { timeout: 6000 });
 // 55×18px, underlined, #0000EE, about 1.9:1 against the dark panel — because the .dw-btn look
 // was scoped to .tbl-drawer and this sheet is mounted outside it. The old check only asked
 // `offsetParent !== null`, which an invisible link satisfies (caught in review, 2026-08-04).
+//
+// IT IS NOW A FORM POSTING TO /api/panel-logout, not a link (T9 improvement 13, 2026-08-06):
+// /api/panel-logout is POST-only, because a GET that ends a session fires from anything that merely
+// POINTS at the URL — a waiter could be signed out mid-service. This selector was still hunting for
+// the old `<a href>` and so reported the control MISSING when it was there and correct (measured on
+// the live tablet: 324×45px, Δ152 on the dark skin, Δ179 on the light, weight 700, no underline).
+// Both shapes are accepted so the check keeps working whichever way it is built; what it actually
+// guards — that the thing is a real, readable control in BOTH skins — is unchanged.
 {
   const lo = await F.evaluate(() => {
-    const el = document.querySelector('.set-overlay a[href="/api/panel-logout"]');
+    const el = document.querySelector('.set-overlay form[action="/api/panel-logout"] button')
+            || document.querySelector('.set-overlay a[href="/api/panel-logout"]');
     if (!el) return null;
     const lum = (c) => { let m = (c.match(/[\d.]+/g) || [0, 0, 0]).map(Number); if (/^color\(/.test(c)) m = m.map((x) => x * 255); return 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2]; };
     const contrastNow = () => {
