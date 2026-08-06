@@ -14,7 +14,7 @@ import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { liveOrdersAndItems } from "@/lib/liveBoard";
 import { requireRole, type StaffUser } from "@/lib/userAuth";
 import { notifyAggregator } from "@/lib/aggregators";
-import { platformLadder, parcelLadder } from "@/lib/tableTags";
+import { platformLadder, parcelLadder, tableTagsLadder } from "@/lib/tableTags";
 import { panelRestaurantId, emptyIdSegment } from "@/lib/panelScope";
 import { invalidateFloor } from "@/lib/floorSummary";
 import { raiseIssue } from "@/lib/issues";
@@ -42,6 +42,35 @@ async function gate(req: NextRequest): Promise<{ user: StaffUser | null } | Next
 //  also honours the admin's "view as" restaurant.)
 
 const nowIso = () => new Date().toISOString();
+
+// Which tables carry a special mark right now — { "6": "vip", "12": "family" }.
+//
+// The kitchen ticket draws a 👑 VIP / 🏠 FAMILY / 🤝 GUEST badge so a cook can pull a marked
+// table's food forward. It used to read `o.tag`, a column that does not exist on `orders`, so the
+// badge never once rendered (T4 sweep, 2026-08-06). Orders don't carry the mark — the TABLE does —
+// so the board ships the map and the panel looks the ticket's table up in it.
+//
+// Empty when the module isn't effective for this restaurant, matching the manager floor and the
+// waiter tablet: a mark nobody can set or clear must not appear on paper or on the pass. Only
+// marked tables have a row here, so this is a handful of rows at most.
+async function tableTagMap(rid: string): Promise<Record<string, string>> {
+  try {
+    if (!(await tableTagsLadder(rid)).effective) return {};
+    const rows = (await sb.from("table_tags").select("table_number, tag")
+      .eq("restaurant_id", rid).limit(500)).data as { table_number: unknown; tag: unknown }[] | null;
+    const out: Record<string, string> = {};
+    for (const r of rows || []) {
+      const t = String(r?.table_number ?? "").trim();
+      const tag = String(r?.tag ?? "").trim();
+      if (t && tag) out[t] = tag;
+    }
+    return out;
+  } catch {
+    // A mark is decoration on a cooking ticket. If this read fails the board must still arrive —
+    // losing a badge is survivable, losing the pass is not.
+    return {};
+  }
+}
  
 // Keep the SQLSTATE on the thrown error: lib/dbRefusal reads it to tell a refused VALUE (400,
 // the person must see it) from the server failing to answer (500, saved and retried).
@@ -98,13 +127,22 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (tbl) {
         // activeOnly=true: the kitchen board only shows received/preparing orders (a served
         // one has left the board), so we filter server-side — no point shipping served rows.
-        const live = await liveOrdersAndItems(rid, [tbl], true);
-        return ok({ orders: live.orders, items: live.items });
+        // tableTags rides along on the TARGETED path too, and it has to: marking a table VIP
+        // writes `table_tags`, whose breadcrumb carries that table's number, so the kitchen
+        // answers it with THIS slice — not a full board read. Leave the tags out here and the
+        // badge only appears on the next full refresh (up to 60s later), which is the whole
+        // point of the mark. It's a two-column read of a table that only holds MARKED tables,
+        // so it is far smaller than the orders it travels with.
+        const [live, tags] = await Promise.all([
+          liveOrdersAndItems(rid, [tbl], true),
+          tableTagMap(rid),
+        ]);
+        return ok({ orders: live.orders, items: live.items, tableTags: tags });
       }
       // Orders + dishes from the shared "live board" helper — today's tickets PLUS
       // any still-open session's, so a dish left cooking on an overnight table keeps
       // showing here (and matches the manager). Was a day-clipped fetch before.
-      const [live, dishes, platform, settings, restaurant, platL, parcL] = await Promise.all([
+      const [live, dishes, platform, settings, restaurant, platL, parcL, tableTags] = await Promise.all([
         liveOrdersAndItems(rid, undefined, true), // activeOnly: received/preparing only (board never shows served)
         sb.from("menu_items").select("id,title,category,tags").eq("restaurant_id", rid).order("category").limit(2000),
         // active platform (Zomato/Swiggy/takeaway) tickets — separate table, so dine-in is untouched.
@@ -123,6 +161,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
         platformLadder(rid),
         parcelLadder(rid),
+        // SPECIAL TABLE TYPES (mig 166) — 👑 VIP / 🏠 Family / 🤝 Owner's guest.
+        //
+        // The kitchen ticket has always TRIED to draw this badge, from `o.tag`. There is no such
+        // column on `orders` and this board never joined `table_tags`, so `TAG_BADGE[undefined]`
+        // was undefined and the badge was silently never rendered — for the whole life of the
+        // feature (T4 sweep, 2026-08-06). The manager floor and the waiter tablet both read the
+        // mark off the floor summary's per-tile `tag`; the kitchen renders ORDERS, not tiles, so
+        // it needs the map keyed by table number instead.
+        //
+        // Gated by the same ladder the other two panels use, so a restaurant that has the module
+        // switched off shows nothing rather than a mark nobody can clear.
+        tableTagMap(rid),
       ]);
       // Only surface tickets whose feature is live (mig 209): delivery channels (zomato/swiggy/
       // website=takeaway) when the platform module is effective AND that channel is on; parcels
@@ -171,6 +221,8 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         autoPrintKot: !!((must(settings) || {}).auto_print_kot && (must(settings) || {}).auto_print_kot_allowed),
         // { "1": "A1", … } — display names only; every id/bill still uses the number.
         tableNames: ((must(settings) || {}) as { table_names?: Record<string, string> }).table_names || {},
+        // { "6": "vip", … } — which tables are marked, so a cook can see a priority ticket.
+        tableTags,
         restaurant: must(restaurant) || null,
       });
     }

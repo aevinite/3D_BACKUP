@@ -36,8 +36,14 @@ type Row = { id: string; created_at: string; session_id?: string | null; [k: str
 // shows a due and caps a discount from these rows. Without them it has to ESTIMATE the taxable
 // part as "all of it", which is right until a bill contains an MRP bottle and then quietly
 // isn't — three numerics on an already-fetched row, no extra round-trip.
+// `archived` is fetched even though this helper already filters `.eq("archived", false)` — the
+// waiter tablet's ordersOf() tests `!o.archived` as a second line of defence, and without the
+// column that test read `!undefined` and was true for every row, i.e. it looked like a guard and
+// was not one (T4 sweep, 2026-08-06). It matters for the khata path: parking a bill sets
+// archived = true, so if a future caller ever relaxes the server-side filter, the client test is
+// what stops a parked bill reappearing on the tile. One boolean per row.
 const ORDER_COLS =
-  "id, created_at, session_id, table_number, status, payment_status, total, discount, discount_note, kot_no, member_id, allergies, items, taxable_base, nontax_amount, mrp_amount";
+  "id, created_at, session_id, table_number, status, payment_status, total, discount, discount_note, kot_no, member_id, allergies, items, taxable_base, nontax_amount, mrp_amount, archived";
 const ITEM_COLS =
   "id, order_id, title, qty, status, note, options, removed, added_allergens, removed_flag, unit_price, created_at, tax_mode, is_mrp";
 

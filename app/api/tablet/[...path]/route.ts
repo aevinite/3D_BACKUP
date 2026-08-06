@@ -972,32 +972,54 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const status = body && body.status;
       if (!["approved", "denied"].includes(status)) return err("invalid status");
       // rid-scoped: service-role bypasses RLS so .eq(restaurant_id) is the tenant boundary.
-      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).select())[0];
-      if (status === "approved" && reqRow && reqRow.type === "open") {
+      // .eq("status", "pending") IS THE POINT (added 2026-08-06, T4 sweep). The manager's identical
+      // endpoint has always had it; this one did not, so an ALREADY-resolved request could be
+      // resolved again — and because "approved" + type "open" goes on to OPEN A TABLE, a waiter
+      // tapping Approve on a stale screen could seat a party on a request a colleague had just
+      // DENIED. That produces exactly the state the owner had removed on 2026-08-01: a table the
+      // floor draws as Free while the database calls it open. Two waiters on one floor is all it
+      // takes. With the filter, the second tap matches no row and is refused out loud below.
+      const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).eq("status", "pending").select())[0];
+      // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS — the same answer every order/dish branch
+      // in this file already gives. Without it the waiter saw a success and a refreshed screen that
+      // silently disagreed with what they thought they had just done.
+      if (!reqRow) return err("Someone already answered that request — refresh to see where it stands.", 409);
+      if (status === "approved" && reqRow.type === "open") {
         const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
         if (!existing.length) await openTableSession(rid, String(reqRow.table_number)); // race-tolerant (2026-07-30)
       }
-      return ok(reqRow || null);
+      return ok(reqRow);
     }
 
     // calls/:id/attend
     if (a === "calls" && c === "attend") {
       const row = must(await sb.from("waiter_calls").update({ resolved: true }).eq("id", b).eq("restaurant_id", rid).select());
+      // The call is GONE (a manager deleted it — the editor route really does hard-delete these).
+      // This used to answer 200, so the waiter got a success AND an undo bar offering to put a call
+      // back that no longer exists — and the undo (calls/:id/reopen) was equally silent. Two taps,
+      // neither of which did anything, both reported as done. (2026-08-06, T4 sweep)
+      if (!row[0]) return err("That call is no longer on the board — refresh and try again.", 404);
       await log("call_attend", { table_number: row[0]?.table_number ?? null, device_id: dev });
-      return ok(row[0] || null);
+      return ok(row[0]);
     }
     // calls/:id/reopen — take back an accidental "attend" (owner undo bar, 2026-07-22):
     // put the guest's call back on the board so a mis-tap can't silently drop a real
     // water/bill request. Just flips resolved back to false.
     if (a === "calls" && c === "reopen") {
       const row = must(await sb.from("waiter_calls").update({ resolved: false }).eq("id", b).eq("restaurant_id", rid).select());
-      return ok(row[0] || null);
+      // Same rule as attend above: an undo that reopened nothing must say so, or the waiter believes
+      // the guest's call is back on the board when it isn't.
+      if (!row[0]) return err("That call no longer exists, so it can't be put back — refresh.", 404);
+      return ok(row[0]);
     }
 
     // members/:id/approve  (rid-scoped — service-role bypasses RLS, so this is the boundary)
     if (a === "members" && c === "approve") {
       const row = must(await sb.from("session_members").update({ approved: true }).eq("id", b).eq("restaurant_id", rid).select());
-      return ok(row[0] || null);
+      // The guest left the party (or the table closed) between the paint and the tap. 200 here made
+      // the waiter think they had let someone in. Same 404 as make-head/ban two branches down.
+      if (!row[0]) return err("That guest is no longer on this table — refresh and try again.", 404);
+      return ok(row[0]);
     }
 
     // members/:id/make-head — transfer the table head to another member (kick the
@@ -1018,8 +1040,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     // table stays open). Mirrors the editor's remove. (owner, 2026-06-17 — parity)
     if (a === "members" && c === "remove") {
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
+      if (!row[0]) return err("That guest is no longer on this table — refresh and try again.", 404);
       await log("member_remove", { detail: "kicked", device_id: dev });
-      return ok(row[0] || null);
+      return ok(row[0]);
     }
 
     // members/:id/ban — KICK + add to the blocklist so they can't rejoin. Mirrors
@@ -1050,8 +1073,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "sessions" && c === "auto-approve") {
       const value = !!(body && body.value === true);
       const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).eq("restaurant_id", rid).select());
+      // The table was closed while the toggle was on screen — the setting had nowhere to land.
+      if (!row[0]) return err("That table has closed — the setting wasn't saved.", 404);
       await log("auto_approve", { detail: value ? "on" : "off", device_id: dev });
-      return ok(row[0] || null);
+      return ok(row[0]);
     }
 
     // orders/:id/discount — reduce ONE order's bill (comp/loyalty/fix). Clamped to

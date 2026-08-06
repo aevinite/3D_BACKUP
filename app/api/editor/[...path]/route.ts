@@ -4569,7 +4569,12 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
 
     if (a === "calls" && id) {
       const data = must(await sb.from("waiter_calls").update({ resolved: body?.resolved === true }).eq("id", id).eq("restaurant_id", rid).select());
-      return ok(data[0] || null);
+      // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS (2026-08-06, T4 sweep). The manager's floor
+      // can hard-delete a waiter call, so a second device still showing it would tick it off, get a
+      // 200, and be offered an undo for a call that no longer exists. The tablet's twin of this
+      // endpoint (calls/:id/attend + /reopen) was fixed in the same pass; this is the same answer.
+      if (!data[0]) return err("That call is no longer on the board — refresh and try again.", 404);
+      return ok(data[0]);
     }
 
     return err("unknown PATCH endpoint", 404);
