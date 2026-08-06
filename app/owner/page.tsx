@@ -27,6 +27,7 @@ import {
   DeltaChip, Spark, SparkArea, Heatmap, StackedDailyBars, RevMonthCompare,
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
+import { compactINR } from "@/lib/money";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
@@ -37,6 +38,12 @@ import { gatherOwnerReport } from "@/lib/ownerReportGather";
 import { ReportMenu } from "@/components/owner/OwnerReportButton";
 
 const DAY_MS = 86400000;
+// The server clamps the busy grid to the last ~90 days on purpose (an all-time grid hit the
+// statement timeout and 500'd the whole dashboard). The card's chip still showed the SELECTED
+// range, so "All time" sat over a 90-day picture (T5 sweep, 2026-08-06). These are the ranges
+// that are actually wider than the clamp.
+const HEAT_CLAMP_DAYS = 90;
+const HEAT_CLAMPED: Partial<Record<Range, boolean>> = { all: true };
 type Range = "today" | "yesterday" | "week" | "7d" | "month" | "30d" | "lastmonth" | "all";
 const RANGES: { k: Range; label: string }[] = [
   { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
@@ -89,11 +96,10 @@ type Records = {
 type RestA = {
   scope: "restaurant"; prev: Prev;
   restaurant: { id: string; slug: string; name: string; accentColor: string; heroTitle: string };
-  // `openTables: number | null` — null means the live head-count could NOT be read (T9 sweep,
-  // 2026-08-06). Nothing renders this field today (every "tables open" figure on this page comes
-  // from /api/owner/overview instead), so the type is the guard: whoever wires it up is forced to
-  // handle "we don't know" rather than printing a 0 that means "couldn't count".
-  kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; openTables: number | null; topDish: string };
+  // openTables is NOT here: the analytics route stopped computing it (T5 sweep, 2026-08-06) —
+  // it was a ~165ms live count on every request that no card ever read. Every open-tables figure
+  // on this page comes from the OVERVIEW payload (`ov.restaurants[…].openTables`).
+  kpis: { revenue: number; orders: number; paidOrders?: number; avgOrder: number; topDish: string };
   // Staff pay that LEFT in this window (mig 221). null = this restaurant doesn't have the
   // Staff-profiles-&-pay module, so no such tile is drawn at all.
   staffPay?: { paidOut: number; people: number; entries: number } | null;
@@ -135,8 +141,17 @@ const PORTFOLIO_COLORS = [
   "#f97316", // orange
   "#06b6d4", // cyan
 ];
-/** Stable colour for a restaurant by its position in the portfolio list. */
-const portfolioColor = (i: number) => PORTFOLIO_COLORS[i % PORTFOLIO_COLORS.length];
+/** Stable colour for a restaurant — keyed by its ID, so it cannot drift.
+ *  It used to be keyed by POSITION in the unsorted list, while "Who earns more" sorts a copy by
+ *  revenue: the moment the ranking changed, a restaurant's bar and its trend line beside it
+ *  disagreed, and the console promises one identity colour across both (T5 sweep, 2026-08-06).
+ *  A hash of the id is stable across loads, across sorts, and across sessions. */
+function portfolioColor(idOrIndex: string | number): string {
+  if (typeof idOrIndex === "number") return PORTFOLIO_COLORS[idOrIndex % PORTFOLIO_COLORS.length];
+  let h = 0;
+  for (let i = 0; i < idOrIndex.length; i++) h = (h * 31 + idOrIndex.charCodeAt(i)) >>> 0;
+  return PORTFOLIO_COLORS[h % PORTFOLIO_COLORS.length];
+}
 
 const IST = "Asia/Kolkata";
 // Some RPCs return a zone-LESS IST wall-clock timestamp — see the note in the old
@@ -298,7 +313,7 @@ function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; valu
 // (that restaurant's full dashboard). It only DRIVES the existing view model
 // (goHome / viewTo restaurant) — no new fetch: every scope is already cached
 // per `${scopeKey}|${range}`, so switching costs nothing extra. The colour swatch
-// per restaurant matches its portfolioColor(i) in the charts, so a restaurant
+// per restaurant matches its portfolioColor(id) in the charts, so a restaurant
 // keeps ONE identity colour across the selector and every graph.
 function RestaurantDrop({ rests, activeRid, onPick }: {
   rests: { id: string; name: string; accentColor: string; revenueToday: number; reportsOff?: boolean }[];
@@ -317,14 +332,14 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
   }, [open]);
   const idx = activeRid ? rests.findIndex((r) => r.id === activeRid) : -1;
   const cur = idx >= 0 ? rests[idx] : null;
-  const money = (n: number) =>
-    n >= 1e7 ? `₹${(n / 1e7).toFixed(1)}Cr` : n >= 1e5 ? `₹${(n / 1e5).toFixed(1)}L`
-    : n >= 1e3 ? `₹${(n / 1e3).toFixed(1)}k` : `₹${Math.round(n)}`;
+  // the SHARED short form (lib/money) — this used to be a private copy that went to crores while
+  // the chart axis beside it stopped at lakhs, so one amount read two ways (T5 sweep, 2026-08-06)
+  const money = compactINR;
   return (
     <span className="owd" data-restdrop>
       <button type="button" className="owd-btn" aria-haspopup="listbox" aria-expanded={open}
         onClick={() => setOpen((o) => !o)}>
-        {cur ? <span className="sw" style={{ background: portfolioColor(idx) }} aria-hidden="true" />
+        {cur ? <span className="sw" style={{ background: portfolioColor(cur.id) }} aria-hidden="true" />
           : <i className="fas fa-store" aria-hidden="true" />}
         <span className="lbl">{cur ? cur.name : "All restaurants"}</span>
         <i className="fas fa-chevron-down" aria-hidden="true" />
@@ -342,7 +357,7 @@ function RestaurantDrop({ rests, activeRid, onPick }: {
             <button key={r.id} type="button" role="option" aria-selected={activeRid === r.id}
               className={activeRid === r.id ? "on" : ""}
               onClick={() => { onPick(r.id); setOpen(false); }}>
-              <span className="sw" style={{ background: portfolioColor(i) }} aria-hidden="true" />
+              <span className="sw" style={{ background: portfolioColor(r.id) }} aria-hidden="true" />
               <span className="nm">{r.name}</span>
               <small>{r.reportsOff ? "takings hidden" : `${money(r.revenueToday)} today`}</small>
             </button>
@@ -379,6 +394,7 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
   prevTitle?: string; sub?: string; loading?: boolean; spark?: number[];
   pill?: string; href?: string;
 }) {
+  const hasSpark = !!spark && spark.length >= 2 && !loading;
   const body = (
     <>
       <div className="ow2-kt">
@@ -390,8 +406,8 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
         {!loading && delta && <DeltaChip now={delta.now} prev={delta.prev} title={prevTitle || ""} />}
       </div>
       {sub && !loading && <div className="ow2-sub">{sub}</div>}
-      {spark && spark.length >= 2 && !loading && (
-        <div className="ow2-spark" aria-hidden="true"><SparkArea points={spark} color={GREEN} height={34} /></div>
+      {hasSpark && (
+        <div className="ow2-spark" aria-hidden="true"><SparkArea points={spark!} color={GREEN} height={34} /></div>
       )}
     </>
   );
@@ -409,6 +425,10 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
          guessed: the caption box overlapped the spark box by 14px.
          Three classes so it beats that rule; keep this >= the SparkArea height below, plus air. */
       .owx .adm-stat.ow2-kpi { padding-bottom: 44px; }
+      /* …but only a tile that HAS a spark needs that band. Five of the seven don't, and on a
+         360px phone each was carrying 34px of empty green-less space (T5 sweep, 2026-08-06).
+         Same three-class weight so it still beats .owx .adm-stat. */
+      .owx .adm-stat.ow2-kpi.ow2-nospark { padding-bottom: 14px; }
       .ow2-kpi.ow2-click { cursor: pointer; text-decoration: none; color: inherit; display: block; transition: border-color .15s, transform .15s; }
       .ow2-kpi.ow2-click:hover { border-color: var(--accent); transform: translateY(-2px); }
       .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -419,9 +439,9 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
     `}</style>
   );
   return href ? (
-    <Link href={href} className="adm-stat owx-kpi ow2-kpi ow2-click" title="Open the full report">{body}{styles}</Link>
+    <Link href={href} className={`adm-stat owx-kpi ow2-kpi ow2-click${hasSpark ? "" : " ow2-nospark"}`} title="Open the full report">{body}{styles}</Link>
   ) : (
-    <div className="adm-stat owx-kpi ow2-kpi">{body}{styles}</div>
+    <div className={`adm-stat owx-kpi ow2-kpi${hasSpark ? "" : " ow2-nospark"}`}>{body}{styles}</div>
   );
 }
 
@@ -469,6 +489,11 @@ export default function OwnerDashboard() {
   const [recs, setRecs] = useState<Record<string, Records>>({});
   const [acts, setActs] = useState<Act[] | null>(null);
   const [updatedAt, setUpdatedAt] = useState<string | null>(null);
+  // WHEN each payload was computed, per cache key. The single page-level "updated X ago" was set
+  // by whichever request answered LAST, so it could describe a different card's snapshot than the
+  // one being read (T5 sweep, 2026-08-06). Now every card can state its own age, and the header
+  // line reports the OLDEST thing on screen — the honest worst case.
+  const [ages, setAges] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
   const [dishSort, setDishSort] = useState<"revenue" | "qty">("revenue");
   const inflight = useRef<Set<string>>(new Set());
@@ -592,7 +617,7 @@ export default function OwnerDashboard() {
       if (a.error && a.disabled) { setErr(errText(a.error)); return; }
       if (a.error) throw new Error(errText(a.error));
       setCache((c) => ({ ...c, [key]: a }));
-      if (a.cachedAt) setUpdatedAt(a.cachedAt);
+      if (a.cachedAt) { setUpdatedAt(a.cachedAt); setAges((m) => ({ ...m, [key]: a.cachedAt })); }
       if (rid && a.records) setRecs((m) => ({ ...m, [rid]: a.records }));
       setErr(null);
       reportRealtime("online");
@@ -616,7 +641,7 @@ export default function OwnerDashboard() {
       const refQ = opts?.refresh ? "&refresh=1" : "";
       const m = await fetch(`/api/owner/reports?type=sales&range=${range}${rid ? `&rid=${rid}` : ""}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
       setMoneyCache((c) => ({ ...c, [`${sk}|${range}`]: m.error ? "err" : m.totals }));
-      if (m.cachedAt) setUpdatedAt(m.cachedAt);
+      if (m.cachedAt) { setUpdatedAt(m.cachedAt); setAges((a2) => ({ ...a2, [`money:${sk}|${range}`]: m.cachedAt })); }
     } catch {
       setMoneyCache((c) => ({ ...c, [`${sk}|${range}`]: "err" }));
     } finally {
@@ -637,7 +662,15 @@ export default function OwnerDashboard() {
     const sk = scopeKey;
     if (warmedScopes.current.has(sk)) return;
     warmedScopes.current.add(sk);
-    const others = RANGES.map((r) => r.k).filter((k) => k !== globalRange);
+    // ONLY the range he is most likely to want next — his LAST-USED one (already remembered in
+    // localStorage) — instead of all seven. Warming everything cost 14 requests per scope on every
+    // visit, and again for each restaurant opened, for periods he mostly never looks at
+    // (T5 sweep, 2026-08-06). Switching to a cold range still works: it just fetches then, and the
+    // server's snapshot cache means the SECOND look at it is instant anyway.
+    let saved: Range | null = null;
+    try { const v = localStorage.getItem(RANGE_LS_KEY) as Range | null; if (v && RANGES.some((r) => r.k === v)) saved = v; } catch { /* storage unavailable */ }
+    const others = Array.from(new Set<Range>([saved && saved !== globalRange ? saved : "today"]))
+      .filter((k) => k !== globalRange);
     const timers = others.map((k, i) => setTimeout(() => {
       if (!cacheRef.current[`${sk}|${k}`]) fetchPayload(sk, k);
       if (!moneyRef.current[`${sk}|${k}`]) fetchMoney(sk, k);
@@ -776,7 +809,7 @@ export default function OwnerDashboard() {
     const stacked = p.restaurantRevenue.length >= 2 && p.restaurantRevenue.length <= 3;
     const lines = p.restaurantRevenue.map((r, i) => ({
       key: r.id, name: r.name,
-      color: stacked ? GREEN_SHADES[i % GREEN_SHADES.length] : portfolioColor(i),
+      color: stacked ? GREEN_SHADES[i % GREEN_SHADES.length] : portfolioColor(r.id),
     }));
     const by = new Map<string, Record<string, number>>();
     for (const t of p.timeseries) {
@@ -910,9 +943,16 @@ export default function OwnerDashboard() {
     });
     // <=3 restaurants: identity colours join the green theme too (round-3 — the
     // table dots/share bars were still showing brown/orange accents at this tier).
+    // 4+: the dot and the share bar now use the SAME portfolioColor the charts use, instead of
+    // each restaurant's own brand accent. That is the owner's own reasoning applied to a third
+    // surface — he asked for distinct colours at this tier precisely because "most restaurants
+    // default to the same gold accent, so several bars were the identical washed-out yellow"
+    // (2026-07-27), and the table's dots had exactly that problem while sitting right under
+    // charts that had been fixed (T5 sweep, 2026-08-06). One restaurant, one colour, everywhere
+    // on this page.
     return rows.map((r) => {
       const rk = rank.get(r.id)!;
-      return { ...r, rank: rk, accent: restCount <= 3 ? GREEN_SHADES[(rk - 1) % GREEN_SHADES.length] : r.accent };
+      return { ...r, rank: rk, accent: restCount <= 3 ? GREEN_SHADES[(rk - 1) % GREEN_SHADES.length] : portfolioColor(r.id) };
     });
   }, [ov, single, pl, globalRange, tq, tSort]);
   const th = (k: typeof tSort.k, label: string, left?: boolean, extra?: string) => (
@@ -1017,6 +1057,16 @@ export default function OwnerDashboard() {
   // ── drawer (multi): row click → summary from data ALREADY loaded (zero fetches) ──
   const [drawerRid, setDrawerRid] = useState<string | null>(null);
   useBackClose("owner-rest-drawer", !!drawerRid, () => setDrawerRid(null));
+  // Escape closes it too. It already closed on the hardware/browser Back and on the backdrop and
+  // the ✕ — but not on Escape, while the reports Studio's overlay has always bound it. On a
+  // desktop that meant the one habit that works everywhere else silently did nothing here
+  // (found while driving the interactions, T5 sweep 2026-08-06).
+  useEffect(() => {
+    if (!drawerRid) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawerRid(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawerRid]);
   const drawer = useMemo(() => {
     if (!drawerRid || !ov) return null;
     const r = ov.restaurants.find((x) => x.id === drawerRid);
@@ -1071,6 +1121,20 @@ export default function OwnerDashboard() {
   const todayRev = activeRid ? (todayRow?.revenueToday ?? 0) : (ov?.totals.revenueToday ?? 0);
   const todayOrd = activeRid ? (todayRow?.ordersToday ?? 0) : (ov?.totals.ordersToday ?? 0);
 
+  // The OLDEST of the payloads currently on screen — so the header line can never claim a page
+  // is fresher than its stalest card.
+  const shownAges = [ages[`${scopeKey}|${globalRange}`], ages[`${scopeKey}|month`], ages[`money:${scopeKey}|${globalRange}`]]
+    .filter((x): x is string => !!x);
+  const oldestShown = shownAges.length
+    ? shownAges.reduce((a, b) => (Date.parse(a) <= Date.parse(b) ? a : b))
+    : updatedAt;
+  /** "Figures computed 6 Aug 2026, 9:52 pm" — the per-card tooltip. */
+  const ageTitle = (key: string) => {
+    const at = ages[key];
+    if (!at) return undefined;
+    return `Figures computed ${new Date(at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })} · ${timeAgo(at)}`;
+  };
+  const mainAge = () => ageTitle(`${scopeKey}|${globalRange}`);
   const kMain = kpiOf(globalRange);
   const money = moneyOf(globalRange);
   const trendPayload = pl(globalRange);
@@ -1200,7 +1264,12 @@ export default function OwnerDashboard() {
             <button className="adm-btn" onClick={manualRefresh} disabled={refreshing} title="Refresh now — recomputes the live numbers">
               <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 6 }} aria-hidden="true" />Refresh
             </button>
-            {updatedAt && !refreshing && <span style={{ fontSize: 10.5, color: "var(--muted)" }}>updated {timeAgo(updatedAt)}</span>}
+            {oldestShown && !refreshing && (
+              <span style={{ fontSize: 10.5, color: "var(--muted)" }}
+                title={`The oldest figures on this page were computed ${new Date(oldestShown).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })}. Each card carries its own time — hover its period chip.`}>
+                updated {timeAgo(oldestShown)}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -1221,7 +1290,7 @@ export default function OwnerDashboard() {
             <div className="adm-card" style={{ marginBottom: 12 }}>
               <div className="ow2-ct">
                 <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"} · each bar split by restaurant</span></span>
-                <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
+                <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
               </div>
               {!trendPayload ? <div className="adm-empty">Loading…</div>
                 : <StackedDailyBars data={groupTrend.rows} lines={groupTrend.lines} />}
@@ -1230,9 +1299,9 @@ export default function OwnerDashboard() {
             <div className="ow2-two" style={{ marginBottom: 12 }}>
               <div className="adm-card">
                 <div className="ow2-ct"><span>Who earns more <span className="mut">· tap a bar to open</span></span>
-                  <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+                  <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
                 {!trendPayload || trendPayload.scope !== "group" ? <div className="adm-empty">Loading…</div>
-                  : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r, i) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: portfolioColor(i) }))}
+                  : <WhoEarnsMore data={trendPayload.restaurantRevenue.map((r) => ({ id: r.id, name: r.name, revenue: r.revenue, orders: r.orders, accentColor: portfolioColor(r.id) }))}
                       onSelect={(id) => setDrawerRid(id)} />}
               </div>
               <div className="adm-card">
@@ -1281,7 +1350,7 @@ export default function OwnerDashboard() {
                     <tr key={r.id} className="hq-row" onClick={() => setDrawerRid(r.id)}
                       tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setDrawerRid(r.id); }}>
                       <td className="rk l">{r.rank}</td>
-                      <td className="l"><span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span></td>
+                      <td className="l"><span className="hq-nm" title={r.name}><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span></td>
                       {/* Reports switched off ⇒ every money cell says so rather than printing
                           the deliberate zero as if it were this restaurant's real takings. */}
                       {/* FOUR CELLS EITHER WAY, matching the header one-for-one. This used to be a
@@ -1322,7 +1391,7 @@ export default function OwnerDashboard() {
               heatmap below already covers hour-of-day) + category. Locked to whole months. */}
           <div className="ow2-two" style={{ marginBottom: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · {restScopeText}</span></span><span className="ow2-tag">{thisMonthName}</span></div>
+              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName} · {restScopeText}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
               {!pl("month") ? <div className="adm-empty">Loading…</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
@@ -1335,7 +1404,7 @@ export default function OwnerDashboard() {
                   the Items & menu report does (it keeps each brand's rows apart, because the same
                   title in two brands is a different product). Saying so is what was missing
                   (T5 sweep, 2026-08-06). */}
-              <div className="ow2-ct"><span>Revenue by category <span className="mut">· added up across {restScopeText}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Revenue by category <span className="mut">· added up across {restScopeText}</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as GroupA).categories!} />
                 : <div className="adm-empty">Loading…</div>}
@@ -1345,13 +1414,13 @@ export default function OwnerDashboard() {
           {/* Heatmap + payments, side by side (group scope) */}
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · {restScopeText}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · {restScopeText}{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.heatmap
-                ? <Heatmap data={(pl(globalRange) as GroupA).heatmap!} accent={GREEN} rangeLabel={RANGES.find((r) => r.k === globalRange)!.label} />
+                ? <Heatmap data={(pl(globalRange) as GroupA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · {restScopeText}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid · {restScopeText}</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.paymentMethods
                 ? <PaymentDonut data={(pl(globalRange) as GroupA).paymentMethods} />
                 : <div className="adm-empty">Loading…</div>}
@@ -1388,7 +1457,7 @@ export default function OwnerDashboard() {
           <div className="adm-card" style={{ marginBottom: 12 }}>
             <div className="ow2-ct">
               <span>Revenue over time <span className="mut">· {globalRange === "today" || globalRange === "yesterday" ? "by hour" : "by day"}</span></span>
-              <span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
+              <span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span>
             </div>
             {!trendPayload || trendPayload.scope !== "restaurant" ? <div className="adm-empty">Loading…</div>
               : restTrend.length >= 9
@@ -1398,7 +1467,7 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two">
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName}</span></span><span className="ow2-tag">{thisMonthName}</span></div>
+              <div className="ow2-ct"><span>Revenue · this month vs last <span className="mut">· {thisMonthName} vs {lastMonthName}</span></span><span className="ow2-tag" title={[`All of ${thisMonthName} so far`, ageTitle(`${scopeKey}|month`)].filter(Boolean).join(" · ")}>{thisMonthName}</span></div>
               {!pl("month") ? <div className="adm-empty">Loading…</div>
                 : <><RevMonthCompare data={monthCompare.rows} curName={monthCurName} prevName={monthPrevName} curColor={GREEN} prevColor={GRAY_LINE} />
                   {/* Say why the green line stops short — a part-day plotted against full days
@@ -1406,7 +1475,7 @@ export default function OwnerDashboard() {
                   <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Revenue by category</span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as RestA).categories} />
                 : <div className="adm-empty">Loading…</div>}
@@ -1415,13 +1484,13 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two" style={{ marginTop: 12 }}>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.heatmap
-                ? <Heatmap data={(pl(globalRange) as RestA).heatmap!} accent={GREEN} rangeLabel={RANGES.find((r) => r.k === globalRange)!.label} />
+                ? <Heatmap data={(pl(globalRange) as RestA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
                 : <div className="adm-empty">Loading…</div>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              <div className="ow2-ct"><span>Payment methods <span className="mut">· how customers paid</span></span><span className="ow2-tag" title={[rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.paymentMethods && ((pl(globalRange) as RestA).paymentMethods.reduce((a, m) => a + m.revenue, 0) > 0)
                 ? <PaymentDonut data={(pl(globalRange) as RestA).paymentMethods} />
                 : (pl(globalRange) ? <div className="adm-empty">No recorded payments in this range.</div> : <div className="adm-empty">Loading…</div>)}
@@ -1714,7 +1783,7 @@ function DishList({ payload, sort, onDish }: { payload?: RestA; sort: "revenue" 
       {dishes.length === 0 && <div className="adm-empty">No dish sales in this range.</div>}
       {dishes.map((d) => (
         <button key={d.title} className="rv-dish" onClick={() => onDish(d.title)}>
-          <span className="rv-dn">{d.title}</span>
+          <span className="rv-dn" title={d.title}>{d.title}</span>
           <span className="rv-bar"><span style={{ width: `${(d.revenue / maxRev) * 100}%`, background: GREEN }} /></span>
           <span className="rv-q">{d.qty} sold</span>
           <span className="rv-r">{inr(d.revenue)}</span>
