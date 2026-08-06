@@ -48,8 +48,12 @@ function TrendPill({ pct, invert = false }: { pct: number; invert?: boolean }) {
 export function BestWorst({
   series, money = true, unit = "day", noun = "revenue",
   invertTrend = false, title = "Best & quietest " + unit,
+  droppedPartial = false,
 }: {
   series: Pt[]; money?: boolean; unit?: string; noun?: string; invertTrend?: boolean; title?: string;
+  // The caller removed the final, still-running bucket before handing the series over (a
+  // half-finished today is not the quietest day — see the note this renders below).
+  droppedPartial?: boolean;
 }) {
   const { total, best, worst, avg, count, trendPct } = seriesStats(series);
   if (!best || !worst) return null;
@@ -93,6 +97,7 @@ export function BestWorst({
             : <>Your best {unit} (<b>{cap(best.label)}</b>) brought <b>{Math.round(share(best.value))}%</b> of the period&apos;s {noun}
               {count >= 3 && <> · the top 3 {unit}s made <b>{Math.round(total ? (top3 / total) * 100 : 0)}%</b></>}
               {worst.value > 0 && <> · the best {unit} did <b>{(worst.value ? best.value / worst.value : 0).toFixed(1)}×</b> the quietest</>}.</>}
+          {droppedPartial && <> Today is still in progress, so it is left out of this comparison.</>}
         </p>
       </div>
       <RiStyles />

@@ -83,6 +83,54 @@ export function taxableValue(row: { tax: number; subtotal: number; discount: num
   return Math.min((Number(row.tax) || 0) / (pct / 100), net);
 }
 
+/** Net sales for one money row — the figure GST is charged on before any exempt split. */
+export const netSalesOf = (row: { subtotal: number; discount: number }): number =>
+  p2((Number(row.subtotal) || 0) - (Number(row.discount) || 0));
+
+/**
+ * How big a `netSales − taxable` residue has to be before it means anything.
+ *
+ * `taxableValue` recovers the taxable base as tax ÷ rate, and BOTH sides are already rounded —
+ * every bill's tax is stored to the paisa and the reports route rounds each bucket to 2dp again.
+ * So the subtraction practically never lands on zero, and the Tax report used to dress the
+ * leftover up as real exempt supply: measured live on a restaurant that sells nothing exempt at
+ * all, net ₹79,61,596 and tax ₹3,98,074 at 5% produced a KPI tile reading "EXEMPT / MRP SALES
+ * ₹111 — sold with no GST — file separately". That is a wrong line to copy into a return
+ * (T5 sweep, 2026-08-06).
+ *
+ * The drift is per-BILL, so the tolerance scales with bills — half a rupee each, floor ₹100. A
+ * genuine MRP / nil-rated line is far bigger than that.
+ */
+export const exemptTolerance = (paidOrders: number): number =>
+  Math.max(100, (Number(paidOrders) || 0) * 0.5);
+
+/**
+ * Is there a REAL exempt / MRP portion in this period, or just rounding dust? Answered ONCE from
+ * the totals and then handed to every row, so the KPI tile, the filing table and the exported
+ * sheet can never disagree about what the taxable base is.
+ */
+export function exemptIsMaterial(
+  totals: { tax: number; subtotal: number; discount: number; paidOrders: number },
+  pct: number | null,
+): boolean {
+  if (!pct) return false;
+  const residue = Math.max(0, p2(netSalesOf(totals) - taxableValue(totals, pct)));
+  return residue > exemptTolerance(totals.paidOrders);
+}
+
+/**
+ * The taxable value to PRINT for a row. When the period has no material exempt portion the whole
+ * of net sales was taxed, so say so — recovering tax ÷ rate per row would otherwise leave the
+ * filing table's total a few rupees under the "Taxable sales" tile above it.
+ */
+export function taxableFor(
+  row: { tax: number; subtotal: number; discount: number },
+  pct: number | null,
+  exemptMaterial: boolean,
+): number {
+  return exemptMaterial ? taxableValue(row, pct) : netSalesOf(row);
+}
+
 export type FilingLine = { label: string; rate: number };
 export type FilingRow<T> = { row: T; tax: number; parts: number[] };
 

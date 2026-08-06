@@ -111,9 +111,8 @@ type Act = { id: string; panel: string; action: string; actor: string | null; ta
 // graphs"; owner: the boxes should have "only the main one"). The Busy HEATMAP now
 // follows that main range too (owner 2026-07-26: "it should be shown from how much
 // we have selected … and be clickable and interactive") — see the interactive
-// Heatmap in Charts.tsx. Only Busy-HOURS stays PINNED to the last 7 days (a stable
-// weekly rhythm; the weekFallback below finds the newest active week when empty).
-const WEEK: Range = "7d";
+// Heatmap in Charts.tsx. NOTHING is pinned to its own range any more — the last card that
+// was (Busy hours, last 7 days) went with the 2026-08-05 clean-up noted further down.
 // 2–3 restaurants: the split daily bars stay in the THEME's green family — light +
 // dark green, a third non-brown colour only if needed (owner round-2: "only brown
 // doesn't make sense"). Identity accent colours are for the many-tier only.
@@ -148,6 +147,8 @@ function istWall(ts: string, opts: Intl.DateTimeFormatOptions): string {
   const d = new Date(zoneless ? ts + "Z" : ts);
   return d.toLocaleString("en-IN", { ...opts, timeZone: zoneless ? "UTC" : IST });
 }
+/** "8 PM" — the one clock format this console uses (matches the Studio's hourLabel). */
+const hour12 = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
 function tsLabel(iso: string, range: Range): string {
   const d = new Date(iso);
   if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST });
@@ -584,6 +585,11 @@ export default function OwnerDashboard() {
       const recQ = rid && !(rid in ((recsRef.current) || {})) ? "&records=1" : "";
       const refQ = opts?.refresh ? "&refresh=1" : "";
       const a = await fetch(`/api/owner/analytics?${opts?.qs ?? `range=${range}`}${rid ? `&rid=${rid}` : ""}&compare=1${recQ}${scp}${refQ}`, { cache: "no-store" }).then((r) => r.json());
+      // A deliberate "Reports aren't enabled for this restaurant" (403, `disabled: true`) is a
+      // PERMISSION, not a network problem — it used to drop the top strip's Connected pill to a
+      // warning state and show the entitlement text in the red "couldn't load" banner
+      // (T5 sweep, 2026-08-06). Say it plainly and leave the connection light alone.
+      if (a.error && a.disabled) { setErr(errText(a.error)); return; }
       if (a.error) throw new Error(errText(a.error));
       setCache((c) => ({ ...c, [key]: a }));
       if (a.cachedAt) setUpdatedAt(a.cachedAt);
@@ -649,9 +655,12 @@ export default function OwnerDashboard() {
     } catch { setActs(null); }
   }, [scopePin]);
 
-  // The distinct (scope, range) keys the CURRENT view's cards need: the main range
-  // (all graphs), any KPI overrides, and the pinned week for busy-hours/heatmap.
-  const neededRanges = useMemo(() => Array.from(new Set<Range>([globalRange, WEEK])), [globalRange]);
+  // The distinct (scope, range) keys the CURRENT view's cards need. That is the MAIN range and
+  // nothing else: the only card that ever had its own pinned window (Busy hours, last 7 days)
+  // was deleted on 2026-08-05, but "7d" stayed in this list — so every dashboard open, AND every
+  // 60-second auto-refresh tick, fetched a whole extra analytics payload that no JSX could read
+  // (T5 sweep, 2026-08-06). Exactly the waste the "latest active week" fetch was removed for.
+  const neededRanges = useMemo(() => [globalRange], [globalRange]);
 
   // Overview first (identity + today-so-far numbers), then ensure every needed payload.
   const loadOverview = useCallback(async () => {
@@ -696,6 +705,10 @@ export default function OwnerDashboard() {
     const started = Date.now();
     const jobs: Promise<unknown>[] = [loadOverview()];
     for (const r of neededRanges) jobs.push(fetchPayload(scopeKey, r, { refresh: true }));
+    // The month-vs-month card reads its OWN payload and was left out of Refresh entirely, so it
+    // kept showing snapshot figures up to five minutes old while every other card recomputed —
+    // with no way to force it (T5 sweep, 2026-08-06).
+    jobs.push(fetchPayload(scopeKey, "month", { qs: "range=month", refresh: true }));
     jobs.push(fetchMoney(scopeKey, globalRange, { refresh: true }));
     if (activeRid) jobs.push(fetchActs(activeRid));
     Promise.allSettled(jobs).finally(() => {
@@ -727,7 +740,14 @@ export default function OwnerDashboard() {
       by.set(key, (by.get(key) || 0) + (kind === "revenue" ? t.revenue : t.orders));
     }
     const exp = expectedBuckets(range);
-    const pts = exp.length ? exp.map((e) => by.get(e.key) ?? 0) : Array.from(by.values());
+    // SORT the fallback. `expectedBuckets` is empty for This week / This month / Last month /
+    // All time, and Map.values() is INSERTION order — with several restaurants interleaved in
+    // the group timeseries that is time order only by luck. The line inside a KPI tile has no
+    // axis, so a mis-ordered one looks exactly like a real trend (T5 sweep, 2026-08-06).
+    // groupTrend already sorts its keys for this reason.
+    const pts = exp.length
+      ? exp.map((e) => by.get(e.key) ?? 0)
+      : Array.from(by.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([, v]) => v);
     return pts.length >= 2 ? pts : undefined;
   }, [kpiOf]);
 
@@ -738,7 +758,10 @@ export default function OwnerDashboard() {
     const by = new Map<string, { rev: number; ord: number }>();
     for (const t of p.timeseries) by.set(istKey(new Date(t.bucket), globalRange), { rev: t.revenue, ord: t.orders });
     const exp = expectedBuckets(globalRange);
-    if (!exp.length) return p.timeseries.map((t) => ({ label: tsLabel(t.bucket, globalRange), Revenue: t.revenue, __orders: t.orders }));
+    // sorted for the same reason as sparkOf above — never trust the payload's row order
+    if (!exp.length) return [...p.timeseries]
+      .sort((a, b) => (String(a.bucket) < String(b.bucket) ? -1 : 1))
+      .map((t) => ({ label: tsLabel(t.bucket, globalRange), Revenue: t.revenue, __orders: t.orders }));
     return exp.map((e) => ({ label: e.label, Revenue: by.get(e.key)?.rev ?? 0, __orders: by.get(e.key)?.ord ?? 0 }));
   }, [pl, globalRange]);
 
@@ -892,8 +915,8 @@ export default function OwnerDashboard() {
       return { ...r, rank: rk, accent: restCount <= 3 ? GREEN_SHADES[(rk - 1) % GREEN_SHADES.length] : r.accent };
     });
   }, [ov, single, pl, globalRange, tq, tSort]);
-  const th = (k: typeof tSort.k, label: string, left?: boolean) => (
-    <th className={left ? "l" : undefined} onClick={() => setTSort((s) => ({ k, asc: s.k === k ? !s.asc : false }))}
+  const th = (k: typeof tSort.k, label: string, left?: boolean, extra?: string) => (
+    <th className={[left ? "l" : "", extra || ""].filter(Boolean).join(" ") || undefined} onClick={() => setTSort((s) => ({ k, asc: s.k === k ? !s.asc : false }))}
       role="columnheader" aria-sort={tSort.k === k ? (tSort.asc ? "ascending" : "descending") : "none"}
       style={{ cursor: "pointer" }}>
       {label} {tSort.k === k && <i className={`fas fa-caret-${tSort.asc ? "up" : "down"}`} aria-hidden="true" />}
@@ -954,7 +977,9 @@ export default function OwnerDashboard() {
         else if (Math.abs(pct) >= 3) out.push({ icon: pct > 0 ? "fa-arrow-trend-up" : "fa-arrow-trend-down", text: `Revenue is ${pct > 0 ? "up" : "down"} ${Math.abs(pct)}% ${PREV_LABEL[globalRange]}` });
       }
       const busiest = [...p.hourly].sort((a, b) => b.orders - a.orders)[0];
-      if (busiest?.orders) out.push({ icon: "fa-clock", text: `Busiest at ${busiest.hour}:00 — ${busiest.orders} order${busiest.orders === 1 ? "" : "s"}` });
+      // 12-hour, like every report in the Studio ("8 PM"). This was the one place on the
+      // dashboard that named a time and it used 24-hour (T5 sweep, 2026-08-06).
+      if (busiest?.orders) out.push({ icon: "fa-clock", text: `Busiest at ${hour12(busiest.hour)} — ${busiest.orders} order${busiest.orders === 1 ? "" : "s"}` });
       const total = p.dishes.reduce((a, d) => a + d.revenue, 0);
       if (p.dishes[0] && total > 0) out.push({ icon: "fa-utensils", text: `${p.dishes[0].title} makes ${Math.round((p.dishes[0].revenue / total) * 100)}% of dish revenue` });
       if (money && money !== "err" && money.cancelledValue > 0) out.push({ icon: "fa-ban", text: `${inr(money.cancelledValue)} lost to ${money.cancelledOrders} cancelled order${money.cancelledOrders === 1 ? "" : "s"} ${RANGE_LABEL[globalRange]}` });
@@ -1014,8 +1039,14 @@ export default function OwnerDashboard() {
       by.set(k, cur);
     }
     const exp = expectedBuckets(globalRange);
-    if (!exp.length) return [];
-    return exp.map((e) => ({ label: e.label, Revenue: by.get(e.key)?.rev ?? 0, __orders: by.get(e.key)?.ord ?? 0 }));
+    // No expected sequence (This week / This month / Last month / All time) used to mean NO
+    // CHART AT ALL — tapping a restaurant row showed a trend on "30 days" and a blank card on
+    // "This month", with nothing to explain it (T5 sweep, 2026-08-06). Fall back to the buckets
+    // we actually got, sorted and human-labelled, exactly as groupTrend does.
+    const keys = exp.length
+      ? exp
+      : Array.from(by.keys()).sort().map((k) => ({ key: k, label: keyLabel(k) }));
+    return keys.map((e) => ({ label: e.label, Revenue: by.get(e.key)?.rev ?? 0, __orders: by.get(e.key)?.ord ?? 0 }));
   }, [drawerRid, pl, globalRange]);
 
   // ── Report export tables for the current view ──
@@ -1229,10 +1260,14 @@ export default function OwnerDashboard() {
                 <thead><tr>
                   {th("rank", "#", true)}
                   {th("name", "Restaurant", true)}
-                  {th("today", "Today")}
+                  {th("today", "Today", false, "hide-s")}
                   {th("revenue", `Revenue (${RANGE_LABEL[globalRange]})`)}
                   {th("orders", "Orders")}
-                  {th("avg", "Avg check")}
+                  {/* "Avg / order", NOT "Avg check": this column divides by ALL non-cancelled
+                      orders (open ones included) while the KPI card above says "per paid order",
+                      so the two could never be reconciled. Same honesty fix the Busy-times report
+                      made for its own "Per order" column (T5 sweep, 2026-08-06). */}
+                  {th("avg", "Avg / order", false, "hide-s")}
                   <th className="hide-m">Trend</th>
                   <th className="hide-m">Share</th>
                   {th("openTables", "Open")}
@@ -1249,16 +1284,27 @@ export default function OwnerDashboard() {
                       <td className="l"><span className="hq-nm"><span className="sw" style={{ background: r.accent }} aria-hidden="true" />{r.name}</span></td>
                       {/* Reports switched off ⇒ every money cell says so rather than printing
                           the deliberate zero as if it were this restaurant's real takings. */}
+                      {/* FOUR CELLS EITHER WAY, matching the header one-for-one. This used to be a
+                          single colSpan={4} cell — and at =<760px the stylesheet hides the 3rd and
+                          6th columns by position, so on a phone the colSpan cell WAS the 3rd child:
+                          the whole "figures hidden" explanation vanished and every remaining cell
+                          slid under the wrong heading (T5 sweep, 2026-08-06). Same shape, same
+                          hide-s classes, message in the always-visible Revenue column. */}
                       {r.reportsOff ? (
-                        <td className="mut" colSpan={4} title="Reports are switched off for this restaurant, so its figures aren't shown here.">
-                          <span style={{ opacity: .7 }}><i className="fas fa-eye-slash" style={{ marginRight: 6, fontSize: 10 }} aria-hidden="true" />figures hidden</span>
-                        </td>
+                        <>
+                          <td className="mut hide-s">—</td>
+                          <td className="mut" title="Reports are switched off for this restaurant, so its figures aren't shown here.">
+                            <span style={{ opacity: .7 }}><i className="fas fa-eye-slash" style={{ marginRight: 6, fontSize: 10 }} aria-hidden="true" />figures hidden</span>
+                          </td>
+                          <td className="mut">—</td>
+                          <td className="mut hide-s">—</td>
+                        </>
                       ) : (
                         <>
-                          <td className="mut"><AnimatedNumber value={r.today} money /></td>
+                          <td className="mut hide-s"><AnimatedNumber value={r.today} money /></td>
                           <td><b><AnimatedNumber value={r.revenue} money /></b></td>
                           <td className="mut"><AnimatedNumber value={r.orders} /></td>
-                          <td className="mut"><AnimatedNumber value={r.avg} money /></td>
+                          <td className="mut hide-s"><AnimatedNumber value={r.avg} money /></td>
                         </>
                       )}
                       <td className="hide-m">{!r.reportsOff && r.spark && r.spark.length >= 2 ? <Spark points={r.spark} color={GREEN} width={84} height={22} /> : <span className="mut">—</span>}</td>
@@ -1284,7 +1330,12 @@ export default function OwnerDashboard() {
                   <div className="ow2-note">Today is still in progress, so it joins the line tomorrow.</div></>}
             </div>
             <div className="adm-card">
-              <div className="ow2-ct"><span>Revenue by category <span className="mut">· {restScopeText}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
+              {/* "added up across restaurants" — the group donut merges a category NAME across
+                  every restaurant, which is the right thing for a portfolio view but is NOT what
+                  the Items & menu report does (it keeps each brand's rows apart, because the same
+                  title in two brands is a different product). Saying so is what was missing
+                  (T5 sweep, 2026-08-06). */}
+              <div className="ow2-ct"><span>Revenue by category <span className="mut">· added up across {restScopeText}</span></span><span className="ow2-tag" title={rangeSpanText(globalRange)}>{RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.categories
                 ? <CategoryDonut data={(pl(globalRange) as GroupA).categories!} />
                 : <div className="adm-empty">Loading…</div>}
@@ -1386,8 +1437,14 @@ export default function OwnerDashboard() {
                   <div className="rv-rec"><span className="e">🏆</span><span><small>BEST DAY EVER</small><b><AnimatedNumber value={records.bestDay.revenue} money /></b>
                     <i>{new Date(records.bestDay.date).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: IST })} — beat it!</i></span></div>
                 )}
+                {/* "LAST 30 DAYS (ROLLING)", not "30 DAYS". lfh_owner_records keeps its OWN
+                    rolling window, while the dish list below is the SELECTED range (30 whole IST
+                    days ending today) — so the two printed different plate counts for the same
+                    dish, 400px apart, both captioned "30 days" (measured live: 549 vs 529,
+                    T5 sweep 2026-08-06). Naming the window is the honest fix; the records strip
+                    is deliberately all-time-ish and must not follow the dropdown. */}
                 {records.starDish && (
-                  <div className="rv-rec"><span className="e">👑</span><span><small>STAR DISH · 30 DAYS</small><b>{records.starDish.title}</b>
+                  <div className="rv-rec"><span className="e">👑</span><span><small>STAR DISH · LAST 30 DAYS (ROLLING)</small><b>{records.starDish.title}</b>
                     <i>{records.starDish.qty} plates</i></span></div>
                 )}
                 {records.fastHour && (
@@ -1399,7 +1456,7 @@ export default function OwnerDashboard() {
                     <i>{records.bigBill.table ? `table ${records.bigBill.table}` : "one sitting"}</i></span></div>
                 )}
                 {(records.regulars ?? 0) > 0 && (
-                  <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · 30 DAYS</small><b><AnimatedNumber value={records.regulars ?? 0} /> returning guests</b>
+                  <div className="rv-rec"><span className="e">🔁</span><span><small>REGULARS · LAST 30 DAYS (ROLLING)</small><b><AnimatedNumber value={records.regulars ?? 0} /> returning guests</b>
                     <i>same name, 2+ visits</i></span></div>
                 )}
               </div>
@@ -1490,7 +1547,7 @@ export default function OwnerDashboard() {
               <div className="dstats">
                 <div><small>Today</small><b><AnimatedNumber value={drawer.r.revenueToday} money /></b><i>{drawer.r.ordersToday} orders</i></div>
                 <div><small>Revenue · {RANGE_LABEL[globalRange]}</small><b><AnimatedNumber value={drawer.row?.revenue ?? 0} money /></b><i>{drawer.row?.orders ?? 0} orders</i></div>
-                <div><small>Avg check</small><b><AnimatedNumber value={drawer.row?.avg ?? 0} money /></b><i>per order</i></div>
+                <div><small>Avg / order</small><b><AnimatedNumber value={drawer.row?.avg ?? 0} money /></b><i>all orders, paid or open</i></div>
                 <div><small>Open tables</small><b><AnimatedNumber value={drawer.r.openTables} /></b><i>right now</i></div>
               </div>
               {drawerTrend.length >= 2 && (
@@ -1565,7 +1622,8 @@ export default function OwnerDashboard() {
         .own-dish-name { font-size: 22px; font-weight: 800; }
         .rv-sort { display: inline-flex; gap: 2px; }
         .rv-sort button { background: none; border: var(--border); padding: 4px 10px; border-radius: 7px; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; }
-        .rv-sort button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+        /* --accent-on, not #fff — see the note in components/owner/reports/kit.tsx. */
+        .rv-sort button.on { background: var(--accent); color: var(--accent-on, #fff); border-color: var(--accent); }
         .rv-recs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
         .rv-rec { flex: 1 1 190px; min-width: 170px; display: flex; gap: 11px; align-items: center; border: 1px solid var(--border-c, rgba(128,128,128,.22)); border-radius: 12px; padding: 11px 14px; }
         .rv-rec .e { font-size: 20px; }
@@ -1622,7 +1680,9 @@ export default function OwnerDashboard() {
           :global(.ow2-stats) { grid-template-columns: repeat(2, 1fr) !important; }
           .ow2-two, .ow2-callouts { grid-template-columns: minmax(0, 1fr); }
           .hq-table .hide-m { display: none; }
-          .hq-table th:nth-child(3), .hq-table td:nth-child(3), .hq-table th:nth-child(6), .hq-table td:nth-child(6) { display: none; }
+          /* by CLASS, never by nth-child — a row whose cells don't line up 1:1 with the header
+             (the "figures hidden" row) used to lose the wrong ones (T5 sweep, 2026-08-06). */
+          .hq-table .hide-s { display: none; }
           .ow2-act .who { display: none; }
         }
       `}</style>

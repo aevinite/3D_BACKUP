@@ -61,7 +61,10 @@ export function AnimatedNumber({ value, loading, money, format, className }: {
   format?: (n: number) => string; className?: string;
 }) {
   const disp = useAnimatedValue(value, loading);
-  const fmt = format ?? (money ? inr : (n: number) => Math.round(n).toLocaleString("en-US"));
+  // en-IN, not en-US: this console writes Indian money and Indian counts everywhere else
+  // (components/admin/shared → inr / nfmt are both en-IN). A plain count over 9,999 used to
+  // print "1,234,567" here beside a table saying "12,34,567".
+  const fmt = format ?? (money ? inr : (n: number) => Math.round(n).toLocaleString("en-IN"));
   // Auto-fit: shrink the font when the figure outgrows its tile (see components/FitNumber).
   // Keyed on the rendered text, so it re-measures every count-up frame — mid-roll digits only
   // ever grow, so this reads as the number settling into the exact size that fits.
@@ -81,7 +84,7 @@ export function AnimatedNumber({ value, loading, money, format, className }: {
 // every report number with zero call-site changes.
 export function AnimatedStatValue({ value, loading }: { value: React.ReactNode; loading?: boolean }) {
   const parsed = typeof value === "number"
-    ? { pre: "", num: value, locale: "en-US", suf: "" }
+    ? { pre: "", num: value, locale: "en-IN", suf: "" }
     : parseFormatted(value);
   const disp = useAnimatedValue(parsed ? parsed.num : 0, loading);
   const text = parsed ? parsed.pre + Math.round(disp).toLocaleString(parsed.locale) + parsed.suf : "";
@@ -93,9 +96,21 @@ export function AnimatedStatValue({ value, loading }: { value: React.ReactNode; 
   </span>;
 }
 
-// "₹42,361,012" → {pre:"₹", num, locale:"en-US"}; "1,234" → en-IN; "5%" → suffix kept.
-// inr formats with en-US grouping, nfmt with en-IN — inferred from the ₹ prefix so the
-// re-rendered grouping matches the original exactly. Returns null for non-integers.
+// "₹83,59,670" → {pre:"₹", num}; "1,234" → plain; "5%" → suffix kept. Returns null for
+// non-integers (a paise figure from inrP renders unchanged).
+//
+// THE GROUPING IS ALWAYS en-IN, AND THAT IS THE WHOLE POINT (T5 sweep, 2026-08-06).
+// This helper takes an ALREADY-FORMATTED string apart and puts it back together, so the
+// grouping it chooses must match the formatter the caller used. It used to pick en-US
+// whenever it saw a ₹ — on the belief, written into the old comment here, that
+// "inr formats with en-US grouping". It does not: components/admin/shared → inr is
+// toLocaleString("en-IN"), and so is nfmt. So every <Stat> in the Reports Studio — the
+// headline number of all eight reports — was silently re-grouped the American way while
+// the table underneath it, which prints inr() straight, stayed Indian. Measured live:
+// the Sales report read ₹8,359,670 above a Total row of ₹83,59,670, and the Tax report
+// read ₹398,074 above a CGST/SGST split of ₹3,98,074 on a panel captioned "ready to copy
+// into a return". Both formatters this helper can ever be fed are en-IN, so there is
+// nothing to infer.
 function parseFormatted(value: React.ReactNode): { pre: string; num: number; locale: string; suf: string } | null {
   if (typeof value !== "string") return null;
   const m = value.match(/^(\D*?)([\d,]+)(\D*)$/);
@@ -104,5 +119,5 @@ function parseFormatted(value: React.ReactNode): { pre: string; num: number; loc
   if (!/^\d+$/.test(numStr)) return null;
   const num = Number(numStr);
   if (!isFinite(num)) return null;
-  return { pre: m[1], num, locale: m[1].includes("₹") ? "en-US" : "en-IN", suf: m[3] };
+  return { pre: m[1], num, locale: "en-IN", suf: m[3] };
 }

@@ -504,7 +504,10 @@ export async function GET(req: NextRequest) {
         const enabled = payIds.filter((id) => payEff[id] === true);
         if (enabled.length) {
           const per = await mapLimit(enabled, 6, (id) =>
-            sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: istDateOf(from), p_to: istDateOf(to), p_bucket: "day" }));
+            // docDateHi, NOT istDateOf: this window ends at 05:00 IST TOMORROW, so istDateOf
+            // returned tomorrow's date and a salary recorded the next morning landed on this
+            // day's sheet (T5 sweep, 2026-08-06). Same rule the inventory lists already use.
+            sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: istDateOf(from), p_to: docDateHi(to), p_bucket: "day" }));
           const rowsSp = per.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[]);
           if (rowsSp.length) staffPay = {
             paidOut: rowsSp.reduce((a, r) => a + num(r.paid_out), 0),
@@ -662,7 +665,10 @@ export async function GET(req: NextRequest) {
       let rowsets = okPairs.map((x) => (x.p.data ?? []) as Row[]);
       if (type !== "hourly" && okIds.length > 1) {
         const nameById: Record<string, string> = {};
-        const nq = await sb.from("restaurants").select("id, name").in("id", okIds);
+        // `.limit()` matters: past PostgREST's 1000-row default every label past the 1000th
+        // restaurant silently became "Dish · —". Ask for exactly as many as we're looking up.
+        const nq = await sb.from("restaurants").select("id, name").in("id", okIds).limit(okIds.length);
+        if (nq.error) throw nq.error;   // a swallowed failure renamed EVERY dish to "Dish · —"
         for (const x of (nq.data || []) as { id: string; name: string }[]) nameById[x.id] = x.name;
         rowsets = rowsets.map((rows, i) => rows.map((r) => ({ ...r, [keyCol]: `${String(r[keyCol])} · ${nameById[okIds[i]] || "—"}` })));
       }
@@ -933,7 +939,9 @@ export async function GET(req: NextRequest) {
     //   people  — per-person totals for the table
     if (type === "staffpay") {
       const ids = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
-      const f = istDateOf(from), t2 = istDateOf(to);   // IST calendar dates, not UTC ones
+      // The high bound follows the BUSINESS day (docDateHi), so a "yesterday" report can't
+      // reach into this morning's payments — the same fix as the day sheet above.
+      const f = istDateOf(from), t2 = docDateHi(to);
       const per = await mapLimit(ids, 6, async (id) => {
         const [cash, monthly, people, staff] = await Promise.all([
           sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: f, p_to: t2, p_bucket: bucket === "month" ? "month" : "day" }),

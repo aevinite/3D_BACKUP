@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { canonPayMethod } from "@/components/owner/Charts";
-import { buildFiling, taxableValue } from "@/lib/taxFiling";
+import { buildFiling, taxableFor, exemptIsMaterial } from "@/lib/taxFiling";
 import type { ExportTable, ExportCol } from "@/components/owner/ownerReportDoc";
 
 // Paise only when the amount actually has them (the CGST/SGST halves of an odd tax total),
@@ -93,6 +93,9 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
       // (owner-panel sweep 2026-08-04).
       const lines = data.tax.components.map((x) => ({ label: x.label, rate: x.rate }));
       const filing = buildFiling(m.filter((r) => r.tax > 0), lines, (r) => r.tax);
+      // The SAME exempt-vs-rounding decision the screen makes (lib/taxFiling → exemptIsMaterial),
+      // so an exported "Taxable value" column can never differ from the tile the owner just read.
+      const exemptMaterial = !!t && exemptIsMaterial(t, data.tax.effectivePct);
       out.push({ title: `${meta.label} — tax split`, head: ["Component", "Rate %", "Collected"],
         cols: ["text", "pct", "money"],
         rows: [["Total tax", data.tax.effectivePct, filing.total],
@@ -103,8 +106,8 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
         cols: ["text", "money", ...lines.map(() => "money" as ExportCol), "money"],
         rows: [
           ...filing.rows.map((fr) => [c.bucketLabel(fr.row.bucket, grain),
-            Math.round(taxableValue(fr.row, data.tax!.effectivePct)), ...fr.parts, fr.tax] as (string | number)[]),
-          ["Total", Math.round(filing.rows.reduce((a, fr) => a + taxableValue(fr.row, data.tax!.effectivePct), 0)),
+            Math.round(taxableFor(fr.row, data.tax!.effectivePct, exemptMaterial)), ...fr.parts, fr.tax] as (string | number)[]),
+          ["Total", Math.round(filing.rows.reduce((a, fr) => a + taxableFor(fr.row, data.tax!.effectivePct, exemptMaterial), 0)),
             ...filing.columnTotals, filing.total] as (string | number)[],
         ],
       });

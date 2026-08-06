@@ -37,7 +37,7 @@ import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { SectionExport, printSection, POPUP_BLOCKED } from "@/components/owner/reports/sectionExport";
 // ONE filing computation for the whole app (screen, CSV, printed sheet) — see lib/taxFiling.ts
 // for why having three was a bug rather than a style choice.
-import { buildFiling, splitTax, taxableValue } from "@/lib/taxFiling";
+import { buildFiling, splitTax, taxableValue, exemptIsMaterial, taxableFor } from "@/lib/taxFiling";
 
 // "day" never appears in the period dropdown — it is the Day-summary sheet's own window
 // (`range=day&date=…` = ONE 05:00-IST business day). See DAY_KINDS below.
@@ -367,6 +367,11 @@ export default function OwnerReports() {
     const map: Record<string, { sel: RKey; sub?: string; pay?: "discounts" | "cancellations" }> = {
       daysummary: { sel: "daysummary" }, sales: { sel: "sales" }, tax: { sel: "tax" }, payments: { sel: "payments" },
       items: { sel: "items" }, timing: { sel: "timing" },
+      // `team` and `inventory` were MISSING, so the dashboard's "Staff pay out" / "After staff
+      // pay" tiles — which link to ?open=team and promise "Open the full report" — dropped the
+      // owner on the report catalogue with the Team card still to find (T5 sweep, 2026-08-06).
+      // Every RKey must be its own alias; the map is the only thing this deep-link consults.
+      team: { sel: "team" }, inventory: { sel: "inventory" },
       avgbill: { sel: "sales", sub: "avgbill" }, volume: { sel: "sales", sub: "volume" },
       weekday: { sel: "timing", sub: "weekday" }, hourly: { sel: "timing", sub: "hours" }, daypart: { sel: "timing", sub: "dayparts" },
       dishes: { sel: "items", sub: "items" }, categories: { sel: "items", sub: "categories" }, menu: { sel: "items", sub: "menu" },
@@ -1036,6 +1041,24 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
   const cser = (pick: (r: MoneyRow) => number) => chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), value: pick(r) }));
   const series = chartRows.map((r) => ({ label: bucketLabel(r.bucket, chartBucket), revenue: r.revenue }));
 
+  // ── THE LAST BUCKET OF A "…TO NOW" WINDOW IS STILL RUNNING ─────────────────────────────
+  // Every ranged report ends at `now`, so its final day (or hour, or month) is only part
+  // finished. Handed to BestWorst unchanged, that half-day always won "Quietest day" and
+  // dragged the trend pill down with it — measured live on Sales · 30 days: "QUIETEST DAY ·
+  // 6 Aug · ₹5,124 · 0% of the period", where 6 Aug was today with one order so far, under a
+  // pill reading "Trending down · 34%" (T5 sweep, 2026-08-06). The dashboard's month-compare
+  // card already refuses to plot today for exactly this reason and says so in a caption; the
+  // Studio's best/quietest panel never got the same treatment. The CHART still draws every
+  // bucket — only the ranking and the trend leave the unfinished one out, and say they did.
+  const IST_MS = 5.5 * 3600_000;
+  const stampLen = chartBucket === "month" ? 7 : chartBucket === "hour" ? 13 : 10;
+  const istStamp = (ms: number) => new Date(ms + IST_MS).toISOString().slice(0, stampLen);
+  const lastBucket = chartRows.length ? chartRows[chartRows.length - 1].bucket : null;
+  const lastIsRunning = !!lastBucket && chartRows.length > 1
+    && istStamp(Date.parse(String(lastBucket))) === istStamp(Date.now());
+  /** The series minus its still-running final bucket — for rankings, never for the chart. */
+  const settled = <T,>(arr: T[]): T[] => (lastIsRunning && arr.length > 1 ? arr.slice(0, -1) : arr);
+
   // ── TEAM & PAY (mig 220) ────────────────────────────────────────────────────
   // TWO money truths, deliberately labelled as such (owner's choice 2026-07-29):
   //   CASH  — what left the till on the day it left. Matches the day book.
@@ -1192,7 +1215,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <div className="rs-kpis">
           <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} />
           <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
-          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`${nfmt(t.orders)} orders total`} />
+          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`${nfmt(t.orders)} order${t.orders === 1 ? "" : "s"} total`} />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
           <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
           <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} onClick={() => onOpenReport("payments", { pay: "cancellations" })} title="Open the Cancellations report" />
@@ -1301,9 +1324,10 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         {series.length > 1 && (
           <>
             <BestWorst
-              series={series.map((s) => ({ label: s.label, value: s.revenue }))}
+              series={settled(series).map((s) => ({ label: s.label, value: s.revenue }))}
               money noun="income"
               unit={chartUnit}
+              droppedPartial={lastIsRunning}
             />
             <Panel title="Revenue through the day" pad={false}>
               <div style={{ padding: 12 }}><ToggleChart data={series.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money height={220} /></div>
@@ -1334,7 +1358,16 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         {(() => {
           const costRows = data.costSeries;
           const drilled = chartBucket !== bucket;
-          const canOverlay = !!costRows?.length && !drilled;
+          // The cost series is ALWAYS day- or month-grained (the route asks
+          // lfh_inv_cost_series for `bucket === "month" ? "month" : "day"`), and mig 294 returns
+          // its bucket as a "YYYY-MM-DD" / "YYYY-MM" STRING. On an HOUR window (Today /
+          // Yesterday) `istKey` slices an hour bucket down to its DAY, so all 24 hourly bars
+          // matched the one and only cost row and the chart drew the whole day's supplier spend
+          // twenty-four times over (T5 sweep, 2026-08-06). `drilled` never catches it, because
+          // an hour window has nothing finer to drill to. Only day/month revenue buckets can
+          // carry this overlay honestly.
+          const grainMatches = bucket === "day" || bucket === "month";
+          const canOverlay = !!costRows?.length && !drilled && grainMatches;
           const costBy = new Map((costRows ?? []).map((c) => [c.bucket, c]));
           const istKey = (iso: string) => {
             const d = new Date(Date.parse(iso) + 5.5 * 3600_000).toISOString();
@@ -1355,9 +1388,10 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         })()}
         {series.filter((s) => s.revenue > 0).length > 1 && (
           <BestWorst
-            series={series.map((s) => ({ label: s.label, value: s.revenue }))}
+            series={settled(series).map((s) => ({ label: s.label, value: s.revenue }))}
             money noun="revenue"
             unit={chartUnit}
+            droppedPartial={lastIsRunning}
           />
         )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
@@ -1384,10 +1418,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         </Panel>
         {withData.length > 1 && (
           <BestWorst
-            series={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))}
+            series={settled(avgSeries).map((s) => ({ label: s.label, value: s.revenue }))}
             money noun="basket size"
             title={`Fullest & thinnest ${chartUnit}`}
             unit={chartUnit}
+            droppedPartial={lastIsRunning}
           />
         )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} showAvg />
@@ -1423,7 +1458,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           <div style={{ padding: 12 }}><ToggleChart data={vol} color={accent} money={false} name="Orders" height={240} /></div>
         </Panel>
         {vol.filter((v) => v.value > 0).length > 1 && (
-          <BestWorst series={vol} money={false} noun="orders" unit={unitWord} />
+          <BestWorst series={settled(vol)} money={false} noun="orders" unit={unitWord} droppedPartial={lastIsRunning} />
         )}
         <MoneyTable rows={mrows} totals={t} bucket={bucket} />
       </>
@@ -1527,8 +1562,14 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     // The taxable value is recoverable exactly from the tax itself: tax = taxable × rate
     // (lib/taxFiling → taxableValue, shared with the export). It stays right when a period
     // mixes taxed and MRP/exempt lines, and is capped at net sales.
-    const taxable = composition ? 0 : taxableValue(t, configuredPct);
-    const exempt = Math.max(0, Math.round((netSales - taxable) * 100) / 100);
+    // Is there a REAL exempt / MRP portion, or is `net − tax÷rate` just rounding dust? Decided
+    // ONCE, in lib/taxFiling → exemptIsMaterial (which carries the story), then handed to every
+    // row below and to the export, so the tile, the filing table and the printed sheet can never
+    // print three different taxable bases. Without it a single-rate restaurant was permanently
+    // told it had ₹111 of exempt supply to file separately (T5 sweep, 2026-08-06).
+    const exemptMaterial = !composition && exemptIsMaterial(t, configuredPct);
+    const taxable = composition ? 0 : exemptMaterial ? taxableValue(t, configuredPct) : netSales;
+    const exempt = exemptMaterial ? Math.max(0, Math.round((netSales - taxable) * 100) / 100) : 0;
     const actualPct = taxable ? (t.tax / taxable) * 100 : 0;       // rate the numbers actually realised
     // With the exempt part accounted for, a REMAINING mismatch is a genuine data problem
     // worth flagging — it is no longer just "there were some untaxed items".
@@ -1548,7 +1589,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     // filing grain AND the exact total.
     const filing = buildFiling(comps.length ? mrows.filter((r) => r.tax > 0) : [], comps, (r) => r.tax);
     const filingRows = filing.rows.map((fr) => ({
-      bucket: fr.row.bucket, taxable: taxableValue(fr.row, configuredPct), tax: fr.tax, parts: fr.parts,
+      bucket: fr.row.bucket, taxable: taxableFor(fr.row, configuredPct, exemptMaterial), tax: fr.tax, parts: fr.parts,
     }));
     const compTotals = filing.columnTotals;
     const filingTaxable = filingRows.reduce((a, r) => a + r.taxable, 0);
