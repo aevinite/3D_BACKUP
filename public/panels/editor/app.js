@@ -836,10 +836,6 @@ function renderList() {
     // .no-sidebar); the content uses the full width.
     return;
   }
-  if (state.tab === "features") {
-    ul.appendChild(el(`<li class="list-item active"><div class="thumb"><i class="fas fa-toggle-on"></i></div><div class="meta"><b>Feature switches</b><small>turn things on/off</small></div></li>`));
-    return;
-  }
   if (state.tab === "dash") {
     // The left column IS the dashboard's range sub-nav — same pattern as Orders — instead of
     // a second menu inside the content.
@@ -5245,11 +5241,20 @@ function printParcelReceipt(o) {
   printBill(null, sessLike, [order], { parcel: true });
 }
 
-// ---------- Features tab: per-restaurant on/off switches ----------
-// The catalogue of GUEST-FACING switches. Each key matches lib/features.ts in
-// the menu app (absent in the DB = the default below). The four backend-only
-// switches (verification / payments / aggregators / gst_invoice) are
-// DELIBERATELY not listed here — the owner wants them invisible in every UI.
+// ---------- Guest feature switches: READ ONLY in this panel ----------
+// THE FEATURES TAB IS GONE (sweep T6, 2026-08-06). Its editor — featuresHtml() / bindFeatures() /
+// saveFeature() and the two render branches — had been unreachable for a long time: there is no
+// data-tab="features" in index.html and nothing sets state.tab = "features", so no manager, owner
+// or admin could open it. Left wired it was a standing offer to hand a manager ten restaurant-wide
+// guest switches, which the model gives to the ADMIN alone (docs/ACCESS-MODEL.md: "The admin owns
+// every switch"), and its save was the only path into settings.features with no key allow-list.
+// Guest features are set on /aevinite/access, whose route allow-lists them AND purges the guest
+// menu cache so a change reaches diners at once. POST /settings { features } now answers 403.
+//
+// The CATALOGUE stays, because the panel still READS it: featureOn("waiter_calls") decides whether
+// the floor can show a call. Each key matches lib/features.ts in the menu app (absent in the DB =
+// the default below). The four backend-only switches (verification / payments / aggregators /
+// gst_invoice) are DELIBERATELY not listed here — the owner wants them invisible in every UI.
 const FEATURE_CATALOG = [
   { key: "ratings",      def: true, icon: "⭐", label: "Star ratings",     desc: "The star scores on dish cards and dish pages. Off = no stars anywhere." },
   { key: "reviews",      def: true, icon: "💬", label: "Guest reviews",    desc: "Guests can write and read reviews on a dish. Off = the whole review area disappears." },
@@ -5269,52 +5274,6 @@ const featureOn = (key) => {
   const def = (FEATURE_CATALOG.find((x) => x.key === key) || {}).def !== false;
   return typeof f[key] === "boolean" ? f[key] : def;
 };
-
-// One card per switch — big friendly toggle, name, plain-language description.
-function featuresHtml() {
-  const rows = FEATURE_CATALOG.map((f) => `
-    <div class="feat-card">
-      <div class="feat-icon">${f.icon}</div>
-      <div class="feat-info"><b>${esc(f.label)}</b><small>${esc(f.desc)}</small></div>
-      <label class="fc-toggle feat-toggle"><input type="checkbox" data-feature="${esc(f.key)}" ${featureOn(f.key) ? "checked" : ""}/><span class="fc-sw"></span></label>
-    </div>`).join("");
-  return `<div class="ed-head"><h2>Features <span class="sub">· what guests can see and use</span></h2></div>
-    <p class="feat-note">Turning a feature off removes it COMPLETELY from the guest menu — buttons, screens, everything — the moment guests reload. Turning it back on restores it instantly.</p>
-    <div class="feat-grid">${rows}</div>`;
-}
-
-function bindFeatures() {
-  const ed = $("#editor");
-  ed.querySelectorAll("[data-feature]").forEach((c) => (c.onchange = async () => {
-    const key = c.dataset.feature;
-    const f = FEATURE_CATALOG.find((x) => x.key === key);
-    // Two-step confirm when switching something OFF — it vanishes for every
-    // guest immediately, so a misclick mid-service would be very visible.
-    if (!c.checked && !(await confirmDialog(`Turn OFF ${f ? f.label : key}? It disappears from the guest menu for everyone until you turn it back on.`, "Turn off"))) {
-      c.checked = true; // they said no — restore the toggle
-      return;
-    }
-    await saveFeature(key, c.checked);
-  }));
-}
-
-// Save ONE switch: optimistically merge it locally, then send ONLY the changed key to the server,
-// which merges it into the current bag — so two people toggling different switches don't clobber
-// each other (last-writer-wins used to revert the other's change). (B17)
-async function saveFeature(key, value) {
-  const prev = (state.data.settings || {}).features || {};
-  const next = { ...prev, [key]: value };
-  state.data.settings = { ...(state.data.settings || {}), features: next }; // optimistic (full local view)
-  // When offline, api() returns the outbox STUB ({ok,queued,action_id}), not the settings row —
-  // overwriting state.data.settings with it would wipe table_count/features/tax etc. Keep the
-  // optimistic value in that case (the queued write replays on reconnect).
-  try { const r = await api("POST", "/settings", { features: { [key]: value } }); if (!(r && r.queued)) state.data.settings = r; toast(r && r.queued ? "Saved (will sync)" : "Saved", "ok"); }
-  catch (e) {
-    state.data.settings = { ...(state.data.settings || {}), features: prev }; // undo
-    renderEditor();
-    toast("Failed: " + e.message, "err");
-  }
-}
 
 function renderEditor() {
   const ed = $("#editor");
@@ -5345,11 +5304,6 @@ function renderEditor() {
       bindLog();
       if (view === "operations" && !state.oplog) loadOplog();
     }
-    return;
-  }
-  if (state.tab === "features") {
-    ed.innerHTML = featuresHtml();
-    bindFeatures();
     return;
   }
   if (state.tab === "dash") {

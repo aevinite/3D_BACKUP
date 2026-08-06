@@ -9,27 +9,15 @@
 import { MANAGER_GRANT_DEFAULTS, managerGrantValue } from "@/lib/accessTree";
 import { MANAGER_POWER_FLAGS } from "@/lib/accessModel";
 
-// Tablet capability tri-states (settings.*), off | on | pin. tablet_take_orders
-// defaults 'on' (order-taking is the tablet's core function, mig 178); the rest 'off'.
-export const TABLET_CAPS = [
-  "tablet_discount", "tablet_mark_paid", "tablet_invoice", "tablet_banquet",
-  "tablet_table_tags", "tablet_khata", "tablet_table_ops", "tablet_take_orders",
-  "tablet_parcel",
-] as const;
-
-// Feature-ladder switches on settings (mig 166): the feature's admin "allowed" switch +
-// the admin "power transfer" (may the OWNER toggle it). Booleans, default OFF.
-export const FEATURE_SWITCHES = [
-  "table_tags_allowed", "table_tags_owner_control",
-  "banquet_allowed", "banquet_owner_control",
-  "table_ops_allowed", "table_ops_owner_control",
-  "take_orders_allowed", "take_orders_owner_control",
-  // TWO separate features (mig 259): Platforms (Zomato/Swiggy/own website) and the counter
-  // Parcel. One switch each — see the box at the top of lib/tableTags.ts.
-  "takeaway_allowed", "takeaway_owner_control",
-  "parcel_allowed", "parcel_owner_control",
-] as const;
-
+// ── WHAT LEFT THIS FILE ON 2026-08-06 (sweep T6) ────────────────────────────────────────────
+// `TABLET_CAPS`, `FEATURE_SWITCHES` and `TABLET_CAP_DEFAULTS` all went with the create form's
+// access block. The last of the three was the dangerous one: it still claimed the waiter's FLOOR
+// capabilities default 'off' — the pre-migration-295 answer — while lib/settingsClone.ts (which
+// its own comment said it mirrored) writes them 'on'. It had no caller, which was the only
+// reason nothing was broken; it was a trap for the next person who reached for "the
+// new-restaurant tablet defaults". The one true answer now lives in exactly two places:
+// lib/accessTree.ts (what the screen shows) and lib/settingsClone.ts (what a new row gets).
+//
 // The owner's grant baseline for the manager powers (restaurants.manager_permissions).
 // edit_menu/give_discounts/view_dashboard ON; money-risk + newer powers OFF.
 // The owner's grant baseline for a NEW restaurant (restaurants.manager_permissions).
@@ -57,13 +45,3 @@ export const MP_DEFAULT: Record<string, boolean> = Object.fromEntries(
     .filter((flag) => !OWNED_BY_PAYROLL.has(flag))
     .map((flag) => [flag, managerGrantValue(flag, undefined)]),
 );
-
-// New-restaurant DEFAULT tablet caps (mirrors lib/settingsClone.ts). take_orders 'on'.
-export const TABLET_CAP_DEFAULTS: Record<string, "off" | "on" | "pin"> = {
-  tablet_discount: "off", tablet_mark_paid: "off", tablet_invoice: "off",
-  tablet_banquet: "off", tablet_table_tags: "off", tablet_khata: "off",
-  tablet_table_ops: "off", tablet_take_orders: "on", tablet_parcel: "off",
-};
-
-export const isTri = (v: unknown): v is "off" | "on" | "pin" =>
-  v === "off" || v === "on" || v === "pin";

@@ -3910,10 +3910,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
           return permDenied("change the dining-session rules");
       }
       if (a === "settings" && g.user && g.user.role === "manager" && body && typeof body === "object") {
-        const cfgFloor = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
-          { table_assign?: { manager_opts?: Record<string, boolean> } } | null;
-        const opt = (k: string) => { const v = cfgFloor?.table_assign?.manager_opts?.[k]; return typeof v === "boolean" ? v : true; };
-        const touchesTables = "table_names" in body || "table_seats" in body;
+        // THE `table_assign.manager_opts` GATE LEFT THIS BLOCK (sweep T6, 2026-08-06). It read
+        // access_config.table_assign.manager_opts.tables and refused a rename when it was false —
+        // and NO screen can write that path: `table_assign` is not in the access tree's HAS_IDS,
+        // CONFIG_OPTS, CONFIG_LIMITS or CONFIG_TABLET, so the write route can never touch it. It
+        // answered `true` for every restaurant, which is the only reason nothing was broken; a
+        // restaurant carrying an old stored `false` would have had a manager refused a table
+        // rename with nothing anywhere able to undo it. That is the stranded-switch shape the
+        // access rebuild exists to remove. The LIVE switch for this exact act is
+        // `menus.mgrset.tables`, checked by managerSettingsOff() a few lines above — one switch,
+        // one screen, one refusal.
         // THE WHOLE FLOOR LAYOUT IS ADMIN-ONLY, AND IT IS NOT A PERMISSION (owner, 2026-08-02:
         // "in the manager panel there shouldn't be option of number of table per row… you cannot
         // on it and off it, that will be only set by admin"). Both fields are refused outright:
@@ -3930,7 +3936,6 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         // that does not exist.
         if ("floor_layout_mode" in body || "floor_per_row" in body)
           return err("How the floor is laid out — including how many tables sit on a row — is set by the admin only.", 403);
-        if (touchesTables && !opt("tables")) return permDenied("rename tables or change their seats");
         // Anything ELSE under settings is admin-owned now — a manager may not send it at all.
         const allowed = new Set(["table_names", "table_seats"]);
         for (const k of Object.keys(body)) {
@@ -4047,17 +4052,21 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
             body[rk] = Number.isFinite(n) ? Math.min(Math.max(n, 1), 90) : 90;
           }
         }
-        if ("features" in body) {
-          const f = body.features;
-          const incoming = f && typeof f === "object" && !Array.isArray(f)
-            ? Object.fromEntries(Object.entries(f).filter(([, v]) => typeof v === "boolean"))
-            : {};
-          // MERGE the incoming switch(es) into the CURRENT features (read-modify-write) instead of
-          // replacing the whole bag — so the client can send just the ONE changed key and two people
-          // toggling DIFFERENT switches don't clobber each other. (B17)
-          const curF = ((await sb.from("settings").select("features").eq("restaurant_id", rid).maybeSingle()).data?.features) as Record<string, unknown> | null;
-          body.features = { ...(curF && typeof curF === "object" && !Array.isArray(curF) ? curF : {}), ...incoming };
-        }
+        // GUEST FEATURE SWITCHES ARE NOT THIS ENDPOINT'S TO WRITE (sweep T6, 2026-08-06).
+        //
+        // This used to merge whatever `features` bag it was sent into settings.features, filtered
+        // by nothing but "is it a boolean" — so ANY key at all could be stored, including the four
+        // the model says stay invisible in every UI (verification / payments / aggregators /
+        // gst_invoice). It was the one settings write in the product with no key list, and the
+        // only thing that ever sent it was the manager panel's Features tab, which has been dead
+        // code behind no tab for a long time and is deleted in the same change.
+        //
+        // Guest features belong to ONE screen — /aevinite/access — whose route allow-lists them
+        // from the model (WRITEABLE_FEATURES) AND purges the guest menu cache so a switch reaches
+        // diners immediately. Neither was true here. Refused, in the panel's own voice, rather
+        // than dropped silently: a request that changes nothing must never answer "Saved".
+        if ("features" in body)
+          return err("Guest features are set by the admin on Access & permissions, not from this panel.", 403);
         // "Table setting" — per-table seat counts, keyed by table number ("1", "2", …).
         // Rebuild from scratch rather than trust the client shape: drops non-numeric
         // keys/values and clamps seats to 1..30, so a malformed request can't write an

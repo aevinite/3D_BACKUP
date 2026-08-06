@@ -104,7 +104,12 @@ has: both ⇒ "🛵 Platform", parcel only ⇒ "🥡 Parcels".
 
 ### A4 · Auto-print KOT
 ### A5 · Banquet billing
-### A6 · Payroll   — sub: show payroll cost inside the main reports as an expense line
+### A6 · Payroll
+One row, no sub-option. Pay counts as an expense wherever money is shown already — a "Staff pay
+out" line in the day book and "Staff pay out" + "After staff pay" on the owner dashboard — so
+there is nothing to switch. (This heading promised a "show payroll cost in reports" sub-option
+until 2026-08-06; no such row has ever existed, and the module's own ⓘ says the opposite.
+Inventory's equivalent row DOES exist and is honestly labelled left-to-build — see A7.)
 ### A7 · Inventory — sub: show inventory cost inside the main reports as an expense line
 ### A8 · Bill
 A pure group — a restaurant can always issue a bill, so there is no on/off. What is inside:
@@ -185,7 +190,7 @@ Two folders, the same shape as Manager. Every row is a tri-state (`Off` · `On` 
 |---|---|---|---|
 | Mark a bill paid | `settings.tablet_mark_paid` | **Off** | The one power the owner asked to be handed over deliberately. |
 | Discount a bill | `settings.tablet_discount` | **Off** | Child: the % ceiling (default 5% for a waiter, 50% for a manager). Shares the restaurant-level Feature switch with the manager's discount row. |
-| Close a table that still owes money | `access_config.close_unpaid.tablet` | **On + manager PIN** | A walk-out. Its own key since 2026-08-04 — it used to hang off `void_bills.tablet`, i.e. off the row labelled "Reopen a bill", which is a different act. Migration 268 carries stored values across. |
+| Close a table that still owes money | `access_config.close_unpaid.tablet` | **On + manager PIN** | A walk-out. Its own key since 2026-08-04 — it used to hang off `void_bills.tablet`, i.e. off the row labelled "Reopen a bill", which is a different act. Migration **295** (`295_waiter_caps_reach_a_switch.sql`) carries stored values across — it is the only migration that mentions `close_unpaid`. (This line said 268 until 2026-08-06; 268 is `prune_action_idempotency`.) |
 
 **NOT here, and not grantable to a tablet at all:**
 - **Print / issue an invoice** — `WAITER_NEVER` in `lib/accessTree.ts`. `waiterCapValue()` answers
@@ -221,7 +226,7 @@ french-house                               mark_paid=on  invoice=on  table_ops=o
 Eight of nine restaurants: a waiter could not settle a bill, and **no screen could change it** —
 while the waiter panel's own admin ribbon offered *"⚙ change in Access"* for a switch that did not
 exist. `waiterCapValue()` is now the ONE answer for the screen, the panel and every endpoint
-(never-list → off · listed row → stored-or-default · **unlisted → on**), and migration 268 makes
+(never-list → off · listed row → stored-or-default · **unlisted → on**), and migration 295 makes
 the stored data agree with the defaults above.
 
 The **daily report** the manager dashboard generates and the **owner's daily analysis report**

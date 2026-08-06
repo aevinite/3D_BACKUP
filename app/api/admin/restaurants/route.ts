@@ -14,10 +14,9 @@ import { resolveOwnerHomeRid, loginNameTaken } from "@/lib/ownerHome";
 import { logAction } from "@/lib/oplog";
 import { loadStarterMenu, toCategoryRows, toFilterRows, toItemRows } from "@/lib/starterMenu";
 import { cleanClonedSettings } from "@/lib/settingsClone";
-import { MANAGER_POWER_FLAGS, OWNER_ENTITLEMENT_KEYS } from "@/lib/ownerEntitlements";
-import { TABLET_CAPS, FEATURE_SWITCHES, MP_DEFAULT, isTri } from "@/lib/accessConfig";
+import { MP_DEFAULT } from "@/lib/accessConfig";
 
-// The remembered "New restaurant" setup (panels + sample-menu + access), stored in
+// The remembered "New restaurant" setup (panels + sample-menu), stored in
 // app_config (mig 186) so the create form auto-fills from the admin's last choice.
 const CREATE_DEFAULTS_KEY = "restaurant_creation_defaults";
 
@@ -230,35 +229,29 @@ export async function POST(req: NextRequest) {
     };
     // Seed a starter menu unless the admin turned the toggle off (default ON).
     const seedMenu = body?.seedMenu !== false;
-    // ACCESS config chosen at creation (owner 2026-07-24): the admin sets the new
-    // restaurant's access ladder right here. Shape mirrors the access editor's body:
-    //   access.owner    → owner_entitlements (sections + power_<flag>)
-    //   access.manager  → manager_permissions (the owner's grant baseline)
-    //   access.tablet   → tablet cap tri-states (settings.*)
-    //   access.features → module allowed / owner_control switches (settings.*)
-    // Absent = fall back to the system defaults (all-on owner sections, MP_DEFAULT
-    // grants, modules off) exactly as before — so an old client still works.
-    const access = (body?.access && typeof body.access === "object") ? body.access as Record<string, any> : {};
-    const settingsAccessPatch: Record<string, string | boolean> = {};
-    if (access.tablet && typeof access.tablet === "object")
-      for (const k of TABLET_CAPS) { const v = access.tablet[k]; if (isTri(v)) settingsAccessPatch[k] = v; }
-    if (access.features && typeof access.features === "object")
-      for (const k of FEATURE_SWITCHES) { const v = access.features[k]; if (typeof v === "boolean") settingsAccessPatch[k] = v; }
-    let managerPerms: Record<string, boolean> | null = null;
-    if (access.manager && typeof access.manager === "object") {
-      managerPerms = { ...MP_DEFAULT };
-      for (const k of MANAGER_POWER_FLAGS) if (k in access.manager) managerPerms[k] = (access.manager as Record<string, unknown>)[k] === true;
-    }
-    let ownerEnts: Record<string, boolean> | null = null;
-    if (access.owner && typeof access.owner === "object") {
-      ownerEnts = {};
-      for (const k of OWNER_ENTITLEMENT_KEYS) if (k in access.owner) ownerEnts[k] = (access.owner as Record<string, unknown>)[k] === true;
-    }
-    // 1) the restaurant row (id auto-uuid, active) + any chosen access entitlements.
+    // ── A NEW RESTAURANT IS BORN ON THE MODEL'S OWN DEFAULTS, AND NOTHING ELSE ──────────────
+    // (sweep T6, 2026-08-06.) This used to accept a whole `access` blob from the create form —
+    // owner sections + power_<flag>, a manager grant map, nine tablet tri-states and the module
+    // ladder — and the form's hand-typed presets had drifted badly from the model:
+    //
+    //   · its tablet preset was PRE-MIGRATION-295 (table_ops / table_tags / khata / parcel /
+    //     banquet = 'off') and was spread OVER cleanClonedSettings below, so every restaurant
+    //     created here was born with the exact fault migration 295 exists to repair;
+    //   · it seeded view_ratings:false against the model's true, so new managers had no Rating
+    //     review tab (measured on pizza-palace / taco-fiesta / demo-bistro);
+    //   · owner sections and power_<flag> could ONLY be set here — no Access row writes them and
+    //     the server honours them, so one untick stranded a manager with nothing able to undo it.
+    //
+    // So creation sets NO permission of its own. `manager_permissions` is seeded from MP_DEFAULT,
+    // which DERIVES from managerGrantValue() — i.e. it stores exactly what the Access screen
+    // displays, so the row and the screen agree from the first second. `owner_entitlements` is
+    // left absent, which the model reads as "all on". Everything on `settings` comes from
+    // cleanClonedSettings (money caps off, floor caps on, modules off). Permissions are changed
+    // afterwards on ONE screen: /aevinite/access.
+    const managerPerms: Record<string, boolean> = { ...MP_DEFAULT };
+    // 1) the restaurant row (id auto-uuid, active) + the model's own grant baseline.
     const rest = await sb.from("restaurants").insert({
-      slug, name, active: true,
-      ...(managerPerms ? { manager_permissions: managerPerms } : {}),
-      ...(ownerEnts ? { owner_entitlements: ownerEnts } : {}),
+      slug, name, active: true, manager_permissions: managerPerms,
     }).select("id, slug, name").single();
     if (rest.error) {
       // Slug uniqueness is a read-then-insert (not atomic), so two admins creating the same
@@ -274,8 +267,9 @@ export async function POST(req: NextRequest) {
     // cleanClonedSettings strips #1's tenant-specific identity/geo/tax (and sets table_count:10)
     // so a new restaurant never inherits #1's invoice name/GSTIN or café geofence coordinates.
     const baseRow = cleanClonedSettings(template.data);
-    // Fold the chosen tablet caps + module switches over the cleaned defaults.
-    const settingsRow = { ...baseRow, id: slug, restaurant_id: rid, enabled_panels: panels, ...settingsAccessPatch };
+    // NOTHING IS SPREAD OVER baseRow ANY MORE (sweep T6): the create form's tablet/module
+    // preset used to land here, last, and overwrite the very defaults cleanClonedSettings sets.
+    const settingsRow = { ...baseRow, id: slug, restaurant_id: rid, enabled_panels: panels };
     const setRes = await sb.from("settings").upsert(settingsRow, { onConflict: "restaurant_id" });
     if (setRes.error) {
       // Roll back the orphaned restaurant row (bug #5, 2026-07-06): without a settings
@@ -332,12 +326,14 @@ export async function POST(req: NextRequest) {
     }
     const onPanels = (Object.keys(panels) as (keyof typeof panels)[]).filter((k) => panels[k]);
     await logAction("admin", "restaurant_create", { actor: "admin", restaurant_id: rid, detail: `created restaurant "${name}" (${slug}) · panels ${onPanels.join("+")}${seedMenu ? (menuSeeded ? " · menu seeded" : " · menu seed FAILED") : " · no menu"}` });
-    // Remember this setup (panels + sample-menu + access) so the next "New restaurant"
-    // form auto-fills from it. Best-effort — a save failure must never fail the create.
+    // Remember this setup (panels + sample-menu) so the next "New restaurant" form auto-fills
+    // from it. Best-effort — a save failure must never fail the create. NO `access` any more
+    // (sweep T6, 2026-08-06): remembering a permission set is what let one stale shape pre-fill
+    // every future restaurant, and permissions are not this form's to decide.
     if (body?.saveDefaults !== false) {
       try {
         await sb.from("app_config").upsert(
-          { key: CREATE_DEFAULTS_KEY, value: { panels, seedMenu, access }, updated_at: new Date().toISOString() },
+          { key: CREATE_DEFAULTS_KEY, value: { panels, seedMenu }, updated_at: new Date().toISOString() },
           { onConflict: "key" },
         );
       } catch { /* remembering defaults is a convenience, not critical */ }

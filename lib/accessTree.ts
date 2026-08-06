@@ -221,7 +221,8 @@ const ACTIONS: ActionDef[] = [
   // access_config.void_bills.tablet never reopened anything either — it gated a WALK-OUT (closing
   // a table that still owes money), which is a different act wearing the wrong row's name. It is
   // now its own waiter row (WAITER_MONEY below, id "close_unpaid"), so the screen says what the
-  // switch does. Migration 268 copies any stored value across.
+  // switch does. Migration 295 copies any stored value across (295_waiter_caps_reach_a_switch.sql
+  // — NOT 268, which is prune_action_idempotency; corrected by sweep T6, 2026-08-06).
   { id: "void_bills", name: "Reopen a bill", flag: "void_bills", mgrDef: false, pin: true, mins: 5,
     what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it. Managers only — a waiter can never reopen a bill." },
   { id: "give_discounts", name: "Discount a bill", flag: "give_discounts", mgrDef: true, pin: true, cap: true,
@@ -1020,7 +1021,15 @@ export function nodeValue(n: Node, s: TreeState): any {
     case "ratingsMaster": {
       const stars = s.features?.ratings;
       const mode = present(s.settings?.google_review_mode as string, "off");
-      return (stars === undefined ? true : stars === true) || mode === "google";
+      // EVERY google mode counts, not only the pure one (fixed by sweep T6, 2026-08-06). This read
+      // `mode === "google"`, so a restaurant sitting on stars-off + "google_after_normal" showed
+      // the master as OFF on this screen while its guests were still being sent to the Google
+      // review page — the screen saying "nobody is asked to rate anything" over a restaurant that
+      // asks every guest. Through the UI the two halves are kept in step by extraPatch(), so it
+      // takes legacy or hand-edited data to reach; the comment above already described the rule
+      // correctly ("Off is the one combination that shows a guest nothing"), the code just tested
+      // one mode of the two.
+      return (stars === undefined ? true : stars === true) || String(mode).startsWith("google");
     }
     default:         return null;
   }
