@@ -776,7 +776,7 @@ export default function AdminRepair() {
               const statusInfo: Record<AgentRun["status"], { label: string; color: string }> = {
                 running: { label: "working…", color: "var(--adm-accent, #e8a13c)" },
                 done: { label: "finished", color: "var(--adm-ok, #4caf82)" },
-                closed: { label: "window closed", color: "var(--adm-muted-fg, #9aa)" },
+                closed: { label: "window closed", color: "var(--muted)" },   // --adm-muted-fg was never declared, so this was always #9aa = 2.42:1 on the light console
                 failed: { label: "failed", color: "var(--adm-danger)" },
               };
               const st = statusInfo[s.status];

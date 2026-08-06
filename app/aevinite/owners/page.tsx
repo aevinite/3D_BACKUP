@@ -140,7 +140,7 @@ export default function AdminOwners() {
           <button style={btn("#3b82f6")} onClick={() => setShowCreate(true)}><i className="fas fa-plus" style={{ marginRight: 7, fontSize: 11 }} aria-hidden="true" />New owner</button>
         </div>
 
-        {err ? <div style={{ ...card, borderColor: "#7f1d1d", color: "#fca5a5", margin: "10px 0 0", padding: 12 }}>{err}</div> : null}
+        {err ? <div className="hue-ink" style={{ ...card, borderColor: "#7f1d1d", ["--hue" as string]: "#fca5a5", margin: "10px 0 0", padding: 12 }}>{err}</div> : null}
 
         {/* KPI strip — each card is a FILTER (tap to filter the list, tap again to clear) */}
         <div className="own-kpis">
@@ -384,7 +384,7 @@ function RestChip({ r }: { r: OwnedRest }) {
       <span aria-hidden style={{ width: 30, height: 30, borderRadius: 8, background: chipColor(r.id), flex: "none" }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontWeight: 700, fontSize: 13.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name}</div>
-        <div style={{ fontSize: 11.5, marginTop: 1 }}>{r.primary ? <span style={{ color: "#fbbf24", fontWeight: 700 }}>Primary owner</span> : <span style={{ color: "#60a5fa", fontWeight: 700 }}>Co-owner</span>}</div>
+        <div style={{ fontSize: 11.5, marginTop: 1 }}>{r.primary ? <span className="hue-ink" style={{ ["--hue" as string]: "#fbbf24", fontWeight: 700 }}>Primary owner</span> : <span className="hue-ink" style={{ ["--hue" as string]: "#60a5fa", fontWeight: 700 }}>Co-owner</span>}</div>
       </div>
     </div>
   );
@@ -658,7 +658,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
       ) : null}
 
       <div style={{ padding: 18, display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 16 }}>
-        {mErr ? <div style={{ ...card, padding: 12, borderColor: "#7f1d1d", color: "#fca5a5" }}>{mErr}</div> : null}
+        {mErr ? <div className="hue-ink" style={{ ...card, padding: 12, borderColor: "#7f1d1d", ["--hue" as string]: "#fca5a5" }}>{mErr}</div> : null}
 
         {/* Actions */}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -680,7 +680,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
           {owner.restaurants.length > 0 && (() => {
             const home = owner.restaurants.find((r) => r.primary) || owner.restaurants[0];
             return (
-              <a style={{ ...actBtn, textDecoration: "none", color: "#60a5fa" }}
+              <a className="hue-ink" style={{ ...actBtn, textDecoration: "none", ["--hue" as string]: "#60a5fa" }}
                 title={`Open ${owner.name}'s owner panel${owner.restaurants.length > 1 ? ` (opens on ${home.name})` : ""} — no password, invisible to them`}
                 href={panelHref(home.id, owner.id)} target="_blank" rel="noreferrer">
                 <i className="fas fa-eye" style={ic} aria-hidden="true" />Visit panel</a>
@@ -725,7 +725,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
             <div style={{ fontSize: 11, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--muted)", flex: 1 }}>Owns {owner.restaurants.length} restaurant{owner.restaurants.length === 1 ? "" : "s"}</div>
-            <button style={{ ...chip, borderStyle: "dashed", color: "#60a5fa", cursor: "pointer", background: "transparent", padding: "7px 11px" }} disabled={busy}
+            <button className="hue-ink" style={{ ...chip, borderStyle: "dashed", ["--hue" as string]: "#60a5fa", cursor: "pointer", background: "transparent", padding: "7px 11px" }} disabled={busy}
               onClick={() => setShowAssign(true)}>
               <i className="fas fa-plus" style={{ fontSize: 10 }} aria-hidden="true" />Assign restaurant</button>
           </div>
@@ -740,7 +740,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
                     {r.primary
                       ? <span style={{ color: "#fbbf24", fontWeight: 700 }}><i className="fas fa-star" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Primary owner</span>
                       : <>
-                          <span style={{ color: "#60a5fa", fontWeight: 700 }}><i className="fas fa-user-group" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Co-owner</span>
+                          <span className="hue-ink" style={{ ["--hue" as string]: "#60a5fa", fontWeight: 700 }}><i className="fas fa-user-group" style={{ fontSize: 9, marginRight: 4 }} aria-hidden="true" />Co-owner</span>
                           {/* Name the holder — "Co-owner" alone reads like a bug when the
                               primary is a binned starter login nobody can see. */}
                           {r.primaryHolder
@@ -754,7 +754,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
                     title={`Make ${owner.name} the primary owner of ${r.name}`}
                     onClick={() => makePrimary(r)}><i className="fas fa-star" style={ic} aria-hidden="true" /><span className="hue-ink" style={{ ["--hue" as string]: "#60a5fa" }}>Make primary</span></button>
                 )}
-                <a style={{ ...actBtn, textDecoration: "none", color: "#60a5fa", padding: "7px 10px" }}
+                <a className="hue-ink" style={{ ...actBtn, textDecoration: "none", ["--hue" as string]: "#60a5fa", padding: "7px 10px" }}
                   title={`Open ${owner.name}'s owner panel for ${r.name} (no password, invisible to them)`}
                   href={panelHref(r.id, owner.id)} target="_blank" rel="noreferrer">
                   <i className="fas fa-eye" style={ic} aria-hidden="true" />Open panel</a>
@@ -790,7 +790,7 @@ function OwnerDetail({ owner, rests, onBack, busy, setBusy, onChanged, onDeleted
 
         {/* Danger zone */}
         <div style={{ ...card, padding: 14, borderColor: "#7f1d1d", background: "rgba(127,29,29,.06)" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#fca5a5", marginBottom: 6 }}>Danger zone</div>
+          <div className="hue-ink" style={{ fontSize: 13, fontWeight: 700, ["--hue" as string]: "#fca5a5", marginBottom: 6 }}>Danger zone</div>
           {owner.active ? (
             <div style={{ fontSize: 12, color: "var(--muted)" }}>
               To delete this owner, <b>suspend them first</b> (the reversible step). Deleting then moves them to the <b>Recycle bin</b> — restorable for 90 days.
@@ -884,7 +884,7 @@ function CreateOwnerModal({ rests, onClose, onCreated }: {
         ) : (
           <form onSubmit={create} style={{ ...card, pointerEvents: "auto", width: "min(96vw, 440px)", maxHeight: "90vh", overflowY: "auto", display: "grid", gap: 13 }}>
             <div style={{ fontSize: 16, fontWeight: 800 }}>New owner</div>
-            {err ? <div style={{ fontSize: 12.5, color: "#fca5a5" }}>{err}</div> : null}
+            {err ? <div className="hue-ink" style={{ fontSize: 12.5, ["--hue" as string]: "#fca5a5" }}>{err}</div> : null}
             <label style={label}>Name / username <span style={{ color: "var(--muted)" }}>· this is their login</span>
               <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rakesh Patel" style={field} autoFocus required />
             </label>

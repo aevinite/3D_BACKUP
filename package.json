@@ -95,7 +95,8 @@
     "verify:closed-session": "node scripts/verify-closed-session-orders.mjs",
     "verify:skin-ink": "node scripts/verify-skin-ink.mjs",
     "verify:dead-css": "node scripts/verify-dead-css.mjs",
-    "verify:sweep-extras": "node scripts/verify-sweep-extras.mjs"
+    "verify:sweep-extras": "node scripts/verify-sweep-extras.mjs",
+    "verify:css-tokens": "node scripts/verify-css-tokens.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
