@@ -197,6 +197,17 @@ export function PrintHead({ restName, title, period, asOf }: { restName: string;
   );
 }
 
+/** The closing note, word-for-word the one sectionHtml() prints, so both sheets read alike. */
+export function PrintFoot() {
+  return (
+    <div className="rs-printfoot" aria-hidden>
+      Item sales are menu prices before discount. Total collected is every rupee guests paid
+      (GST included) on paid, non-cancelled orders; your earnings are the item sales minus
+      discount, before GST. Generated automatically by the Aevidine owner console.
+    </div>
+  );
+}
+
 // The full design-system CSS for the reports studio. Scoped to `.rs-root` so it
 // never bleeds into the rest of the owner console; rendered once by the page.
 export function ReportsStyles() {
@@ -302,6 +313,11 @@ export function ReportsStyles() {
       .rs-subtab:hover { color: var(--text); background: var(--muted2); }
       .rs-subtab.on { color: var(--accent); }
       .rs-subtab.on::after { content: ""; position: absolute; left: 10px; right: 10px; bottom: -3px; height: 2.5px; border-radius: 2px; background: var(--accent); }
+      /* A view the chosen period cannot produce (Day of week on Today) is shown as unavailable
+         rather than as a tab that only ever says "pick something else" (T5 sweep, 2026-08-06).
+         Its title attribute carries the reason. */
+      .rs-subtab.off { opacity: .42; cursor: not-allowed; }
+      .rs-subtab.off:hover { color: var(--muted); background: none; }
       @media print { .rs-subtabs { display: none !important; } }
 
       /* ── Detail overlay (discount/cancellation drill from Payments) ──────── */
@@ -450,8 +466,8 @@ export function ReportsStyles() {
         .rs-ov-kpis { gap: 20px; }
       }
 
-      /* The document masthead is invisible on screen; it only paints in @media print. */
-      .rs-printhead { display: none; }
+      /* The masthead and closing note are invisible on screen; they only paint in @media print. */
+      .rs-printhead, .rs-printfoot { display: none; }
 
       /* ── Print: a clean one-report document, not a screenshot of the console ──
          Works for EVERY report (the rules are generic by class): money/day-summary,
@@ -499,14 +515,23 @@ export function ReportsStyles() {
           max-width: none !important;
         }
 
-        /* The print-only document masthead. */
-        .rs-printhead { display: block !important; margin: 0 0 16px; padding: 0 0 10px; border-bottom: 1.5px solid #111; color: #111; break-inside: avoid; break-after: avoid; }
+        /* ── The print-only document masthead ──────────────────────────────────────────
+           Deliberately mirrors components/owner/reports/sectionExport.tsx → sectionHtml(): the
+           SAME brand line, the same "Generated"/"Figures as of" pair, the same teal rule and the
+           same closing note. There are two printing paths — Ctrl+P renders THIS page through the
+           rules below, while Export → Print opens a freshly-built document — and until now they
+           produced two visibly different sheets for one report (T5 sweep, 2026-08-06). They are
+           still two code paths; they are no longer two documents. If you change one masthead,
+           change the other. */
+        .rs-printhead { display: block !important; margin: 0 0 16px; padding: 0 0 10px; border-bottom: 3px solid #0f766e; color: #10231c; break-inside: avoid; break-after: avoid; }
         .rs-ph-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
-        .rs-ph-brand { font-size: 10.5px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; color: #333; }
-        .rs-ph-gen { font-size: 10.5px; color: #555; font-variant-numeric: tabular-nums; }
-        .rs-ph-title { font-size: 23px; font-weight: 800; letter-spacing: -0.02em; margin: 9px 0 2px; color: #111; }
-        .rs-ph-scope { font-size: 12.5px; color: #444; font-weight: 600; }
-        .rs-ph-asof { font-size: 10.5px; color: #555; margin-top: 3px; font-variant-numeric: tabular-nums; }
+        .rs-ph-brand { font-size: 13px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #0f766e; }
+        .rs-ph-gen { font-size: 10.5px; color: #6b7f78; font-variant-numeric: tabular-nums; }
+        .rs-ph-title { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; margin: 14px 0 2px; color: #10231c; }
+        .rs-ph-scope { font-size: 13px; color: #4b615a; font-weight: 600; }
+        .rs-ph-asof { font-size: 10.5px; color: #6b7f78; margin-top: 3px; font-variant-numeric: tabular-nums; }
+        /* the same closing note the built document carries */
+        .rs-printfoot { display: block !important; margin-top: 26px; font-size: 10px; color: #6b7f78; border-top: 1px solid #d9e5e1; padding-top: 8px; }
 
         /* KPI tiles, panels and quadrant boxes → clean bordered boxes; no colour
            wash, no shadow, and never split across a page. */

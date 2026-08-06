@@ -334,5 +334,79 @@ check("the phone column-hiding reaches the header too",
   /\.hq-table :global\(\.hide-m\), \.hq-table :global\(\.hide-s\)/.test(dashPage),
   "hiding only the body cells leaves the header a column or two too wide");
 
+console.log("\n── 20. THE IMPROVEMENTS STAY IMPROVED (T5, 2026-08-06) ──");
+const money = read("lib/money.ts");
+const animNum2 = read("components/owner/AnimatedNumber.tsx");
+// I1 — one short money form, and it goes to CRORES (the owner's pick: "do 1.2 Cr").
+check("there is ONE compact money form, and it reaches crores",
+  /export function compactINR/.test(money) && /Cr/.test(money)
+    && /compactINR/.test(charts) && /compactINR/.test(dashPage)
+    && !/\(n \/ 1e7\)\.toFixed/.test(dashPage),
+  "a private copy is how an axis said ₹120.0L while the dropdown beside it said ₹1.2Cr");
+// I6 — round ticks, WITHOUT giving up "a chart fills its box".
+check("chart axes label round numbers, not the ragged max",
+  /export function roundTicks/.test(money) && /ticks=\{tk\(/.test(charts),
+  "ending the domain at the data max makes recharts print it beside the last round tick");
+check("…and the domain still ends at the data max",
+  /fitDomain\(values\)/.test(charts) && /domain=\{\[0, max\]\}/.test(charts),
+  "the owner's rule is that the data touches the top — ticks are a label change, not a domain change");
+// I4 — the heatmap colour means something.
+check("the heatmap legend prints its scale",
+  /busiest hour/.test(charts) && /legendHi/.test(charts),
+  "'Less … More' with no numbers means one shade is 3 orders on one view and ₹18,000 on the other");
+// I5 — say the grid is clamped.
+check("the heatmap card says when it only covers 90 days",
+  /HEAT_CLAMPED/.test(dashPage) && /HEAT_CLAMP_DAYS/.test(dashPage),
+  "the server clamps to 90 days; a chip saying 'All time' overstates it");
+// I3 — freshness per card.
+check("each card can state its own figures-computed time",
+  /const \[ages, setAges\]/.test(dashPage) && /ageTitle\(/.test(dashPage) && /oldestShown/.test(dashPage),
+  "one page-level label described whichever request answered last");
+// I8 — warm what he'll actually use.
+check("the dashboard pre-warms at most the last-used range",
+  !/RANGES\.map\(\(r\) => r\.k\)\.filter\(\(k\) => k !== globalRange\)/.test(dashPage),
+  "warming all seven cost 14 requests per scope on every visit");
+// I11 — no tab that only says "pick something else".
+check("a sub-tab the period cannot answer is disabled, not empty",
+  /needsDayGrain/.test(reportsPage) && /DAY_GRAIN_RANGES/.test(reportsPage) && /rs-subtab\.off/.test(kit),
+  "Day of week on Today could only ever tell you to choose a different period");
+// I12 — printing must not change what is on screen.
+check("printing restores the period it borrowed",
+  /restoreAfterPrint/.test(reportsPage),
+  "printing last month used to leave the screen on a custom range");
+// I10 — a failed report offers a way out.
+check("a failed report has a Try again button",
+  /Try again/.test(reportsPage) && /onRetry/.test(reportsPage),
+  "Refresh always worked; nothing said so");
+// I13 — one sheet, whichever way you print.
+check("both print paths share a masthead and a closing note",
+  /export function PrintFoot/.test(kit) && /PrintFoot/.test(reportsPage) && /rs-printfoot/.test(kit),
+  "Ctrl+P and Export → Print produced two visibly different documents");
+// I17 — one colour per restaurant.
+check("a restaurant's colour is keyed by its id, not its list position",
+  /function portfolioColor\(idOrIndex: string \| number\)/.test(dashPage) && !/portfolioColor\(i\)/.test(dashPage),
+  "sorting the ranking made a bar and its trend line disagree");
+// I18 — an unknown payment method is not 'Not recorded'.
+check("an unrecognised payment method gets its own colour",
+  /export function payColor/.test(charts) && /PAY_EXTRA/.test(charts),
+  "two custom methods painted the same grey are one wedge");
+// I20 — one fan-out cap.
+check("there is ONE mapLimit",
+  /export async function mapLimit/.test(read("lib/mapLimit.ts"))
+    && /from "@\/lib\/mapLimit"/.test(reportsRoute) && /from "@\/lib\/mapLimit"/.test(analyticsRoute)
+    && /from "@\/lib\/mapLimit"/.test(read("lib/ownerReportGather.ts")),
+  "four copies with four different limits, and one bare for-await with none");
+check("the merged-inventory rung read is capped, not sequential",
+  !/for \(const id of invIdsAll\) if \(\(await inventoryLadder/.test(reportsRoute),
+  "a bare for-await reads the restaurants strictly one after another");
+// I23 — nothing is fetched that nothing renders.
+check("the dashboard no longer counts open tables it never shows",
+  !/from\("sessions"\)[\s\S]{0,120}status", "open"/.test(analyticsRoute) && !/openTables/.test(analyticsRoute),
+  "a ~165ms live count on every request, rendered by nothing (the overview payload has it)");
+// the drawer closes the way every other overlay does
+check("the restaurant drawer closes on Escape too",
+  /if \(e\.key === "Escape"\) setDrawerRid\(null\)/.test(dashPage),
+  "it closed on Back, the backdrop and the ✕ — but not the one habit that works everywhere else");
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }

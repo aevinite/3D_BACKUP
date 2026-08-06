@@ -24,6 +24,7 @@ import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerpri
 import { payrollEffectiveByRid } from "@/lib/tableTags";
 import { istDateOf } from "@/lib/staffProfileShared";
 import { businessDateHi } from "@/lib/businessDay";
+import { mapLimit, FANOUT } from "@/lib/mapLimit";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 
 export const dynamic = "force-dynamic";
@@ -181,25 +182,7 @@ function prevTsWindowFor(range: string, from: string, to: string): { from: strin
   return prevWindowFor(range, from, to);
 }
 
-// Run an RPC over a list of restaurants with a CONCURRENCY CAP, order preserved. A bare
-// Promise.all fires one call PER RESTAURANT at once, which on a grown platform saturates the
-// pool and times the whole dashboard payload out — the sibling reports route has capped this
-// at 8 since the 2026-07-07 audit, and these two fan-outs were never given the same
-// treatment (found by the 2026-08-04 owner-panel sweep). 8 keeps the few-restaurant case
-// exactly as fast as before.
-async function mapLimit<I, O>(items: I[], limit: number, fn: (item: I) => PromiseLike<O> | O): Promise<O[]> {
-  const out = new Array<O>(items.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (;;) {
-      const i = next++;
-      if (i >= items.length) return;
-      out[i] = await fn(items[i]);
-    }
-  }));
-  return out;
-}
-const FANOUT = 8;
+// (the fan-out cap now lives in lib/mapLimit — see the note there)
 
 const num = (v: unknown) => Math.round((Number(v) || 0) * 100) / 100;
 
@@ -501,7 +484,7 @@ export async function GET(req: NextRequest) {
     return {
       scope: "restaurant", range, prev,
       restaurant: { id: meta.data.id, slug: meta.data.slug, name: meta.data.name, accentColor: meta.data.accent_color || "#e3c06f", heroTitle: meta.data.hero_title || "" },
-      kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, openTables: 0, topDish: dishRows[0]?.title || "—" },
+      kpis: { revenue, orders, paidOrders, avgOrder: paidOrders ? num(revenue / paidOrders) : 0, topDish: dishRows[0]?.title || "—" },
       staffPay: await staffPayExpense(),
       timeseries: tsRows,
       timeseriesPrev: tsPrevRows,
@@ -514,24 +497,23 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    // LIVE add-ons, outside the cache: the open-tables now-count (must never freeze)
-    // and the on-demand all-time records (unbounded scan, once per restaurant).
-    const openT = await sb.from("sessions").select("id", { count: "exact", head: true }).eq("restaurant_id", rid).eq("status", "open");
-    // "0 TABLES OPEN" AND "WE COULDN'T COUNT" ARE DIFFERENT SENTENCES (T9 sweep, 2026-08-06).
-    // `openT.count || 0` turned a failed head-count into a confident empty floor — mid-service, on
-    // the one KPI this route deliberately keeps LIVE. `null` lets the tile show a dash instead of
-    // claiming a number nobody read (the client already renders `openTables ?? "—"`).
-    const kpis = {
-      ...(restBase as { kpis: Record<string, unknown> }).kpis,
-      openTables: openT.error ? null : (openT.count ?? 0),
-    };
-    if (openT.error) console.error("[owner/analytics] open-tables count failed:", openT.error.message);
+    // THE OPEN-TABLES COUNT IS GONE FROM HERE (T5 sweep, 2026-08-06). It was a live count(*) on
+    // open sessions, run OUTSIDE the snapshot cache on EVERY request — measured at ~165 ms — and
+    // NOTHING rendered it: every open-tables figure on the dashboard (the hero line, the estate
+    // table's Open column, the drawer) reads /api/owner/overview, which already returns
+    // open_tables per restaurant on the same page load and refreshes on the same 60s tick. That
+    // is the project's own "nothing is fetched that nothing renders" rule, and this was the last
+    // thing breaking it here. If a future card wants a live head-count, read it from the overview
+    // payload rather than adding a second query for the same number.
+    //
+    // The all-time RECORDS scan stays outside the cache on purpose: it is unbounded, and the
+    // client asks for it once per restaurant (&records=1), not on the polled path.
     let records: unknown = null;
     if (wantRecords) {
       const r = await sb.rpc("lfh_owner_records", { p_restaurant_id: rid });
       if (!r.error) records = r.data ?? null;
     }
-    return NextResponse.json({ ...restBase, kpis, records });
+    return NextResponse.json({ ...restBase, records });
   } catch (e) {
     return dbFail("owner/analytics", e, {
       message: "Couldn't load your dashboard just now — please try again.",

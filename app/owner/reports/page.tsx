@@ -22,7 +22,7 @@ import {
   canonPayMethod, PAY_COLORS,
 } from "@/components/owner/Charts";
 import {
-  REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, PrintHead, nfmt, scrollToId, type RKey, type DataKind,
+  REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, PrintHead, PrintFoot, nfmt, scrollToId, type RKey, type DataKind,
 } from "@/components/owner/reports/kit";
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
 import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
@@ -129,7 +129,9 @@ const BODY_KIND: Record<BodyKey, DataKind> = {
 };
 type OpenOpts = { sub?: string; pay?: "discounts" | "cancellations" };
 type OpenReport = (k: RKey, opts?: OpenOpts) => void;
-type SubTab = { key: string; label: string; icon: string; body: BodyKey };
+type SubTab = { key: string; label: string; icon: string; body: BodyKey; needsDayGrain?: boolean };
+/** Which periods produce DAY buckets — the only ones a day-of-week breakdown can read. */
+const DAY_GRAIN_RANGES = new Set<Range>(["7d", "30d", "month", "lastmonth", "custom"]);
 const SUBTABS: Record<RKey, SubTab[]> = {
   daysummary: [],
   sales: [
@@ -151,7 +153,11 @@ const SUBTABS: Record<RKey, SubTab[]> = {
   timing: [
     { key: "hours", label: "By hour", icon: "fa-clock", body: "hourly" },
     { key: "dayparts", label: "Day parts", icon: "fa-sun", body: "daypart" },
-    { key: "weekday", label: "Day of week", icon: "fa-calendar-week", body: "weekday" },
+    // needsDayGrain: the weekday breakdown can only be built from DAY buckets, so on Today /
+    // Yesterday / 12 months it could only ever say "pick a daily period" — a tab whose one job
+    // was to send you somewhere else (T5 sweep, 2026-08-06). It is now disabled there, with the
+    // reason on the button itself.
+    { key: "weekday", label: "Day of week", icon: "fa-calendar-week", body: "weekday", needsDayGrain: true },
   ],
   // Inventory & stock (mig 227). Five views, one payload shape each — the owner's
   // "inside the main report all the sub reports will be there" for stock.
@@ -533,7 +539,14 @@ export default function OwnerReports() {
   const ensure = useCallback((kind: DataKind, r: string, _rg: Range, eff: Eff) => { void load(kind, r, eff); }, [load]);
 
   // The active body (sub-tab aware) and the payload it reads. The hub reads "money".
-  const bodyKey: BodyKey = sel ? bodyKeyFor(sel, sub) : "sales";
+  // Resolved HERE (not further down) because the body — and therefore which payload gets
+  // fetched — must follow the same "is this tab even usable in this period" rule the strip does.
+  const subUsableEarly = (t: SubTab) => !t.needsDayGrain || DAY_GRAIN_RANGES.has(range);
+  const tabsEarly = sel ? SUBTABS[sel] : [];
+  const activeSubKeyEarly = tabsEarly.length
+    ? ((tabsEarly.find((t) => t.key === sub && subUsableEarly(t)) ?? tabsEarly.find(subUsableEarly) ?? tabsEarly[0]).key)
+    : "";
+  const bodyKey: BodyKey = sel ? bodyKeyFor(sel, activeSubKeyEarly) : "sales";
   const activeKind: DataKind = sel ? BODY_KIND[bodyKey] : "money";
   const isDayKind = DAY_KINDS.has(activeKind);
   const fdate = (iso: string) => new Date(iso + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
@@ -571,8 +584,10 @@ export default function OwnerReports() {
   const singleRest = !!rid;
 
   // Sub-tabs for the current report + the export meta for whatever sub-view is showing.
-  const subTabs = sel ? SUBTABS[sel] : [];
-  const activeSubKey = subTabs.length ? (subTabs.find((t) => t.key === sub)?.key ?? subTabs[0].key) : "";
+  // If the owner is ON the day-of-week tab and then picks "Today", don't leave him staring at a
+  // disabled tab's empty card — the resolver above already slid him back to the first usable view.
+  const subTabs = tabsEarly;
+  const activeSubKey = activeSubKeyEarly;
   const activeSubLabel = subTabs.find((t) => t.key === activeSubKey)?.label ?? "";
   const exportMeta = { label: sel ? REPORTS[sel].label + (activeSubLabel ? ` · ${activeSubLabel}` : "") : "", kind: BODY_KIND[bodyKey] };
   const exportCtx = data ? {
@@ -622,6 +637,11 @@ export default function OwnerReports() {
   const [pdFrom, setPdFrom] = useState("");                // dialog's from/to (ranged reports)
   const [pdTo, setPdTo] = useState("");
   const [printWhenReady, setPrintWhenReady] = useState(false);
+  // What the screen was showing BEFORE the print dialog changed it. Confirming the dialog with
+  // other dates used to switch the page to a custom range and leave it there, so the owner
+  // printed last month and then kept reading what he thought was the 30-day view
+  // (T5 sweep, 2026-08-06). We put it back once the sheet is out.
+  const restoreAfterPrint = useRef<{ range: Range; cFrom: string; cTo: string; day: string } | null>(null);
   // printSection() answers FALSE when the browser refused the pop-up. This page always routes
   // Print through its own ask-the-date dialog, so it — not SectionExport — is the place that has
   // to say so; without this the Print button did nothing at all, silently (found 2026-08-04).
@@ -638,10 +658,12 @@ export default function OwnerReports() {
     setPrintErr(null);
     if (isDayKind) {
       if (pdDay === day) { if (exportCtx) tryPrint(exportCtx); return; }
+      restoreAfterPrint.current = { range, cFrom, cTo, day };
       setDay(pdDay); setPrintWhenReady(true);
     } else {
       const cur = rangeDates(range, cFrom, cTo);
       if (pdFrom === cur.from && pdTo === cur.to) { if (exportCtx) tryPrint(exportCtx); return; }
+      restoreAfterPrint.current = { range, cFrom, cTo, day };
       setRange("custom"); setCFrom(pdFrom); setCTo(pdTo); setPrintWhenReady(true);
     }
   };
@@ -652,6 +674,11 @@ export default function OwnerReports() {
     if (!printWhenReady || !exportCtx || entry?.loading || !extrasSettled) return;
     setPrintWhenReady(false);
     tryPrint(exportCtx);
+    // …and hand the screen back exactly as he left it (the sheet is already built from the
+    // period he chose, so restoring cannot change what came out of the printer).
+    const back = restoreAfterPrint.current;
+    restoreAfterPrint.current = null;
+    if (back) { setRange(back.range); setCFrom(back.cFrom); setCTo(back.cTo); setDay(back.day); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printWhenReady, data, entry?.loading, extrasSettled]);
   useBackClose("owner-print-ask", printAsk, () => setPrintAsk(false));
@@ -759,12 +786,17 @@ export default function OwnerReports() {
       {/* Sub-tab strip — the merge (owner 2026-07-26): one report, several views, no hop. */}
       {sel && subTabs.length > 0 && (
         <div className="rs-subtabs" role="tablist" aria-label={`${REPORTS[sel].label} views`}>
-          {subTabs.map((t) => (
-            <button key={t.key} role="tab" aria-selected={t.key === activeSubKey}
-              className={"rs-subtab" + (t.key === activeSubKey ? " on" : "")} onClick={() => setSub(t.key)}>
-              <i className={`fas ${t.icon}`} aria-hidden /> {t.label}
-            </button>
-          ))}
+          {subTabs.map((t) => {
+            const off = !!t.needsDayGrain && !DAY_GRAIN_RANGES.has(range);
+            return (
+              <button key={t.key} role="tab" aria-selected={t.key === activeSubKey} disabled={off}
+                title={off ? "Needs a period made of whole days — try 7 days, 30 days, this or last month." : undefined}
+                className={"rs-subtab" + (t.key === activeSubKey ? " on" : "") + (off ? " off" : "")}
+                onClick={() => !off && setSub(t.key)}>
+                <i className={`fas ${t.icon}`} aria-hidden /> {t.label}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -812,7 +844,8 @@ export default function OwnerReports() {
         <ReportView sel={sel} bodyKey={bodyKey} data={data} loading={entry?.loading} error={entry?.error}
           rangeText={effLabel} accent={accent} restName={restName} singleRest={singleRest}
           onOpenReport={openReport} payDetail={payDetail} onPayDetail={setPayDetail}
-          moneyData={moneyEntry?.data} dishesDay={dishesDay} hourlyDay={hourlyDay} asOf={entry?.cachedAt} />
+          moneyData={moneyEntry?.data} dishesDay={dishesDay} hourlyDay={hourlyDay} asOf={entry?.cachedAt}
+          onRetry={refreshNow} retrying={refreshing} />
       )}
     </div>
   );
@@ -929,10 +962,10 @@ function Hub({ range, money, restName, accent, onOpen, rests, rid, onPickRest, b
 }
 
 // ── The report view (title + loading/error, delegates body) ───────────────────
-function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay, asOf }: {
+function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, restName, singleRest, onOpenReport, payDetail, onPayDetail, moneyData, dishesDay, hourlyDay, asOf, onRetry, retrying }: {
   sel: RKey; bodyKey: BodyKey; data?: Payload; loading?: boolean; error?: string;
   rangeText: string; accent: string; restName: string; singleRest: boolean;
-  asOf?: string;
+  asOf?: string; onRetry?: () => void; retrying?: boolean;
   onOpenReport: OpenReport;
   payDetail: "" | "discounts" | "cancellations"; onPayDetail: (d: "" | "discounts" | "cancellations") => void;
   moneyData?: Payload; dishesDay?: Payload; hourlyDay?: Payload;
@@ -947,13 +980,27 @@ function ReportView({ sel, bodyKey, data, loading, error, rangeText, accent, res
         <div><h2>{meta.label}</h2><div className="scope">{restName} · {rangeText}</div></div>
       </div>
       {error ? (
-        <Panel><div className="rs-empty"><i className="fas fa-triangle-exclamation" aria-hidden />{error}</div></Panel>
+        <Panel><div className="rs-empty">
+          <i className="fas fa-triangle-exclamation" aria-hidden />{error}
+          {/* A failed fetch used to sit there until the period changed. Refresh always worked —
+              nothing said so (T5 sweep, 2026-08-06). */}
+          {onRetry && (
+            <div style={{ marginTop: 14 }}>
+              <button className="rs-btn cta" onClick={onRetry} disabled={retrying}>
+                <i className={`fas fa-rotate-right${retrying ? " fa-spin" : ""}`} aria-hidden /> Try again
+              </button>
+            </div>
+          )}
+        </div></Panel>
       ) : loading || !data ? (
         <div className="rs-kpis">{[0, 1, 2, 3].map((i) => <div key={i} className="rs-stat tone-accent" style={{ opacity: .5 }}><div className="rs-stat-k">Loading…</div><div className="rs-stat-v">—</div></div>)}</div>
       ) : (
         <ReportBody bk={bodyKey} data={data} accent={accent} singleRest={singleRest} onOpenReport={onOpenReport}
           onPayDetail={onPayDetail} dishesDay={dishesDay} hourlyDay={hourlyDay} rangeText={rangeText} />
       )}
+      {/* The same closing note the Export → Print document carries, so Ctrl+P and the Print
+          button hand over the same sheet (T5 sweep, 2026-08-06). */}
+      <PrintFoot />
       {/* Discount / cancellation DETAIL overlay opened from a Payments KPI box (owner: a
           popup, not a whole extra sub-report). Reads the money payload. */}
       {sel === "payments" && payDetail && (
@@ -1571,9 +1618,22 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     const taxable = composition ? 0 : exemptMaterial ? taxableValue(t, configuredPct) : netSales;
     const exempt = exemptMaterial ? Math.max(0, Math.round((netSales - taxable) * 100) / 100) : 0;
     const actualPct = taxable ? (t.tax / taxable) * 100 : 0;       // rate the numbers actually realised
-    // With the exempt part accounted for, a REMAINING mismatch is a genuine data problem
-    // worth flagging — it is no longer just "there were some untaxed items".
-    const rateOk = configuredPct == null || Math.abs(actualPct - configuredPct) < 0.5;
+    // ── A WARNING THAT IS ALWAYS ON IS A WARNING NOBODY READS (T5 sweep, 2026-08-06) ──────────
+    // This used to fire whenever the realised rate differed from the configured one by 0.5pp,
+    // which is PERMANENT for any restaurant legitimately selling at two GST rates (a 5% kitchen
+    // with a few 18% packaged items will never land on 5.00%). So the banner told a correctly
+    // configured restaurant it had a problem, every single day, until it stopped being read.
+    //
+    // The honest question is not "is the average off the set rate" but "is more than one rate in
+    // use". Per-period rates that scatter say yes; a steady offset from the set rate says the
+    // rate itself is what it is. Only a rate that MOVES, or one that is impossibly above the set
+    // rate, is worth interrupting him for.
+    const rateOfRow = (r: MoneyRow) => { const tv = taxableFor(r, configuredPct, exemptMaterial); return tv > 0 ? (r.tax / tv) * 100 : null; };
+    const rowRates = mrows.map(rateOfRow).filter((x): x is number => x != null && x > 0);
+    const rateSpread = rowRates.length > 1 ? Math.max(...rowRates) - Math.min(...rowRates) : 0;
+    const mixedRates = rateSpread > 0.75;                          // the periods disagree with each other
+    const overSetRate = configuredPct != null && actualPct - configuredPct > 0.5;   // can't collect MORE than the rate
+    const rateOk = configuredPct == null || (!mixedRates && !overSetRate);
     const avgTaxPerBill = t.paidOrders ? t.tax / t.paidOrders : 0;
     const comps = data.tax?.components ?? [];
     // ── ONE filing computation for the whole report (lib/taxFiling → buildFiling) ──
@@ -1611,7 +1671,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
           )}
           {!composition && (
             <Stat label="Effective rate" tone={rateOk ? "good" : "warn"} icon="fa-percent" value={`${actualPct.toFixed(2)}%`}
-              sub={configuredPct != null ? (rateOk ? `matches the set ${configuredPct}%` : `set rate is ${configuredPct}%`) : "tax ÷ taxable sales"} />
+              sub={configuredPct != null ? (rateOk ? `matches the set ${configuredPct}%` : mixedRates ? `mixed rates · set ${configuredPct}%` : `above the set ${configuredPct}%`) : "tax ÷ taxable sales"} />
           )}
           {!composition && <Stat label="Tax per bill" tone="info" icon="fa-receipt" value={inr(avgTaxPerBill)} sub="average" />}
         </div>
@@ -1626,7 +1686,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         {!composition && configuredPct != null && !rateOk && (
           <p className="rs-note" style={{ marginTop: -4, marginBottom: 12 }}>
             <i className="fas fa-triangle-exclamation" aria-hidden style={{ color: "var(--adm-warn)", marginRight: 6 }} />
-            The rate the bills actually realised ({actualPct.toFixed(2)}%) doesn&apos;t match the set rate ({configuredPct}%) — usually from tax-free or specially-priced items in this period. Worth a look before filing.
+            {overSetRate ? (
+              <>These bills realised <b>{actualPct.toFixed(2)}%</b> — MORE than the {configuredPct}% you have set. Tax collected can&apos;t exceed the rate, so something is priced or configured wrong. Worth checking before filing.</>
+            ) : (
+              <>More than one GST rate is in use here: across the periods below the realised rate ranges over <b>{rateSpread.toFixed(2)} points</b> (averaging {actualPct.toFixed(2)}% against the set {configuredPct}%). That is normal if you sell items at different rates — check the split matches what you intend before filing.</>
+            )}
           </p>
         )}
         {composition ? null : data.tax && comps.length ? (

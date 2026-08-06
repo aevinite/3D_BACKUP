@@ -7,28 +7,12 @@
 // so even a 7-restaurant gather is fast and egress-cheap.
 import { canonPayMethod } from "@/components/owner/Charts";
 import type { ReportData, ReportPayments } from "@/components/owner/ownerReportDoc";
+import { mapLimit } from "@/lib/mapLimit";
 
 const IST = "Asia/Kolkata";
 type Pay = { method: string; revenue: number; orders: number };
 
-// Run an async job over a list with a CONCURRENCY CAP, preserving order. A bare
-// Promise.all over the list fired 2 requests PER RESTAURANT at once — 30 simultaneous
-// snapshot-cache reads on a 15-restaurant estate, any of which can cold-compute. That is
-// exactly the "a handful of expensive reads landing together" shape that took the database
-// down on 2026-07-31; the reports route has capped its own fan-out at 8 since the
-// 2026-07-07 audit and this one was never given the same treatment (found 2026-08-04).
-async function mapLimit<I, O>(items: I[], limit: number, fn: (item: I) => Promise<O>): Promise<O[]> {
-  const out = new Array<O>(items.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
-    for (;;) {
-      const i = next++;
-      if (i >= items.length) return;
-      out[i] = await fn(items[i]);
-    }
-  }));
-  return out;
-}
+// (the shared cap lives in lib/mapLimit; the reason it exists is written there)
 const CONCURRENCY = 4;   // 4 restaurants in flight = at most 8 requests, matching the route's cap
 
 export type GatherOpts = {

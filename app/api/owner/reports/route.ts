@@ -23,6 +23,7 @@ import { entitledSubset } from "@/lib/ownerEntitlements";
 import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollLadder, inventoryLadder, payrollEffectiveByRid, inventoryEffectiveByRid } from "@/lib/tableTags";
+import { mapLimit, FANOUT, FANOUT_HEAVY } from "@/lib/mapLimit";
 
 export const dynamic = "force-dynamic";
 
@@ -171,23 +172,8 @@ async function allRestaurantIds(): Promise<string[]> {
   return ids;
 }
 
-// Run an async op over a list with a CONCURRENCY CAP. The admin "all restaurants" reports
-// fan one RPC out per restaurant; a bare Promise.all over hundreds of restaurants fires them
-// all at once and can saturate the DB pool / time out (audit 2026-07-07). 8 in flight keeps
-// it bounded while staying fast for the common few-restaurant case. Order is preserved.
-async function mapLimit<I, O>(items: I[], limit: number, fn: (item: I, i: number) => PromiseLike<O> | O): Promise<O[]> {
-  const out = new Array<O>(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (true) {
-      const i = next++;
-      if (i >= items.length) break;
-      out[i] = await fn(items[i], i);
-    }
-  });
-  await Promise.all(workers);
-  return out;
-}
+// (the fan-out cap now lives in lib/mapLimit — it existed in four places with four different
+// limits, and in one place as a bare for-await with no limit at all: T5 sweep, 2026-08-06)
 
 // Sum one numeric key across per-restaurant RPC result sets (small rows).
 function mergeBy<T extends Row>(rowsets: T[][], key: keyof T, numeric: (keyof T)[]): T[] {
@@ -363,7 +349,7 @@ export async function GET(req: NextRequest) {
             // Fallback: if the grouped call errors, sum each owned restaurant separately so one
             // issue can't blank the WHOLE report; only surface an error if EVERY one failed
             // (audit 2026-07-09).
-            const per = await mapLimit(scope.ids, 8, (id) =>
+            const per = await mapLimit(scope.ids, FANOUT, (id) =>
               sb.rpc("lfh_owner_sales_report", { p_restaurant_id: id, p_from: f, p_to: t, p_bucket: bkt }));
             const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
             if (!okData.length && per.length) throw per.find((p) => p.error)?.error || new Error("Report failed");
@@ -458,7 +444,7 @@ export async function GET(req: NextRequest) {
           if (!grp.error) {
             payRaw = (grp.data ?? []) as Row[];
           } else {
-            const per = await mapLimit(scope.ids, 8, (id) =>
+            const per = await mapLimit(scope.ids, FANOUT, (id) =>
               sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
             payRaw = mergeBy(per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]), "method", ["revenue", "orders"]);
           }
@@ -511,7 +497,7 @@ export async function GET(req: NextRequest) {
         const payEff = await payrollEffectiveByRid(payIds);
         const enabled = payIds.filter((id) => payEff[id] === true);
         if (enabled.length) {
-          const per = await mapLimit(enabled, 6, (id) =>
+          const per = await mapLimit(enabled, FANOUT_HEAVY, (id) =>
             // docDateHi, NOT istDateOf: this window ends at 05:00 IST TOMORROW, so istDateOf
             // returned tomorrow's date and a salary recorded the next morning landed on this
             // day's sheet (T5 sweep, 2026-08-06). Same rule the inventory lists already use.
@@ -596,11 +582,11 @@ export async function GET(req: NextRequest) {
         if (enabledInv.length) {
           // Sum across the owner's inventory-enabled restaurants (each RPC is per-restaurant).
           const [sums, covs, dishes, seriesPer] = await Promise.all([
-            mapLimit(enabledInv, 6, (id) => sb.rpc("lfh_inv_report_summary", { p_restaurant: id, p_from: from, p_to: to })),
-            mapLimit(enabledInv, 6, (id) => sb.rpc("lfh_inv_coverage", { p_restaurant: id, p_from: from, p_to: to })),
-            mapLimit(enabledInv, 6, (id) => sb.rpc("lfh_inv_dish_cost", { p_restaurant: id, p_from: from, p_to: to })),
+            mapLimit(enabledInv, FANOUT_HEAVY, (id) => sb.rpc("lfh_inv_report_summary", { p_restaurant: id, p_from: from, p_to: to })),
+            mapLimit(enabledInv, FANOUT_HEAVY, (id) => sb.rpc("lfh_inv_coverage", { p_restaurant: id, p_from: from, p_to: to })),
+            mapLimit(enabledInv, FANOUT_HEAVY, (id) => sb.rpc("lfh_inv_dish_cost", { p_restaurant: id, p_from: from, p_to: to })),
             type === "sales"
-              ? mapLimit(enabledInv, 6, (id) => sb.rpc("lfh_inv_cost_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" }))
+              ? mapLimit(enabledInv, FANOUT_HEAVY, (id) => sb.rpc("lfh_inv_cost_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" }))
               : Promise.resolve([] as { data?: unknown; error?: unknown }[]),
           ]);
           const sRows = sums.filter((x) => !x.error).flatMap((x) => (x.data ?? []) as Row[]);
@@ -657,7 +643,7 @@ export async function GET(req: NextRequest) {
       if (rid) ids = [rid];
       else if (!scope.all) ids = scope.ids;
       else ids = await allRestaurantIds();
-      const per = await mapLimit(ids, 8, (id) => sb.rpc(fn, { p_restaurant_id: id, p_from: from, p_to: to }));
+      const per = await mapLimit(ids, FANOUT, (id) => sb.rpc(fn, { p_restaurant_id: id, p_from: from, p_to: to }));
       // Degrade gracefully (audit 2026-07-09): keep the restaurants that succeeded, drop the
       // ones whose RPC errored, and only surface an error when EVERY one failed. Pair each
       // result with its id so the per-restaurant name labelling below stays aligned.
@@ -712,12 +698,15 @@ export async function GET(req: NextRequest) {
       // a dish that doesn't exist. In merged mode the dish table is empty and `merged`
       // tells the UI to say "open one restaurant to see cost per dish".
       const invIdsAll = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
-      const invEnabled: string[] = [];
-      for (const id of invIdsAll) if ((await inventoryLadder(id)).effective) invEnabled.push(id);
+      // was a bare for-await: it read the rung for each restaurant strictly one after another,
+      // so a 10-restaurant estate paid ten round-trips end to end before the report even started
+      // (T5 sweep, 2026-08-06).
+      const invEff = await mapLimit(invIdsAll, FANOUT_HEAVY, (id) => inventoryLadder(id).then((l) => l.effective));
+      const invEnabled: string[] = invIdsAll.filter((_, i) => invEff[i]);
       if (!rid && invEnabled.length > 1) {
         const names = new Map(((await sb.from("restaurants").select("id, name").in("id", invEnabled)).data || [])
           .map((r) => [r.id as string, r.name as string]));
-        const per = await mapLimit(invEnabled, 6, async (id) => {
+        const per = await mapLimit(invEnabled, FANOUT_HEAVY, async (id) => {
           const [s, c, it, vd, sr] = await Promise.all([
             sb.rpc("lfh_inv_report_summary", { p_restaurant: id, p_from: from, p_to: to }),
             sb.rpc("lfh_inv_coverage", { p_restaurant: id, p_from: from, p_to: to }),
@@ -931,7 +920,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === "payments") {
-      const per = await mapLimit(ridList, 8, (id) =>
+      const per = await mapLimit(ridList, FANOUT, (id) =>
         sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
       // Degrade gracefully: keep the restaurants that succeeded (audit 2026-07-09).
       const okData = per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]);
@@ -951,7 +940,7 @@ export async function GET(req: NextRequest) {
       // The high bound follows the BUSINESS day (docDateHi), so a "yesterday" report can't
       // reach into this morning's payments — the same fix as the day sheet above.
       const f = istDateOf(from), t2 = docDateHi(to);
-      const per = await mapLimit(ids, 6, async (id) => {
+      const per = await mapLimit(ids, FANOUT_HEAVY, async (id) => {
         const [cash, monthly, people, staff] = await Promise.all([
           sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: f, p_to: t2, p_bucket: bucket === "month" ? "month" : "day" }),
           sb.rpc("lfh_staff_pay_monthly_cost", { p_restaurant: id, p_from: f, p_to: t2 }),
@@ -995,7 +984,7 @@ export async function GET(req: NextRequest) {
     // ── TEAM PERFORMANCE: one row per person, owner-only leaderboard ────────────
     if (type === "staffperf") {
       const ids = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
-      const per = await mapLimit(ids, 6, async (id) => {
+      const per = await mapLimit(ids, FANOUT_HEAVY, async (id) => {
         const [perf, staff] = await Promise.all([
           sb.rpc("lfh_staff_performance", { p_restaurant: id, p_from: from, p_to: to }),
           sb.from("staff_users").select("id, name, username, role, designation, active")

@@ -10,6 +10,7 @@
 // fixed-height responsive boxes so cards never jump while loading.
 import { useState, useId, Fragment, type CSSProperties } from "react";
 import { useBackClose } from "@/lib/backStack";
+import { compactINR, roundTicks } from "@/lib/money";
 import {
   ResponsiveContainer, BarChart, Bar, AreaChart, Area, ComposedChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, CartesianGrid, LabelList,
@@ -21,12 +22,20 @@ import {
 // one MoneyTip the amount was en-US while the orders line below it was en-IN (T5 sweep,
 // 2026-08-06). Kept local (not imported) so the chart kit stays dependency-free.
 const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
-const compact = (v: number) =>
-  "₹" + (v >= 100000 ? (v / 100000).toFixed(1).replace(/\.0$/, "") + "L"
-       : v >= 1000   ? (v / 1000).toFixed(1).replace(/\.0$/, "") + "k"
-       : Math.round(v).toString());
+// One shared short form for the whole console — and it goes up to CRORES now (owner,
+// 2026-08-06: "do 1.2 Cr, it will look great"). This used to stop at lakhs, so a chart axis
+// read "₹120.0L" while the restaurant dropdown beside it wrote "₹1.2Cr" for the same amount.
+const compact = compactINR;
 const AXIS = "var(--muted)";
 const GRID = "var(--border-c, rgba(128,128,128,.18))";
+
+// ── I6 (T5 sweep, 2026-08-06) — ROUND TICKS, WITHOUT GIVING UP THE OWNER'S RULE ──────────────
+// The domain still ends at the exact data max, so a chart still FILLS its box. What changed is
+// that we now hand recharts an explicit set of ROUND ticks, so it stops ALSO labelling that
+// ragged max: the axis used to print ₹7.1L directly above ₹6L while every other gap was a full
+// ₹2L, which reads as a rendering glitch. `roundTicks` returns [] when nothing sensible fits,
+// and `tk()` then passes undefined so the axis behaves exactly as it did before.
+const tk = (lo: number, hi: number) => { const t = roundTicks(lo, hi); return t.length ? t : undefined; };
 
 /** y-domain that makes the data touch top AND bottom of the plot (owner's rule). */
 function fitDomain(values: number[]): [number, number] {
@@ -185,7 +194,7 @@ export function AreaTrend({ data, lines, height = 260 }: {
             </defs>
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} minTickGap={24} />
-            <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
+            <YAxis domain={fitDomain(values)} ticks={tk(...fitDomain(values))} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
             {/* Crosshair + ringed active dot = the "pretty" hover from the design demos
                 the owner asked to match (2026-07-26). */}
             <Tooltip content={<MoneyTip />} cursor={{ stroke: "var(--muted)", strokeDasharray: "3 3", strokeOpacity: 0.5 }} />
@@ -246,7 +255,7 @@ export function RevMonthCompare({ data, height = 260, curName, prevName, curColo
             </defs>
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: AXIS }} minTickGap={24} />
-            <YAxis domain={fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
+            <YAxis domain={fitDomain(values)} ticks={tk(...fitDomain(values))} tick={{ fontSize: 11, fill: AXIS }} tickFormatter={compact} width={48} allowDecimals={false} />
             <Tooltip content={<MoneyTip />} cursor={{ stroke: "var(--muted)", strokeDasharray: "3 3", strokeOpacity: 0.5 }} />
             {/* grey LAST-month line drawn first, under the green area's stroke */}
             {hasPrev && (
@@ -273,12 +282,24 @@ export function TimeBar({ data, color, height = 240 }: { data: { label: string; 
         <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={16} />
-          <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
+          <YAxis domain={[0, max]} ticks={tk(0, max)} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name="Revenue" fill={color} radius={[5, 5, 0, 0]} maxBarSize={42} />
         </BarChart>
       </ResponsiveContainer>
     </ScrollX>
+  );
+}
+
+/** A category tick that carries its own tooltip — recharts clips a long label silently. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function CatTick({ x, y, payload }: any) {
+  const label = String(payload?.value ?? "");
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <title>{label}</title>
+      <text x={0} y={0} dy={4} textAnchor="end" fill={AXIS} fontSize={11.5}>{label}</text>
+    </g>
   );
 }
 
@@ -303,7 +324,10 @@ export function LeaderBar({ data, onSelect, valueLabel = "Revenue", showValues =
         <BarChart data={data} layout="vertical" margin={{ left: 8, right: showValues ? 58 : 16, top: 4, bottom: 4 }}>
           <CartesianGrid horizontal={false} stroke={GRID} />
           <XAxis type="number" domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} allowDecimals={false} />
-          <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 11.5, fill: AXIS }} />
+          {/* A long name is clipped to the 110px axis with nothing to reveal it. A custom tick
+              draws the same label plus an SVG <title>, so hovering gives the full name back
+              (T5 sweep, 2026-08-06). */}
+          <YAxis type="category" dataKey="name" width={110} tick={<CatTick />} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name={valueLabel} radius={[0, 6, 6, 0]} cursor={onSelect ? "pointer" : undefined}
             onClick={(d: { id?: string }) => d?.id && onSelect?.(d.id)}>
@@ -372,7 +396,7 @@ function ColumnsChart({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: st
         <BarChart data={data} margin={{ left: 0, right: 22, top: 24, bottom: 6 }}>
           <CartesianGrid vertical={false} stroke={GRID} />
           <XAxis dataKey="name" tick={{ fontSize: 11, fill: AXIS }} interval={0} angle={-28} textAnchor="end" height={74} />
-          <YAxis domain={[0, max]} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} width={46} allowDecimals={false} />
+          <YAxis domain={[0, max]} ticks={tk(0, max)} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} width={46} allowDecimals={false} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name="Revenue" shape={<Column3D uid={uid} />} maxBarSize={72} isAnimationActive={false}
             cursor={onSelect ? "pointer" : undefined}
@@ -469,6 +493,19 @@ export function CategoryDonut({ data }: { data: { category: string; revenue: num
 export const PAY_COLORS: Record<string, string> = {
   UPI: "#9085e9", Cash: "#199e70", Card: "#3987e5", Other: "#c98500", "Not recorded": "#6b7280",
 };
+// A method this app doesn't know by name (a wallet, a house account) used to fall back to the
+// SAME grey as "Not recorded", so two custom methods were one indistinguishable wedge in the
+// ring — the legend named them, the chart didn't (T5 sweep, 2026-08-06). Give each a stable
+// colour of its own, picked from the name so it never changes between two loads. Deliberately
+// away from the five fixed hues above, and away from "Not recorded" grey, which keeps its
+// meaning: "nobody wrote down how this was paid".
+const PAY_EXTRA = ["#d97706", "#0ea5e9", "#c026d3", "#65a30d", "#e11d48", "#0d9488"];
+export function payColor(method: string): string {
+  if (PAY_COLORS[method]) return PAY_COLORS[method];
+  let h = 0;
+  for (let i = 0; i < method.length; i++) h = (h * 31 + method.charCodeAt(i)) >>> 0;
+  return PAY_EXTRA[h % PAY_EXTRA.length];
+}
 /** Canonical label for a stored payment_method (any casing, null, "" → "Not recorded"). */
 export function canonPayMethod(m: string | null | undefined): string {
   const t = (m || "").trim();
@@ -486,7 +523,7 @@ export function PaymentDonut({ data }: { data: { method: string; revenue: number
   const rows = [...merged.values()].filter((p) => p.revenue > 0).sort((a, b) => b.revenue - a.revenue);
   const total = rows.reduce((a, p) => a + p.revenue, 0);
   if (!rows.length || total <= 0) return <Empty />;
-  const color = (m: string) => PAY_COLORS[m] || PAY_COLORS["Not recorded"];
+  const color = payColor;
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 22 }}>
       <div style={{ position: "relative", width: 180, height: 180, flex: "0 0 auto" }}>
@@ -649,7 +686,7 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
               <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
                 <CartesianGrid stroke={GRID} vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
-                <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={money ? 48 : 36} tickFormatter={fmt} allowDecimals={false} />
+                <YAxis domain={[0, max]} ticks={tk(0, max)} tick={{ fontSize: 11, fill: AXIS }} width={money ? 48 : 36} tickFormatter={fmt} allowDecimals={false} />
                 <Tooltip content={money ? <MoneyTip /> : <CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
                 <Bar dataKey="value" name={label} fill={color} radius={[5, 5, 0, 0]} maxBarSize={46} />
                 {cost && <Bar dataKey="cost" name={costName} fill={COST_COLOR} radius={[5, 5, 0, 0]} maxBarSize={46} />}
@@ -659,7 +696,7 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
                 <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.28} /><stop offset="100%" stopColor={color} stopOpacity={0.02} /></linearGradient></defs>
                 <CartesianGrid stroke={GRID} vertical={false} />
                 <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={24} interval="preserveStartEnd" />
-                <YAxis domain={cost ? [0, max] : fitDomain(values)} tick={{ fontSize: 11, fill: AXIS }} width={money ? 48 : 36} tickFormatter={fmt} allowDecimals={false} />
+                <YAxis domain={cost ? [0, max] : fitDomain(values)} ticks={cost ? tk(0, max) : tk(...fitDomain(values))} tick={{ fontSize: 11, fill: AXIS }} width={money ? 48 : 36} tickFormatter={fmt} allowDecimals={false} />
                 <Tooltip content={money ? <MoneyTip /> : <CountTip />} />
                 <Area type="monotone" dataKey="value" name={label} stroke={color} strokeWidth={2.25} dot={false} activeDot={{ r: 4 }} fill={`url(#${gid})`} />
                 {cost && <Area type="monotone" dataKey="cost" name={costName} stroke={COST_COLOR} strokeWidth={2} dot={false} activeDot={{ r: 4 }} fill="none" />}
@@ -770,14 +807,18 @@ export function Heatmap({ data, accent, rangeLabel }: { data: HeatCell[]; accent
     );
   };
 
+  // The scale is REBUILT when you flip Orders ⇄ Revenue, so the same shade means 3 orders on one
+  // view and ₹18,000 on the other. Printing the two ends is what makes the colour mean something
+  // (T5 sweep, 2026-08-06).
+  const legendHi = m === "revenue" ? compact(max) : Math.round(max).toLocaleString("en-IN");
   const legend = (
     <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 10, color: "var(--muted)" }}>
-      <span>Less</span>
+      <span>0</span>
       {[10, 30, 55, 80, 100].map((p) => (
         <span key={p} style={{ width: 16, height: 10, borderRadius: 2, background: `color-mix(in srgb, ${accent} ${p}%, transparent)` }} />
       ))}
-      <span>More</span>
-      <span style={{ marginLeft: "auto" }}>{m === "revenue" ? "revenue" : "orders"} · day × hour</span>
+      <span style={{ fontVariantNumeric: "tabular-nums", fontWeight: 700, color: "var(--text)" }}>{legendHi}</span>
+      <span style={{ marginLeft: "auto" }}>{m === "revenue" ? "revenue" : "orders"} in the busiest hour · day × hour</span>
     </div>
   );
 
@@ -829,7 +870,7 @@ export function StackedDailyBars({ data, lines, height = 260 }: {
           <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={16} />
-            <YAxis domain={[0, max]} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
+            <YAxis domain={[0, max]} ticks={tk(0, max)} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
             <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
             {lines.map((l, i) => (
               <Bar key={l.key} dataKey={l.key} name={l.name} stackId="day" fill={l.color}
