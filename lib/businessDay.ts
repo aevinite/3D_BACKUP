@@ -8,6 +8,17 @@
 const IST_OFFSET_MIN = 5 * 60 + 30; // Asia/Kolkata is UTC+05:30 (no DST)
 const ROLLOVER_HOUR = 5;            // a new business day begins at 05:00 IST
 
+/** The DATE KEY the counters are stored under for the business day `now` falls in — the same value
+ *  SQL's lfh_business_day() returns, so a read of `daily_counters` finds the row the triggers wrote.
+ *
+ *  It has to be derived the SAME way the database derives it, or the Z-report would ask for the wrong
+ *  day's counter and quietly report the wrong number of bills. SQL does
+ *  `((now() AT TIME ZONE 'Asia/Kolkata') - interval '5 hours')::date`, which is UTC+05:30−05:00 =
+ *  UTC+00:30, so the key is simply the UTC date half an hour from now. Same arithmetic, one place. */
+export function businessDayDate(now: Date = new Date()): string {
+  return new Date(now.getTime() + (IST_OFFSET_MIN - ROLLOVER_HOUR * 60) * 60000).toISOString().slice(0, 10);
+}
+
 // ISO timestamp (UTC) of the start of the business day that `now` falls in.
 export function businessDayStartIso(now: Date = new Date()): string {
   // Shift into IST by pretending the UTC fields hold the IST wall clock.
