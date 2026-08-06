@@ -1787,14 +1787,29 @@ async function saveWaiterTables(userId, tables) {
     // Through the panel's own api() (→ LFH_OUTBOX), like every other write here. As a bare fetch
     // this was the one change a manager could make with no signal and simply lose: the grid
     // reverted and the reason was a raw "Failed to fetch".
-    const d = await api("POST", "/table-sections", { user_id: userId, tables });
+    //
+    // NO SILENT OVERWRITES ON THE ROTA EITHER (T3 sweep, 2026-08-07). This write replaces ONE
+    // waiter's WHOLE table list, and it carried no expectation — so two managers editing the rota
+    // during a shift change both saw "Saved ✓" and the second one's list silently replaced the
+    // first's. `table-sections` was in neither of verify:clash's lists, so nothing recorded the
+    // decision either. `before` is the list this screen was showing; if the row no longer holds it,
+    // expectClash refuses (409) and says what it says NOW. `staff_users` was already comparable and
+    // clashCompare sorts arrays before comparing, so a rota is matched by its MEMBERS, not their
+    // order — [5,6] and [6,5] are the same rota and must not read as a clash.
+    const d = await api("POST", "/table-sections", { user_id: userId, tables },
+      before ? { expect: { table: "staff_users", id: userId, fields: { assigned_tables: before } } } : undefined);
     // Saved on this device instead of sent — the optimistic grid above is already right, so keep
     // it and let the queue deliver. Never overwrite it with a server answer that doesn't exist yet.
     if (d && d.queued) toast("Saved ✓ — syncing automatically.", "ok");
     else if (w && d.user) w.assigned_tables = d.user.assigned_tables || [];
   } catch (e) {
     if (w && before) w.assigned_tables = before;       // put it back — never lie about what's saved
-    toast(e.message || "Couldn't save that change.", "err");
+    // Someone else got to this waiter first: the server sends a ready-made sentence, and the raw
+    // code (`clash_changed_elsewhere`) tells a manager nothing. Same shape as the floor's other
+    // protected writes; hold it on screen long enough to read, then show the rota as it really is.
+    const clash = e && e.data && e.data.clash;
+    toast(clash ? clash.plain : (errText(e) || "Couldn't save that change."), "err", undefined, clash ? 9000 : undefined);
+    if (clash) await loadTableSections();
   }
   renderEditor(); repaintSectionPicker(); repaintSectionsModal();
 }
