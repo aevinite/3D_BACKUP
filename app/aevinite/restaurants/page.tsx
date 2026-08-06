@@ -333,7 +333,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
   const [saved, setSaved] = useState<{ panels?: Record<string, boolean>; seedMenu?: boolean } | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [done, setDone] = useState<{ name: string; slug: string; logins: { panel: string; username: string; password: string }[]; loginErrors?: string[]; menuSeeded?: boolean; seedError?: string | null } | null>(null);
+  const [done, setDone] = useState<{ id?: string; name: string; slug: string; logins: { panel: string; username: string; password: string }[]; loginErrors?: string[]; menuSeeded?: boolean; seedError?: string | null } | null>(null);
   const creatingRef = useRef(false); // sync double-submit guard (bug #12)
 
   // On open, load the admin's remembered setup and auto-fill from it (editable). First
@@ -379,7 +379,7 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({ action: "create_restaurant", name: name.trim(), panels, seedMenu, saveDefaults: true }),
       });
       const d = await r.json(); if (!r.ok) throw new Error(d.error || "Couldn't create the restaurant.");
-      setDone({ name: d.name, slug: d.slug, logins: d.logins || [], loginErrors: d.loginErrors || [], menuSeeded: d.menuSeeded, seedError: d.seedError });
+      setDone({ id: d.id, name: d.name, slug: d.slug, logins: d.logins || [], loginErrors: d.loginErrors || [], menuSeeded: d.menuSeeded, seedError: d.seedError });
       // Remember locally too so the very next open pre-fills instantly, and mark preset "saved".
       setSaved({ panels, seedMenu }); setPreset("saved"); setName("");
       onCreated();
@@ -454,6 +454,17 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
       {done && (
         <div style={{ marginTop: 14, padding: "12px 14px", borderRadius: 8, background: "color-mix(in srgb, var(--adm-ok) 12%, transparent)" }}>
           <b>{done.name}</b> created (<span style={{ fontFamily: "ui-monospace, monospace" }}>/r/{done.slug}/menu</span>).
+          {/* CLOSE THE LOOP THE ACCESS BLOCK USED TO CLOSE BADLY (2026-08-06). This form stopped
+              setting permissions, and the sentence above says to change them on Access — so hand
+              over a button that lands on THIS restaurant's Access screen instead of leaving the
+              admin to find it. ?from=rest gives that page its "Back to <restaurant>" link. */}
+          {done.id ? (
+            <p style={{ margin: "8px 0 0" }}>
+              <a className="adm-btn primary" href={`/aevinite/access?rid=${done.id}&from=rest`}>
+                <i className="fas fa-user-shield" style={{ marginRight: 7 }} aria-hidden="true" />Set its access &amp; permissions
+              </a>
+            </p>
+          ) : null}
           {done.seedError ? (
             <p className="hint" style={{ margin: "6px 0", color: "var(--adm-bad, #c0392b)" }}>Menu seed failed: {done.seedError}. The restaurant was created — add dishes from its manager panel.</p>
           ) : done.menuSeeded ? (

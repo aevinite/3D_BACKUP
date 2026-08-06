@@ -25,6 +25,13 @@ export async function GET(req: NextRequest) {
   // ?level=error|warn|info filters severity (Everything Log, mig 159) — e.g. "just show me
   // what broke". ?q= is a free-text search over the action + detail (the incident hunt).
   const level = url.searchParams.get("level");
+  // ?action=<exact> — ONE kind of row, matched by equality, not by the ?q= ILIKE below. The
+  // Access screen's "recent changes here" strip asks for action=access_change on one restaurant,
+  // and an ILIKE over action+detail would also drag in every row whose DETAIL happened to say
+  // "access". Equality rides the existing (restaurant_id, created_at DESC) index straight to a
+  // handful of rows. Length-capped and character-restricted so it can only ever be an action name.
+  const actionEq = (url.searchParams.get("action") || "").trim().slice(0, 40);
+  const actionOk = /^[a-z0-9_]+$/.test(actionEq);
   const qText = (url.searchParams.get("q") || "").trim().slice(0, 80);
   // ?since=<ISO> bounds the query to rows newer than a timestamp — the Repair hub asks for
   // the last 24h so its "problems (24h)" label is TRUE (before this it fetched the latest N
@@ -44,6 +51,7 @@ export async function GET(req: NextRequest) {
   let q = sb.from("staff_actions").select("id, panel, action, actor, actor_id, device_id, order_id, detail, table_number, restaurant_id, level, seen_at, resolved_at, created_at").order("created_at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (level === "error" || level === "warn" || level === "info") q = q.eq("level", level);
+  if (actionOk) q = q.eq("action", actionEq);
   if (unresolvedOnly) q = q.is("resolved_at", null);
   if (since) q = q.gte("created_at", since);
   if (qText) {
