@@ -10,6 +10,19 @@
 -- lfh_nice_usd stays as-is: on whole-rupee values its .99/.50 logic is a no-op,
 -- so lfh_price_order keeps working and now returns rupee amounts.
 
+-- ⚠️ ONE-TIME — GUARDED SINCE MIGRATION 307. `seed-supabase.mjs` re-runs every file in this
+-- folder, and this one MULTIPLIES money by 84. A second run turned a ₹500 dish into ₹42,000 and
+-- the whole bill history into ₹3.08 billion (measured, not guessed). It now runs only while
+-- `lfh_applied_once` has no row for it — absent table (a fresh database) counts as "not yet",
+-- which is the single legitimate run. Do NOT unwrap this.
+
+DO $reseed_guard$
+BEGIN
+IF lfh_already_applied('043_inr_base_currency') THEN
+  RAISE NOTICE '043_inr_base_currency: already applied — skipped (a second x84 would corrupt every price and bill)';
+  RETURN;
+END IF;
+
 -- 1) Dish base prices: USD → the exact rupee figure currently shown.
 UPDATE menu_items
 SET price = (round(lfh_nice_usd(NULLIF(regexp_replace(price, '[^0-9.]', '', 'g'), '')::numeric) * 84 / 10) * 10)::int::text
@@ -46,3 +59,5 @@ SET items = (
   FROM jsonb_array_elements(items) it
 )
 WHERE items IS NOT NULL AND jsonb_typeof(items) = 'array' AND jsonb_array_length(items) > 0;
+
+END $reseed_guard$;

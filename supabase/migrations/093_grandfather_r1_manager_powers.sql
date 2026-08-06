@@ -13,6 +13,18 @@
 -- still meaningful for the SaaS tenants. Idempotent (a plain UPDATE of #1's row).
 -- ─────────────────────────────────────────────────────────────────────────
 
+-- ⚠️ ONE-TIME — GUARDED SINCE MIGRATION 307. This REPLACES the whole manager_permissions bag
+-- with 5 keys; French House now carries 24. A re-run (seed-supabase.mjs runs every file) would
+-- delete the other 19 and flip `delete_bill` from a deliberate false back to absent — a seed
+-- script quietly handing back powers an admin removed.
+
+DO $reseed_guard$
+BEGIN
+IF lfh_already_applied('093_grandfather_r1_manager_powers') THEN
+  RAISE NOTICE '093_grandfather_r1_manager_powers: already applied — skipped (a re-run would wipe 19 permission keys)';
+  RETURN;
+END IF;
+
 UPDATE restaurants
 SET manager_permissions = jsonb_build_object(
   'manage_staff',   true,
@@ -24,3 +36,5 @@ SET manager_permissions = jsonb_build_object(
 WHERE id = '00000000-0000-0000-0000-000000000001';
 
 NOTIFY pgrst, 'reload schema';
+
+END $reseed_guard$;
