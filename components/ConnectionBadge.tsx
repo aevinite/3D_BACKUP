@@ -235,8 +235,8 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
             <SignalBars lit={v.bars} color={v.color} big />
             <span className="lfh-conn-pop-figs">
               {v.ms != null
-                ? <><b style={{ color: v.text }}>{v.ms}<span className="lfh-conn-pop-unit"> ms</span></b><small>{v.label}</small></>
-                : <><b style={{ color: v.text }}>{v.label}</b><small>{v.kind === "live" ? "Speed shows when data flows" : ""}</small></>}
+                ? <><b className="lfh-conn-pop-fig" style={{ ["--ink-dark" as string]: v.color, ["--ink-light" as string]: v.text }}>{v.ms}<span className="lfh-conn-pop-unit"> ms</span></b><small>{v.label}</small></>
+                : <><b className="lfh-conn-pop-fig" style={{ ["--ink-dark" as string]: v.color, ["--ink-light" as string]: v.text }}>{v.label}</b><small>{v.kind === "live" ? "Speed shows when data flows" : ""}</small></>}
             </span>
           </span>
 

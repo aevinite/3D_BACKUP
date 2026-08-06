@@ -3832,13 +3832,16 @@ body[data-lfh-minicart] .order-tracker { bottom: calc(84px + env(safe-area-inset
      · [data-skin="dark"] = the owner/admin consoles; html[data-theme="dark"] = guest + panels
      · a LIGHT console must beat the document-level dark rule, and `html[data-theme="dark"] .x`
        scores (0,3,1) — so the light-console rule carries a matching descendant `html`. */
-.lfh-conn-txt, .lfh-conn-ms { color: var(--ink-light, currentColor); }
+.lfh-conn-txt, .lfh-conn-ms, .lfh-conn-pop-fig { color: var(--ink-light, currentColor); }
 [data-skin="dark"] .lfh-conn-txt,
 [data-skin="dark"] .lfh-conn-ms,
+[data-skin="dark"] .lfh-conn-pop-fig,
 html[data-theme="dark"] .lfh-conn-txt,
-html[data-theme="dark"] .lfh-conn-ms { color: var(--ink-dark, currentColor); }
+html[data-theme="dark"] .lfh-conn-ms,
+html[data-theme="dark"] .lfh-conn-pop-fig { color: var(--ink-dark, currentColor); }
 html [data-skin="light"] .lfh-conn-txt,
-html [data-skin="light"] .lfh-conn-ms { color: var(--ink-light, currentColor); }
+html [data-skin="light"] .lfh-conn-ms,
+html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColor); }
 /* .adm-chip keeps its old dark-skin look (the hue lifted toward the body text) as the base. */
 .adm-chip { color: color-mix(in srgb, var(--hue, currentColor) 78%, var(--text)); }
 [data-skin="light"] .rp,
