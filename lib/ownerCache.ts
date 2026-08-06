@@ -70,6 +70,22 @@ function sweepStaleRows(): void {
 //   • cold (no row) → compute once synchronously (the only unavoidable wait).
 // `compute` may throw; on the sync path nothing is stored and the caller's try/catch surfaces
 // the error, on the background path the failure is swallowed (the stale value already shipped).
+
+// ── AN INCOMPLETE ANSWER IS NEVER CACHED (T9 finding F18, 2026-08-07) ─────────────────────────────
+//
+// Some payloads may now report `partial: [...]` — "these named figures could not be read this time"
+// (lib/partialRead.ts). Storing one of those would be worse than the bug it exists to fix: a snapshot
+// is served stale-while-revalidate, so a single blip would freeze "couldn't read the payment split"
+// onto the owner's dashboard until the FINGERPRINT happened to move, which it does not do for a
+// transient read failure. The note would outlive the problem and the owner would be told something
+// untrue for as long as the key sat there.
+//
+// So a partial compute is returned to THIS caller and not persisted: no row, no fingerprint. The next
+// open recomputes and, when the read succeeds, gets the whole answer with no note.
+const isPartial = (p: unknown): boolean =>
+  !!p && typeof p === "object" && Array.isArray((p as { partial?: unknown }).partial)
+     && (p as { partial: unknown[] }).partial.length > 0;
+
 export async function cachedOwnerPayload<T extends object>(opts: {
   key: string;
   force?: boolean;
@@ -98,6 +114,7 @@ export async function cachedOwnerPayload<T extends object>(opts: {
         }
       }
       const payload = await compute();
+      if (isPartial(payload)) return;                // see isPartial — do not freeze a half answer
       const fp2 = fingerprint ? await fingerprint().catch(() => null) : null;
       await sb.from(TABLE).upsert(
         { cache_key: key, payload, fingerprint: fp2, computed_at: nowIso(), last_viewed_at: nowIso() },
@@ -134,10 +151,13 @@ export async function cachedOwnerPayload<T extends object>(opts: {
     fingerprint ? fingerprint().catch(() => null) : Promise.resolve(null),
   ]);
   const now = nowIso();
-  await sb.from(TABLE).upsert(
-    { cache_key: key, payload, fingerprint: fp, computed_at: now, last_viewed_at: now },
-    { onConflict: "cache_key" },
-  );
+  // Same rule on the cold path: hand this caller the partial answer, store nothing.
+  if (!isPartial(payload)) {
+    await sb.from(TABLE).upsert(
+      { cache_key: key, payload, fingerprint: fp, computed_at: now, last_viewed_at: now },
+      { onConflict: "cache_key" },
+    );
+  }
   return { ...payload, cachedAt: now, cached: false };
 }
 

@@ -19,7 +19,7 @@
 // the wrong thing. Corrected in the T9 sweep, 2026-08-06.)
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds, dbFail } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, dbFail, type PartialKey } from "@/lib/ownerScope";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollEffectiveByRid } from "@/lib/tableTags";
 import { istDateOf } from "@/lib/staffProfileShared";
@@ -355,6 +355,17 @@ export async function GET(req: NextRequest) {
         }
       }
       const paymentMethods = Array.from(pmByMethod.values()).sort((a, b) => b.revenue - a.revenue);
+      // ── SAY SO WHEN A TOTAL IS ONLY PART OF THE GROUP (T9 finding F18, 2026-08-07) ──────────────
+      // The degrade-gracefully rule above (T5, 2026-08-06) is right: one slow restaurant must not
+      // blank the whole dashboard. But "keep what answered" quietly turns a GROUP TOTAL into a
+      // subset — a multi-restaurant owner whose 3rd restaurant's RPC failed saw a "revenue by
+      // payment method" chart that simply excluded it, presented as the whole group. That is the
+      // same class as the ₹0 figures this sweep removed elsewhere: a number that is too small,
+      // stated as fact. So the chart is still drawn from what DID answer, and the payload names
+      // what is missing so the screen can say it. (cachedOwnerPayload refuses to STORE a payload
+      // carrying `partial`, so this note can never outlive the blip — see lib/ownerCache.)
+      const partial: PartialKey[] = [];
+      if (pmOk.length < pmRes.length) partial.push("payments");
       // Category split across the group (round-2: the owner wants "Revenue by category"
       // on the multi home too). lfh_owner_category_breakdown is per-restaurant, so —
       // exactly like the payment breakdown above — a scoped owner sums their own
@@ -377,6 +388,7 @@ export async function GET(req: NextRequest) {
         }
       }
       const categories = Array.from(catByName.values()).sort((a, b) => b.revenue - a.revenue);
+      if (catOk.length < catRes.length) partial.push("categories");
       const prev = await prevP;
       // Sum the previous window's per-restaurant rows into ONE total per bucket (the overlay
       // is a whole-group total line, not per-restaurant). Non-fatal: a failed prev query just
@@ -401,7 +413,9 @@ export async function GET(req: NextRequest) {
       const heatmap = ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({
         dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue),
       }));
-      return { scope: "group", range, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev, staffPay: await staffPayExpense() };
+      return { scope: "group", range, restaurantRevenue, timeseries, timeseriesPrev, paymentMethods, categories, heatmap, prev,
+        staffPay: await staffPayExpense(),
+        ...(partial.length ? { partial } : {}) };
         },
       });
       return NextResponse.json(groupPayload);
