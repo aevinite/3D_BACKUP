@@ -305,7 +305,7 @@ export default function AdminBills() {
             return (
               <div key={b.sessionId} style={{ borderBottom: "1px solid var(--adm-line, rgba(255,255,255,0.06))", background: del ? "color-mix(in srgb, #ef4444 8%, transparent)" : undefined }}>
                 <button onClick={() => expand(b)} className={`blz-row${isOpen ? " open" : ""}`} style={{ width: "100%", display: "grid", gridTemplateColumns: "148px 1.3fr 60px 116px 92px 24px", gap: 12, alignItems: "center", padding: "12px 16px", background: "transparent", border: 0, cursor: "pointer", textAlign: "left", color: "var(--text)", minWidth: 640 }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 7, color: m.tone, fontWeight: 700, fontSize: 12.5 }}><Ico n={m.icon} s={15} />{m.label}</span>
+                  <span className="hue-ink" style={{ display: "inline-flex", alignItems: "center", gap: 7, ["--hue" as string]: m.tone, fontWeight: 700, fontSize: 12.5 }}><Ico n={m.icon} s={15} />{m.label}</span>
                   <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <b style={{ fontVariantNumeric: "tabular-nums" }}>{b.billNo != null ? `#${b.billNo}` : "—"}</b>
                     <span style={{ color: "var(--muted)", margin: "0 6px" }}>·</span>
