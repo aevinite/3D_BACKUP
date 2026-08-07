@@ -11,6 +11,9 @@
 // KITCHEN IS DELIBERATELY EXCLUDED (owner, 2026-07-29: "for the kitchen, we don't need this
 // thing"). Their KDS stays a cooking display; they keep their login, their PIN and their
 // action log, they just have no profile or pay record. Flip this one list if that changes.
+// REJECTED (owner, 2026-07-29 · re-confirmed 2026-08-05 and 2026-08-07): kitchen is NOT on this list
+// and must not be added. "Kitchen panel will not have profile or stuff like that. I have already told
+// this." Asked and answered three times — see docs/REJECTED-IDEAS.md → R7.
 export const PROFILE_ROLES = ["owner", "manager", "tablet"] as const;
 export const hasProfile = (role: string) => (PROFILE_ROLES as readonly string[]).includes(role);
 

@@ -6,6 +6,17 @@
 // so no confirm dialog; a 6-second undo is safer than a popup mid-rush) and a
 // chime when a brand-new order lands (mutable, remembered per device).
 
+// REJECTED (owner, 2026-07-29, re-confirmed 2026-08-05 and 2026-08-07): the KITCHEN HAS NO PROFILE.
+// His words on 2026-08-07 — "Kitchen panel will not have profile or stuff like that. I have already
+// told this." So this flag stops maint.js injecting its everyday "👤 Profile" button into this bar.
+// It is the same mechanism the waiter tablet uses, and it must be set BEFORE maint.js's async init.
+// A cook keeps their login, their PIN and their action log; there is no profile, no pay record and no
+// button that says Profile. `lib/staffProfileShared.ts` PROFILE_ROLES already excludes kitchen — this
+// closes the last door that still said the word. Do not add one back, and do not offer it as an
+// "improvement": see docs/REJECTED-IDEAS.md → R7. (maint.js still shows the ONE-TIME "👋 Finish
+// setup" capture, which is a LOGIN thing — name/phone for PIN reset — not a profile.)
+window.LFH_SUPPRESS_SETTINGS_BTN = true;
+
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -109,6 +120,9 @@ const timeAgo = (ts) => {
 // Cooking ticket 44 HOURS old and another at 13h, rendered in exactly the same small grey text as
 // "5m" — so a cook scanning the board had no signal that anything had been sitting. These are real
 // tickets on overnight open sessions and must never be hidden; they just have to be visible AS old.
+// REJECTED (owner, 2026-08-07): no second ageing signal for food that is READY and sitting
+// uncollected. This warning is for a ticket that has been COOKING too long, and that is all the
+// board needs. See docs/REJECTED-IDEAS.md → R5.
 const AGE_WARN_MIN = 30, AGE_LATE_MIN = 120;
 const ageClass = (ts) => {
   const m = ageMinutes(ts);
@@ -415,6 +429,9 @@ function reconcileList(container, desired) {
 
 // COLUMNS view — the classic New → Cooking → Ready board. Dine-in tickets first,
 // then platform tickets, in each column.
+// REJECTED (owner, 2026-08-07): do NOT collapse or hide an EMPTY column on a phone to win back the
+// ~101px its "Nothing here." box costs. The three columns a kitchen thinks in — New / Cooking / Ready —
+// are always all three, whatever is in them. See docs/REJECTED-IDEAS.md → R3.
 function renderColumns() {
   const map = itemsByOrderId(); // build the item index ONCE, not per ticket
   const buckets = { new: [], cooking: [], ready: [], served: [] };
@@ -566,7 +583,23 @@ async function undoReady(snap, orderId) {
   });
   render();
   try {
-    for (const s of snap) await api("POST", `/items/${s.id}/status`, { status: s.prev });
+    // ONE REQUEST FOR THE WHOLE TICKET (owner-picked improvement, 2026-08-07). This used to be
+    // `for (const s of snap) await api(...)` — one round trip per dish, in series — so taking back a
+    // 12-dish "ALL READY" meant twelve waits on restaurant wifi, on the exact tap a cook makes the
+    // instant they realise they were too quick. /orders/:id/unready restores each dish to the status
+    // it actually had (the snapshot travels in the body, because a ticket can hold a mix of
+    // 'received' and 'preparing' and a blanket write would move the wrong ones).
+    //
+    // The per-dish loop is KEPT as the fallback, and not out of caution: the single-✓ undo passes no
+    // orderId (it takes back one dish, which may not be the whole ticket), and an OFFLINE replay of a
+    // bulk unready would have to be re-checked against a board that has since moved. One dish is one
+    // round trip either way, so the fallback costs nothing where it is used.
+    if (orderId != null && snap.length > 1) {
+      const r = await api("POST", `/orders/${orderId}/unready`, { dishes: snap.map((s) => ({ id: s.id, prev: s.prev })) });
+      if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; }
+    } else {
+      for (const s of snap) await api("POST", `/items/${s.id}/status`, { status: s.prev });
+    }
   } catch (e) {
     toast("Undo failed: " + e.message);
   }
@@ -1261,7 +1294,17 @@ $("#drawerOverlay").onclick = (e) => { if (e.target.id === "drawerOverlay") clos
 $("#dishSearch").oninput = renderDishes;
 // Wall ⇄ Columns toggle (the "expansion"). Persist the choice per device.
 $("#viewBtn").onclick = () => { view = view === "wall" ? "columns" : "wall"; localStorage.setItem("kds_view", view); applyView(); };
-setInterval(() => ($("#clock").textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })), 1000);
+// The clock, but only while it is actually on screen (owner-picked improvement, 2026-08-07). CSS
+// hides #clock below 760px, so on a phone this wrote a string into an invisible element once a second
+// for as long as the panel was open — and a KDS is open for days. Reading the computed style is the
+// honest test (the element exists either way); if it is hidden, or the panel is in a background tab,
+// there is nothing to keep up to date.
+setInterval(() => {
+  const el = $("#clock");
+  if (!el || document.hidden) return;
+  if (getComputedStyle(el).display === "none") return;
+  el.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}, 1000);
 
 // ── ⋯ MORE: the three set-once controls, off the phone bar (T4 sweep, 2026-08-06) ──────────
 // WHY THIS EXISTS. Measured on a 360px phone: `header.topbar` was 157px — a fifth of a 780px

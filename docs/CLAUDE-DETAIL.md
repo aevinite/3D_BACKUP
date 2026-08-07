@@ -172,6 +172,47 @@ no-tax-line, GSTIN, DPDP) + the risk map live in **`docs/COMPLIANCE-GUARDRAILS.m
 building/gating anything billing. Business view: Brain `05_Company/Aevidine-compliance-risks.md`.
 Stands in auto-accept mode.
 
+## 🚫 WHAT HE HAS ALREADY SAID NO TO — read `docs/REJECTED-IDEAS.md` BEFORE suggesting anything
+
+**The rule (owner, 2026-08-07):**
+> *"everything I reject also should be written in the comment in the code."*
+> *"While suggesting something and doing, at that time, you have to make sure I have already said no for it. So you don't repeat the same thing again."*
+
+### Why it exists
+
+He said it after being handed, for the THIRD time, a change he had already refused twice: a profile on
+the kitchen panel (ruled out 2026-07-29, re-confirmed 2026-08-05). The session that did it had *read*
+the rule and even written "correctly enforced" in its own notes — and then offered the thing back as an
+"improvement" instead of removing the last button that still said the word. A rule that gets re-litigated
+every few weeks is costing him time he already spent.
+
+### What it means in practice
+
+**Every rejection lands in TWO places:**
+
+1. **A row in `docs/REJECTED-IDEAS.md`** — the idea, his decision in his own words where they exist, the
+   date, and the code site. Rows are **never deleted**. If he changes his mind the row moves to the
+   `## Reversed` section with the new date, because the history is the point: "he said no in August" and
+   "he said no in August and yes in October" are different facts.
+2. **A `REJECTED (owner, <date>):` comment at the exact line** someone would otherwise change, naming the
+   reason and pointing back at the doc. This is the half that actually works — nobody opens a doc before
+   editing a function, but everybody reads the lines around the one they are about to touch.
+
+**Before you propose an improvement, or "fix" something that merely looks wrong, check that list.** A
+thing that looks like a defect is sometimes a decision: a FREE table tile is mostly empty space because
+he wants it that way (R1), and the 💳/⏻ controls on a floor tile are ~22px wide because he accepted that
+and answered mis-taps with a confirm step instead (R4).
+
+### Guarded
+
+`npm run verify:rejected` (`scripts/verify-rejected-ideas.mjs`) fails when:
+
+- a rejection listed in the doc has lost the comment at its code site,
+- a `REJECTED (owner, …)` comment somewhere claims a decision the doc does not record (no orphan claims),
+- a row names a file that no longer exists, or records no clear NO,
+- the doc loses the rule text, the "read this first" instruction, the how-to, or the `## Reversed` heading,
+- **CLAUDE.md stops pointing at the list** — a rule nobody is told about is not a rule.
+
 ## Owner working agreements (2026-06-26 — FOLLOW EVERY TIME)
 
 - **Design work → ALWAYS load the UI/UX skill (the "UI/UX Pro Max" skill if present)

@@ -109,6 +109,9 @@ export const ACT_LABEL: Record<string, string> = {
   customer_erase: "Erased a guest's record", issue_raised: "Raised a complaint",
   rating_handled: "Handled a rating",
   order_accept: "Accepted order", order_serve: "Served order", order_ready: "Marked ready",
+  // The kitchen taking back an "ALL READY" — one row per ticket now that the undo is a single
+  // request (2026-08-07), so this reads as one action rather than twelve.
+  order_unready: "Took back \u2018all ready\u2019",
   order_discount: "Applied discount", table_open: "Opened table", table_close: "Closed table",
   table_shift: "Shifted table", transfer_head: "Transferred head", order_place: "Placed order",
   call_attend: "Attended call", member_approve: "Approved guest", sold_out_on: "Marked sold-out", sold_out_off: "Back in stock",
