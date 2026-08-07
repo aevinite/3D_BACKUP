@@ -42,8 +42,8 @@ async function expectBreadcrumb(topic, kind, label, write) {
   return false;
 }
 
-await Promise.all([listen("menu"), listen("ops")]);
-console.log("subscribed to rt:menu + rt:ops\n");
+await Promise.all([listen("menu"), listen("ops"), listen("audit")]);
+console.log("subscribed to rt:menu + rt:ops + rt:audit\n");
 
 const results = [];
 
@@ -73,8 +73,12 @@ const results = [];
   await svc.from("sessions").delete().eq("id", s.id); // cleanup
 }
 
-// 5) staff_actions insert → ops/action (drives the admin activity feed)
-{ results.push(await expectBreadcrumb("ops", "action", "staff action (oplog)",
+// 5) staff_actions insert → AUDIT/action (drives the admin activity feed).
+// It was 'ops' until migration 267 moved it to its own topic, so the oplog stops waking every
+// staff panel on the ops firehose. lib/useRealtime.ts knows the topic and
+// components/admin/shared.tsx subscribes to it — but this test was never updated, so it has been
+// failing on correct behaviour. A guard that is permanently red is a guard people learn to skip.
+{ results.push(await expectBreadcrumb("audit", "action", "staff action (oplog)",
     () => svc.from("staff_actions").insert({ panel: "admin", action: "rt_selftest", detail: "verify-realtime" })));
   await svc.from("staff_actions").delete().eq("action", "rt_selftest"); // cleanup
 }
