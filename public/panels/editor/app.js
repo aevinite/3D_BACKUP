@@ -8345,7 +8345,23 @@ function floorHtml() {
   // wrapped in ONE element on purpose: left loose in a wrapping flex row they came apart the
   // moment the row wrapped (an iPad put both at the far LEFT of line two — the placement the
   // owner rejected on 2026-08-02). As a pair with `margin-left:auto` they stay together, right.
-  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view <span class="sub">· live</span></h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridHtml}${parcelStripHtml()}</div>`;
+  // ── "THERE IS MORE FLOOR TO THE RIGHT" (owner, 2026-08-07) ──────────────────────────────────
+  // The tables-per-row number is his instruction and does NOT shrink to fit a screen, so on a phone
+  // the grid keeps all N columns and scrolls sideways (see the <=1040px block in style.css). Measured
+  // on an A35 at 12 per row: 930px of grid inside a 332px window — eight of the twelve columns are
+  // off screen, and the only hint was that the fifth tile is cut in half. When I looked, two of the
+  // three BUSY tables were among the hidden ones.
+  // So the grid gets a small counter pinned to its right edge: "→ 8 more". It changes nothing about
+  // the column count; it only says how many tables are past the edge, and it disappears the moment
+  // you have scrolled to the end (or on a screen wide enough not to scroll at all).
+  // It sits INSIDE .ftile-wrap with the grid so it can be positioned against the grid's own box —
+  // the grid is the scroller, so a child of the grid would scroll away with the tables.
+  // `hidden` alone (not aria-hidden) — `hidden` already takes it out of the accessibility tree, and
+  // it is a real button because tapping it MUST do something: it scrolls the floor one screen right.
+  // A chip that only announced there was more and then ignored the tap would be a dropped tap.
+  const moreChip = `<button class="ftile-more" data-ftile-more hidden title="Scroll the floor to the right">→ <b data-ftile-more-n>0</b> more</button>`;
+  const gridBlock = `<div class="ftile-wrap">${gridHtml}${moreChip}</div>`;
+  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view <span class="sub">· live</span></h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridBlock}${parcelStripHtml()}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",
@@ -8604,9 +8620,44 @@ function layoutFloatingRow() {
 // patch path never has to re-bind them); here we wire only the controls the patch never
 // touches (bulk open/close, the side toggle, settings, location, block, unblock, resizer,
 // and the selected-table detail panel).
+// syncFloorMore(): keep the "→ N more" chip honest. Called after every full render, on the grid's
+// own scroll, and on resize. It counts the tiles whose left edge is past the grid's visible right
+// edge — the plainest possible answer to "how many tables am I not looking at" — and hides itself
+// entirely when the floor doesn't scroll (a desktop) or when you have reached the end.
+// Cheap by design: one getBoundingClientRect per tile, no layout writes, and only while the Tables
+// tab is showing. At 300 tables that is still one pass over nodes already in memory.
+function syncFloorMore() {
+  const ed = $("#editor");
+  const grid = ed && ed.querySelector(".ftile-grid");
+  const chip = ed && ed.querySelector("[data-ftile-more]");
+  if (!grid || !chip) return;
+  const slack = grid.scrollWidth - grid.clientWidth;
+  if (slack <= 2) { chip.hidden = true; return; }          // nothing to scroll — desktop, or it fits
+  const right = grid.getBoundingClientRect().right;
+  let n = 0;
+  for (const t of grid.querySelectorAll(".ftile")) if (t.getBoundingClientRect().left >= right - 1) n++;
+  chip.hidden = n === 0;                                    // scrolled to the end → say nothing
+  if (n) {
+    const b = chip.querySelector("[data-ftile-more-n]");
+    if (b) b.textContent = String(n);
+    chip.setAttribute("aria-label", `${n} more table${n === 1 ? "" : "s"} to the right — tap to scroll`);
+  }
+}
 function bindFloor() {
   bindFloorDelegation(); // attach the delegated tile/quick/queue handler ONCE
   const ed = $("#editor");
+  // The "→ N more" chip: wire its scroll-by-one-screen tap, keep it in step with the grid's scroll,
+  // and set it right for the layout we just drew.
+  {
+    const grid = ed.querySelector(".ftile-grid");
+    const chip = ed.querySelector("[data-ftile-more]");
+    if (grid && chip) {
+      chip.onclick = () => grid.scrollBy({ left: Math.max(120, grid.clientWidth - 40), behavior: "smooth" });
+      // passive: this listener only READS geometry, so it must never hold up the scroll it watches.
+      grid.addEventListener("scroll", syncFloorMore, { passive: true });
+      syncFloorMore();
+    }
+  }
   // (The ↻ Refresh button was removed — the floor is live via realtime + the 60s backup poll,
   //  so a manual refresh was redundant and looked broken. Coordinator-relayed owner request.)
   // Bulk open/close for the whole floor (both confirm before acting).
@@ -10555,11 +10606,36 @@ function openShiftPicker(t, sess) {
   // `target_occupied`, and the manager was told a table the floor draws as Free "already has a party
   // on it". tableHasAnyParty exists precisely for this (see its own comment) and the DESKTOP door
   // — openKotColumns → freeTables() — has always used it. Two doors, one answer.
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && !tableHasAnyParty(i) && !reqTables.has(String(i)) && !mergeParentOf(i)) free.push(i); }
-  const grid = free.length
-    ? free.map((i) => `<button class="btn shiftpick" data-shiftto="${i}">T${i}</button>`).join("")
-    : `<div class="muted" style="padding:14px">No free tables to move to right now.</div>`;
-  const wrap = el(`<div class="sx-modal-overlay shift-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Move T${esc(t)} →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Move this party — orders, calls &amp; bill included — to a free table:</div><div class="shiftgrid">${grid}</div></div></div>`);
+  // EVERY TABLE IS SHOWN, THE UNAVAILABLE ONES DIMMED (owner, 2026-08-07: "in the move table you
+  // can also be able to see all the thing, but the thing which are filled will be greyed out").
+  // Before this the list held only the free ones, so a table was simply ABSENT and a manager could
+  // not tell whether T12 was missing because it was busy, because it was joined to another table, or
+  // because his restaurant does not have a T12. Now the whole floor is on screen in order, and each
+  // one that cannot take the party says WHY in a word. The reasons are exactly the conditions below,
+  // and the server still refuses independently — this is presentation, never the guard.
+  // ONE word each, deliberately: "party on it" wrapped onto two lines in a ~70px tile and made those
+  // tiles taller than their neighbours, so the grid stopped reading as a grid.
+  const whyBlocked = (i) => {
+    if (String(i) === String(t)) return "this one";
+    if (mergeParentOf(i)) return "joined";
+    if (tableHasAnyParty(i)) return "taken";
+    if (reqTables.has(String(i))) return "wants in";
+    return "";
+  };
+  for (let i = 1; i <= n; i++) if (!whyBlocked(i)) free.push(i);
+  const nm = (i) => ((state.data.settings || {}).table_names || {})[String(i)];
+  const grid = Array.from({ length: n }, (_, k) => k + 1).map((i) => {
+    const why = whyBlocked(i);
+    const label = (nm(i) || "").trim() || `T${i}`;
+    // A blocked table is a real <button> kept `disabled` rather than a <div>: it stays in the same
+    // grid position and keeps its tooltip, and `disabled` is what stops the tap (and takes it out of
+    // the tab order) without any handler of ours having to decide.
+    return why
+      ? `<button class="btn shiftpick shiftpick-off" disabled aria-disabled="true" title="${esc(label)} — ${esc(why)}"><span class="shiftpick-t">${esc(label)}</span><small class="shiftpick-why">${esc(why)}</small></button>`
+      : `<button class="btn shiftpick" data-shiftto="${i}" title="Move this party to ${esc(label)}"><span class="shiftpick-t">${esc(label)}</span><small class="shiftpick-why">free</small></button>`;
+  }).join("");
+  const noneNote = free.length ? "" : `<div class="muted small" style="padding:0 14px 10px">Nothing is free right now — every table is either taken, joined, or waiting on a guest.</div>`;
+  const wrap = el(`<div class="sx-modal-overlay shift-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>Move ${esc(tableLabel(t))} →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Move this party — orders, calls &amp; bill included — to a free table. Dimmed tables can't take it:</div>${noneNote}<div class="shiftgrid">${grid}</div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = closeM;
@@ -10630,7 +10706,11 @@ function tableOpsOn() {
   .kotm-tile small { display:block; color:var(--muted); font-size:10.5px; margin-top:2px; }
   .kotm-tile.occ { border-color: color-mix(in srgb, var(--gold) 45%, transparent);
     background: color-mix(in srgb, var(--gold) 8%, var(--panel-2)); }
-  .kotm-tile:hover { border-color: var(--gold); }
+  .kotm-tile:hover:not(:disabled) { border-color: var(--gold); }
+  /* A table that cannot take the party is DIMMED, not hidden (owner, 2026-08-07): it keeps its place
+     in the grid and says why in a word, so "T12 is busy" reads differently from "there is no T12". */
+  .kotm-tile-off { opacity: .42; cursor: default; border-style: dashed; background: transparent; }
+  .kotm-tile-off small { font-weight: 700; white-space: nowrap; }
   /* THE TABLE PICKER (owner, 2026-08-01): as wide as the screen allows, as many tables per row as
      fit, and each one wearing its own state colour + words. Same --c state variables the floor
      tiles use (.ft-free/.ft-prep/…), so the popup and the floor can never disagree. */
@@ -10841,13 +10921,33 @@ function openKotColumns(t, sess) {
   };
   const tiles = (list, attr, subOf, labelOf) => `<div class="kotm-grid">` +
     list.map((i) => `<button class="kotm-tile${summaryTableOpen(i) ? " occ" : ""}${mergeChildrenOf(i).length ? " kotm-tile-party" : ""}" data-${attr}="${i}"><b>${esc((labelOf || partyLabel)(i))}</b><small>${subOf(i)}</small></button>`).join("") + `</div>`;
+  // The same grid, but showing tables that CANNOT be picked as dimmed and disabled instead of
+  // leaving them out (owner, 2026-08-07). `blocked(i)` returns a one-word reason or "" — a table with
+  // a reason keeps its place in the grid and says why, so a manager can tell "T12 is busy" apart from
+  // "this restaurant has no T12". The pickable ones behave exactly as before.
+  const tilesAll = (attr, subOf, blocked) => `<div class="kotm-grid">` +
+    Array.from({ length: n }, (_, k) => k + 1).map((i) => {
+      const why = blocked(i);
+      if (why) return `<button class="kotm-tile kotm-tile-off" disabled aria-disabled="true" title="${esc(partyLabel(i))} — ${esc(why)}"><b>${esc(partyLabel(i))}</b><small>${esc(why)}</small></button>`;
+      return `<button class="kotm-tile${summaryTableOpen(i) ? " occ" : ""}${mergeChildrenOf(i).length ? " kotm-tile-party" : ""}" data-${attr}="${i}"><b>${esc(partyLabel(i))}</b><small>${subOf(i)}</small></button>`;
+    }).join("") + `</div>`;
   // A "free" target must have NO party row at all — not even the invisible empty one the floor
   // draws as Free (see tableHasAnyParty). Moving a party onto it would put two sessions on one
   // table, and the second one is the kind of thing nobody notices until a bill is wrong.
   // …and a merged CHILD is never "free" either: it has no party row of its own, so
   // tableHasAnyParty can't see it, but shifting onto it would land a second party on a joined
   // table (the server refuses too — 'merged_child', mig 264; this list just never offers it).
-  const freeTables = () => { const reqT = new Set((state.summary && state.summary.requests || []).map((r) => String(r.table_number))); const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && !tableHasAnyParty(i) && !reqT.has(String(i)) && !mergeParentOf(i)) out.push(i); return out; };
+  // ONE definition of "why not this table", used both to build the free list and to LABEL the dimmed
+  // ones — so the list and the reason can never disagree (the exact drift that made the phone's
+  // picker offer a table the desktop refused, T3 sweep 2026-08-06).
+  const shiftBlocked = (i) => {
+    if (String(i) === String(t)) return "this one";
+    if (mergeParentOf(i)) return "joined";
+    if (tableHasAnyParty(i)) return "taken";
+    if ((state.summary && state.summary.requests || []).some((r) => String(r.table_number) === String(i))) return "wants in";
+    return "";
+  };
+  const freeTables = () => { const out = []; for (let i = 1; i <= n; i++) if (!shiftBlocked(i)) out.push(i); return out; };
   const occTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) out.push(i); return out; };
   const allTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t)) out.push(i); return out; };
   const tileDue = (i) => { const tile = (state.summary && state.summary.tiles || {})[String(i)]; return tile && tile.due > 0 ? "due " + inr(tile.due) : "open"; };
@@ -10855,7 +10955,10 @@ function openKotColumns(t, sess) {
 
   // What panel 2 shows per operation; ops with a 3rd step mark their picks sel-able.
   const col2 = () => {
-    if (sel1 === "shift") return { title: "Move to which free table?", html: freeTables().length ? tiles(freeTables(), "goshift", () => "free") : `<div class="muted" style="padding:10px">No free tables right now.</div>` };
+    // Shift shows the WHOLE floor with the unavailable tables dimmed — same as the phone's own
+    // picker, and the same four reasons in the same words, so the two doors read alike.
+    if (sel1 === "shift") return { title: "Move to which table?", html: tilesAll("goshift", () => "free", shiftBlocked)
+      + (freeTables().length ? "" : `<div class="muted" style="padding:10px">Nothing is free right now — every table is either taken, joined, or waiting on a guest.</div>`) };
     if (sel1 === "merge") return { title: "Join which party?", html: tiles(occTables(), "gomerge", (i) => (mergeChildrenOf(i).length ? "merged party · " + tileDue(i) : tileDue(i))) };
     if (sel1 === "movekot") return { title: "Which KOT moves?", html: movable.map((o) => kotCard(o, "pickkot")).join("") };
     if (sel1 === "moveitem") {
@@ -10957,6 +11060,9 @@ function openKotTablePicker() {
   // not paid / served / not served things"). The first version was a narrow two-column list: on a
   // 30-table floor you scrolled to find a table you could already SEE behind the popup. It uses
   // the same tableTileState the tiles use, so the words match the floor exactly.
+  // …which was not quite true until 2026-08-07: a free table was hard-coded to lowercase "free" here
+  // while the floor says "Free". One screen, two spellings of the same state. It prints ts.label now,
+  // which IS the floor's word for every state including Free — so the claim above is finally honest.
   let busyN = 0;
   const grid = floorTableList(n).map((i) => {
     const ts = tableTileState(i);
@@ -10968,7 +11074,7 @@ function openKotTablePicker() {
     const nm = ((s.table_names || {})[String(i)] || "").trim();
     return `<button class="kotm-tile kotp-tile ft-${esc(ts.st)}${busy ? " occ" : ""}${ts.pay ? " pay-" + esc(ts.pay) : ""}" data-kotpick="${esc(i)}" title="${esc(nm ? nm + " (T" + i + ")" : "T" + i)}">
       <b>${info ? info.emoji + " " : ""}T${esc(i)}</b>
-      <small class="kotp-state">${esc(busy ? ts.label : "free")}</small>
+      <small class="kotp-state">${esc(ts.label)}</small>
       ${busy && ts.meta ? `<small class="kotp-meta">${esc(ts.meta)}</small>` : ""}
       ${money ? `<small class="kotp-pay ${esc(money)}">${esc(money)}</small>` : ""}
     </button>`;
@@ -13416,6 +13522,9 @@ window.addEventListener("resize", () => {
     return;
   }
   if (state.floatingTables.length) layoutFloatingRow();
+  // Widening the window can remove the sideways scroll entirely (and narrowing it can create one),
+  // so the "→ N more" chip is re-checked here rather than only on the grid's own scroll.
+  if (state.tab === "tables") syncFloorMore();
 });
 // ---- Auto-fitting top nav (2026-07-29) ----
 // With Banquet + Ratings on there are NINE tabs; brand + tabs + the right-hand actions
