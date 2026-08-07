@@ -4,7 +4,7 @@
 //   3. scrolling into a section lights its chip (Coffee → … → Pizza);
 //   4. the very bottom lights the LAST category (short-section edge case);
 //   5. tapping a chip jumps so the section lands BELOW the pinned header.
-// Prints pass/fail only. Usage: node scripts/verify-scrollspy.mjs (menu on :4000)
+// Prints pass/fail only. Usage: node scripts/verify-scrollspy.mjs [--base http://localhost:PORT]
 import { chromium } from "playwright";
 
 // A guard that can only run when port 4000 happens to be up is a guard that gets skipped — and
@@ -23,7 +23,7 @@ const browser = await chromium.launch();
 try {
   const ctx = await browser.newContext({ viewport: { width: 420, height: 900 } });
   const page = await ctx.newPage();
-  await page.goto("${BASE}/menu", { waitUntil: "domcontentloaded" });
+  await page.goto(`${BASE}/menu`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".cat-group-head", { timeout: 60000 });
   await page.evaluate(() => sessionStorage.removeItem("lfh_menu_scroll"));
 
