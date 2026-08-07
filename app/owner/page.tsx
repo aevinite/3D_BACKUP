@@ -28,6 +28,7 @@ import {
 } from "@/components/owner/Charts";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { compactINR } from "@/lib/money";
+import { portfolioColor } from "@/lib/restaurantColor";
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import { reportRealtime } from "@/lib/connectionStatus";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
@@ -140,35 +141,10 @@ type Act = { id: string; panel: string; action: string; actor: string | null; ta
 // dark green, a third non-brown colour only if needed (owner round-2: "only brown
 // doesn't make sense"). Identity accent colours are for the many-tier only.
 const GREEN_SHADES = ["#34d399", "#0f766e", "#a3e635"];
-// 4+ restaurants: give each one a DISTINCT, SOLID colour (owner 2026-07-27: the charts
-// looked "faded" and same-ish because most restaurants default to the same gold accent —
-// so several bars/lines were the identical washed-out yellow). This vibrant qualitative
-// palette assigns a clearly-different hue per restaurant BY POSITION, so no two adjacent
-// restaurants share a colour and the same restaurant keeps its colour across the
-// "Who earns more" bars AND the "Revenue over time" lines that sit side-by-side.
-const PORTFOLIO_COLORS = [
-  "#34d399", // emerald  (owner brand green first)
-  "#3b82f6", // blue
-  "#f59e0b", // amber
-  "#ec4899", // pink
-  "#8b5cf6", // violet
-  "#14b8a6", // teal
-  "#ef4444", // red
-  "#eab308", // yellow
-  "#f97316", // orange
-  "#06b6d4", // cyan
-];
-/** Stable colour for a restaurant — keyed by its ID, so it cannot drift.
- *  It used to be keyed by POSITION in the unsorted list, while "Who earns more" sorts a copy by
- *  revenue: the moment the ranking changed, a restaurant's bar and its trend line beside it
- *  disagreed, and the console promises one identity colour across both (T5 sweep, 2026-08-06).
- *  A hash of the id is stable across loads, across sorts, and across sessions. */
-function portfolioColor(idOrIndex: string | number): string {
-  if (typeof idOrIndex === "number") return PORTFOLIO_COLORS[idOrIndex % PORTFOLIO_COLORS.length];
-  let h = 0;
-  for (let i = 0; i < idOrIndex.length; i++) h = (h * 31 + idOrIndex.charCodeAt(i)) >>> 0;
-  return PORTFOLIO_COLORS[h % PORTFOLIO_COLORS.length];
-}
+// 4+ restaurants: each gets a DISTINCT, SOLID colour, because most restaurants default to the
+// same gold accent and several bars/lines came out the identical washed-out yellow (owner,
+// 2026-07-27). The palette moved to lib/restaurantColor so the SHELL's sidebar and switcher can
+// use the very same colour — they were still painting their own brand accents (T5, 2026-08-07).
 
 const IST = "Asia/Kolkata";
 // Some RPCs return a zone-LESS IST wall-clock timestamp — see the note in the old

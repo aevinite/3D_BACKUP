@@ -384,7 +384,8 @@ check("both print paths share a masthead and a closing note",
   "Ctrl+P and Export → Print produced two visibly different documents");
 // I17 — one colour per restaurant.
 check("a restaurant's colour is keyed by its id, not its list position",
-  /function portfolioColor\(idOrIndex: string \| number\)/.test(dashPage) && !/portfolioColor\(i\)/.test(dashPage),
+  /function portfolioColor\(idOrIndex: string \| number\)/.test(read("lib/restaurantColor.ts"))
+    && !/portfolioColor\(i\)/.test(dashPage),
   "sorting the ranking made a bar and its trend line disagree");
 // I18 — an unknown payment method is not 'Not recorded'.
 check("an unrecognised payment method gets its own colour",
@@ -407,6 +408,21 @@ check("the dashboard no longer counts open tables it never shows",
 check("the restaurant drawer closes on Escape too",
   /if \(e\.key === "Escape"\) setDrawerRid\(null\)/.test(dashPage),
   "it closed on Back, the backdrop and the ✕ — but not the one habit that works everywhere else");
+
+console.log("\n── 21. ONE RESTAURANT, ONE COLOUR — INCLUDING THE SHELL (T5, 2026-08-07) ──");
+// The palette lived inside the dashboard page, so the SHELL's sidebar and top-strip switcher kept
+// painting each restaurant's own brand accent: one restaurant was orange in the sidebar and blue
+// in the chart three inches to its right.
+const shell = read("components/owner/OwnerShell.tsx");
+check("the palette lives in lib/, not in one page",
+  /export function portfolioColor/.test(read("lib/restaurantColor.ts")),
+  "a palette inside a page cannot be shared with the shell that frames it");
+check("the shell's swatches use it",
+  /portfolioColor\(r\.id\)/.test(shell) && !/background: r\.accentColor/.test(shell),
+  "the sidebar and the switcher must agree with the charts they sit beside");
+check("the dashboard imports the same one",
+  /from "@\/lib\/restaurantColor"/.test(dashPage) && !/^const PORTFOLIO_COLORS/m.test(dashPage),
+  "two copies of a palette is how they drift");
 
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }
