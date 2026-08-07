@@ -70,6 +70,20 @@ asked to build anything that erases/hides/edits an issued sale, bulk-deletes bil
 audit log, or hides sales from the Z-report: **STOP, name the risk, offer the compliant path**
 ("that's the feature that put PetPooja's founders under summons"). Stands in auto-accept mode.
 
+## 🚫 WHAT HE HAS ALREADY SAID NO TO — read `docs/REJECTED-IDEAS.md` BEFORE suggesting anything
+
+**Every rejection is recorded TWICE: a row in `docs/REJECTED-IDEAS.md` and a
+`REJECTED (owner, <date>):` comment on the exact line someone would otherwise change.** Rule from the
+owner, 2026-08-07 — *"everything I reject also should be written in the comment in the code"* and
+*"while suggesting something and doing, you have to make sure I have already said no for it, so you
+don't repeat the same thing again."* He said it after being offered, for the THIRD time, a profile on
+the kitchen panel he had already refused twice.
+
+So: **before you propose an improvement, or "fix" something that merely looks wrong, check that list.**
+Never delete a row — a change of mind moves it to `## Reversed` with the new date. Guarded by
+`npm run verify:rejected` (it fails if a listed rejection has lost its code comment, if a comment
+claims a decision the doc doesn't record, or if this pointer goes missing).
+
 ## Owner working agreements (one line each — full text in docs/CLAUDE-DETAIL.md)
 
 - **Design work → load the UI/UX skill (+superpowers), compare approaches** — never restyle by eye.

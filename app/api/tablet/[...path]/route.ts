@@ -980,10 +980,22 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // floor draws as Free while the database calls it open. Two waiters on one floor is all it
       // takes. With the filter, the second tap matches no row and is refused out loud below.
       const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).eq("status", "pending").select())[0];
-      // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS — the same answer every order/dish branch
-      // in this file already gives. Without it the waiter saw a success and a refreshed screen that
-      // silently disagreed with what they thought they had just done.
-      if (!reqRow) return err("Someone already answered that request — refresh to see where it stands.", 409);
+      // ALREADY ANSWERED — and the two cases are NOT the same (twin-parity pass, 2026-08-07).
+      // The update is scoped `.eq("status","pending")`, so a request somebody already answered matches
+      // no row. What happens next depends on WHO answered and HOW:
+      //   · same answer  → this is a double-tap or a re-poll of your own action. The outcome you wanted
+      //     already holds, so say OK. (That idempotence is deliberate — B22 — and it is what stops a
+      //     re-approve running the open-session insert twice.)
+      //   · different answer → somebody ELSE decided the other way. Reporting success would hide that:
+      //     the waiter taps Approve on a request a colleague just DENIED, is told it worked, and on the
+      //     tablet that used to go on to OPEN A TABLE nobody asked for.
+      // So: idempotent for your own repeat, refused out loud when the ground actually moved.
+      if (!reqRow) {
+        const now = must(await sb.from("requests").select("status").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { status?: string } | null;
+        if (!now) return err("That request is no longer there — refresh.", 404);
+        if (now.status !== status) return err(`Someone already ${now.status === "approved" ? "approved" : "denied"} that request — refresh to see where it stands.`, 409);
+        return ok(null);   // same answer, already recorded — nothing more to do
+      }
       if (status === "approved" && reqRow.type === "open") {
         const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
         if (!existing.length) await openTableSession(rid, String(reqRow.table_number)); // race-tolerant (2026-07-30)
@@ -1253,6 +1265,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // client's optimistic move sticks visually then silently snaps back (#1). Surface a
       // real 4xx so the client reverts AND shows a toast (matches orders/:id/move).
       if (data && (data as any).ok === false) return err(shiftErrMsg((data as any).reason), 409);
+      // LOGGED, like the manager's twin (twin-parity pass, 2026-08-07). Moving a whole party — its
+      // session, its orders, its calls and its bill — is one of the largest things anyone does to a
+      // floor, and from the tablet it left no row at all, so "who moved table 6 to 12?" had no answer.
+      await log("table_shift", { table_number: to, detail: `party moved to T${to}`, device_id: dev });
       return ok(data);
     }
 
@@ -1448,6 +1464,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         amount: (Number(gone.unit_price) || 0) * (Number(gone.qty) || 1),
         meta: { items_left: data?.items_left ?? null, order_cancelled: !!data?.order_cancelled, from: "waiter tablet" },
       });
+      // "✎ Edited" must appear whichever panel took the dish off (twin-parity pass, 2026-08-07). The
+      // manager's identical endpoint stamps this; the waiter's did not, so the SAME removal marked the
+      // ticket as edited when a manager did it and left it looking untouched when a waiter did — and
+      // the kitchen reads that badge to know a ticket changed after it was rung.
+      await stampEdited(data?.order_id ?? gone.order_id, rid);
       return ok(data);
     }
 

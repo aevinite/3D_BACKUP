@@ -347,6 +347,70 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       return ok({ ok: true });
     }
 
+    // orders/:id/unready — TAKE BACK an "ALL READY" in ONE request (owner-picked improvement,
+    // 2026-08-07). The undo bar used to replay the snapshot one dish at a time — `for (const s of
+    // snap) await api(...)` — so taking back a 12-dish ticket was 12 sequential round trips on
+    // restaurant wifi, on the one action a cook reaches for immediately after a mistake. It is now
+    // the exact mirror of /ready above.
+    //
+    // It restores each dish to the status it ACTUALLY had, not a blanket value: the body carries the
+    // snapshot the panel captured before it flipped anything ([{ id, prev }]), because a ticket can
+    // hold a mix — one dish still 'received', another already 'preparing' — and a blanket write would
+    // quietly promote or demote the others. Ids are scoped to THIS order and this restaurant, so a
+    // hand-formed body cannot reach another ticket's dishes.
+    //
+    // A dish that has since been SERVED is deliberately left alone: the waiter has already carried it
+    // out, and un-serving it is a different, explicit action (the tablet's "↩ Send back to kitchen").
+    if (a === "orders" && c === "unready") {
+      const cur = must(await sb.from("orders").select("items").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      if (!cur) return err("That order isn't on this restaurant's board any more.", 404);
+      const raw = Array.isArray(body?.dishes) ? body.dishes : [];
+      const VALID = ["received", "preparing", "ready"];
+      // Normalise + drop anything unusable, then cap: a ticket has tens of lines, never thousands.
+      const snap = raw
+        .map((d: any) => ({ id: String(d?.id ?? ""), prev: String(d?.prev ?? "") }))
+        .filter((d: { id: string; prev: string }) => d.id && VALID.includes(d.prev))
+        .slice(0, 200);
+      if (!snap.length) return err("Nothing to take back — refresh the board and try again.", 400);
+      // Only rows that really belong to THIS order in THIS restaurant may be touched.
+      const mine = must(await sb.from("order_items").select("id, status")
+        .eq("order_id", b).eq("restaurant_id", rid)
+        .in("id", snap.map((d: { id: string }) => d.id))) as { id: string; status: string }[];
+      const byId = new Map(mine.map((r) => [r.id, r.status]));
+      // Group by target status so a mixed ticket costs ONE update per distinct status (at most three)
+      // instead of one per dish — which is the whole point of this endpoint.
+      const groups = new Map<string, string[]>();
+      for (const d of snap) {
+        const wasNow = byId.get(d.id);
+        if (wasNow === undefined) continue;          // gone, or not ours
+        if (wasNow === "served") continue;           // already carried out — see the note above
+        if (wasNow === d.prev) continue;             // nothing to change
+        if (!groups.has(d.prev)) groups.set(d.prev, []);
+        groups.get(d.prev)!.push(d.id);
+      }
+      if (!groups.size) return err("Those dishes have already moved on — refresh the board.", 409);
+      let moved = 0;
+      for (const [status, ids] of groups) {
+        // served_at back to null: these are all pre-served states, and a row must never keep a
+        // "served at" time it no longer earns (same rule as items/:id/status).
+        must(await sb.from("order_items").update({ status, served_at: null })
+          .in("id", ids).eq("order_id", b).eq("restaurant_id", rid).select("id"));
+        moved += ids.length;
+      }
+      // Roll the parent order up from what the rows now say — identical to the items/:id/status
+      // rollup below, so the two paths can never leave the order disagreeing with its dishes.
+      const rows = must(await sb.from("order_items").select("status").eq("order_id", b).eq("restaurant_id", rid));
+      const served = rows.filter((r: any) => r.status === "served").length;
+      const anyActive = rows.some((r: any) => ["preparing", "ready", "served"].includes(r.status));
+      const overall = served === rows.length && rows.length > 0 ? "served" : anyActive ? "preparing" : "received";
+      const its = Array.isArray(cur.items)
+        ? cur.items.map((i: any) => (i.status === "served" ? i : { ...i, status: overall === "received" ? "received" : "preparing" }))
+        : [];
+      must(await sb.from("orders").update({ items: its, status: overall }).eq("id", b).eq("restaurant_id", rid));
+      await logAction("kitchen", "order_unready", { ...adminMark, order_id: b, detail: `${moved} ${moved === 1 ? "dish" : "dishes"} taken back`, device_id: dev, restaurant_id: rid });
+      return ok({ ok: true, count: moved });
+    }
+
     // items/:id/status — one dish moved along, with order rollup. The kitchen
     // sends "ready" (cooked); the tablet sends "served" (delivered).
     if (a === "items" && c === "status") {

@@ -886,6 +886,9 @@ function rangeText(nums) {
 
 // The "Your tables" strip above the floor. Hidden entirely (via an inline style, not the
 // `hidden` attribute — an author display rule would beat that) for anyone not restricted.
+// REJECTED (owner, 2026-08-07): the strip stays even when `my_tables` covers the whole floor plan
+// (i.e. it reads "Your tables 1-30 · 30 tables"). Do not add a "hide it when it's everything" rule.
+// See docs/REJECTED-IDEAS.md → R2.
 function renderMySection() {
   const el = document.getElementById("mySection");
   if (!el) return;
@@ -1047,6 +1050,14 @@ function passesFilter(i) {
 // byte-identical (no path-divergent rendering). All the per-tile state/agg/badges/quick reads
 // live here, exactly as they did inside the old renderFloor loop. Mirrors the manager's
 // floorTileHtml. (owner perf 2026-06-27 — 300-table freeze fix)
+// REJECTED (owner, 2026-08-07) — two things about this tile, both deliberate:
+//  · R1 "I want free table to look empty only": a FREE tile is a number, a seat count and the word
+//    Free in a big square, and the blank space is the design. Do not shorten it, do not fill it, do
+//    not make free tiles denser than busy ones to fit more floor on screen.
+//  · R4 "Don't do fix number four": the 💳 Mark-paid and ⏻ Close controls in the actions row measure
+//    ~22-25px wide and that is ACCEPTED. The answer to a mis-tap is the confirm step each one already
+//    has, not a bigger button. Do not widen them or re-balance the row for them.
+// See docs/REJECTED-IDEAS.md → R1, R4.
 function tileHtml(i) {
   // A MERGED TABLE IS NOT A FREE TABLE (mig 249; the manager floor got this on 2026-08-01,
   // the tablet never had it). A child's party lives on its parent, so its own summary tile
@@ -1165,6 +1176,9 @@ function floorNavHtml() {
 // is only the DB's outer bound and the screens offer 2..12), so a stored 18 would have drawn
 // differently here than in the manager. A panel file can't import TS, so the values are
 // restated — keep them in step, and prefer changing lib/floorLayout.ts first.
+// REJECTED (owner, 2026-08-07): do NOT also restate lib/floorLayout.ts's TILE_MIN_PX (the 44px
+// tappability floor) here. These three are the only numbers this panel mirrors. R6 in
+// docs/REJECTED-IDEAS.md.
 const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 // A FINGER NEEDS A BIGGER SQUARE THAN A MOUSE DOES (owner, 2026-08-05).
 // The admin number is chosen for a desktop floor. Taken literally on a tablet it made the tiles
@@ -4396,9 +4410,17 @@ async function loadImpl() {
 }
 // The clock lives ONLY in the ☰ menu now (#dwClock) — the minimal top bar has no room for it
 // and a waiter's device shows the time anyway (owner, 2026-08-03).
+// Only while the drawer that holds it is actually OPEN (owner-picked improvement, 2026-08-07). #dwClock
+// lives inside the ☰ drawer, which is shut almost all the time, so this wrote into a hidden element
+// once a second for the whole life of the page. The drawer sets .open when it is showing, and
+// openDrawer() calls tickClock() itself, so the time is already correct the moment it is seen.
 const tickClock = () => {
+  if (document.hidden) return;
   const dc = document.getElementById("dwClock");
-  if (dc) dc.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (!dc) return;
+  const drawer = dc.closest(".tbl-drawer");
+  if (drawer && !drawer.classList.contains("open")) return;
+  dc.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 };
 tickClock(); setInterval(tickClock, 1000);
 
@@ -4807,6 +4829,7 @@ window.addEventListener("online", () => load().catch(() => {}));
       bqBtn.hidden = tHigher() ? false : offForWaiters;
       bqBtn.classList.toggle("xray-off", tHigher() && offForWaiters);
     }
+    tickClock();   // the drawer is now open, so show the right time at once (see tickClock)
     loadProfile();
     if (window.LFH_BACK && !drawerOff) drawerOff = LFH_BACK.layer("tablet-drawer", closeDrawer);
   };

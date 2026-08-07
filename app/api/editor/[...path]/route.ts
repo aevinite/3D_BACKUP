@@ -3112,7 +3112,11 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // .eq(restaurant_id, rid) is the tenant boundary (service-role bypasses RLS) — the
       // same rule applied to order/dish writes; a foreign session id can't be flipped.
       const row = must(await sb.from("sessions").update({ auto_approve: value }).eq("id", b).eq("restaurant_id", rid).select());
-      return ok(row[0] || null);
+      // The table closed while the toggle was on screen — the setting had nowhere to land, and saying
+      // "saved" would be a lie. Matches the waiter's twin. (twin-parity pass, 2026-08-07)
+      if (!row[0]) return err("That table has closed — the setting wasn't saved.", 404);
+      await log("editor", "auto_approve", { restaurant_id: rid, detail: value ? "on" : "off", device_id: dev });
+      return ok(row[0]);
     }
     // sessions/:id/invoice — GENERATE the tax invoice (assign a permanent number, lock the
     // bill). Server-authoritative. A RE-issue (after a void) carries a reason and is REFUSED
@@ -3400,11 +3404,20 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "members" && c === "approve") {
       // rid-scoped like every by-id write (service-role bypasses RLS → this is the boundary).
       const row = must(await sb.from("session_members").update({ approved: true }).eq("id", b).eq("restaurant_id", rid).select());
-      return ok(row[0] || null);
+      // A TAP THAT MOVED NOTHING MUST NOT REPORT SUCCESS (twin-parity pass, 2026-08-07). The waiter's
+      // identical endpoint was given this on 2026-08-06 and the manager's was left behind — exactly the
+      // drift `npm run verify:twins` now exists to catch. The guest left the party (or the table closed)
+      // between the paint and the tap; 200 here told the manager they had let someone in.
+      if (!row[0]) return err("That guest is no longer on this table — refresh and try again.", 404);
+      return ok(row[0]);
     }
     if (a === "members" && c === "remove") {
       const row = must(await sb.from("session_members").update({ removed: true }).eq("id", b).eq("restaurant_id", rid).select());
-      return ok(row[0] || null);
+      if (!row[0]) return err("That guest is no longer on this table — refresh and try again.", 404);
+      // ...and it is LOGGED, like the waiter's twin: kicking someone off a table is a thing a person
+      // did to another person, and "who removed this guest?" had no answer on this side. (2026-08-07)
+      await log("editor", "member_remove", { restaurant_id: rid, detail: "kicked", device_id: dev });
+      return ok(row[0]);
     }
     if (a === "members" && c === "make-head") {
       const found = must(await sb.from("session_members").select("id,session_id,role,removed").eq("id", b).eq("restaurant_id", rid).limit(1));
@@ -3601,7 +3614,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // Only resolve a STILL-PENDING request (B22): a double-tap or a re-poll re-approve then updates
       // 0 rows (reqRow undefined) and returns cleanly, instead of re-running the open-session insert.
       const reqRow = must(await sb.from("requests").update({ status }).eq("id", b).eq("restaurant_id", rid).eq("status", "pending").select())[0];
-      if (status === "approved" && reqRow && reqRow.type === "open") {
+      // ALREADY ANSWERED — and the two cases are NOT the same (twin-parity pass, 2026-08-07).
+      // The update is scoped `.eq("status","pending")`, so a request somebody already answered matches
+      // no row. What happens next depends on WHO answered and HOW:
+      //   · same answer  → this is a double-tap or a re-poll of your own action. The outcome you wanted
+      //     already holds, so say OK. (That idempotence is deliberate — B22 — and it is what stops a
+      //     re-approve running the open-session insert twice.)
+      //   · different answer → somebody ELSE decided the other way. Reporting success would hide that:
+      //     the waiter taps Approve on a request a colleague just DENIED, is told it worked, and on the
+      //     tablet that used to go on to OPEN A TABLE nobody asked for.
+      // So: idempotent for your own repeat, refused out loud when the ground actually moved.
+      if (!reqRow) {
+        const now = must(await sb.from("requests").select("status").eq("id", b).eq("restaurant_id", rid).maybeSingle()) as { status?: string } | null;
+        if (!now) return err("That request is no longer there — refresh.", 404);
+        if (now.status !== status) return err(`Someone already ${now.status === "approved" ? "approved" : "denied"} that request — refresh to see where it stands.`, 409);
+        return ok(null);   // same answer, already recorded — nothing more to do
+      }
+      if (status === "approved" && reqRow.type === "open") {
         const existing = must(await sb.from("sessions").select("id").eq("table_number", reqRow.table_number).eq("restaurant_id", rid).neq("status", "closed").limit(1));
         if (!existing.length) {
           // A concurrent open (two waiters, or a waiter tap-open racing the guest's own open) can both
