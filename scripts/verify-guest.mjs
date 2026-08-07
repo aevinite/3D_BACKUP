@@ -90,8 +90,12 @@ check("394-395", "no internal dev text on a guest 3D screen", () =>
   !has(F.pmv, "config.json") && !has(F.pmv, "Supabase") && !rx(F.viewer, /\{error\}<\/p>/));
 check(115, "the is-4d card styling follows the 3D switch", () =>
   has(F.food, 'item.is4d && features.model3d ? "is-4d"'));
+// The "off" branch became stopAll() on 2026-08-04 — setQueue([],[],[],[]) only emptied the WAITING
+// LINE, so a GLB already in flight still finished downloading. This guard kept asserting the OLD
+// call and so read FAIL against the better code; it asserts the switch-then-queue order, not the
+// one function that implements it.
 check(111, "the menu waits for the REAL 3D switch before queueing any GLB", () =>
-  has(F.menuView, "getFeatures(restaurantId)") && rx(F.menuView, /model3d === false\) \{ modelLoader\.setQueue\(\[\], \[\], \[\], \[\]\)/));
+  has(F.menuView, "getFeatures(restaurantId)") && rx(F.menuView, /model3d === false\) \{ modelLoader\.stopAll\(\)/));
 check(163, "the item_ratings read carries a .limit()", () =>
   rx(F.menuLib, /from\("item_ratings"\)[\s\S]{0,220}?\.limit\(/));
 check(497, "offline.html and sw.js share the #retry/#home contract", () =>
