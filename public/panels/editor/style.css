@@ -2182,6 +2182,60 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
      (the phone dish strip shows its bar for the same reason). */
   .ftile-grid::-webkit-scrollbar { height: 5px; }
   .ftile-grid::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--gold) 42%, transparent); border-radius: 999px; }
+  /* …and SAY IT IN WORDS (owner, 2026-08-07) — see the .ftile-more block further down. The reveal
+     rule lives THERE, after the base `display:none`, because a media query does not raise
+     specificity: put it here and the base rule (declared later in the file) wins and the chip is
+     never seen. Measured exactly that way once — hidden=false, text updating, box 0x0. */
+}
+
+/* ── A PHONE'S TILE BUTTONS ARE FOR FINGERS (owner, 2026-08-07: "we need two in the phone, but we
+   don't need two in here on the manager panel") ───────────────────────────────────────────────────
+   Measured on an A35 at the default 12 per row: the tile is 72px and its action row came out ~20px
+   tall with the ⏻ only 17px wide — under half the 44px a finger reliably lands on. A mis-tap hits the
+   tile instead and opens the popup, costing a tap and a close every time.
+   The tile stays SQUARE and the column count is untouched (both are his instructions). The height
+   comes from slack that was already inside the square: ~6px unused, plus a little off the row's own
+   top margin. That buys ~30px — not 44, but half again what it was, and it is all the square has to
+   give without changing its shape. PHONE ONLY: the desktop panel is a mouse and he said explicitly
+   he does not want it changed there. */
+@media (max-width: 760px) {
+  .ftile .ft-act { margin-top: 3px; min-height: 30px; }
+  .ftile .ft-act > button { min-height: 30px; }
+  /* The ⏻ and 🧾 squares: the 30cqw cap is what pinned them to 17px on a 58px container. A finger
+     needs width as much as height, and at most three controls ever share this row. */
+  .ftile .ft-ico { width: min(34px, 46cqw); }
+  /* The number gives up a couple of pixels so the row can have them — it is by far the largest thing
+     on the tile and loses nothing readable at this size. */
+  .ftile .ft-num { line-height: 1; }
+}
+
+/* ── "→ N more" — how much floor is off to the right ────────────────────────────────────────────
+   The wrapper exists only to give the chip something to sit against: the GRID is the scroller, so a
+   chip inside it would scroll away with the tables it is counting. */
+.ftile-wrap { position: relative; }
+/* Hidden by default and on any screen wide enough not to scroll — the <=1040px block above is what
+   reveals it, and syncFloorMore() then hides it again the moment you reach the end. `[hidden]` needs
+   saying explicitly because the display rule above would otherwise win. */
+.ftile-more { display: none; position: absolute; right: 2px; bottom: 0; z-index: 4;
+  align-items: center; gap: 4px; padding: 5px 9px; border-radius: 999px; cursor: pointer;
+  font: 700 10.5px/1 inherit; letter-spacing: .02em;
+  color: var(--text); background: color-mix(in srgb, var(--gold) 20%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--gold) 55%, var(--line));
+  box-shadow: 0 2px 10px rgba(0,0,0,.28); }
+.ftile-more[hidden] { display: none !important; }
+.ftile-more b { font-size: 12px; font-weight: 800; }
+.ftile-more:active { transform: scale(.96); }
+html[data-theme="light"] .ftile-more { box-shadow: 0 2px 10px rgba(60,45,20,.16); }
+/* THE REVEAL — only where the floor actually scrolls sideways. AFTER the base rule above on purpose
+   (see the note in the <=1040px block): a media query adds no specificity, so this has to come later
+   in the file to win. syncFloorMore() then does the rest with `hidden`. */
+@media (max-width: 1040px) {
+  .ftile-more { display: inline-flex; }
+  .ftile-more[hidden] { display: none !important; }
+  /* Its OWN strip of space under the grid, so it can never sit on top of a tile. The first cut had it
+     at `bottom: 12px` and it covered table 28 — a chip that tells you about tables you cannot see,
+     by hiding a table you could. */
+  .ftile-wrap { padding-bottom: 32px; }
 }
 
 /* ---- tiles: rounder, lift on hover, a clear ring when selected ---- */
@@ -2937,9 +2991,22 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 
 /* ---- shift-table picker (mirrors the tablet's free-table grid) ---- */
 .shift-modal { width: min(94vw, 420px); }
-.shiftgrid { display: flex; flex-wrap: wrap; gap: 10px; padding: 4px 14px 18px; }
-.shiftgrid .shiftpick { flex: 1 1 calc(33% - 10px); min-width: 96px; padding: 14px 10px; font-size: 15px; font-weight: 700; }
-.shiftgrid .shiftpick:hover { filter: brightness(1.08); }
+/* THE WHOLE FLOOR IS LISTED, not only the free tables (owner, 2026-08-07 — "the thing which are
+   filled will be greyed out"). A grid rather than a wrapping flex row, so the tables stay in even
+   columns and a manager can find T17 by counting instead of by reading every label. */
+.shiftgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px; padding: 4px 14px 18px; max-height: min(58vh, 520px); overflow-y: auto; }
+.shiftgrid .shiftpick { min-width: 0; padding: 12px 8px; font-size: 15px; font-weight: 700;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  min-height: 56px; }
+.shiftgrid .shiftpick .shiftpick-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.shiftgrid .shiftpick:hover:not(:disabled) { filter: brightness(1.08); }
+/* DIMMED, NOT HIDDEN. Faint enough to read as "not this one" at a glance, still legible enough to
+   answer the question it exists to answer — which table is it, and why can't it take the party. */
+.shiftgrid .shiftpick-off { opacity: .42; cursor: default; filter: none;
+  border-style: dashed; background: transparent; }
+.shiftgrid .shiftpick-off:hover { filter: none; }
+.shiftgrid .shiftpick .shiftpick-why { font-size: 10px; font-weight: 700; opacity: .85; white-space: nowrap; }
 
 /* ── Platform tab (Zomato / Swiggy / takeaway board) ─────────────────────── */
 .plat-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
