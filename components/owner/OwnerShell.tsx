@@ -12,6 +12,7 @@ import { useBackClose } from "@/lib/backStack";
 import ConnectionBadge from "@/components/ConnectionBadge";
 import { fetchOwnerOverview } from "@/lib/ownerOverviewCache";
 import { asSuffix } from "@/lib/ownerPin";
+import { portfolioColor } from "@/lib/restaurantColor";
 
 type NavItem = { href: string; label: string; icon: string; exact?: boolean; soon?: boolean; ent?: string };
 type NavGroup = { label: string; quiet?: boolean; items: NavItem[] };
@@ -349,7 +350,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
               </button>
               {myRests.map((r) => (
                 <button key={r.id} className="rrow" onClick={() => openRestaurant(r.id)} title={`Open ${r.name}`}>
-                  <span className="sw" style={{ background: r.accentColor }} aria-hidden="true" />
+                  {/* the SAME colour the dashboard's charts, table and switcher use — keyed by id, not the
+                      restaurant's brand accent, which made one restaurant orange here and blue three inches
+                      to the right (T5 sweep, 2026-08-07). lib/restaurantColor carries the reasoning. */}
+                  <span className="sw" style={{ background: portfolioColor(r.id) }} aria-hidden="true" />
                   <span className="nm">{r.name}</span>
                   <span className="rv">{r.reportsOff
                     ? <span title="Reports are switched off for this restaurant, so its takings aren't shown here." style={{ opacity: .6 }}>hidden</span>
@@ -459,7 +463,10 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                     {myRests.map((r) => (
                       <button key={r.id} type="button" className="rrow" role="menuitem"
                         onClick={() => { setRestOpen(false); openRestaurant(r.id); }} title={`Open ${r.name}`}>
-                        <span className="sw" style={{ background: r.accentColor }} aria-hidden="true" />
+                        {/* the SAME colour the dashboard's charts, table and switcher use — keyed by id, not the
+                      restaurant's brand accent, which made one restaurant orange here and blue three inches
+                      to the right (T5 sweep, 2026-08-07). lib/restaurantColor carries the reasoning. */}
+                  <span className="sw" style={{ background: portfolioColor(r.id) }} aria-hidden="true" />
                         <span className="nm">{r.name}</span>
                         <span className="rv">{r.reportsOff
                     ? <span title="Reports are switched off for this restaurant, so its takings aren't shown here." style={{ opacity: .6 }}>hidden</span>
