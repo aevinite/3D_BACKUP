@@ -1,7 +1,10 @@
 // Generates the Little French House CAFE menu into public/content/menu.json,
 // modelled on the real littlefrenchhouse.in menu (real dish names + real photos).
 //
-// - Food images are the restaurant's own photos (harvested from the live site).
+// - Food images are the restaurant's own photos, SERVED FROM OUR OWN public/dishes/french-house/
+//   (WebP). They used to be hotlinked from littlefrenchhouse.in, an outside WordPress site nobody
+//   here controls: a menu full of broken photos the day it goes down, and cross-origin, so the
+//   offline layer could never cache one of them. Re-hosted 2026-08-08.
 // - Coffee / beverage images are verified Unsplash photos (the site has none).
 // - It's a vegetarian cafe, so ~90% veg with a few non-veg additions.
 // - The "Avocado & Cream Cheese" croissant is the ONLY 4D dish; it reuses the
@@ -20,7 +23,6 @@ const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const GLB_SMALL = "/models/croissant_small.glb";
 const GLB_OPTIMIZED = "/models/croissant-optimized.glb";
 
-const LFH = (f) => `https://littlefrenchhouse.in/restaurant/wp-content/uploads/2021/01/${f}`;
 const UNS = (id) => `https://images.unsplash.com/${id}?w=600&h=600&fit=crop`;
 
 // ---------------------------------------------------------------------------
@@ -126,63 +128,63 @@ const ITEMS = {
     ["Spicy Watermelon Cooler", "4.99", 1, ["vegan", "spicy", "healthy"], UNS("photo-1623065422902-30a2d299bbe4")],
   ],
   croissants: [
-    ["Avocado & Cream Cheese", "6.49", 1, ["vegetarian", "healthy"], LFH("Avocado-and-Cream-Cheese.png")],
-    ["Caprese Style", "5.99", 1, ["vegetarian"], LFH("Caperese-Style.png")],
-    ["Minty Cucumber Cream Cheese", "5.49", 1, ["vegetarian"], LFH("Minty-Cucumber-Cream-Cheese.png")],
-    ["Ranch Pickled Veggies", "5.49", 1, ["vegetarian"], LFH("Ranch-Dressed-Pickled-Veggies.png")],
+    ["Avocado & Cream Cheese", "6.49", 1, ["vegetarian", "healthy"], "/dishes/french-house/avocado-and-cream-cheese.webp"],
+    ["Caprese Style", "5.99", 1, ["vegetarian"], "/dishes/french-house/caprese-style.webp"],
+    ["Minty Cucumber Cream Cheese", "5.49", 1, ["vegetarian"], "/dishes/french-house/minty-cucumber-cream-cheese.webp"],
+    ["Ranch Pickled Veggies", "5.49", 1, ["vegetarian"], "/dishes/french-house/ranch-pickled-veggies.webp"],
   ],
   starters: [
-    ["Cream of Lettuce Soup", "4.99", 1, ["vegetarian", "healthy"], LFH("Cream-of-Lettuse-1.png")],
-    ["Crockpot French Onion Soup", "5.49", 1, ["vegetarian"], LFH("Crockpot-French-Onion-Soup.png")],
-    ["Roasted Tomato & Basil Soup", "4.99", 1, ["vegetarian", "healthy", "gluten-free"], LFH("Roasted-Tomato-and-Basil-Soup.png")],
-    ["Arancini Balls", "6.49", 1, ["vegetarian"], LFH("Aarancini-balls.png")],
-    ["Hash Brown Potato Cakes", "5.99", 1, ["vegetarian"], LFH("Hashbrown-Potato-Cakes.png")],
-    ["Double Loaded Spiced Fries", "6.49", 1, ["vegetarian", "spicy"], LFH("Double-Loaded-Spiced-Fries.png")],
-    ["Pesto Mushroom Canapés", "6.99", 1, ["vegetarian"], LFH("Pesto-Filled-Crisp-Mushroom-Canapes.png")],
-    ["Farmer's Tear & Share Bread", "6.99", 1, ["vegetarian"], LFH("Farmers-Tear-and-Share-pull-apart-bread.png")],
+    ["Cream of Lettuce Soup", "4.99", 1, ["vegetarian", "healthy"], "/dishes/french-house/cream-of-lettuce-soup.webp"],
+    ["Crockpot French Onion Soup", "5.49", 1, ["vegetarian"], "/dishes/french-house/crockpot-french-onion-soup.webp"],
+    ["Roasted Tomato & Basil Soup", "4.99", 1, ["vegetarian", "healthy", "gluten-free"], "/dishes/french-house/roasted-tomato-and-basil-soup.webp"],
+    ["Arancini Balls", "6.49", 1, ["vegetarian"], "/dishes/french-house/arancini-balls.webp"],
+    ["Hash Brown Potato Cakes", "5.99", 1, ["vegetarian"], "/dishes/french-house/hash-brown-potato-cakes.webp"],
+    ["Double Loaded Spiced Fries", "6.49", 1, ["vegetarian", "spicy"], "/dishes/french-house/double-loaded-spiced-fries.webp"],
+    ["Pesto Mushroom Canapés", "6.99", 1, ["vegetarian"], "/dishes/french-house/pesto-mushroom-canap-s.webp"],
+    ["Farmer's Tear & Share Bread", "6.99", 1, ["vegetarian"], "/dishes/french-house/farmer-s-tear-and-share-bread.webp"],
   ],
   salads: [
-    ["Buddha Bowl", "9.99", 1, ["vegan", "healthy", "high-protein"], LFH("Buddha-Bowl.png")],
-    ["Protein Power Bowl", "10.49", 1, ["vegetarian", "high-protein", "healthy"], LFH("Protein-Powder-Bowl.png")],
-    ["Roasted Veggie Salad", "9.49", 1, ["vegan", "healthy"], LFH("Roasted-Veggie-Salad.png")],
-    ["Crunchy Fruit Salad", "8.49", 1, ["vegan", "healthy", "gluten-free"], LFH("Crunchy-Fruit-Saladwith-Poppy-Seeds.png")],
-    ["Sassy Signature Salad", "9.99", 1, ["vegetarian", "healthy"], LFH("Sassy-Signature-Salad.png")],
-    ["Diet Cracker Nachos", "8.99", 1, ["vegetarian"], LFH("Diet-Crackers-Twist-to-old-school-nachos-copy.png")],
+    ["Buddha Bowl", "9.99", 1, ["vegan", "healthy", "high-protein"], "/dishes/french-house/buddha-bowl.webp"],
+    ["Protein Power Bowl", "10.49", 1, ["vegetarian", "high-protein", "healthy"], "/dishes/french-house/protein-power-bowl.webp"],
+    ["Roasted Veggie Salad", "9.49", 1, ["vegan", "healthy"], "/dishes/french-house/roasted-veggie-salad.webp"],
+    ["Crunchy Fruit Salad", "8.49", 1, ["vegan", "healthy", "gluten-free"], "/dishes/french-house/crunchy-fruit-salad.webp"],
+    ["Sassy Signature Salad", "9.99", 1, ["vegetarian", "healthy"], "/dishes/french-house/sassy-signature-salad.webp"],
+    ["Diet Cracker Nachos", "8.99", 1, ["vegetarian"], "/dishes/french-house/diet-cracker-nachos.webp"],
     ["Grilled Chicken Salad", "11.49", 0, ["high-protein", "healthy"], UNS("photo-1532550907401-a500c9a57435")],
   ],
   sandwiches: [
-    ["Spinach Feta Grilled Cheese", "8.49", 1, ["vegetarian"], LFH("Spinach-Feta-Grilled-Cheese-Sandwich.png")],
-    ["Cottage Cheese Piri Piri", "8.99", 1, ["vegetarian", "spicy"], LFH("Cottage-cheese-piri-piri-twist.png")],
-    ["Pesto Ricotta Crostino", "7.49", 1, ["vegetarian"], LFH("Pesto-Ricotta.png")],
-    ["Creamy Corn & Spinach Crostino", "7.49", 1, ["vegetarian"], LFH("Creamy-Corn-Spinach.png")],
-    ["Roasted Tomato Mozzarella", "7.99", 1, ["vegetarian"], LFH("Roasted-Tomato-Basil-Mozarella.png")],
+    ["Spinach Feta Grilled Cheese", "8.49", 1, ["vegetarian"], "/dishes/french-house/spinach-feta-grilled-cheese.webp"],
+    ["Cottage Cheese Piri Piri", "8.99", 1, ["vegetarian", "spicy"], "/dishes/french-house/cottage-cheese-piri-piri.webp"],
+    ["Pesto Ricotta Crostino", "7.49", 1, ["vegetarian"], "/dishes/french-house/pesto-ricotta-crostino.webp"],
+    ["Creamy Corn & Spinach Crostino", "7.49", 1, ["vegetarian"], "/dishes/french-house/creamy-corn-and-spinach-crostino.webp"],
+    ["Roasted Tomato Mozzarella", "7.99", 1, ["vegetarian"], "/dishes/french-house/roasted-tomato-mozzarella.webp"],
     ["Grilled Chicken Sandwich", "9.99", 0, ["high-protein"], UNS("photo-1626645738196-c2a7c87a8f58")],
   ],
   pizza: [
-    ["Chicago Deep Dish Margherita", "13.99", 1, ["vegetarian"], LFH("Deep-Dish-1.png")],
-    ["Tri Chilli Pizza", "13.49", 1, ["vegetarian", "spicy"], LFH("Tri-Chilli-1.png")],
-    ["Quattro Formaggi Pizza", "14.49", 1, ["vegetarian"], LFH("Quattro-Formaggi-Pizza-1.png")],
-    ["Mediterranean Veg Pizza", "13.49", 1, ["vegetarian", "healthy"], LFH("Mediterranean-Veg-Pizza-1.png")],
-    ["Truffle & Wild Mushroom Pizza", "15.49", 1, ["vegetarian"], LFH("Truffle-and-Wild-Mushroom-Pizza-1.png")],
-    ["Flat Bread Pesto Pizza", "12.99", 1, ["vegetarian"], LFH("Flat-Bread-Pesto-Pizza-1.png")],
+    ["Chicago Deep Dish Margherita", "13.99", 1, ["vegetarian"], "/dishes/french-house/chicago-deep-dish-margherita.webp"],
+    ["Tri Chilli Pizza", "13.49", 1, ["vegetarian", "spicy"], "/dishes/french-house/tri-chilli-pizza.webp"],
+    ["Quattro Formaggi Pizza", "14.49", 1, ["vegetarian"], "/dishes/french-house/quattro-formaggi-pizza.webp"],
+    ["Mediterranean Veg Pizza", "13.49", 1, ["vegetarian", "healthy"], "/dishes/french-house/mediterranean-veg-pizza.webp"],
+    ["Truffle & Wild Mushroom Pizza", "15.49", 1, ["vegetarian"], "/dishes/french-house/truffle-and-wild-mushroom-pizza.webp"],
+    ["Flat Bread Pesto Pizza", "12.99", 1, ["vegetarian"], "/dishes/french-house/flat-bread-pesto-pizza.webp"],
   ],
   pasta: [
-    ["Aglio e Olio in Coconut Oil", "12.49", 1, ["vegetarian"], LFH("Aglio-E-Olio-In-Coconut-Oil.png")],
-    ["Ravioli in Pesto Sauce", "13.49", 1, ["vegetarian"], LFH("Ravioli-In-Pesto-Sauce.png")],
-    ["Wild Mushroom Tagliatelle", "14.49", 1, ["vegetarian"], LFH("Wild-Mushroom-Tagliatelle-With-Truffle-Oil.png")],
-    ["Grandma's Mac N' Cheese", "12.99", 1, ["vegetarian"], LFH("Grandmas-Cosy-Macaroni-N-Cheese.png")],
-    ["Gnocchi in Red Pesto", "13.49", 1, ["vegetarian"], LFH("Gnocchi-In-Homemade-Red-Pesto.png")],
-    ["Roasted Tomato Basil Risotto", "13.99", 1, ["vegetarian", "gluten-free"], LFH("Roastd-Tomato-Basil-Risotto.png")],
+    ["Aglio e Olio in Coconut Oil", "12.49", 1, ["vegetarian"], "/dishes/french-house/aglio-e-olio-in-coconut-oil.webp"],
+    ["Ravioli in Pesto Sauce", "13.49", 1, ["vegetarian"], "/dishes/french-house/ravioli-in-pesto-sauce.webp"],
+    ["Wild Mushroom Tagliatelle", "14.49", 1, ["vegetarian"], "/dishes/french-house/wild-mushroom-tagliatelle.webp"],
+    ["Grandma's Mac N' Cheese", "12.99", 1, ["vegetarian"], "/dishes/french-house/grandma-s-mac-n-cheese.webp"],
+    ["Gnocchi in Red Pesto", "13.49", 1, ["vegetarian"], "/dishes/french-house/gnocchi-in-red-pesto.webp"],
+    ["Roasted Tomato Basil Risotto", "13.99", 1, ["vegetarian", "gluten-free"], "/dishes/french-house/roasted-tomato-basil-risotto.webp"],
     ["Chicken Alfredo Pasta", "14.99", 0, ["high-protein"], UNS("photo-1604908176997-125f25cc6f3d")],
     ["Smoked Salmon Fettuccine", "16.49", 0, ["high-protein", "healthy"], UNS("photo-1467003909585-2f8a72700288")],
   ],
   desserts: [
-    ["Nutella Banana Crepes", "6.49", 1, ["vegetarian"], LFH("Nutella-Banana-Creps-Crepes.png")],
-    ["Salted Caramel Crepes", "6.99", 1, ["vegetarian"], LFH("Salted-Caramel-Crepes-with-Mascaprone-Cream-Cheese.png")],
-    ["Strawberry & Orange Crepes", "6.49", 1, ["vegetarian"], LFH("Strawberry-Orange-Crepes-Crepes.png")],
-    ["Lemon Blueberry Waffles", "6.99", 1, ["vegetarian"], LFH("Lemon-Blueberry-Waffles-Dessert.png")],
-    ["Nutella Pancake", "5.99", 1, ["vegetarian"], LFH("Nutella-Pancake-2.png")],
-    ["Fluffy Buttermilk Pancakes", "5.99", 1, ["vegetarian"], LFH("Fluffy-Buttermilk-Pancakes-Dessert.png")],
+    ["Nutella Banana Crepes", "6.49", 1, ["vegetarian"], "/dishes/french-house/nutella-banana-crepes.webp"],
+    ["Salted Caramel Crepes", "6.99", 1, ["vegetarian"], "/dishes/french-house/salted-caramel-crepes.webp"],
+    ["Strawberry & Orange Crepes", "6.49", 1, ["vegetarian"], "/dishes/french-house/strawberry-and-orange-crepes.webp"],
+    ["Lemon Blueberry Waffles", "6.99", 1, ["vegetarian"], "/dishes/french-house/lemon-blueberry-waffles.webp"],
+    ["Nutella Pancake", "5.99", 1, ["vegetarian"], "/dishes/french-house/nutella-pancake.webp"],
+    ["Fluffy Buttermilk Pancakes", "5.99", 1, ["vegetarian"], "/dishes/french-house/fluffy-buttermilk-pancakes.webp"],
   ],
 };
 
