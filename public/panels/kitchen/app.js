@@ -16,6 +16,11 @@
 // "improvement": see docs/REJECTED-IDEAS.md → R7. (maint.js still shows the ONE-TIME "👋 Finish
 // setup" capture, which is a LOGIN thing — name/phone for PIN reset — not a profile.)
 window.LFH_SUPPRESS_SETTINGS_BTN = true;
+// ...and NOTHING AT ALL from maint.js's profile side, including the one-time "👋 Finish setup"
+// card (settled 2026-08-08). The flag above only hides the everyday button; this one means the
+// kitchen has no profile surface whatsoever, which is what he actually said. A cook's name and
+// phone are set by the owner on the staff screen if they are wanted; the card never appears here.
+window.LFH_NO_PROFILE_AT_ALL = true;
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
