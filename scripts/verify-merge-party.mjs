@@ -126,8 +126,18 @@ check("mig 264: moving a single dish to a joined table joins that party's bill",
   /lfh_staff_move_order_item[\s\S]{0,1800}lfh_merge_parent_table\(p_rid, p_to\)/.test(mig264));
 check("manager: the Change-table row says 'unmerge first' on a merged party (both menus)",
   (editor.match(/why: mergeGroupLabel\(t\) \? "unmerge first"/g) || []).length >= 2);
+// This used to look for `&& !mergeParentOf(i)` twice — the shape the two pickers had while they
+// HID an unavailable table. #907 (2026-08-07) stopped hiding them, because the owner asked to see
+// the whole floor with the unavailable ones greyed out, so each picker now names the reason in one
+// place (`whyBlocked` / `shiftBlocked`) and builds its free list from exactly that. The rule is
+// unchanged and still true — a merged child is refused — but the old regex could not see it, so
+// this went red on a picker that is behaving correctly. Assert the RULE, in both doors: a merged
+// child is classified blocked ("joined"), and the free list is precisely "not blocked", which is
+// what stops the list and the label from ever disagreeing.
 check("manager: no shift picker offers a merged child as a free table",
-  (editor.match(/&& !mergeParentOf\(i\)/g) || []).length >= 2);
+  (editor.match(/if \(mergeParentOf\(i\)\) return "joined";/g) || []).length >= 2
+  && /if \(!whyBlocked\(i\)\) free\.push\(i\)/.test(editor)
+  && /if \(!shiftBlocked\(i\)\) out\.push\(i\)/.test(editor));
 // The LIST moved to public/panels/outbox.js (2026-08-06) so the waiter tablet and the "Needs you"
 // sheet speak the same sentences as the manager's toast instead of showing raw codes — this used
 // to assert the object literal lived in editor/app.js, which was checking WHERE it is rather than
