@@ -459,6 +459,16 @@ window.LFH_PROFILE_SAVE = window.LFH_PROFILE_SAVE || async function profileSave(
       // profile to show, so leave the top bar alone. (The endpoint answers 200 for this
       // now instead of 401, which used to log a red console error on every panel load.)
       if (!profile || profile.staff === false || profile.error) { profile = null; return; }
+      // REJECTED (owner, 2026-07-29 · 2026-08-05 · 2026-08-07 · settled 2026-08-08):
+      // a panel may declare it has NO profile of any kind, and then this file adds NOTHING to it —
+      // not the everyday "👤 Profile" button and not the one-time first-login capture card. That is
+      // stronger than LFH_SUPPRESS_SETTINGS_BTN, which the waiter tablet uses to hide only the
+      // everyday button because it DOES have a profile behind its own ☰ menu.
+      // The KITCHEN sets this. His words: "Kitchen panel will not have profile or stuff like that."
+      // Safe to skip the capture: `needsProfile` is a UI flag only — panel-login returns it but never
+      // blocks on it, and nothing outside this card reads `profile_confirmed`. A cook simply never
+      // sees it. See docs/REJECTED-IDEAS.md → R7.
+      if (window.LFH_NO_PROFILE_AT_ALL) return;
       buildSettingsButton();
       if (profile.needsProfile) openDrawer(); // force first-login capture
     }
