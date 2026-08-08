@@ -30,6 +30,8 @@
 //   3. warming never re-fetches a read — /api/ is excluded   (egress: a menu payload is not small)
 //   4. warming refuses anything that isn't this origin       (it must not pull in a foreign file)
 //   5. a second visit stores nothing again                   (the cost is one first visit, not every one)
+//   6. a READ the page already holds is stored WITHOUT re-fetching it — the same first-visit race,
+//      closed without spending a single extra request (LFH_WARM_DATA)
 import { chromium } from "playwright";
 import http from "node:http";
 import { readFileSync } from "node:fs";
@@ -143,6 +145,58 @@ const after = hits.filter((u) => u.startsWith("/_next/static/")).length;
 // them a second time on top. Anything already stored is skipped, so the extra should be small.
 if (after - before <= 2) ok(`nothing was warmed twice (${after - before} extra static request(s))`);
 else bad("the warm ran again on an already-warmed device", `${after - before} extra static requests`);
+
+// ── 6. the DATA half of the same race, at zero egress ────────────────────────────────────────
+// The code half is fetched (checks 1-5). A read must NOT be: pulling the menu a second time on
+// every diner's first visit is a real per-device cost. The page hands over what it already has.
+console.log("\n6) A read the page already holds is saved without re-fetching it");
+{
+  // A path this page NEVER requests — so if it lands in the cache, only the warm can have put it
+  // there. My first version used the page's OWN read and passed even with the handler disabled,
+  // because the normal network-first path had already cached it: a check that cannot fail.
+  const before = hits.filter((u) => u.startsWith("/api/r/")).length;
+  await page.evaluate(() => new Promise((done) => {
+    const c = navigator.serviceWorker.controller;
+    c.postMessage({ type: "LFH_WARM_DATA", url: location.origin + "/api/r/never-fetched-by-this-page/menu-data", body: JSON.stringify({ items: [{ id: "x" }], categories: [] }) });
+    // …and two it must REFUSE: another origin, and a route that is never cached.
+    c.postMessage({ type: "LFH_WARM_DATA", url: "https://example.invalid/api/r/x/menu-data", body: "{}" });
+    c.postMessage({ type: "LFH_WARM_DATA", url: location.origin + "/api/health", body: "{}" });
+    setTimeout(done, 1200);
+  }));
+  const stored = await page.evaluate(async () => {
+    const k = (await caches.keys()).find((x) => x.startsWith("lfh-data"));
+    if (!k) return [];
+    return (await (await caches.open(k)).keys()).map((r) => new URL(r.url).pathname);
+  });
+  const after = hits.filter((u) => u.startsWith("/api/r/")).length;
+  stored.includes("/api/r/never-fetched-by-this-page/menu-data")
+    ? ok("the read is in the offline cache, from the page's own copy")
+    : bad("the handed-over read was not stored", JSON.stringify(stored));
+  after === before
+    ? ok("…and NOTHING was fetched to do it (egress unchanged)")
+    : bad("warming a read cost a request", `${after - before} extra`);
+  !stored.some((p) => p.includes("/api/health"))
+    ? ok("a never-cached route is refused")
+    : bad("a never-cached route was stored");
+  // Nothing from another origin can appear: those are keyed by full URL, so check none are foreign.
+  const foreign = await page.evaluate(async () => {
+    const k = (await caches.keys()).find((x) => x.startsWith("lfh-data"));
+    if (!k) return [];
+    return (await (await caches.open(k)).keys()).map((r) => r.url).filter((u) => !u.startsWith(location.origin));
+  });
+  foreign.length === 0 ? ok("a foreign origin is refused") : bad("stored another origin's data", foreign.join(","));
+  // …and it must never clobber something the worker fetched itself.
+  await page.evaluate(() => new Promise((done) => {
+    navigator.serviceWorker.controller.postMessage({ type: "LFH_WARM_DATA", url: location.origin + "/api/r/never-fetched-by-this-page/menu-data", body: JSON.stringify({ items: [], categories: [], OVERWRITTEN: true }) });
+    setTimeout(done, 1000);
+  }));
+  const body = await page.evaluate(async () => {
+    const k = (await caches.keys()).find((x) => x.startsWith("lfh-data"));
+    const r = await (await caches.open(k)).match(location.origin + "/api/r/never-fetched-by-this-page/menu-data", { ignoreVary: true });
+    return r ? await r.text() : "";
+  });
+  !body.includes("OVERWRITTEN") ? ok("an already-saved read is never overwritten by a later offer") : bad("a saved read was overwritten");
+}
 
 await browser.close();
 server.close();
