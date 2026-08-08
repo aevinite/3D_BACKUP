@@ -10,9 +10,12 @@ const nextConfig: NextConfig = {
     root: path.join(__dirname),
   },
   images: {
+    // littlefrenchhouse.in was here for restaurant #1's dish photos and came OUT on 2026-08-08 —
+    // those photos are served from public/dishes/french-house/ now, so nothing loads from that
+    // outside WordPress site any more. (Dish cards render a plain <img>, not next/image, so this
+    // list never optimized them anyway; it only ever granted permission.)
     remotePatterns: [
       { protocol: "https", hostname: "images.unsplash.com" },
-      { protocol: "https", hostname: "littlefrenchhouse.in" },
     ],
   },
 };
