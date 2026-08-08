@@ -3339,7 +3339,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (!must(ownsMerge)) return err("That table isn't for this restaurant.", 404);
       const tableCountMg = Number((must(setRowMg) || {}).table_count) || 0;
       if (tableCountMg && Number(to) > tableCountMg) return err("That table number is out of range.", 400);
-      const { data, error } = await sb.rpc("lfh_staff_merge_tables", { p_session: b, p_to: to, p_rid: rid });
+      // WHO joined them (mig 308). The record has carried merged_by since mig 249, but the actor was
+      // read from a session GUC nothing ever set, so every merge row said NULL — on the one action
+      // that puts two tables' money onto a single bill. Passed as a parameter now, exactly the way
+      // the unmerge half a few hundred lines below already does it.
+      const { data, error } = await sb.rpc("lfh_staff_merge_tables", {
+        p_session: b, p_to: to, p_rid: rid,
+        p_actor: g.user?.username || g.user?.role || "manager",
+        p_actor_id: g.user?.id ?? null,
+      });
       if (error) throw new Error(error.message);
       if (data && (data as { ok?: boolean }).ok === false) return err(mergeErrMsg((data as { reason?: string }).reason), 409);
       // The RPC decides which table survives (the LOWER number always), so log what it actually

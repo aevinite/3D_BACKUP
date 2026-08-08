@@ -1285,7 +1285,19 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const tc2 = Number((mtc2.data as { table_count?: number } | null)?.table_count) || 0;
       if (tc2 > 0 && (Number(to) < 1 || Number(to) > tc2)) return err(`Table ${to} doesn't exist (this place has ${tc2} tables).`, 400);
       // Session ownership is enforced INSIDE the RPC via p_rid (returns no_session otherwise).
-      const { data: mg, error: mgErr } = await sb.rpc("lfh_staff_merge_tables", { p_session: b, p_to: to, p_rid: rid });
+      // WHO joined them (mig 308) — the same names this panel's log() uses, so the merge record and
+      // the Activity row agree about who was standing there. A PIN-approved action names the MANAGER
+      // who approved it, exactly as log() does, because that is the whole point of the PIN pill.
+      // `pinAuth` is assigned inside recordPin(), a closure — so TypeScript's control-flow analysis
+      // still believes it is the `null` it was initialised to and narrows it to `never` here. Read
+      // it through its declared type; log() dodges the same thing by only touching it inside its own
+      // closure. Runtime behaviour is unchanged either way.
+      const pin = pinAuth as { actor: string; actor_id: string | null } | null;
+      const mergeActor = pin?.actor || actor?.name || actor?.username || "waiter";
+      const mergeActorId = pin?.actor_id || actor?.id || null;
+      const { data: mg, error: mgErr } = await sb.rpc("lfh_staff_merge_tables", {
+        p_session: b, p_to: to, p_rid: rid, p_actor: mergeActor, p_actor_id: mergeActorId,
+      });
       if (mgErr) throw new Error(mgErr.message);
       if (mg && (mg as any).ok === false) {
         const reason = (mg as any).reason;
