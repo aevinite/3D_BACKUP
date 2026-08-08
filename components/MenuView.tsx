@@ -7,6 +7,7 @@
 // certain times, like after the page appears), useRef (a value that survives
 // re-draws without causing one).
 import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { warmDataCache } from "@/lib/warmData";
 // Link = Next's fast, no-full-reload navigation between pages.
 import Link from "next/link";
 // AppShell = the shared outer frame/chrome around the menu content.
@@ -304,6 +305,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         if (Array.isArray(bundle.items)) setMenuData(bundle.items);
         if (Array.isArray(bundle.categories)) setDbCategories(bundle.categories);
         setLoaded(true); // fetch resolved — even 0 items now shows an empty state, not endless skeletons
+        // HAND THIS READ TO THE OFFLINE LAYER. On a FIRST visit the service worker does not control
+        // the page yet when the fetch above fires, so it never saw the reply — and an offline reload
+        // showed a perfectly styled menu with no dishes on it (measured, 2026-08-07). We already
+        // have the payload, so give it to the worker rather than making it fetch the menu again:
+        // no extra request, no extra bytes. It refuses anything it has already stored.
+        warmDataCache(`/api/r/${restaurantSlug}/menu-data`, bundle);
       })
       // Only a genuine network/5xx failure reaches here → safe to fall back to a
       // direct read so a blip can't blank the menu. (The 404 case rethrows above

@@ -272,6 +272,38 @@ self.addEventListener("message", (e) => {
         }
       } catch { /* best-effort, exactly like the shell warm above */ }
     })());
+  } else if (type === "LFH_WARM_DATA") {
+    // A READ THE PAGE ALREADY HAS — stored WITHOUT fetching anything (see lib/warmData.ts).
+    //
+    // The offline layer promises that a screen you have opened will open again with no internet,
+    // showing its last known state. For the guest menu that was only true from the SECOND visit
+    // (measured on the deployed site, 2026-08-07): a first visit left no saved read, so an offline
+    // reload rendered a correctly styled, branded page with NO DISHES on it.
+    //
+    // It is the same race the page's CODE used to lose — we only handle a request once we CONTROL
+    // the client, and the menu's data fetch fires before that on a first visit. The code half was
+    // fixed by FETCHING the missing files (above). Doing that for a read would mean pulling the
+    // menu a second time on every diner's first visit, and egress is the one budget this project
+    // will not spend loosely. So nothing is re-fetched: the page hands over the payload it already
+    // holds and we store it under the key the next read will look for.
+    //
+    // Everything is validated rather than trusted, and we NEVER overwrite something already
+    // stored — a copy this worker fetched itself always wins over one the page offered.
+    const wUrl = e.data && e.data.url, wBody = e.data && e.data.body;
+    if (wUrl && typeof wBody === "string") e.waitUntil((async () => {
+      try {
+        const u = new URL(wUrl, self.location.origin);
+        if (u.origin !== self.location.origin) return;                        // never another origin
+        if (!u.pathname.startsWith("/api/") || !isData(u.pathname)) return;   // only a read we cache anyway
+        if (isNever(u.pathname)) return;                                      // never sign-in / health
+        if (wBody.length > MAX_DATA_BYTES) return;                            // same ceiling as any saved read
+        const cache = await caches.open(DATA);
+        if (await cache.match(u.href, { ignoreVary: true })) return;          // already saved — leave it
+        await putStamped(DATA, u.href, new Response(wBody, {
+          status: 200, headers: { "Content-Type": "application/json" },
+        }));
+      } catch { /* best-effort: being unable to pre-save must never affect the page */ }
+    })());
   }
 });
 
