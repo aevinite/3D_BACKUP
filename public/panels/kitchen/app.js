@@ -25,6 +25,28 @@ window.LFH_NO_PROFILE_AT_ALL = true;
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
+// __lfhPerf: cheap, always-on render counters — IDENTICAL to the manager's and the waiter
+// tablet's, which have had them since the 300-table freeze work (owner perf 2026-06-27). The
+// KITCHEN had none, despite carrying the same incremental-patch design (reconcileList) and the
+// same rush-hour freeze history: "the kitchen froze at dinner" could only ever be answered with a
+// theory. Read it from the panel console at any time as `__lfhPerf`.
+//   fullRenders  — whole-board paints (render → renderColumns/renderWall)
+//   patches      — how many tickets those paints actually REPLACED (the rest were reused in place;
+//                  a healthy rush shows paints with very few replacements)
+//   tilesPatched — cumulative replaced tickets, so a rebuild-everything regression shows up as
+//                  patches climbing in step with the ticket count
+//   lastMs       — how long the most recent paint took
+//   longTasks    — main-thread tasks over 50ms, i.e. the freeze symptom itself
+// Costs nothing: no network, no storage, invisible to a cook, and the observer no-ops where the
+// API is unavailable.
+window.__lfhPerf = window.__lfhPerf || { fullRenders: 0, patches: 0, tilesPatched: 0, lastMs: 0, longTasks: 0 };
+try {
+  if (typeof PerformanceObserver === "function") {
+    new PerformanceObserver((list) => { for (const e of list.getEntries()) if (e.duration > 50) window.__lfhPerf.longTasks++; })
+      .observe({ entryTypes: ["longtask"] });
+  }
+} catch {}
+
 const state = { orders: [], items: [], dishes: [], platform: [], platformAccept: false, tableNames: {}, tableTags: {}, knownIds: null, muted: localStorage.getItem("kds_muted") === "1" };
 // Platform (Zomato/Swiggy/Website/Parcel) source badges shown on a platform ticket.
 const PLAT_META = {
@@ -318,7 +340,7 @@ function ticketHtml(o, rows) {
   const tb = TAG_BADGE[ttag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${ttag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl" title="T${esc(o.table_number)}">${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageClass(o.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageClass(o.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
@@ -437,7 +459,7 @@ function reconcileList(container, desired) {
       if (node.__kdsHtml !== d.html) { // content actually changed → swap just this card
         const tmp = document.createElement("div"); tmp.innerHTML = d.html;
         const fresh = tmp.firstElementChild;
-        if (fresh) { fresh.__kdsHtml = d.html; container.replaceChild(fresh, node); node = fresh; }
+        if (fresh) { fresh.__kdsHtml = d.html; container.replaceChild(fresh, node); node = fresh; window.__lfhPerf.tilesPatched++; window.__lfhPerf.patches++; }
       }
     } else { // a brand-new card
       const tmp = document.createElement("div"); tmp.innerHTML = d.html;
@@ -499,7 +521,15 @@ function renderWall() {
 }
 // Paint the ACTIVE view. Every render() caller (load, loadTables, applyView) repaints
 // whichever layout the cook is on — via the incremental reconciler, not a full rebuild.
-function render() { return view === "wall" ? renderWall() : renderColumns(); }
+// Timed + counted for __lfhPerf (see the note at the top of this file): every board paint goes
+// through here, so this is the one place that needs to measure.
+function render() {
+  const _t0 = performance.now();
+  const r = view === "wall" ? renderWall() : renderColumns();
+  window.__lfhPerf.fullRenders++;
+  window.__lfhPerf.lastMs = performance.now() - _t0;
+  return r;
+}
 // Switch layout: show/hide the two <main>s, clear the inactive one, repaint, persist.
 function applyView() {
   const wall = view === "wall";

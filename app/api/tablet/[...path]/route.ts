@@ -4,6 +4,8 @@
 // pricing RPC. The tablet UI calls fetch("/api/tablet"+path).
 
 import { NextRequest, NextResponse } from "next/server";
+// sha1 for the menu digest served by /menu-sig (see the note there) — node:crypto, so no dep.
+import { createHash } from "node:crypto";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { withIdempotency } from "@/lib/idempotency";
 import { replayClash, clashJson, expectClash } from "@/lib/clash";
@@ -262,10 +264,9 @@ function narrowSummary(summary: Record<string, any>, limit: SectionLimit | null)
   if (!keep(summary.latest_order_table)) summary.latest_order_table = null;
 }
 
-// Keep only the rows whose table_number the waiter holds. `members` and `items` carry no
-// table_number — they are narrowed by the session/order ids that survived instead.
-const narrowRows = <T extends { table_number?: unknown }>(rows: T[] | null | undefined, limit: SectionLimit | null): T[] =>
-  limit === null ? (rows || []) : (rows || []).filter((r) => allows(limit, r?.table_number));
+// (narrowRows lived here — it existed ONLY for the whole-floor /state branch, which went with
+//  T4 improvement 4. The remaining per-table reads are already scoped by their own table_number,
+//  and the summary is narrowed by narrowSummary above. Nothing else needs a row filter.)
 
 const nowIso = () => new Date().toISOString();
 // Mark an order EDITED after placement → bumps orders.edited_at so the "✎ Edited"
@@ -385,6 +386,43 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const { data, error } = await sb.rpc("lfh_customer_phone_search", { p_restaurant_id: rid, p_prefix: q, p_limit: 6 });
       if (error) throw new Error(error.message);
       return ok({ matches: Array.isArray(data) ? data : [] });
+    }
+
+    // ── GET /api/tablet/menu-sig — "has the menu changed?" in about forty bytes ──────────
+    // THE SELF-HEAL USED TO COST 50 KB TO ANSWER "no" (T4 improvement 7, 2026-08-11).
+    //
+    // The tablet refetches the whole dish list every ~10 minutes as a safety net for a realtime
+    // `menu` breadcrumb it might have missed. The net is worth keeping — a waiter selling a dish
+    // that went sold-out an hour ago is a real fault — but it does not need to CARRY the menu to
+    // find out nothing changed, and a menu changes a few times a week, not every ten minutes. Ten
+    // tablets on a floor were paying roughly 1,440 needless dish-list downloads a day between them.
+    //
+    // Why a computed digest and not a timestamp: `menu_items` has no `updated_at` column, and the
+    // breadcrumb table is pruned after 15 minutes (mig 057), so neither could answer this honestly.
+    // The digest is built from the SLIM identifying columns — the ones whose change a waiter must
+    // see (a dish appearing or leaving, its price, its sold-out/hidden tags, its name) — read
+    // inside the database and hashed here, so what crosses the wire is one short string. Categories
+    // ride along because the dish browser groups by them.
+    //
+    // DELIBERATELY NOT the fat columns (`options`, `veg`, `tax_mode`): they are what make the full
+    // list 50 KB, and an edit to them lands via the realtime `menu` breadcrumb like any other. This
+    // is the BACKSTOP for a missed breadcrumb, not a replacement for it — so it is allowed to be
+    // slightly coarse, and it must never be the only path (it isn't).
+    if (path.join("/") === "menu-sig") {
+      const [mi, cat] = await Promise.all([
+        sb.from("menu_items").select("id,title,price,tags").eq("restaurant_id", rid).order("id").limit(2000),
+        sb.from("categories").select("slug,name,sort_order,active").eq("restaurant_id", rid).order("slug"),
+      ]);
+      const rows = (must(mi) || []) as { id: string; title: string | null; price: unknown; tags: unknown[] | null }[];
+      const cats = (must(cat) || []) as { slug: string; name: unknown; sort_order: unknown; active: unknown }[];
+      const h = createHash("sha1");
+      h.update(String(rows.length) + "|");
+      for (const r of rows) h.update(`${r.id}${r.title ?? ""}${String(r.price ?? "")}${(r.tags || []).join(",")}`);
+      h.update("||" + String(cats.length) + "|");
+      for (const c of cats) h.update(`${c.slug}${JSON.stringify(c.name ?? "")}${String(c.sort_order ?? "")}${String(c.active)}`);
+      // 16 hex chars is plenty: this only has to differ when the menu differs, and a collision
+      // would cost one skipped self-heal, which the realtime breadcrumb covers anyway.
+      return ok({ sig: h.digest("hex").slice(0, 16), dishes: rows.length });
     }
 
     if (path.join("/") === "summary") {
@@ -556,52 +594,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           orders: live.orders, items: live.items, requests: must(requests),
         });
       }
-      // Orders + dishes come from the shared "live board" helper so the tablet shows
-      // EXACTLY what the manager shows — today's orders plus any still-open session's
-      // orders, even past the 05:00 IST rollover. (This used to be a day-clipped fetch
-      // here, which hid an overnight open table's orders → tablet-vs-manager desync.)
-      const [live, settings, sessions, members, calls, dishes, categories, requests, restaurant] = await Promise.all([
-        liveOrdersAndItems(rid),
-        sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
-        sb.from("sessions").select("*").neq("status", "closed").eq("restaurant_id", rid),
-        sb.from("session_members").select("id, session_id, phone, phone_verified, name, role, approved, location_ok, removed, joined_at, device_id, restaurant_id").eq("removed", false).eq("restaurant_id", rid),
-        sb.from("waiter_calls").select("*").eq("resolved", false).eq("restaurant_id", rid),
-        sb.from("menu_items").select("id,title,price,category,tags,veg,options,tax_mode").eq("restaurant_id", rid).order("category"),
-        sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
-        sb.from("requests").select("*").eq("status", "pending").eq("restaurant_id", rid).order("created_at"),
-        // THIS restaurant's identity, so the tablet header shows which restaurant the
-        // panel is scoped to (multi-tenant — never a hardcoded brand). Single-row PK lookup.
-        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
-      ]);
-      // Same server-side KOT-menu module resolution as /summary (canonical ladder, mig 177).
-      const setSt = overlayUserPerms(must(settings), viewer);
-      if (setSt) {
-        const tOpsOkSt = tableOpsEffectiveFromRow(setSt);
-        if (!tOpsOkSt) setSt.tablet_table_ops = "off";
-        setSt.table_ops_tablet_allowed = tOpsOkSt; // synthetic flag, see /summary
-        if (!takeOrdersEffectiveFromRow(setSt)) setSt.tablet_take_orders = "off";
-        if (!parcelEffectiveFromRow(setSt)) setSt.tablet_parcel = "off";
-      }
-      // WAITER SECTIONS: narrow the whole-floor board to the waiter's own tables. The
-      // per-table rows filter on their own table_number; members and items have none, so
-      // they follow the session / order ids that survived. (limit === null → untouched.)
-      const stSessions = narrowRows(must(sessions) as { table_number?: unknown; id?: string }[], limit);
-      const stOrders = narrowRows(live.orders as { table_number?: unknown; id?: string }[], limit);
-      const keptSids = new Set(stSessions.map((s) => String(s.id)));
-      const keptOids = new Set(stOrders.map((o) => String(o.id)));
-      const stMembers = limit === null ? must(members)
-        : (must(members) || []).filter((m: { session_id?: string }) => keptSids.has(String(m.session_id)));
-      const stItems = limit === null ? live.items
-        : (live.items || []).filter((i) => keptOids.has(String((i as { order_id?: string }).order_id)));
-      return ok({
-        // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
-        settings: setSt, sessions: stSessions, members: stMembers,
-        orders: stOrders, items: stItems,
-        calls: narrowRows(must(calls) as { table_number?: unknown }[], limit),
-        dishes: must(dishes), categories: must(categories),
-        requests: narrowRows(must(requests) as { table_number?: unknown }[], limit),
-        restaurant: must(restaurant) || null,
-      });
+      // ── NO TABLE = NO ANSWER, AND THAT IS THE POINT (T4 improvement 4, 2026-08-11) ─────────
+      // There used to be a whole-floor branch here: nine parallel reads including
+      // liveOrdersAndItems(rid) for EVERY table plus the entire menu_items list — comfortably the
+      // heaviest read in this file. Nothing has called it since the two-tier floor landed (#59):
+      // the panel asks for one table at a time (/state?table=N) and gets the floor from the slim
+      // /summary. A repo-wide search for a table-less /state found only that branch's own comment.
+      //
+      // Deleting it rather than leaving it is deliberate. Dead code that LOOKS like the main path is
+      // how a later session spends a day optimising a branch that never runs — the same reasoning
+      // that took the dead /api/menu pattern out of public/sw.js. And a heavy read reachable behind
+      // a live gate is worth removing on its own merits.
+      //
+      // Answering with a refusal instead of silence: a caller that genuinely wants the floor should
+      // be told where it lives, not handed a 404 to guess at.
+      return err("Ask for one table (/state?table=N) — the whole floor comes from /summary.", 400);
     }
     return err("unknown GET endpoint", 404);
   } catch (e) {

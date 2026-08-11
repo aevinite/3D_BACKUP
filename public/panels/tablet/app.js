@@ -3559,6 +3559,10 @@ function updateDishBadges() {
 function updateDishAvailability() {
   document.querySelectorAll("#omScroll .dish[data-dish]").forEach((btn) => {
     const d = state.data.dishes.find((x) => x.id === btn.dataset.dish);
+    // tap-guard: silent-ok — this is a REPAINT loop over every tile, not a person's tap. A dish that
+    // has left the menu entirely has no availability to restate, and the tile it leaves behind is
+    // already handled where it matters: tapping it hits the [data-dish] handler below, which says
+    // "That dish just changed — refreshing the menu" and rebuilds. Nothing is owed to anyone here.
     if (!d) return;
     const out = (d.tags || []).includes("sold-out");
     btn.classList.toggle("out", out);
@@ -4706,6 +4710,41 @@ refreshWhoami(true);
 // instead of polling every second. A slow 60s timer is the backup if the
 // WebSocket drops; if realtime didn't load, fall back to a gentle 2s poll.
 if (window.LFH_RT) {
+  // DECLARED BEFORE LFH_RT.start, which references rebaseMenuSig() from its `menu` handler.
+  // It worked below too (handlers only run after this module finishes evaluating), but a const
+  // used above its own declaration is a trap for whoever edits next — so it lives up here.
+  // THE 10-MINUTE SELF-HEAL ASKS "did the menu change?" INSTEAD OF DOWNLOADING IT (T4 improvement
+  // 7, 2026-08-11). It used to set _menuStale blind, so every tenth tick re-downloaded the whole
+  // dish list — about 50KB of the 77KB payload — whether anything had changed or not, and a menu
+  // changes a few times a WEEK. Ten tablets were paying ~1,440 needless dish-list downloads a day
+  // between them. /menu-sig answers in ~40 bytes (a digest of the slim identifying columns, built
+  // inside the database — see the long note on that endpoint), and only a DIFFERENT answer flags
+  // the menu stale so the next load pulls it for real.
+  //
+  // This is still only the BACKSTOP: the realtime `menu` topic is the primary signal and is
+  // untouched. If /menu-sig itself fails we fall back to the old blind flag — a wasted 50KB is
+  // always better than a waiter selling a dish that sold out an hour ago.
+  let _menuSig = null;
+  const readMenuSig = async () => {
+    const r = await api("GET", "/menu-sig");
+    return r && typeof r.sig === "string" ? r.sig : null;
+  };
+  // RE-BASELINE, never flag. Called at boot and after any load that really did pull the dish list
+  // (the realtime `menu` handler). Without this the next heal tick would see the digest move — it
+  // moved because the breadcrumb already refreshed us — and order a SECOND full download for a
+  // change we have in hand.
+  const rebaseMenuSig = () => { readMenuSig().then((s) => { if (s) _menuSig = s; }).catch(() => {}); };
+  // COMPARE and flag. Only a digest that differs from the one recorded at our last real menu read
+  // means the backstop has work to do.
+  const healMenu = async () => {
+    try {
+      const sig = await readMenuSig();
+      if (!sig) { state._menuStale = true; return; }          // no answer we can trust → refetch for real
+      if (_menuSig === null) { _menuSig = sig; return; }       // nothing to compare against yet
+      if (sig !== _menuSig) { _menuSig = sig; state._menuStale = true; }
+    } catch { state._menuStale = true; }                       // couldn't ask → do the old thing
+  };
+
   // Split by topic: ops churn → TARGETED loadTables() when the breadcrumb names specific
   // tables, else full load() (wake, reconnect, initial, or any unscopable event). menu edits
   // (dish/price/category changes) always do a full load() so the dish browser refreshes.
@@ -4715,7 +4754,7 @@ if (window.LFH_RT) {
     // place so a just-sold-out dish becomes untappable immediately (load() skips renderPanel
     // while ordering, so without this the grid stayed stale). Flag the menu stale so this load()
     // is a FULL one that actually refetches the dishes (normal refreshes are slim). (perf 2026-07-20)
-    menu: () => { refreshWhoami(); state._menuStale = true; return load().then(() => { if (state.ordering) updateDishAvailability(); }).catch(() => {}); },
+    menu: () => { refreshWhoami(); state._menuStale = true; return load().then(() => { if (state.ordering) updateDishAvailability(); rebaseMenuSig(); }).catch(() => {}); },
   }});
   // Backup floor sync every 60s (slim). Every ~10th minute also flag the menu stale so the next
   // load refetches dishes — a safety-net that self-heals a missed realtime `menu` event. (perf 2026-07-20)
@@ -4733,9 +4772,14 @@ if (window.LFH_RT) {
   let _menuHealN = 0;
   setInterval(() => {
     if (document.hidden) return;
-    if ((++_menuHealN % 10) === 0) state._menuStale = true;
-    load().catch(() => {});
+    // Ask, don't download. healMenu() sets _menuStale only when the digest actually moved, so the
+    // load() below is a slim refresh on every tick where the menu really is unchanged.
+    if ((++_menuHealN % 10) === 0) healMenu().finally(() => load().catch(() => {}));
+    else load().catch(() => {});
   }, 60000);
+  // Record the baseline digest once at boot, so the FIRST heal tick has something to compare
+  // against instead of treating its own first reading as a change.
+  rebaseMenuSig();
   // THE CATCH-UP POLL — the tablet was the ONLY live panel without it (T4 sweep, 2026-08-04).
   // When the WebSocket never comes up or dies (a restaurant's wifi blocking WebSockets, a hotel
   // or office network, a database that dropped its realtime connection), the 60s backstop above

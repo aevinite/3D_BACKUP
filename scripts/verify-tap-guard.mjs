@@ -312,6 +312,79 @@ for (const [panel, file] of [["manager", EDITOR], ["tablet", TABLET]]) {
   }
 }
 
+// ── N. NO STATE LOOKUP MAY BE DROPPED IN SILENCE (T4 improvement 2, 2026-08-11) ──────────
+// WHY THIS EXISTS. The T4 sweep found FOUR taps on the waiter tablet that did nothing and said
+// nothing — the quantity stepper, an order-wide allergy chip, and both ✎ pencils. Each looked its
+// row up in cached state, found it gone, and returned silently:
+//
+//     const it = (state.data.items || []).find((x) => x.id === itemId);
+//     if (!it) return;                                   // ← the waiter's tap disappears here
+//
+// All four were reachable the same way: a poll, a realtime breadcrumb, or the stepper's OWN 700ms
+// reconcile lands between the paint and the finger and replaces the array, so the id in the button
+// matches nothing. The KITCHEN's identical ✓ handler was fixed for exactly this on 2026-08-04 —
+// and these checks passed, clean, the whole time, because none of them knew the shape.
+//
+// IT DOES NOT LOOK INSIDE CLICK HANDLERS, and that is the whole lesson of writing it. The first
+// version scanned handler bodies and PROVED ITSELF USELESS: re-introducing the real bug did not
+// fail it, because `bumpItemQty` is a named function the handler merely CALLS. The bug lives one
+// hop away from the tap almost every time. So the shape itself is what is checked, wherever it sits.
+//
+// WHAT IT DELIBERATELY IGNORES (the naive version produced three false positives out of six hits,
+// which is how a check gets switched off):
+//   · DELEGATED DISPATCH — `const cb = e.target.closest("[data-x]"); if (!cb) return;` is not a
+//     dropped tap, it is "this click wasn't on my button", and it MUST be silent.
+//   · a lookup that isn't into shared `state` (a local array built two lines up can't go stale).
+//   · a return that does something visible on the way out (toasts, repaints, closes a popover).
+// An unavoidable case opts out with a written reason:
+//
+//     if (!s) return;   // tap-guard: silent-ok — <why nobody could see this>
+//
+// SCOPE. Kitchen + tablet today. The manager panel has TWO of these (showOpDetail ~12536 and
+// showCustDetail ~12587 — both `state.…find()` on a row the user just clicked); they are reported
+// as a finding for whoever owns that panel rather than fixed from here, and this list should grow
+// to include editor/app.js the moment they are.
+{
+  const VISIBLE = /toast|load\(|render|confirm|alert|LFH_|location|\.focus\(|reload|logKot|notePrint|close[A-Z]/;
+  const LOOKUP = /(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([^;\n]*\bstate\b[^;\n]*\.find\([^;\n]*)\s*;/;
+  for (const rel of ["public/panels/tablet/app.js", "public/panels/kitchen/app.js"]) {
+    const src = read(rel);
+    if (!src) continue;
+    const lines = src.split("\n");
+    const offenders = [];
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(LOOKUP);
+      if (!m) continue;
+      const [, v, how] = m;
+      if (/\.closest\(|e\.target|event\.target/.test(how)) continue;     // delegated dispatch — correct
+      // WALK FORWARD OVER COMMENTS, NOT OVER CHARACTERS. The first version used a 400-character
+      // window and so PROVED ITSELF USELESS a second time: re-introducing the real bug did not fail
+      // it, because the six-line comment explaining the fix pushed the guard out of the window. A
+      // comment is not distance. Six lines of actual CODE is.
+      const bare = new RegExp(`^\\s*if\\s*\\(\\s*!\\s*${v}\\s*\\)\\s*return\\s*;`);
+      let code = 0, optOut = false, hit = -1;
+      for (let j = i + 1; j < lines.length && code < 6; j++) {
+        const t = lines[j].trim();
+        if (/tap-guard:\s*silent-ok/.test(lines[j])) optOut = true;      // marker may sit on its own line
+        if (t === "" || t.startsWith("//") || t.startsWith("*") || t.startsWith("/*")) continue;
+        code++;
+        if (bare.test(lines[j])) { hit = j; break; }
+      }
+      if (hit < 0 || optOut) continue;
+      if (VISIBLE.test(lines[hit])) continue;                            // it says (or does) something
+      offenders.push(`${rel}:${hit + 1}  ${how.trim().slice(0, 62)}…  →  ${lines[hit].trim()}`);
+    }
+    check(
+      `${rel.includes("tablet") ? "tablet" : "kitchen"}: no state lookup is dropped in silence`,
+      offenders.length === 0,
+      `A row is looked up in state, isn't found, and the code returns with nothing on screen:\n      ${offenders.join("\n      ")}\n    ` +
+      `That row can vanish between the paint and the finger (a poll, a breadcrumb, a reconcile), and the\n    ` +
+      `tap then reads as a broken button with no trace to debug. Say what happened and refresh — see\n    ` +
+      `tablet/app.js bumpItemQty. If nobody could ever see it, mark the line "// tap-guard: silent-ok — <reason>".`,
+    );
+  }
+}
+
 // ── report ─────────────────────────────────────────────────────────────────────────────
 // --hook stays SILENT on success (a passing guard must not add noise to every panel edit)
 // and exits 2 on failure, which is how a PostToolUse hook tells the session it broke something.
