@@ -982,10 +982,19 @@
        splitTax still gives the last line the remainder, so every row foots to that rate's tax.
        With no components configured the historical CGST/SGST halves are used, exactly as the
        single-rate branch below already does. */
+    // THE SHAPE COMES FROM THE RESTAURANT'S OWN COMPONENTS, not from the CGST/SGST halves.
+    // `taxComps` above falls back to two halves whenever billMoney refuses to vouch for the
+    // configured list — which it always does on a mixed bill (compsMatch is false there by
+    // construction). Scaling THOSE would quietly drop a third component: a restaurant on
+    // CGST 2.5 + SGST 2.5 + CESS 1 printed "CGST 9% / SGST 9%" on the 18% slice and lost its cess
+    // altogether. So the shape is read from the settings, and only a restaurant that has
+    // configured none falls back to halves — the same answer the single-rate branch gives.
+    var shapeComps = (taxModel(s).components || []);
     var scaleComps = function (bucketPct) {
-      var sum = (taxComps || []).reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
+      var shape = shapeComps.length ? shapeComps : [{ label: "CGST", rate: 1 }, { label: "SGST", rate: 1 }];
+      var sum = shape.reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
       if (!sum) return [{ label: ((s.tax_label || "GST") + "").trim() || "GST", rate: bucketPct }];
-      return taxComps.map(function (c) {
+      return shape.map(function (c) {
         return { label: c.label, rate: Math.round(((Number(c.rate) || 0) / sum) * bucketPct * 100) / 100 };
       });
     };
