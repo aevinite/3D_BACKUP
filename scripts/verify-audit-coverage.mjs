@@ -453,6 +453,63 @@ else ok("the panel shows ✕ Cancel without the void_bills power");
     /BILLDOC\.orderTaxRate\(/.test(read("lib/paySplit.ts"))
       ? ok("  …and settling a bill in parts uses that one definition, not a second copy of the rule")
       : fail("lib/paySplit.ts decides an order's tax rate on its own again — the two drifted once already");
+
+  // …AND SO MUST THE Z-REPORT — the sheet a manager signs at closing time (T7 finding F8, fixed
+  // 2026-08-11). It borrowed ONE rate for a whole bill (`g.find(o => o.tax_rate > 0)`), the very
+  // rule the printed bill and pay-in-parts were rebuilt away from on 2026-08-05. A banquet at its
+  // own 18% shares a table's open session with 5% food (migs 237/239), so the day-close reported
+  // 150 of tax on a bill the paper charged 410 for. COMPLIANCE section 3: they must reconcile.
+  //
+  // BEHAVIOUR, NOT A GREP (the lesson two checks up). billTaxOf() is pure, so it is lifted out of
+  // the route source and RUN against the same bills billMoney() prices — if the two ever disagree
+  // again this fails with both numbers, rather than passing on a phrase that outlived the rule.
+  {
+    const src = read("app/api/editor/[...path]/route.ts");
+    const fn = (src.match(/function billTaxOf\([\s\S]*?\n}\n/) || [])[0];
+    const dbo = (src.match(/function discountBaseOf\([\s\S]*?\n}\n/) || [])[0];
+    if (!fn || !dbo) {
+      fail("billTaxOf() / discountBaseOf() are no longer in the editor route — the Z-report's per-rate tax cannot be checked",
+        "if the Z-report went back to one rate per bill, the day-close stops matching the printed bills");
+    } else {
+      // Drop the TypeScript annotations so the pure function can be run as plain JS, then hand it
+      // the REAL orderTaxRate so it is the shared definition being exercised.
+      const js = (fn + dbo)
+        .replace(/: *\{[^{}]*\}/g, "")
+        .replace(/: *[A-Za-z_][A-Za-z0-9_.]*(\[\])?( *\| *[A-Za-z_][A-Za-z0-9_.]*(\[\])?)*/g, "")
+        .replace(/<[^<>]*>/g, "");
+      let billTaxOf = null;
+      try {
+        billTaxOf = new Function("BILLDOC", js + "; return billTaxOf;")(BILLDOC);
+      } catch (e) {
+        fail("billTaxOf() could not be run: " + e.message, "the Z-report's per-rate tax is then unguarded");
+      }
+      if (billTaxOf) {
+        const ord = (o) => Object.assign({ status: "served", payment_status: "pending", items: [] }, o);
+        const S = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
+        const food = (extra) => ord(Object.assign({ subtotal: 1000, taxable_base: 1000, tax_rate: 0.05, items: [{ title: "F", qty: 1, price: 1000, tax_mode: "excl" }] }, extra || {}));
+        const banq = () => ord({ subtotal: 2000, taxable_base: 2000, tax_rate: 0.18, items: [{ title: "B", qty: 1, price: 2000, tax_mode: "excl" }] });
+        const bills = [
+          ["a banquet at 18% beside 5% food", [food(), banq()]],
+          ["the same bill, banquet order first", [banq(), food()]],
+          ["two rates AND a discount", [food({ discount: 200 }), banq()]],
+          ["one ordinary 5% bill (nothing may move)", [food({ discount: 100 })]],
+          ["a composition bill (the rate really is 0)", [ord({ subtotal: 880, taxable_base: 0, nontax_amount: 880, tax_rate: 0, discount: 50, items: [{ title: "T", qty: 2, price: 440, tax_mode: "exempt" }] })]],
+        ];
+        let off = null;
+        for (const pair of bills) {
+          const paper = BILLDOC.billMoney(pair[1], S);
+          const z = billTaxOf(pair[1], BILLDOC.taxModel(S).rate);
+          if (Math.abs(z.tax - paper.tax) > 0.005 || Math.abs(z.disc - paper.disc) > 0.005) {
+            off = pair[0] + ": the paper charges tax " + paper.tax + " / discount " + paper.disc + ", the Z-report says " + z.tax + " / " + z.disc;
+            break;
+          }
+        }
+        off
+          ? fail(off, "the day-close sheet must equal the sum of the bills already handed to guests (COMPLIANCE section 3)")
+          : ok("the Z-report taxes each order at ITS OWN rate — the day-close agrees with the printed bill on a mixed-rate bill");
+      }
+    }
+  }
   }
 }
 
