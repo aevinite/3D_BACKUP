@@ -10,6 +10,8 @@ import type { ReportData, ReportPayments } from "@/components/owner/ownerReportD
 import { mapLimit } from "@/lib/mapLimit";
 
 const IST = "Asia/Kolkata";
+/** "8 PM" — the one clock this console writes, on screen and now on paper too. */
+const hour12 = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
 type Pay = { method: string; revenue: number; orders: number };
 
 // (the shared cap lives in lib/mapLimit; the reason it exists is written there)
@@ -34,16 +36,23 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
   // below, and named in `failed` so the document can say which ones are missing. Only when
   // EVERY restaurant fails do we surface the error — matching the reports route's own rule.
   const failed: string[] = [];
+  // "Named in `failed`" only ever covered the ANALYTICS call. If the MONEY call failed instead,
+  // the restaurant stayed in with every billing field null — and `bsum()` below returns null
+  // unless EVERY restaurant has the field, so the group's whole gross/discount/GST table
+  // collapsed to a single "Net amount (kept)" line with no banner saying why (T5 sweep,
+  // 2026-08-11). A restaurant whose money could not be read is treated exactly like one whose
+  // analytics could not be read: dropped, and NAMED on the paper.
   const gathered = await mapLimit(list, CONCURRENCY, async (r) => {
     const [a, m] = await Promise.all([
       fetch(`/api/owner/analytics?${o.periodQs}&rid=${r.id}&compare=1${scp}`, { cache: "no-store" }).then((x) => x.json()).catch((e) => ({ error: String(e?.message || e) })),
       fetch(`/api/owner/reports?type=sales&${o.periodQs}&rid=${r.id}${scp}`, { cache: "no-store" }).then((x) => x.json()).catch(() => null),
     ]);
     if (a.error) { failed.push(r.name); return null; }
+    if (!m || m.error) { failed.push(r.name); return null; }
     const hour = [...(a.hourly ?? [])].sort((x: { orders: number }, y: { orders: number }) => y.orders - x.orders)[0];
     const t = m && !m.error ? m.totals : null;
-    const comps: { label: string; amount: number }[] = (m && !m.error && m.tax?.components ? m.tax.components : [])
-      .map((c: { label?: string; amount?: number }) => ({ label: String(c.label || "Tax"), amount: Number(c.amount) || 0 }))
+    const comps: { label: string; rate: number; amount: number }[] = (m && !m.error && m.tax?.components ? m.tax.components : [])
+      .map((c: { label?: string; rate?: number; amount?: number }) => ({ label: String(c.label || "Tax"), rate: Number(c.rate) || 0, amount: Number(c.amount) || 0 }))
       .filter((c: { amount: number }) => c.amount > 0);
     const grain = m && !m.error ? String(m.bucket || "day") : "day";
     const dlabel = (iso: string) => {
@@ -72,7 +81,7 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
         cancelledOrders: t ? Number(t.cancelledOrders) || 0 : null,
         cancelledValue: t ? Number(t.cancelledValue) || 0 : null,
       },
-      busiestHour: hour?.orders ? `${hour.hour}:00` : null,
+      busiestHour: hour?.orders ? hour12(Number(hour.hour) || 0) : null,
       dishes: (a.dishes ?? []) as { title: string; qty: number; revenue: number }[],
       categories: (a.categories ?? []) as { category: string; qty: number; revenue: number }[],
       payments: ((a.paymentMethods ?? []) as Pay[]).map((p) => ({ method: canonPayMethod(p.method), revenue: p.revenue, orders: p.orders })),
@@ -107,8 +116,21 @@ export async function gatherOwnerReport(o: GatherOpts): Promise<ReportData> {
   const paidOrders = perRest.reduce((s, r) => s + r.paidOrders, 0);
   const bsum = (k: "gross" | "discount" | "taxTotal" | "cancelledOrders" | "cancelledValue") =>
     perRest.every((r) => r.billing[k] != null) ? perRest.reduce((s, r) => s + (r.billing[k] || 0), 0) : null;
+  // MERGE ON THE LABEL **AND THE RATE** (T5 sweep, 2026-08-11). Two restaurants whose CGST is
+  // configured at different rates were summed onto one "CGST" line, on a document whose whole
+  // purpose is filing. Same rate → same line, as before; different rates → "CGST (2.5%)" and
+  // "CGST (9%)" stay apart, which is what a return needs.
+  const rates = new Map<string, number>();
+  for (const r of perRest) for (const c of r.billing.taxComponents) {
+    const seen = rates.get(c.label);
+    if (seen === undefined) rates.set(c.label, c.rate);
+    else if (seen !== c.rate) rates.set(c.label, NaN);   // NaN = this label is used at >1 rate
+  }
   const gc = new Map<string, number>();
-  for (const r of perRest) for (const c of r.billing.taxComponents) gc.set(c.label, (gc.get(c.label) || 0) + c.amount);
+  for (const r of perRest) for (const c of r.billing.taxComponents) {
+    const key = Number.isNaN(rates.get(c.label)) ? `${c.label} (${c.rate}%)` : c.label;
+    gc.set(key, (gc.get(key) || 0) + c.amount);
+  }
   return {
     scopeName: o.activeRid ? (list[0]?.name ?? "Restaurant") : `All ${list.length} restaurants`,
     // Named on the document so a missing restaurant is VISIBLE, never a silent gap.

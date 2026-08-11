@@ -133,7 +133,7 @@ function dailyHtml(rows: DailyRow[]): string {
   const shown = rows.length > cap ? rows.slice(-cap) : rows;
   return `<h3>Day-by-day breakdown</h3>
   ${rows.length > cap ? `<p class="mut">Showing the most recent ${cap} of ${rows.length} rows — download the CSV for the complete series.</p>` : ""}
-  <table><thead><tr><th>Period</th><th class="r">Orders</th><th class="r">Gross</th><th class="r">Discount</th><th class="r">GST</th><th class="r">Net</th></tr></thead><tbody>
+  <table><thead><tr><th>Period</th><th class="r">Orders</th><th class="r">Gross</th><th class="r">Discount</th><th class="r">GST</th><th class="r">Collected</th></tr></thead><tbody>
     ${shown.map((r) => `<tr><td>${esc(r.label)}</td><td class="r">${nfmt(r.orders)}</td><td class="r">${inr(r.gross)}</td><td class="r">${inr(r.discount)}</td><td class="r">${inr(r.tax)}</td><td class="r"><b>${inr(r.net)}</b></td></tr>`).join("")}
   </tbody></table>`;
 }
@@ -259,7 +259,7 @@ export function buildReportHtml(d: ReportData): string {
     <section>
       <h2>Executive summary</h2>
       <div class="kvgrid">
-        ${kv("Net revenue", inr(g.revenue), prevLine(g.revenue, g.prevRevenue) || "paid, net of discounts")}
+        ${kv("Total collected", inr(g.revenue), prevLine(g.revenue, g.prevRevenue) || "everything guests paid — GST included")}
         ${inHand != null ? kv("Money in hand", inr(inHand), "after GST set aside") : ""}
         ${kv("Orders", nfmt(g.orders), `${nfmt(g.paidOrders)} paid`)}
         ${kv("Average bill", inr(g.avg), "per paid order")}
@@ -286,7 +286,7 @@ export function buildReportHtml(d: ReportData): string {
   const comparison = multi ? `
     <section>
       <h2>Restaurant comparison</h2>
-      <table><thead><tr><th>#</th><th>Restaurant</th><th class="r">Net revenue</th><th class="r">Share</th><th class="r">Orders</th><th class="r">Avg bill</th><th class="r">GST</th><th class="r">Cancelled</th></tr></thead><tbody>
+      <table><thead><tr><th>#</th><th>Restaurant</th><th class="r">Total collected</th><th class="r">Share</th><th class="r">Orders</th><th class="r">Avg bill</th><th class="r">GST</th><th class="r">Cancelled</th></tr></thead><tbody>
         ${d.restaurants.map((r, i) => `<tr><td>${i + 1}</td><td><b>${esc(r.name)}</b></td><td class="r"><b>${inr(r.revenue)}</b></td><td class="r">${Math.round(r.share * 100)}%</td><td class="r">${nfmt(r.orders)}</td><td class="r">${inr(r.avg)}</td><td class="r">${r.billing.taxTotal != null ? inr(r.billing.taxTotal) : "—"}</td><td class="r">${r.billing.cancelledValue != null ? inr(r.billing.cancelledValue) : "—"}</td></tr>`).join("")}
       </tbody></table>
     </section>` : "";
@@ -307,7 +307,7 @@ export function buildReportHtml(d: ReportData): string {
     <section class="rest ${multi ? "brk" : ""}">
       <h2>${multi ? `${i + 1}. ` : ""}${esc(r.name)}</h2>
       <div class="kvgrid">
-        ${kv("Net revenue", inr(r.revenue), prevLine(r.revenue, r.prevRevenue) || (multi ? `${Math.round(r.share * 100)}% of the group` : "paid, net of discounts"))}
+        ${kv("Total collected", inr(r.revenue), prevLine(r.revenue, r.prevRevenue) || (multi ? `${Math.round(r.share * 100)}% of the group` : "everything guests paid — GST included"))}
         ${moneyInHand(r.billing) != null ? kv("Money in hand", inr(moneyInHand(r.billing)!), "after GST set aside") : ""}
         ${kv("Orders", nfmt(r.orders), `${nfmt(r.paidOrders)} paid`)}
         ${kv("Average bill", inr(r.avg), "per paid order")}
@@ -377,7 +377,7 @@ export function buildReportHtml(d: ReportData): string {
   ${comparison}
   ${slowSection}
   ${sections}
-  <div class="note">Net revenue counts paid, non-cancelled orders and is net of discounts (discount applied before tax). "Money in hand" = total collected minus the GST set aside for the government (equivalently gross sales minus discounts). GST figures come from the restaurant's configured tax lines; a restaurant with no tax configuration shows total tax only. Generated automatically by the Aevidine owner console.</div>
+  <div class="note">"Total collected" is every rupee guests paid on paid, non-cancelled orders — the discount already taken off and the GST already included (discount applied before tax). "Money in hand" = total collected minus the GST set aside for the government (equivalently gross sales minus discounts) — that is the figure that is actually yours. GST figures come from the restaurant's configured tax lines; a restaurant with no tax configuration shows total tax only. Generated automatically by the Aevidine owner console.</div>
 <script>window.addEventListener("load",function(){setTimeout(function(){window.print()},350)});</script>
 </body></html>`;
 }
@@ -385,11 +385,14 @@ export function buildReportHtml(d: ReportData): string {
 // ── the same compiled sections as flat tables (CSV / Excel) ───────────────────
 // Layout the owner asked for (2026-07-27): the averages/summary block sits on TOP,
 // then the fully detailed day-wise sheet for the whole scope, then the sections.
+// The printed sheet and the CSV must head the same value with the same word — this column was
+// "Net" on paper and "Collected" in the spreadsheet (T5 sweep, 2026-08-11).
 const dayHead = ["Period", "Orders", "Gross", "Discount", "GST", "Collected", "In hand"];
 const dayRow = (x: DailyRow): (string | number)[] =>
   [x.label, x.orders, Math.round(x.gross), Math.round(x.discount), Math.round(x.tax), Math.round(x.net), Math.round(x.gross - x.discount)];
 export function buildReportTables(d: ReportData): ExportTable[] {
   const g = d.group;
+  const inHandOf = moneyInHand;
   const out: ExportTable[] = [];
   const gDaily = mergedDaily(d.restaurants);
   const activeDays = gDaily.filter((x) => x.orders > 0).length;
@@ -401,7 +404,8 @@ export function buildReportTables(d: ReportData): ExportTable[] {
     title: `Aevidine business performance report — ${d.scopeName} — ${d.periodLabel} — generated ${d.generatedAt}`,
     head: ["Metric", "Value"],
     rows: [
-      ["Net revenue (paid, net of discounts)", Math.round(g.revenue)],
+      ["Total collected (paid bills, GST included)", Math.round(g.revenue)],
+      ...(inHandOf(g.billing) != null ? [["Money in hand (after GST set aside)", Math.round(inHandOf(g.billing)!)] as (string | number)[]] : []),
       ["Orders", g.orders], ["Paid orders", g.paidOrders],
       ["Average bill", Math.round(g.avg)],
       ...(activeDays > 1 ? [
@@ -429,7 +433,7 @@ export function buildReportTables(d: ReportData): ExportTable[] {
   if (d.restaurants.length > 1) {
     out.push({
       title: "Restaurant comparison",
-      head: ["#", "Restaurant", "Net revenue", "Share %", "Orders", "Paid orders", "Avg bill", "Total GST", "Cancelled value"],
+      head: ["#", "Restaurant", "Total collected", "Share %", "Orders", "Paid orders", "Avg bill", "Total GST", "Cancelled value"],
       rows: d.restaurants.map((r, i) => [i + 1, r.name, Math.round(r.revenue), Math.round(r.share * 100), r.orders, r.paidOrders, Math.round(r.avg), r.billing.taxTotal != null ? Math.round(r.billing.taxTotal) : "", r.billing.cancelledValue != null ? Math.round(r.billing.cancelledValue) : ""]),
     });
     const gSlow = groupSlowDishes(d.restaurants);

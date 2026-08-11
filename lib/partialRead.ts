@@ -33,6 +33,7 @@ export type PartialKey =
   | "collectedToday" | "collectedMonth"              // Pay Later
   | "payments" | "tips" | "staffPay" | "inventory"   // the day sheet's optional lines
   | "categories"                                     // the dashboard's revenue-by-category chart
+  | "busyHours"                                      // the dashboard's day x hour heatmap
   | "modules";                                       // the hub's payroll/inventory card probes
 // NOTE: the staff roster deliberately does NOT use this. A list is better served by a per-ROW marker
 // (`payUnread` on each person) than by one note at the top of the page, because the owner needs to
@@ -43,6 +44,7 @@ const PARTIAL_LABELS: Record<PartialKey, string> = {
   collectedMonth: "money collected this month",
   payments: "how the money arrived",
   categories: "revenue by category",
+  busyHours: "the busy heatmap",
   tips: "tips",
   staffPay: "staff pay",
   inventory: "stock figures",

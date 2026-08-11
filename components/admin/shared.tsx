@@ -200,7 +200,14 @@ export function actLabel(code: string | null | undefined): string {
 // this number directly above a chart axis labelled in lakhs (₹6.7L) — two groupings for one
 // figure on one card. Every other formatter in the product already uses en-IN; these were the
 // three that did not (T15 sweep, 2026-08-05).
-export const inr = (n: number) => "₹" + Math.round(Number(n) || 0).toLocaleString("en-IN");
+// A NEGATIVE amount reads "−₹1,200", not "₹-1,200": the sign belongs in front of the whole
+// amount, and lib/money → compactINR (the short form on every chart axis) has always written it
+// that way, so the same refund printed two different shapes depending on where you read it
+// (T5 sweep, 2026-08-11). U+2212, the same character compactINR uses.
+export const inr = (n: number) => {
+  const v = Math.round(Number(n) || 0);
+  return (v < 0 ? "−₹" : "₹") + Math.abs(v).toLocaleString("en-IN");
+};
 
 // Paise-precise money — for lines that must ADD UP exactly (e.g. the CGST/SGST halves of
 // an odd total tax: ₹162,739 → ₹81,369.50 + ₹81,369.50, not ₹81,370 + ₹81,369 which reads

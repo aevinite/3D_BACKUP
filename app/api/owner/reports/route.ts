@@ -260,8 +260,10 @@ export async function GET(req: NextRequest) {
   // WHENEVER A PAYLOAD SHAPE CHANGES, not just when the numbers change.
   // v4: the day sheet moved from a calendar day (`range=custom`) to the 05:00-IST BUSINESS day
   // (`range=day`), so its numbers changed shape-for-shape — old rows must not be served.
-  const rangePart = range === "custom" ? `custom:${sp.get("from")}:${sp.get("to")}`
-    : range === "day" ? `day:${sp.get("date")}`
+  // Built from the RESOLVED window, never the raw query string — windowFor() validates and
+  // falls back, the key did not, so junk dates minted a cache row each (T5 sweep, 2026-08-11).
+  const rangePart = range === "custom" ? `custom:${from}:${to}`
+    : range === "day" ? `day:${from}`
     : `${range}:${from.slice(0, 10)}`;
   const cacheKey = `reports:v4:${scopeKeyOf(rid, scope.all, scopeIds)}:${type}:${rangePart}`;
   const force = sp.get("refresh") === "1";
@@ -446,7 +448,18 @@ export async function GET(req: NextRequest) {
           } else {
             const per = await mapLimit(scope.ids, FANOUT, (id) =>
               sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
-            payRaw = mergeBy(per.filter((p) => !p.error).map((p) => (p.data ?? []) as Row[]), "method", ["revenue", "orders"]);
+            const okPer = per.filter((p) => !p.error);
+            payRaw = mergeBy(okPer.map((p) => (p.data ?? []) as Row[]), "method", ["revenue", "orders"]);
+            // AN EMPTY LIST AND A FAILED READ ARE DIFFERENT SENTENCES — the single-restaurant
+            // branch below was given this on 2026-08-06 and this one was missed. When the
+            // grouped call AND every fallback fail, `payRaw` is [] and the sheet renders a
+            // settlement panel reading "No payments recorded." beside a real Total collected
+            // (T5 sweep, 2026-08-11). Omit the block and say so, exactly like its twin.
+            if (!okPer.length && per.length) {
+              console.error("[owner/reports] daysummary payment breakdown failed for every restaurant in scope");
+              payUnreadable = true;
+              partialKeys.push("payments");
+            }
           }
         } else {
           const one = await sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: rid, p_from: from, p_to: to });

@@ -96,7 +96,12 @@ export function BestWorst({
             ? <>Only one {unit} carried {noun} this period.</>
             : <>Your best {unit} (<b>{cap(best.label)}</b>) brought <b>{Math.round(share(best.value))}%</b> of the period&apos;s {noun}
               {count >= 3 && <> · the top 3 {unit}s made <b>{Math.round(total ? (top3 / total) * 100 : 0)}%</b></>}
-              {worst.value > 0 && <> · the best {unit} did <b>{(worst.value ? best.value / worst.value : 0).toFixed(1)}×</b> the quietest</>}.</>}
+              {/* A ratio only means something while the quietest {unit} is a real one. Measured
+                  live: "the best day did 379.6× the quietest", which reads as a rendering fault
+                  rather than a fact (T5 sweep, 2026-08-11). Past 20× say the true thing instead. */}
+              {worst.value > 0 && (best.value / worst.value > 20
+                ? <> · the quietest {unit} took almost nothing next to it</>
+                : <> · the best {unit} did <b>{(best.value / worst.value).toFixed(1)}×</b> the quietest</>)}.</>}
           {droppedPartial && <> Today is still in progress, so it is left out of this comparison.</>}
         </p>
       </div>
