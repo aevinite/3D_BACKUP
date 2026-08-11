@@ -16,7 +16,7 @@
  * .at-* set for the tree indentation. */
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import {
-  SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch,
+  SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch, nodeExpect,
   type Node, type Section, type TreeState, type TreePatch,
 } from "@/lib/accessTree";
 import { useToast } from "@/components/admin/toast";
@@ -228,13 +228,31 @@ const isBoolBind = (n: Node) =>
   ["feature", "setting", "module", "channel", "grant", "section", "tab", "ratingsMaster", "has"].includes(n.bind.t);
 
 /** Does this row read as "on"? Used for the parent gate and the section counter. A row with
- *  no switch of its own (a pure group, e.g. Format / Bill) is always "on" so its children show. */
+ *  no switch of its own (a pure group, e.g. Format / Bill) is always "on" so its children show.
+ *
+ *  THE FEATURE HALF COUNTS (fixed by sweep T6, 2026-08-10). This read only `n.bind`, which on a
+ *  two-control row is the DEFAULT half — so switching the FEATURE off, which removes a menu from
+ *  every manager of the restaurant and makes tabGate refuse its endpoints, left the row reading
+ *  "on" and the section header still saying "All". The chip is the only thing this screen tells
+ *  you about a section without opening it, so on the one screen where misreading on/off costs a
+ *  restaurant a feature it must not say All over a manager panel that has lost a tab. A row is on
+ *  only when the restaurant HAS the thing AND the role's default is on — the same order
+ *  managerCan() resolves them in. */
 function isOn(n: Node, st: TreeState): boolean {
   if (n.bind.t === "none") return true;
+  if (n.featureBind && nodeValue({ ...n, bind: n.featureBind }, st) !== true) return false;
   if (isBoolBind(n)) return nodeValue(n, st) === true;
   if (n.bind.t === "tablet" || n.bind.t === "capTablet") return nodeValue(n, st) !== "off";
   return true;
 }
+
+/** Is this row a SWITCH — a thing an admin turns on or off — as opposed to a setting they pick a
+ *  value for? Only switches belong in a section's "9/11" count. A pick-one ("What a menu price
+ *  means"), a text field or a language list has no on/off, and counting each of them as
+ *  permanently "on" padded every section's number with rows that could never move it. */
+const isCountable = (n: Node) =>
+  n.bind.t !== "none" && (isBoolBind(n) || n.bind.t === "tablet" || n.bind.t === "capTablet"
+    || (n.bind.t === "opt" && !n.choices));
 
 export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest }) {
   const [st, setSt] = useState<TreeState | null>(null);
@@ -298,18 +316,24 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
   // Optimistic: merge locally for an instant repaint, then POST the identical patch. On a
   // refusal we reload from the server rather than leave the screen showing a value that
   // never landed (a switch that looks saved and isn't is the exact thing being removed).
-  const save = useCallback((patch: TreePatch) => {
+  const save = useCallback((patch: TreePatch, expect?: ReturnType<typeof nodeExpect>) => {
     setSt((prev) => (prev ? applyPatch(prev, patch) : prev));
     setSaving("saving");
     const stamp = ++flash.current;
     fetch("/api/admin/restaurants/access-tree", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST",
+      // X-LFH-Expect = "this is what the row said when I tapped it" — the ONE clash gate
+      // (lib/clash.ts) refuses the save if somebody else has moved it since. Sent only where the
+      // row can honestly say what it saw; see nodeExpect. (sweep T6, 2026-08-10)
+      headers: { "Content-Type": "application/json", ...(expect ? { "X-LFH-Expect": JSON.stringify(expect) } : {}) },
       body: JSON.stringify({ restaurant_id: rid, patch }),
     })
       .then(async (r) => {
         if (!r.ok) {
           const j = await r.json().catch(() => ({}));
-          setErr(j.error || "That change didn't save.");
+          // 409 = another admin got there first. Say so in their words and RELOAD, so the row
+          // shows what it actually says now rather than the value that lost.
+          setErr(j.clash ? `${j.clash.plain} ${j.clash.todo}` : (j.error || "That change didn't save."));
           setSaving("err"); load(rid); return;
         }
         setErr("");
@@ -345,10 +369,16 @@ export default function AccessTree({ rid, rest }: { rid: string; rest?: TreeRest
 
   // Every control calls this. A credential is routed to the write-only path above, so the control
   // itself stays an ordinary input and there is exactly ONE place that knows keys are different.
+  //
+  // ONE QUESTION, ONLY WHERE A GUEST FEELS IT (sweep T6, 2026-08-10). A row carrying `confirm` in
+  // the model asks before it is switched OFF — today that is the guest Menu, whose off state kills
+  // every table's QR code instantly. Switching a row back ON never asks: the dangerous direction is
+  // only ever "take it away". Everything else on this screen still saves on the tap, as it should.
   const set = useCallback((n: Node, v: any) => {
     if (n.bind.t === "creds") return setCreds(n.bind.key, v as string | null);
-    save(applyTwo(nodePatch(n, v), extraPatch(n, v)));
-  }, [save, setCreds]);
+    if (n.confirm && (v === false || v === "off") && !window.confirm(n.confirm)) return;
+    save(applyTwo(nodePatch(n, v), extraPatch(n, v)), st ? nodeExpect(n, st, rid) ?? undefined : undefined);
+  }, [save, setCreds, st, rid]);
 
   // DEEP LINK — ?focus=<key>. The staff panels' "zones off for staff" popovers send a
   // "⚙ change" link carrying a manager-power flag, a tablet_* column, an owner section or a
@@ -583,12 +613,16 @@ function SectionCard({ sec, st, open, onToggle, openNode, setOpenNode, set, onIn
   // no count at all while Main features, Extra features and Waiter each wore one. Three chips for
   // five sections reads as two broken headers. A folder isn't a thing you can switch, so it still
   // doesn't count itself; we look inside it for the rows that are.
+  // COUNT SWITCHES ONLY (sweep T6, 2026-08-10 — see isCountable). A row that is a pick-one, a
+  // text field or a list is a setting you give a VALUE, not a thing you turn on, and it used to
+  // be counted as permanently on — so "Main features 4/8" quietly included "What a menu price
+  // means" as one of the four. Those rows still render; they just don't inflate the chip.
   const switchable: Node[] = [];
   const collect = (nodes: Node[]) => {
     for (const n of nodes) {
       if (n.leftToBuild) continue;
-      if (n.bind.t !== "none") switchable.push(n);
-      else if (n.children?.length) collect(n.children);   // a pure group — look inside it
+      if (isCountable(n)) switchable.push(n);
+      else if (n.bind.t === "none" && n.children?.length) collect(n.children);   // a pure group — look inside it
     }
   };
   collect(sec.children);
@@ -1150,6 +1184,16 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
           <img key={src} className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} loading="lazy"
             onError={() => setBroken((b) => ({ ...b, [src]: true }))} />
         ))}
+        {/* SAY IT IS AN EXAMPLE (sweep T6, 2026-08-10). These are real captures of the app, but of
+            ONE restaurant — opening ⓘ on Menu while Aangan Garden is selected shows Pizza Palace's
+            "Wood-Fired Pizzeria". Unlabelled, that reads as THIS restaurant's menu, which is the
+            same shape as the bug this codebase keeps having (one tenant's branding on another) and
+            trains people to shrug at the real one. One line, no new pictures. */}
+        {shots.length ? (
+          <p className="at-sheet-egnote">
+            Example from a demo restaurant — it shows you WHERE the setting appears, not this restaurant&apos;s own screen.
+          </p>
+        ) : null}
         <p>{node.what}</p>
         {def ? <p className="at-sheet-def">{def}</p> : null}
         {node.choices?.length ? (
@@ -1542,6 +1586,8 @@ export function TreeStyle() {
     margin:0 0 13px; background:var(--bg); }
   .at-sheet-def { font-size:12.5px !important; font-weight:600; color:var(--text) !important; opacity:.72; margin:-6px 0 12px !important; }
   .at-sheet-noshot { text-align:center; font-size:12px !important; font-style:italic; opacity:.7; margin:2px 0 14px !important; }
+  /* The "this picture is an example" line — quiet, directly under the shot it belongs to. */
+  .at-sheet-egnote { text-align:center; font-size:11.5px !important; font-style:italic; opacity:.68; margin:-8px 0 13px !important; }
   .at-sheet-more { display:block; width:100%; text-align:left; background:color-mix(in srgb, var(--accent) 9%, transparent);
     border:1px solid color-mix(in srgb, var(--accent) 30%, transparent); color:var(--text); font-size:12.5px; font-weight:700;
     padding:9px 12px; border-radius:10px; cursor:pointer; margin:0 0 12px; }
@@ -1571,6 +1617,13 @@ export function TreeStyle() {
   @media (max-width:640px) {
     .at-box { padding:11px; border-radius:12px; }
     .at-box-h { flex-direction:column; gap:10px; }
+    /* THE ⓘ STAYS ON THE TITLE LINE (sweep T6, 2026-08-10). Stacking the header dropped it to its
+       own line at the bottom-left of the box, and on a folder row — which has no switch beside it
+       — that left a lone glyph floating under the text reading as a leftover rather than as
+       "read more about this". Pinned to the row's top-right corner, where it sits on desktop. */
+    .at-box-h { position:relative; }
+    .at-box-h > .at-i.corner { position:absolute; top:0; right:0; margin:0; }
+    .at-box-t { padding-right:26px; }
     .at-segs.wide, .at-chips { max-width:100%; justify-content:flex-start; }
     .at-chips-note { text-align:left; }
     .at-som { max-width:100%; width:100%; align-items:flex-start; }

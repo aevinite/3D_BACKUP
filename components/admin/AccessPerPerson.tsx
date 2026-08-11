@@ -123,7 +123,14 @@ export default function AccessPerPerson({ rid }: { rid: string }) {
         <aside className={`app-rail ${pickerOpen ? "" : "folded"}`}>
           <input className="app-search" placeholder="Find a person…" value={query} onChange={(e) => setQuery(e.target.value)} />
           <div className="app-chips">
-            {["all", "manager", "tablet", "kitchen", "owner"].map((r) => (
+            {/* NO "OWNER" CHIP (sweep T6, 2026-08-10). This list comes from /api/owner/staff, whose
+                ASSIGNABLE roles are manager · kitchen · tablet — it deliberately never returns
+                owners, because an owner's account is a different lifecycle managed only on the
+                Owners page. So the chip could only ever answer "Nobody matches that": a control
+                that always returns nothing, which is the small kind of dead switch this screen was
+                rebuilt to remove. An owner's permission rows are read-only anyway and DO show on
+                their profile, opened from /aevinite/owners. */}
+            {["all", "manager", "tablet", "kitchen"].map((r) => (
               <button key={r} className={roleFilter === r ? "on" : ""} onClick={() => setRoleFilter(r)}
                 style={r !== "all" ? { borderColor: roleFilter === r ? ROLE_COLOR[r] : undefined, color: roleFilter === r ? ROLE_COLOR[r] : undefined } : undefined}>
                 {r === "all" ? "Everyone" : ROLE_LABEL[r]}

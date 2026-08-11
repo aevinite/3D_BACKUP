@@ -42,7 +42,7 @@ import { MANAGER_POWER_FLAGS, getOwnerEntitlements } from "@/lib/ownerEntitlemen
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, platformLadder, allModuleLadders, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { tableAssignLadder } from "@/lib/tableAssign";
 import { PERMISSIONS, moduleKey, ABSENT_ON_POWERS } from "@/lib/accessModel";
-import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, type ManagerTabKey } from "@/lib/accessTree";
+import { managerTabsOff, managerTabOn, managerSettingsOff, managerGrantValue, isConfigurableGrant, GRANT_FLAGS, NODE_BY_ID, defOf, MENU_PART_DEFAULTS, type ManagerTabKey } from "@/lib/accessTree";
 import { dashboardReach, clampDashRange, billsReach } from "@/lib/dashRange";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
@@ -246,14 +246,33 @@ type MenuParts = Record<string, boolean>;
 // accident. Before today it was hard-wired "admin only", which made the switch the owner
 // had put on the Access screen a dead one — granting it changed nothing. Now the switch
 // decides for a manager, and only for a manager.
+// ── A MISSING KEY MEANS THE ROW'S DEFAULT, NOT "NO" (fixed by sweep T6, 2026-08-10) ─────────────
+//
+// This used to read: "if the restaurant has ANY stored manager_opts, only an explicit `true`
+// allows". That is a SECOND rule for a missing value, and the Access screen has always used the
+// first one — `nodeValue` → `present(stored, defOf(node))`, i.e. nothing stored ⇒ the row's own
+// default, and eight of the nine rows default to ON.
+//
+// So a restaurant configured BEFORE a sub-option was added had that option stored nowhere, and the
+// two sides answered differently: the screen said ON, this function said NO. Measured on the
+// backup database, 7 of 9 restaurants were affected — six on "Customisation", and pizza-palace on
+// "Customisation", "Change a price" AND "Mark as sold out". An admin read "Change a price: ON",
+// told the restaurant their manager could fix prices, and the manager had no such control, with no
+// switch anywhere able to grant it because the switch already said ON.
+//
+// Both sides now go through MENU_PART_DEFAULTS (lib/accessTree.ts), derived from the same rows the
+// screen draws. A key that IS stored still wins in both directions, so every `false` an admin
+// deliberately set stays exactly as they set it — only "never stored" changes meaning, and it
+// changes to what the admin has been reading all along. Guarded by verify:access so the two
+// resolutions can never drift apart again.
 function resolveMenuParts(role: "admin" | "manager" | "other", mo: Record<string, boolean> | null | undefined): MenuParts {
   const p: MenuParts = {};
-  const configured = !!(mo && typeof mo === "object");
+  const stored = mo && typeof mo === "object" ? mo : null;
   for (const k of MENU_PART_KEYS) {
     p[k] = role === "admin" ? true
       : role !== "manager" ? k !== "edit_3d"
-      : configured ? mo![k] === true
-      : k !== "edit_3d";
+      : typeof stored?.[k] === "boolean" ? stored[k]
+      : MENU_PART_DEFAULTS[k] === true;
   }
   return p;
 }

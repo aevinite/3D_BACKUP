@@ -12,6 +12,9 @@
 // Callers still override id / restaurant_id / the specific flag they're toggling.
 
 import { MODULE_DEFS, TABLET_PERM_KEYS } from "@/lib/accessModel";
+// The channel defaults are DERIVED from the Access screen's own rows, so "what the ⓘ says is the
+// default" and "what a new restaurant actually gets" are one sentence (see below).
+import { CHANNEL_DEFAULTS } from "@/lib/accessTree";
 
 // Columns that must NEVER be inherited from the template restaurant. (Only REAL, nullable
 // settings columns — verified against the live schema.)
@@ -118,7 +121,35 @@ export function cleanClonedSettings(
   base.platform_allowed = false;
   base.platform_owner_control = false;
   base.platform_enabled = true;
-  base.platform_channels = {};
+  // ── THE CHANNELS COME FROM THE ACCESS SCREEN'S OWN DEFAULTS (sweep T6, 2026-08-10) ────────────
+  // This was `{}`, and every reader treats an absent channel as OFF (lib/accessState, the editor's
+  // simulate path, lib/aggregators) — so a new restaurant was born with "Own website" OFF while
+  // that row's ⓘ printed "On by default." Worse, `scripts/set-access-defaults.mjs` writes
+  // `node.def`, so "reset this restaurant to factory defaults" would have switched an inbound
+  // order channel ON — a screen and a repair tool disagreeing about the same fact, which is the
+  // dead-switch family this model exists to remove. Derived from CHANNEL_DEFAULTS (own website ON,
+  // Zomato + Swiggy OFF — each needs that company's account), so a channel added to the tree is
+  // seeded correctly on the day it is added, with no second list to keep in step.
+  //
+  // Behaviour-safe: the website channel has NO inbound path at all today — the only webhook is
+  // /api/aggregators/webhook/[source], which accepts zomato|swiggy only, is dormant behind the
+  // backend-only `aggregators` flag, and requires a shared secret. This makes the SCREEN honest;
+  // it does not open a door.
+  base.platform_channels = { ...CHANNEL_DEFAULTS };
+
+  // ── NOT A PROBLEM — REJECTED (owner, 2026-08-11): a new restaurant DOES inherit restaurant #1's
+  // guest-menu settings, and that is deliberate ─────────────────────────────────────────────────
+  // Sweep T6 reported it as a fault (2026-08-10): `menu_enabled`, `sessions_enabled`,
+  // `bubbles_enabled`, `menu_default_layout`, `menu_default_mode`, `menu_languages`,
+  // `menu_currencies` and the three `qop_*` switches have NO explicit default in this file, so a
+  // new restaurant is cloned with whatever the template restaurant has — today three menu
+  // languages and dining sessions ON, neither of which is the factory default the Access screen
+  // states. The owner's answer was that this is wanted: a new restaurant starting as a copy of the
+  // flagship's guest-menu setup is a useful starting point, and the admin changes what differs on
+  // the Access screen afterwards. So do NOT add explicit defaults for these columns, and do not
+  // "fix" the drift they show against `node.def` — see docs/REJECTED-IDEAS.md R8. The tax, tablet,
+  // module and channel columns above are a different matter and stay explicit: those are money,
+  // permissions and third-party accounts, not a look-and-feel starting point.
   // The auto-print-KOT capability itself (not just its entitlement) must also start OFF, so a
   // later entitlement grant doesn't immediately auto-print KOTs without the owner choosing to. (mig 107.)
   base.auto_print_kot = false;

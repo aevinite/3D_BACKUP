@@ -17,15 +17,14 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import {
   SETTINGS_COLUMNS, FEATURE_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS,
-  SECTION_ENTITLEMENTS, TAB_KEYS, type TreeState,
+  SECTION_ENTITLEMENTS, TAB_ALLOWED, KNOWN_CONFIG_IDS, type TreeState,
 } from "@/lib/accessTree";
 
 // settings.features keys the model knows about, PLUS "ratings", which the Ratings CHOICE
 // mirrors (see extraPatch in lib/accessTree.ts).
 const KNOWN_FEATURES = new Set([...FEATURE_KEYS, "ratings"]);
-const TAB_ALLOWED: Record<string, Set<string>> = TAB_KEYS.reduce((acc, b) => {
-  (acc[b.panel] ||= new Set()).add(b.key); return acc;
-}, {} as Record<string, Set<string>>);
+// TAB_ALLOWED comes from lib/accessTree now — this file and the access-tree route each kept an
+// identical copy of the same reduce, which is where the next drift starts. (sweep T6, 2026-08-10)
 
 const obj = (v: unknown): Record<string, any> => (v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, any>) : {});
 
@@ -75,7 +74,19 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
   const sections: Record<string, boolean> = {};
   for (const k of SECTION_ENTITLEMENTS) if (typeof oe[k] === "boolean") sections[k] = oe[k];
 
-  const cfg = obj(r.access_config);
+  // ── ONLY THE KEYS THIS MODEL OWNS (sweep T6, 2026-08-10) ────────────────────────────────────
+  // `config` used to be the raw `access_config` column, retired ids and all. Measured on backup:
+  // 5,122 of French House's 6,770-byte reply, and 5,088 of Aangan's — ~26 permission names that
+  // were retired months ago and that nothing on this screen can show or change. The same reply is
+  // fetched by the Access screen, again by the Per-person tab, and again by every staff profile
+  // opened. The route already dropped 25 KB of constant JSON for exactly this reason; this is the
+  // rest of the same fat. Narrowed to KNOWN_CONFIG_IDS — the ids the model can legitimately write,
+  // derived from the tree, so a node added there is carried automatically — plus `menus`, which is
+  // the tab lists the screen reads. The stored history is untouched; it just stops riding along.
+  const rawCfg = obj(r.access_config);
+  const cfg: Record<string, any> = {};
+  for (const id of KNOWN_CONFIG_IDS) if (id in rawCfg) cfg[id] = rawCfg[id];
+  if ("menus" in rawCfg) cfg.menus = rawCfg.menus;
   const menus = obj(cfg.menus);
   const tabs: Record<string, Record<string, boolean>> = {};
   for (const panel of Object.keys(TAB_ALLOWED)) {

@@ -128,6 +128,14 @@ export function capsForRole(role: string): Cap[] {
     const walkOwner = (nodes: Node[]) => {
       for (const n of nodes) {
         if (n.bind.t === "section") add({ key: `section:${n.bind.key}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
+        // THE TWO VIEW ROWS INSIDE "Audit & logs" (fixed by sweep T6, 2026-08-10). They are `opt`
+        // binds — access_config.view_logs.owner_opts.{removals,activity} — not section keys, so
+        // this walked straight past them while the comment right here claimed the opposite. The
+        // owner's profile listed 12 rows and Access → Owner showed 14, against this file's own
+        // stated rule ("a person's rows are EXACTLY the rows Access has for their role"). Nothing
+        // was ever mis-granted, because an owner's rows are read-only either way; the profile
+        // simply told a smaller truth than the screen it is supposed to mirror.
+        else if (n.bind.t === "opt") add({ key: `opt:${n.bind.id}.${n.bind.side}.${n.bind.key}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
         else if (n.bind.t === "none" && !n.children?.length) add({ key: `todo:${n.id}`, group: GROUP_OWNER, node: n, pin: false, perPerson: false });
         // Walk INTO everything, folder or page: the sub-views inside "Audit & logs" are pages the
         // owner does or doesn't get, so they belong on their profile too (read-only, like the rest).

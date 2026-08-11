@@ -1,6 +1,9 @@
 # Access screen — the outstanding list (owner, 2026-08-01)
 
-> ✅ **LIVE WORKING SPEC — not history.** 13 of the lines below are still `☐`. Linked from
+> ✅ **LIVE WORKING SPEC — not history.** **9** of the lines below are still `☐`. It claimed 13
+> until 2026-08-11, and there were only ever 12 — three of those were already BUILT and still
+> marked not-started, which sends the next session to rebuild things that are already there.
+> Counted with `grep -c '^- ☐' docs/ACCESS-REDESIGN-SPEC.md`. Linked from
 > `CLAUDE.md`'s Access rule. Until 2026-08-06 the only pointer to this file lived inside
 > `docs/SESSION-CONTEXT.md`, which carries a "do not follow this for new work" banner — so these 13
 > owner requests were invisible to any session that obeyed it.
@@ -90,8 +93,12 @@ Manager menu diagnosis and the rest.
 
 ## I · What a manager may do — two rows leave it
 
-- ☐ **"Change restaurant settings"** — remove completely. Not a permission any more.
-- ☐ **"Manage staff"** — take it OUT of *What a manager may do*.
+- ☑ **"Change restaurant settings"** — remove completely. Not a permission any more.
+  *(Done. `edit_settings` has no node in `lib/accessTree.ts`; the ACTIONS block records the removal in
+  as many words — "is GONE entirely, not moved". Ticked by sweep T6, 2026-08-11.)*
+- ☑ **"Manage staff"** — take it OUT of *What a manager may do*.
+  *(Done. `manage_staff` has no node; it lives split up under "What a manager can manage".
+  Ticked by sweep T6, 2026-08-11.)*
 
 ## J · NEW group: "What a manager can manage"
 
@@ -126,6 +133,8 @@ permission with a real gate — no decoration.
 - ☑ **"What a manager can manage (Settings · manager panel)"** = one row per SETTINGS SECTION of
   the manager panel: Tables · Users · Sections · Billing · Kitchen · Dining sessions. Off ⇒ gone
   from their sidebar AND the endpoints refuse.
-- ☐ **The staff PROFILE** (another session is building it) gets **Access & permissions → What a
+- ☑ **The staff PROFILE** (another session is building it) gets **Access & permissions → What a
   manager can manage**, reading these same keys, so one person's exceptions and the restaurant
   default can never offer different sections. **Do not build the profile — that session owns it.**
+  *(Done. `lib/staffCaps.ts` adds those rows as `GROUP_MGRSET` from the same list, and both
+  per-person screens render them read-only. Ticked by sweep T6, 2026-08-11.)*
