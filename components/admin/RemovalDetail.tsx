@@ -60,12 +60,17 @@ export const KIND_LABEL: Record<string, string> = {
   discount_given: "Discount given", payment_reverted: "Payment un-booked",
   on_the_house: "Settled on the house",
   bill_changed_after_reopen: "Bill changed after a reopen",
+  // A REMOVAL THAT WAS REVERSED SAYS SO, PERMANENTLY (2026-08-11, T7 finding F4). A delete wrote a
+  // permanent audit row; a restore wrote only an Activity-log line, and that log is cleared after at
+  // most 30 days (mig 158, settable to 1 day). So a month later the lasting record showed a bill
+  // removed, with a reason and a person, and nothing anywhere saying it had been put back.
+  order_restored: "Bill put back",
 };
 /** The little glyph each kind wears in a list. Kept beside the words so the two can't drift. */
 export const KIND_ICON: Record<string, string> = {
   order_cancelled: "🎫", order_deleted: "🧾", dish_removed: "🍽", menu_item_deleted: "📕",
   invoice_voided: "↩️", qty_reduced: "➖", discount_given: "％", payment_reverted: "↺",
-  on_the_house: "🎁", bill_changed_after_reopen: "⇄",
+  on_the_house: "🎁", bill_changed_after_reopen: "⇄", order_restored: "♻️",
 };
 const REASON_LABEL: Record<string, string> = {
   mistake: "Punched by mistake", guest_changed: "Guest changed their mind",
@@ -133,7 +138,8 @@ export function RemovalDetail({ r, canRestore, onRestore, restoring }: {
       </>} />
       {r.restaurant_name ? <Row k="Restaurant" v={r.restaurant_name} /> : null}
       <Row k="Reason" v={reason} />
-      {r.amount != null ? <Row k="Value removed" v={<b>{money(r.amount)}</b>} /> : null}
+      {/* A restore PUTS money back, so calling its amount "removed" would read as a second removal. */}
+      {r.amount != null ? <Row k={r.kind === "order_restored" ? "Value put back" : "Value removed"} v={<b>{money(r.amount)}</b>} /> : null}
       {r.device_id ? <Row k="From device" v={<span className="adm-muted" style={{ fontSize: 11.5 }}>{r.device_id}</span>} /> : null}
 
       <Head>Which ticket / bill</Head>

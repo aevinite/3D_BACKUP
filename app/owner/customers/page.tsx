@@ -90,7 +90,17 @@ export default function OwnerCustomers() {
   const [erasing, setErasing] = useState<string | null>(null);
   const erase = useCallback(async (c: Customer) => {
     const label = c.name || c.phone || "this customer";
-    if (!window.confirm(`Erase ${label}?\n\nThis permanently deletes their name, number, visit history and any linked devices. This can't be undone.`)) return;
+    // SAY WHAT SURVIVES, NOT JUST WHAT GOES (2026-08-11, T7 improvement I6). The erase correctly
+    // leaves the SALES alone — a bill has to be kept for years (docs/COMPLIANCE-GUARDRAILS.md §3),
+    // and the name + number were copied onto each bill when it was issued (mig 227), so they are
+    // still on those bills afterwards. The button did not say so, which left an owner unable to
+    // answer a guest honestly about what had actually been removed.
+    if (!window.confirm(
+      `Erase ${label}?\n\n`
+      + `Deleted for good: their name, number, visit history and any linked devices. This can't be undone.\n\n`
+      + `Kept: bills they were already named on. A bill can't be changed once it's issued — the law `
+      + `requires it to be kept — so their name and number stay on those bills.`
+    )) return;
     const key = `${c.restaurant_id}:${c.phone}`;
     setErasing(key);
     try {

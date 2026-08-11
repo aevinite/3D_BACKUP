@@ -15,6 +15,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
+// The admin stays invisible to an owner, in the AUDIT as it already is in the Activity log.
+import { auditForReader, forReader } from "@/lib/auditActor";
 
 export const dynamic = "force-dynamic";
 
@@ -56,7 +58,12 @@ export async function GET(req: NextRequest) {
     const rn = one.restaurant_id
       ? (await sb.from("restaurants").select("name").eq("id", String(one.restaurant_id)).maybeSingle()).data?.name ?? null
       : null;
-    return NextResponse.json({ removal: { ...one, restaurant_name: rn }, canRestore: false });
+    // The detail CARD names the person in its own "Who" row, so it needs the same treatment as the
+    // list — otherwise hiding the admin in the feed only moved the leak one tap deeper.
+    return NextResponse.json({
+      removal: forReader({ ...one, restaurant_name: rn } as { actor?: string | null; actor_role?: string | null }, !!scope.admin),
+      canRestore: false,
+    });
   }
 
   let q = sb.from("deletion_audit").select(COLS).order("at", { ascending: false }).limit(limit);
@@ -83,6 +90,12 @@ export async function GET(req: NextRequest) {
     const rest = await sb.from("restaurants").select("id, name").in("id", ids);
     for (const x of rest.data ?? []) nameById.set(x.id, x.name);
   }
-  const removals = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null }));
+  const removals = auditForReader(
+    rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null })),
+    // An admin acting AS this owner keeps the full record; a real owner never learns Aevidine was
+    // here (CLAUDE.md's standing rule, and the same call /api/owner/oplog makes). The ROW, its
+    // reason and its amount are untouched either way — only the identity is withheld.
+    !!scope.admin,
+  );
   return NextResponse.json({ removals });
 }

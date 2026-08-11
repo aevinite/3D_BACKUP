@@ -203,13 +203,19 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (jobs.length) {
         const oids = [...new Set(jobs.map((j) => j.order_id).filter(Boolean))] as string[];
         const [jo, ji] = await Promise.all([
-          sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items").in("id", oids).eq("restaurant_id", rid),
+          // `.is("deleted_at", null)` — A TICKET REMOVED FROM THE BOOKS IS NOT PRINTED (2026-08-11,
+          // T7 finding F11). The filter below reads "an order deleted since the request has nothing
+          // to print", but it only drops a job whose order ROW is gone, and a soft delete never
+          // removes the row — so a bill deleted between queueing the reprint and the kitchen
+          // claiming it still came out of the printer. Excluded in the query, so a deleted order
+          // simply has no `order` and the existing filter does the rest.
+          sb.from("orders").select("id, kot_no, table_number, created_at, allergies, items").in("id", oids).eq("restaurant_id", rid).is("deleted_at", null),
           sb.from("order_items").select("id, order_id, title, qty, note, options, removed").in("order_id", oids).eq("restaurant_id", rid).order("created_at"),
         ]);
         const byId = new Map(((jo.data || []) as { id: string }[]).map((o) => [o.id, o]));
         printJobs = jobs
           .map((j) => ({ ...j, order: byId.get(j.order_id as string) || null, items: ((ji.data || []) as { order_id: string }[]).filter((r) => r.order_id === j.order_id) }))
-          .filter((j) => j.order); // an order deleted since the request has nothing to print
+          .filter((j) => j.order); // deleted or gone since the request → nothing to print
       }
       return ok({
         printJobs,

@@ -40,7 +40,13 @@ export type RemovalKind =
   // the Audit shows what the bill was worth before, what it is worth now, and what moved
   // (owner, 2026-08-05: "before and after will also be shown in the audit section"). A reopen
   // that adds food RAISES the bill, so without this the trail only ever showed the lower number.
-  | "bill_changed_after_reopen";
+  | "bill_changed_after_reopen"
+  // Also not a removal — the REVERSAL of one. A delete wrote a permanent row here while a restore
+  // wrote only an Activity-log line, and that log is cleared after 30 days at most (mig 158,
+  // settable to 1 day). So a month later the lasting record said a bill had been removed, with a
+  // reason and a person, and carried nothing to say it had been put back — which reads worse than
+  // what actually happened (T7 finding F4, 2026-08-11).
+  | "order_restored";
 
 export type RemovalReason = { code?: string | null; note?: string | null };
 

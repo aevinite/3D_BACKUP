@@ -68,7 +68,14 @@ export type BillSession = {
 // The rate comes from the order's own `tax_rate` (mig 284) so a bill is never re-priced by a rate
 // changed later; with no stamped rate we fall back to the plain `total − discount`, which is what
 // those pre-284 bills charged.
-const netOf = (o: BillOrder) => {
+//
+// EXPORTED because it existed TWICE (2026-08-11, T7 improvement I1): `app/api/admin/bills/route.ts`
+// carried its own copy called `netAmount`, used for the "amount removed" recorded in the permanent
+// audit. The two agreed, but this codebase's whole history is duplicated money rules drifting — the
+// printed bill, the KOT, the banquet sheet, the filing tax split and "the rate this order was
+// charged at" were every one of them consolidated after a copy went its own way. The ledger's
+// figures and the audit's record of what was taken out are the last pair you want disagreeing.
+export const netOf = (o: BillOrder) => {
   const total = Number(o.total) || 0;
   const disc = Number(o.discount) || 0;
   if (disc <= 0) return total;

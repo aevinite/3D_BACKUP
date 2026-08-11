@@ -38,6 +38,10 @@ export default function OwnerKhata() {
   // Which figures the server could NOT read this time (T9 improvement 2). Cleared on every load, so
   // a passing blip disappears from the screen the moment it stops happening.
   const [partial, setPartial] = useState<string[]>([]);
+  // The tiles above always count EVERY open bill (mig 309's aggregate); the list below is bounded to
+  // the biggest 500 people. On a book that long the page has to say so, or an owner reads the list
+  // as the whole book and concludes people are missing (T7 finding F13).
+  const [shown, setShown] = useState<{ of: number; showing: number } | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -50,6 +54,7 @@ export default function OwnerKhata() {
       if (j.error) throw new Error(j.error);
       setCustomers(j.customers || []); setSummary(j.summary || null); setErr(null);
       setPartial(Array.isArray(j.partial) ? j.partial : []);
+      setShown(j.listCapped ? { of: j.summary?.peopleCount || 0, showing: Number(j.peopleShown) || 0 } : null);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
   }, [scopePin]);
 
@@ -82,6 +87,15 @@ export default function OwnerKhata() {
         <div className="adm-stat"><div className="k">Collected today</div><div className="v">{!summary ? "…" : summary.collectedToday === null ? "—" : inr(summary.collectedToday)}</div></div>
         <div className="adm-stat"><div className="k">Collected this month</div><div className="v">{!summary ? "…" : summary.collectedMonth === null ? "—" : inr(summary.collectedMonth)}</div></div>
       </div>
+
+      {/* Not a warning — a plain statement of what the list holds, so the tiles above and the rows
+          below can never seem to contradict each other. */}
+      {shown && (
+        <p className="adm-page-sub" style={{ marginTop: -6, marginBottom: 14 }}>
+          Showing the {shown.showing.toLocaleString("en-IN")} people who owe the most, of{" "}
+          {shown.of.toLocaleString("en-IN")}. The figures above count everyone.
+        </p>
+      )}
 
       {partial.length > 0 && (
         <div className="adm-card" style={{ marginBottom: 14, borderColor: "var(--adm-warn)", display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>

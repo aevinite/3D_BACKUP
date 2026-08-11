@@ -22,6 +22,9 @@ import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail,
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
+// The sort orders, the type chips and the search, shared with the manager panel and the admin
+// console (see the file's header for why it lives in /panels).
+import AUDITSORT from "@/public/panels/auditsort.js";
 
 // One row of the Removals record — same wording as the manager panel's Removals screen
 // (AUDIT_KIND / REMOVAL_REASONS in public/panels/editor/app.js), so the two panels never
@@ -162,18 +165,46 @@ function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval }: {
   removals: Removal[] | null; err: string | null; q: string; setQ: (v: string) => void; onReload: () => void;
   onOpenRemoval: (id: number) => void;
 }) {
-  // Client-side search over what's on screen (the feed is already capped server-side).
-  const needle = q.toLowerCase().trim();
-  const match = (r: Removal) => !needle || [
-    r.kot_no != null ? `kot ${r.kot_no}` : "", r.bill_no != null ? `bill ${r.bill_no}` : "",
-    r.table_number ? `table ${r.table_number}` : "", r.item_title, r.actor, r.reason_note,
-    r.reason_code ? REMOVAL_REASON[r.reason_code] : "", (REMOVAL_KIND[r.kind] || [])[1], r.restaurant_name,
-  ].filter(Boolean).some((v) => String(v).toLowerCase().includes(needle));
-  const list = (removals || []).filter(match);
+  // SORT + FILTER BY TYPE (owner, 2026-08-11: "make something like sort thing where everything can
+  // be sorted, like what is list of what"). Both come from /panels/auditsort.js — the SAME module the
+  // manager panel and the admin console use — so the one record cannot answer three different ways.
+  // All of it runs on rows already in hand: the feed is capped server-side, so re-sorting or picking
+  // a type costs no request and no egress.
+  const [kind, setKind] = useState("");
+  const [sort, setSort] = useState(AUDITSORT.DEFAULT_SORT);
+
+  // Chips are built from the WHOLE feed, not the filtered slice — a chip's count must not change
+  // when you tap it, and a type must stay reachable once you have narrowed to another one.
+  const chips = AUDITSORT.kindCounts(removals || [], KIND_LABEL, KIND_ICON);
+  // A type that vanished from the feed (a stale chip after Refresh) must not leave the list empty
+  // with no way back — fall back to All.
+  const activeKind = kind && chips.some((c) => c.kind === kind) ? kind : "";
+  const list = AUDITSORT.view(removals || [], {
+    kind: activeKind, q, sort, kindLabel: KIND_LABEL, reasonLabel: REMOVAL_REASON,
+  });
+  // What the visible rows come to in money — the figure an owner is really after when they pick
+  // "Deleted bills". Only shown when there is money on them at all (a dish off the menu has none).
+  const shownMoney = AUDITSORT.sumAmount(list);
   const cols = "1.4fr 1fr auto";
 
   return (
     <div className="adm-card">
+      {/* WHAT IS THE LIST OF WHAT — one chip per type present, with its count. Only types that
+          actually have rows are offered, so there is never a "0" chip to tap. */}
+      {chips.length > 1 && (
+        <div className="own-range aud-chips" style={{ marginBottom: 10, flexWrap: "wrap" }}>
+          <button className={activeKind === "" ? "on" : ""} onClick={() => setKind("")}>
+            All <i>{(removals || []).length}</i>
+          </button>
+          {chips.map((c) => (
+            <button key={c.kind} className={activeKind === c.kind ? "on" : ""} onClick={() => setKind(c.kind)}
+              title={`Show only: ${c.label}`}>
+              <span aria-hidden="true">{c.icon}</span> {c.label} <i>{c.count}</i>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <input
           value={q}
@@ -182,8 +213,24 @@ function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval }: {
           aria-label="Search the removals record"
           style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}
         />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+          <span className="adm-muted">Sort</span>
+          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort the removals record"
+            style={{ padding: "7px 8px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}>
+            {AUDITSORT.SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        </label>
         <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
       </div>
+
+      {/* What is on screen, in one line — so picking "Deleted bills" answers "how much?" too. */}
+      {list.length > 0 && (
+        <p className="adm-muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
+          {list.length.toLocaleString("en-IN")} {list.length === 1 ? "record" : "records"}
+          {activeKind ? ` · ${KIND_LABEL[activeKind] || activeKind}` : ""}
+          {shownMoney > 0 ? ` · ${inr(shownMoney)} in total` : ""}
+        </p>
+      )}
 
       {err && removals === null ? (
         <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>
@@ -193,7 +240,15 @@ function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval }: {
       ) : removals === null ? (
         <div className="adm-empty">Loading…</div>
       ) : list.length === 0 ? (
-        <div className="adm-empty">{needle ? "Nothing matches that." : "Nothing has been removed yet — this list fills itself as it happens."}</div>
+        /* Three different empty states, because "nothing matches" and "nothing has happened" are
+           different facts — and a narrowed type has a way back out of it. */
+        <div className="adm-empty">
+          {q.trim()
+            ? "Nothing matches that."
+            : activeKind
+              ? <>Nothing of that kind. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setKind("")}>Show all</button></>
+              : "Nothing has been removed yet — this list fills itself as it happens."}
+        </div>
       ) : (
         <div className="adm-logwrap">
           <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>What was removed</div><div>Why · by whom</div><div>When</div></div>

@@ -3712,6 +3712,28 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm .own-range { display: inline-flex; background: var(--card); border: var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
 .adm .own-range button { background: transparent; color: var(--muted); border: none; padding: 5px 11px; border-radius: 7px; font-size: 12px; font-weight: 700; cursor: pointer; }
 .adm .own-range button.on { background: var(--accent); color: var(--accent-on, #fff); }
+/* ── Audit (removals) type chips — "what is list of what" (owner, 2026-08-11) ──────────────
+   Modelled on .own-range above, but a WRAPPING row rather than a segmented pill: there is one
+   chip per removal type present, so on a busy restaurant there are six or seven and they have to
+   fall onto a second line on a phone. A segmented pill background stretched across a wrapped row
+   reads as a broken control, so each chip carries its own border instead.
+   Every colour is an existing declared token (--card / --border / --accent / --accent-on / --muted
+   / --text), so the chips are correct in BOTH skins — an undeclared var() here would have pinned
+   them to one skin forever. */
+.adm .aud-chips { display: flex; flex-wrap: wrap; background: transparent; border: 0; padding: 0; gap: 6px; }
+.adm .aud-chips button {
+  background: var(--card); color: var(--muted); border: var(--border); border-radius: 999px;
+  padding: 5px 11px; font-size: 12px; font-weight: 700; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.adm .aud-chips button:hover { color: var(--text); }
+.adm .aud-chips button.on { background: var(--accent); color: var(--accent-on, #fff); border-color: transparent; }
+/* The count sits in its own softer pill, so "Deleted bills 12" reads as a label and a number
+   rather than one long phrase — and stays legible on the selected (accent) chip too. */
+.adm .aud-chips button i {
+  font-style: normal; font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
 .adm .own-crumb .lnk { background: transparent; }
 .adm .own-crumb .cur { color: var(--text); background: transparent; }
 /* Print: drop the panel chrome + report controls so a printed/PDF'd report is
