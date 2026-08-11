@@ -441,6 +441,23 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
       .ow2-kt .k { min-width: 0; }
       .ow2-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
       .ow2-spark { position: absolute; left: 0; right: 0; bottom: 0; opacity: .55; pointer-events: none; overflow: hidden; border-radius: 0 0 12px 12px; }
+      /* ── "TODAY SO FAR" USED TO BREAK IN HALF ON A PHONE ───────────────────────────────
+         Two tiles per row at 360px is a 162px tile, and four words beside the "● live" pill
+         do not fit one line at the size the label is really drawn at.
+         It took three goes and both traps this file already documents (T5, 2026-08-11):
+           1. a two-class selector (.ow2-kt .k) loses to .owx .adm-stat .k in globals.css,
+              which is three classes and comes later — so the rule silently did nothing;
+           2. writing the four-class version in the PAGE's scoped style block did nothing
+              either, because styled-jsx stamps its jsx- class only on markup written in
+              that component, and .owx belongs to the shell — the same reason .hq-table th
+              needed :global() lower down.
+         So it lives HERE, in this component's *global* block, next to the padding rule that
+         escaped trap 1 the same way. Measured on the deployed phone viewport, not read off
+         the source. The label itself stays wrappable: "LOST TO CANCELLATIONS" has to break. */
+      @media (max-width: 760px) {
+        .owx .adm-stat.ow2-kpi .ow2-kt { flex-wrap: wrap; row-gap: 3px; }
+        .owx .adm-stat.ow2-kpi .ow2-kt .k { font-size: 9.5px; letter-spacing: .02em; }
+      }
     `}</style>
   );
   return href ? (
@@ -1784,21 +1801,6 @@ export default function OwnerDashboard() {
         @media (max-width: 1080px) { :global(.ow2-stats) { grid-template-columns: repeat(3, 1fr) !important; } }
         @media (max-width: 760px) {
           :global(.ow2-stats) { grid-template-columns: repeat(2, 1fr) !important; }
-          /* "TODAY SO FAR" broke to "TODAY SO / FAR" on a 360px phone: two tiles per row is
-             162px, and those four words plus the "● live" pill do not fit one line at the size
-             the label is actually drawn at.
-             FOUR CLASSES, and that is the whole point (T5, 2026-08-11). The first attempt wrote
-             a two-class selector (.ow2-kt .k, specificity 0,2,0) — and .owx .adm-stat .k in
-             app/globals.css is 0,3,0 and comes later, so the rule never applied and the label
-             kept its 11.5px. That is the same cascade trap the .owx .adm-stat.ow2-kpi
-             padding-bottom rule above was written three-classes-deep to escape; measured on the
-             deployed site before and after.
-             (And NO BACKTICKS in here — this CSS is a template literal; one closes the string
-             and the build dies with TS1381. The note at the top of .ow2-two says so, and this
-             comment is where I proved it.)
-             The label stays wrappable on purpose — "LOST TO CANCELLATIONS" has to break. */
-          .ow2-kt { flex-wrap: wrap; row-gap: 3px; }
-          .owx .adm-stat.ow2-kpi .ow2-kt .k { font-size: 9.5px; letter-spacing: .02em; }
           .ow2-two, .ow2-callouts { grid-template-columns: minmax(0, 1fr); }
           /* by CLASS, never by nth-child — a row whose cells don't line up 1:1 with the header
              (the "figures hidden" row) used to lose the wrong ones. And :global, because the
