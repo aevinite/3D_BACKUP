@@ -74,8 +74,12 @@
   <script src="/panels/connbadge.js?v=c1df4baa"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
-       offline.js must load AFTER outbox.js (it reads the queue) and after backstack.js
-       is available for the back button. -->
+       offline.js must load AFTER outbox.js (it reads the queue) and BEFORE app.js.
+       It does NOT need backstack.js loaded first, which is why backstack.js sits just below:
+       offline.js only reaches for LFH_BACK lazily, inside its "needs you" sheet, and it boots on
+       DOMContentLoaded — by which time every tag here has run. (The old wording claimed the
+       opposite of the actual order in this file and would have sent the next person reordering
+       these tags the wrong way. T4 sweep, 2026-08-11.) -->
   <script src="/panels/swreg.js?v=c82762b3"></script>
   <script src="/panels/offline.js?v=01332551"></script>
   <!-- backstack: the phone's hardware BACK closes the top layer (order mode, drawer) instead of leaving. -->
@@ -96,6 +100,6 @@
        "how much percent was taken off" — so the waiter's screen quotes the same figure as the
        manager's bill and the paper. It must load BEFORE app.js, which calls it. -->
   <script src="/panels/billdoc.js?v=d2e0ad7c"></script>
-  <script src="app.js?v=13e3ef47"></script>
+  <script src="app.js?v=8e815741"></script>
 </body>
 </html>

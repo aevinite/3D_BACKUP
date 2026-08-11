@@ -119,8 +119,30 @@ const timeAgo = (ts) => {
   if (m == null) return "";               // say nothing rather than nonsense
   if (m < 1) return "just now";
   if (m < 60) return m + "m";
-  return Math.floor(m / 60) + "h " + (m % 60) + "m";
+  const h = Math.floor(m / 60);
+  // PAST A DAY, SAY DAYS (T4 sweep, 2026-08-11). There was no day step, so a ticket on an overnight
+  // open session read "117h 48m" — measured on ALL TWENTY tickets of the live board, the oldest at
+  // 117h — and a cook had to divide by 24 to learn it was nearly five days old. At a glance "117h"
+  // reads as roughly a hundred minutes, which is the opposite of the truth; "4d 21h" is right
+  // immediately. The minutes are deliberately dropped past a day: nobody needs them at that range
+  // and the ticket header is a tight space. Under 24h nothing changes at all.
+  if (h >= 24) return Math.floor(h / 24) + "d " + (h % 24) + "h";
+  return h + "h " + (m % 60) + "m";
 };
+// WALL VIEW IS FIRST-COME-FIRST-SERVED, so its sort key must never be NaN (T4 sweep, 2026-08-11).
+// `new Date(bad) - new Date(good)` is NaN, and a comparator that answers NaN leaves the ticket
+// wherever the sort engine happens to drop it — the board silently stops being FIFO, which is the
+// one thing the wall exists to be. ageMinutes() above was hardened against exactly this value
+// (a platform/aggregator ticket's created_at comes from a webhook, so it is the realistic way in);
+// the sort that decides WHAT A COOK COOKS FIRST was not. An undateable ticket sorts LAST, never
+// first: a row we cannot place in the queue must not be allowed to jump it.
+const orderTime = (ts) => {
+  const t = ts == null || ts === "" ? NaN : new Date(ts).getTime();
+  return Number.isFinite(t) ? t : Infinity;
+};
+// Compared, not subtracted — Infinity − Infinity is NaN, so two undateable tickets would put the
+// comparator right back where it started.
+const cmpTime = (x, y) => { const a = orderTime(x), b = orderTime(y); return a < b ? -1 : a > b ? 1 : 0; };
 // A STUCK TICKET MUST NOT LOOK LIKE A FRESH ONE (T4 sweep, 2026-08-04). The live board carried a
 // Cooking ticket 44 HOURS old and another at 13h, rendered in exactly the same small grey text as
 // "5m" — so a cook scanning the board had no signal that anything had been sitting. These are real
@@ -467,8 +489,10 @@ function renderWall() {
     const phase = orderPhase(o, rows);
     if (phase !== "served") live.push({ o, rows, phase });
   });
-  live.sort((a, b) => ((a.phase === "ready") - (b.phase === "ready")) || (new Date(a.o.created_at) - new Date(b.o.created_at)));
-  const plat = (state.platform || []).slice().sort((a, b) => ((platPhase(a.status) === "ready") - (platPhase(b.status) === "ready")) || (new Date(a.created_at) - new Date(b.created_at)));
+  // cmpTime, not a bare date subtraction — see the note on orderTime(): a webhook timestamp we
+  // can't read used to make this comparator answer NaN and quietly un-FIFO the board.
+  live.sort((a, b) => ((a.phase === "ready") - (b.phase === "ready")) || cmpTime(a.o.created_at, b.o.created_at));
+  const plat = (state.platform || []).slice().sort((a, b) => ((platPhase(a.status) === "ready") - (platPhase(b.status) === "ready")) || cmpTime(a.created_at, b.created_at));
   const desired = live.map(({ o, rows }) => ({ id: String(o.id), html: ticketHtml(o, rows) }))
     .concat(plat.map((p) => ({ id: "plat-" + p.id, html: platTicketHtml(p) })));
   reconcileList($("#wall"), desired);
@@ -1180,7 +1204,32 @@ if (typeof document !== "undefined") {
   window.addEventListener("lfh:stale-refresh", () => { if (!document.hidden) load().catch(() => {}); });
 }
 
-async function load() {
+// Coalesce concurrent load() calls onto ONE in-flight board read (T4 sweep, 2026-08-11).
+//
+// Every open of this panel did TWO whole-board reads: the explicit load() near the bottom of this
+// file, and LFH_RT.start's fireAll() → the ops/menu handlers → fullSoon(), whose FIRST call waits
+// 0ms (lastFullAt is still 0). `loadSeq` stopped the loser PAINTING; it never stopped the read —
+// and /board is by far the biggest thing this panel fetches (orders + items + every menu item +
+// platform tickets + settings + restaurant + print jobs). The same gap let the reconnect flush, the
+// stale-refresh, the 60s backstop and catchUp overlap into concurrent board reads during a rush,
+// which is exactly when the database can least afford it.
+//
+// This is the shape the TABLET has used since 2026-07-09 and the kitchen never got: everyone shares
+// one fetch, plus at most one TRAILING refresh so a change that landed mid-flight isn't missed.
+// Post-write reconciles stay correct — if nothing is in flight they start a fresh fetch that
+// includes their write; if one is running, the trailing refresh repaints server truth right after,
+// and loadSeq still guarantees latest-wins. load() still REJECTS when the read fails, which is what
+// backoffPoll/catchUp back off on.
+let loadInFlight = null, loadQueued = false;
+function load() {
+  if (loadInFlight) { loadQueued = true; return loadInFlight; }
+  const p = loadImpl();
+  loadInFlight = p;
+  // Attach our own handlers so `p` is never an unhandled rejection, then chain the trailing refresh.
+  p.then(() => {}, () => {}).then(() => { loadInFlight = null; if (loadQueued) { loadQueued = false; load(); } });
+  return p;
+}
+async function loadImpl() {
   const seq = ++loadSeq;
   const data = await api("GET", "/board");
   if (seq !== loadSeq) return; // a newer refresh started — drop this stale response
@@ -1462,6 +1511,16 @@ if (window.LFH_RT) {
   let lastFullAt = 0, fullTimer = null;
   const fullSoon = () => {
     if (fullTimer) return;
+    // A READ THAT IS ALREADY RUNNING COVERS THIS EVENT (T4 sweep, 2026-08-11). Measured on boot:
+    // THREE whole-board reads, not one — the explicit load() at the bottom of this file, then the
+    // `ops` handler's fireAll (wait 0ms, because lastFullAt is still 0), then the `menu` handler's,
+    // which found fullTimer already cleared and so scheduled a THIRD read 4s later. The 4s rate
+    // guard can only dedup reloads that are still PENDING; it knew nothing about one in flight.
+    // Handing it to the coalescer instead is both cheaper and safer than a time-based skip: NOTHING
+    // IS DROPPED — loadQueued forces exactly one trailing refresh after the in-flight read lands, so
+    // a change that committed after that read started is still picked up (a blind "skip if a read
+    // finished <1.5s ago" would silently lose it until the 60s backstop, which is bug M9 all over).
+    if (loadInFlight) { loadQueued = true; return; }
     const wait = Math.max(0, lastFullAt + 4000 - Date.now());
     fullTimer = setTimeout(() => { fullTimer = null; lastFullAt = Date.now(); load().catch(() => {}); }, wait);
   };

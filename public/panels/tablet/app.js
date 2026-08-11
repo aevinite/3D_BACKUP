@@ -1932,7 +1932,15 @@ function renderPanel() {
   document.querySelectorAll(".talg[data-alg]").forEach((chip) => (chip.onclick = async () => {
     const id = chip.dataset.alg;
     const o = (state.data.orders || []).find((x) => x.id === id);
-    if (!o) return;
+    // NEVER A SILENT RETURN ON A TAP (owner's standing rule; T4 sweep, 2026-08-11). A poll, a
+    // realtime breadcrumb or a reconcile can land between the paint and the finger and replace
+    // state.data.orders with fresh rows — so an order that has just been moved, voided or settled
+    // leaves this chip pointing at an id that matches nothing. The tap then did nothing and SAID
+    // nothing, which is indistinguishable from a broken button and leaves no trace to debug. The
+    // KITCHEN's ✓ was fixed for exactly this on 2026-08-04 (kitchen/app.js markItemReady); the four
+    // taps on this panel were the ones left behind, and an ALLERGY chip is the worst of them to
+    // drop quietly. This is a defensive path: the chip only renders for an order in state.
+    if (!o) { toast("That order just changed — refreshing this table.", false); load().catch(() => {}); return; }
     const wasAllergies = Array.isArray(o.allergies) ? [...o.allergies] : []; // what the screen showed
     const cur = new Set(wasAllergies.map((x) => String(x).toLowerCase()));
     // ＋ Other → ask for the word, then treat it exactly like tapping a standard chip on.
@@ -2493,8 +2501,21 @@ function renderMoveOrderPicker(t) {
 function renderMoveOrderTarget(t, orderId) {
   const n = tableCount();
   const tiles = [];
+  // NEVER OFFER A TABLE THIS ORDER ALREADY SHARES A BILL WITH (T4 sweep, 2026-08-11). Two rules,
+  // both of them the ones renderMoveItemTarget already applies and explains ("a button that exists
+  // only to fail"):
+  //   · a PARTY MATE — while T6+T7 are one party, T7 was listed on T6's picker, labelled with the
+  //     party's own state ("Preparing"). The server resolves a merged destination to the party head
+  //     (mig 264, lfh_merge_parent_table) and then refuses a move inside the same party with reason
+  //     'same_table', which reaches the waiter as "That order is already on that table." The only
+  //     possible outcome of that button was a confusing refusal.
+  //   · ANOTHER party's merged CHILD — the move works, but it silently lands on the PARENT's bill
+  //     while the button said the child's number. The parent is already in this list under its own
+  //     number, so nothing is lost by dropping the child and the destination stops being a lie.
+  // partyTablesOf(t) includes t itself, so this also covers the old `String(i) === String(t)` test.
+  const mates = new Set(partyTablesOf(t).map(String));
   for (let i = 1; i <= n; i++) {
-    if (String(i) === String(t) || !inMySection(i)) continue;  // sections: only my own tables
+    if (mates.has(String(i)) || mergeParentOf(i) || !inMySection(i)) continue;  // own party; other parties' children; sections: only my own tables
     const st = tileState(i);
     tiles.push(`<button class="btn shiftpick" data-moveto="${i}">T${i}<br><span class="muted small">${st.label}</span></button>`);
   }
@@ -2559,7 +2580,12 @@ const act = async (fn) => {
 let qtyReconcileTimer = null;
 function bumpItemQty(itemId, delta) {
   const it = (state.data.items || []).find((x) => x.id === itemId);
-  if (!it) return;
+  // NEVER A SILENT RETURN ON A TAP — see the note on the allergy chip above. This one is the most
+  // reachable of the four: the stepper's OWN 700ms reconcile calls load(), which replaces
+  // state.data.items, so a waiter tapping ＋ four times quickly can have the row swapped under
+  // them mid-run. Every other refusal in this function already speaks ("Use 🗑 to remove the
+  // dish"); this was the one path that went quiet.
+  if (!it) { toast("That dish just changed — refreshing this table.", false); load().catch(() => {}); return; }
   const cur = Number(it.qty) || 1;
   let next = cur + delta;
   if (next < 1) { toast("Use 🗑 to remove the dish", false); return; }
@@ -3487,7 +3513,10 @@ function wireOrderNav() {
   });
   btns.forEach((b) => (b.onclick = () => {
     const s = sc.querySelector(`.om-sec[data-cat="${(window.CSS && CSS.escape) ? CSS.escape(b.dataset.cat) : b.dataset.cat}"]`);
-    if (!s) return;
+    // A category chip whose section isn't on screen — it should be impossible (the chips are built
+    // from the same sections), but "should be impossible" is what a silent return always says. If it
+    // ever fires we hear about it instead of the waiter tapping a dead chip. T4 sweep, 2026-08-11.
+    if (!s) { toast("Nothing in that group right now.", false); return; }
     state._omMute = Date.now() + 200;
     setOn(b.dataset.cat);
     // Instant, not smooth: overrides the CSS scroll-behavior so the jump lands in one frame.
@@ -3587,7 +3616,10 @@ function bindDishButtons() {
   document.querySelectorAll("[data-dishedit]").forEach((el) => (el.onclick = async (e) => {
     e.preventDefault(); e.stopPropagation();
     const d = state.data.dishes.find((x) => x.id === el.dataset.dishedit);
-    if (!d) return;
+    // The SAME sentence the tile's own tap already used, two handlers below — the ✎ on a tile was
+    // silent while the tile itself spoke, for the identical cause (a `menu` breadcrumb refetches the
+    // dish list mid-order; updateDishAvailability() runs on that very event). T4 sweep, 2026-08-11.
+    if (!d) { toast("That dish just changed — refreshing the menu", false); renderOrderMode(); return; }
     if (d.open_price) { await addOpenPriceDish(d); return; } // ask the price, same as a tap
     renderDishOptions(d, null);
   }));
@@ -3795,7 +3827,12 @@ function updateOrderCart() {
   c.querySelectorAll("[data-edit]").forEach((b) => (b.onclick = async () => {
     const l = state.cart[+b.dataset.edit];
     const d = l && state.data.dishes.find((x) => x.id === l.id);
-    if (!d) return;
+    // A cart LINE whose dish has left the menu (hidden or deleted while this order was being built —
+    // a `menu` breadcrumb refetches the list mid-order). There is nothing to open, but the waiter
+    // must be told, because sending it will be refused server-side ('unknown_item') and they'd have
+    // no idea why. The line is deliberately LEFT in the cart: taking it out from under them is a
+    // second surprise, and removing it is their decision. T4 sweep, 2026-08-11.
+    if (!d) { toast("That dish has left the menu — remove this line and pick another.", false); return; }
     // Open-price line: ✎ re-asks the price (there are no size/extras to pick), instead of the
     // options popup — which would have no groups and reset this line's price to 0.
     if (l.open_price || d.open_price) {
@@ -4682,8 +4719,23 @@ if (window.LFH_RT) {
   }});
   // Backup floor sync every 60s (slim). Every ~10th minute also flag the menu stale so the next
   // load refetches dishes — a safety-net that self-heals a missed realtime `menu` event. (perf 2026-07-20)
+  // …but NOT WHILE THE TAB IS HIDDEN (T4 sweep, 2026-08-11). A waiter's tablet spends much of a
+  // shift asleep, locked, or behind another app, and this fired a WHOLE-FLOOR read every 60 seconds
+  // for as long as the page was open — with every tenth one a FULL read that re-downloads the dish
+  // list (~50KB of the ~77KB, per the perf note in loadImpl). One forgotten tablet is ~1,440 floor
+  // reads and ~144 menu downloads a day, all of them at moments nobody is looking at the screen.
+  // Nothing is missed by stopping: realtime.js fires a full refetch on visibilitychange/focus/
+  // pageshow, and it tears the socket down after 2 minutes hidden — so a hidden tab has no live
+  // connection AND was polling into the void. The KITCHEN's identical backstop has had this guard
+  // all along ("a backgrounded wall display kept firing a full-board read every 60s forever");
+  // only the tablet was left out. The 10-minute menu self-heal counts VISIBLE ticks, which is
+  // right: it exists to repair a `menu` breadcrumb missed while someone was watching.
   let _menuHealN = 0;
-  setInterval(() => { if ((++_menuHealN % 10) === 0) state._menuStale = true; load().catch(() => {}); }, 60000);
+  setInterval(() => {
+    if (document.hidden) return;
+    if ((++_menuHealN % 10) === 0) state._menuStale = true;
+    load().catch(() => {});
+  }, 60000);
   // THE CATCH-UP POLL — the tablet was the ONLY live panel without it (T4 sweep, 2026-08-04).
   // When the WebSocket never comes up or dies (a restaurant's wifi blocking WebSockets, a hotel
   // or office network, a database that dropped its realtime connection), the 60s backstop above
