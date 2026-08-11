@@ -160,6 +160,22 @@ html, body { overflow-x: hidden; } /* belt-and-braces: never let a stray wide ch
 .age.age-late { color: var(--red); font-weight: 800; }
 html[data-theme="light"] .age.age-warn { color: #b45309; }
 html[data-theme="light"] .age.age-late { color: #b91c1c; }
+/* THE THIRD STEP IS A SHAPE AND A WORD, NOT A HUE (owner, 2026-08-11: a printer is black and white,
+   so "colour is no use" — and he is right about more than paper. The two steps above are hue-only,
+   which fails a colour-blind cook, a sun-washed pass and a cheap screen alike). Anything from an
+   earlier day gets a bordered box with DAY in it, so it is legible with the colour thrown away
+   entirely — which is exactly the test. currentColor for the border and the chip, so it stays
+   correct in both skins without a second value to keep in step. */
+.age.age-stale { color: var(--red); font-weight: 800; border: 1px solid currentColor; border-radius: 6px;
+  padding: 1px 6px; display: inline-flex; align-items: center; gap: 5px; line-height: 1.35; }
+/* NO FILLED CHIP. The first version was `background: currentColor; color: var(--panel)` — and
+   currentColor on that rule resolves against the chip's OWN color, which the very next declaration
+   set to var(--panel). Background and text came out the SAME colour and the word was invisible in
+   both skins (measured rgb(33,25,19) on rgb(33,25,19)). The word inherits the box's colour instead:
+   nothing to keep in step, nothing to resolve wrong, and the outer border already supplies the
+   shape. Small + heavy + spaced is the hierarchy this panel's printed ticket uses too. */
+.age.age-stale .age-day { font-style: normal; font-size: 9.5px; font-weight: 900; letter-spacing: .09em; }
+html[data-theme="light"] .age.age-stale { color: #b91c1c; }
 /* Manual reprint (🖨) — a secondary control, so it's subtle and small; only rendered when KOT
    printing is enabled for the restaurant. Sits after the age in the ticket header. */
 .reprint { margin-left: 8px; background: transparent; border: 1px solid var(--line); color: var(--muted); border-radius: 8px; padding: 3px 9px; font-size: 14px; line-height: 1; cursor: pointer; flex: 0 0 auto; }

@@ -11198,7 +11198,9 @@ function printKotTicket(o) {
       reprint: true,
       kot: o.kot_no != null ? o.kot_no : "—",
       tableLabel: tablePrintLabel(o.table_number),
-      when: o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+      // Shared with the kitchen (LFH_BILLDOC.kotWhen): carries the DAY when the ticket is not
+      // from today, because a thermal head is black and white and cannot say it any other way.
+      when: LFH_BILLDOC.kotWhen(o.created_at),
       linesHtml: orderItemRows(o).map(kotLineHtml).join(""),
       allergHtml: allerg,
       // THE BIG DUPLICATE BANNER, not just a word in the header (2026-08-05). This path is reached
@@ -11330,7 +11332,9 @@ async function printJobHere(id, btn) {
       head: "KITCHEN TICKET",
       kot: o.kot_no ?? "—",
       tableLabel: tablePrintLabel(o.table_number),
-      when: o.created_at ? new Date(o.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "",
+      // Shared with the kitchen (LFH_BILLDOC.kotWhen): carries the DAY when the ticket is not
+      // from today, because a thermal head is black and white and cannot say it any other way.
+      when: LFH_BILLDOC.kotWhen(o.created_at),
       lines: rows,
       allergies: Array.isArray(o.allergies) ? o.allergies : [],
       reprint: r.job ? r.job.reprint !== false : true,
