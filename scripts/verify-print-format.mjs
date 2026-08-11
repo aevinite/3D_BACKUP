@@ -503,6 +503,31 @@ console.log("\n── the bill a person is actually handed (T7 sweep) ──");
         "on a tax invoice the words are the controlling figure — they must name the same amount AND the currency");
   }
 
+  // 9b. A MIXED-RATE BILL KEEPS THE RESTAURANT'S OWN TAX COMPONENTS (T7 F1, 2026-08-11).
+  //     It used to print one flat "GST 18%" / "GST 5%" line per rate, dropping the central/state
+  //     split every other bill from the same printer shows. The first fix scaled the CGST/SGST
+  //     HALVES, which silently lost a third component — a restaurant on CGST+SGST+CESS printed
+  //     "CGST 9% / SGST 9%" on its 18% slice and no cess at all. The shape now comes from the
+  //     restaurant's configured components, and each rate's rows still foot to that rate's tax.
+  {
+    const ord = (o) => Object.assign({ status: "served", payment_status: "pending", items: [] }, o);
+    const food = (r) => ord({ subtotal: 1000, taxable_base: 1000, tax_rate: r, items: [{ title: "F", qty: 1, price: 1000, tax_mode: "excl" }] });
+    const banq = () => ord({ subtotal: 2000, taxable_base: 2000, tax_rate: 0.18, items: [{ title: "B", qty: 1, price: 2000, tax_mode: "excl" }] });
+    const S3 = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }, { label: "CESS", rate: 1 }] };
+    const os = [food(0.06), banq()];
+    const d = BILLDOC.billData({ settings: S3, restaurant: {}, orders: os, session: {} });
+    const money = BILLDOC.billMoney(os, S3);
+    const labels = d.taxRows.map((r) => r.label);
+    const sum = d.taxRows.reduce((a, r) => a + r.amt, 0);
+    const keptCess = labels.filter((l) => l === "CESS").length === 2;   // one per rate bucket
+    const noFlatGst = !labels.includes("GST");
+    const foots = sum === Math.round(money.tax);
+    keptCess && noFlatGst && foots
+      ? ok("a mixed-rate bill splits EACH rate by the restaurant's own components (a cess survives) and still foots")
+      : bad(`mixed rows = ${d.taxRows.map((r) => `${r.label} ${r.rate}% ${r.amt}`).join(" | ")} (sum ${sum}, tax ${money.tax})`,
+        "a tax invoice states WHICH taxes were charged — dropping a component on a two-rate bill understates the split");
+  }
+
   // 10. THE BANQUET TAX COLUMNS FOOT — on a MULTI-LINE bill, exactly.
   //     Check 6 above builds a one-line sheet with a ±0.02 tolerance, so per-line rounding can
   //     never diverge there and it could not see T7 finding F10: every cell was rounded on its own
