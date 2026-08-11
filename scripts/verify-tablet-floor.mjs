@@ -695,6 +695,65 @@ if (READ_ONLY) {
   expect(opened.size === 0, opened.size ? `left ${opened.size} test table(s) open: ${[...opened].join(", ")}` : "every table this run touched was put back");
 }
 
+// ── 12 · A FINGER, NOT A MOUSE — the tiles-per-row cap this run never exercised ────────────
+// WHY THIS EXISTS (T4 improvement 3, 2026-08-11). Every size pass above resizes ONE browser
+// context, and that context reports a MOUSE. The owner's 2026-08-05 rule — "when it is horizontal
+// at least four to five to six can be shown… if there is twelve, then six will be shown" — is
+// implemented as a cap that only applies to a COARSE pointer (floorPerRow / FLOOR_PER_ROW_TOUCH_MAX
+// in tablet/app.js). So every "iPad"/"iPhone" check above measured the 12-per-row DESKTOP layout,
+// and cheerfully reported things like "iPad 1024px: tile 73px" — a size no real iPad will ever draw.
+// 78 checks passed while the one number he actually asked about went untested.
+//
+// So: a SECOND context with hasTouch, which is what makes `(pointer: coarse)` match in Chromium.
+// It asserts the emulation really took effect first — a touch pass that silently ran as a mouse
+// would be worse than no pass at all, since it would look like coverage.
+{
+  const tctx = await browser.newContext({ viewport: { width: 1024, height: 768 }, hasTouch: true, isMobile: false });
+  // loginAs() caches per (base, username) for the whole process, so this reuses the session the run
+  // already has — no second staff login, which is rate-limited and pings the owner's phone.
+  // (Copying cookies across contexts by hand does NOT work here: a row from ctx.cookies() carries
+  //  domain+path, and addCookies rejects those alongside a `url`, so the copy silently added nothing
+  //  and the panel bounced to /login — which is what made the first version of this pass fail.)
+  await loginAs(tctx, "tablet", BASE);
+  const tpage = await tctx.newPage();
+  const terrs = [];
+  tpage.on("pageerror", (e) => terrs.push(String(e)));
+  await tpage.goto(`${BASE}/tablet`, { waitUntil: "domcontentloaded" });
+  let TF = null;
+  for (let i = 0; i < 60 && !TF; i++) { TF = tpage.frames().find((f) => /panels\/tablet/.test(f.url())); if (!TF) await tpage.waitForTimeout(500); }
+  if (!TF) { bad("touch pass: the tablet panel frame never appeared"); }
+  else {
+    await tpage.waitForTimeout(9000);
+    const coarse = await TF.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+    expect(coarse, "touch pass: the browser really reports a coarse pointer (otherwise this pass proves nothing)");
+    for (const [w, h, tag, cap] of [[1194, 834, "touch tablet 1194px", 6], [1024, 768, "touch iPad 1024px", 6]]) {
+      await tpage.setViewportSize({ width: w, height: h });
+      await tpage.waitForTimeout(900);
+      const m = await TF.evaluate(() => {
+        const g = document.getElementById("tiles");
+        const t = g.querySelector(".tile");
+        const r = t ? t.getBoundingClientRect() : null;
+        return {
+          perRow: Number(g.style.getPropertyValue("--per-row").trim()) || 0,
+          cols: getComputedStyle(g).gridTemplateColumns.split(" ").length,
+          w: r ? Math.round(r.width) : 0, h: r ? Math.round(r.height) : 0,
+          clip: [...document.querySelectorAll(".tile")].filter((x) => x.scrollHeight > x.clientHeight + 1).length,
+          ovf: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
+        };
+      });
+      expect(m.perRow > 0 && m.perRow <= cap, `${tag}: at most ${cap} tiles per row on a touch screen (got ${m.perRow})`);
+      expect(m.cols === m.perRow, `${tag}: the grid really draws ${m.perRow} per row (got ${m.cols})`);
+      // 44px is the tappability floor named in lib/floorLayout.ts. A finger needs a bigger square
+      // than a mouse does — that is the whole reason the cap exists.
+      expect(m.w >= 44 && m.h >= 44, `${tag}: tiles are a real finger target (${m.w}×${m.h}, ≥44)`);
+      expect(m.clip === 0, m.clip ? `${tag}: ${m.clip} tile(s) clip their content at touch size` : `${tag}: no tile clips at touch size`);
+      expect(!m.ovf, `${tag}: the page does not scroll sideways on a touch screen`);
+    }
+    expect(terrs.length === 0, terrs.length ? `touch pass page errors: ${terrs.join(" | ")}` : "touch pass: no page errors");
+  }
+  await tctx.close();
+}
+
 expect(errors.length === 0, errors.length ? `page errors: ${errors.join(" | ")}` : "no page errors anywhere in the walk");
 
 await browser.close();
