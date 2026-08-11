@@ -12,10 +12,14 @@ import type { ExportTable, ExportCol } from "@/components/owner/ownerReportDoc";
 
 // Paise only when the amount actually has them (the CGST/SGST halves of an odd tax total),
 // so equal rates print as equal halves; whole-rupee amounts stay clean.
+// The sign goes in FRONT of the whole amount ("−₹2,350"), matching components/admin/shared →
+// inr and lib/money → compactINR. The printed day sheet's "Discounts given" row was the one
+// place still writing "₹-2,350" (T5 re-run, 2026-08-11).
 const inr = (n: number) => {
   const v = Number(n) || 0;
-  const hasPaise = Math.abs(Math.round(v) - v) > 0.005;
-  return "₹" + v.toLocaleString("en-IN", { minimumFractionDigits: hasPaise ? 2 : 0, maximumFractionDigits: 2 });
+  const a = Math.abs(v);
+  const hasPaise = Math.abs(Math.round(a) - a) > 0.005;
+  return (v < 0 ? "−₹" : "₹") + a.toLocaleString("en-IN", { minimumFractionDigits: hasPaise ? 2 : 0, maximumFractionDigits: 2 });
 };
 const nfmt = (n: number) => Math.round(Number(n) || 0).toLocaleString("en-IN");
 /** "8 PM" — the one clock this console writes (mirrors hour12 on the dashboard). */
