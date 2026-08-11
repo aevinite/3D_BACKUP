@@ -673,6 +673,13 @@ else ok("the read/write route derives every allow-list from the model");
   if (!tree.includes("export function nodeExpect")) bad.push("nodeExpect() is gone from the model, so the screen has nothing to send");
   if (bad.length) fail(`two admins can silently overwrite each other on Access & permissions: ${bad.join("; ")}`);
   else ok("a second admin's tap on the same switch is refused, not silently applied");
+  // …AND THE REFUSAL HAS TO READ AS ENGLISH. The gate quotes the value it found, and it was saying
+  // a permission "now says “false”" — a word that appears nowhere on the screen the admin is
+  // looking at. The owner's standing rule is that these lines read like a person wrote them.
+  const clash = read("lib/clash.ts");
+  if (!/typeof v === "boolean"/.test(clash) || !/"pin"/.test(clash))
+    fail("lib/clash.ts describe() no longer says on/off for a switch — a refused permission change would quote \"true\"/\"false\"/\"pin\" at an admin");
+  else ok("a refused permission change is described in the words the screen uses (on / off / manager PIN)");
 }
 
 // ── report ─────────────────────────────────────────────────────────────────

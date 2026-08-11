@@ -240,7 +240,23 @@ function describe(v: unknown): string {
   // An object has no useful one-line value to quote — printing it would put the literal words
   // "[object Object]" in front of a manager. Say that it moved and send them to look instead.
   if (isPlainObject(v)) return "something different now";
+  // A SWITCH READS "on" / "off", NEVER "true" / "false" (2026-08-11).
+  //
+  // This gate started life on the panels, where the values it quoted were notes, quantities and
+  // allergen lists — words a person types. Since the Access & permissions screen was wired into it
+  // the same sentence also has to describe SWITCHES, and it was saying: 'Someone else changed
+  // Delete a bill while you had it open — it now says “false”.' An admin does not call a permission
+  // "false"; the screen they are staring at says Off. The whole value of this message is that
+  // somebody reads it and knows what to do, so it has to use the words on the screen.
+  //
+  // Unquoted on purpose: these are STATES, not a value somebody typed, and "it now says off" reads
+  // as a sentence where "it now says “off”" reads as a quotation of a string.
+  if (typeof v === "boolean") return v ? "on" : "off";
   const s = v == null ? "" : String(v).trim();
+  // The waiter tri-states (settings.tablet_*) are reachable here too, and "pin" on its own says
+  // nothing to anyone — it is the third state of a money row, "On, but ask a manager PIN".
+  if (s === "pin") return "on, but asking for a manager PIN";
+  if (s === "on" || s === "off") return s;
   return s ? `“${s}”` : "nothing";
 }
 
