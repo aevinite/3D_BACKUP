@@ -420,8 +420,8 @@ function platTicketHtml(p) {
 // Advance a platform order (accept/ready/handed_over), then refresh.
 function platAct(id, status) {
   api("POST", `/platform/${id}/status`, { status })
-    .then((r) => { if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; } load(); })
-    .catch((e) => { toast("Failed: " + e.message); load(); });
+    .then((r) => { if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; } freshLoad(); })
+    .catch((e) => { toast("Failed: " + e.message); freshLoad(); });
 }
 
 // INCREMENTAL tile patcher. Given a container and the DESIRED ordered list of tickets
@@ -546,7 +546,9 @@ function applyView() {
 
 // Run an action then refresh immediately (snappier than waiting for the poll).
 // Used by the 86-board toggle/undo — a single deliberate tap, so a reload is fine.
-const act = async (fn) => { try { await fn(); await load(); } catch (e) { toast("Failed: " + e.message); } };
+// freshLoad, not load: this runs a WRITE and then refreshes, so it must not be handed a read that
+// started before the write (see the note on freshLoad).
+const act = async (fn) => { try { await fn(); await freshLoad(); } catch (e) { toast("Failed: " + e.message); } };
 
 // Marking dishes READY is OPTIMISTIC. In a rush the cook taps ✓ down a long ticket
 // one after another; we flip the dish locally + redraw INSTANTLY, fire the API in the
@@ -574,7 +576,16 @@ function scheduleReadyReconcile() {
     // refresh most likely to be stale, so a slow DB briefly flipped a ready dish back to
     // cooking. load() re-applies the overlay during its run, so the painted board stays
     // ready; we drop the overlay once the fetch resolves.
-    load().catch(() => {}).finally(() => { pendingReady.clear(); pendingReadyOrders.clear(); });
+    //
+    // freshLoad(), NOT load() — and this is the one caller that must not share (found while
+    // re-checking my own coalescer, 2026-08-11). load() now hands a caller the read ALREADY IN
+    // FLIGHT, which is right for a refresh and WRONG here: a read that started before the cook's ✓
+    // cannot contain it, so `.finally` would drop the optimistic overlay against a board that still
+    // says "cooking" and flick every ticked dish back until the trailing refresh landed — precisely
+    // the flicker the refetch-first ordering above exists to prevent. So: wait for whatever is in
+    // flight, then start a read of our own. loadImpl keeps its loadSeq latest-wins guard, so calling
+    // it directly is safe.
+    freshLoad().catch(() => {}).finally(() => { pendingReady.clear(); pendingReadyOrders.clear(); });
   }, 2500);
 }
 function setLocalReady(matches) {
@@ -626,7 +637,7 @@ function markItemReady(id, btn) {
       icon: "🔥",
       onUndo: () => undoReady([{ id, prev }]),
     });
-  }).catch((e) => { toast("Failed: " + e.message); load(); });
+  }).catch((e) => { toast("Failed: " + e.message); freshLoad(); });
 }
 
 // Take back a "marked ready": drop the optimistic overlay, restore each dish's
@@ -662,7 +673,7 @@ async function undoReady(snap, orderId) {
   } catch (e) {
     toast("Undo failed: " + e.message);
   }
-  load();
+  freshLoad();   // a write just landed — do not accept a read that predates it
 }
 // Move ONE fully-ready ticket into the Ready column without a whole-board rebuild:
 // re-render just that card (now shows "ready — waiter serving", no buttons), drop it
@@ -726,7 +737,7 @@ function markOrderReady(orderId) {
         onUndo: () => undoReady(snap, orderId),
       });
     }
-  }).catch((e) => { toast("Failed: " + e.message); load(); });
+  }).catch((e) => { toast("Failed: " + e.message); freshLoad(); });
 }
 
 // Manual REPRINT (owner 2026-07-07): re-run the KOT print for ONE order's current dishes on
@@ -1251,6 +1262,13 @@ if (typeof document !== "undefined") {
 // and loadSeq still guarantees latest-wins. load() still REJECTS when the read fails, which is what
 // backoffPoll/catchUp back off on.
 let loadInFlight = null, loadQueued = false;
+// freshLoad(): a read that is GUARANTEED to have started after this call — for the one caller that
+// needs to see its own write (scheduleReadyReconcile, which drops the optimistic overlay when it
+// resolves). Everything else should use load() and happily share. Waits for any in-flight read to
+// settle, then goes to the server itself; loadImpl's own loadSeq still makes the latest paint win.
+function freshLoad() {
+  return loadInFlight ? loadInFlight.catch(() => {}).then(() => loadImpl()) : loadImpl();
+}
 function load() {
   if (loadInFlight) { loadQueued = true; return loadInFlight; }
   const p = loadImpl();
