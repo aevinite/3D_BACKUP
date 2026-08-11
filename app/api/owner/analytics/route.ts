@@ -73,6 +73,22 @@ function windowFor(range: string, sp?: URLSearchParams): { from: string; to: str
     if (range === "month") return { from: new Date(start(y, m)).toISOString(), to, bucket: "day" };
     return { from: new Date(start(y, m - 1)).toISOString(), to: new Date(start(y, m)).toISOString(), bucket: "day" };
   }
+  // ── "12m" AND "fy" LIVE IN BOTH ROUTES OR IN NEITHER (T5 re-run, 2026-08-11) ───────────
+  // The sibling reports route has understood these two since the GST work; this one did not,
+  // and an unknown range here falls through to TODAY at the bottom of the function. Nothing
+  // sent them until the compiled-statement dialog gained an FY option — and the statement then
+  // printed "FY (Apr–Mar) · Total collected ₹0", because `gatherOwnerReport` asks BOTH routes
+  // for the same window and only one of them knew what it meant. Measured on the backup the
+  // moment the option shipped. Same boundaries as the reports route, to the millisecond:
+  // 12m = the 12 whole IST calendar months ending this month; fy = the Indian financial year,
+  // 1 April → now (April is month index 3).
+  if (range === "12m" || range === "fy") {
+    const istNow = new Date(now + 5.5 * 3600_000);
+    const y = istNow.getUTCFullYear(), m = istNow.getUTCMonth();
+    const istMonthStart = (yy: number, mm: number) => new Date(Date.UTC(yy, mm, 1) - 5.5 * 3600_000).toISOString();
+    if (range === "12m") return { from: istMonthStart(y, m - 11), to, bucket: "month" };
+    return { from: istMonthStart(m >= 3 ? y : y - 1, 3), to, bucket: "month" };
+  }
   // this calendar week: Monday 00:00 IST → now, day buckets (owner 2026-07-27:
   // "make option like … this week"). Mirrors the whole-IST-month logic above.
   if (range === "week") {
@@ -179,6 +195,8 @@ function prevTsWindowFor(range: string, from: string, to: string): { from: strin
     const start = (yy: number, mm: number) => Date.UTC(yy, mm, 1) - 5.5 * 3600_000;
     return { from: new Date(start(y, m - 1)).toISOString(), to: new Date(start(y, m)).toISOString() };
   }
+  // "12m" and "fy" are month-grained and long; the equal-span step-back below lines their
+  // buckets up month-for-month, which is what the overlay wants.
   return prevWindowFor(range, from, to);
 }
 
