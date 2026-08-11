@@ -24,7 +24,7 @@ const {
   MANAGER_GRANT_DEFAULTS, isConfigurableGrant, MODULE_KEYS, HAS_IDS, ALL_NODES,
   nodePatch, defOf, SETTING_KEYS, CHOICE_KEYS, LIST_KEYS, TEXT_KEYS, TABLET_COLS,
   GRANT_FLAGS, SECTION_ENTITLEMENTS, CHANNEL_KEYS, CREDS_KEYS, FEATURE_KEYS, TAB_KEYS,
-  waiterCapValue, WAITER_NEVER,
+  waiterCapValue, WAITER_NEVER, MENU_PART_DEFAULTS, CHANNEL_DEFAULTS, WAITER_FEATURE_OF,
 } = await import("../node_modules/.cache/accessTree.mjs");
 
 const tree = read("lib/accessTree.ts");
@@ -592,6 +592,87 @@ else ok("the read/write route derives every allow-list from the model");
   if (!src.includes("featureBind"))
     fail(`the defaults script ignores featureBind, so it is blind to the Feature half of all ${twoControl} two-control rows`);
   else ok(`the defaults tool reads both halves of all ${twoControl} two-control rows`);
+}
+
+// ── 17 · BOTH SIDES MUST ANSWER A *MISSING* KEY THE SAME WAY ────────────────
+// THE BUG THIS EXISTS TO KILL (sweep T6, 2026-08-10 — it was live on 7 of 9 restaurants). The
+// Access screen reads an unstored Edit-menu sub-option as "use this row's default" (nodeValue →
+// present()), and eight of the nine default to ON. The editor API read the same unstored value as
+// NO, because it treated "the restaurant has ANY stored manager_opts" as "everything not explicitly
+// true is false". So an admin read "Change a price: ON" and the manager was refused, with no switch
+// anywhere able to fix it — the screen-says-ON-server-says-NO drift this whole model removes.
+//
+// Every check in this file until now asked "is this key READ by real code?". None asked "do the two
+// readers AGREE?", which is why a green suite sat on top of it for days.
+{
+  const parts = Object.keys(MENU_PART_DEFAULTS);
+  if (!parts.length) fail("MENU_PART_DEFAULTS is empty — the nine Edit-menu rows are no longer derivable from the model");
+  else if (!editorApi.includes("MENU_PART_DEFAULTS"))
+    fail("resolveMenuParts() in app/api/editor no longer resolves a MISSING Edit-menu key through MENU_PART_DEFAULTS — the screen and the server can drift apart again (7 of 9 restaurants were wrong the last time)");
+  else if (/configured \? mo!\[k\] === true/.test(editorApi))
+    fail("resolveMenuParts() still has the old \"configured ⇒ only an explicit true allows\" branch, which reads a missing key as NO while the screen reads it as the row's default");
+  else ok(`both readers answer a MISSING Edit-menu key the same way (all ${parts.length} parts, via MENU_PART_DEFAULTS)`);
+}
+
+// ── 18 · A NEW RESTAURANT MUST BE BORN AGREEING WITH THE SCREEN ─────────────
+// The reset tool writes node.def and the QA suite compares Aangan against node.def — but nothing
+// compared node.def against what a BRAND-NEW restaurant is actually given. That gap is where
+// "Own website: On by default" sat while every new restaurant got it OFF, which also meant
+// `set-access-defaults` would have switched an inbound order channel ON as part of a reset.
+//
+// Only the columns lib/settingsClone.ts is RESPONSIBLE for are checked. The guest-menu look
+// columns are deliberately cloned from the template restaurant (docs/REJECTED-IDEAS.md R8), so
+// they are not part of this contract and must not be reported.
+{
+  const clone = read("lib/settingsClone.ts");
+  const bad = [];
+  if (!clone.includes("CHANNEL_DEFAULTS"))
+    bad.push("platform_channels is not seeded from CHANNEL_DEFAULTS, so a new restaurant can be born disagreeing with the Own website / Zomato / Swiggy rows");
+  for (const [k, v] of Object.entries(CHANNEL_DEFAULTS)) {
+    const node = ALL_NODES.find((n) => n.bind.t === "channel" && n.bind.key === k);
+    if (node && (defOf(node) === true) !== v.on) bad.push(`channel "${k}" default disagrees with its own row`);
+  }
+  // Every tablet tri-state must have an explicit default in the clone file — a waiter power that
+  // silently inherits the template restaurant's value is the bug migration 295 had to repair.
+  for (const col of TABLET_COLS) {
+    if (!new RegExp(`base\\.${col}\\s*=`).test(clone)) bad.push(`${col} has no explicit default in cleanClonedSettings — a new restaurant would inherit the template's waiter power`);
+  }
+  if (bad.length) fail(`a new restaurant is born disagreeing with the Access screen: ${bad.join("; ")}`);
+  else ok(`a new restaurant is born matching the screen for all ${Object.keys(CHANNEL_DEFAULTS).length} channels + all ${TABLET_COLS.length} waiter columns`);
+}
+
+// ── 19 · THE TABLET MUST HIDE WHAT THE RESTAURANT DOES NOT HAVE ─────────────
+// The manager panel folds the Feature half into what it SHOWS (effectivePowers = hasFeature &&
+// granted). The tablet did not: switching "Discount a bill" off for a restaurant left the Discount
+// button on the tablet and the waiter found out by tapping it in front of a guest. The map of which
+// waiter column sits under which Feature half was also hand-typed in the route, covering exactly
+// one column — correct for today and silently wrong for the next row added.
+{
+  const tabletApi = read("app/api/tablet/[...path]/route.ts");
+  const bad = [];
+  if (Object.keys(WAITER_FEATURE_OF).length === 0)
+    bad.push("WAITER_FEATURE_OF is empty — no waiter row's Feature half is derivable from the model");
+  if (/const WAITER_FEATURE_OF: Record<string, string> = \{/.test(tabletApi))
+    bad.push("app/api/tablet keeps its own hand-typed WAITER_FEATURE_OF instead of the derived one");
+  if (!/resolveWaiterCaps|waiterFeatureOffCols/.test(tabletApi) || !/overlayUserPerms\([^)]*accessConfig|accessConfig\?: unknown/.test(tabletApi))
+    bad.push("overlayUserPerms() no longer takes the restaurant's access_config, so the tablet can show a button the server refuses");
+  if (bad.length) fail(`the tablet can show what the restaurant does not have: ${bad.join("; ")}`);
+  else ok(`the tablet hides every waiter row whose Feature half is off (${Object.keys(WAITER_FEATURE_OF).length} mapped, derived from the rows)`);
+}
+
+// ── 20 · THE ACCESS SCREEN MUST NOT SILENTLY OVERWRITE ANOTHER ADMIN ────────
+// Project rule 11 ("first save wins, the loser is told") was enforced nowhere on the one screen
+// that decides what anyone can do, and scripts/verify-clash-coverage.mjs did not know the route
+// existed — so it reported green over the gap.
+{
+  const route = read("app/api/admin/restaurants/access-tree/route.ts");
+  const screen = read("components/admin/AccessTree.tsx");
+  const bad = [];
+  if (!route.includes("expectClash")) bad.push("the access-tree route no longer reads an expectation");
+  if (!screen.includes("X-LFH-Expect")) bad.push("the Access screen no longer SENDS what it was editing from");
+  if (!tree.includes("export function nodeExpect")) bad.push("nodeExpect() is gone from the model, so the screen has nothing to send");
+  if (bad.length) fail(`two admins can silently overwrite each other on Access & permissions: ${bad.join("; ")}`);
+  else ok("a second admin's tap on the same switch is refused, not silently applied");
 }
 
 // ── report ─────────────────────────────────────────────────────────────────

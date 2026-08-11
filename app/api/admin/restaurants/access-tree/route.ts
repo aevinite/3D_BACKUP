@@ -17,10 +17,11 @@ import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { menuTag } from "@/lib/menuDataServer";
 import {
-  SECTIONS, ALL_NODES, NODE_BY_ID, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
+  ALL_NODES, NODE_BY_ID, FEATURE_KEYS, SETTING_KEYS, CHOICE_KEYS,
   LIST_KEYS, TEXT_KEYS, MODULE_KEYS, CHANNEL_KEYS, CREDS_KEYS, GRANT_FLAGS, SECTION_ENTITLEMENTS,
-  TABLET_COLS, TAB_KEYS, HAS_IDS,
+  TABLET_COLS, TAB_ALLOWED, HAS_IDS, KNOWN_CONFIG_IDS,
 } from "@/lib/accessTree";
+import { expectClash, clashJson } from "@/lib/clash";
 
 export const dynamic = "force-dynamic";
 
@@ -28,9 +29,8 @@ export const dynamic = "force-dynamic";
 // "ratings", which the Ratings CHOICE mirrors (see extraPatch in lib/accessTree.ts).
 const WRITEABLE_FEATURES = new Set([...FEATURE_KEYS, "ratings"]);
 const MODULE_COLS = new Set(MODULE_KEYS.flatMap((m) => [`${m}_allowed`, `${m}_enabled`]));
-const TAB_ALLOWED: Record<string, Set<string>> = TAB_KEYS.reduce((acc, b) => {
-  (acc[b.panel] ||= new Set()).add(b.key); return acc;
-}, {} as Record<string, Set<string>>);
+// TAB_ALLOWED + KNOWN_CONFIG_IDS are derived ONCE in lib/accessTree and imported by both this
+// route and lib/accessState — they used to be two identical copies. (sweep T6, 2026-08-10)
 
 // access_config paths the tree may touch: { permId → { opts: Set<"side.key">, limits, tablet } }
 const CONFIG_OPTS = new Set<string>();   // `${id}|${side}|${key}`
@@ -46,14 +46,6 @@ for (const n of ALL_NODES) {
   }
   if (b.t === "capTablet") CONFIG_TABLET.add(b.id);
 }
-// Every access_config top-level id this model can legitimately write — the union of the four
-// shapes above plus the `has` feature halves. Derived, so a node added to the tree wires itself.
-const KNOWN_CONFIG_IDS = new Set<string>([
-  ...HAS_IDS,
-  ...[...CONFIG_TABLET],
-  ...[...CONFIG_OPTS].map((k) => k.split("|")[0]),
-  ...[...CONFIG_LIMITS].map((k) => k.split("|")[0]),
-]);
 // The legal values of every choice / list node, so a hand-made request can't write a value
 // the screen would then be unable to display.
 const CHOICE_VALUES: Record<string, Set<string>> = {};
@@ -153,6 +145,21 @@ export async function POST(req: NextRequest) {
     .select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as Record<string, any> | null;
   if (!cur) return bad("Restaurant not found.", 404);
 
+  // ── FIRST SAVE WINS, AND THE LOSER IS TOLD (project rule 11 — wired 2026-08-10) ──────────────
+  // This route had no clash gate, and scripts/verify-clash-coverage.mjs did not know it existed,
+  // so it reported green over the ONE screen that decides what anyone can do. Two admins flipping
+  // the same switch both got "Saved": each tap writes one key and the server re-reads the row
+  // first, so different switches never clobbered each other — but on the SAME switch the second
+  // tap won silently, and the loser's screen kept showing the value that lost (every tap here is
+  // optimistic and nothing refreshes it). They then told a restaurant a manager had a power the
+  // server refuses. Same one gate every panel uses: it does nothing unless the screen SAID what it
+  // was editing from (X-LFH-Expect — see nodeExpect in lib/accessTree), so a caller that sends no
+  // expectation is completely unaffected.
+  {
+    const overwrite = await expectClash(req, rid);
+    if (overwrite) return clashJson(overwrite);
+  }
+
   const patch = obj(body.patch ?? body);
 
   // ── restaurants columns ───────────────────────────────────────────────────
@@ -178,13 +185,21 @@ export async function POST(req: NextRequest) {
   // the discount caps and the waiter caps that have no settings column.
   let cfg: Record<string, any> | null = null;
   const cfgRoot = () => (cfg ||= { ...obj(cur.access_config) });
+  // "DID ANYTHING ACTUALLY LAND?" — counted, not assumed (sweep T6, 2026-08-10).
+  // The `grants` and `sections` branches above each count what survived their allow-list, so a
+  // patch naming nothing but unknown keys leaves the column alone and the handler can honestly
+  // answer "nothing could be saved". These two branches did not: `cfgRoot()` built the object
+  // BEFORE the allow-lists ran, so `access_config` was rewritten with its own current value and
+  // the handler concluded something had landed — a fully-refused save wearing a green tick, which
+  // is the exact dead-switch shape the guard below exists to prevent, in the guard itself.
+  let cfgTook = 0;
   if (patch.tabs) {
     const root = cfgRoot();
     const menus = { ...obj(root.menus) };
     for (const [panel, keys] of Object.entries(obj(patch.tabs))) {
       if (!TAB_ALLOWED[panel]) continue;
       const dest = { ...obj(menus[panel]) };
-      for (const [k, v] of Object.entries(obj(keys))) if (TAB_ALLOWED[panel].has(k)) dest[k] = v === true;
+      for (const [k, v] of Object.entries(obj(keys))) if (TAB_ALLOWED[panel].has(k)) { dest[k] = v === true; cfgTook++; }
       menus[panel] = dest;
     }
     root.menus = menus;
@@ -198,11 +213,11 @@ export async function POST(req: NextRequest) {
       for (const [side, vals] of Object.entries(incoming)) {
         // config[id].on — "does this restaurant have it at all", the feature half of a row.
         if (side === "on") {
-          if (HAS_IDS.includes(permId)) entry.on = vals === true;
+          if (HAS_IDS.includes(permId)) { entry.on = vals === true; cfgTook++; }
           continue;
         }
         if (side === "tablet") {
-          if (CONFIG_TABLET.has(permId) && isTri(vals)) entry.tablet = vals;
+          if (CONFIG_TABLET.has(permId) && isTri(vals)) { entry.tablet = vals; cfgTook++; }
           continue;
         }
         if (side === "limit") {
@@ -215,7 +230,7 @@ export async function POST(req: NextRequest) {
             // accepted, so a hand-made request could store a 100000% discount ceiling that no
             // dropdown could ever show or undo — and lib/discountCap.ts would honour it.
             const ceiling = CONFIG_LIMIT_MAX.get(`${permId}|${sd}`);
-            dest[sd] = ceiling === undefined ? n : Math.max(0, Math.min(n, ceiling));
+            dest[sd] = ceiling === undefined ? n : Math.max(0, Math.min(n, ceiling)); cfgTook++;
           }
           entry.limit = dest;
           continue;
@@ -224,7 +239,7 @@ export async function POST(req: NextRequest) {
         if (!m) continue;
         const dest = { ...obj(entry[side]) };
         for (const [k, v] of Object.entries(obj(vals)))
-          if (CONFIG_OPTS.has(`${permId}|${m[1]}|${k}`)) dest[k] = typeof v === "boolean" ? v : String(v);
+          if (CONFIG_OPTS.has(`${permId}|${m[1]}|${k}`)) { dest[k] = typeof v === "boolean" ? v : String(v); cfgTook++; }
         entry[side] = dest;
       }
       // ONLY WRITE BACK A KEY THE MODEL KNOWS (fixed 2026-08-05). Every branch above already
@@ -237,7 +252,7 @@ export async function POST(req: NextRequest) {
       if (KNOWN_CONFIG_IDS.has(permId)) root[permId] = entry;
     }
   }
-  if (cfg) restUpdate.access_config = cfg;
+  if (cfg && cfgTook) restUpdate.access_config = cfg;
 
   // ── settings columns ──────────────────────────────────────────────────────
   // BUILT BEFORE ANYTHING IS WRITTEN (2026-08-04). The `restaurants` update used to run here,

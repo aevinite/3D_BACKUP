@@ -87,6 +87,12 @@ const COMPARABLE_TABLES: Record<string, string> = {
   categories: "id",
   filters: "id",
   settings: "restaurant_id",   // one row per restaurant
+  // The restaurant row itself — where a permission LIVES (manager_permissions, owner_entitlements,
+  // access_config). Added 2026-08-10 so /aevinite → Access & permissions can be protected like
+  // every other value edit: it is the one screen that decides what anyone can do, and two admins
+  // flipping the same switch had no gate at all. Like `settings`, its own id IS the tenant key —
+  // see TENANT_ROW_TABLES below.
+  restaurants: "id",
   staff_users: "id",
   table_tags: "id",
   // Inventory. Two people stock-taking at once is the commonest real collision in the whole
@@ -100,6 +106,10 @@ const COMPARABLE_TABLES: Record<string, string> = {
   // table was unknown here, which reads as "nothing to protect" even when the screen asks.
   feedback: "id",
 };
+
+/** Tables whose own primary key IS the restaurant, so there is no `restaurant_id` to scope by and
+ *  the id the caller names must BE the restaurant they are already scoped to. */
+const TENANT_ROW_TABLES = new Set(["settings", "restaurants"]);
 
 /**
  * THE ONE CLASH GATE — "did someone else change this while you had it open?"
@@ -164,20 +174,21 @@ export async function expectClash(req: NextRequest, rid: string): Promise<ClashI
   const cols = [...new Set(keys.map((k) => k.split(".")[0]))];
 
   try {
-    // THE ONE ROW WHOSE ID *IS* THE TENANT KEY. `settings` is one row per restaurant, so the
-    // scope line below deliberately skips it — which left it as the only comparison in this file
-    // reading whatever restaurant the SCREEN named, with nothing here confirming it was the
-    // caller's own. Every real sender passes its own (editor/app.js buildEditExpect takes the id
-    // off the row it loaded), so nothing was wrong — but a refusal quotes the value it found, so
-    // the one comparison that could cross a restaurant boundary was also the one that reads a
-    // value back out. Answer "nothing to compare" instead, exactly like an unknown table.
-    if (idCol === "restaurant_id" && id !== rid) return null;
+    // THE ROWS WHOSE ID *IS* THE TENANT KEY. `settings` is one row per restaurant and
+    // `restaurants` IS the restaurant, so neither has a `restaurant_id` column to scope by — the
+    // scope line below skips them. That once left `settings` as the only comparison in this file
+    // reading whatever restaurant the SCREEN named, with nothing confirming it was the caller's
+    // own. Every real sender passes its own — but a refusal quotes the value it found, so the one
+    // comparison that could cross a restaurant boundary was also the one that reads a value back
+    // out. Both tables now answer "nothing to compare" for a foreign id, exactly like an unknown
+    // table. (`restaurants` joined the list on 2026-08-10 for the Access & permissions screen.)
+    if (TENANT_ROW_TABLES.has(table) && id !== rid) return null;
     let q = sb.from(table).select(cols.join(", "));
     if (id) q = q.eq(idCol, id);
     else for (const [col, v] of where) q = q.eq(col, v);
     // Tenant boundary: service-role bypasses RLS, so scope every comparison to this
     // restaurant — a foreign id must never be readable through this check.
-    if (idCol !== "restaurant_id") q = q.eq("restaurant_id", rid);
+    if (!TENANT_ROW_TABLES.has(table)) q = q.eq("restaurant_id", rid);
     const res = await q.maybeSingle();
     // No row: nothing to overwrite. For a composite key that is the normal "first person to
     // count this item" case, so it must READ as fine rather than as a clash.

@@ -179,8 +179,19 @@ async function scope(req: NextRequest): Promise<Scope> {
     // absent-key bug managerGrantValue() was built to kill; manage_staff itself is RETIRED —
     // no row offers it, so the model answers it permanently on). Found in the 2026-08-02
     // "everything must be linked" sweep. The admin entitlement cap (mig 133) still applies.
-    if (!r || mergeOwnerEntitlements(r.owner_entitlements).power_manage_staff === false
-      || managerSettingsOff(r.access_config).includes("users"))
+    // THE LAST `power_<flag>` READER IS GONE (sweep T6, 2026-08-10). This still asked
+    // `owner_entitlements.power_manage_staff !== false` — the pre-rebuild "may the admin allow
+    // this power at all" rung, which docs/ACCESS-MODEL.md already recorded as deleted from all
+    // five readers INCLUDING this file. One of this file's two went on 2026-08-06; this one was
+    // missed. It is unwritable by any code path (the sole writer of owner_entitlements allow-lists
+    // owner PAGE keys from SECTION_ENTITLEMENTS) and an absent key merges to `true`, so it could
+    // never fire — verified before removing: no restaurant on the backup database has any
+    // `power_*` stored at all, let alone false. Left in place it was a trap, not a gate: a
+    // restaurant that ever acquired a stored `false` would have its managers permanently refused
+    // Settings → Users with NO screen able to give it back, which is precisely the
+    // stored-but-unswitchable shape this model removed everywhere else. The admin's real switch
+    // for this section is the row it already checks below — Access → Manager settings → Users.
+    if (!r || managerSettingsOff(r.access_config).includes("users"))
       return { ok: false, resp: bad("Your owner hasn't given you staff management.", 403) };
     return { ok: true, actor: "manager", actorId: u.id, restaurants: [r] };
   }

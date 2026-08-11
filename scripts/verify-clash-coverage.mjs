@@ -156,6 +156,23 @@ const REACT_VALUE_EDITS = [
       { match: /action:\s*"set_payroll"/, why: "pay-list on/off is a toggle" },
     ],
   },
+  // ── ACCESS & PERMISSIONS (added by sweep T6, 2026-08-10) ─────────────────────────────────────
+  // The one screen that decides what anyone can do, and it was outside this file entirely — so
+  // this guard printed green over the biggest gap it had. Two admins flipping the SAME switch both
+  // got "Saved": each tap writes one key and the server re-reads the row first, so different
+  // switches never clobbered each other, but on the same switch the second tap won silently and
+  // the loser's screen kept showing the value that lost (every tap here is optimistic and nothing
+  // refreshes it). They then told a restaurant a manager had a power the server refuses.
+  //
+  // Matched on the HEADER rather than on an action, because this route takes one shape of body
+  // (a patch) for every switch on the screen: the property to hold is "the screen says what it was
+  // editing from". Which rows can honestly say that is decided by nodeExpect() in
+  // lib/accessTree.ts, and verify:access check 20 holds the three pieces together.
+  {
+    file: "components/admin/AccessTree.tsx",
+    route: "app/api/admin/restaurants/access-tree/route.ts",
+    patterns: [{ re: /"X-LFH-Expect":\s*JSON\.stringify/, name: "sends what the row said when it was tapped" }],
+  },
   {
     file: "app/owner/issues/page.tsx",
     route: "app/api/owner/ratings/route.ts",

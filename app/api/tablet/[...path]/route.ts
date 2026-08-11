@@ -27,7 +27,7 @@ import { openTableSession } from "@/lib/openSession";
 import { raiseIssue } from "@/lib/issues";
 // ONE resolver for what a waiter may do, shared with the Access screen — see the note above
 // tabletPerm(). WAITER_NEVER is the owner's "no printing, no reopening" rule made structural.
-import { waiterCapValue, waiterConfigCapValue, resolveWaiterCaps, WAITER_NEVER, type WaiterCap } from "@/lib/accessTree";
+import { waiterCapValue, waiterConfigCapValue, resolveWaiterCaps, WAITER_NEVER, WAITER_FEATURE_OF, waiterFeatureOffCols, type WaiterCap } from "@/lib/accessTree";
 import { worthLogging, pgError } from "@/lib/dbRefusal";
 // ONE answer for a caught failure, so a database that didn't reply is told apart from a bug
 // and the device can fall back to what it already has (lib/panelFailure.ts).
@@ -183,8 +183,10 @@ async function tabletPerm(key: string, req: NextRequest, body: any, rid: string,
   if (mode === "pin") return managerPinGate(req, body, rid);
   return { allow: true }; // 'on'
 }
-/** Which restaurant-level "does this restaurant have it at all" switch a waiter column sits under. */
-const WAITER_FEATURE_OF: Record<string, string> = { tablet_discount: "give_discounts" };
+// WAITER_FEATURE_OF now comes from lib/accessTree (imported above), DERIVED from the rows' own
+// `featureBind`. It was a hand-typed map here covering exactly one column — which was correct for
+// today's single row and silently wrong for any future waiter row that shares a Feature half.
+// (sweep T6, 2026-08-10)
 
 // Force-closing a table that still owes money on the TABLET (a walk-out / write-off).
 //
@@ -215,7 +217,15 @@ async function closeUnpaidGate(req: NextRequest, body: any, rid: string, user: S
 // "off" and its button disappears), and THEN the logged-in waiter's own overrides are laid on top.
 // `user` is the real waiter, or — on an admin tab opened from someone's profile (?as=) — the
 // waiter being looked through. The server gates above stay the real guard either way.
-function overlayUserPerms<T extends Record<string, any> | null>(settings: T, user: StaffUser | null): T {
+//
+// `accessConfig` IS THE RESTAURANT-LEVEL RUNG and it was missing (sweep T6, 2026-08-10). The
+// manager panel has always folded the Feature half into what it SHOWS
+// (`effectivePowers[flag] = hasFeature && granted` in app/api/editor/whoami). The tablet did not:
+// switching "Discount a bill" off for a restaurant left the Discount button sitting on the tablet,
+// and the waiter found out by tapping it in front of a guest. It is applied LAST, after the
+// per-person overrides, for the same reason managerCan() checks it FIRST — "this restaurant does
+// not have the thing" beats anything one person was given.
+function overlayUserPerms<T extends Record<string, any> | null>(settings: T, user: StaffUser | null, accessConfig?: unknown): T {
   if (!settings) return settings;
   // A manager/owner looking in through this panel keeps their own reach (see tabletPerm), so the
   // waiter resolution is applied only when a real waiter is asking.
@@ -226,6 +236,11 @@ function overlayUserPerms<T extends Record<string, any> | null>(settings: T, use
       if (asWaiter && WAITER_NEVER.includes(k)) continue;      // an override can't grant a never
       if (isPermMode(user.permissions[k])) out[k] = user.permissions[k];
     }
+  }
+  // The admin super-user is never blocked by a waiter rung (X-ray honesty — the same bypass
+  // tabletPerm gives it), so the Feature half applies to every real login and not to the admin.
+  if (user && accessConfig !== undefined) {
+    for (const k of waiterFeatureOffCols(accessConfig)) out[k] = "off";
   }
   return out as T;
 }
@@ -491,7 +506,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const [settings, categories, restaurant] = await Promise.all([
         sb.from("settings").select("*").eq("restaurant_id", rid).maybeSingle(),
         sb.from("categories").select("slug,name,icon,sort_order,active").eq("restaurant_id", rid).order("sort_order"),
-        sb.from("restaurants").select("id, slug, name, logo_text, accent_color").eq("id", rid).maybeSingle(),
+        sb.from("restaurants").select("id, slug, name, logo_text, accent_color, access_config").eq("id", rid).maybeSingle(),
       ]);
       // KOT ▾ module rung resolved server-side from the settings row itself (canonical
       // ladder, mig 177 — no extra query): when the module isn't effective the tri-state
@@ -499,7 +514,16 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // can't surface the menu (same server-resolution trick as overlayUserPerms).
       // Applied AFTER the per-user overlay on purpose. table_ops_tablet_allowed is the
       // synthetic client flag (like banquet_allowed): module off = no dead UI/X-ray zone.
-      const setOut = overlayUserPerms(must(settings), viewer);
+      // The restaurant row is fetched WITH access_config in the SAME batch, so resolving the
+      // waiter rungs below costs no extra query — but access_config is this restaurant's whole
+      // permission record and has no business in a tablet payload, so it is peeled off before
+      // the row is sent. (sweep T6, 2026-08-10)
+      const restRow = must(restaurant) as Record<string, any> | null;
+      const restCfg = restRow?.access_config ?? {};
+      const restaurantOut = restRow
+        ? Object.fromEntries(Object.entries(restRow).filter(([k]) => k !== "access_config"))
+        : null;
+      const setOut = overlayUserPerms(must(settings), viewer, restCfg);
       if (setOut) {
         const tOpsOk = tableOpsEffectiveFromRow(setOut);
         if (!tOpsOk) setOut.tablet_table_ops = "off";
@@ -520,7 +544,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         my_tables: myTables ? myTables.tables : null,
         // Per-user overrides resolved into the tri-state keys (see overlayUserPerms).
         settings: setOut, categories: must(categories),
-        restaurant: must(restaurant) || null,
+        restaurant: restaurantOut,
       };
       // Only attach dishes on a FULL load. On nomenu the key is ABSENT (not []), so the client
       // can tell "menu not sent, keep the cached one" apart from "menu is genuinely empty".

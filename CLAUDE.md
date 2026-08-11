@@ -157,7 +157,7 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
 ## Security gate (verified per-route 2026-08-04/05 — full route list in docs/CLAUDE-DETAIL.md)
 
 **There is NO `middleware.ts` — deliberate.** The gate moved per-route: `/aevinite` layout +
-all 49 `/api/admin/*` routes check `tokenIsValid` before any DB call (counted 2026-08-06;
+all 48 `/api/admin/*` routes check `tokenIsValid` before any DB call (re-counted 2026-08-11, handler by handler;
 `find app/api/admin -name route.ts | wc -l` must equal the number that grep `tokenIsValid`); panel APIs use
 `requireRole()` (re-checks entitlement every request); `/api/owner/*` uses `ownerScope()`.
 The deliberately-public list is COMPLETE in the detail doc — an API route absent from it must

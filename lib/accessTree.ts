@@ -128,6 +128,14 @@ export type Node = {
   // rendered by the SAME file the panels print from (/panels/billdoc.js), so what is approved
   // here is what a guest is handed.
   preview?: "bill" | "parcel" | "kot";
+  // ASK BEFORE SWITCHING THIS OFF. Every tap on this screen saves instantly, with no confirm and
+  // no undo, and for almost every row that is right — you can see what you did and put it back.
+  // A handful cannot be put back before somebody notices: switching Menu off leaves the
+  // restaurant with NO guest menu at all, so every QR code on every table stops working for
+  // diners the moment you tap it. The string is the question, in plain words. Only set it where
+  // the consequence reaches a GUEST — a confirm on an ordinary row is just a tax on doing the job.
+  // (sweep T6, 2026-08-10)
+  confirm?: string;
 };
 
 export type Section = { id: string; name: string; blurb: string; icon: string; children: Node[] };
@@ -177,11 +185,19 @@ const LOG_PARTS: { id: string; name: string; what: string; mgrOnly?: boolean }[]
 
 // Money & floor actions offered as a MANAGER default (restaurants.manager_permissions —
 // already enforced by managerCan) and as a WAITER default (settings.tablet_* tri-state —
-// already enforced by tabletPerm). `pin` marks the ones whose waiter row also offers
-// "On, but ask a manager PIN"; everything else is a plain on/off.
+// already enforced by tabletPerm).
+//
+// `pin` DELIBERATELY DOES NOT EXIST ON THIS TYPE (sweep T6, 2026-08-10). All three rows carried
+// `pin: true`, and it was read by nothing: a manager's control is a plain on/off on the Access row,
+// on the Per-person tab and on their profile (lib/staffCaps hard-codes `pin: false` for a manager,
+// and FeatureRow only offers the third state for a `tablet`/`capTablet` bind). "On, but ask a
+// manager PIN" is a WAITER idea — a waiter acts with a manager standing there — and a manager IS
+// the PIN authority, so there is nothing for them to be asked. A flag that reads nowhere looks
+// like a promise the product doesn't keep, which is what this whole model exists to remove; the
+// waiter rows keep their own `pin`, which is real (see WaiterRow below).
 type ActionDef = {
   id: string; name: string; what: string; flag: string; tablet?: string; capTablet?: string;
-  mgrDef: boolean; waiterDef?: "off" | "on" | "pin"; pin?: boolean; cap?: boolean;
+  mgrDef: boolean; waiterDef?: "off" | "on" | "pin"; cap?: boolean;
   // Reopen-a-bill's minutes window (owner default: 5 — his 2026-08-02 word for every
   // restaurant). Rendered as the "Only within" child of the manager row.
   mins?: number;
@@ -200,7 +216,7 @@ const ACTIONS: ActionDef[] = [
   // discount bill percentage will be fifty percent." The minutes window lives INSIDE the
   // reopen row and the percentage cap INSIDE the discount row — his words: "there will be a
   // drop down for reopen bill how much minute is set… you could able to go inside and change".
-  { id: "delete_bill", name: "Delete a bill", flag: "delete_bill", mgrDef: false, pin: true,
+  { id: "delete_bill", name: "Delete a bill", flag: "delete_bill", mgrDef: false,
     // WHAT IT ACTUALLY DOES — the old wording promised the illegal button (2026-08-06). It read
     // "Takes a bill out of the reports … it simply stops counting towards sales", which is not what
     // the code does and is the one capability this product's whole compliance argument refuses
@@ -223,9 +239,9 @@ const ACTIONS: ActionDef[] = [
   // now its own waiter row (WAITER_MONEY below, id "close_unpaid"), so the screen says what the
   // switch does. Migration 295 copies any stored value across (295_waiter_caps_reach_a_switch.sql
   // — NOT 268, which is prune_action_idempotency; corrected by sweep T6, 2026-08-06).
-  { id: "void_bills", name: "Reopen a bill", flag: "void_bills", mgrDef: false, pin: true, mins: 5,
+  { id: "void_bills", name: "Reopen a bill", flag: "void_bills", mgrDef: false, mins: 5,
     what: "Reopening a bill that was already closed. The SAME bill comes back — and it is recorded that it was reopened, and what changed, so the audit always shows it. Managers only — a waiter can never reopen a bill." },
-  { id: "give_discounts", name: "Discount a bill", flag: "give_discounts", mgrDef: true, pin: true, cap: true,
+  { id: "give_discounts", name: "Discount a bill", flag: "give_discounts", mgrDef: true, cap: true,
     what: "Taking money off a bill. The cap below is the most this role may take off in one go." },
   // "Manage staff" LEFT this list (owner, 2026-08-01) — it is not one of the money actions, it is
   // its own thing, and one switch covering create/reset/delete was three very different amounts of
@@ -248,7 +264,7 @@ const mgrAction = (a: ActionDef): Node => {
     unit: " min", options: [5, 10, 15, 30, 60],
     what: "How long after a bill closes it can still be reopened. After that it is settled and a correction has to be a credit note, which is the legal way round." });
   return {
-    id: `mgr_${a.id}`, name: a.name, what: a.what, bind: { t: "grant", flag: a.flag }, def: a.mgrDef, pin: a.pin,
+    id: `mgr_${a.id}`, name: a.name, what: a.what, bind: { t: "grant", flag: a.flag }, def: a.mgrDef,
     featureBind: { t: "has", id: a.id },
     children: kids.length ? kids : undefined,
   };
@@ -356,6 +372,7 @@ export const SECTIONS: Section[] = [
     children: [
       {
         id: "menu", name: "Menu", def: true, fresh: true, bind: { t: "setting", key: "menu_enabled" },
+        confirm: "Switch the guest menu OFF for this restaurant?\n\nEvery QR code on every table stops working immediately, the menu link goes dead, and diners have no way to see the menu or order. The restaurant keeps running on its staff panels only.",
         what: "The whole guest menu. OFF means this restaurant has NO guest menu at all — no QR menu, no menu link, nothing for a diner to open. It runs on the staff panels only.",
         children: [
           { id: "dining_sessions", name: "Dining session and location", def: false,
@@ -954,6 +971,20 @@ export const CREDS_KEYS = collect((b) => (b.t === "creds" ? b.key : null));
 export const HAS_IDS = Array.from(new Set(ALL_NODES.flatMap((n) =>
   [n.featureBind?.t === "has" ? n.featureBind.id : null, n.bind?.t === "has" ? n.bind.id : null],
 ).filter(Boolean) as string[]));
+/** Every `access_config` TOP-LEVEL id this model can legitimately read or write — the union of the
+ *  four shapes that live in there (`has` feature halves · waiter caps · per-side opts · limits).
+ *
+ *  It lived inside the access-tree route, built from four route-local Sets. lib/accessState.ts
+ *  needs the same answer to stop shipping ~26 retired permission names to the browser on every
+ *  load, and a second copy of "which keys are ours" is exactly the drift this model exists to
+ *  remove — so it is derived here, once, from the rows. (sweep T6, 2026-08-10) */
+export const KNOWN_CONFIG_IDS: Set<string> = new Set<string>([
+  ...ALL_NODES.flatMap((n) => [n.featureBind?.t === "has" ? n.featureBind.id : null, n.bind.t === "has" ? n.bind.id : null]),
+  ...ALL_NODES.map((n) => (n.bind.t === "capTablet" ? n.bind.id : null)),
+  ...ALL_NODES.map((n) => (n.bind.t === "opt" ? n.bind.id : null)),
+  ...ALL_NODES.map((n) => (n.bind.t === "limit" ? n.bind.id : null)),
+].filter(Boolean) as string[]);
+
 export const GRANT_FLAGS = collect((b) => (b.t === "grant" ? b.flag : null));
 export const SECTION_ENTITLEMENTS = collect((b) => (b.t === "section" ? b.key : null));
 export const TABLET_COLS = collect((b) => (b.t === "tablet" ? b.key : null));
@@ -965,6 +996,71 @@ export const TAB_KEYS: { panel: string; key: string }[] = ALL_NODES
   .flatMap((n) => (n.featureBind ? [n.bind, n.featureBind] : [n.bind]))
   .filter((b): b is Extract<Bind, { t: "tab" }> => b.t === "tab")
   .map((b) => ({ panel: b.panel, key: b.key }));
+
+/** { panel → the tab keys this model may write }. Built ONCE here because two files needed the
+ *  identical reduce — lib/accessState.ts (reading) and the access-tree route (writing) — and two
+ *  copies of one allow-list is where the next drift starts. */
+export const TAB_ALLOWED: Record<string, Set<string>> = TAB_KEYS.reduce((acc, b) => {
+  (acc[b.panel] ||= new Set()).add(b.key); return acc;
+}, {} as Record<string, Set<string>>);
+
+// The DEFAULT CHANNEL SET a brand-new restaurant is born with, derived from the rows themselves.
+// lib/settingsClone.ts writes this, so "what the ⓘ says is the default" and "what a new
+// restaurant actually gets" are the same sentence. They were not: `ch_website` says "On by
+// default" while `platform_channels` was seeded `{}` — every reader treats an absent channel as
+// OFF, so the screen showed it off on day one, and `scripts/set-access-defaults.mjs` (which
+// writes node.def) would have switched an inbound order channel ON as part of "reset to
+// factory defaults". Found by sweep T6, 2026-08-10.
+export const CHANNEL_DEFAULTS: Record<string, { on: boolean }> = Object.fromEntries(
+  ALL_NODES.filter((n) => n.bind.t === "channel")
+    .map((n) => [(n.bind as Extract<Bind, { t: "channel" }>).key, { on: defOfEarly(n) === true }]),
+);
+// defOf is declared below (it is used by everything); this is the same rule, hoisted for the two
+// derived maps above and below that need it before the declaration is reached.
+function defOfEarly(n: Node): boolean | string | string[] | number {
+  return n.def !== undefined ? n.def : (n.bind.t === "tablet" || n.bind.t === "capTablet" ? "off" : false);
+}
+
+// THE NINE EDIT-MENU PARTS AND THEIR DEFAULTS, derived from the rows on the Access screen.
+//
+// WHY THIS EXISTS (sweep T6, 2026-08-10 — 7 of 9 restaurants were wrong). The screen reads a
+// sub-option that has never been stored as "use this row's default" (nodeValue → present()), and
+// eight of the nine rows default to ON. The editor API read the same missing value as NO, because
+// it treated "this restaurant has ANY stored manager_opts" as "everything not explicitly true is
+// false". So a restaurant configured before a sub-option existed had it stored nowhere: the admin
+// read "Change a price: ON" and the manager was refused, with no switch anywhere able to fix it —
+// the exact screen-says-ON-server-says-NO drift this whole model exists to remove.
+//
+// Both sides now resolve a MISSING key through this one map. A key that IS stored still wins,
+// either way, so every deliberate `false` an admin set stays exactly as they set it.
+export const MENU_PART_DEFAULTS: Record<string, boolean> = Object.fromEntries(
+  ALL_NODES
+    .filter((n) => n.bind.t === "opt" && n.bind.id === "edit_menu" && n.bind.side === "manager")
+    .map((n) => [(n.bind as Extract<Bind, { t: "opt" }>).key, defOfEarly(n) === true]),
+);
+
+// WHICH RESTAURANT-LEVEL "does this restaurant have it at all" SWITCH A WAITER ROW SITS UNDER.
+//
+// Derived from the rows (a waiter row's `featureBind`), not hand-typed — the hand-typed copy
+// lived in app/api/tablet and covered exactly one column, so the tablet PANEL went on drawing a
+// button the server would refuse, and any future waiter row that shared a feature half would have
+// inherited the same gap in silence. Keyed the way a person's override is keyed, so one lookup
+// serves the column rows and the `cap:` ones. (sweep T6, 2026-08-10)
+export const WAITER_FEATURE_OF: Record<string, string> = Object.fromEntries(
+  ALL_NODES
+    .filter((n) => n.featureBind?.t === "has" && (n.bind.t === "tablet" || n.bind.t === "capTablet"))
+    .map((n) => [
+      n.bind.t === "tablet" ? n.bind.key : `cap:${(n.bind as Extract<Bind, { t: "capTablet" }>).id}`,
+      (n.featureBind as Extract<Bind, { t: "has" }>).id,
+    ]),
+);
+
+/** The waiter columns this restaurant does not HAVE at all — the Feature half of their row is off.
+ *  Nobody has these whatever their own override says, exactly as managerCan() resolves it. */
+export function waiterFeatureOffCols(accessConfig: unknown): string[] {
+  const cfg = (accessConfig || {}) as Record<string, { on?: boolean }>;
+  return Object.entries(WAITER_FEATURE_OF).filter(([, id]) => cfg?.[id]?.on === false).map(([col]) => col);
+}
 
 // Every settings COLUMN the route selects/writes (features + enabled_panels handled apart).
 export const SETTINGS_COLUMNS: string[] = Array.from(new Set([
@@ -1056,6 +1152,40 @@ export function nodeValue(n: Node, s: TreeState): any {
       return (stars === undefined ? true : stars === true) || String(mode).startsWith("google");
     }
     default:         return null;
+  }
+}
+
+/** WHAT THIS ROW WAS SHOWING WHEN YOU TAPPED IT — the `expect` a save carries so the server can
+ *  refuse a second admin's tap instead of silently overwriting the first (project rule 11, "first
+ *  save wins and the loser is told"). The Access screen had NO such gate: two admins flipping the
+ *  same switch both got "Saved", the loser's screen kept showing the value that lost (every tap is
+ *  optimistic and nothing refreshes it), and they went off telling a restaurant a manager had a
+ *  power the server refuses. (sweep T6, 2026-08-10)
+ *
+ *  `null` means "don't ask" and is the honest answer for three cases:
+ *    · nothing is stored yet — there is no earlier value for anyone to overwrite;
+ *    · a credential — the browser only ever holds a mask, so it cannot say what it saw;
+ *    · anything living TWO levels deep in access_config (the Feature halves, the discount caps,
+ *      the Edit-menu parts, a panel's tab list). lib/clash.ts compares `column.subkey`, one level,
+ *      and comparing the whole blob instead would fire on any unrelated change inside it — a
+ *      false-positive machine that teaches people to ignore the warning. Those rows are no worse
+ *      off than they are today; they are simply not yet covered, and saying so beats pretending. */
+export function nodeExpect(n: Node, s: TreeState, rid: string):
+  { table: string; id: string; fields: Record<string, unknown>; label: string } | null {
+  const b = n.bind;
+  const at = (table: string, field: string, was: unknown) =>
+    was === undefined ? null : { table, id: rid, fields: { [field]: was }, label: n.name };
+  switch (b.t) {
+    case "feature":  return at("settings", `features.${b.key}`, s.features?.[b.key]);
+    case "setting":  return at("settings", b.key, s.settings?.[b.key]);
+    case "module":   return at("settings", `${b.key}_allowed`, s.settings?.[`${b.key}_allowed`]);
+    case "choice":
+    case "text":
+    case "list":
+    case "tablet":   return at("settings", b.key, s.settings?.[b.key]);
+    case "grant":    return at("restaurants", `manager_permissions.${b.flag}`, s.grants?.[b.flag]);
+    case "section":  return at("restaurants", `owner_entitlements.${b.key}`, s.sections?.[b.key]);
+    default:         return null;   // creds · tab · has · capTablet · opt · limit · ratingsMaster · none
   }
 }
 
@@ -1191,8 +1321,15 @@ export function waiterConfigCapValue(id: string, accessConfig: unknown): WaiterC
  *
  *  This is what stops the TABLET PANEL needing a rule of its own: its `tperm(k)` is
  *  `settings[k] || "off"`, so as long as the server hands it resolved values the buttons hide and
- *  show correctly and `tablet_invoice` arrives "off" — one rule, no client copy to drift. */
-export function resolveWaiterCaps<T extends Record<string, any> | null>(settings: T): T {
+ *  show correctly and `tablet_invoice` arrives "off" — one rule, no client copy to drift.
+ *
+ *  `accessConfig` adds the RESTAURANT-LEVEL rung — "does this restaurant have the thing at all",
+ *  the Feature half of the row. It was missing, so switching "Discount a bill" off for a
+ *  restaurant left the Discount button on the tablet: the waiter tapped it in front of a guest
+ *  and only THEN got refused. The manager panel has always folded this into what it SHOWS
+ *  (effectivePowers = hasFeature && granted); this is the tablet's half of the same rule.
+ *  Optional so the two callers that have no reason to read `restaurants` are unaffected. */
+export function resolveWaiterCaps<T extends Record<string, any> | null>(settings: T, accessConfig?: unknown): T {
   if (!settings) return settings;
   const out: Record<string, any> = { ...settings };
   for (const key of Object.keys(out)) {
@@ -1201,6 +1338,7 @@ export function resolveWaiterCaps<T extends Record<string, any> | null>(settings
   // Columns the row list expects but the select didn't return still need an answer.
   for (const key of Object.keys(WAITER_COL_NODE)) if (!(key in out)) out[key] = waiterCapValue(key, undefined);
   for (const key of WAITER_NEVER) out[key] = "off";
+  if (accessConfig !== undefined) for (const key of waiterFeatureOffCols(accessConfig)) out[key] = "off";
   return out as T;
 }
 

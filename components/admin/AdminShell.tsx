@@ -40,7 +40,11 @@ const GROUPS: NavGroup[] = [
       { href: "/aevinite/owners", label: "Owners", icon: "fa-crown" },
       { href: "/aevinite/customers", label: "Customers", icon: "fa-user-group" },
       { href: "/aevinite/recycle", label: "Recycle bin", icon: "fa-trash-can" },
-      { href: "/aevinite/access", label: "Access / Permissions", icon: "fa-key" },
+      // ONE NAME FOR THE SCREEN (sweep T6, 2026-08-10). The sidebar said "Access / Permissions"
+      // and the page you land on says "Access & permissions" — and the docs, the deep links and
+      // the owner all call it "Access". Two names for one screen is a small thing that makes
+      // every instruction about it ambiguous.
+      { href: "/aevinite/access", label: "Access & permissions", icon: "fa-key" },
       { href: "/aevinite/users", label: "Users", icon: "fa-users" },
     ],
   },
