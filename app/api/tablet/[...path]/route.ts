@@ -34,9 +34,9 @@ import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts, reverseSplitLegs, badSplitShape } from "@/lib/paySplit";
 import { isTableTag, tableTagsLadder, khataLadder, banquetLadder, tableOpsLadder, takeOrdersLadder, parcelLadder, COMP_TAGS, ON_THE_HOUSE_METHOD, type TableTag } from "@/lib/tableTags";
 import { TABLET_PERM_KEYS } from "@/lib/accessModel";
-import { effectiveTaxRate, TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
+import { TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
 import { getOwnerEntitlements } from "@/lib/ownerEntitlements";
-import { waiterTables, allows, normTable, blockedReason, type SectionLimit } from "@/lib/tableAssign";
+import { waiterTables, allows, blockedReason, type SectionLimit } from "@/lib/tableAssign";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
@@ -1405,8 +1405,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       must(await sb.from("orders").update({ items, status: "served" }).eq("id", b).eq("restaurant_id", rid));
       await sb.from("order_items").update({ status: "served", served_at: nowIso() }).eq("order_id", b).eq("restaurant_id", rid).neq("status", "served");
       await log("order_serve", { order_id: b, device_id: dev });
-      // Only session_id needed (for auto-settle); client discards the body → not the full row.
-      const served = must(await sb.from("orders").select("session_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      // A READ THAT WAS THROWN AWAY, DELETED (T4 sweep, 2026-08-11). This used to re-select
+      // session_id into a `served` variable nothing ever looked at. Its comment said "for
+      // auto-settle" — and auto-settle was deleted on 2026-08-02 (see the note by offerPayUndo in
+      // public/panels/tablet/app.js), so the query outlived its only reader. It cost a round trip on
+      // every Serve-all, and the table-wide button fans one of those out PER ORDER. eslint had been
+      // reporting it as an unused variable the whole time; a warning is easy not to read.
       return ok({ ok: true });
     }
 
@@ -1932,7 +1936,9 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       // (mig 285): this used to be a hard DELETE, which erased the only record of what had been
       // collected and in what parts — while the manager panel's twin left the legs standing and
       // went on claiming the money was in. One shared helper now, so both read the same.
-      const legs = await reverseSplitLegs(sb, {
+      // The return value is not read — reverseSplitLegs does the writing. (Named nothing rather
+      // than a variable eslint has to warn about; T4 sweep, 2026-08-11.)
+      await reverseSplitLegs(sb, {
         rid, sessionId: openSess.id, since: cutoff,
         actor: actor?.name || actor?.username || null,
         reason: String((body && body.reason) || "undo settle (within the 30-minute window)").slice(0, 200),
