@@ -62,7 +62,11 @@ export type ReportData = {
 export type ExportCol = "text" | "money" | "num" | "pct";
 export type ExportTable = { title: string; head: string[]; rows: (string | number)[][]; cols?: ExportCol[] };
 
-const inr = (n: number) => "₹" + Math.round(n).toLocaleString("en-IN");
+// Same rule as everywhere else: "−₹1,200", never "₹-1,200" (T5 re-run, 2026-08-11).
+const inr = (n: number) => {
+  const v = Math.round(Number(n) || 0);
+  return (v < 0 ? "−₹" : "₹") + Math.abs(v).toLocaleString("en-IN");
+};
 const nfmt = (n: number) => Math.round(n).toLocaleString("en-IN");
 const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / whole) * 100) + "%" : "—");
 // Tolerates null/undefined too — a `label` coming out of settings JSON is not guaranteed
