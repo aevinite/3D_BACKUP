@@ -1262,6 +1262,9 @@ if (typeof document !== "undefined") {
 // and loadSeq still guarantees latest-wins. load() still REJECTS when the read fails, which is what
 // backoffPoll/catchUp back off on.
 let loadInFlight = null, loadQueued = false;
+// Set by the realtime block below (it owns the 4s full-reload window). A no-op until then, so the
+// boot read never depends on load order.
+let markFullRead = () => {};
 // freshLoad(): a read that is GUARANTEED to have started after this call — for the one caller that
 // needs to see its own write (scheduleReadyReconcile, which drops the optimistic overlay when it
 // resolves). Everything else should use load() and happily share. Waits for any in-flight read to
@@ -1278,6 +1281,7 @@ function load() {
   return p;
 }
 async function loadImpl() {
+  markFullRead();   // this IS a whole-board read — the rate guard must count it
   const seq = ++loadSeq;
   const data = await api("GET", "/board");
   if (seq !== loadSeq) return; // a newer refresh started — drop this stale response
@@ -1568,10 +1572,25 @@ if (window.LFH_RT) {
     // IS DROPPED — loadQueued forces exactly one trailing refresh after the in-flight read lands, so
     // a change that committed after that read started is still picked up (a blind "skip if a read
     // finished <1.5s ago" would silently lose it until the 60s backstop, which is bug M9 all over).
+    // A READ ALREADY RUNNING COVERS THIS EVENT, and its trailing refresh is the proof. NOTHING IS
+    // DROPPED: loadQueued forces exactly one refresh after the in-flight read lands, so a change
+    // that committed after that read started is still picked up.
+    //
+    // I TRIED ABSORBING THE BOOT ONE ENTIRELY and took it back out (2026-08-11). realtime.js's
+    // start-up fireAll() means "do your initial load", and at boot that load is already in flight,
+    // so its trailing refresh looks like pure waste — skipping it would make the boot a reliable 2
+    // reads instead of 2-or-3. But it also removes the retry when the boot read FAILS: today the
+    // fireAll gives us another attempt about 200ms later, and without it a failed first read waits
+    // for the 60s backstop while the socket sits there perfectly healthy. One saved read is not
+    // worth a minute of blank board.
     if (loadInFlight) { loadQueued = true; return; }
     const wait = Math.max(0, lastFullAt + 4000 - Date.now());
-    fullTimer = setTimeout(() => { fullTimer = null; lastFullAt = Date.now(); load().catch(() => {}); }, wait);
+    fullTimer = setTimeout(() => { fullTimer = null; markFullRead(); load().catch(() => {}); }, wait);
   };
+  // Every completed whole-board read counts toward the 4s window, not just the ones this timer
+  // started. It was blind to the boot read and to the 60s backstop, so a breadcrumb arriving a
+  // moment after either of those fired instantly rather than waiting its turn.
+  markFullRead = () => { lastFullAt = Date.now(); };
   LFH_RT.start({ handlers: {
     ops: (detail) => (detail && !detail.full && detail.tables && detail.tables.length) ? loadTables(detail.tables) : fullSoon(),
     menu: () => fullSoon(),
