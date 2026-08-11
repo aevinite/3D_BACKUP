@@ -53,7 +53,12 @@ function isFresh(computedAt: unknown, maxAgeMs: number): boolean {
 // hour per instance, and is fire-and-forget — a failed sweep must never affect the response.
 const SWEEP_EVERY_MS = 3600_000;
 const KEEP_DAYS = 30;
-let lastSweep = 0;
+// `lastSweep` is module state, so a serverless COLD START resets it and the guard below stops
+// meaning "once an hour" (T5 sweep, 2026-08-11). Seeding it with a random slice of the interval
+// means a fleet of fresh instances doesn't all sweep at once on their first cold compute; the
+// delete is one indexed statement, so spreading it is enough — a shared clock would cost a read
+// on the rare path it is trying to protect.
+let lastSweep = -Math.floor(Math.random() * SWEEP_EVERY_MS);
 function sweepStaleRows(): void {
   const now = Date.now();
   if (now - lastSweep < SWEEP_EVERY_MS) return;

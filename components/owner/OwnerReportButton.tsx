@@ -3,7 +3,7 @@
 // month/last month/all/custom-dates) that then auto-generates the professional
 // compiled statement as Print / CSV / Excel. Used by BOTH the owner dashboard's
 // Report button and the /owner/reports hub, so the report is identical everywhere.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { buildReportHtml, buildReportTables, type ReportData, type ExportTable } from "@/components/owner/ownerReportDoc";
 import { POPUP_BLOCKED } from "@/components/owner/reports/sectionExport";
@@ -11,11 +11,17 @@ import { POPUP_BLOCKED } from "@/components/owner/reports/sectionExport";
 const DAY_MS = 86400000;
 const GREEN = "#34d399";
 
+// The Reports Studio next door offers "This week", "12 months" and "FY (Apr–Mar)", and BOTH
+// owner routes already understand all three — but this dialog did not list them, so the one
+// document an Indian restaurant has to produce every year (the financial year) could only be
+// made by typing two dates by hand (T5 sweep, 2026-08-11).
 const REPORT_PERIODS: { k: string; label: string }[] = [
   { k: "today", label: "Today" }, { k: "yesterday", label: "Yesterday" },
   { k: "7d", label: "Last 7 days" }, { k: "30d", label: "Last 30 days" },
-  { k: "month", label: "This month" }, { k: "lastmonth", label: "Last month" },
-  { k: "all", label: "All time" }, { k: "custom", label: "Custom dates…" },
+  { k: "week", label: "This week" }, { k: "month", label: "This month" },
+  { k: "lastmonth", label: "Last month" }, { k: "12m", label: "12 months" },
+  { k: "fy", label: "FY (Apr–Mar)" }, { k: "all", label: "All time" },
+  { k: "custom", label: "Custom dates…" },
 ];
 const MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -38,6 +44,15 @@ export function ReportMenu({ gather, filename }: { gather: (qs: string, label: s
     setPeriod("custom"); setDFrom(from); setDTo(clampTo(to)); setLabelOv(lab);
   };
   useBackClose("owner-report-modal", open, () => setOpen(false));
+  // Escape, like every other overlay in this console (the report detail overlay, the print
+  // ask-dialog and the dashboard drawer all bind it). Never while a report is compiling — that
+  // would strand the tab it already opened (T5 sweep, 2026-08-11).
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !busy) setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, busy]);
   const download = (blob: Blob, name: string) => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -140,7 +155,10 @@ export function ReportMenu({ gather, filename }: { gather: (qs: string, label: s
                 </div>
                 {browse.level === "years" && (
                   <div className="owrp-grid y">
-                    {[todayY, todayY - 1, todayY - 2].map((y) => (
+                    {/* Reach as far back as "All time" does (2020) rather than three years —
+                        an owner comparing against an older year could not get there without
+                        typing (T5 sweep, 2026-08-11). */}
+                    {Array.from({ length: Math.max(3, todayY - 2019) }, (_, i) => todayY - i).map((y) => (
                       <button key={y} onClick={() => setBrowse({ level: "months", year: y, month: 0 })}>{y} <i className="fas fa-chevron-right" aria-hidden="true" /></button>
                     ))}
                   </div>
@@ -204,7 +222,7 @@ export function ReportMenu({ gather, filename }: { gather: (qs: string, label: s
             .owrp-bhead b { color: var(--text); }
             .owrp-bhead .bx { margin-left: auto; background: none; border: var(--border); color: var(--muted); border-radius: 7px; width: 24px; height: 24px; font-size: 11px; cursor: pointer; }
             .owrp-grid { display: grid; gap: 6px; }
-            .owrp-grid.y { grid-template-columns: repeat(3, 1fr); }
+            .owrp-grid.y { grid-template-columns: repeat(3, 1fr); max-height: 168px; overflow-y: auto; }
             .owrp-grid.m { grid-template-columns: repeat(4, 1fr); }
             .owrp-grid.d { grid-template-columns: repeat(7, 1fr); }
             .owrp-grid button { background: var(--card); border: var(--border); border-radius: 8px; padding: 8px 4px; font: inherit; font-size: 12px; font-weight: 700; color: var(--text); cursor: pointer; }

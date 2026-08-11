@@ -7,7 +7,7 @@
 import { useEffect, useState } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { canonPayMethod } from "@/components/owner/Charts";
-import { buildFiling, taxableFor, exemptIsMaterial } from "@/lib/taxFiling";
+import { buildFiling, splitTax, taxableFor, exemptIsMaterial } from "@/lib/taxFiling";
 import type { ExportTable, ExportCol } from "@/components/owner/ownerReportDoc";
 
 // Paise only when the amount actually has them (the CGST/SGST halves of an odd tax total),
@@ -18,12 +18,23 @@ const inr = (n: number) => {
   return "₹" + v.toLocaleString("en-IN", { minimumFractionDigits: hasPaise ? 2 : 0, maximumFractionDigits: 2 });
 };
 const nfmt = (n: number) => Math.round(Number(n) || 0).toLocaleString("en-IN");
+/** "8 PM" — the one clock this console writes (mirrors hour12 on the dashboard). */
+const hour12 = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
 const esc = (s: string) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 type MoneyRow = { bucket: string; orders: number; paidOrders: number; subtotal: number; tax: number; discount: number; revenue: number; cancelledOrders: number; cancelledValue: number };
 type Totals = Omit<MoneyRow, "bucket">;
 type TaxInfo = { effectivePct: number; components: { label: string; rate: number; amount: number }[]; configured: boolean; composition?: boolean } | null;
 type Payload = { rows?: unknown[]; totals?: Totals; tax?: TaxInfo; bucket?: string;
+  // The DAY SHEET's own blocks. The export used to read none of them, so Print/CSV/Excel of a
+  // Day summary carried the hourly money table and nothing else — no settlement split, no
+  // CGST/SGST lines, no money-out — while the screen showed all of it (T5 sweep, 2026-08-11).
+  payments?: { method: unknown; revenue: number; orders: number }[];
+  staffPay?: { paidOut: number; people: number; entries: number } | null;
+  tips?: { collected: number; orders: number } | null;
+  inventory?: { bought: number; usedActual: number; usedTheoretical: number; wasted: number;
+    expenses: number; stockValue: number; lowCount: number; negativeCount: number;
+    foodCostPct: number | null; coveragePct: number; hasRecipes?: boolean } | null;
   // Team & pay carries its own shapes (mig 220/221) alongside the shared `rows`.
   people?: unknown[]; monthRows?: unknown[]; cashRows?: unknown[];
   // Inventory & stock (mig 227) — the five sub-tabs share one payload shape.
@@ -84,6 +95,51 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
     const rows: (string | number)[][] = m.map((r) => [c.bucketLabel(r.bucket, grain), r.orders, r.paidOrders, Math.round(r.subtotal), Math.round(r.tax), Math.round(r.discount), Math.round(r.revenue), r.cancelledOrders, Math.round(r.cancelledValue)]);
     if (t) rows.push(["Total", t.orders, t.paidOrders, Math.round(t.subtotal), Math.round(t.tax), Math.round(t.discount), Math.round(t.revenue), t.cancelledOrders, Math.round(t.cancelledValue)]);
     const out: ExportTable[] = [{ title, head, rows }];
+
+    // ── THE DAY SHEET PRINTS WHAT THE DAY SHEET SHOWS (T5 sweep, 2026-08-11) ──────────────
+    // Same order as the screen: where the money came from (with the tax lines), how it
+    // arrived, then what went out. Every block is omitted when its payload is absent, so a
+    // restaurant without payroll/inventory gets exactly the sheet it had before.
+    if (meta.kind === "daysummary" && t) {
+      const net = t.subtotal - t.discount;
+      const flow: (string | number)[][] = [
+        ["Item sales (menu prices)", Math.round(t.subtotal)],
+        ["Discounts given", -Math.round(t.discount)],
+        ["Net sales (your earnings, GST is charged on this)", Math.round(net)],
+        ["GST collected (held for the government)", Math.round(t.tax)],
+      ];
+      // The SAME whole-rupee split the screen prints, so the sheet and the screen agree.
+      if (data.tax?.components.length) {
+        const parts = splitTax(data.tax.components.map((x) => x.rate), Math.round(t.tax));
+        data.tax.components.forEach((cmp, i) => flow.push([`  ${cmp.label} (${cmp.rate}%)`, parts[i]]));
+      }
+      flow.push(["Total collected", Math.round(t.revenue)]);
+      out.push({ title: `${meta.label} — where the money came from`, head: ["Line", "Amount"], cols: ["text", "money"], rows: flow });
+
+      if (data.payments?.length) {
+        const pays = data.payments.map((x) => ({ method: canonPayMethod(String(x.method ?? "")), revenue: x.revenue, orders: x.orders }))
+          .filter((x) => x.orders > 0).sort((a, b) => b.revenue - a.revenue);
+        const paid = pays.reduce((a, x) => a + x.revenue, 0);
+        if (pays.length) out.push({
+          title: `${meta.label} — settlement (how the money arrived)`,
+          head: ["Method", "Bills", "Amount", "Share"], cols: ["text", "num", "money", "pct"],
+          rows: [...pays.map((x) => [x.method, x.orders, Math.round(x.revenue), paid > 0 ? Math.round((x.revenue / paid) * 100) : 0] as (string | number)[]),
+            ["Total settled", pays.reduce((a, x) => a + x.orders, 0), Math.round(paid), 100]],
+        });
+      }
+
+      const outRows: (string | number)[][] = [];
+      if (data.staffPay) outRows.push(["Staff paid out", Math.round(data.staffPay.paidOut)],
+        ["Payments made", data.staffPay.entries], ["People paid", data.staffPay.people]);
+      if (data.tips) outRows.push(["Tips collected (for the team, not revenue)", Math.round(data.tips.collected)],
+        ["Bills with a tip", data.tips.orders]);
+      if (data.inventory) outRows.push(["Stock bought (cash out to suppliers)", Math.round(data.inventory.bought)],
+        ["Ingredients used (recipe cost)", Math.round(data.inventory.usedTheoretical)],
+        ["Wasted", Math.round(data.inventory.wasted)], ["Other expenses", Math.round(data.inventory.expenses)],
+        ["On the shelf at the end", Math.round(data.inventory.stockValue)]);
+      if (outRows.length) out.push({ title: `${meta.label} — money out and money held`, head: ["Line", "Amount"], cols: ["text", "money"], rows: outRows });
+    }
+
     if (c.isTax && data.tax && data.tax.components.length) {
       // ONE filing computation, shared with the screen (lib/taxFiling.ts) — so the exported
       // split, the exported per-period table and what the owner just looked at are the SAME
@@ -115,10 +171,12 @@ export function sectionTables(c: SectionCtx): ExportTable[] {
     if (c.extra?.length) out.push(...c.extra);   // Day summary: the day's dishes + busy hours
     return out;
   }
-  if (meta.kind === "dishes") return [{ title, head: ["Dish", "Qty sold", "Item sales (list price)"], rows: ((data.rows ?? []) as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, Math.round(r.revenue)]) }];
-  if (meta.kind === "categories") return [{ title, head: ["Category", "Qty sold", "Item sales (list price)"], rows: ((data.rows ?? []) as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, Math.round(r.revenue)]) }];
+  if (meta.kind === "dishes") return [{ title, head: ["Dish", "Qty sold", "Dish sales (GST included)"], rows: ((data.rows ?? []) as { title: string; qty: number; revenue: number }[]).map((r) => [r.title, r.qty, Math.round(r.revenue)]) }];
+  if (meta.kind === "categories") return [{ title, head: ["Category", "Qty sold", "Category sales (GST included)"], rows: ((data.rows ?? []) as { category: string; qty: number; revenue: number }[]).map((r) => [r.category, r.qty, Math.round(r.revenue)]) }];
   if (meta.kind === "payments") return [{ title, head: ["Method", "Bills", "Revenue"], rows: ((data.rows ?? []) as { method: string; revenue: number; orders: number }[]).map((r) => [canonPayMethod(r.method), r.orders, Math.round(r.revenue)]) }];
-  if (meta.kind === "hourly") return [{ title, head: ["Hour", "Orders", "Revenue"], rows: ((data.rows ?? []) as { hour: number; orders: number; revenue: number }[]).map((r) => [`${r.hour}:00`, r.orders, Math.round(r.revenue)]) }];
+  // "8 PM", not "20:00" — the whole console (hour12(), the Studio's hourLabel, the Busy-times
+  // tiles) speaks the 12-hour clock, and only the EXPORT of it spoke 24-hour (T5 sweep, 2026-08-11).
+  if (meta.kind === "hourly") return [{ title, head: ["Hour", "Orders", "Revenue"], rows: ((data.rows ?? []) as { hour: number; orders: number; revenue: number }[]).map((r) => [hour12(r.hour), r.orders, Math.round(r.revenue)]) }];
   // Team & pay (mig 220/221). Without these two branches the export fell through to the
   // empty "—" table below, so Export and Print produced a blank document (2026-07-31 sweep).
   if (meta.kind === "staffpay") {

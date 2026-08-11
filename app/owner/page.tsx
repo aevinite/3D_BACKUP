@@ -124,6 +124,10 @@ type RestA = {
   timeseries: TsRow[]; timeseriesPrev?: TsPrevRow[]; dishes: Dish[]; categories: { category: string; qty: number; revenue: number }[];
   hourly: { hour: number; orders: number; revenue: number }[]; paymentMethods: Pay[];
   heatmap?: HeatRow[]; records?: Records; cachedAt?: string;
+  // Named figures the server could NOT read (lib/partialRead) — the restaurant scope gained
+  // this for the busy heatmap, which used to degrade to an empty grid in silence
+  // (T5 sweep, 2026-08-11).
+  partial?: string[];
 };
 type Payload = GroupA | RestA;
 type MoneyTotals = { revenue: number; discount: number; cancelledOrders: number; cancelledValue: number; tax: number };
@@ -157,6 +161,11 @@ function istWall(ts: string, opts: Intl.DateTimeFormatOptions): string {
 }
 /** "8 PM" — the one clock format this console uses (matches the Studio's hourLabel). */
 const hour12 = (h: number) => `${h % 12 === 0 ? 12 : h % 12} ${h < 12 ? "AM" : "PM"}`;
+/** istWall() for a stamp that includes an hour — but upper-cased, because toLocaleString
+ *  writes "1 pm" and every other time on this console is written "1 PM". The records strip was
+ *  the one place that leaked the locale's own casing (T5 sweep, 2026-08-11). */
+const istWall12 = (ts: string, opts: Intl.DateTimeFormatOptions): string =>
+  istWall(ts, opts).replace(/\b(am|pm)\b/g, (m) => m.toUpperCase());
 function tsLabel(iso: string, range: Range): string {
   const d = new Date(iso);
   if (range === "today" || range === "yesterday") return d.toLocaleTimeString("en-IN", { hour: "numeric", hour12: true, timeZone: IST });
@@ -426,7 +435,10 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
       .ow2-kpi.ow2-click:hover { border-color: var(--accent); transform: translateY(-2px); }
       .ow2-kt { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
       .ow2-kt .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
-      .ow2-live { font-size: 10px; font-weight: 800; color: ${GREEN}; background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; }
+      /* nowrap + flex-none: on a 360px phone the dot and the word "live" stacked inside the
+         pill and the label broke to "TODAY SO / FAR" (T5 sweep, 2026-08-11). */
+      .ow2-live { font-size: 10px; font-weight: 800; color: ${GREEN}; background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; white-space: nowrap; flex: none; }
+      .ow2-kt .k { min-width: 0; }
       .ow2-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
       .ow2-spark { position: absolute; left: 0; right: 0; bottom: 0; opacity: .55; pointer-events: none; overflow: hidden; border-radius: 0 0 12px 12px; }
     `}</style>
@@ -488,6 +500,10 @@ export default function OwnerDashboard() {
   // line reports the OLDEST thing on screen — the honest worst case.
   const [ages, setAges] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
+  // Has ANY payload answered this visit? Until one has, what is on screen is the instant-paint
+  // snapshot from the last time this tab was open — real numbers, but last-seen ones. The age
+  // line said "updated 15 hr ago" without saying that was a saved copy (T5 sweep, 2026-08-11).
+  const [landed, setLanded] = useState(false);
   const [dishSort, setDishSort] = useState<"revenue" | "qty">("revenue");
   const inflight = useRef<Set<string>>(new Set());
   // Admin tab pin (bug C1): ?rid= rides on EVERY call so a second tab's act-as cookie
@@ -610,6 +626,7 @@ export default function OwnerDashboard() {
       if (a.error && a.disabled) { setErr(errText(a.error)); return; }
       if (a.error) throw new Error(errText(a.error));
       setCache((c) => ({ ...c, [key]: a }));
+      setLanded(true);
       if (a.cachedAt) { setUpdatedAt(a.cachedAt); setAges((m) => ({ ...m, [key]: a.cachedAt })); }
       if (rid && a.records) setRecs((m) => ({ ...m, [rid]: a.records }));
       setErr(null);
@@ -911,7 +928,13 @@ export default function OwnerDashboard() {
         byRest.set(t.restaurantId, m);
       }
       const exp = expectedBuckets(globalRange);
-      for (const [rid, m] of byRest) sparks.set(rid, exp.length ? exp.map((e) => m.get(e.key) ?? 0) : Array.from(m.values()));
+      // SORT the fallback, like sparkOf / restTrend / groupTrend / drawerTrend all do. It is
+      // correct today only because lfh_owner_revenue_timeseries happens to end `ORDER BY 1`;
+      // a line inside a tile has no axis, so a wrong order looks exactly like a real trend
+      // (T5 sweep, 2026-08-11).
+      for (const [rid, m] of byRest) sparks.set(rid, exp.length
+        ? exp.map((e) => m.get(e.key) ?? 0)
+        : Array.from(m.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1)).map(([, v]) => v));
     }
     const total = Math.max(1, Array.from(revById.values()).reduce((a, r) => a + r.revenue, 0));
     const base = ov.restaurants.map((r) => {
@@ -1201,8 +1224,13 @@ export default function OwnerDashboard() {
     </div>
   ) : null;
 
+  // How many tiles this row will actually draw — 5 normally, 7 once the payroll module is on.
+  // Seven into a fixed 5-across grid left the last two alone against three empty columns
+  // (T5 sweep, 2026-08-11); the count picks a balanced row instead (7 → 4 + 3).
+  const kpiCount = 5 + (kMain?.staffPay ? 2 : 0);
+  const kpiCols = kpiCount <= 5 ? kpiCount : Math.ceil(kpiCount / 2);
   const kpiRow = (
-    <div className="adm-stats ow2-stats">
+    <div className="adm-stats ow2-stats" style={{ ["--ow2-cols" as string]: String(kpiCols) }}>
       <Kpi k="Revenue" href={reportHref("sales")} v={kMain?.revenue ?? 0} money loading={!kMain}
         delta={kMain?.prev ? { now: kMain.revenue, prev: kMain.prev.revenue } : undefined}
         prevTitle={PREV_LABEL[globalRange]} sub={PREV_LABEL[globalRange] || "whole history"} spark={sparkOf(globalRange, "revenue")} />
@@ -1260,7 +1288,7 @@ export default function OwnerDashboard() {
             {oldestShown && !refreshing && (
               <span style={{ fontSize: 10.5, color: "var(--muted)" }}
                 title={`The oldest figures on this page were computed ${new Date(oldestShown).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: IST })}. Each card carries its own time — hover its period chip.`}>
-                updated {timeAgo(oldestShown)}
+                {!landed && "your last view · "}updated {timeAgo(oldestShown)}
               </span>
             )}
           </div>
@@ -1408,6 +1436,7 @@ export default function OwnerDashboard() {
           {/* Heatmap + payments, side by side (group scope) */}
           <div className="ow2-two">
             <div className="adm-card">
+              <PartialStrip keys={(pl(globalRange) as GroupA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour · {restScopeText}{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as GroupA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as GroupA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
@@ -1479,6 +1508,7 @@ export default function OwnerDashboard() {
 
           <div className="ow2-two" style={{ marginTop: 12 }}>
             <div className="adm-card">
+              <PartialStrip keys={(pl(globalRange) as RestA | undefined)?.partial?.filter((k) => k === "busyHours")} />
               <div className="ow2-ct"><span>Busy heatmap <span className="mut">· by day × hour{HEAT_CLAMPED[globalRange] ? ` · last ${HEAT_CLAMP_DAYS} days only` : ""}</span></span><span className="ow2-tag" title={[HEAT_CLAMPED[globalRange] ? `A busy pattern is about recent weeks, so this grid always covers the last ${HEAT_CLAMP_DAYS} days, whatever the period above says` : rangeSpanText(globalRange), mainAge()].filter(Boolean).join(" · ")}>{HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label}</span></div>
               {(pl(globalRange) as RestA | undefined)?.heatmap
                 ? <Heatmap data={(pl(globalRange) as RestA).heatmap!} accent={GREEN} rangeLabel={HEAT_CLAMPED[globalRange] ? `Last ${HEAT_CLAMP_DAYS} days` : RANGES.find((r) => r.k === globalRange)!.label} />
@@ -1513,7 +1543,7 @@ export default function OwnerDashboard() {
                 )}
                 {records.fastHour && (
                   <div className="rv-rec"><span className="e">⚡</span><span><small>BUSIEST HOUR EVER</small><b><AnimatedNumber value={records.fastHour.orders} /> orders</b>
-                    <i>{istWall(records.fastHour.at, { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
+                    <i>{istWall12(records.fastHour.at, { day: "numeric", month: "short", hour: "numeric", hour12: true })}</i></span></div>
                 )}
                 {records.bigBill && (
                   <div className="rv-rec"><span className="e">💎</span><span><small>BIGGEST BILL</small><b><AnimatedNumber value={records.bigBill.revenue} money /></b>
@@ -1640,7 +1670,7 @@ export default function OwnerDashboard() {
         .ow2-back:hover { color: var(--accent); border-color: var(--accent); }
         .ow2-tools { display: flex; gap: 10px; align-items: flex-start; }
         .ow2-stats { margin-bottom: 12px; }
-        :global(.ow2-stats) { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+        :global(.ow2-stats) { display: grid; grid-template-columns: repeat(var(--ow2-cols, 5), 1fr); gap: 12px; }
         .ow2-ct { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 800; margin-bottom: 10px; flex-wrap: wrap; }
         .ow2-ct .mut { color: var(--muted); font-weight: 500; }
         /* A quiet caption under a chart, for saying what it deliberately leaves out. */

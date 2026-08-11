@@ -267,8 +267,12 @@ export async function GET(req: NextRequest) {
   // after the 2026-07-27 audit ("the first open of a new day served YESTERDAY'S 30-day window")
   // and this route was never given it, so the two halves of the same KPI row could disagree.
   // `from` is the resolved window start, so the key changes the moment the window does.
+  // Built from the RESOLVED window, never from the raw query string. `custom` used to
+  // interpolate sp.get("from")/sp.get("to") straight in — but windowFor() validates those and
+  // silently falls back to 30d, so every distinct junk value minted its own cache row holding
+  // the identical 30-day payload (T5 sweep, 2026-08-11). `from`/`to` are already validated.
   const rangeKey = range === "custom"
-    ? `custom:${sp.get("from")}:${sp.get("to")}`
+    ? `custom:${from}:${to}`
     : `${range}:${from.slice(0, 10)}`;
   const prevWin = compare ? prevWindowFor(range, from, to) : null;
   const prevTsWin = compare ? prevTsWindowFor(range, from, to) : null;
@@ -366,6 +370,10 @@ export async function GET(req: NextRequest) {
       // carrying `partial`, so this note can never outlive the blip — see lib/ownerCache.)
       const partial: PartialKey[] = [];
       if (pmOk.length < pmRes.length) partial.push("payments");
+      // The heatmap is deliberately NON-FATAL (see heatFrom) — but "degraded quietly" and
+      // "this restaurant is empty at those hours" look identical on screen, which is the very
+      // thing `partial` exists to stop. Name it like its neighbours (T5 sweep, 2026-08-11).
+      if (heat.error) partial.push("busyHours");
       // Category split across the group (round-2: the owner wants "Revenue by category"
       // on the multi home too). lfh_owner_category_breakdown is per-restaurant, so —
       // exactly like the payment breakdown above — a scoped owner sums their own
@@ -507,6 +515,10 @@ export async function GET(req: NextRequest) {
       hourly: (hourly.data ?? []).map((r: Record<string, unknown>) => ({ hour: Number(r.hour) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       heatmap: ((heat.data ?? []) as Record<string, unknown>[]).map((r) => ({ dow: Number(r.dow) || 0, hr: Number(r.hr) || 0, orders: Number(r.orders) || 0, revenue: num(r.revenue) })),
       paymentMethods: (pm.data ?? []).map((r: Record<string, unknown>) => ({ method: r.method, revenue: num(r.revenue), orders: Number(r.orders) || 0 })),
+      // Same rule as the group scope: an unread busy grid says so instead of drawing an empty
+      // one (T5 sweep, 2026-08-11). cachedOwnerPayload refuses to STORE a payload carrying
+      // `partial`, so the note can never outlive the blip.
+      ...(heat.error ? { partial: ["busyHours"] as PartialKey[] } : {}),
     };
       },
     });

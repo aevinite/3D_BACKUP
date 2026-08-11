@@ -19,13 +19,17 @@ const useIso = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 import { AnimatedNumber } from "@/components/owner/AnimatedNumber";
 import {
   ToggleChart, PaymentDonut, LeaderBar,
-  canonPayMethod, PAY_COLORS,
+  // payColor, NOT PAY_COLORS[m] || grey: a method this app doesn't know by name (a wallet, a
+  // house account) fell back to the SAME grey as "Not recorded", so the table's swatch and the
+  // donut's wedge disagreed about which slice was which. Measured live 2026-08-10: "On the
+  // house" and "Not recorded" both rendered rgb(107,114,128) (T5 sweep, 2026-08-11).
+  canonPayMethod, payColor,
 } from "@/components/owner/Charts";
 import {
   REPORTS, CATEGORIES, ReportsStyles, Stat, Panel, PrintHead, PrintFoot, nfmt, scrollToId, type RKey, type DataKind,
 } from "@/components/owner/reports/kit";
 import { BestWorst, SplitBar } from "@/components/owner/reports/Insights";
-import { DishesReport, CategoriesReport, MenuReport } from "@/components/owner/reports/DishReports";
+import { DishesReport, CategoriesReport, MenuReport, classifyMenu, type MI } from "@/components/owner/reports/DishReports";
 import {
   InvStockReport, InvPurchasesReport, InvUsageReport, InvWasteReport, InvExpensesReport,
   InvReportStyles, type InvPayload,
@@ -272,27 +276,11 @@ function dayExtraTables(dishesDay?: Payload, hourlyDay?: Payload): { title: stri
 // Tab-lifetime memo of the hub's per-restaurant brief per query string (see Hub).
 const briefMemo = new Map<string, { id: string; name: string; accent: string; revenue: number; orders: number }[]>();
 
-// ── Menu-engineering quadrant (client-only view over the dishes payload) ──────
-type MI = { title: string; qty: number; revenue: number };
-type Klass = "star" | "workhorse" | "puzzle" | "dog";
-function median(arr: number[]): number {
-  if (!arr.length) return 0;
-  const s = [...arr].sort((a, b) => a - b), m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-function classifyMenu(rows: MI[]) {
-  const clean = rows.filter((r) => (Number(r.qty) || 0) > 0);
-  const totalQty = clean.reduce((a, r) => a + r.qty, 0);
-  const totalRev = clean.reduce((a, r) => a + r.revenue, 0);
-  const medQty = median(clean.map((r) => r.qty));
-  const medPrice = median(clean.map((r) => (r.qty ? r.revenue / r.qty : 0)));
-  const dishes = clean.map((r) => {
-    const price = r.qty ? r.revenue / r.qty : 0;
-    const klass: Klass = r.qty >= medQty && price >= medPrice ? "star" : r.qty >= medQty ? "workhorse" : price >= medPrice ? "puzzle" : "dog";
-    return { ...r, price, qtyShare: totalQty ? r.qty / totalQty : 0, revShare: totalRev ? r.revenue / totalRev : 0, klass };
-  });
-  return { dishes };
-}
+// ── Menu-engineering quadrant ────────────────────────────────────────────────
+// The grouping maths lives ONCE, in DishReports.tsx, and is imported here (T5 sweep,
+// 2026-08-11). This file used to carry a byte-identical copy whose only job was the
+// is-this-report-empty check below — two copies of the medians that decide every
+// Star / Workhorse / Puzzle / Dog verdict is one place for them to drift apart.
 
 // ── Period dropdown (owner 2026-07-27: "make it a dropdown like the dashboard,
 // not the whole strip showing"). Same button+popup look as the dashboard's
@@ -682,6 +670,15 @@ export default function OwnerReports() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [printWhenReady, data, entry?.loading, extrasSettled]);
   useBackClose("owner-print-ask", printAsk, () => setPrintAsk(false));
+  // …and Escape. The detail overlay and the dashboard drawer both close on it, so leaving this
+  // one out meant the habit that works everywhere else silently did nothing here (T5 sweep,
+  // 2026-08-11).
+  useEffect(() => {
+    if (!printAsk) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setPrintAsk(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [printAsk]);
 
   // ── ONE breadcrumb (owner 2026-07-26: "not two different paths — on the top only") ──
   // Feed the SCOPE ("All restaurants" or the picked restaurant — owner: "beside Reports it
@@ -1215,7 +1212,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <Panel title="Who put through the most" hint="Value of the orders each person punched in this period." id="perf-leader">
           {bars.filter((b) => b.revenue > 0).length < 2
             ? <div className="rs-empty">Only one person has punched orders in this period ({bars[0]?.name} · {inr(bars[0]?.revenue || 0)}). A comparison needs two.</div>
-            : <LeaderBar data={bars} />}
+            : <LeaderBar data={bars} valueLabel="Value punched" />}
         </Panel>
 
         <Panel title="Everyone, side by side" hint="Sorted by value punched. Ratings come from guests who rated an order that person took." id="perf-table">
@@ -1251,6 +1248,15 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     const pays = (data.payments || []).map((p) => ({ ...p, method: canonPayMethod(p.method) })).filter((p) => p.revenue > 0);
     const payTotal = pays.reduce((a, p) => a + p.revenue, 0);
     const avg = t.paidOrders ? t.revenue / t.paidOrders : 0;
+    // ONE meaning of "orders placed" for the whole console (T5 sweep, 2026-08-11). `t.orders`
+    // is COUNT(*) WHERE status <> 'cancelled', so it leaves the voided ones out — this sheet
+    // used it under the label "Orders placed" while the Order-volume report used
+    // orders + cancelled under the identical label. Measured 3,839 here against 4,634 there,
+    // same restaurant, same window. Placed means placed.
+    const placed = t.orders + t.cancelledOrders;
+    const stillOpen = Math.max(0, t.orders - t.paidOrders);
+    // A day that has not started trading yet is a sentence, not eleven zeroes (T5 sweep).
+    const nothingYet = placed === 0 && t.revenue === 0;
     // Split the WHOLE-RUPEE tax (GST returns round to the rupee): equal rates then always
     // show equal halves (₹81,369.50 each), and the lines sum exactly to the displayed
     // whole-rupee "GST collected" — no ₹163 parent over ₹81.25+81.25 children (audit 2026-07-27).
@@ -1259,10 +1265,17 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
       : [];
     return (
       <>
+        {nothingYet && (
+          <p className="rs-note" style={{ marginTop: -2, marginBottom: 12 }}>
+            <i className="fas fa-circle-info" aria-hidden style={{ color: "var(--accent)", marginRight: 6 }} />
+            Nothing has been billed on this day yet — a restaurant&apos;s day runs from 5 am to 5 am, so
+            anything served after midnight still counts on the day before. The sheet fills in as bills are paid.
+          </p>
+        )}
         <div className="rs-kpis">
           <Stat label="Total collected" tone="accent" icon="fa-indian-rupee-sign" big value={inr(t.revenue)} sub="everything guests paid — GST included" spark={series.map((s) => s.revenue)} />
           <Stat label="Net sales" tone="good" icon="fa-sack-dollar" value={inr(t.subtotal - t.discount)} sub="your earnings, before GST" />
-          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`${nfmt(t.orders)} order${t.orders === 1 ? "" : "s"} total`} />
+          <Stat label="Paid bills" tone="info" icon="fa-receipt" value={nfmt(t.paidOrders)} sub={`of ${nfmt(placed)} order${placed === 1 ? "" : "s"} placed`} />
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" value={inr(avg)} />
           <Stat label="Tax collected" tone="accent" icon="fa-landmark" value={inr(t.tax)} onClick={() => onOpenReport("tax")} title="Open the Tax / GST report" />
           <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={`${inr(t.cancelledValue)} lost`} onClick={() => onOpenReport("payments", { pay: "cancellations" })} title="Open the Cancellations report" />
@@ -1323,7 +1336,8 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
               <div className="rs-line total"><span className="lbl">Total collected</span><span className="val">{inr(t.revenue)}</span></div>
             </div>
             <p className="rs-note">
-              <b>Total collected</b> is every rupee guests paid — it includes the {inr(t.tax)} GST, which isn&apos;t yours to keep.
+              <b>Total collected</b> is every rupee guests paid — it includes the {inr(t.tax)}{" "}
+              GST, which isn&apos;t yours to keep.
               Your actual sales are the <b>Net sales</b> line ({inr(t.subtotal - t.discount)}).
               {!singleRest && " Pick one restaurant to see its CGST/SGST split."}
             </p>
@@ -1335,7 +1349,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
             {pays.length === 0 ? <div className="rs-empty" style={{ padding: 20 }}>No payments recorded.</div> : (
               <div className="rs-paylist">
                 {pays.map((p) => {
-                  const c = PAY_COLORS[p.method] || PAY_COLORS["Not recorded"];
+                  const c = payColor(p.method);
                   const share = payTotal ? (p.revenue / payTotal) * 100 : 0;
                   return (
                     <div key={p.method}>
@@ -1355,8 +1369,9 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
 
           <Panel title="Order stats" hint="volume & health">
             <div className="rs-lines">
-              <div className="rs-line"><span className="lbl">Orders placed</span><span className="val">{nfmt(t.orders)}</span></div>
+              <div className="rs-line"><span className="lbl">Orders placed</span><span className="val">{nfmt(placed)}</span></div>
               <div className="rs-line"><span className="lbl">Paid bills</span><span className="val">{nfmt(t.paidOrders)}</span></div>
+              {stillOpen > 0 && <div className="rs-line"><span className="lbl">Still open (not paid yet)</span><span className="val">{nfmt(stillOpen)}</span></div>}
               <div className="rs-line"><span className="lbl">Cancelled orders</span><span className="val neg">{nfmt(t.cancelledOrders)}</span></div>
               <div className="rs-line"><span className="lbl">Value lost to cancels</span><span className="val neg">{inr(t.cancelledValue)}</span></div>
               <div className="rs-line"><span className="lbl">Average bill</span><span className="val">{inr(avg)}</span></div>
@@ -1457,8 +1472,10 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <div className="rs-kpis">
           <Stat label="Average bill" tone="info" icon="fa-scale-balanced" big value={inr(avg)} sub="revenue ÷ paid bills" spark={avgSeries.map((s) => s.revenue)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
           <Stat label="Paid bills" tone="accent" icon="fa-receipt" value={nfmt(t.paidOrders)} onClick={() => onOpenReport("sales", { sub: "volume" })} title="Open the Order volume report" />
-          <Stat label="Highest bucket" tone="good" icon="fa-arrow-up" value={inr(withData.length ? Math.max(...withData) : 0)} />
-          <Stat label="Lowest bucket" tone="warn" icon="fa-arrow-down" value={inr(withData.length ? Math.min(...withData) : 0)} />
+          {/* "bucket" is the word the query uses; the owner reads days, hours or months
+              (T5 sweep, 2026-08-11). The panel underneath already says "day". */}
+          <Stat label={`Best ${chartUnit}`} tone="good" icon="fa-arrow-up" value={inr(withData.length ? Math.max(...withData) : 0)} sub="fullest average bill" />
+          <Stat label={`Thinnest ${chartUnit}`} tone="warn" icon="fa-arrow-down" value={inr(withData.length ? Math.min(...withData) : 0)} sub="lightest average bill" />
         </div>
         <Panel title="Average bill over time" pad={false}>
           <div style={{ padding: 12 }}><ToggleChart data={avgSeries.map((s) => ({ label: s.label, value: s.revenue }))} color={accent} money name="Avg bill" height={240} /></div>
@@ -1488,7 +1505,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(placed)} sub={`${nfmt(t.paidOrders)} paid · ${nfmt(t.cancelledOrders)} cancelled`} spark={vol.map((v) => v.value)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
+          {/* The caption must ACCOUNT FOR the headline. It used to read "3,534 paid · 795
+              cancelled" under a total of 4,634 — 305 open tables short (T5 sweep, 2026-08-11). */}
+          <Stat label="Orders placed" tone="info" icon="fa-list-check" big value={nfmt(placed)}
+            sub={`${nfmt(t.paidOrders)} paid${openOrders ? ` · ${nfmt(openOrders)} still open` : ""} · ${nfmt(t.cancelledOrders)} cancelled`}
+            spark={vol.map((v) => v.value)} onClick={() => scrollToId("rs-by-period")} title="Jump to the by-period table" />
           <Stat label="Paid bills" tone="good" icon="fa-circle-check" value={nfmt(t.paidOrders)} sub={`${paidPct.toFixed(0)}% of placed`} />
           <Stat label="Cancelled" tone="bad" icon="fa-ban" value={nfmt(t.cancelledOrders)} sub={placed ? `${((t.cancelledOrders / placed) * 100).toFixed(1)}% of placed` : ""} onClick={() => onOpenReport("payments", { pay: "cancellations" })} title="Open the Cancellations report" />
           <Stat label={`Busiest ${unitWord}`} tone="accent" icon="fa-fire" value={nfmt(vol.length ? Math.max(...vol.map((v) => v.value)) : 0)} sub={`orders in one ${unitWord}`} />
@@ -1680,7 +1701,8 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
             <i className="fas fa-circle-info" aria-hidden style={{ color: "var(--accent)", marginRight: 6 }} />
             This restaurant is on the <b>composition scheme</b>, so it cannot charge GST to guests and
             the bill shows no tax line. There is no CGST/SGST split to file — you pay the flat
-            composition rate on turnover yourself, from the <b>Sales</b> figure above.
+            composition rate on turnover yourself, from the <b>Sales</b>{" "}
+            figure above.
           </p>
         )}
         {!composition && configuredPct != null && !rateOk && (
@@ -1778,7 +1800,9 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         </Panel>
         {top5.length > 0 && (
           <Panel title={`Biggest discount ${rowUnit}s`} hint="top 5 by amount given away">
-            <LeaderBar data={top5} />
+            {/* valueLabel, or the hover reads "Revenue: ₹4,700" over money GIVEN AWAY —
+                measured live 2026-08-10 (T5 sweep, 2026-08-11). */}
+            <LeaderBar data={top5} valueLabel="Discount given" />
             <p className="rs-note">
               These {top5.length} {rowUnit}{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of everything discounted this period.
               {" "}Discounting is <b>{trend}</b>{trend === "steady" ? " — the give-away rate is holding flat." : trend === "rising" ? ` — the give-away rate climbed from ~${firstAvg.toFixed(1)}% to ~${lastAvg.toFixed(1)}% of sales.` : ` — the give-away rate fell from ~${firstAvg.toFixed(1)}% to ~${lastAvg.toFixed(1)}% of sales.`}
@@ -1831,7 +1855,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         </Panel>
         {top5.length > 0 && (
           <Panel title={`Worst cancellation ${rowUnit}s`} hint="top 5 by value lost">
-            <LeaderBar data={top5} />
+            <LeaderBar data={top5} valueLabel="Value lost" />
             <p className="rs-note">These {top5.length} {rowUnit}{top5.length === 1 ? "" : "s"} account for {top5Share.toFixed(0)}% of all the value lost to cancellations this period.</p>
           </Panel>
         )}
@@ -1895,7 +1919,7 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
                     <tr key={p.method} style={dom ? { background: "color-mix(in srgb, var(--accent) 8%, transparent)" } : undefined}>
                       <td>
                         <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ width: 10, height: 10, borderRadius: 3, background: PAY_COLORS[p.method] || PAY_COLORS["Not recorded"], flexShrink: 0 }} />
+                          <span style={{ width: 10, height: 10, borderRadius: 3, background: payColor(p.method), flexShrink: 0 }} />
                           {p.method}
                           {dom && <span className="rs-tag" style={{ background: "color-mix(in srgb, var(--accent) 16%, transparent)", color: "var(--accent)" }}>Top</span>}
                         </span>
@@ -1975,7 +1999,8 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         {top3.length > 0 && (
           <p className="rs-note" style={{ marginBottom: 12 }}>
             Your three busiest hours — <b>{top3.map((h) => hourLabel(h.hour)).join(", ")}</b> — bring in{" "}
-            <b>{top3Share}%</b> of the period&apos;s revenue. Staff and stock for those windows first.
+            <b>{top3Share}%</b>{" "}
+            of the period&apos;s revenue. Staff and stock for those windows first.
           </p>
         )}
         <Panel title="Revenue by hour" pad={false}>
@@ -2039,7 +2064,8 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         </div>
         {best.rev > 0 && (
           <p className="rs-note" style={{ marginBottom: 12 }}>
-            <b>{best.label}</b> is your money-maker — <b>{totalRev ? Math.round((best.rev / totalRev) * 100) : 0}%</b> of everything you take.
+            <b>{best.label}</b> is your money-maker — <b>{totalRev ? Math.round((best.rev / totalRev) * 100) : 0}%</b>{" "}
+            of everything you take.
             {weakest && weakest.label !== best.label && <> <b>{weakest.label}</b> is the quietest stretch; a small offer there can even out the day.</>}
           </p>
         )}

@@ -452,8 +452,16 @@ export function CategoryDonut({ data }: { data: { category: string; revenue: num
   const perCol = 9;                                   // comfortable rows per side column
   const twoCols = n > perCol;
   const small = n > perCol * 2;                       // both sides full → smaller text
-  const right = twoCols ? sorted.filter((_, i) => i % 2 === 0) : sorted;
-  const left = twoCols ? sorted.filter((_, i) => i % 2 === 1) : [];
+  // SPLIT IN HALF, don't interleave (T5 sweep, 2026-08-11). This used to be `i % 2`, which
+  // fills both columns evenly but scatters the ranking: measured live, the LEFT column (which
+  // is rendered first, so it is read first) began at pasta 17% while the biggest category —
+  // salads 29% — sat at the top of the RIGHT one. The comment below already claimed the sort
+  // existed "so the labels an owner actually cares about are always at the top of the columns";
+  // that is only true of a column each reader can read in order. Halves give the same two
+  // columns AND keep 1,2,3… running down the left and continuing down the right.
+  const half = Math.ceil(n / 2);
+  const left = twoCols ? sorted.slice(0, half) : [];
+  const right = twoCols ? sorted.slice(half) : sorted;
   const total = sorted.reduce((a, d) => a + d.revenue, 0) || 1;
   const legendCol = (items: typeof sorted) => (
     <div style={{ display: "flex", flexDirection: "column", gap: small ? 3 : 5, minWidth: 0, flex: "1 1 0", maxHeight: 230, overflowY: "auto" }}>
@@ -563,6 +571,11 @@ export function PaymentDonut({ data }: { data: { method: string; revenue: number
 // ── SparkArea — full-width gradient mini-trend for KPI cards (D1 look, 2026-07-26).
 // preserveAspectRatio="none" lets it stretch across the whole card bottom.
 export function SparkArea({ points, color, height = 34, animate = false }: { points: number[]; color: string; height?: number; animate?: boolean }) {
+  // useId, not Math.random(): every other gradient in this file moved off a random id after the
+  // duplicate-<linearGradient> lesson (two charts filling from ONE definition). This one only
+  // escaped it because it never renders on the server — that is luck, not a rule. The hook must
+  // run before the early return below, so it sits here (T5 sweep, 2026-08-11).
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, "");
   if (points.length < 2) return null;
   const w = 300;
   const max = Math.max(...points, 1), min = Math.min(...points, 0);
@@ -571,7 +584,7 @@ export function SparkArea({ points, color, height = 34, animate = false }: { poi
   const X = (i: number) => (i * step).toFixed(1);
   const Y = (v: number) => (height - 3 - ((v - min) / span) * (height - 6)).toFixed(1);
   const line = points.map((v, i) => `${i === 0 ? "M" : "L"}${X(i)},${Y(v)}`).join(" ");
-  const gid = "spa" + Math.random().toString(36).slice(2, 7);
+  const gid = `spa-${uid}`;
   return (
     <svg width="100%" height={height} viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" aria-hidden="true" style={{ display: "block" }}>
       <defs>

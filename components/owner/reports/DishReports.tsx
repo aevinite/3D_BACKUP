@@ -12,6 +12,23 @@
 // can't correctly label a "by quantity" ranking. This file's small <RankBars> renders the
 // top movers with correct labels for BOTH metrics (₹ or units) and stays on the owner
 // theme green — the honest fit for a toggleable ranking.
+//
+// ── WHAT THE MONEY COLUMN ACTUALLY IS (T5 sweep, 2026-08-11) ──────────────────────────────
+// Every figure here comes from lfh_owner_dish_breakdown, and that RPC's own SQL says what it
+// returns: "this line's share of its order's NET revenue (discount before tax, tax included)"
+// (mig 304). So it is MONEY COLLECTED — the discount already taken off, the GST already added —
+// NOT menu list price.
+//
+// These three reports called it "Item sales (list price) · menu price × paid qty", and the note
+// under the table told the owner it was "menu list price × paid quantity — before discounts and
+// tax". Measured live on 2026-08-10, one restaurant, one 30-day window: this total came to
+// ₹70,43,999, which is EXACTLY the Sales report's "Total collected", while the Sales report's own
+// "Item sales" tile (orders.subtotal — the real menu-price gross) read ₹67,38,001. Two different
+// numbers under one name, one click apart, with the explanation the wrong way round.
+//
+// The payload carries no list price, so the honest fix is the NAME, not a new calculation: this
+// is "Dish sales — what each dish brought in, GST included". The per-plate figure below is
+// therefore the average COLLECTED per plate, and is labelled as such.
 import { useState } from "react";
 import { inr } from "@/components/admin/shared";
 import { nfmt, scrollToId } from "@/components/owner/reports/kit";
@@ -94,12 +111,20 @@ export function DishesReport({ rows, onOpenReport }: { rows: DishRow[]; onOpenRe
     sub: metric === "revenue" ? `${nfmt(d.qty)} sold` : `${inr(d.revenue)} earned`,
   }));
   // "Selling less": the softest movers by units (only dishes that sold at least something).
-  const worst = byQty.filter((d) => d.qty > 0).slice(-8).reverse();
+  //
+  // The bottom EIGHT is only a meaningful list when the menu is comfortably bigger than eight —
+  // otherwise `slice(-8)` is the whole menu, and the best seller ends up under a heading that
+  // says "fix the name/photo/price, or drop" (T5 sweep, 2026-08-11). Ask for a real gap: at
+  // least 12 dishes sold, and never more than the bottom third of them.
+  const soldDishes = byQty.filter((d) => d.qty > 0);
+  const worst = soldDishes.length >= 12
+    ? soldDishes.slice(-Math.min(8, Math.floor(soldDishes.length / 3))).reverse()
+    : [];
 
   const cols: Col<DishRow>[] = [
     { key: "title", label: "Dish", render: (d) => d.title, sortBy: (d) => d.title },
     { key: "qty", label: "Qty sold", num: true, render: (d) => nfmt(d.qty), sortBy: (d) => d.qty },
-    { key: "revenue", label: "Item sales", num: true, render: (d) => <b>{inr(d.revenue)}</b>, sortBy: (d) => d.revenue },
+    { key: "revenue", label: "Sales", num: true, render: (d) => <b>{inr(d.revenue)}</b>, sortBy: (d) => d.revenue },
     { key: "share", label: "% of sales", num: true, render: (d) => pct1(d.revenue, totalRev), sortBy: (d) => d.revenue },
   ];
   const footer = (
@@ -114,11 +139,13 @@ export function DishesReport({ rows, onOpenReport }: { rows: DishRow[]; onOpenRe
   return (
     <>
       <div className="rs-kpis">
-        <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="menu price × paid qty" />
+        <Stat label="Dish sales" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="what these dishes brought in — GST included" />
         <Stat label="Units sold" tone="info" icon="fa-boxes-stacked" value={nfmt(totalQty)} onClick={() => scrollToId("rs-top-movers")} title="See the top-moving dishes" />
         <Stat label="Distinct dishes" tone="info" icon="fa-utensils" value={nfmt(rows.length)} onClick={() => scrollToId("rs-every-dish")} title="Jump to the full dish list" />
         <Stat label="Top seller" tone="good" icon="fa-crown" value={topSeller?.title || "—"} sub={topSeller ? `${nfmt(topSeller.qty)} sold · ${inr(topSeller.revenue)}` : ""} onClick={() => scrollToId("rs-top-movers")} title="See the top movers" />
-        <Stat label="Avg per dish" tone="accent" icon="fa-scale-balanced" value={inr(avgPerDish)} sub="item sales ÷ dishes" />
+        {/* "Avg per dish" read like the price of a dish. It is the period's dish sales spread
+            across how many DIFFERENT dishes sold — say that (T5 sweep, 2026-08-11). */}
+        <Stat label="Sales per menu item" tone="accent" icon="fa-scale-balanced" value={inr(avgPerDish)} sub="dish sales ÷ how many dishes sold" />
       </div>
 
       <Panel
@@ -152,7 +179,12 @@ export function DishesReport({ rows, onOpenReport }: { rows: DishRow[]; onOpenRe
           initialSort={{ key: "revenue", dir: "desc" }} placeholder="Search dishes…" footer={footer}
           emptyText="No dish matches your search."
         />
-        <p className="rs-note">Item sales is menu list price × paid quantity — before discounts and tax — so it won&apos;t equal the net revenue on the Sales report.</p>
+        <p className="rs-note">
+          Dish sales is what each dish actually brought in on paid bills — the discount already
+          taken off and the GST already included. It adds up to the same &ldquo;Total collected&rdquo; the
+          Sales report shows, and it is deliberately NOT the same as that report&apos;s
+          &ldquo;Item sales&rdquo;, which is menu price before discount and before GST.
+        </p>
       </Panel>
     </>
   );
@@ -169,7 +201,7 @@ export function CategoriesReport({ rows, onOpenReport }: { rows: CatRow[]; onOpe
   const cols: Col<CatRow>[] = [
     { key: "category", label: "Category", render: (c) => c.category, sortBy: (c) => c.category },
     { key: "qty", label: "Qty", num: true, render: (c) => nfmt(c.qty), sortBy: (c) => c.qty },
-    { key: "revenue", label: "Item sales", num: true, render: (c) => <b>{inr(c.revenue)}</b>, sortBy: (c) => c.revenue },
+    { key: "revenue", label: "Sales", num: true, render: (c) => <b>{inr(c.revenue)}</b>, sortBy: (c) => c.revenue },
     { key: "share", label: "%", num: true, render: (c) => pct1(c.revenue, totalRev), sortBy: (c) => c.revenue },
     // Category rows carry an explicit "view items" affordance → the full Item sales report
     // (the dishes payload isn't category-scoped, so every row opens the same item report).
@@ -191,7 +223,7 @@ export function CategoriesReport({ rows, onOpenReport }: { rows: CatRow[]; onOpe
   return (
     <>
       <div className="rs-kpis">
-        <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="across all sections" />
+        <Stat label="Category sales" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="across all sections — GST included" />
         <Stat label="Categories" tone="info" icon="fa-layer-group" value={nfmt(rows.length)} onClick={() => scrollToId("rs-every-cat")} title="Jump to the category table" />
         <Stat label="Top category" tone="good" icon="fa-crown" value={top?.category || "—"} sub={top ? `${pct0(top.revenue, totalRev)} of sales` : ""} onClick={onOpenReport ? () => onOpenReport("dishes") : undefined} title={onOpenReport ? "See the dishes in Item sales" : undefined} />
         <Stat label="Weakest category" tone="warn" icon="fa-arrow-down" value={weak?.category || "—"} sub={weak ? `${pct0(weak.revenue, totalRev)} of sales` : ""} />
@@ -211,13 +243,17 @@ export function CategoriesReport({ rows, onOpenReport }: { rows: CatRow[]; onOpe
 }
 
 // ── MENU ENGINEERING ─────────────────────────────────────────────────────────────
-type MI = { title: string; qty: number; revenue: number };
+export type MI = { title: string; qty: number; revenue: number };
 type Klass = "star" | "workhorse" | "puzzle" | "dog";
+// "priced high / low price" was the wrong word for the axis this actually uses: the payload has
+// no menu price, so `revenue / qty` is the average COLLECTED PER PLATE — discount off, GST on
+// (T5 sweep, 2026-08-11). It still separates the pricey dishes from the cheap ones, so the
+// grouping stands; only the wording had to stop claiming to be the menu price.
 const KLASS: Record<Klass, { label: string; icon: string; sub: string; tip: string }> = {
-  star:      { label: "Stars",      icon: "fa-star",         sub: "Ordered a lot · priced high",  tip: "Your winners — show them off: top of the menu, photos, specials." },
-  workhorse: { label: "Workhorses", icon: "fa-horse",        sub: "Ordered a lot · low price",    tip: "Nudge the price up a little, or add a combo — easy extra money." },
-  puzzle:    { label: "Puzzles",    icon: "fa-puzzle-piece", sub: "Priced high · rarely ordered", tip: "Give them a photo, a clearer name, or a small offer to move them." },
-  dog:       { label: "Dogs",       icon: "fa-face-frown",   sub: "Low price · rarely ordered",   tip: "Mostly clutter — worth thinking about dropping." },
+  star:      { label: "Stars",      icon: "fa-star",         sub: "Ordered a lot · brings in more per plate",  tip: "Your winners — show them off: top of the menu, photos, specials." },
+  workhorse: { label: "Workhorses", icon: "fa-horse",        sub: "Ordered a lot · brings in less per plate",  tip: "Nudge the price up a little, or add a combo — easy extra money." },
+  puzzle:    { label: "Puzzles",    icon: "fa-puzzle-piece", sub: "Brings in more per plate · rarely ordered", tip: "Give them a photo, a clearer name, or a small offer to move them." },
+  dog:       { label: "Dogs",       icon: "fa-face-frown",   sub: "Brings in less per plate · rarely ordered", tip: "Mostly clutter — worth thinking about dropping." },
 };
 const KRANK: Record<Klass, number> = { star: 0, workhorse: 1, puzzle: 2, dog: 3 };
 function median(arr: number[]): number {
@@ -225,7 +261,7 @@ function median(arr: number[]): number {
   const s = [...arr].sort((a, b) => a - b), m = Math.floor(s.length / 2);
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
-function classifyMenu(rows: MI[]) {
+export function classifyMenu(rows: MI[]) {
   const clean = rows.filter((r) => (Number(r.qty) || 0) > 0);
   const totalQty = clean.reduce((a, r) => a + r.qty, 0);
   const totalRev = clean.reduce((a, r) => a + r.revenue, 0);
@@ -259,7 +295,7 @@ export function MenuReport({ rows, onOpenReport }: { rows: MI[]; onOpenReport?: 
     { key: "group", label: "Group", render: (d) => <span className={`rs-tag ${d.klass}`}>{KLASS[d.klass].label.replace(/s$/, "")}</span>, sortBy: (d) => KRANK[d.klass] },
     { key: "qty", label: "Sold", num: true, render: (d) => nfmt(d.qty), sortBy: (d) => d.qty },
     { key: "ushare", label: "% units", num: true, render: (d) => (d.qtyShare * 100).toFixed(1) + "%", sortBy: (d) => d.qtyShare },
-    { key: "revenue", label: "Item sales", num: true, render: (d) => <b>{inr(d.revenue)}</b>, sortBy: (d) => d.revenue },
+    { key: "revenue", label: "Sales", num: true, render: (d) => <b>{inr(d.revenue)}</b>, sortBy: (d) => d.revenue },
     { key: "sshare", label: "% sales", num: true, render: (d) => (d.revShare * 100).toFixed(1) + "%", sortBy: (d) => d.revShare },
   ];
   const footer = (
@@ -273,7 +309,7 @@ export function MenuReport({ rows, onOpenReport }: { rows: MI[]; onOpenReport?: 
   return (
     <>
       <div className="rs-kpis">
-        <Stat label="Item sales (list price)" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="menu price × paid qty" />
+        <Stat label="Dish sales" tone="accent" icon="fa-indian-rupee-sign" big value={inr(totalRev)} sub="what these dishes brought in — GST included" />
         <Stat label="Units sold" tone="info" icon="fa-boxes-stacked" value={nfmt(totalQty)} onClick={() => scrollToId("rs-product-mix")} title="Jump to the full product mix" />
         <Stat label="Stars" tone="good" icon="fa-star" value={nfmt(stars)} sub="push these" onClick={() => scrollToId("rs-menu-quad")} title="See the star dishes" />
         <Stat label="Needs attention" tone="warn" icon="fa-screwdriver-wrench" value={nfmt(attention)} sub="puzzles + dogs" onClick={() => scrollToId("rs-menu-quad")} title="See what needs attention" />
@@ -285,13 +321,13 @@ export function MenuReport({ rows, onOpenReport }: { rows: MI[]; onOpenReport?: 
           <div className="ctxt">
             <b>Biggest opportunity: {opp.title}</b>
             <p>
-              It&apos;s a <b>{KLASS[opp.klass].label.replace(/s$/, "")}</b> — {KLASS[opp.klass].sub.toLowerCase()} (₹{Math.round(opp.price)} each, {nfmt(opp.qty)} sold). {KLASS[opp.klass].tip}
+              It&apos;s a <b>{KLASS[opp.klass].label.replace(/s$/, "")}</b> — {KLASS[opp.klass].sub.toLowerCase()} ({inr(opp.price)} a plate, {nfmt(opp.qty)} sold). {KLASS[opp.klass].tip}
             </p>
           </div>
         </div>
       )}
 
-      <p className="rs-note" style={{ marginTop: 0, marginBottom: 12 }}>Every dish is grouped by how <b>often</b> it&apos;s ordered and how <b>pricey</b> it is. Uses menu price (not cost) — a per-dish cost field would make this profit-true.</p>
+      <p className="rs-note" style={{ marginTop: 0, marginBottom: 12 }}>Every dish is grouped by how <b>often</b> it&apos;s ordered and how much it <b>brings in per plate</b> (what was actually collected — discount off, GST included). It uses what you charge, not what it costs you — a per-dish cost would make this profit-true.</p>
 
       <div className="rs-quad" id="rs-menu-quad">
         {QORDER.map((k) => {
@@ -302,7 +338,7 @@ export function MenuReport({ rows, onOpenReport }: { rows: MI[]; onOpenReport?: 
               <div className="rs-qsub">{KLASS[k].sub}</div>
               <div className="rs-qtip">{KLASS[k].tip}</div>
               <div className="rs-qchips">
-                {list.length === 0 ? <span className="rs-qmore">none</span> : list.slice(0, 8).map((d) => <span key={d.title} className="rs-qchip" title={`${nfmt(d.qty)} sold · ₹${Math.round(d.price)} each`}>{d.title}</span>)}
+                {list.length === 0 ? <span className="rs-qmore">none</span> : list.slice(0, 8).map((d) => <span key={d.title} className="rs-qchip" title={`${nfmt(d.qty)} sold · ${inr(d.price)} a plate`}>{d.title}</span>)}
                 {list.length > 8 && <span className="rs-qmore">+{list.length - 8} more</span>}
               </div>
             </div>
