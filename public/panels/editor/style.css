@@ -3751,6 +3751,27 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
 .au-q { width: 100%; box-sizing: border-box; max-width: 520px; padding: 11px 13px; margin: 0 0 14px;
   border-radius: 12px; border: 1.5px solid var(--line); background: var(--panel-2); color: var(--text); font-size: 14px; }
 .au-q:focus { outline: 0; border-color: var(--gold); }
+/* Audit type chips + sort control (owner, 2026-08-11: "what is list of what").
+   One chip per removal type PRESENT, so there is never a "0" chip to tap, and the count sits in
+   its own softer pill. Tokens only (--panel-2 / --line / --gold / --muted / --text), so both the
+   light and dark panel skins are right — a hard-coded colour here would pin one of them. */
+.au-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
+.au-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 11px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--panel-2); color: var(--muted);
+  font-size: 12.5px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.au-chip:hover { color: var(--text); }
+.au-chip.on { background: var(--gold); color: #1a1300; border-color: var(--gold); }
+.au-chip i { font-style: normal; font-size: 11px; padding: 1px 6px; border-radius: 999px;
+  background: color-mix(in srgb, currentColor 16%, transparent); }
+/* The search and the sort box sit on ONE row, so the sort never drops below the fold on a phone
+   while the search keeps the full width it had. */
+.au-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 10px; }
+.au-controls .au-q { margin: 0; flex: 1 1 260px; }
+.au-sort { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); }
+.au-sort select { padding: 9px 10px; border-radius: 10px; border: 1.5px solid var(--line);
+  background: var(--panel-2); color: var(--text); font-size: 13px; font-family: inherit; }
+.au-sort select:focus { outline: 0; border-color: var(--gold); }
+.au-count { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
 .au-rows { display: flex; flex-direction: column; gap: 8px; }
 .au-row { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 12px;
   background: var(--panel-2); border: 1px solid var(--line); }

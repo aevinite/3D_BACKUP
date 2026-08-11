@@ -252,7 +252,15 @@
     var inclOnly = (d.inclRows || []).length > 0;
     // A "Taxable value" restatement only makes sense when the row above it really is the taxable
     // figure. With tax inside the prices it is the gross, so the restatement would misname it.
-    var restate = !inclusive && !inclOnly;
+    //
+    // …AND A COMPOSITION BILL HAS NO TAXABLE VALUE AT ALL (2026-08-11, T7 finding F9). A
+    // composition-scheme restaurant may show the diner no tax (COMPLIANCE §3), so `taxRows` is
+    // empty — but this restatement still printed, and a discounted composition bill read
+    // "Subtotal ₹880 / Discount −₹50 / Taxable value ₹830 / TOTAL ₹830": a line naming the one
+    // concept this document exists to have none of. The tax LINE was suppressed and the row that
+    // describes it was left behind.
+    var composition = !!d.composition;
+    var restate = !inclusive && !inclOnly && !composition;
     var discBlock = disc > 0
       ? '<div class="t"><span>Discount' + (d.discLabel ? " (" + esc(d.discLabel) + ")" : "") + "</span><span>− " + inr(billRows(d).discount) + "</span></div>"
         + (restate ? '<div class="t tx"><span>Taxable value</span><span>' + inr(billRows(d).taxable) + "</span></div>" : "")
@@ -297,7 +305,17 @@
         + (d.custPhone ? '<div class="kv"><span>Mobile</span><b>' + esc(d.custPhone) + "</b></div>" : "")
       : "";
 
-    return '<!doctype html><title>' + (d.cancelled ? "Cancelled Bill" : "Tax Invoice") + " — " + name + "</title>\n"
+    /* WHAT THIS PIECE OF PAPER IS CALLED (2026-08-11, T7 finding F9).
+       A COMPOSITION-SCHEME restaurant cannot issue a tax invoice — it is not allowed to collect
+       tax from the diner at all (which is why its rate genuinely is 0, mig 272, and why no tax
+       line prints). The document such a business hands over is a BILL OF SUPPLY, and it has to
+       carry the declaration that the supplier is a composition taxable person not eligible to
+       collect tax on supplies. This file had exactly two names — "Tax Invoice" and "Cancelled
+       Bill" — so a composition tenant's guest was handed a sheet headed TAX INVOICE with the
+       restaurant's GSTIN on it. docs/COMPLIANCE-GUARDRAILS.md §3 covered the tax LINE and
+       stopped at the letterhead; the money was right and the heading was not. */
+    var docName = d.cancelled ? "Cancelled Bill" : (composition ? "Bill of Supply" : "Tax Invoice");
+    return '<!doctype html><title>' + docName + " — " + name + "</title>\n"
 + "<style>\n"
 + "  /* Thermal-roll print recipe — VALIDATED offline through the real CUPS+ESC/POS driver\n"
 + "     chain (2026-07-21, see aangan-thermal-printer-setup memory). Three rules:\n"
@@ -389,7 +407,7 @@
 + '<div class="sub">' + (addr ? addr + "<br/>" : "") + (phone ? "Ph " + phone : "") + (phone && gstin ? "<br/>" : "") + (gstin ? "GSTIN " + gstin : "") + "</div>\n"
 // A cancelled bill says so, in a band nobody can miss, and is NOT called a tax invoice.
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
-+ '<div class="kind">' + (d.cancelled ? "Cancelled Bill" : "Tax Invoice") + "</div>\n"
++ '<div class="kind">' + docName + "</div>\n"
 + (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
 + (d.billNo !== "" && d.billNo != null ? '<div class="kv"><span>Bill no</span><b>#' + esc(d.billNo) + "</b></div>" : "") + "\n"
 + (d.parcel ? '<div class="kv"><span>Parcel</span><b></b></div>' : '<div class="kv"><span>Table</span><b>' + esc(d.tableDisp) + "</b></div>") + "\n"
@@ -421,6 +439,12 @@
         : ""))
 + "</div>\n"
 + mrpNote + "\n"
+// The composition declaration — the words that make a Bill of Supply a Bill of Supply. Boxed in
+// the same one-ink style as mrpNote (no grey: a thermal head has no grey). Never on a cancelled
+// sheet, which charges nothing and says so in its own band.
++ ((composition && !d.cancelled)
+   ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">Composition taxable person — not eligible to collect tax on supplies.</div>\n'
+   : "")
 + '<div class="foot">' + footer + "</div>\n"
 + pageScript(d.autoPrint);
   }
@@ -653,7 +677,13 @@
      and saying otherwise on a tax invoice is a claim the accounts don't support. */
   function mrpTaxInside(orders, rate) {
     var inside = 0;
-    (orders || []).filter(function (x) { return x.status !== "cancelled"; }).forEach(function (o) {
+    // A SOFT-DELETED ORDER IS NOT ON THE BILL — the same predicate billMoney and billData use
+    // (2026-08-11, T7 finding F7). This filtered `cancelled` only. Nothing reached it today
+    // because billData hands it the already-filtered `live` list, but it is on the public API
+    // (LFH_BILLDOC.mrpTaxInside) and the manager panel wraps it as a one-liner that passes
+    // whatever its caller holds — so a future call site would have printed "MRP items include
+    // ₹X GST" counting a tombstoned line, on the one document that must reconcile to the rupee.
+    (orders || []).filter(function (x) { return x.status !== "cancelled" && !x.deleted_at; }).forEach(function (o) {
       (Array.isArray(o.items) ? o.items : []).forEach(function (i) {
         if (!i || !i.is_mrp || i.tax_mode !== "incl") return;
         var amt = Math.round((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1) * 100) / 100;
@@ -941,12 +971,30 @@
     // A ₹0 tax line reads as a mistake, so when there is nothing to ADD the rows are dropped rather
     // than printed as zeros (the same rule the guest cart follows for a bill with nothing to add).
     var addWhole = Math.round(m.taxAdded);
+    /* A MIXED-RATE BILL STILL SPLITS ITS TAX INTO CGST/SGST (2026-08-11, T7 finding F1).
+       This printed one flat "GST 18%" / "GST 5%" line per rate, while every other bill from the
+       same printer names the restaurant's configured halves. On a document headed Tax Invoice the
+       central/state split is what a person (and an inspector) expects to see, and dropping it made
+       the mixed bill the one sheet that states its tax more thinly than all the others.
+       What was rightly being protected is the PERCENTAGE: naming one rate for the whole bill would
+       have put correct rupees under a rate nobody was charged. So each rate row is now split by the
+       configured components' own SHAPE — CGST 2.5 + SGST 2.5 becomes CGST 9 + SGST 9 at 18% — and
+       splitTax still gives the last line the remainder, so every row foots to that rate's tax.
+       With no components configured the historical CGST/SGST halves are used, exactly as the
+       single-rate branch below already does. */
+    var scaleComps = function (bucketPct) {
+      var sum = (taxComps || []).reduce(function (a, c) { return a + (Number(c.rate) || 0); }, 0);
+      if (!sum) return [{ label: ((s.tax_label || "GST") + "").trim() || "GST", rate: bucketPct }];
+      return taxComps.map(function (c) {
+        return { label: c.label, rate: Math.round(((Number(c.rate) || 0) / sum) * bucketPct * 100) / 100 };
+      });
+    };
     var addRows = (m.composition || addWhole <= 0)
       ? []
       : (m.mixedRates
-        ? (m.rateRows || []).filter(function (b) { return Math.round(b.tax) > 0; }).map(function (b) {
-          return { label: ((s.tax_label || "GST") + "").trim() || "GST", rate: Math.round(b.rate * 10000) / 100, amt: Math.round(b.tax) };
-        })
+        ? (m.rateRows || []).filter(function (b) { return Math.round(b.tax) > 0; }).reduce(function (acc, b) {
+          return acc.concat(splitTax(Math.round(b.tax), scaleComps(Math.round(b.rate * 10000) / 100)));
+        }, [])
         : splitTax(addWhole, taxComps));
     var insideWhole = Math.round(m.taxInside);
     var inclRows = (m.composition || !hasInside || insideWhole <= 0) ? [] : splitTax(insideWhole, taxComps);
@@ -982,6 +1030,9 @@
       taxable: m.taxable, total: m.total,
       taxRows: addRows,
       inclRows: inclRows,
+      // A composition restaurant's paper is a BILL OF SUPPLY, not a tax invoice, and carries the
+      // declaration to say so — the document decides both from this one flag (T7 finding F9).
+      composition: !!m.composition,
       nontax: mrpPart(m), mrpLabel: "MRP items",
       mrpNote: inside > 0 ? "MRP items include " + inr(inside) + " " + (((s.tax_label || "GST") + "").trim() || "GST") : "",
       autoPrint: a.autoPrint !== false,
@@ -1044,11 +1095,24 @@ function bqWords(amount) {
   // whole rupees while the total prints 2dp (bq2), so a ₹1,234.56 banquet invoice read "One Thousand
   // Two Hundred Thirty-Four Only" next to "1,234.56". On a tax invoice the amount in words is the
   // controlling figure, so the paper contradicted itself. Paise are now said when there are any.
-  const exact = Math.round(Math.abs(Number(amount) || 0) * 100);
+  /* IT NAMES A CURRENCY, AND GETS THE SINGULAR RIGHT (2026-08-11, T7 finding F2).
+     The currency word used to appear ONLY when there happened to be paise, so the common case —
+     a whole-rupee total — read "One Lakh Thirty-Five Thousand Seven Hundred Only" with no mention
+     of rupees at all, in a box captioned "Invoice Total (In Words)" on the product's largest-value
+     document. And with paise it said "One Rupees and One Paise". On a tax invoice the amount in
+     words is the controlling figure, so it says Rupees/Rupee and Paise/Paisa properly, and a
+     NEGATIVE amount says so rather than printing positive words beside a negative figure. */
+  const value = Number(amount) || 0;
+  const sign = value < 0 ? "Minus " : "";
+  const exact = Math.round(Math.abs(value) * 100);
   const paise = exact % 100;
-  const tail = paise ? " Rupees and " + two(paise) + " Paise Only" : " Only";
+  const rupeeWord = (r) => (r === 1 ? "Rupee" : "Rupees");
+  const paiseWord = (p) => (p === 1 ? "Paisa" : "Paise");
   let n = Math.floor(exact / 100);
-  if (!n) return paise ? two(paise) + " Paise Only" : "Zero Only";
+  const tail = paise
+    ? " " + rupeeWord(n) + " and " + two(paise) + " " + paiseWord(paise) + " Only"
+    : " " + rupeeWord(n) + " Only";
+  if (!n) return sign + (paise ? two(paise) + " " + paiseWord(paise) + " Only" : "Zero Rupees Only");
   const p = [];
   const cr = Math.floor(n / 1e7); n %= 1e7;
   const la = Math.floor(n / 1e5); n %= 1e5;
@@ -1057,7 +1121,7 @@ function bqWords(amount) {
   if (la) p.push(three(la) + " Lakh");
   if (th) p.push(three(th) + " Thousand");
   if (n) p.push(three(n));
-  return p.join(" ").trim() + tail;
+  return sign + p.join(" ").trim() + tail;
 }
 
 
@@ -1155,6 +1219,42 @@ function banquetDocHtml(a) {
   // per-line taxable value: the bill's discount spread pro-rata so the column foots
   const grossAll = L.reduce((a, l) => a + l.gross, 0) || 1;
   L.forEach((l) => { l.taxable = Math.round((l.gross - disc * (l.gross / grossAll)) * 100) / 100; });
+  /* …AND THE COLUMN FOOTS TO THE BILL, NOT JUST TO ITSELF (2026-08-11, T7 improvement I8).
+     Two sources of truth meet on this sheet: the item TABLE adds up the LINES, while the money box
+     on the right prints the totals STORED on the bill (b.subtotal / b.discount). They agree today,
+     but nothing made them: a line edited after the bill was saved, or a line missing from the fetch,
+     and the taxable column silently landed real rupees away from the TOTAL row under it with nothing
+     on the paper to explain the gap. The stored bill is the authority — it is what was charged — so
+     the LAST line absorbs any difference, the same rule the tax columns and the thermal bill's
+     splitTax already use. When the lines do add up to the bill (every sheet today) this moves at
+     most a paisa, and it is what makes the in-table TOTAL row true by construction. */
+  if (L.length) {
+    const sumTaxable = L.reduce((a, l) => a + l.taxable, 0);
+    const drift = Math.round((taxable - sumTaxable) * 100) / 100;
+    if (drift !== 0) {
+      const last = L[L.length - 1];
+      last.taxable = Math.round((last.taxable + drift) * 100) / 100;
+    }
+  }
+  /* EACH TAX COLUMN FOOTS TO ITS OWN TOTAL ROW (2026-08-11, T7 finding F10).
+     Every cell used to be rounded on its own — round(line.taxable × rate) — while the TOTAL row
+     printed below comes from the bill's STORED tax. On a multi-line bill the two disagreed:
+     measured off the real rendered A5 sheet, CGST 9,703.13 + 646.88 = 10,350.01 sitting under a
+     TOTAL row reading 10,350.00, and replayed over 960 realistic line/price/discount combinations
+     47.8% of sheets printed at least one column that did not add up.
+     That row is not decoration — this document's own note calls it "the proof that the per-line
+     tax columns add up to the summary". So the columns are allocated the same way splitTax does it
+     for the thermal bill: round every cell except the LAST, and give the last the remainder. */
+  const colTax = taxRows.map((c) => {
+    let run = 0;
+    return L.map((l, i) => {
+      const amt = i === L.length - 1
+        ? Math.round(((Number(c.amt) || 0) - run) * 100) / 100
+        : Math.round(l.taxable * ((Number(c.rate) || 0) / 100) * 100) / 100;
+      run = Math.round((run + amt) * 100) / 100;
+      return amt;
+    });
+  });
 
   const cols = 5 + taxRows.length * 2;
   // One <col> per column. Built by concatenation, NOT by joining half-open tags — the
@@ -1170,7 +1270,7 @@ function banquetDocHtml(a) {
   const rows = L.map((l, i) => {
     const nameCell = `<td class="n">${esc(l.title)}</td>`;
     if (!b2b) return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.gross)}</td></tr>`;
-    const tds = taxRows.map((c) => `<td class="c">${bq2(c.rate)}%</td><td class="r">${bq2(Math.round(l.taxable * (c.rate / 100) * 100) / 100)}</td>`).join("");
+    const tds = taxRows.map((c, ci) => `<td class="c">${bq2(c.rate)}%</td><td class="r">${bq2(colTax[ci][i])}</td>`).join("");
     return `<tr><td class="c">${i + 1}</td>${nameCell}<td class="c">${bq0(l.qty)}</td><td class="r">${bq2(l.price)}</td><td class="r">${bq2(l.taxable)}</td>${tds}</tr>`;
   }).join("");
   const fillN = P.fill ? Math.max(0, (isA4 ? 12 : 6) - L.length) : 0;

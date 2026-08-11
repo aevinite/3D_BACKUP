@@ -20,6 +20,9 @@ import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
 import { adminFetch } from "@/lib/adminFetch";
 import { SkelList } from "@/components/admin/Skeleton";
+// Sort orders + type chips for the removals record, shared with the owner console and the manager
+// panel (see /panels/auditsort.js for why it lives there — the panel loads it as a bare <script>).
+import AUDITSORT from "@/public/panels/auditsort.js";
 
 type Restaurant = { id: string; name: string };
 // One row of the Removals record (deletion_audit, mig 251) — what was taken out and why.
@@ -60,7 +63,13 @@ const REMOVAL_KIND: Record<string, [string, string]> = {
   payment_reverted: ["↺", "Payment reverted"],
   on_the_house: ["🎁", "On the house"],
   bill_changed_after_reopen: ["⇄", "Bill changed after a reopen"],
+  // The reversal of a removal — a deleted bill put back (T7 finding F4, 2026-08-11).
+  order_restored: ["♻️", "Bill put back"],
 };
+// The same two maps flattened, for /panels/auditsort.js — which takes plain label/icon lookups so it
+// stays free of any import and can be loaded by the manager panel as a bare <script>.
+const AUD_ICON: Record<string, string> = Object.fromEntries(Object.entries(REMOVAL_KIND).map(([k, v]) => [k, v[0]]));
+const AUD_LABEL: Record<string, string> = Object.fromEntries(Object.entries(REMOVAL_KIND).map(([k, v]) => [k, v[1]]));
 const REMOVAL_REASON: Record<string, string> = {
   mistake: "By mistake",
   guest_changed: "Guest changed their mind",
@@ -137,6 +146,16 @@ export default function AdminLogs() {
     const qs = rid ? `?restaurant_id=${rid}` : "";
     try { const j = await (await fetch(`/api/admin/custlog${qs}`, { cache: "no-store" })).json(); if (j.error) setCustErr(true); else { setCust(j); setCustErr(false); } } catch { setCustErr(true); }
   }, [rid]);
+  // Sort + type filter for the Removals record, shared with the owner console and the manager panel
+  // via /panels/auditsort.js (owner, 2026-08-11). Both act on rows already in hand.
+  const [audKind, setAudKind] = useState("");
+  const [audSort, setAudSort] = useState(AUDITSORT.DEFAULT_SORT);
+  // Chips come from the WHOLE arrived feed, so a chip's count never changes when you tap it.
+  const audChips = AUDITSORT.kindCounts(aud || [], AUD_LABEL, AUD_ICON);
+  // A type that has gone from the feed (a stale chip after Refresh) must not leave an empty list
+  // with no way back.
+  const audKindSafe = audKind && audChips.some((c) => c.kind === audKind) ? audKind : "";
+  const audRows = aud === null ? null : (AUDITSORT.view(aud, { kind: audKindSafe, sort: audSort, kindLabel: AUD_LABEL }) as Removal[]);
   // The Removals record (deletion_audit) — every restaurant's audit rows, searchable.
   const loadAud = useCallback(async () => {
     const qs = (rid ? `&restaurant_id=${rid}` : "") + (qDebounced.trim() ? `&q=${encodeURIComponent(qDebounced.trim())}` : "");
@@ -264,16 +283,39 @@ export default function AdminLogs() {
         </div>
       )}
       {tab === "aud" && (
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search a dish, person or reason…"
-            aria-label="Search the removals record"
-            style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}
-          />
-          <button className="adm-btn" onClick={() => loadAud()}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
-        </div>
+        <>
+          {/* WHAT IS THE LIST OF WHAT (owner, 2026-08-11) — a chip per removal type present, with
+              its count, from the SAME /panels/auditsort.js the owner console and the manager panel
+              use. The search here is server-side (`&q=` above), so these work on the rows that
+              arrived: picking a type or re-sorting costs no request. */}
+          {audChips.length > 1 && (
+            <div className="own-range aud-chips" style={{ marginBottom: 10 }}>
+              <button className={audKind === "" ? "on" : ""} onClick={() => setAudKind("")}>All <i>{(aud || []).length}</i></button>
+              {audChips.map((c) => (
+                <button key={c.kind} className={audKind === c.kind ? "on" : ""} onClick={() => setAudKind(c.kind)} title={`Show only: ${c.label}`}>
+                  <span aria-hidden="true">{c.icon}</span> {c.label} <i>{c.count}</i>
+                </button>
+              ))}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search a dish, person or reason…"
+              aria-label="Search the removals record"
+              style={{ flex: "1 1 200px", minWidth: 160, padding: "7px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}
+            />
+            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+              <span className="adm-muted">Sort</span>
+              <select value={audSort} onChange={(e) => setAudSort(e.target.value)} aria-label="Sort the removals record"
+                style={{ padding: "7px 8px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13 }}>
+                {AUDITSORT.SORTS.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+              </select>
+            </label>
+            <button className="adm-btn" onClick={() => loadAud()}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
+          </div>
+        </>
       )}
       {tab === "cust" && (
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
@@ -284,7 +326,7 @@ export default function AdminLogs() {
       {tab === "ops"
         ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} onResolve={markResolved} />
         : tab === "aud"
-        ? <AudTable rows={aud} err={audErr} onRetry={loadAud} scopedName={scopedName || null} onOpenRemoval={setRemovalId} />
+        ? <AudTable rows={audRows} err={audErr} onRetry={loadAud} scopedName={scopedName || null} onOpenRemoval={setRemovalId} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}
 
       {/* Cleanup confirm — a shared modal (phone Back + Escape + focus-trap via useAdminModal). */}

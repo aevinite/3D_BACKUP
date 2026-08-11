@@ -53,8 +53,21 @@ export async function GET(req: NextRequest) {
     for (const x of (r.data || []) as { id: string; name: string }[]) names[x.id] = x.name; }
 
   const nowIso = new Date().toISOString();
-  const [outQ, collMonthQ, collTodayQ] = await Promise.all([
-    sb.rpc("lfh_khata_outstanding", { p_restaurant_ids: moduleIds }),
+  // HOW MANY PEOPLE THE LIST SHOWS. Bounded by PERSON (mig 309), biggest debt first, so everyone
+  // shown has all of their own bills and their figure is complete — bounding by BILL would cut a
+  // customer's smaller bills and understate that person. The HEADLINE never depends on this.
+  const PEOPLE_SHOWN = 500;
+  const [outQ, sumQ, collMonthQ, collTodayQ] = await Promise.all([
+    sb.rpc("lfh_khata_outstanding", { p_restaurant_ids: moduleIds, p_limit: PEOPLE_SHOWN }),
+    // THE HEADLINE COMES FROM AN AGGREGATE, NOT FROM SUMMING THE ROWS (2026-08-11, T7 finding F13).
+    // `lfh_khata_outstanding` returns one row per open BILL and this route summed those rows in JS.
+    // PostgREST caps a set-returning rpc at db-max-rows exactly as it caps a select — this project's
+    // DB has such a cap and the Z-report pages around it for the same reason, in its own words:
+    // "silently computed the till on a truncated sample → understated cash". Pay-later bills pile up
+    // until someone pays, so a khata-heavy restaurant crosses that cap over months and "TOTAL
+    // OUTSTANDING" quietly goes small — on the one figure that says how much the restaurant is owed.
+    // This returns ONE row computed in SQL, so there is nothing left for a row cap to truncate.
+    sb.rpc("lfh_khata_outstanding_summary", { p_restaurant_ids: moduleIds }),
     sb.rpc("lfh_khata_collected", { p_restaurant_ids: moduleIds, p_from: istMonthStartIso(), p_to: nowIso }),
     sb.rpc("lfh_khata_collected", { p_restaurant_ids: moduleIds, p_from: businessDayStartIso(), p_to: nowIso }),
   ]);
@@ -77,6 +90,15 @@ export async function GET(req: NextRequest) {
     // The database's own words stay our side — the owner gets a sentence they can act on (the rule
     // /api/maintenance was fixed for on 2026-08-05).
     console.error("[owner/khata] outstanding read failed:", outQ.error.message);
+    return NextResponse.json(
+      { error: "Couldn't load the Pay Later figures just now — please try again.", transient: true },
+      { status: 503 },
+    );
+  }
+  // The SUMMARY read fails the request for the same reason the outstanding read does: it IS the
+  // "how much are we owed" figure now, and a wrong one is worse than none (this route's own rule).
+  if (sumQ.error) {
+    console.error("[owner/khata] outstanding summary failed:", sumQ.error.message);
     return NextResponse.json(
       { error: "Couldn't load the Pay Later figures just now — please try again.", transient: true },
       { status: 503 },
@@ -112,14 +134,26 @@ export async function GET(req: NextRequest) {
     q.error ? null
       : Math.round(((q.data || []) as Array<{ collected: number }>).reduce((s, c) => s + (Number(c.collected) || 0), 0) * 100) / 100;
 
+  // The three headline figures, counted in the DATABASE over EVERY open bill — never summed from
+  // the rows above, which are bounded to the biggest `PEOPLE_SHOWN` people (T7 finding F13).
+  const agg = (Array.isArray(sumQ.data) ? sumQ.data[0] : sumQ.data) as
+    { total_outstanding?: number; people_count?: number; bill_count?: number } | null;
   const summary = {
-    totalOutstanding: Math.round(customers.reduce((s, c) => s + c.outstanding, 0) * 100) / 100,
-    peopleCount: customers.length,
-    billCount: customers.reduce((s, c) => s + c.billCount, 0),
+    totalOutstanding: Math.round((Number(agg?.total_outstanding) || 0) * 100) / 100,
+    peopleCount: Number(agg?.people_count) || 0,
+    billCount: Number(agg?.bill_count) || 0,
     collectedMonth: sumColl(collMonthQ),
     collectedToday: sumColl(collTodayQ),
   };
-  // `partial` rides along only when something is genuinely missing, so a healthy response is
-  // byte-for-byte what it was before this change.
-  return NextResponse.json({ summary, customers, ...(partial.length ? { partial } : {}) });
+  // SAY SO WHEN THE LIST IS SHORTER THAN THE TOTALS. The figures above always count everyone, so a
+  // capped list must not read as if it were the whole book — the page shows a line naming both
+  // numbers rather than letting an owner conclude that 500 people is all there is.
+  const listCapped = summary.peopleCount > customers.length;
+  // `partial` / `listCapped` ride along only when genuinely true, so a healthy response on an
+  // ordinary restaurant is byte-for-byte what it was before this change.
+  return NextResponse.json({
+    summary, customers,
+    ...(listCapped ? { listCapped, peopleShown: customers.length } : {}),
+    ...(partial.length ? { partial } : {}),
+  });
 }

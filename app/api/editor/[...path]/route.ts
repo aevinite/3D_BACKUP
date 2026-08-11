@@ -27,9 +27,15 @@ import { mergeParentTable } from "@/lib/tableMerge";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { raiseIssue } from "@/lib/issues";
 import { effectiveTaxRate, taxComponents, TAX_SETTINGS_COLUMNS, resolveTaxMode, isMrpDish, splitBill } from "@/lib/tax";
+// The rate ONE order was charged at is decided in the same file the printed bill uses, so the
+// day-close sheet and the paper can never answer differently — see billTaxOf() below.
+import BILLDOC from "@/public/panels/billdoc.js";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
 import { openTableSession } from "@/lib/openSession";
 import { softDeleteOrders } from "@/lib/softDelete";
+// The admin stays invisible to a MANAGER too — the Audit now obeys the rule the Activity log
+// already did (lib/auditActor.ts).
+import { auditForReader, forReader } from "@/lib/auditActor";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts, reverseSplitLegs } from "@/lib/paySplit";
@@ -474,6 +480,53 @@ function discountBaseOf(o: OrderMoney, rate: number): number {
   if (rate > 0) return o?.taxable_base == null ? sub : (Number(o.taxable_base) || 0);
   return Math.max(0, sub - (Number(o?.mrp_amount) || 0));
 }
+
+// ── THE TAX ON ONE BILL, AT EACH ORDER'S OWN RATE (mig 284) ───────────────────────────────
+// Stated ONCE here because the Z-report needs it twice — the day's money totals and the
+// payments-by-method reconciliation — and a money rule that exists twice is a money rule that
+// drifts (this file already says so about discountBaseOf, two functions up).
+//
+// IT USED TO BORROW ONE RATE FOR THE WHOLE BILL (fixed 2026-08-11, T7 sweep finding F8):
+//   const stamped = g.find((o) => Number(o.tax_rate) > 0);   // ← the old rule
+// The printed bill (billdoc's billMoney) and settling in parts (lib/paySplit.ts) were BOTH
+// rebuilt away from exactly that on 2026-08-05, each with a comment explaining why. The
+// Z-report kept it. A banquet carries its own rate (mig 239) and is inserted into the table's
+// existing OPEN session (migs 237/239), so an 18% banquet genuinely shares a bill with 5% food
+// — and then the day-close sheet charged the whole bill at whichever of the two came first.
+// Measured on food ₹1,000 @5% + banquet ₹2,000 @18%: the paper charged ₹410 of tax, this
+// reported ₹150 (or ₹540 the other way round). COMPLIANCE §3 requires the two to reconcile to
+// the rupee, and this is the sheet a manager signs and an inspector reads.
+//
+// `orderTaxRate` is imported rather than restated: it is the single definition of "the rate
+// this order was charged at", already shared by the paper and pay-in-parts, and it handles a
+// stamped ZERO (a real 0%, not a missing rate) which `> 0` alone cannot.
+//
+// Tax is rounded ONCE PER RATE — never per order, which drifts ±½ paise an order and can make
+// the day-close miss the sum of its own bills.
+type BillTaxRow = OrderMoney & { discount?: number | null; tax_rate?: number | null };
+function billTaxOf(g: BillTaxRow[], settingsRate: number): { disc: number; taxable: number; tax: number } {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const rateOf = (o: BillTaxRow) => BILLDOC.orderTaxRate(o, settingsRate);
+  // Capped exactly the way every discount door caps it, each order at its OWN rate.
+  const cap = g.reduce((a, o) => a + discountBaseOf(o, rateOf(o)), 0);
+  const disc = Math.min(g.reduce((a, o) => a + (Number(o.discount) || 0), 0), cap);
+  const buckets = new Map<number, { base: number; disc: number }>();
+  for (const o of g) {
+    const r = rateOf(o);
+    const b = buckets.get(r) || { base: 0, disc: 0 };
+    b.base += o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0);
+    b.disc += Number(o.discount) || 0;
+    buckets.set(r, b);
+  }
+  let taxable = 0, tax = 0;
+  for (const [r, b] of buckets) {
+    const bBase = r2(b.base);
+    const bTaxable = Math.max(0, r2(bBase - Math.min(Math.max(0, r2(b.disc)), bBase)));
+    taxable = r2(taxable + bTaxable);
+    tax = r2(tax + r2(bTaxable * r));
+  }
+  return { disc, taxable, tax };
+}
 /** The columns effectiveTaxRate() needs — one small row, read only on a discount write. */
 async function taxSettings(restaurantId: string) {
   return (await sb.from("settings").select("tax_rate,tax_components,price_tax_mode")
@@ -712,6 +765,18 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // groups from THIS, and GET /orders clamps its bills window + every bill search to
         // the same answer — so the screen can never offer a day the server refuses.
         billsReach: billsReach(r?.access_config),
+        // THE MOST OFF A BILL THIS PERSON MAY TAKE, as a percentage (2026-08-11, T7 improvement I5).
+        // The discount modal already refuses anything above what the BILL can carry (mig 272's base)
+        // and says so out loud, but it knew nothing about the person's own %-ceiling — a waiter's 5%,
+        // a manager's 50% (lib/discountCap.ts). So they could type ₹500 off, press Apply, and only
+        // then be told "That discount is over your 5% limit". The panel's own comment already argues
+        // against exactly that for the other cap: "offering a bigger one here only produced a refusal
+        // at the last tap — the failure the QO/P destination gates exist to remove."
+        // Sent so the modal can fold it into the maximum it already shows. The server check in
+        // orders/discount is UNCHANGED and still decides — this only stops the screen offering a
+        // number the server will refuse. `null` = uncapped (the admin, and the owner's own money).
+        // A named person's own role wins here too (?as=), exactly as the powers above do.
+        discountCapPct: await discountCapPct(rid, discountRole(person ? person.role : (g.user ? g.user.role : null))),
         // MANAGER'S MENU (access rebuild): which tabs this RESTAURANT has at all — a
         // different question from what a PERSON may do, which is the powers above. The panel
         // removes these tabs entirely (never greys them), and the guards below refuse their
@@ -1293,20 +1358,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         const base = g.reduce((a, o) => a + (o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0)), 0);
         const nontax = g.reduce((a, o) => a + (Number(o.nontax_amount) || 0), 0);
         const sub = r2(base + nontax);
-        // Capped exactly the way every discount door caps it (discountBaseOf / mig 272): on
-        // the taxable base when tax applies, else on everything but the locked MRP.
-        // THE RATE THIS BILL WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 284), not the rate
-        // configured right now. Re-deriving it meant an admin correcting the tax at 6pm made the
-        // 11pm day-close disagree with every bill already handed to a guest, and it re-taxed a
-        // BANQUET (its own 18%, mig 239) at the dine-in rate — reporting ₹5,000 of tax on a
-        // banquet that charged ₹18,000. `rate` stays the fallback for rows from before the column.
-        const stamped = g.find((o) => Number(o.tax_rate) > 0);
-        const gRate = stamped ? Number(stamped.tax_rate) : rate;
-        const cap = g.reduce((a, o) => a + discountBaseOf(o, gRate), 0);
-        const d = Math.min(g.reduce((a, o) => a + (Number(o.discount) || 0), 0), cap);
+        // THE RATE EACH ORDER WAS ACTUALLY CHARGED AT (orders.tax_rate, mig 284) — capped and
+        // taxed per rate bucket by billTaxOf(), the one definition shared with the printed bill
+        // and pay-in-parts. It used to borrow ONE rate for the whole bill; see billTaxOf's own
+        // note for the banquet case that made the day-close disagree with the paper.
+        // `rate` (the restaurant's settings) stays the fallback for rows from before the column.
+        const { disc: d, taxable: tx, tax: t } = billTaxOf(g, rate);
         // One formula for both cases — subtotal − discount + tax — so a zero-rate (composition)
         // day, where the discount can land outside the taxable base, still adds up.
-        const tx = Math.max(0, base - Math.min(d, base)), t = r2(tx * gRate), tot = r2(sub - d + t);
+        const tot = r2(sub - d + t);
         gross += sub; disc += d; taxable += tx; tax += t; net += tot; mrp += nontax;
         // A bill counts as collected only when EVERY order on it is paid (a table settles in
         // one go — Mark paid pays the whole table — so this matches real behaviour).
@@ -1350,12 +1410,10 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (method === "Split") continue;                                             // its legs already spoke
         const base = g.reduce((a: number, o: any) => a + (o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0)), 0);
         const ntx = g.reduce((a: number, o: any) => a + (Number(o.nontax_amount) || 0), 0);
-        const stampedG = g.find((o: any) => Number(o.tax_rate) > 0);
-        const gR = stampedG ? Number(stampedG.tax_rate) : rate;
-        const cap = g.reduce((a: number, o: any) => a + discountBaseOf(o, gR), 0);
-        const d2 = Math.min(g.reduce((a: number, o: any) => a + (Number(o.discount) || 0), 0), cap);
-        const tx2 = Math.max(0, base - Math.min(d2, base));
-        addMethod(method, r2(r2(base + ntx) - d2 + r2(tx2 * gR)));
+        // Same per-rate rule as the money totals above — one definition, so "how the money came
+        // in" can never total differently from the day's net.
+        const { disc: d2, tax: t2 } = billTaxOf(g, rate);
+        addMethod(method, r2(r2(base + ntx) - d2 + t2));
       }
       const payments = [...byMethod.entries()]
         .map(([method, v]) => ({ method, amount: r2(v.amount), bills: v.count }))
@@ -2124,13 +2182,15 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount,session_id,order_id,item_id,device_id,meta")
           .eq("id", Number(detailId)).eq("restaurant_id", rid).limit(1)) as Record<string, unknown>[] | null;
         if (!one || !one.length) return err("That record isn't for this restaurant.", 404);
-        return ok(one[0]);
+        // `g.user` is null ONLY for the admin super-user. A real manager never learns that Aevidine
+        // removed something in their restaurant; the row, its reason and its amount are untouched.
+        return ok(forReader(one[0] as { actor?: string | null; actor_role?: string | null }, !g.user));
       }
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
       const rows = must(await sb.from("deletion_audit")
         .select("id,at,kind,reason_code,reason_note,actor,actor_role,table_number,bill_no,invoice_no,kot_no,item_title,qty,amount")
         .eq("restaurant_id", rid).order("at", { ascending: false }).limit(lim));
-      return ok(rows || []);
+      return ok(auditForReader((rows || []) as { actor?: string | null; actor_role?: string | null }[], !g.user));
     }
 
     return err("unknown GET endpoint", 404);
@@ -3970,9 +4030,15 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "print-jobs" && path.length === 1) {
       const orderId = String(body?.order_id || "");
       if (!orderId) return err("Missing order id — refresh and try again.");
-      const o = must(await sb.from("orders").select("id, status, kot_no").eq("id", orderId).eq("restaurant_id", rid).maybeSingle());
+      const o = must(await sb.from("orders").select("id, status, kot_no, deleted_at").eq("id", orderId).eq("restaurant_id", rid).maybeSingle());
       if (!o) return err("That KOT isn't on this restaurant's board any more.", 404);
       if (o.status === "cancelled") return err("That KOT was cancelled — there is nothing to reprint.");
+      // A TOMBSTONED KOT IS NOT COOKED AGAIN (2026-08-11, T7 finding F11). The cancelled guard was
+      // here and its other half was not, so an order removed from the books could still be pushed
+      // to the kitchen printer — and a cook reading the ticket has no way to know. A soft delete
+      // never removes the row (that is the point of lib/softDelete.ts), so the kitchen side's
+      // `.filter((j) => j.order)` could not catch it either; both halves are checked now.
+      if (o.deleted_at) return err("That KOT was deleted — it can't be sent to the kitchen.");
       must(await sb.from("print_jobs").insert({
         restaurant_id: rid, kind: "kot", order_id: orderId, reprint: true,
         requested_by: actorName || "Manager",

@@ -6845,6 +6845,10 @@ const AUDIT_KIND = {
   qty_reduced: ["➖", "Quantity reduced"], discount_given: ["％", "Discount given"],
   payment_reverted: ["↺", "Payment reverted"], on_the_house: ["🎁", "On the house"],
   bill_changed_after_reopen: ["⇄", "Bill changed after a reopen"],
+  // The reversal of a removal — a deleted bill put back. Recorded permanently now, because the
+  // delete always was and the restore only reached the Activity log, which is cleared after a
+  // month at most (T7 finding F4, 2026-08-11).
+  order_restored: ["♻", "Bill put back"],
 };
 async function loadAudit() {
   try { state.audit = await api("GET", "/audit?limit=200"); }
@@ -6870,10 +6874,30 @@ function auditHtml() {
   const rows = Array.isArray(state.audit) ? state.audit : null;
   if (!rows) return `<div class="ed-head"><h2>Audit · removals</h2></div><div class="empty">${state.audit && state.audit.error ? esc("Couldn't load: " + state.audit.error) : "Loading…"}</div>`;
   const q = (state.auditQ || "").toLowerCase().trim();
-  const match = (r) => !q || [r.kot_no && "kot " + r.kot_no, r.kot_no, r.bill_no && "bill " + r.bill_no, r.bill_no,
-    r.table_number && "table " + r.table_number, r.item_title, r.actor, r.reason_note, r.reason_code,
-    (AUDIT_KIND[r.kind] || [])[1]].filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
-  const list = rows.filter(match);
+  // SORT + FILTER BY TYPE, from the SAME module the owner console and the admin console use
+  // (owner, 2026-08-11: "make something like sort thing where everything can be sorted, like what
+  // is list of what"). /panels/auditsort.js is loaded as a plain script by index.html, exactly as
+  // billdoc.js is — the words (AUDIT_KIND) were already shared; this is the behaviour beside them.
+  // A stale cached app.js talking to a page without the script must not lose the screen, so every
+  // use is guarded and falls back to the old flat, newest-first list.
+  const AS = typeof LFH_AUDITSORT !== "undefined" ? LFH_AUDITSORT : null;
+  const kindLabel = {}, kindIcon = {};
+  Object.keys(AUDIT_KIND).forEach((k) => { kindIcon[k] = AUDIT_KIND[k][0]; kindLabel[k] = AUDIT_KIND[k][1]; });
+  const reasonLabel = {};
+  REMOVAL_REASONS.forEach((x) => { reasonLabel[x[0]] = x[1]; });
+  // Chips from the WHOLE feed, so a chip count never changes when you tap it, and a type stays
+  // reachable once you have narrowed to another one.
+  const chips = AS ? AS.kindCounts(rows, kindLabel, kindIcon) : [];
+  // A type that has gone from the feed (a stale chip after Refresh) falls back to All rather than
+  // leaving an empty list with no way out.
+  const auKind = state.auditKind && chips.some((c) => c.kind === state.auditKind) ? state.auditKind : "";
+  const auSort = state.auditSort || (AS ? AS.DEFAULT_SORT : "new");
+  const list = AS
+    ? AS.view(rows, { kind: auKind, q, sort: auSort, kindLabel, reasonLabel })
+    : rows.filter((r) => !q || [r.kot_no && "kot " + r.kot_no, r.kot_no, r.bill_no && "bill " + r.bill_no, r.bill_no,
+        r.table_number && "table " + r.table_number, r.item_title, r.actor, r.reason_note, r.reason_code,
+        (AUDIT_KIND[r.kind] || [])[1]].filter(Boolean).some((v) => String(v).toLowerCase().includes(q)));
+  const shownMoney = AS ? AS.sumAmount(list) : 0;
   const when = (t) => { const d = new Date(t); return d.toLocaleString([], { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }); };
   const reasonTxt = (r) => {
     const preset = REMOVAL_REASONS.find((x) => x[0] === r.reason_code);
@@ -6882,7 +6906,15 @@ function auditHtml() {
   return `<div class="ed-head"><h2>Audit · what was removed <span class="sub">· ${rows.length}</span></h2>
       <div style="display:flex;gap:8px"><button class="btn" id="auRefresh">↻ Refresh</button></div></div>
     <p class="au-lead">Everything taken out of the system, newest first — a cancelled ticket, a deleted bill, a dish off an order or off the menu — with the reason and the person. Every role is recorded, managers included.</p>
-    <input id="auQ" class="au-q" type="search" placeholder="Search a KOT, bill, table, dish, person or reason…" value="${esc(state.auditQ || "")}">
+    ${chips.length > 1 ? `<div class="au-chips">
+      <button class="au-chip${auKind === "" ? " on" : ""}" data-au-kind="">All <i>${rows.length}</i></button>
+      ${chips.map((c) => `<button class="au-chip${auKind === c.kind ? " on" : ""}" data-au-kind="${esc(c.kind)}" title="Show only: ${esc(c.label)}">${c.icon} ${esc(c.label)} <i>${c.count}</i></button>`).join("")}
+    </div>` : ""}
+    <div class="au-controls">
+      <input id="auQ" class="au-q" type="search" placeholder="Search a KOT, bill, table, dish, person or reason…" value="${esc(state.auditQ || "")}">
+      ${AS ? `<label class="au-sort">Sort <select id="auSort">${AS.SORTS.map((o) => `<option value="${esc(o.id)}"${o.id === auSort ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>` : ""}
+    </div>
+    ${list.length ? `<p class="au-count">${list.length} ${list.length === 1 ? "record" : "records"}${auKind ? " · " + esc(kindLabel[auKind] || auKind) : ""}${shownMoney > 0 ? " · " + inr(shownMoney) + " in total" : ""}</p>` : ""}
     ${list.length ? `<div class="au-rows">${list.map((r) => {
       const [ico, label] = AUDIT_KIND[r.kind] || ["•", r.kind];
       const bits = [r.table_number ? "T" + esc(r.table_number) : "", r.kot_no != null ? "KOT #" + esc(r.kot_no) : "",
@@ -6896,7 +6928,7 @@ function auditHtml() {
         <div class="au-who"><b>${esc(r.actor || "—")}</b><small>${esc(r.actor_role || "")}</small><small>${esc(when(r.at))}</small></div>
       </div>`;
     }).join("")}</div>`
-    : `<div class="empty">${q ? "Nothing matches that." : "Nothing has been removed yet — this list fills itself as it happens."}</div>`}`;
+    : `<div class="empty">${q ? "Nothing matches that." : auKind ? "Nothing of that kind — tap All to see everything." : "Nothing has been removed yet — this list fills itself as it happens."}</div>`}`;
 }
 function bindAudit() {
   const q = document.getElementById("auQ");
@@ -6904,6 +6936,13 @@ function bindAudit() {
     const n = document.getElementById("auQ"); if (n) { n.focus(); try { n.setSelectionRange(at, at); } catch {} } };
   const r = document.getElementById("auRefresh");
   if (r) r.onclick = () => { state.audit = null; renderEditor(); loadAudit(); };
+  // The type chips and the sort box. Both only re-render what is already in hand — no request, no
+  // egress — and neither is allowed to swallow the tap in silence: every one of them repaints.
+  document.querySelectorAll("[data-au-kind]").forEach((b) => {
+    b.onclick = () => { state.auditKind = b.dataset.auKind || ""; renderEditor(); };
+  });
+  const so = document.getElementById("auSort");
+  if (so) so.onchange = () => { state.auditSort = so.value; renderEditor(); };
   // Click a row → the whole story (owner, 2026-08-04: "click and view the full — how it was and
   // what he changed, which KOT he deleted and what was the item, with time, day, everything").
   document.querySelectorAll("[data-au-open]").forEach((el2) => {
@@ -11651,7 +11690,25 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   const lockedMrp = bm ? (Number(bm.mrpAmount) || 0) : 0;
   const lockedNote = lockedMrp > 0 ? inr(lockedMrp) : inr(nontax);
   const total = payFor(0); // the table total BEFORE this order's discount (shown as "Bill total")
-  const maxDisc = base;    // can't discount more than the food (pre-tax) base
+  // THE PERSON'S OWN CEILING IS PART OF THE MAXIMUM (2026-08-11, T7 improvement I5).
+  // Two limits decide how much may come off, and this modal only knew one of them:
+  //   · the BILL's — you cannot discount more than the taxable food (mig 272), handled by `base`;
+  //   · the PERSON's — a waiter's 5%, a manager's 50% (lib/discountCap.ts), which lived ONLY on the
+  //     server. So a waiter could type ₹500 off a ₹1,000 bill, watch the preview agree, press Apply,
+  //     and get "That discount is over your 5% limit — ask the owner." A refusal at the last tap is
+  //     the failure this panel already argues against for the other cap; it just never had the
+  //     number to argue with. whoami sends it now (`discountCapPct`, null = uncapped).
+  // The SERVER still decides — overDiscountCap in orders/discount is untouched. Taking the smaller
+  // of the two here only stops the screen offering a figure that was always going to be refused,
+  // and it reuses the refusal machinery below word for word, so the person is told the real
+  // maximum as they type instead of after committing.
+  const roleCapPct = XRAY_WHO && typeof XRAY_WHO.discountCapPct === "number" ? XRAY_WHO.discountCapPct : null;
+  const roleCapAmt = roleCapPct != null ? round2((capBase * roleCapPct) / 100) : Infinity;
+  const maxDisc = Math.max(0, Math.min(base, roleCapAmt));
+  // True when the PERSON is what set the ceiling, not the bill — so the message can say which,
+  // because "why can't I take ₹200 off a ₹1,000 bill?" has a real answer and hiding it is what
+  // makes staff distrust the screen.
+  const cappedByRole = roleCapPct != null && roleCapAmt < base - 0.004;
   // ONE interface, no mode toggle (owner, 2026-07-03): a Percent and an Amount(₹) field,
   // two-way linked from a single discAmount (₹ off, pre-tax — the value the server stores),
   // so they can never disagree. The % is off the pre-tax base.
@@ -11737,9 +11794,14 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   const capMsg = wrap.querySelector("#discCapMsg");
   let nudgeT = null;
   const capLine = () => `Most you can take off this bill is ${inr(maxDisc)}`
-    + (nontax > 0
-        ? ` — the other ${lockedNote} ${lockedMrp > 0 ? "is MRP items, whose price is final" : "carries no GST and can't be discounted"}.`
-        : ".");
+    // WHICH ceiling bit. The person's own %-limit wins the sentence when it is the tighter of the
+    // two, because that is the one they can do something about (ask the owner) — naming MRP there
+    // would send them looking for a bottle that isn't the reason.
+    + (cappedByRole
+        ? ` — that is your ${roleCapPct}% limit. Ask the owner if you need to go higher.`
+        : nontax > 0
+          ? ` — the other ${lockedNote} ${lockedMrp > 0 ? "is MRP items, whose price is final" : "carries no GST and can't be discounted"}.`
+          : ".");
   const clearRefusal = () => { if (!capMsg.hidden) { capMsg.hidden = true; capMsg.textContent = ""; } };
   const refuse = (msg) => {
     capMsg.textContent = msg;
@@ -11757,8 +11819,12 @@ function openDiscountModal(order, rerender, billTotal, bm, wholeBill, pending) {
   // can't exceed the taxable food value, and anything above that is refused OUT LOUD.
   pctInput.oninput = () => {
     const typed = parseFloat(pctInput.value);
-    if (Number.isFinite(typed) && typed > 100) refuse("100% is the most — that is the whole taxable value."); else clearRefusal();
-    const p = clamp(typed, 0, 100); discAmount = round2((base * p) / 100); setBlank(false); paint("pct");
+    // The % box refuses against the SAME maximum as the ₹ box, so the two cannot disagree about
+    // what is allowed — and it names the person's own limit when that is the tighter one (I5).
+    if (Number.isFinite(typed) && typed > 100) refuse("100% is the most — that is the whole taxable value.");
+    else if (Number.isFinite(typed) && base > 0 && round2((base * typed) / 100) > maxDisc + 0.004) refuse(capLine());
+    else clearRefusal();
+    const p = clamp(typed, 0, 100); discAmount = clamp(round2((base * p) / 100), 0, maxDisc); setBlank(false); paint("pct");
   };
   amtInput.oninput = () => {
     const typed = parseFloat(amtInput.value);

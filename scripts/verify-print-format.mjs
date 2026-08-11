@@ -476,11 +476,68 @@ console.log("\n── the bill a person is actually handed (T7 sweep) ──");
         "grey is faked with sparse dots at 203dpi — the option/removal lines are the ones a cook must read");
   }
 
-  // 9. AMOUNT IN WORDS names the same amount as the figure printed beside it.
+  // 9. AMOUNT IN WORDS names the same amount as the figure printed beside it — AND names a currency.
+  //    This check used to assert bqWords(1234) === "One Thousand Two Hundred Thirty-Four Only",
+  //    which pinned a defect: the box is captioned "Invoice Total (In Words)" and on the common
+  //    whole-rupee case it named a number with no currency at all, while the paise case said
+  //    "Rupees". It also said "One Rupees and One Paise". Fixed + re-pinned 2026-08-11 (T7 F2).
   {
-    /Fifty-Six Paise/.test(BILLDOC.bqWords(1234.56)) && BILLDOC.bqWords(1234) === "One Thousand Two Hundred Thirty-Four Only"
-      ? ok("the banquet amount-in-words states its paise, and says nothing extra when there are none")
-      : bad(`bqWords(1234.56) = "${BILLDOC.bqWords(1234.56)}"`, "on a tax invoice the words are the controlling figure — they cannot floor away the paise printed beside them");
+    const w = {
+      paise: BILLDOC.bqWords(1234.56),
+      whole: BILLDOC.bqWords(1234),
+      one: BILLDOC.bqWords(1),
+      onePaisa: BILLDOC.bqWords(1.01),
+      zero: BILLDOC.bqWords(0),
+      neg: BILLDOC.bqWords(-1234.56),
+    };
+    const okWords =
+      /Fifty-Six Paise Only$/.test(w.paise) && /Rupees and/.test(w.paise)
+      && w.whole === "One Thousand Two Hundred Thirty-Four Rupees Only"
+      && w.one === "One Rupee Only"                       // singular, not "One Rupees"
+      && w.onePaisa === "One Rupee and One Paisa Only"     // singular both halves
+      && w.zero === "Zero Rupees Only"
+      && /^Minus /.test(w.neg);                            // a negative says so
+    okWords
+      ? ok("the banquet amount-in-words states its paise, names the currency, and gets the singular right")
+      : bad(`bqWords: whole="${w.whole}" one="${w.one}" onePaisa="${w.onePaisa}" neg="${w.neg}"`,
+        "on a tax invoice the words are the controlling figure — they must name the same amount AND the currency");
+  }
+
+  // 10. THE BANQUET TAX COLUMNS FOOT — on a MULTI-LINE bill, exactly.
+  //     Check 6 above builds a one-line sheet with a ±0.02 tolerance, so per-line rounding can
+  //     never diverge there and it could not see T7 finding F10: every cell was rounded on its own
+  //     while the TOTAL row printed the bill's stored tax, so CGST 9,703.13 + 646.88 = 10,350.01
+  //     sat under a TOTAL of 10,350.00 — on 47.8% of realistic bills. Two lines and an EXACT
+  //     comparison is what catches it (added 2026-08-11).
+  {
+    const cases = [
+      { lines: [{ title: "Deluxe veg thali", qty: 250, price: 450 }, { title: "Live chaat counter", qty: 1, price: 7500 }], subtotal: 120000, discount: 5000, tax: 20700, total: 135700 },
+      { lines: [{ title: "A", qty: 100, price: 300 }, { title: "B", qty: 1, price: 5000 }], subtotal: 35000, discount: 0, tax: 6300, total: 41300 },
+      { lines: [{ title: "A", qty: 7, price: 111 }, { title: "B", qty: 3, price: 99 }, { title: "C", qty: 1, price: 1 }], subtotal: 1075, discount: 137, tax: 168.84, total: 1244 },
+    ];
+    const num = (s) => Number(String(s).replace(/[^0-9.\-]/g, "")) || 0;
+    let offenders = [];
+    for (const c of cases) {
+      const html = BILLDOC.banquetDocHtml({
+        bill: { bill_no: "B1", issued_at: "2026-08-05", subtotal: c.subtotal, discount: c.discount, tax: c.tax, total: c.total },
+        lines: c.lines,
+        settings: { banquet_paper_size: "a5", banquet_tax_components: [{ label: "CGST", rate: 9 }, { label: "SGST", rate: 9 }] },
+        restaurant: { slug: "x" }, autoPrint: false,
+      });
+      // Every body row's tax cells, and the TOTAL row's, straight off the rendered table.
+      const body = [...html.matchAll(/<tr><td class="c">\d+<\/td>[\s\S]*?<\/tr>/g)].map((m) => m[0]);
+      const cellsOf = (row) => [...row.matchAll(/<td class="c">[\d.]+%<\/td><td class="r">([\d,.]+)<\/td>/g)].map((m) => num(m[1]));
+      const perCol = body.map(cellsOf).filter((a) => a.length);
+      const totRow = (html.match(/<tr class="tot">([\s\S]*?)<\/tr>/) || [])[1] || "";
+      const totals = [...totRow.matchAll(/class="r">([\d,.]+)</g)].map((m) => num(m[1])).slice(1);
+      for (let col = 0; col < totals.length; col++) {
+        const summed = Math.round(perCol.reduce((a, r) => a + (r[col] ?? 0), 0) * 100) / 100;
+        if (summed !== totals[col]) offenders.push(`${c.lines.length} lines, col ${col + 1}: ${summed} vs TOTAL ${totals[col]}`);
+      }
+    }
+    offenders.length === 0
+      ? ok("a MULTI-LINE banquet sheet's tax columns add up to its TOTAL row exactly, to the paisa")
+      : bad(offenders.join(" · "), "the in-table TOTAL row is the PROOF the columns add up — a paisa out is a paisa too many");
   }
 }
 

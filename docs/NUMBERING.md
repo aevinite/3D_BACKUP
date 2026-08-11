@@ -32,8 +32,18 @@ Gaps can still appear, and each is honest:
   different numbers, never the same one (migration 051 takes a row lock to guarantee it).
 
 **A missing bill number never means a sale was removed.** Sales are never deleted — see
-`docs/COMPLIANCE-GUARDRAILS.md`. If you need to prove where a number went, the Activity log and
-the bill ledger both keep the record.
+`docs/COMPLIANCE-GUARDRAILS.md`. If you need to prove where a number went, ask **the Audit** and the
+**admin bill ledger** — those two keep the record permanently:
+
+* **the Audit** (`deletion_audit`, migration 251) — every removal with its reason, the person, the
+  bill/KOT number and the amount. Append-only, and **nothing prunes it**;
+* **the admin bill ledger** (`/aevinite` → Bills) — the bill row itself, tombstoned rather than
+  erased, reachable at any time by number, date or table.
+
+⚠️ **Not the Activity log.** This page used to name it, and it is the wrong place to send anyone:
+the Activity log is `staff_actions`, and `lfh_prune_logs()` (migration 158) deletes it after a hard
+maximum of **30 days** — selectable down to **1 day** from `/aevinite/settings`. It is a working
+log of what staff did, not the record of where a number went (corrected 2026-08-11, T7 finding F5).
 
 ## Why invoice numbers never reset — and also have gaps
 

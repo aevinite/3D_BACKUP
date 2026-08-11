@@ -32,7 +32,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { logAction } from "@/lib/oplog";
 import { softDeleteOrders, restoreOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
-import { rollUpBill, type BillSession, type BillOrder, type BillState } from "@/lib/billLedger";
+import { rollUpBill, netOf, type BillSession, type BillOrder, type BillState } from "@/lib/billLedger";
 import { withIdempotency } from "@/lib/idempotency";
 import { invalidateFloor } from "@/lib/floorSummary";
 
@@ -42,15 +42,11 @@ const isUuid = (s: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-
 const SESSION_COLS = "id, status, bill_no, invoice_no, invoice_voided, table_number, restaurant_id, opened_at, closed_at, created_at, deleted_at, deleted_by, delete_reason";
 const ORDER_COLS = "id, session_id, total, discount, tax_rate, status, payment_status, payment_method, khata_at, deleted_at, deleted_by, delete_reason";
 
-// What an order was actually worth, net of its discount — see lib/billLedger.ts netOf() for why
-// `total` alone overstates a discounted bill.
-const netAmount = (o: { total?: number | null; discount?: number | null; tax_rate?: number | null }) => {
-  const total = Number(o.total) || 0;
-  const disc = Number(o.discount) || 0;
-  if (disc <= 0) return total;
-  const rate = Number(o.tax_rate) > 0 ? Number(o.tax_rate) : 0;
-  return Math.round((total - disc * (1 + rate)) * 100) / 100;
-};
+// What an order was actually worth, net of its discount. This was a SECOND COPY of
+// lib/billLedger.ts's netOf() (T7 improvement I1) — the ledger's amounts and the permanent audit's
+// "amount removed" are computed from the same rule now, so they cannot drift apart.
+const netAmount = (o: { total?: number | null; discount?: number | null; tax_rate?: number | null }) =>
+  netOf(o as BillOrder);
 
 async function requireAdmin(req: NextRequest) {
   return tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value);
@@ -251,13 +247,37 @@ async function postImpl(req: NextRequest) {
   }
 
   if (action === "restore") {
-    const orderRows = (await sb.from("orders").select("id").eq("session_id", sessionId).not("deleted_at", "is", null)).data as { id: string }[] | null;
+    // Read the money BEFORE the restore clears the tombstone, so the audit row can say what came
+    // back — the same columns and the same netOf() the delete recorded on the way out.
+    const orderRows = (await sb.from("orders").select("id, total, discount, tax_rate").eq("session_id", sessionId).not("deleted_at", "is", null)).data as { id: string; total: number | null; discount: number | null; tax_rate: number | null }[] | null;
     const ids = (orderRows || []).map((o) => o.id);
-    const res = await restoreOrders(rid, ids);
+    // restoreOrders() now THROWS when the database refuses either write (T7 finding F3 — it used to
+    // report the row count it intended and leave the bill deleted). Caught here so the admin gets a
+    // sentence they can act on instead of a bare 500, and so the "you can restore them" promise
+    // either happens or says out loud that it didn't.
+    let res: { restored: number };
+    try { res = await restoreOrders(rid, ids); }
+    catch (e) {
+      console.error("[admin/bills] restore failed:", e instanceof Error ? e.message : String(e));
+      return NextResponse.json({ error: "Couldn't restore that bill — nothing was changed. Please try again." }, { status: 500 });
+    }
     // Un-tombstone the session itself (covers the no-orders case + belt for the rest).
     // Scoped by restaurant like every other write on this route — rid came from this very
     // session two reads ago, so the row was already right; the missing pair was a consistency gap.
     await sb.from("sessions").update({ deleted_at: null, deleted_by: null, deleted_by_id: null, delete_reason: null }).eq("id", sessionId).eq("restaurant_id", rid);
+    // …AND INTO THE PERMANENT AUDIT (T7 finding F4). The delete wrote one `deletion_audit` row per
+    // order — a table nothing prunes — while the restore wrote only the Activity-log line below,
+    // which mig 158 clears after 30 days at most. A month on, the lasting record said "removed" and
+    // stayed silent about the reversal, which reads worse than the truth. One row per order, the
+    // same shape the delete writes, so the two sit next to each other and tell the whole story.
+    for (const o of orderRows || []) {
+      await recordRemoval({
+        rid, kind: "order_restored", reason: { note: "put back from the admin bill ledger" }, user: null,
+        orderId: o.id, sessionId, tableNumber: sess.table_number != null ? String(sess.table_number) : null,
+        amount: netAmount(o),
+        meta: { from: "admin bill ledger", orders_on_bill: (orderRows || []).length },
+      });
+    }
     invalidateFloor(rid);
     await logAction("admin", "bill_restore", { restaurant_id: rid, table_number: sess.table_number, detail: `admin restored bill${sess.bill_no ? ` #${sess.bill_no}` : ""}` });
     return NextResponse.json({ ok: true, restored: res.restored });

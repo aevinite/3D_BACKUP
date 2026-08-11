@@ -192,6 +192,11 @@ export function billPreviewHtml(settings: Settings, mode: BillMode, restaurant: 
     total,
     taxRows: taxRowsAdded,
     inclRows: taxRowsInside,
+    // A composition tenant's paper is a BILL OF SUPPLY carrying the "not eligible to collect tax"
+    // declaration, and it has no "Taxable value" row (T7 finding F9). The preview has to pass this
+    // or it would approve a heading the printer no longer produces — the one fault this file exists
+    // to prevent (see the header).
+    composition,
     nontax,
     mrpLabel: "MRP items",
     // The note must only ever say what the accounts support (billdoc.js says so itself). With

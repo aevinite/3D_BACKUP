@@ -57,6 +57,12 @@ export interface BillDocData {
   /** One printed line under the totals explaining the untaxed part. Only rendered when
    *  `nontax` is above 0, and it must only claim tax is inside the price when it really is. */
   mrpNote?: string;
+  /** true = this restaurant is on the COMPOSITION scheme, so the paper is a **Bill of Supply**,
+   *  not a tax invoice: the heading and `<title>` change, the "not eligible to collect tax on
+   *  supplies" declaration prints, and the "Taxable value" restatement is dropped (a composition
+   *  bill has no taxable value to restate). `billData` sets it from the money; a caller building
+   *  figures by hand (the admin preview, `lib/billPreview.ts`) must pass it too. */
+  composition?: boolean;
   /** true = the page opens the print dialog by itself (a real print, not a preview). */
   autoPrint?: boolean;
   /** A line of explanation in the screen-only toolbar. Never printed. */

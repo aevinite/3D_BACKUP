@@ -108,10 +108,21 @@ export async function restoreOrders(
     { id: string; session_id: string | null }[] | null;
   const targetIds = (gone || []).map((o) => o.id);
   if (!targetIds.length) return { restored: 0 };
-  await sb.from("orders").update(clear).eq("restaurant_id", rid).in("id", targetIds);
+  // NEITHER WRITE WAS CHECKED, AND THE COUNT WAS THE INTENTION (fixed 2026-08-11, T7 finding F3).
+  // Both updates fired blind and the function returned `targetIds.length` — the number of rows it
+  // MEANT to clear — so a refused write answered "restored 3" while all three stayed deleted. That
+  // is the exact failure softDeleteOrders() above was fixed for, and its comment says why: "This is
+  // the write that silently failed for months… an unchecked error meant the column stayed null
+  // while the screen looked right." The delete half was repaired; the restore half was not, on the
+  // one screen that carries the "you can restore them" promise (app/api/admin/bills/route.ts).
+  const ordUpd = await sb.from("orders").update(clear).eq("restaurant_id", rid).in("id", targetIds);
+  if (ordUpd.error) throw new Error(`restore failed: ${ordUpd.error.message}`);
   const sessionIds = [...new Set((gone || []).map((o) => o.session_id).filter(Boolean))] as string[];
   if (sessionIds.length) {
-    await sb.from("sessions").update(clear).eq("restaurant_id", rid).in("id", sessionIds);
+    const sUpd = await sb.from("sessions").update(clear).eq("restaurant_id", rid).in("id", sessionIds);
+    // The bill would stay tombstoned in the ledger while its orders read alive — the same
+    // half-restored state, just the other way round.
+    if (sUpd.error) throw new Error(`bill un-tombstone failed: ${sUpd.error.message}`);
   }
   return { restored: targetIds.length };
 }
