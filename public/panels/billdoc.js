@@ -433,6 +433,44 @@
    * plus the break-inside rules are what keep a ticket on ONE piece of paper — the admin's old
    * sample had neither and printed in two parts (owner, 2026-08-02). NO PRICES: a KOT is for
    * the kitchen, not a bill. */
+  /** kotWhen(ts) — WHAT TIME, AND WHICH DAY, on a printed kitchen ticket.
+   *
+   * The paper used to carry a bare "09:31 PM" and nothing else, so a ticket rung five days ago on an
+   * overnight table printed exactly like one rung tonight. On screen the board says "5d 3h"; on
+   * paper there was no way to tell at all — and the owner's point (2026-08-11) is that a thermal
+   * head is BLACK AND WHITE, so nothing about this can be solved with a colour. It has to be words.
+   *
+   * Words are also what this document already uses for hierarchy: "a thermal head has no grey — it
+   * fakes one with sparse dots" (the note above kotDocHtml's .kl rule), so size, weight and borders
+   * are the only tools here. Today reads exactly as it always did — a ticket from today is the
+   * normal case and gains nothing from a date. Anything older says so, in capitals, before the time.
+   *
+   * Lives HERE, in the one print document, because FOUR callers built this string for themselves
+   * (the kitchen's auto-print and queued reprints, and the manager panel twice). One of them getting
+   * the day and the others not is precisely the twin-drift this file exists to prevent.
+   */
+  function kotWhen(ts) {
+    if (ts == null || ts === "") return "";
+    var d = new Date(ts);
+    var t = d.getTime();
+    if (!isFinite(t) || t <= 0) return "";          // never print "Invalid Date" on a ticket
+    var time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    var now = new Date();
+    var sameDay = function (a, b) {
+      return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    };
+    if (sameDay(d, now)) return time;
+    var y = new Date(now.getTime() - 86400000);
+    if (sameDay(d, y)) return "YESTERDAY " + time;
+    // Older than that: the date itself. Day-and-month only — a KOT is never a year old, and the
+    // paper is 66mm wide.
+    // Built explicitly, NOT via toLocaleDateString's own ordering: the system locale decided it, so
+    // the same ticket printed "AUG 6" on one machine and "6 AUG" on another. A kitchen ticket must
+    // read the same on every device in the building.
+    var mon = d.toLocaleDateString("en-GB", { month: "short" }).toUpperCase();
+    return d.getDate() + " " + mon + " " + time;
+  }
+
   function kotLineHtml(r) {
     var opts = Array.isArray(r.options) ? r.options.map(function (x) { return typeof x === "string" ? x : ((x && x.label) || ""); }).filter(Boolean).join(", ") : "";
     var rem = Array.isArray(r.removed) ? r.removed.filter(Boolean).join(", ") : "";
@@ -1296,6 +1334,7 @@ ${a.autoPrint === false ? "" : "setTimeout(printAgain, 350);"}
     billDocHtml: billDocHtml,
     kotDocHtml: kotDocHtml,
     kotLineHtml: kotLineHtml,
+    kotWhen: kotWhen,
     billIdentity: billIdentity,
     splitTax: splitTax,
     discPct: discPct,

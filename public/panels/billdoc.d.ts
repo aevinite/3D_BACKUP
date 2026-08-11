@@ -103,6 +103,9 @@ export interface BillIdentity {
 
 export function billDocHtml(d: BillDocData): string;
 export function kotDocHtml(o: KotDocData): string;
+/** The time on a printed kitchen ticket, with the DAY when it isn't today
+ *  ("09:31 PM" · "YESTERDAY 09:31 PM" · "6 AUG 09:31 PM"). Black-and-white by design. */
+export function kotWhen(ts: string | number | Date | null | undefined): string;
 export function kotLineHtml(r: KotDocLine): string;
 export function billIdentity(
   settings: Record<string, unknown>,

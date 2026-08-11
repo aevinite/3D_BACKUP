@@ -172,11 +172,36 @@ const cmpTime = (x, y) => { const a = orderTime(x), b = orderTime(y); return a <
 // REJECTED (owner, 2026-08-07): no second ageing signal for food that is READY and sitting
 // uncollected. This warning is for a ticket that has been COOKING too long, and that is all the
 // board needs. See docs/REJECTED-IDEAS.md → R5.
-const AGE_WARN_MIN = 30, AGE_LATE_MIN = 120;
+// A THIRD STEP, BECAUSE "LATE" STOPPED MEANING ANYTHING (owner picked this, 2026-08-11).
+// The two steps ended at 2 hours, so a ticket 3 hours old and one FIVE DAYS old wore the same red.
+// Measured on the live board: all twenty tickets were red at once, and when everything is red a cook
+// scanning the pass cannot tell which one has genuinely been sitting — the signal was there and
+// carried no information. Anything from yesterday or earlier is a different KIND of thing (an
+// overnight table nobody closed) from a ticket that is running twenty minutes behind tonight.
+//
+// AND IT IS NOT A COLOUR (his instruction, same day: a printer is black and white, so colour is
+// "no use"). He is right about more than the printer: the two existing steps are hue-only, which
+// fails a colour-blind cook, a sun-washed screen and a cheap panel alike. So the stale step is a
+// bordered BOX with the word DAY in it — a shape and a word, either of which survives alone. The
+// paper half of the same instruction is LFH_BILLDOC.kotWhen(), which prints the DAY on the ticket.
+//
+// This is NOT R5. R5 refused an ageing signal on the READY column — food cooked and waiting to be
+// carried out. This is the COOKING warning that already exists, given the step it was missing.
+const AGE_WARN_MIN = 30, AGE_LATE_MIN = 120, AGE_STALE_MIN = 24 * 60;
 const ageClass = (ts) => {
   const m = ageMinutes(ts);
   if (m == null) return "";
-  return m >= AGE_LATE_MIN ? " age-late" : m >= AGE_WARN_MIN ? " age-warn" : "";
+  return m >= AGE_STALE_MIN ? " age-stale" : m >= AGE_LATE_MIN ? " age-late" : m >= AGE_WARN_MIN ? " age-warn" : "";
+};
+// The words a cook reads on hover / long-press — different at each step, because "open a long time"
+// says nothing useful about a five-day-old ticket.
+const ageTitle = (ts) => {
+  const m = ageMinutes(ts);
+  if (m == null) return "";
+  if (m >= AGE_STALE_MIN) return "This ticket is from an earlier day — it is almost certainly a table nobody closed";
+  if (m >= AGE_LATE_MIN) return "This ticket has been cooking a long time";
+  if (m >= AGE_WARN_MIN) return "This ticket has been cooking over half an hour";
+  return "";
 };
 const toast = (msg, undoFn) => {
   const t = document.createElement("div");
@@ -340,7 +365,7 @@ function ticketHtml(o, rows) {
   const tb = TAG_BADGE[ttag];
   const tagBadge = tb ? `<span class="ttag" style="background:${tb[1]};color:${ttag === "guest" ? "#1c2230" : "#fff"}">${tb[0]}</span>` : "";
   return `<div class="ticket st-${esc(o.status)}" data-ticket="${esc(o.id)}">
-    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageClass(o.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
+    <div class="thead"><span class="kot">#${esc(o.kot_no ?? "—")}</span><span class="tbl"${o.table_number == null || o.table_number === "" ? "" : ` title="T${esc(o.table_number)}"`}>${esc(whereFor(o, false))}</span>${tagBadge}<span class="age${ageClass(o.created_at)}"${ageTitle(o.created_at) ? ` title="${esc(ageTitle(o.created_at))}"` : ""}>${ageMinutes(o.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(o.created_at))}</span>${reprintBtn}</div>
     ${lines}${action}</div>`;
 }
 
@@ -413,7 +438,7 @@ function platTicketHtml(p) {
     action = `<button class="big" data-plat-hand="${esc(p.id)}">HANDED OVER</button>`;
   }
   return `<div class="ticket plat plat-${esc(meta.cls)} st-plat-${esc(p.status)}" data-ticket="plat-${esc(p.id)}">
-    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="age${ageClass(p.created_at)}"${ageClass(p.created_at) ? ` title="This ticket has been open a long time"` : ""}>${esc(timeAgo(p.created_at))}</span></div>
+    <div class="thead"><span class="src-badge ${esc(meta.cls)}">${esc(meta.label)}</span><span class="kot">#${esc(p.kot_no ?? "—")}</span><span class="age${ageClass(p.created_at)}"${ageTitle(p.created_at) ? ` title="${esc(ageTitle(p.created_at))}"` : ""}>${ageMinutes(p.created_at) >= AGE_STALE_MIN ? `<i class="age-day">DAY</i>` : ""}${esc(timeAgo(p.created_at))}</span></div>
     ${p.customer_name ? `<div class="plat-cust-line">${esc(p.customer_name)}</div>` : ""}
     ${lines}${action}</div>`;
 }
@@ -1003,7 +1028,9 @@ function printKot(order, itemRows, restaurant, opts) {
     // "Table 7". Printing the raw number on a renamed table sends staff to the wrong table.
     const tlab = whereFor(order, true);   // the table as the FLOOR knows it ("A1"), or "T?" when a bill has no table
     const kot = order.kot_no != null ? order.kot_no : "—";
-    const when = order.created_at ? new Date(order.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "";
+    // LFH_BILLDOC.kotWhen, not a bare time — a ticket rung five days ago on an overnight table
+    // used to print exactly like one rung tonight, and paper has no colour to say otherwise.
+    const when = LFH_BILLDOC.kotWhen(order.created_at);
     const rows = (itemRows && itemRows.length)
       ? itemRows
       : (Array.isArray(order.items) ? order.items : []);
