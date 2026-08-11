@@ -1788,10 +1788,14 @@ export default function OwnerDashboard() {
              162px, and those four words plus the "● live" pill do not fit one line at the size
              the label is actually drawn at.
              FOUR CLASSES, and that is the whole point (T5, 2026-08-11). The first attempt wrote
-             `.ow2-kt .k`, which is 0,2,0 — and `.owx .adm-stat .k` in app/globals.css is 0,3,0
-             and comes later, so the rule never applied and the label kept its 11.5px. That is
-             the same cascade trap `.owx .adm-stat.ow2-kpi { padding-bottom }` above was written
-             three-classes-deep to escape; measured on the deployed site before and after.
+             a two-class selector (.ow2-kt .k, specificity 0,2,0) — and .owx .adm-stat .k in
+             app/globals.css is 0,3,0 and comes later, so the rule never applied and the label
+             kept its 11.5px. That is the same cascade trap the .owx .adm-stat.ow2-kpi
+             padding-bottom rule above was written three-classes-deep to escape; measured on the
+             deployed site before and after.
+             (And NO BACKTICKS in here — this CSS is a template literal; one closes the string
+             and the build dies with TS1381. The note at the top of .ow2-two says so, and this
+             comment is where I proved it.)
              The label stays wrappable on purpose — "LOST TO CANCELLATIONS" has to break. */
           .ow2-kt { flex-wrap: wrap; row-gap: 3px; }
           .owx .adm-stat.ow2-kpi .ow2-kt .k { font-size: 9.5px; letter-spacing: .02em; }
