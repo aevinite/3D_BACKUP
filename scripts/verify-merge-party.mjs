@@ -134,10 +134,21 @@ check("manager: the Change-table row says 'unmerge first' on a merged party (bot
 // this went red on a picker that is behaving correctly. Assert the RULE, in both doors: a merged
 // child is classified blocked ("joined"), and the free list is precisely "not blocked", which is
 // what stops the list and the label from ever disagreeing.
+// AND IT WENT RED ON A CORRECT REFACTOR A SECOND TIME (T10 sweep, 2026-08-12). The paragraph above
+// says "assert the RULE" — but two thirds of this check were still pinned to one SPELLING of the
+// loop that applies it. `for (const i of allT) if (!shiftBlocked(i)) out.push(i)` became
+// `tables.filter((i) => !shiftBlocked(i))` (app.js:11199), which is the same rule in fewer words, and
+// main went red for five hours on it. `verify:static` is one `&&` chain, so that also silenced every
+// guard after this one — the same way a stale regex in verify-owner-reports had silenced seven of
+// them the day before.
+//
+// What must be true, in both doors: a merged child is CLASSIFIED blocked ("joined"), and each free
+// list is built from exactly that classifier — so the list and the label can never disagree. HOW the
+// list is built (loop-and-push, .filter, .flatMap) is not the rule and is not this guard's business.
 check("manager: no shift picker offers a merged child as a free table",
   (editor.match(/if \(mergeParentOf\(i\)\) return "joined";/g) || []).length >= 2
-  && /if \(!whyBlocked\(i\)\) free\.push\(i\)/.test(editor)
-  && /if \(!shiftBlocked\(i\)\) out\.push\(i\)/.test(editor));
+  && /(?:if \(!whyBlocked\(i\)\) free\.push\(i\)|filter\(\((\w+)\) => !whyBlocked\(\1\)\))/.test(editor)
+  && /(?:if \(!shiftBlocked\(i\)\) out\.push\(i\)|filter\(\((\w+)\) => !shiftBlocked\(\1\)\))/.test(editor));
 // The LIST moved to public/panels/outbox.js (2026-08-06) so the waiter tablet and the "Needs you"
 // sheet speak the same sentences as the manager's toast instead of showing raw codes — this used
 // to assert the object literal lived in editor/app.js, which was checking WHERE it is rather than
