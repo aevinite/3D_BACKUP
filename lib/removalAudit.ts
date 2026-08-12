@@ -53,7 +53,15 @@ export type RemovalKind =
   // settable to 1 day). So a month later the lasting record said a bill had been removed, with a
   // reason and a person, and carried nothing to say it had been put back — which reads worse than
   // what actually happened (T7 finding F4, 2026-08-11).
-  | "order_restored";
+  | "order_restored"
+  // A NOTE OR AN ALLERGY CHANGED ON A BILL THAT WAS ALREADY SETTLED (owner, 2026-08-13, on sweep
+  // problem P4: "you CAN edit after the bill, but it will go in audit — minor section, not the risky
+  // one, no money one"). It moves NOTHING: not the total, not the tax, not the discount, and since
+  // migration 312 it does not even rewrite the rest of the issued ticket — only that one line's note
+  // is patched. So it is recorded at risk level `record`, never `money`
+  // (public/panels/auditsort.js KIND_RISK + SQL lfh_audit_risk, kept in step by verify:audit).
+  // An edit BEFORE settling is ordinary work and is not recorded here — the activity log has it.
+  | "bill_annotated";
 
 export type RemovalReason = { code?: string | null; note?: string | null };
 

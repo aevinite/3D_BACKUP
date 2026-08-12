@@ -71,6 +71,15 @@ BEGIN
   RETURN json_build_object('ok', v_n > 0);
 END $$;
 
+-- ── PERMISSIONS for the heartbeat (migration-038 pattern) ───────────────────────────────────
+-- New functions are PUBLIC-executable by default — lock it, then grant the one role that needs it.
+-- The heartbeat is guest-facing but can only TOUCH an already-open session: it never reads data and
+-- never opens or reopens a table. (These two lines used to live further down this file, below the
+-- auto-close code; they were kept here when that code was removed in 2026-08-13 — without them,
+-- running this file alone would leave the heartbeat public-executable.)
+REVOKE EXECUTE ON FUNCTION lfh_touch_session(text) FROM PUBLIC;
+GRANT  EXECUTE ON FUNCTION lfh_touch_session(text) TO anon;
+
 -- ── 2) AUTO-CLOSE SAFETY NET ────────────────────────────────────────────────
 -- Close every OPEN session idle past p_idle_minutes that has NO blocking order.
 --
@@ -92,60 +101,44 @@ END $$;
 -- and so verification can force an immediate close with (0). 15 (not 10) because
 -- a guest between courses may background the tab briefly — but rule above means
 -- a live order / unpaid bill is protected no matter the window.
-CREATE OR REPLACE FUNCTION lfh_auto_close_idle_sessions(p_idle_minutes int DEFAULT 15)
-RETURNS json
-LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_closed int;
-BEGIN
-  UPDATE sessions s
-     SET status = 'closed', closed_at = NOW()
-   WHERE s.status = 'open'
-     AND s.last_activity_at < NOW() - make_interval(mins => GREATEST(p_idle_minutes, 0))
-     AND NOT EXISTS (
-       SELECT 1 FROM orders o
-        WHERE o.session_id = s.id
-          AND o.status <> 'cancelled'
-          AND NOT o.archived
-          AND ( o.status IN ('received', 'preparing')   -- not yet served (live order)
-             OR o.payment_status <> 'paid' )            -- served but unpaid (open bill)
-     );
-  GET DIAGNOSTICS v_closed = ROW_COUNT;
   -- Each status→'closed' fires rt_emit_sessions (UPDATE OF status), so the
   -- manager/owner/admin floor + the guest's status widget clear in realtime.
-  RETURN json_build_object('ok', true, 'closed', v_closed);
-END $$;
-
 -- ── PERMISSIONS (migration-038 pattern) ─────────────────────────────────────
 -- New functions are PUBLIC-executable by default — lock them down.
 -- Heartbeat: anon may call it (it's guest-facing) but it can only TOUCH an
 -- already-open session, never read data or open one.
-REVOKE EXECUTE ON FUNCTION lfh_touch_session(text)            FROM PUBLIC;
-GRANT  EXECUTE ON FUNCTION lfh_touch_session(text)            TO anon;
 -- Auto-close: service-role ONLY (it bypasses the per-table token, so no guest /
 -- authenticated client may ever fire a mass-close).
-REVOKE EXECUTE ON FUNCTION lfh_auto_close_idle_sessions(int)  FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION lfh_auto_close_idle_sessions(int)  TO service_role;
-
 -- ── 3) SCHEDULE EVERY 5 MINUTES (fail-soft) ─────────────────────────────────
 -- Try pg_cron first. If the extension isn't available on this project the whole
 -- DO block is caught and we NOTICE the fallback — the safety-net function above
 -- still lands, so a Vercel cron / external scheduler can POST to it instead.
-DO $$
-BEGIN
-  CREATE EXTENSION IF NOT EXISTS pg_cron;
   -- Unschedule any prior copy so re-running this migration doesn't error on a
   -- duplicate job name.
-  IF EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'lfh_auto_close_idle_sessions') THEN
-    PERFORM cron.unschedule('lfh_auto_close_idle_sessions');
-  END IF;
-  PERFORM cron.schedule(
-    'lfh_auto_close_idle_sessions',
-    '*/5 * * * *',                                   -- every 5 minutes
-    $cron$ SELECT lfh_auto_close_idle_sessions(); $cron$  -- uses the 15-min default
-  );
-  RAISE NOTICE 'pg_cron: scheduled lfh_auto_close_idle_sessions every 5 minutes.';
+
+-- ═════════════════════════════════════════════════════════════════════════════════════════════
+-- THE CODE THAT USED TO BE HERE IS GONE, ON PURPOSE (2026-08-13, T8 sweep problem P2).
+--
+-- Everything above this line from "2) AUTO-CLOSE SAFETY NET" down is KEPT AS REASONING ONLY. The
+-- function `lfh_auto_close_idle_sessions(int)` and the pg_cron job that ran it every 5 minutes were
+-- dropped by migration 267 under the owner's rule from migration 254: **NO TABLE ENDS ITSELF.**
+-- `scripts/verify-db-grants.mjs` lists that job name as FORBIDDEN, so re-adding it fails the checks
+-- on purpose.
+--
+-- But this file still CREATED the function and still called `cron.schedule` for it. A FULL re-seed
+-- healed that (267 sorts after this file and drops it again) — the hole was the PARTIAL run, which
+-- is what CLAUDE.md actively recommends: "Prefer running just the one migration." Running this file
+-- alone brought a table-closing job back to life, and the guard would only report it afterwards.
+--
+-- So the body is replaced by the removal itself: run this file alone now and it ENFORCES the rule
+-- instead of breaking it. Idempotent, and safe on a database where neither exists.
+DROP FUNCTION IF EXISTS public.lfh_auto_close_idle_sessions(int);
+DO $$
+BEGIN
+  PERFORM cron.unschedule('lfh_auto_close_idle_sessions')
+   WHERE EXISTS (SELECT 1 FROM cron.job WHERE jobname = 'lfh_auto_close_idle_sessions');
 EXCEPTION WHEN OTHERS THEN
-  RAISE NOTICE 'pg_cron unavailable (%); lfh_auto_close_idle_sessions() landed but is NOT scheduled. Hit it every 5 min from a Vercel cron / external scheduler (service-role).', SQLERRM;
+  NULL; -- pg_cron absent, or the job never existed: nothing to unschedule either way
 END $$;
 
 NOTIFY pgrst, 'reload schema';

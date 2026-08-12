@@ -24,39 +24,16 @@
 -- The client pairs this with optimistic tiles (flip to "Open" instantly), so it FEELS instant too.
 -- service-role only (the editor endpoint calls it via supabaseAdmin).
 
-CREATE OR REPLACE FUNCTION lfh_staff_open_all_tables(p_restaurant_id uuid)
-RETURNS json LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_count  int;
-  v_opened int := 0;
-  v_t      int;
-BEGIN
-  SELECT COALESCE(table_count, 0) INTO v_count FROM settings WHERE restaurant_id = p_restaurant_id;
-  IF v_count IS NULL OR v_count < 1 THEN
-    RETURN json_build_object('opened', 0);
-  END IF;
-
-  FOR v_t IN 1..v_count LOOP
-    IF NOT EXISTS (
-      SELECT 1 FROM sessions
-      WHERE restaurant_id = p_restaurant_id AND table_number = v_t::text AND status <> 'closed'
-    ) THEN
-      INSERT INTO sessions (table_number, status, opened_by, opened_at, last_activity_at, restaurant_id)
-      VALUES (v_t::text, 'open', 'waiter', now(), now(), p_restaurant_id);
-      v_opened := v_opened + 1;
-    END IF;
-  END LOOP;
-
-  -- The whole floor is open now → clear any pending access/join requests for real tables.
-  UPDATE requests SET status = 'approved'
-    WHERE restaurant_id = p_restaurant_id AND status = 'pending'
-      AND table_number IN (SELECT generate_series(1, v_count)::text);
-
-  RETURN json_build_object('opened', v_opened);
-END; $$;
-
--- Lock down: service-role only (the editor endpoint calls it via supabaseAdmin).
-REVOKE EXECUTE ON FUNCTION lfh_staff_open_all_tables(uuid) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION lfh_staff_open_all_tables(uuid) TO service_role;
+-- ═════════════════════════════════════════════════════════════════════════════════════════════
+-- THE CODE THAT USED TO BE HERE IS GONE, ON PURPOSE (2026-08-13, T8 sweep problem P2).
+--
+-- Everything above is KEPT AS REASONING ONLY. `lfh_staff_open_all_tables` — which opened every table on the floor in one call — was dropped by
+-- migration 281 under the owner's "no table ends itself" rule, and the panels and routes were
+-- updated to match (/sessions/open-all and /sessions/close-all are gone from the server too).
+--
+-- This file nevertheless still CREATED it. A full re-seed healed that, because 281 sorts after and
+-- drops it again; running THIS FILE ALONE — which CLAUDE.md recommends — brought it back. So the
+-- body is now the removal itself. Idempotent; safe where it never existed.
+DROP FUNCTION IF EXISTS public.lfh_staff_open_all_tables(uuid);
 
 NOTIFY pgrst, 'reload schema';

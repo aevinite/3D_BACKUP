@@ -143,15 +143,19 @@ export async function GET(req: NextRequest) {
   // Measured on the dev data the day this went in: 220 cancelled tickets and 14 deleted bills existed
   // where a 200-row page showed 178 and 10.
   const countScope = pinRid ? [pinRid] : (scope.all ? null : scope.ids);
-  let kindCounts: { kind: string; n: number; amount: number }[] | null = null;
+  let kindCounts: { kind: string; n: number; amount: number; risk?: string }[] | null = null;
   if (countScope && countScope.length) {
     const kc = await sb.rpc("lfh_audit_kind_counts", { p_restaurant_ids: countScope, p_from: null, p_to: null });
     // A failed count is reported ABSENT, never as zeroes: the screen then counts what it holds and
     // labels the chips as this-page-only, which is the honest fallback. Fabricating totals on the one
     // screen built to prove nothing disappeared is exactly the wrong failure (this route's own rule).
     if (kc.error) console.error("[owner/audit] kind counts failed:", kc.error.message);
-    else kindCounts = ((kc.data || []) as { kind: string; n: number; amount: number }[])
-      .map((x) => ({ kind: x.kind, n: Number(x.n) || 0, amount: Number(x.amount) || 0 }));
+    // `risk` (mig 314) rides along: money / record / data, decided ONCE in the database
+    // (lfh_audit_risk) so the strip on the screen cannot classify a row differently from the manager
+    // panel's copy of the same record. An older database without the column simply sends nothing and
+    // the screen falls back to auditsort.js's map, which is the same map.
+    else kindCounts = ((kc.data || []) as { kind: string; n: number; amount: number; risk?: string }[])
+      .map((x) => ({ kind: x.kind, n: Number(x.n) || 0, amount: Number(x.amount) || 0, ...(x.risk ? { risk: x.risk } : {}) }));
   }
   return NextResponse.json({
     removals,

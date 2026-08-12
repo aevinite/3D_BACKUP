@@ -3608,6 +3608,18 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await log("editor", "order_item_note", { restaurant_id: rid, order_id: data?.order_id, device_id: dev });
+      // EDITING AFTER THE BILL IS ALLOWED, AND RECORDED (owner, 2026-08-13). Only when the bill was
+      // already SETTLED — an edit before that is ordinary work and the activity log already has it.
+      // Risk level `record`, never `money`: mig 312 patches just this line's note and touches no
+      // total, tax or discount (auditsort.js KIND_RISK / SQL lfh_audit_risk).
+      if (data?.settled) {
+        await recordRemoval({
+          rid, kind: "bill_annotated", user: g.user, deviceId: dev,
+          orderId: data?.order_id, itemId: b,
+          reason: reasonFromBody(body),
+          meta: { field: "note", note_now: data?.note ?? null },
+        });
+      }
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }
@@ -3644,6 +3656,17 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       const rowU = must(await sb.from("order_items").update({ removed, added_allergens, removed_flag: removedFlag }).eq("id", b).eq("restaurant_id", rid).select());
       const detail = [justAdded.length ? `added ${justAdded.join(", ")}` : "", justRemoved.length ? `removed ${justRemoved.join(", ")}` : ""].filter(Boolean).join("; ") || "no change";
       await log("editor", "order_item_removed", { restaurant_id: rid, order_id: item.order_id, detail, device_id: dev });
+      // Same rule as the note above: allowed after the bill, and RECORDED when the bill was already
+      // settled — minor, no money (owner, 2026-08-13). `detail` says which allergens moved, so the
+      // Audit row can be read without opening the order.
+      if (order?.payment_status === "paid" && (justAdded.length || justRemoved.length)) {
+        await recordRemoval({
+          rid, kind: "bill_annotated", user: g.user, deviceId: dev,
+          orderId: item.order_id, itemId: b,
+          reason: reasonFromBody(body),
+          meta: { field: "allergy", added: justAdded, removed: justRemoved },
+        });
+      }
       await stampEdited(item.order_id, rid);
       return ok(rowU[0] || { ok: true });
     }

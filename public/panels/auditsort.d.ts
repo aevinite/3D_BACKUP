@@ -44,6 +44,15 @@ export interface AuditKindCount {
  *  `components/admin/RemovalDetail.tsx` re-exports these as KIND_LABEL / KIND_ICON. */
 export const KIND_LABEL: Record<string, string>;
 export const KIND_ICON: Record<string, string>;
+/** DID MONEY ACTUALLY MOVE (owner, 2026-08-13). "money" = the restaurant collected less than the
+ *  food was worth (discount, on-the-house, payment reverted, bill deleted, reopen difference).
+ *  "record" = the record changed and the money did not (a KOT cancelled before anything was charged,
+ *  a dish off a live order, a menu edit, a reopen, a restore, a note/allergy after settling).
+ *  "data" = a guest's details erased on request. The DATABASE holds the same map (lfh_audit_risk),
+ *  and npm run verify:audit asserts the two agree — two answers to "is this about money" is how a
+ *  summary starts disagreeing with the list printed above it. */
+export const KIND_RISK: Record<string, "money" | "record" | "data">;
+export function riskOf(kind: string): "money" | "record" | "data";
 export const REASON_LABEL: Record<string, string>;
 export const SORTS: AuditSort[];
 export const DEFAULT_SORT: string;

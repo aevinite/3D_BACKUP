@@ -597,6 +597,49 @@ if (!HOOK) for (const m of oks) console.log("  ok   " + m);
     : fail("a rollup does not carry disc_gross_paid — its history would still be grossed at today's rate");
 }
 
+// ── THE RISK MAP HAS ONE ANSWER, NOT TWO (owner, 2026-08-13) ────────────────────────────────────
+// He asked the Audit to show "the whole risk, money-wise — how much money is there which reverted",
+// and for an edit after the bill to land in the MINOR section. That split now exists twice by
+// necessity: in public/panels/auditsort.js (KIND_RISK — what the three screens read) and in the
+// database (lfh_audit_risk — what the per-type counts are grouped by). If those two ever disagree,
+// the strip at the top of the screen contradicts the list underneath it, which is the exact fault
+// this whole file exists to prevent. So they are compared, kind by kind.
+{
+  const shared = read("public/panels/auditsort.js");
+  const sqlRisk = migrationSrcWith("lfh_audit_risk");
+  const jsRisk = {};
+  const block = shared.match(/var KIND_RISK = \{([\s\S]*?)\};/);
+  if (block) for (const m of block[1].matchAll(/([a-z_]+)\s*:\s*"(money|record|data)"/g)) jsRisk[m[1]] = m[2];
+  // The SQL is a CASE list: everything named is money/data, everything else falls to 'record'.
+  const sqlNamed = {};
+  for (const m of sqlRisk.matchAll(/WHEN\s+'([a-z_]+)'\s+THEN\s+'(money|record|data)'/g)) sqlNamed[m[1]] = m[2];
+  const kinds = Object.keys(jsRisk);
+  kinds.length >= 12
+    ? ok(`the screens' risk map covers all ${kinds.length} removal kinds`)
+    : fail(`public/panels/auditsort.js KIND_RISK only covers ${kinds.length} kinds — every kind needs one`);
+  const disagree = kinds.filter((k) => (sqlNamed[k] || "record") !== jsRisk[k]);
+  disagree.length === 0
+    ? ok("the database and the screens agree, kind by kind, on which rows are about money")
+    : fail(`lfh_audit_risk and auditsort.js KIND_RISK disagree on: ${disagree.join(", ")} — the money strip would contradict the list below it`);
+  // The one the owner asked for by name: an edit after the bill must NOT count as money.
+  jsRisk.bill_annotated === "record" && (sqlNamed.bill_annotated || "record") === "record"
+    ? ok("a note/allergy changed after settling is recorded as MINOR, never as money moved")
+    : fail("bill_annotated is classified as money — the owner's instruction was the minor section, no money");
+  // And it must actually be recorded, from the endpoint, not the browser.
+  const ed = read("app/api/editor/[...path]/route.ts");
+  /kind:\s*"bill_annotated"/.test(ed) && /data\?\.settled/.test(ed)
+    ? ok("the note edit records it server-side, and only when the bill was already settled")
+    : fail("editing a settled bill's note leaves no Audit row — record it via lib/removalAudit.ts");
+  /payment_status === "paid" && \(justAdded\.length \|\| justRemoved\.length\)/.test(ed)
+    ? ok("an allergy changed on a settled bill records it too")
+    : fail("an allergy change on a settled bill leaves no Audit row");
+  // And the settled ticket itself must be PATCHED, never rebuilt.
+  const noteFn = migrationSrcWith("patch ONLY this line's note");
+  /jsonb_set\(line, '\{note\}'/.test(noteFn) && /line->>'id'\) = p_item::text/.test(noteFn)
+    ? ok("a settled bill's ticket is patched on the one line, matched by that line's own id")
+    : fail("lfh_staff_edit_item_note rebuilds a settled bill's whole ticket again — patch the one line");
+}
+
 if (fails.length) {
   const body = fails.map((m) => "  FAIL " + m).join("\n");
   if (HOOK) {
