@@ -60,6 +60,25 @@ const GUARDS = [
   ["verify-open-request-guard.mjs", "a join request stays valid, a stale one doesn't"],
   ["verify-ready-tile-and-kitchen.mjs", "a ready tile shows before EVERY dish is ready"],
   ["verify-tablet-wants-in.mjs", "a free table with a raised hand says 'Wants in'"],
+
+  // ── NINE THAT RAN NOWHERE (added by the T10 sweep, 2026-08-12) ───────────────────────────
+  // Each of these reads repo files only, finishes in under a second, and was green — and each one
+  // was run by nobody but a person remembering to. Not in the old chain, not in the PostToolUse
+  // hook (which runs six), not in CI. That is the same silence the CI file's own header was written
+  // to end, and its comment claiming "six moved in, two stayed out" was nine guards out of date.
+  //
+  // The admission test is the one CI states: does it read anything outside the repo? These don't.
+  // (verify:no-ask reads ~/.claude/CLAUDE.md and verify:avlive-release reads the client-stack
+  // folder, so both correctly stay out — the hook covers no-ask on this machine.)
+  ["verify-rejected-ideas.mjs", "every NO the owner gave is written at the code, not just in a doc"],
+  ["verify-css-tokens.mjs", "no --adm-*/--ow-* token is read without being declared"],
+  ["verify-dead-css.mjs", "no :global() rule that can never match anything"],
+  ["verify-panel-twins.mjs", "the same action agrees across manager, kitchen and tablet"],
+  ["verify-server-only-imports.mjs", "no client file reaches a server-only module"],
+  ["verify-outbox-drain.mjs", "saved work always finds its way out, in the order it was made"],
+  ["verify-guest-recovery.mjs", "a diner loses neither their basket nor their waiter call"],
+  ["verify-hidden-dishes.mjs", "a dish taken off the menu is really off the menu"],
+  ["verify-warm-shell.mjs", "a device's first visit leaves it able to open the app"],
 ];
 
 const failed = [];
