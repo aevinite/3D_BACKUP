@@ -189,7 +189,10 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // "all" view and smooth-scrolls to that category's section. If a search was
   // active we clear it first (so the grouped menu is back), then scroll once the
   // section has painted.
-  const scrollToCategory = (slug: string) => {
+  // `retry` counts the filter-clearing recovery below, so it can never loop forever. It is a
+  // PARAMETER rather than a ref because the recovery re-calls this function from a setTimeout,
+  // which keeps THIS render's closure — see the note at the recovery itself.
+  const scrollToCategory = (slug: string, retry = 0) => {
     const wasSearching = !!q;
     if (wasSearching) setSearchQuery("");
     setCurrentCategory("all");
@@ -207,9 +210,19 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       // view), don't leave the guest with a dead tap — clear the filters so the
       // full grouped menu is back, then scroll to it on the next paint (bug #12).
       if (sc && !sec) {
-        if (chefActive || favActive || dietActive || currentSort) {
+        // COUNT THE RETRIES. The timeout below re-enters this function with THIS render's closure,
+        // so `chefActive` / `favActive` / `dietActive` / `currentSort` still read their pre-clear
+        // values however many times we come back — the guard can never turn itself off. Without a
+        // count that is an unbounded 80ms loop of setState no-ops for as long as the guest stays on
+        // the page, if the section never appears. The correction loop just below has always been
+        // capped (`tries >= 8`); this one was not. (Guest sweep T1, 2026-08-12.)
+        //
+        // 3 is plenty: one clear plus a paint is all this recovery has ever needed. After that the
+        // honest answer is to stop — the chip stays highlighted and the menu stays where it is,
+        // which is a no-op, not a broken screen.
+        if (retry < 3 && (chefActive || favActive || dietActive || currentSort)) {
           setChefOnly(false); setFavOnly(false); setCurrentDiet(""); setCurrentSort("");
-          setTimeout(() => scrollToCategory(slug), 80);
+          setTimeout(() => scrollToCategory(slug, retry + 1), 80);
         }
         return;
       }
@@ -796,7 +809,29 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   // once the restaurant switches that feature OFF. Derive effective values that
   // fall back to "no filter" when the matching switch is off.
   const favActive = favOnly && features.favorites !== false;
-  const dietActive = features.diet_filter === false ? "" : currentDiet;
+  // A VEG-ONLY MENU HAS NOTHING TO DISTINGUISH (owner, 2026-08-12: *"there shouldn't be a non-veg
+  // chip … because it's veg"*).
+  //
+  // The Access toggle (Access → Menu → Veg / non-veg → `diet_filter`) has existed all along and its
+  // own help text says "Switch it off for a pure-veg restaurant so nothing needs marking" — but it
+  // DEFAULTS ON, and nobody had turned it off. Measured on Aangan Garden, which is pure veg: 199
+  // dishes, 199 green veg marks, and a "🍖 Non-Veg" chip whose only possible outcome is the
+  // "no dishes match these filters" screen. A filter that can never match anything is a dead end a
+  // diner has to work out for themselves.
+  //
+  // So the switch being ON now means "on WHERE IT MEANS SOMETHING": if every dish on the menu is on
+  // the same side of the line, there is nothing to tell apart and the chips + the per-dish mark both
+  // go. Derived from the menu itself rather than a new setting, so it is right for Aangan today and
+  // for every veg (or every all-meat) restaurant created afterwards, with nothing to remember to
+  // configure. An admin who genuinely wants them gone on a mixed menu still switches the toggle off.
+  // Guarded by `!!menuData.length` so a menu that hasn't loaded yet never flickers the chips away.
+  const dietMeaningful =
+    menuData.length > 0 && !(menuData.every((i) => i.veg) || menuData.every((i) => !i.veg));
+  const dietShown = features.diet_filter !== false && dietMeaningful;
+  // …and a saved "veg" filter must stop narrowing the grid the moment the chips are gone, exactly as
+  // it already does when the switch is off — otherwise a returning guest sees a partial menu with no
+  // visible chip to turn off.
+  const dietActive = dietShown ? currentDiet : "";
   // Same guard for Chef's Special, which was missing it. Its chip is hidden when the admin
   // switches `chip_chef-special` off, but the restored `lfh_menu_chef=1` kept narrowing the
   // grid — so a returning guest saw a partial menu with no visible chip to turn off
@@ -1102,7 +1137,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                 {/* SEPARATE diet group — Veg / Non-Veg, sitting next to the layout toggle. The whole
                     group is shown/hidden by one per-restaurant switch (diet_filter, admin-controlled);
                     OFF for pure-veg restaurants (e.g. Aangan). A dish is one or the other (single-select). */}
-                {features.diet_filter !== false && (
+                {dietShown && (
                   <>
                     <span className="chip-divider" aria-hidden="true"></span>
                     {DIETS.map((d) => (
@@ -1210,7 +1245,19 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   </p>
                 </>
               ) : (
-                <h3 className="fav-empty-title">{t.noMatch}</h3>
+                /* TELL THEM WHAT TO DO, not just that there is nothing (guest sweep T1, 2026-08-12).
+                   This branch used to be the headline ALONE, while the flat-grid branch ~40 lines
+                   below renders the same headline WITH `t.noMatchSub` under it. So the sentence
+                   "Try turning a filter off." already existed in all six languages and was simply
+                   never shown on the grouped view — the commoner case, because the grouped view is
+                   what a diner is looking at when they tap a filter chip.
+                   Measured on Aangan (pure veg) with Non-Veg on, 360x780: one sentence, then an
+                   empty screen — and the category bar and "Categories" heading are deliberately
+                   hidden at that moment too, so there was nothing else on the page at all. */
+                <>
+                  <h3 className="fav-empty-title">{t.noMatch}</h3>
+                  <p className="fav-empty-sub">{t.noMatchSub}</p>
+                </>
               )}
             </div>
           ) : (
@@ -1238,7 +1285,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                   {open && (
                     <div className={`items-container ${layout === "gallery" ? "gallery-mode" : ""}`}>
                       {g.items.map((item, index) => (
-                        <FoodCard key={item.id} item={item} index={index} viewingCategory={g.slug} restaurantId={restaurantId} restaurantSlug={restaurantSlug} />
+                        <FoodCard key={item.id} item={item} index={index} viewingCategory={g.slug} restaurantId={restaurantId} restaurantSlug={restaurantSlug} showDiet={dietShown} />
                       ))}
                     </div>
                   )}
@@ -1272,7 +1319,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
           >
             {/* One FoodCard tile per dish in the filtered list. */}
             {filteredItems.map((item, index) => (
-              <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} restaurantId={restaurantId} restaurantSlug={restaurantSlug} />
+              <FoodCard key={item.id} item={item} index={index} viewingCategory={currentCategory} restaurantId={restaurantId} restaurantSlug={restaurantSlug} showDiet={dietShown} />
             ))}
           </div>
         )}

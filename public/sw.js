@@ -120,7 +120,13 @@ const LOGOUT = /^\/api\/(panel|staff)-logout/; // the only two logout routes tha
 // Read families worth remembering for offline (panel + dashboard + guest-menu reads).
 const DATA_PATHS = [
   /^\/api\/editor\//, /^\/api\/tablet\//, /^\/api\/kitchen\//, /^\/api\/admin\//,
-  /^\/api\/owner\//, /^\/api\/guest\//, /^\/api\/inventory\//,
+  /^\/api\/owner\//, /^\/api\/inventory\//,
+  // `/^\/api\/guest\//` used to sit above and, like the one below, matched NOTHING. Every route
+  // under app/api/guest/ — place-order, call-waiter, limit-hit — is POST only, and a non-GET
+  // returns from the fetch handler before this list is ever consulted. It read as "the diner's
+  // reads are saved for offline", and none of them are: what a diner actually needs offline is
+  // the menu (/api/r/, below) and their own queued order (lib/guestOutbox.ts, on the device).
+  // Removed for exactly the reason given for the next one. (Guest sweep T1, 2026-08-12.)
   // `/^\/api\/menu/` used to sit here and matched NOTHING — there is no /api/menu route; the
   // guest menu has always been served by /api/r/<restaurant>/menu-data, the entry below. A dead
   // pattern is worse than a missing one: it reads as "guest menu reads are covered here", which

@@ -29,6 +29,10 @@ interface FoodItem {
   veg: boolean;          // vegetarian? drives the VegIcon
   is4d: boolean;         // does this dish have a 3D model to view?
   modelFolder?: string;
+  // The two model FILES. The card needs them because the "4D" tick alone does not mean 3D will
+  // open — see `has3d` below. Both are already on the card payload (lib/menu.ts CARD_COLUMNS).
+  modelSmallUrl?: string;
+  modelOptimizedUrl?: string;
   rating?: string;       // average of REAL reviews ("" = none yet -> "New" badge)
   reviewCount?: number;  // how many real reviews exist
   time?: string;
@@ -75,7 +79,13 @@ const writeCart = (cart: CartItem[]) => {
 // One dish "card" in the menu grid: the photo, name, price, veg badge, and the
 // add/customise button. `index` is its position (used to stagger the fade-in);
 // `viewingCategory` is the current filter, remembered in the link.
-export default function FoodCard({ item, index, viewingCategory, restaurantId, restaurantSlug }: { item: FoodItem; index: number; viewingCategory?: string; restaurantId?: string; restaurantSlug?: string }) {
+export default function FoodCard({ item, index, viewingCategory, restaurantId, restaurantSlug, showDiet }: { item: FoodItem; index: number; viewingCategory?: string; restaurantId?: string; restaurantSlug?: string;
+  /* Whether the veg / non-veg MARK belongs on this card. Decided by MenuView, which is the only
+     place that can see the WHOLE menu: on a pure-veg (or all-meat) restaurant every dish is on the
+     same side of the line, so marking each one says nothing — owner, 2026-08-12. Undefined means
+     "no opinion", which falls back to the switch alone, so any caller that predates this prop keeps
+     today's behaviour. */
+  showDiet?: boolean }) {
   // Read THIS restaurant's switches (not the default one's) so a per-restaurant
   // toggle — e.g. turning ratings off for one restaurant — actually shows/hides
   // here. Falls back to the default restaurant when no id is passed.
@@ -184,6 +194,10 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
     const rawQty = (idx >= 0 ? cart[idx].qty : 0) + delta;
     const newQty = Math.min(99, rawQty);
     // Tell the guest why the "+" stopped adding, so it doesn't feel broken.
+    // REJECTED (owner, 2026-08-12): these two toast strings stay ENGLISH and are not moved into
+    // lib/i18n.ts. Guest sweep T1 reported them (with the offline strip) as "hardcoded English on a
+    // 6-language menu"; asked directly, the owner chose *"No — English is fine for these"*. Do not
+    // translate them and do not re-report them. See docs/REJECTED-IDEAS.md R15.
     if (delta > 0 && rawQty > 99) {
       window.dispatchEvent(new CustomEvent("lfh:toast", { detail: { message: "Maximum 99 per dish", subtitle: "that's the most we can add to one line", kicker: "your order", duration: 1400 } }));
     }
@@ -210,6 +224,37 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
     }
   };
 
+  // DOES 3D ACTUALLY WORK FOR THIS DISH? Three things have to be true, and the card used to check
+  // only the first two (owner, 2026-08-12: *"do the problem nine also"*).
+  //
+  //   1. the owner ticked "4D" on the dish            → item.is4d
+  //   2. this restaurant has the 3D feature switched on → features.model3d
+  //   3. THE MODEL FILES EXIST                        → both URLs are set
+  //
+  // The downloader has always required all three (`i.is4d && i.modelSmallUrl && i.modelOptimizedUrl`
+  // in MenuView) — the badge did not. So a dish ticked as 4D BEFORE its model was uploaded wore a
+  // "4D" badge, a cube icon and the whole 4D card treatment, and the diner who tapped through was
+  // met with "3D view isn't ready for this dish". Advertising the one feature this product sells
+  // itself on and then not having it is worse than not advertising it. One source of truth now.
+  const has3d = !!(item.is4d && features.model3d && item.modelSmallUrl && item.modelOptimizedUrl);
+  // ── STILL OWED: SHOW A BROKEN 3D DISH ON THE OWNER'S PROBLEMS LIST ────────────────────────────
+  // Asked for by the owner, 2026-08-12: *"whenever the 3-D is not available, it should show me as a
+  // problem also notification"*. The badge above no longer LIES to the diner, which is the guest
+  // half; telling the owner is the other half, and it deliberately does NOT live here.
+  //
+  // Why not from the diner's phone: the only public sink for a client-side fault is
+  // /api/log/client-error, which files at level 'error', is capped at 5 per device per 10 minutes,
+  // and can raise an owner alert. A menu with three un-uploaded models would burn that budget on a
+  // content problem and push real crashes off the Repair board — the same "a board full of
+  // non-faults is a board nobody reads" reasoning that endpoint's own noise filter was built on.
+  // It would also only ever be noticed if a diner happened to open that menu.
+  //
+  // Where it belongs: the admin/editor side already holds `is4d`, `model_small_url` and
+  // `model_optimized_url` for every dish, so "ticked 4D, feature on, files missing" is a plain
+  // server-side query over `menu_items` — found without any diner, per restaurant, once. That is a
+  // job on the ADMIN problems surface, not in a guest card. Tracked in .claude/REQUESTS.md.
+  // ──────────────────────────────────────────────────────────────────────────────────────────────
+
   // Is this dish flagged sold-out? (We treat a missing tags list as empty.)
   const soldOut = (item.tags || []).includes("sold-out");
   // Menu cards stay FAST: dishes with real option groups (size/extras you must
@@ -228,7 +273,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
         // is-4d gives the card its 3D treatment. It must follow the SWITCH, not just the
         // dish flag: with 3D off the badge and the cube icon correctly disappear, but the
         // card kept wearing the 4D styling with nothing to explain it (sweep 2026-08-04).
-        className={`item-card fade-in ${item.is4d && features.model3d ? "is-4d" : ""} ${soldOut ? "sold-out" : ""}`}
+        className={`item-card fade-in ${has3d ? "is-4d" : ""} ${soldOut ? "sold-out" : ""}`}
         // Stagger each card's fade-in slightly based on its position.
         style={{ animationDelay: `${index * 0.06}s` }}
       >
@@ -262,7 +307,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           />
           {/* Show a little "4D" cube badge only if this dish has a 3D model
               (and the restaurant hasn't switched the 3D feature off). */}
-          {item.is4d && features.model3d ? (
+          {has3d ? (
             <div className="badge-4d">
               <i className="fas fa-cube"></i> 4D
             </div>
@@ -272,7 +317,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
           <div className="dish-name" ref={nameRef}>
             {item.title}
             {/* A small cube icon beside the name for 4D dishes */}
-            {item.is4d && features.model3d ? <i className="fas fa-cube dish-4d-icon"></i> : null}
+            {has3d ? <i className="fas fa-cube dish-4d-icon"></i> : null}
           </div>
           {/* Rating (real average) and prep time. Dishes with no reviews yet
               show only the prep time — no invented stars, no extra badges
@@ -297,7 +342,11 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
               features.ratings
                 ? (item.reviewCount && item.reviewCount > 0 ? `${item.rating} ★` : t.noRatingsYet)
                 : "",
-              item.time || "",   // only ever a REAL prep time; nothing is invented (see below)
+              // Only when the restaurant has asked for it (Access → Menu → Prep time on a dish;
+              // `prep_time`, default OFF — owner, 2026-08-12) AND the dish actually has one typed.
+              // Nothing is ever invented: this used to be `item.time || "25-30 min"`, which told
+              // every diner on restaurant #1 that all 59 dishes take 25-30 minutes, espresso included.
+              features.prep_time ? (item.time || "") : "",
             ].filter(Boolean).join(" • ")}
           </div>
           {/* Price, formatted to the chosen currency (falls back to a $ amount) */}
@@ -307,7 +356,7 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
         {/* The veg / non-veg marker in the corner. One switch now covers the filter chips
             AND this mark (Access → Menu → Veg / non-veg): a pure-veg restaurant has nothing
             to distinguish, so marking every dish green was noise (owner, 2026-07-31). */}
-        {features.diet_filter && (
+        {(showDiet ?? !!features.diet_filter) && (
           <div className="diet-badge" aria-hidden="true">
             <VegIcon isVeg={item.veg} size={18} />
           </div>

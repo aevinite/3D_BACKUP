@@ -40,7 +40,10 @@ export function sanitizeBrandTheme(input: unknown): BrandTheme {
 // Build the CSS var lines for ONE mode. Accent (and its derived gradient/glows)
 // falls back to accentFallback when the mode itself sets no accent. Returns "" if
 // there's nothing to emit (no palette keys AND no usable accent).
-export function buildModeBlock(_mode: "dark" | "light", palette: ModePalette, accentFallback?: string): string {
+// `mode` is USED (it stopped being `_mode` on 2026-08-12): the readable "ink" version of the accent
+// is derived differently in each skin, so this block cannot emit it without knowing which skin it is
+// writing. See the --accent-ink note at the bottom of the function.
+export function buildModeBlock(mode: "dark" | "light", palette: ModePalette, accentFallback?: string): string {
   const p = cleanPalette(palette);
   const accent = p.accent || (isHexColor(accentFallback) ? (accentFallback as string).trim() : undefined);
   const lines: string[] = [];
@@ -56,6 +59,34 @@ export function buildModeBlock(_mode: "dark" | "light", palette: ModePalette, ac
     const grad = `linear-gradient(135deg, ${accent} 0%, color-mix(in srgb, ${accent} 82%, #000) 100%)`;
     lines.push(`--accent: ${accent};`, `--gold: ${accent};`, `--accent-grad: ${grad};`, `--gold-grad: ${grad};`, `--brand-highlight: ${accent};`);
     if (rgb) lines.push(`--accent-dim: rgba(${rgb}, 0.6);`, `--accent-glow: rgba(${rgb}, 0.34);`, `--gold-glow: rgba(${rgb}, 0.42);`);
+    // ONE RESTAURANT, ONE BRAND COLOUR — the ink tokens have to be re-derived HERE (guest sweep T1,
+    // 2026-08-12; owner confirmed it is a real problem).
+    //
+    // globals.css declares `--accent-ink` ONCE, at `:root`, as a value derived from `--accent`
+    // (`var(--accent)` in dark, `color-mix(… 55%, #000)` in light). A custom property that uses
+    // var() is resolved on the element where it is DECLARED, so `--accent-ink` is fixed on the root
+    // and then simply inherits. This block writes `--accent` on `#app.brand-themed`, a different
+    // element further down — so `--accent` changed and `--accent-ink` did not.
+    //
+    // The result was two brand colours on one screen. Measured on Aangan Garden, dark, 360px:
+    // `--accent` at :root (its accent_color) = rgb(232,119,46) orange, `--accent` inside #app (its
+    // theme palette) = rgb(48,152,232) blue. So the header wordmark was blue, the hero wordmark
+    // ORANGE (it paints from --accent-ink), the "+" buttons and the waiter bell blue, and the cart
+    // and bill sheet — which are mounted OUTSIDE #app, at body level — orange again. The same word
+    // "Garden" appeared in two colours 200px apart.
+    //
+    // Worse for a themed restaurant with NO accent_color: nothing emits a :root palette at all, so
+    // --accent-ink kept the value in globals.css — restaurant #1's gold — and its hero and search
+    // prices would have been French House gold on someone else's menu.
+    //
+    // These two lines MUST mirror app/globals.css (`:root` for dark, `[data-theme="light"]` for
+    // light). If the ink formula changes there, change it here in the same commit.
+    if (mode === "light") {
+      lines.push(`--accent-ink: color-mix(in srgb, ${accent} 55%, #000);`, `--accent-ink-dim: color-mix(in srgb, ${accent} 62%, #000);`);
+    } else {
+      lines.push(`--accent-ink: ${accent};`);
+      if (rgb) lines.push(`--accent-ink-dim: rgba(${rgb}, 0.6);`);
+    }
   }
   return lines.join(" ");
 }

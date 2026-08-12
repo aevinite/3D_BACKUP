@@ -64,7 +64,22 @@ const STALE_ON_ERROR_MS = 10 * 60 * 1000;
  * not. A genuinely unknown slug, and a restaurant in the recycle bin, still return null exactly
  * as before.
  */
-export async function getRestaurantBySlug(slug: string): Promise<Restaurant | null> {
+export async function getRestaurantBySlug(slugRaw: string): Promise<Restaurant | null> {
+  // CAPITALS MUST BEHAVE EXACTLY LIKE LOWER CASE (owner, 2026-08-12: *"make sure c capital and
+  // small works as a same … it should be identical only"*).
+  //
+  // Slugs are stored lower case and `lfh_guest_restaurant` matches them exactly, so
+  // `/r/French-House/menu` answered 404 while `/r/french-house/menu` answered 200 — measured on the
+  // deployed site (guest sweep T1). A diner does not have to do anything unusual to hit that: a
+  // chat app capitalising the first letter of a pasted link, a printed card set in Title Case, or
+  // simply typing it. And the page they land on says the restaurant is not available, which is a
+  // lie about a restaurant that is right there.
+  //
+  // Folded HERE rather than in each route because all three guest doors, the item pages, the
+  // menu-data API and lib/panelGate.ts every one of them resolve through this function — one place
+  // to be case-blind, and the per-process cache is keyed on the folded value so `/r/FRENCH-HOUSE`
+  // and `/r/french-house` share one entry instead of reading the database twice.
+  const slug = String(slugRaw || "").trim().toLowerCase();
   const hit = bySlug.get(slug);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.value;
   // ONE DOOR (mig 282): a SECURITY DEFINER function returns this restaurant's guest slice as one

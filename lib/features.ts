@@ -40,6 +40,13 @@ export const FEATURE_DEFAULTS = {
   // A restaurant whose saved settings still carry `scrollspy` is unaffected: getFeatures spreads the
   // DB overrides over these defaults, so the stray key just rides along unread.
   diet_filter: true,  // the Veg / Non-Veg filter group on the menu (off for pure-veg restaurants)
+  // PREP TIME ON A DISH CARD — OFF unless a restaurant asks for it (owner, 2026-08-12: *"We don't
+  // need time column only for the restaurant which requires it. We will add it if you want to add
+  // the setting and permission do that and off that thing"*). Before this, the editor had a "Prep
+  // time" box whose value reached NO screen at all: `time` was not in CARD_COLUMNS, and the dish page
+  // never printed it either — so an owner typed "20 min", saved, and nothing showed anywhere
+  // (guest sweep T1). It is now a real, admin-controlled switch that starts off.
+  prep_time: false,
   // Backend-only switches (NO UI anywhere; default OFF):
   verification: false, // phone/email OTP before ordering (plumbing only)
   payments: false,     // in-app payment collection (plumbing only)

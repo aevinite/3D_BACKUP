@@ -169,9 +169,13 @@ class ModelLoader {
 
   // STOP EVERYTHING — used when a restaurant turns out to have 3D switched off. Empties
   // the waiting line and calls off the download already in flight, so no model bytes are
-  // spent on a feature that is not enabled. An aborted fetch lands in pump()'s catch,
-  // which treats it as one failed attempt; that is harmless because nothing will re-queue
-  // it while the switch is off, and if 3D is on again later the retry path is unchanged.
+  // spent on a feature that is not enabled.
+  //
+  // An aborted fetch lands in pump()'s catch, which recognises the AbortError and records
+  // NOTHING against the model — no attempt, no failure. That correction matters: while the abort
+  // was counted as an attempt, two aborts in one tab (bounce between a 3D restaurant and a non-3D
+  // one twice) marked the model permanently `failed` and it never loaded again until a reload.
+  // See the long note at that catch.
   stopAll() {
     this.queue = [];
     if (this.inFlightAbort) {
@@ -240,6 +244,9 @@ class ModelLoader {
       this.inFlightAbort = ac;
       this.notify();
       let ok = false; // did this download succeed?
+      // WAS THIS DOWNLOAD CALLED OFF BY US, or did it genuinely fail? The two must not be
+      // counted together — see the note at the `catch` below.
+      let calledOff = false;
       try {
         // Actually fetch the file. "cors"/"omit" = cross-site read, no cookies sent.
         const res = await fetch(url, { mode: "cors", credentials: "omit", ...(ac ? { signal: ac.signal } : {}) });
@@ -257,8 +264,28 @@ class ModelLoader {
           console.warn("Model preload non-OK", url, res.status);
         }
       } catch (e) {
-        // Network blew up entirely (offline, blocked, etc.).
-        console.warn("Model preload failed", url, e);
+        // CALLING A DOWNLOAD OFF IS NOT THE SAME AS IT FAILING (guest sweep T1, 2026-08-12).
+        //
+        // stopAll() aborts the fetch in flight, and that abort lands right here. It used to be
+        // counted as one failed ATTEMPT, exactly like a dead network — and with MAX_ATTEMPTS = 2
+        // that meant the SECOND abort moved the model into `failed`, which nothing ever clears for
+        // the life of the tab. The comment on stopAll() promised the opposite ("if 3D is on again
+        // later the retry path is unchanged"); it was unchanged after one abort, not two.
+        //
+        // Measured with a mocked fetch: queue → stopAll → re-queue loaded fine; queue → stopAll →
+        // queue → stopAll → re-queue never fetched again. Reachable by moving between a restaurant
+        // with 3D on and one with it off in the same tab twice: the first restaurant's 3D dish then
+        // showed "3D view isn't ready for this dish" until a reload.
+        //
+        // We asked for it to stop, so it owes us nothing: leave `attempts` alone and let whoever
+        // re-queues it try again with a clean slate. A genuine network failure still counts.
+        const aborted = !!(e && typeof e === "object" && (e as { name?: string }).name === "AbortError");
+        if (aborted) {
+          calledOff = true;
+        } else {
+          // Network blew up entirely (offline, blocked, etc.).
+          console.warn("Model preload failed", url, e);
+        }
       }
       this.inFlight = null; // we're no longer downloading this one
       this.inFlightAbort = null;
@@ -266,6 +293,11 @@ class ModelLoader {
         // Success: forget any past failed attempts and announce it loaded.
         this.attempts.delete(url);
         this.dispatch("lfh:model-loaded", url);
+      } else if (calledOff) {
+        // WE stopped it. Not a failure, not an attempt, and nothing to announce — the queue is
+        // already empty (stopAll cleared it) and the switch that stopped us decides what happens
+        // next. Deliberately no retry timer either: re-queueing behind a switch that is OFF is
+        // exactly the wasted download stopAll() exists to prevent.
       } else {
         // Failure: count this attempt.
         const tries = (this.attempts.get(url) || 0) + 1;
