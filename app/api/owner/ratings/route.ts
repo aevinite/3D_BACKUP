@@ -10,6 +10,7 @@ import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds, RestaurantLi
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { expectClash, clashJson } from "@/lib/clash";
+import { restaurantNames } from "@/lib/restaurantNames";
 
 export const dynamic = "force-dynamic";
 
@@ -76,14 +77,12 @@ export async function GET(req: NextRequest) {
 
   // Attach restaurant names (one small fetch, avoids a PostgREST embed).
   const list = (data || []) as Array<{ restaurant_id: string } & Record<string, unknown>>;
-  const rids = [...new Set(list.map((r) => r.restaurant_id))];
-  const names: Record<string, string> = {};
-  if (rids.length) {
-    const r = await sb.from("restaurants").select("id, name").in("id", rids);
-    for (const x of (r.data || []) as { id: string; name: string }[]) names[x.id] = x.name;
-  }
-  const ratings = list.map((r) => ({ ...r, restaurantName: names[r.restaurant_id] || "—" }));
-  return NextResponse.json({ summary, ratings });
+  // Shared lookup (finding F17): it checks its own error, so a blip no longer renders every rating's
+  // restaurant as "—" with nothing saying why — and it handles a JSONB name, which this local copy
+  // would have printed as "[object Object]".
+  const names = await restaurantNames(list.map((r) => r.restaurant_id));
+  const ratings = list.map((r) => ({ ...r, restaurantName: names.get(r.restaurant_id) ?? "—" }));
+  return NextResponse.json({ summary, ratings, ...(names.partial ? { partial: ["restaurantNames"] } : {}) });
 }
 
 export async function PATCH(req: NextRequest) {

@@ -449,10 +449,19 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
 - **Deliberately public** (the COMPLETE list — an API route absent from here must have a gate;
   re-checked route by route in the T9 sweep 2026-08-05, which found the last two missing):
   `/api/health`, `/api/blocked`, `/api/log/client-error`, `/api/guest/limit-hit`,
-  `/api/guest/place-order`, `/api/r/<slug>/menu-data`, `/api/rt-config`,
+  `/api/guest/place-order`, `/api/guest/call-waiter`, `/api/r/<slug>/menu-data`, `/api/rt-config`,
   `/api/aggregators/webhook/<source>`, and the guest menu itself.
   - `/api/guest/place-order` is a diner's own order — identity is the session token / the table in
     the body, and both RPCs are SECURITY DEFINER, so there is no login to require.
+  - `/api/guest/call-waiter` is the same door for a raised hand: it exists ONLY so a call made with
+    no signal can be delivered on reconnect (the online path still calls the anon RPC straight from
+    the browser). Identity is the session token or the table, the RPC is SECURITY DEFINER, and it is
+    wrapped in the at-most-once guard so a double delivery rings the floor once.
+    **It shipped 2026-08-06 and was missing from this list until the T9 sweep found it on
+    2026-08-12** — which is worth recording, because the rule above ("a route absent from here must
+    have a gate") then points the next audit at a route that is entirely correct, and the list stops
+    being trustworthy for the routes that genuinely ARE missing one. A new public route goes on this
+    list in the same commit that creates it.
   - `/api/rt-config` returns only the PUBLIC Supabase url + anon key (already shipped inside the
     guest bundle) plus which restaurant the caller's panel belongs to. No cookie → restaurant #1.
   - `/api/aggregators/webhook/<source>` is an inbound POST from Zomato/Swiggy, so it cannot carry

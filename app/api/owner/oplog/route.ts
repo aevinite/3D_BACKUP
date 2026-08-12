@@ -15,18 +15,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, inScope, dbFail } from "@/lib/ownerScope";
-import { entitledSubset, logViewSubset, mergeOwnerEntitlements } from "@/lib/ownerEntitlements";
+import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
+import { loadLogVisibility, logVisibilityUnavailable } from "@/lib/logVisibility";
+import { restaurantNames } from "@/lib/restaurantNames";
+import { safeSearch } from "@/lib/searchText";
 
-// Which VISIBILITY switch (Access → Owner → Owner's menu → Audit and log) a log row rides.
-// These filter what the owner's page SHOWS — never what gets recorded (the money/bill audit
-// trail is not switchable, docs/COMPLIANCE-GUARDRAILS.md). Absent key = ON, so nothing
-// changes for a restaurant until the admin switches a kind off.
-function logKindKey(action: string): "logs_signins" | "logs_staff_changes" | "logs_service" {
-  if (action === "login" || action === "login_failed") return "logs_signins";
-  if (action.startsWith("staff_") || action.startsWith("user_")) return "logs_staff_changes";
-  return "logs_service";
-}
+// WHICH VISIBILITY SWITCH A ROW RIDES now lives in lib/logVisibility.ts, together with the decision
+// about what to do when the switches cannot be read (T9 finding F23, fixed 2026-08-12).
+//
+// It moved out of this file for one reason: the old code did the filtering with
+// `return !ents || ents[logKindKey(...)] !== false`, where `!ents` meant "show it". That expression
+// cannot tell "this restaurant has nothing stored, so everything is on" (correct, deliberate) apart
+// from "the read that would have told me failed" — and on the second one it SHOWED rows the admin
+// had switched off. A switch that fails open is not a switch. The two states are now different
+// TYPES, so they cannot be confused again, and `npm run verify:log-visibility` fails the build if a
+// route goes back to reading `owner_entitlements` by hand to filter activity.
 
 export const dynamic = "force-dynamic";
 
@@ -94,38 +98,37 @@ export async function GET(req: NextRequest) {
     q = q.eq("actor_id", actorId);
   }
   if (qText) {
-    const safe = qText.replace(/[%,()]/g, " ");
-    q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
+    // ONE sanitiser for every owner search box (T9 finding F15, fixed 2026-08-12). The old local
+    // copy stripped `%,()` but left `*` alone — and PostgREST translates `*` to `%` inside `ilike`,
+    // so searching for `*` matched EVERY row instead of the literal character. lib/searchText.ts is
+    // now the only place that decides what a typed search may contain.
+    const safe = safeSearch(qText);
+    if (safe) q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
   }
 
   const r = await q;
   if (r.error) return dbFail("owner/oplog", r.error, { message: "Couldn't load the activity log just now — please try again." });
-  let rows = r.data ?? [];
+  const fetched = r.data ?? [];
 
-  // Stamp each row with its restaurant NAME so a multi-restaurant owner can tell them apart
-  // (one batched lookup, no N+1). Single-restaurant owners simply ignore it. The same lookup
-  // now carries owner_entitlements for the per-kind visibility switches below — still one read.
-  const ids = Array.from(new Set(rows.map((a) => a.restaurant_id).filter(Boolean))) as string[];
-  const nameById = new Map<string, string>();
-  const entsById = new Map<string, Record<string, boolean>>();
-  if (ids.length) {
-    const rest = await sb.from("restaurants").select("id, name, owner_entitlements").in("id", ids);
-    for (const x of rest.data ?? []) { nameById.set(x.id, x.name); entsById.set(x.id, mergeOwnerEntitlements(x.owner_entitlements)); }
-  }
-  // Per-kind VISIBILITY (owner, 2026-08-02): a kind the admin switched off for a restaurant
-  // leaves the owner's view. Rows are ≤200 here, so this JS pass costs nothing. The ADMIN's
-  // own session is never filtered (X-ray: the admin always sees the full record).
-  if (!scope.admin) {
-    rows = rows.filter((a) => {
-      if (!a.restaurant_id) return true;
-      const ents = entsById.get(a.restaurant_id);
-      return !ents || ents[logKindKey(String(a.action || ""))] !== false;
-    });
-  }
-  const actions = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null }));
+  const ids = Array.from(new Set(fetched.map((a) => a.restaurant_id).filter(Boolean))) as string[];
+
+  // ── WHAT THIS OWNER IS ALLOWED TO SEE ────────────────────────────────────────────────────────
+  // Its own module, and it fails CLOSED: if the switches can't be read we answer "try again"
+  // rather than showing rows we could not check (T9 finding F23). The ADMIN's own session is
+  // X-ray and needs no read at all.
+  const vis = await loadLogVisibility(ids, !!scope.admin);
+  if (!vis.ok) return logVisibilityUnavailable();
+  const rows = vis.visibility.filter(fetched);
+
+  // Stamp each row with its restaurant NAME so a multi-restaurant owner can tell them apart (one
+  // batched lookup, no N+1). A FAILED lookup used to render every row's restaurant as "—", which on
+  // a multi-restaurant estate makes the list unreadable with nothing saying why (T9 finding F17);
+  // the shared helper reports that instead of hiding it.
+  const names = await restaurantNames(ids);
+  const actions = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? names.get(a.restaurant_id) : null }));
   // Actions the ADMIN performed from a panel view carry actor_id='admin:view' (2026-07-28).
   // Only the admin may see that marker — a REAL owner gets the row as a plain, neutral
   // panel action (the admin stays invisible, per the standing rule).
   if (!scope.admin) for (const a of actions) if (a.actor_id === ADMIN_VIEW_ACTOR_ID) a.actor_id = null;
-  return NextResponse.json({ actions });
+  return NextResponse.json({ actions, ...(names.partial ? { partial: ["restaurantNames"] } : {}) });
 }

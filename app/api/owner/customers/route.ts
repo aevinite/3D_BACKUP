@@ -9,6 +9,9 @@ import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteLi
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { logAction } from "@/lib/oplog";
+import { rd, ReadSet, ReadFailed } from "@/lib/readGuard";
+import { restaurantNames } from "@/lib/restaurantNames";
+import { safeSearch, safePhone } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 // visits/consent added by Customer CRM (mig 212): a REAL repeat count + the DPDP
@@ -39,7 +42,8 @@ export async function GET(req: NextRequest) {
   if (!ids.length) return NextResponse.json({ summary: { total: 0, returning: 0, newThisMonth: 0, blocked: 0, shown: 0 }, customers: [] });
 
   // Sanitised search (their own data; strip chars that would break the PostgREST or() filter).
-  const search = (req.nextUrl.searchParams.get("q") || "").replace(/[,()%*]/g, "").trim();
+  // One shared sanitiser for every owner search box (T9 finding F15) — see lib/searchText.ts.
+  const search = safeSearch(req.nextUrl.searchParams.get("q"));
   // Narrowing controls (owner, 2026-07-30): one restaurant, a segment, and the sort —
   // all applied in the DATABASE so the payload stays small however many guests exist.
   const sp = req.nextUrl.searchParams;
@@ -57,24 +61,15 @@ export async function GET(req: NextRequest) {
   if (error) return dbFail("owner/customers", error, { message: "Couldn't load your guest list just now — please try again." });
   const list = (data || []) as Array<{ restaurant_id: string; phone: string; name: string | null; blocked: boolean; visits: number; consent: boolean; first_seen_at: string; last_seen_at: string }>;
 
-  // Restaurant names (multi-restaurant owner tells brands apart).
-  const rids = [...new Set(list.map((c) => c.restaurant_id))];
-  const names: Record<string, string> = {};
-  if (rids.length) {
-    const r = await sb.from("restaurants").select("id, name, slug").in("id", rids);
-    // restaurants.name is a JSONB of translations on some rows, a plain string on others.
-    for (const x of (r.data || []) as Array<{ id: string; name: unknown; slug: string }>) {
-      const n = x.name;
-      names[x.id] = typeof n === "string" && n.trim() ? n
-        : (n && typeof n === "object" && typeof (n as Record<string, unknown>).en === "string" && ((n as Record<string, unknown>).en as string).trim())
-          ? ((n as Record<string, unknown>).en as string)
-          : x.slug;
-    }
-  }
+  // Restaurant names (multi-restaurant owner tells brands apart). This file's local copy was the
+  // only one of the five that handled a JSONB name correctly — so that reading is what moved into
+  // lib/restaurantNames, and now every screen gets it (T9 finding F17 + idea I9). Ask for the WHOLE
+  // scope, not just the ids on this page, so the restaurant picker below is complete.
+  const names = await restaurantNames(ids);
 
   const monthAgo = Date.now() - 30 * 86_400_000;
   const monthAgoIso = new Date(monthAgo).toISOString();
-  const customers = list.map((c) => ({ ...c, restaurantName: names[c.restaurant_id] || "—", returning: (c.visits || 0) >= REPEAT_MIN }));
+  const customers = list.map((c) => ({ ...c, restaurantName: names.get(c.restaurant_id) ?? "—", returning: (c.visits || 0) >= REPEAT_MIN }));
 
   // Summary counts are TRUE scoped head-counts, not derived from the 300-row display page —
   // before this, "Blocked"/"New" undercounted for a restaurant with >300 guests (a guest
@@ -91,7 +86,7 @@ export async function GET(req: NextRequest) {
   // the function is the ALREADY-authorised scope, never a raw request parameter. Deliberately
   // per-guest (indexed on sessions(restaurant_id, cust_phone)) rather than a spend column on
   // every row, which would aggregate every bill on every page load.
-  const detailPhone = (req.nextUrl.searchParams.get("phone") || "").replace(/\D/g, "").slice(0, 15);
+  const detailPhone = safePhone(req.nextUrl.searchParams.get("phone"));
   if (detailPhone) {
     const { data: hist, error: hErr } = await sb.rpc("lfh_owner_customer_bills", {
       p_restaurant_ids: ids, p_phone: detailPhone, p_limit: 20,
@@ -99,19 +94,16 @@ export async function GET(req: NextRequest) {
     if (hErr) return dbFail("owner/customers.bills", hErr, { message: "Couldn't load this guest's bills just now — please try again." });
     // Read this guest's rows directly — the list above is a filtered page and may not
     // contain them (searching for someone, then opening an older guest).
-    const { data: mineRaw } = await sb.from("customers").select(COLS).in("restaurant_id", ids).eq("phone", detailPhone).limit(20);
-    const mineRows = (mineRaw || []) as typeof list;
-    // fill in any restaurant name the list page didn't already resolve
-    const missing = mineRows.map((c) => c.restaurant_id).filter((id) => !names[id]);
-    if (missing.length) {
-      const r2 = await sb.from("restaurants").select("id, name, slug").in("id", missing);
-      for (const x of (r2.data || []) as Array<{ id: string; name: unknown; slug: string }>) {
-        const n = x.name;
-        names[x.id] = typeof n === "string" && n.trim() ? n
-          : (n && typeof n === "object" && typeof (n as Record<string, unknown>).en === "string") ? String((n as Record<string, unknown>).en) : x.slug;
-      }
+    // A FAILED READ HERE SHOWED A GUEST WITH NO RECORD AT ALL (T9 finding F13). `mineRaw` was taken
+    // with no `.error` check, so a blip rendered the drawer as an existing guest who has never been
+    // anywhere — indistinguishable from a data problem the owner would then go hunting for.
+    const mineRead = await rd("guestRows", () => sb.from("customers").select(COLS).in("restaurant_id", ids).eq("phone", detailPhone).limit(20));
+    if (mineRead.error) {
+      return dbFail("owner/customers.detail", mineRead.error, { message: "Couldn't open that guest just now — please try again." });
     }
-    const mine = mineRows.map((c) => ({ ...c, restaurantName: names[c.restaurant_id] || "—" }));
+    const mineRows = (mineRead.data || []) as typeof list;
+    // `names` already covers the whole scope, so there is nothing left to fill in.
+    const mine = mineRows.map((c) => ({ ...c, restaurantName: names.get(c.restaurant_id) ?? "—" }));
     return NextResponse.json({ detail: { ...(hist || {}), rows: mine } });
   }
 
@@ -122,7 +114,11 @@ export async function GET(req: NextRequest) {
   // live: it's a paged, indexed read, not an aggregate. Placed AFTER the drawer's early return,
   // so opening one guest's record doesn't pay for the tiles at all.
   const scopeIds = onlyRid && ids.includes(onlyRid) ? [onlyRid] : ids;
-  const counted = await cachedOwnerPayload({
+  // The tiles compute now THROWS rather than printing a fabricated zero (finding F13), so the
+  // caller has to answer for it: a retryable "try again", never four confident zeroes.
+  let counted;
+  try {
+  counted = await cachedOwnerPayload({
     key: `ownercust:v1:${scopeKeyOf(scopeIds.length === 1 ? scopeIds[0] : null, false, scopeIds)}`,
     force: sp.get("refresh") === "1",
     fingerprint: async () => {
@@ -130,13 +126,31 @@ export async function GET(req: NextRequest) {
       return typeof data === "string" ? data : null;
     },
     compute: async () => {
+      // A COUNT THAT FAILED IS NOT A COUNT OF ZERO (T9 finding F13, fixed 2026-08-12). These four
+      // were read as `cnt.count ?? 0`, so a failed count printed a confident "Blocked 0" /
+      // "Returning 0" — and because this compute is inside `cachedOwnerPayload` and declared no
+      // `partial`, the invented zeros were STORED and served long after the blip.
+      // All four are fatal: they are the entire content of the four tiles, so there is nothing left
+      // to show if they fail. `rows()` throws, the caller turns it into a retryable answer.
       const head = () => sb.from("customers").select("phone", { count: "exact", head: true }).in("restaurant_id", scopeIds);
-      const [cntAll, cntBlocked, cntNew, cntReturning] = await Promise.all([
-        head(), head().eq("blocked", true), head().gte("first_seen_at", monthAgoIso), head().gte("visits", REPEAT_MIN),
-      ]);
-      return { total: cntAll.count ?? 0, blocked: cntBlocked.count ?? 0, newThisMonth: cntNew.count ?? 0, returning: cntReturning.count ?? 0 };
+      const set = new ReadSet("owner/customers.tiles", await Promise.all([
+        rd("all", () => head()),
+        rd("blocked", () => head().eq("blocked", true)),
+        rd("new", () => head().gte("first_seen_at", monthAgoIso)),
+        rd("returning", () => head().gte("visits", REPEAT_MIN)),
+      ]));
+      // `.count()` throws on a failed read instead of falling back to 0 — the whole point.
+      return {
+        total: set.count("all"), blocked: set.count("blocked"),
+        newThisMonth: set.count("new"), returning: set.count("returning"),
+      };
     },
   });
+  } catch (e) {
+    return dbFail("owner/customers.tiles", e instanceof ReadFailed ? e.cause : e, {
+      message: "Couldn't count your guests just now — please try again.",
+    });
+  }
   const summary = {
     total: counted.total,
     returning: counted.returning,
@@ -145,8 +159,9 @@ export async function GET(req: NextRequest) {
     shown: list.length,
     cachedAt: counted.cachedAt,
   };
-  const restaurantList = ids.map((id) => ({ id, name: names[id] || "" })).filter((r) => r.name);
-  return NextResponse.json({ summary, customers, restaurants: restaurantList });
+  const restaurantList = ids.map((id) => ({ id, name: names.get(id) || "" })).filter((r) => r.name);
+  return NextResponse.json({ summary, customers, restaurants: restaurantList,
+    ...(names.partial ? { partial: ["restaurantNames"] } : {}) });
 }
 
 // DELETE /api/owner/customers — erase a customer (DPDP right-to-erasure, mig 212).
@@ -174,8 +189,91 @@ export async function DELETE(req: NextRequest) {
     if (!allowed.length) return NextResponse.json({ error: "Customers isn't enabled for your restaurant.", disabled: true }, { status: 403 });
   }
 
-  await sb.from("customer_visits").delete().eq("restaurant_id", restaurantId).eq("phone", phone);
-  await sb.from("customer_devices").delete().eq("restaurant_id", restaurantId).eq("phone", phone);
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  //  ERASE MEANS ERASE — AND IT MEANS EVERY TABLE (T9 findings F26 + F14, fixed 2026-08-12)
+  // ══════════════════════════════════════════════════════════════════════════════════════════════
+  //
+  // TWO things were wrong here, and the first one is the serious one.
+  //
+  // 1. THERE ARE TWO CUSTOMER TABLES. This erased `customers`, `customer_visits` and
+  //    `customer_devices` — and never touched **`khata_customers`**, the pay-later person book
+  //    (mig 166), which holds a NAME and a PHONE NUMBER. Nothing anywhere in the app or the
+  //    migrations has ever deleted a row from it. So a guest exercised their right to erasure, this
+  //    route answered `{ok:true}`, wrote an Activity line saying their record and devices were
+  //    erased — and their name and number were still one search away in the manager's "Collect
+  //    later" person picker (app/api/tablet/[...path] → `khata/customers?q=`).
+  //
+  // 2. THE FIRST TWO DELETES NEVER CHECKED `.error`. Only the third did. So a partial erasure —
+  //    visits gone, devices left, or the reverse — still reported complete success, with no trace
+  //    anywhere that half of it had not happened.
+  //
+  // ── WHAT AN UNPAID DEBT DOES (owner's call, 2026-08-12) ────────────────────────────────────────
+  // The owner's answer to "what if they still owe money": *"why is there an erase button? there
+  // should be a paid button."* Exactly right — the settle flow already exists in the manager panel,
+  // and erasing someone mid-debt destroys the only record of who owes it. So the erase REFUSES while
+  // a pay-later bill is outstanding and says how much and what to do, rather than either silently
+  // keeping their data (what it used to do) or silently destroying a live receivable. Once the debt
+  // is collected or written off, the erase goes through and takes the khata row with it.
+  const owing = await rd("khataOwed", () => sb.rpc("lfh_khata_outstanding_summary", { p_restaurant_ids: [restaurantId] }));
+  if (owing.error) {
+    // Cannot check whether they owe → refuse. Erasing on doubt is irreversible; waiting is not.
+    return dbFail("owner/customers.erase", owing.error, { message: "Couldn't check their pay-later balance just now — please try again." });
+  }
+  const khataRow = await rd("khataPerson", () => sb.from("khata_customers")
+    .select("id, name, phone").eq("restaurant_id", restaurantId).eq("phone", phone).maybeSingle());
+  if (khataRow.error) {
+    return dbFail("owner/customers.erase", khataRow.error, { message: "Couldn't check their pay-later record just now — please try again." });
+  }
+  const person = khataRow.data as { id: string; name: string | null } | null;
+  if (person) {
+    const bal = await rd("khataBalance", () => sb.rpc("lfh_khata_outstanding", { p_restaurant_ids: [restaurantId], p_limit: 500 }));
+    if (bal.error) {
+      return dbFail("owner/customers.erase", bal.error, { message: "Couldn't check their pay-later balance just now — please try again." });
+    }
+    const theirs = ((bal.data || []) as { khata_customer_id: string; bill_amount: number }[])
+      .filter((b) => b.khata_customer_id === person.id);
+    const owed = Math.round(theirs.reduce((a, b) => a + (Number(b.bill_amount) || 0), 0) * 100) / 100;
+    if (owed > 0) {
+      return NextResponse.json({
+        error: `${person.name || "This guest"} still owes ₹${owed} on ${theirs.length} pay-later ${theirs.length === 1 ? "bill" : "bills"}. Collect or write that off first, then erase them.`,
+        reason: "khata_outstanding",
+        owed, bills: theirs.length,
+      }, { status: 409 });
+    }
+  }
+
+  // ── THE PAY-LATER ROW IS ANONYMISED, NOT DELETED — AND THAT IS NOT A COMPROMISE ────────────────
+  // Found by the fixture test (2026-08-12) before this ever shipped: `orders.khata_customer_id` is a
+  // FOREIGN KEY onto `khata_customers` with no cascade, so DELETING that row fails outright for any
+  // guest who has ever actually used pay-later — i.e. for exactly the people this is meant to cover.
+  // And the referencing orders must NOT be removed to make room: an issued bill is a sales record,
+  // the database refuses to hard-delete one, and doing so is the CGST §132 offence
+  // (docs/COMPLIANCE-GUARDRAILS.md).
+  //
+  // So the row stays and the PERSON is removed from it: name, phone and note cleared. Their personal
+  // data is gone — which is what was asked for and all that was ever asked for — while the bill it
+  // is attached to keeps a valid reference and stays in the books. This is the standard shape for
+  // erasing someone who appears on a financial document, and it is genuinely better than a delete:
+  // a delete would either fail or take a sale with it.
+  const wipes: { table: string; run: () => PromiseLike<{ error: unknown }> }[] = [
+    { table: "customer_visits", run: () => sb.from("customer_visits").delete().eq("restaurant_id", restaurantId).eq("phone", phone) },
+    { table: "customer_devices", run: () => sb.from("customer_devices").delete().eq("restaurant_id", restaurantId).eq("phone", phone) },
+    // The table this route had never heard of (finding F26).
+    {
+      table: "khata_customers",
+      run: () => sb.from("khata_customers")
+        .update({ name: "Erased at their request", phone: null, note: null })
+        .eq("restaurant_id", restaurantId).eq("phone", phone),
+    },
+  ];
+  for (const w of wipes) {
+    const r = await rd(w.table, () => w.run().then((x) => ({ data: null, error: x.error })));
+    if (r.error) {
+      return dbFail("owner/customers.erase", r.error, {
+        message: "Couldn't finish erasing that guest — nothing was reported as removed. Please try again.",
+      });
+    }
+  }
   const del = await sb.from("customers").delete().eq("restaurant_id", restaurantId).eq("phone", phone).select("phone");
   if (del.error) return dbFail("owner/customers.erase", del.error, { message: "Couldn't erase that guest — please try again." });
   // THE ONLY IRREVERSIBLE ERASE IN THE OWNER PANEL, AND IT WAS UNRECORDED (sweep 2026-08-04). This
@@ -185,10 +283,42 @@ export async function DELETE(req: NextRequest) {
   // guest vanishing from the list is indistinguishable from a bug — and with several co-owners
   // nobody could say who did it. Only the last 4 digits are recorded: the log must not become a
   // second copy of the number the owner just asked us to erase.
+  const who = (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner");
+  const last4 = phone.slice(-4);
   await logAction("owner", "customer_erase", {
     restaurant_id: restaurantId,
-    actor: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
-    detail: `erased guest record ending ${phone.slice(-4)} (${(del.data || []).length} ${(del.data || []).length === 1 ? "row" : "rows"}) + their visits and devices`,
+    actor: who,
+    detail: `erased guest record ending ${last4} (${(del.data || []).length} ${(del.data || []).length === 1 ? "row" : "rows"}) + their visits, devices and pay-later record`,
+  });
+  // ── AND INTO THE REMOVALS RECORD (owner, 2026-08-12: "delete — it will go in audit and stuff") ──
+  // The Activity log is a feed of what people DID; `deletion_audit` is the owner's "what was taken
+  // out of the system" screen, and it is where anyone would actually go looking for a vanished
+  // guest. This is the only irreversible erase in the owner panel — three tables, no tombstone, no
+  // restore — so it belongs on the screen built for exactly that question.
+  // Only the last 4 digits are recorded, here as in the Activity line: the audit of an erasure must
+  // not become a fresh copy of the number we were just asked to erase.
+  await sb.from("deletion_audit").insert({
+    restaurant_id: restaurantId,
+    kind: "customer_erased",
+    reason_code: "data_erasure_request",
+    reason_note: "Guest asked for their personal data to be erased",
+    actor: who,
+    actor_role: (scope.all || scope.admin) ? "admin" : "owner",
+    item_title: `Guest ending ${last4}`,
+    meta: {
+      phone_last4: last4,
+      customers_rows: (del.data || []).length,
+      also_erased: ["customer_visits", "customer_devices"],
+      // Named separately and honestly: this row was emptied of the person, not removed, because a
+      // sales record points at it. Anyone auditing an erasure should see that distinction rather
+      // than a blanket "all gone".
+      anonymised: ["khata_customers"],
+    },
+  }).then(({ error }) => {
+    // A failed audit line must not un-erase the guest (the data is already gone and that was the
+    // point), but it must be shouted about our side — an erasure nobody recorded is the gap this
+    // whole change exists to close.
+    if (error) console.error("[owner/customers.erase] the erase SUCCEEDED but its audit row failed:", error.message);
   });
   return NextResponse.json({ ok: true, erased: (del.data || []).length });
 }

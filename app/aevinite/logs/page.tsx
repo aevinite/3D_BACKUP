@@ -53,6 +53,7 @@ const CLEANUP_OPTS = [
 // screen (public/panels/editor/app.js AUDIT_KIND / REMOVAL_REASONS), so the two never
 // describe the same row differently.
 const REMOVAL_KIND: Record<string, [string, string]> = {
+  customer_erased: ["🧑‍🦰", "Guest data erased on request"],
   order_cancelled: ["🎫", "KOT cancelled"],
   order_deleted: ["🧾", "Bill deleted"],
   dish_removed: ["🍽", "Dish removed from an order"],

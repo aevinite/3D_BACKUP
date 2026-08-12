@@ -24,6 +24,8 @@ import { effectiveTaxPct, priceTaxMode, TAX_SETTINGS_COLUMNS } from "@/lib/tax";
 import { cachedOwnerPayload, scopeKeyOf, ordersFingerprint, reportMonthFingerprint } from "@/lib/ownerCache";
 import { payrollLadder, inventoryLadder, payrollEffectiveByRid, inventoryEffectiveByRid } from "@/lib/tableTags";
 import { mapLimit, FANOUT, FANOUT_HEAVY } from "@/lib/mapLimit";
+import { rd, ReadSet } from "@/lib/readGuard";
+import { restaurantNames } from "@/lib/restaurantNames";
 
 export const dynamic = "force-dynamic";
 
@@ -719,18 +721,25 @@ export async function GET(req: NextRequest) {
       if (!rid && invEnabled.length > 1) {
         const names = new Map(((await sb.from("restaurants").select("id, name").in("id", invEnabled)).data || [])
           .map((r) => [r.id as string, r.name as string]));
+        // EVERY ERROR IN THIS FAN-OUT WAS IGNORED (T9 finding F5, merged branch). This is the
+        // multi-restaurant "All restaurants" view, where the damage is worse than in the single
+        // branch: the figures below are SUMMED across restaurants, so one restaurant answering
+        // nothing simply made the group's stock value, purchases and food-cost quietly too small,
+        // with one fewer row in a breakdown nobody counts. Every read here is fatal for the same
+        // reason the money fan-out in `staffpay` is: a total that silently excludes a restaurant is
+        // not a total.
         const per = await mapLimit(invEnabled, FANOUT_HEAVY, async (id) => {
-          const [s, c, it, vd, sr] = await Promise.all([
-            sb.rpc("lfh_inv_report_summary", { p_restaurant: id, p_from: from, p_to: to }),
-            sb.rpc("lfh_inv_coverage", { p_restaurant: id, p_from: from, p_to: to }),
-            sb.rpc("lfh_inv_report_items", { p_restaurant: id, p_from: from, p_to: to }),
-            sb.rpc("lfh_inv_report_vendors", { p_restaurant: id, p_from: from, p_to: to }),
-            sb.rpc("lfh_inv_cost_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" }),
-          ]);
-          const dq = await sb.rpc("lfh_inv_dish_cost", { p_restaurant: id, p_from: from, p_to: to });
-          return { id, s: ((s.data ?? []) as Row[])[0] || {}, c: ((c.data ?? []) as Row[])[0] || {},
-            items: (it.data ?? []) as Row[], vendors: (vd.data ?? []) as Row[], series: (sr.data ?? []) as Row[],
-            theo: ((dq.data ?? []) as Row[]).reduce((a, d) => a + num(d.cost_total), 0) };
+          const rs = new ReadSet(`owner/reports.${type}.merged[${id}]`, await Promise.all([
+            rd("summary", () => sb.rpc("lfh_inv_report_summary", { p_restaurant: id, p_from: from, p_to: to })),
+            rd("coverage", () => sb.rpc("lfh_inv_coverage", { p_restaurant: id, p_from: from, p_to: to })),
+            rd("items", () => sb.rpc("lfh_inv_report_items", { p_restaurant: id, p_from: from, p_to: to })),
+            rd("vendors", () => sb.rpc("lfh_inv_report_vendors", { p_restaurant: id, p_from: from, p_to: to })),
+            rd("series", () => sb.rpc("lfh_inv_cost_series", { p_restaurant: id, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" })),
+            rd("dish", () => sb.rpc("lfh_inv_dish_cost", { p_restaurant: id, p_from: from, p_to: to })),
+          ]));
+          return { id, s: rs.one<Row>("summary") || {}, c: rs.one<Row>("coverage") || {},
+            items: rs.rows<Row>("items"), vendors: rs.rows<Row>("vendors"), series: rs.rows<Row>("series"),
+            theo: rs.rows<Row>("dish").reduce((a, d) => a + num(d.cost_total), 0) };
         });
         const S = (k: string) => per.reduce((a, p) => a + num(p.s[k]), 0);
         const C = (k: string) => per.reduce((a, p) => a + num(p.c[k]), 0);
@@ -818,24 +827,41 @@ export async function GET(req: NextRequest) {
       }
       // ── single restaurant (explicit ?rid, or the owner only has one with the module) ──
       const one = rid || invEnabled[0] || (scopeIds[0] as string);
-      const [sum, cov, dish, items, vendors, series, firstMv] = await Promise.all([
-        sb.rpc("lfh_inv_report_summary", { p_restaurant: one, p_from: from, p_to: to }),
-        sb.rpc("lfh_inv_coverage", { p_restaurant: one, p_from: from, p_to: to }),
-        sb.rpc("lfh_inv_dish_cost", { p_restaurant: one, p_from: from, p_to: to }),
+      // ── ONLY `sum` WAS EVER CHECKED (T9 finding F5, fixed 2026-08-12) ────────────────────────────
+      // `cov`, `dish`, `items`, `vendors`, `series` and `firstMv` were all read as `.data ?? []`.
+      // The consequences were not cosmetic:
+      //   · a failed `lfh_inv_coverage` gives `coveragePct: 0` and `foodCostPct: null`, which the
+      //     screen renders as "you haven't mapped any recipes" — a completely different sentence from
+      //     "we couldn't read it", and one that sends an owner off to fix something that isn't broken;
+      //   · a failed `lfh_inv_dish_cost` sets `theoreticalCost` to 0, which IS the food-cost numerator;
+      //   · a failed `firstMv` erases `costDataFrom`, the note that stops a 30-day window implying
+      //     30 days of ledger.
+      // Coverage and dish cost are fatal because the hero band's percentages are built from them.
+      // The per-tab LISTS degrade and name themselves in `partial`.
+      const invReads = new ReadSet(`owner/reports.${type}`, await Promise.all([
+        rd("summary", () => sb.rpc("lfh_inv_report_summary", { p_restaurant: one, p_from: from, p_to: to })),
+        rd("coverage", () => sb.rpc("lfh_inv_coverage", { p_restaurant: one, p_from: from, p_to: to })),
+        rd("dish", () => sb.rpc("lfh_inv_dish_cost", { p_restaurant: one, p_from: from, p_to: to })),
         type === "invstock" || type === "invusage" || type === "invwaste"
-          ? sb.rpc("lfh_inv_report_items", { p_restaurant: one, p_from: from, p_to: to })
-          : Promise.resolve({ data: [], error: null }),
+          ? rd("items", () => sb.rpc("lfh_inv_report_items", { p_restaurant: one, p_from: from, p_to: to }))
+          : rd("items", async () => ({ data: [] as Row[], error: null })),
         type === "invpurchases"
-          ? sb.rpc("lfh_inv_report_vendors", { p_restaurant: one, p_from: from, p_to: to })
-          : Promise.resolve({ data: [], error: null }),
-        sb.rpc("lfh_inv_cost_series", { p_restaurant: one, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" }),
+          ? rd("vendors", () => sb.rpc("lfh_inv_report_vendors", { p_restaurant: one, p_from: from, p_to: to }))
+          : rd("vendors", async () => ({ data: [] as Row[], error: null })),
+        rd("series", () => sb.rpc("lfh_inv_cost_series", { p_restaurant: one, p_from: from, p_to: to, p_bucket: bucket === "month" ? "month" : "day" })),
         // When did this restaurant's stock ledger actually start? Anchors the honesty note.
-        sb.from("inv_movements").select("created_at").eq("restaurant_id", one).order("id", { ascending: true }).limit(1),
-      ]);
-      if (sum.error) throw sum.error;
-      const s = ((sum.data ?? []) as Row[])[0] || {};
-      const c = ((cov.data ?? []) as Row[])[0] || {};
-      const dishRows = ((dish.data ?? []) as Row[]).map((d) => ({
+        rd("firstMv", () => sb.from("inv_movements").select("created_at").eq("restaurant_id", one).order("id", { ascending: true }).limit(1)),
+      ]));
+      const invPartial = invReads.partial({
+        items: "stockItems", vendors: "vendors", series: "usage", firstMv: "stockValue",
+      });
+      const s = invReads.one<Row>("summary") || {};
+      const c = invReads.one<Row>("coverage") || {};
+      const items = { data: invReads.rowsOr<Row>("items", []) };
+      const vendors = { data: invReads.rowsOr<Row>("vendors", []) };
+      const series = { data: invReads.rowsOr<Row>("series", []) };
+      const firstMv = { data: invReads.rowsOr<Row>("firstMv", []) };
+      const dishRows = (invReads.rows<Row>("dish")).map((d) => ({
         slug: String(d.slug), title: String(d.title), price: num(d.price),
         qtySold: num(d.qty_sold), revenue: num(d.revenue),
         plateCost: num(d.plate_cost), costTotal: num(d.cost_total),
@@ -862,22 +888,31 @@ export async function GET(req: NextRequest) {
       // and stopped adding up to the total above it, with nothing on screen (owner-panel sweep
       // 2026-08-04). Ask for ONE more than the cap: if it comes back, the UI says so.
       const LIST_CAP = MERGED_CAP;
-      const expensesRaw = type === "invexpenses"
-        ? (await sb.from("expenses")
+      // A FAILED LIST READ USED TO RENDER AS "no expenses this month" (T9 finding F5). Both of these
+      // were `.data || []`. They stay non-fatal — the hero band above is the report — but an unread
+      // list now says so in `partial` instead of quietly claiming the month was empty.
+      const expRead = type === "invexpenses"
+        ? await rd("expenseList", () => sb.from("expenses")
             .select("id, category, title, amount, expense_date, note, photo_url, created_by, voided_at, void_reason")
             .eq("restaurant_id", one).gte("expense_date", dFrom).lte("expense_date", dTo)
-            .order("expense_date", { ascending: false }).limit(LIST_CAP + 1)).data || []
-        : [];
+            .order("expense_date", { ascending: false }).limit(LIST_CAP + 1))
+        : null;
+      const expensesUnread = !!expRead?.error;
+      if (expensesUnread) console.error("[owner/reports] expense list unread for", one);
+      const expensesRaw = (expRead?.data || []) as Row[];
       const expensesMore = expensesRaw.length > LIST_CAP;
       const expenses = expensesMore ? expensesRaw.slice(0, LIST_CAP) : expensesRaw;
       // Expense slips are private paperwork — sign them on the way out (lib/mediaLinks.ts).
       const expensesOut = await signRows("inv-media", expenses as Record<string, unknown>[], ["photo_url"]);
-      const wasteRaw = type === "invwaste"
-        ? (await sb.from("inv_waste_entries")
+      const wasteRead = type === "invwaste"
+        ? await rd("wasteList", () => sb.from("inv_waste_entries")
             .select("id, item_id, qty_base, reason, note, unit_cost_snap, waste_date, created_by, voided_at")
             .eq("restaurant_id", one).gte("waste_date", dFrom).lte("waste_date", dTo)
-            .order("waste_date", { ascending: false }).limit(LIST_CAP + 1)).data || []
-        : [];
+            .order("waste_date", { ascending: false }).limit(LIST_CAP + 1))
+        : null;
+      const wasteUnread = !!wasteRead?.error;
+      if (wasteUnread) console.error("[owner/reports] waste list unread for", one);
+      const wasteRaw = (wasteRead?.data || []) as Row[];
       const wasteMore = wasteRaw.length > LIST_CAP;
       const waste = wasteMore ? wasteRaw.slice(0, LIST_CAP) : wasteRaw;
       return {
@@ -916,6 +951,9 @@ export async function GET(req: NextRequest) {
         expenses: expensesOut, waste,
         // "there are more than these" — the UI prints a plain line instead of stopping silently.
         listCap: LIST_CAP, expensesMore, wasteMore,
+        ...(invPartial.length || expensesUnread || wasteUnread
+          ? { partial: [...invPartial, ...(expensesUnread ? ["expenses" as PartialKey] : []), ...(wasteUnread ? ["waste" as PartialKey] : [])] }
+          : {}),
       };
     }
 
@@ -953,16 +991,38 @@ export async function GET(req: NextRequest) {
       // The high bound follows the BUSINESS day (docDateHi), so a "yesterday" report can't
       // reach into this morning's payments — the same fix as the day sheet above.
       const f = istDateOf(from), t2 = docDateHi(to);
+      // ── "PAID OUT ₹0" IS A CLAIM ABOUT WAGES (T9 finding F3, fixed 2026-08-12) ────────────────────
+      // All four reads were taken as `x.data || []` with no `.error` check. A failed
+      // `lfh_staff_pay_cashflow` therefore produced `cashRows: []`, and the report stated
+      // "Paid out ₹0 · 0 people · ₹0 still owed" for a month in which the team was paid — and, because
+      // this compute sits inside `cachedOwnerPayload` and declared no `partial`, that zero was STORED
+      // and served for hours. This is the report an argument with a staff member gets settled from.
+      //
+      // The three MONEY reads are fatal, deliberately, and that is a different policy from the
+      // dishes/categories fan-outs above: those show a chart where a missing restaurant is visibly
+      // one fewer bar, while these are summed into ONE total that would simply come out too small
+      // with nothing to see. `/api/owner/khata` made the same call in the same words — "a half-read
+      // money figure" fails the request rather than printing.
+      // The STAFF-NAMES read is not fatal: a missing name renders as "—", which is ugly, not untrue.
       const per = await mapLimit(ids, FANOUT_HEAVY, async (id) => {
-        const [cash, monthly, people, staff] = await Promise.all([
-          sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: f, p_to: t2, p_bucket: bucket === "month" ? "month" : "day" }),
-          sb.rpc("lfh_staff_pay_monthly_cost", { p_restaurant: id, p_from: f, p_to: t2 }),
-          sb.rpc("lfh_staff_pay_summary", { p_restaurant: id, p_from: f, p_to: t2 }),
-          sb.from("staff_users").select("id, name, username, role, designation, pay_type, pay_amount")
-            .eq("restaurant_id", id).is("deleted_at", null).limit(500),
-        ]);
-        return { cash: cash.data || [], monthly: monthly.data || [], people: people.data || [], staff: staff.data || [] };
+        const reads = new ReadSet(`owner/reports.staffpay[${id}]`, await Promise.all([
+          rd("cash", () => sb.rpc("lfh_staff_pay_cashflow", { p_restaurant: id, p_from: f, p_to: t2, p_bucket: bucket === "month" ? "month" : "day" })),
+          rd("monthly", () => sb.rpc("lfh_staff_pay_monthly_cost", { p_restaurant: id, p_from: f, p_to: t2 })),
+          rd("people", () => sb.rpc("lfh_staff_pay_summary", { p_restaurant: id, p_from: f, p_to: t2 })),
+          rd("staff", () => sb.from("staff_users").select("id, name, username, role, designation, pay_type, pay_amount")
+            .eq("restaurant_id", id).is("deleted_at", null).limit(500)),
+        ]));
+        // `rows()` throws ReadFailed for any of the three money reads; the outer catch turns that
+        // into a retryable dbFail, so the owner is asked to try again instead of shown a wrong total.
+        return {
+          cash: reads.rows("cash"),
+          monthly: reads.rows("monthly"),
+          people: reads.rows("people"),
+          staff: reads.rowsOr("staff", []),
+          namesUnread: reads.failed("staff"),
+        };
       });
+      const staffNamesUnread = per.some((p) => p.namesUnread);
       const nameOf = new Map<string, { name: string; role: string; designation: string | null; pay_type: string | null; pay_amount: number | null }>();
       for (const p of per) for (const s2 of p.staff as any[])
         nameOf.set(s2.id, { name: s2.name || s2.username, role: s2.role, designation: s2.designation, pay_type: s2.pay_type, pay_amount: s2.pay_amount });
@@ -991,19 +1051,26 @@ export async function GET(req: NextRequest) {
         advanceOutstanding: people.reduce((s2, r) => s2 + r.advanceOutstanding, 0),
         estExcluded: monthRows.reduce((s2, r) => Math.max(s2, r.est_excluded), 0),
       };
-      return { type, range, bucket, cashRows, monthRows, people, totals };
+      return { type, range, bucket, cashRows, monthRows, people, totals,
+        ...(staffNamesUnread ? { partial: ["teamPay"] as PartialKey[] } : {}) };
     }
 
     // ── TEAM PERFORMANCE: one row per person, owner-only leaderboard ────────────
     if (type === "staffperf") {
       const ids = (rid ? [rid] : scopeIds).filter(Boolean) as string[];
+      // ── AN EMPTY LEADERBOARD IS NOT "NOBODY DID ANYTHING" (T9 finding F4, fixed 2026-08-12) ───────
+      // Both reads were `x.data || []`. The `who` map is built from `staff`, and the rows are then
+      // filtered by `who.has(r.staff_id)` — so a failed STAFF read silently removed EVERY row and the
+      // report announced `people: 0, orders: 0, value: ₹0`, i.e. a team that did nothing all month.
+      // Here the staff read is fatal precisely BECAUSE the filter depends on it: without it there is
+      // no leaderboard at all, only a convincing empty one.
       const per = await mapLimit(ids, FANOUT_HEAVY, async (id) => {
-        const [perf, staff] = await Promise.all([
-          sb.rpc("lfh_staff_performance", { p_restaurant: id, p_from: from, p_to: to }),
-          sb.from("staff_users").select("id, name, username, role, designation, active")
-            .eq("restaurant_id", id).is("deleted_at", null).in("role", ["manager", "tablet"]).limit(500),
-        ]);
-        return { perf: (perf.data || []) as any[], staff: (staff.data || []) as any[] };
+        const reads = new ReadSet(`owner/reports.staffperf[${id}]`, await Promise.all([
+          rd("perf", () => sb.rpc("lfh_staff_performance", { p_restaurant: id, p_from: from, p_to: to })),
+          rd("staff", () => sb.from("staff_users").select("id, name, username, role, designation, active")
+            .eq("restaurant_id", id).is("deleted_at", null).in("role", ["manager", "tablet"]).limit(500)),
+        ]));
+        return { perf: reads.rows<any>("perf"), staff: reads.rows<any>("staff") };
       });
       const who = new Map<string, { name: string; role: string; designation: string | null; active: boolean }>();
       for (const p of per) for (const s2 of p.staff)

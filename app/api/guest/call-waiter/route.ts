@@ -45,8 +45,24 @@ async function postImpl(req: NextRequest): Promise<Response> {
 
   // TOO LATE TO BE USEFUL. Answered as a plain refusal (not an error) so the phone stops
   // retrying it and can say something true to the person.
-  const at = Number(b.at || 0);
-  if (at && Date.now() - at > STALE_CALL_MS) return NextResponse.json({ ok: false, reason: "call_too_old" });
+  // A BAD `at` MUST NOT BE A FREE PASS (T9 finding F24, fixed 2026-08-12). This was
+  // `const at = Number(b.at || 0); if (at && …)`, so any value that isn't a usable number — "abc",
+  // an object, null — became NaN or 0 and skipped the check entirely. The comment above calls this
+  // guard "the half that does not depend on the phone getting it right"; a body the phone got wrong
+  // was precisely the body that walked past it, and a twenty-minute-old call rang the floor.
+  //
+  // A REPLAY THAT CARRIES AN UNREADABLE TIMESTAMP IS TREATED AS TOO OLD, deliberately: this route
+  // exists only for calls saved on a phone and delivered later, so "I can't tell when this was
+  // tapped" is not a good enough reason to send a waiter across the room for something nobody
+  // remembers asking for. A body with NO `at` field at all is an ordinary online call and still goes
+  // straight through, exactly as before.
+  // `at` is typed `number` but arrives as untrusted JSON, so the empty-string case is checked on the
+  // raw value rather than the declared type.
+  const rawAt = (b as { at?: unknown }).at;
+  const hasAt = rawAt !== undefined && rawAt !== null && rawAt !== "";
+  const at = Number(rawAt);
+  if (hasAt && !Number.isFinite(at)) return NextResponse.json({ ok: false, reason: "call_too_old" });
+  if (hasAt && Date.now() - at > STALE_CALL_MS) return NextResponse.json({ ok: false, reason: "call_too_old" });
 
   const reason = String(b.reason || "").slice(0, 200);
 
@@ -56,8 +72,16 @@ async function postImpl(req: NextRequest): Promise<Response> {
     // The database's own words never travel to a diner — a code does, and lib/guestOutbox.ts owns
     // the sentence. Same rule as place-order.
     if (error) { console.error("[guest/call-waiter] session RPC failed:", error.message); return NextResponse.json({ ok: false, reason: "server_busy" }, { status: 502 }); }
-    const rid = isUuid(b.restaurantId) ? (b.restaurantId as string) : "";
+    // Prefer the restaurant the RPC itself resolved from the token over the one the phone sent —
+    // an older saved call may carry none, and the floor snapshot then never got dropped, so a
+    // manager reloading inside the shared 1.5s window saw a floor without the raised hand on it
+    // (T9 finding F20, the twin of the same fix in place-order).
+    const fromRpc = (data && typeof data === "object")
+      ? ((data as Record<string, unknown>).restaurant_id ?? (data as Record<string, unknown>).restaurantId)
+      : null;
+    const rid = isUuid(fromRpc) ? (fromRpc as string) : (isUuid(b.restaurantId) ? (b.restaurantId as string) : "");
     if (rid) invalidateFloor(rid);   // a raised hand changes the floor
+    else console.warn("[guest/call-waiter] session replay had no resolvable restaurant — floor snapshot not dropped");
     return NextResponse.json(data ?? { ok: false, reason: "empty" });
   }
 

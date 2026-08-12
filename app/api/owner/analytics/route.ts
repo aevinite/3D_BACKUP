@@ -224,7 +224,15 @@ export async function GET(req: NextRequest) {
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const sp = req.nextUrl.searchParams;
-  const range = sp.get("range") || "today";
+  // ── AN UNKNOWN RANGE IS ANSWERED AS "today", SO IT MUST SAY "today" (T9 finding F21) ───────────
+  // `windowFor()` falls through to today for anything it doesn't recognise, but `range` was echoed
+  // back RAW in the payload — so `?range=NOT_A_RANGE` returned today's numbers labelled
+  // "NOT_A_RANGE" (measured live on the backup, 2026-08-12, against the reports route which
+  // correctly answered "today"). That route added this normalisation after the same bug rendered a
+  // blank chart title; this one never got it, and the two halves of one KPI row could disagree.
+  const VALID_RANGES = new Set(["today", "yesterday", "week", "7d", "30d", "month", "lastmonth", "12m", "fy", "all", "custom"]);
+  const rawRange = sp.get("range") || "today";
+  const range = VALID_RANGES.has(rawRange) ? rawRange : "today";
   const rid = sp.get("rid");
   const compare = sp.get("compare") === "1";
   // All-time "records" (lfh_owner_records) is an UNBOUNDED scan of the restaurant's whole
@@ -318,7 +326,20 @@ export async function GET(req: NextRequest) {
       const pmIds: (string | null)[] = scope.all ? [null] : scope.ids;
       const pmP = mapLimit(pmIds, FANOUT, (id) => sb.rpc("lfh_owner_payment_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
       const catScopedP = scope.all ? null : mapLimit(scope.ids, FANOUT, (id) => sb.rpc("lfh_owner_category_breakdown", { p_restaurant_id: id, p_from: from, p_to: to }));
-      const prevP = prevWin ? windowTotals(pIds, prevWin.from, prevWin.to) : Promise.resolve(null);
+      // ── A PROMISE MUST NOT BE ABLE TO REJECT BEFORE ANYONE IS LISTENING (T9 finding F12) ────────
+      // `windowTotals` is the one helper here that THROWS (`if (rev.error) throw rev.error`) instead
+      // of returning an error object. It was started here and only awaited ~50 lines below, with
+      // `await pmP` and the whole category fan-out in between — so if the previous-window RPC failed
+      // while those were still in flight, the rejection had no handler attached, and Node reports an
+      // unhandled rejection, which on the serverless runtime can end the invocation instead of
+      // letting this route answer with its own `dbFail`. Catching it AT CREATION keeps the
+      // parallelism (which is why it starts early) and turns the failure into a value.
+      const prevP: Promise<{ revenue: number; orders: number } | null> = prevWin
+        ? windowTotals(pIds, prevWin.from, prevWin.to).catch((e) => {
+            console.error("[owner/analytics] previous-window totals failed:", e instanceof Error ? e.message : e);
+            return null;   // the ▲/▼ comparison chips simply don't render — never a wrong delta
+          })
+        : Promise.resolve(null);
       // Previous-period revenue PER BUCKET (same grain), for the "this period vs previous"
       // overlay that replaces Busy hours. ONE extra pre-summed RPC, only inside the cached
       // compute — so it runs at most on a ~5-min recompute, never on a plain snapshot read.

@@ -39,6 +39,15 @@ function maybePing(data: unknown, rid: string): void {
 // A dish that reaches the kitchen changes the floor, so the shared 1.5s snapshot must be dropped
 // or a manager reloading right after can be handed a floor computed before this order existed.
 // Only for a real placement — a refusal changed nothing.
+// The restaurant the RPC itself says this order landed on. `lfh_place_order` resolves it from the
+// session token, so it is the one value that cannot be wrong — unlike the body field, which an old
+// saved order may not carry at all (T9 finding F20).
+function ridFromResult(data: unknown): string {
+  if (!data || typeof data !== "object") return "";
+  const v = (data as Record<string, unknown>).restaurant_id ?? (data as Record<string, unknown>).restaurantId;
+  return isUuid(v) ? (v as string) : "";
+}
+
 function dropFloorIfPlaced(data: unknown, rid: string): void {
   if (rid && data && typeof data === "object" && (data as { ok?: unknown }).ok !== false) invalidateFloor(rid);
 }
@@ -86,9 +95,21 @@ async function postImpl(req: NextRequest): Promise<Response> {
     if (error) { console.error("[guest/place-order] session RPC failed:", error.message); return NextResponse.json({ ok: false, reason: "server_busy" }, { status: 502 }); }
     // The restaurant is only used to SCOPE the limit ping — identity still comes from the token,
     // so a wrong value here can never place an order anywhere.
-    const sessionRid = isUuid(b.restaurantId) ? (b.restaurantId as string) : "";
+    //
+    // ── AND TO DROP THE FLOOR SNAPSHOT, WHICH IS WHY A MISSING ONE MATTERED (T9 finding F20) ──────
+    // When the body carried no (or a malformed) `restaurantId`, `invalidateFloor` was skipped — so a
+    // replayed order reached the kitchen while a manager reloading inside the shared 1.5s window
+    // could still be handed a floor computed before that order existed. The token already knows
+    // which restaurant it belongs to, so ask the RPC's own answer for it rather than depending on
+    // the phone to have sent it: `lfh_place_order` returns the session's restaurant, and that is the
+    // authoritative value. The body remains a fallback for older saved orders.
+    const sessionRid = ridFromResult(data) || (isUuid(b.restaurantId) ? (b.restaurantId as string) : "");
     maybePing(data, sessionRid);
     dropFloorIfPlaced(data, sessionRid);
+    if (!sessionRid) {
+      // Nothing to invalidate against. Say so in the log rather than leaving a silently stale floor.
+      console.warn("[guest/place-order] session replay had no resolvable restaurant — floor snapshot not dropped");
+    }
     return NextResponse.json(data ?? { ok: false, reason: "empty" });
   }
 

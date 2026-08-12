@@ -34,7 +34,17 @@ export type PartialKey =
   | "payments" | "tips" | "staffPay" | "inventory"   // the day sheet's optional lines
   | "categories"                                     // the dashboard's revenue-by-category chart
   | "busyHours"                                      // the dashboard's day x hour heatmap
-  | "modules";                                       // the hub's payroll/inventory card probes
+  | "modules"                                        // the hub's payroll/inventory card probes
+  // ── added by the T9 fix pass, 2026-08-12 ───────────────────────────────────────────────────────
+  // Each of these names a figure that USED to be printed as a confident zero or an empty list when
+  // its read failed. They exist so the screen can say "couldn't read this one" instead.
+  | "stockValue" | "lowStock" | "expenses" | "purchases" | "waste" | "usage"  // Inventory
+  | "coverage" | "dishCosts" | "vendors" | "stockItems"                        // Inventory report
+  | "teamPay" | "teamPerformance" | "payHistory"                               // Team & pay
+  | "guestCounts"                                                              // the Customers tiles
+  | "records"                                                                  // all-time bests
+  | "restaurantNames"                                                          // which brand a row is
+  | "logVisibility";                                                           // see lib/logVisibility
 // NOTE: the staff roster deliberately does NOT use this. A list is better served by a per-ROW marker
 // (`payUnread` on each person) than by one note at the top of the page, because the owner needs to
 // know WHICH people's figures are missing, not just that some are.
@@ -49,6 +59,23 @@ const PARTIAL_LABELS: Record<PartialKey, string> = {
   staffPay: "staff pay",
   inventory: "stock figures",
   modules: "which features are on",
+  stockValue: "the value of stock on the shelf",
+  lowStock: "which items are running low",
+  expenses: "the expense list",
+  purchases: "the purchase list",
+  waste: "the waste list",
+  usage: "what was used from stock",
+  coverage: "how much of the menu has recipes",
+  dishCosts: "cost per dish",
+  vendors: "the supplier list",
+  stockItems: "the ingredient list",
+  teamPay: "what the team was paid",
+  teamPerformance: "the team leaderboard",
+  payHistory: "this person's payment history",
+  guestCounts: "the guest totals",
+  records: "the all-time bests",
+  restaurantNames: "which restaurant each row belongs to",
+  logVisibility: "which kinds of activity you're allowed to see",
 };
 
 /** Plain words for one unread part, for a screen to put in front of a person. */

@@ -12,6 +12,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, type PartialKey } from "@/lib/ownerScope";
 import { khataLadder } from "@/lib/tableTags";
 import { businessDayStartIso } from "@/lib/businessDay";
+import { restaurantNames } from "@/lib/restaurantNames";
 
 export const dynamic = "force-dynamic";
 
@@ -48,9 +49,9 @@ export async function GET(req: NextRequest) {
   if (!moduleIds.length) return NextResponse.json({ summary: emptySummary(), customers: [], moduleOff: true });
 
   // Restaurant names (a multi-restaurant owner tells brands apart).
-  const names: Record<string, string> = {};
-  { const r = await sb.from("restaurants").select("id, name").in("id", moduleIds);
-    for (const x of (r.data || []) as { id: string; name: string }[]) names[x.id] = x.name; }
+  // Shared lookup (finding F17) — checks its own error rather than silently rendering every debt's
+  // restaurant as "—", which on a multi-restaurant estate makes "who owes what" unreadable.
+  const names = await restaurantNames(moduleIds);
 
   const nowIso = new Date().toISOString();
   // HOW MANY PEOPLE THE LIST SHOWS. Bounded by PERSON (mig 309), biggest debt first, so everyone
@@ -117,7 +118,7 @@ export async function GET(req: NextRequest) {
   for (const r of rows) {
     let c = byCust.get(r.khata_customer_id);
     if (!c) {
-      c = { id: r.khata_customer_id, restaurant_id: r.restaurant_id, restaurantName: names[r.restaurant_id] || "—",
+      c = { id: r.khata_customer_id, restaurant_id: r.restaurant_id, restaurantName: names.get(r.restaurant_id) || "—",
             name: r.name, phone: r.phone, note: r.note, outstanding: 0, billCount: 0, oldestKhataAt: r.khata_at, bills: [] };
       byCust.set(r.khata_customer_id, c);
     }

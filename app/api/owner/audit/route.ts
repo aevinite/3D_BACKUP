@@ -17,6 +17,8 @@ import { ownerScope, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 // The admin stays invisible to an owner, in the AUDIT as it already is in the Activity log.
 import { auditForReader, forReader } from "@/lib/auditActor";
+import { rd } from "@/lib/readGuard";
+import { restaurantNames } from "@/lib/restaurantNames";
 
 export const dynamic = "force-dynamic";
 
@@ -53,11 +55,18 @@ export async function GET(req: NextRequest) {
       if (!scope.ids.length) return NextResponse.json({ error: "not found" }, { status: 404 });
       dq = dq.in("restaurant_id", scope.ids);
     }
-    const one = (await dq).data?.[0] as Record<string, unknown> | undefined;
+    // "I COULDN'T ASK" IS NOT "IT DOESN'T EXIST" (T9 finding F8, fixed 2026-08-12). The error was
+    // never inspected, so a database blip was indistinguishable from a removal that isn't there and
+    // the owner was told the record was gone — about the one screen whose whole job is proving that
+    // nothing quietly disappears. The LIST read three lines below already used `dbFail`; this half
+    // was missed.
+    const detailRead = await rd("removal", () => dq);
+    if (detailRead.error) {
+      return dbFail("owner/audit.detail", detailRead.error, { message: "Couldn't open that removal just now — please try again." });
+    }
+    const one = (detailRead.data || [])[0] as Record<string, unknown> | undefined;
     if (!one) return NextResponse.json({ error: "not found" }, { status: 404 });
-    const rn = one.restaurant_id
-      ? (await sb.from("restaurants").select("name").eq("id", String(one.restaurant_id)).maybeSingle()).data?.name ?? null
-      : null;
+    const rn = one.restaurant_id ? (await restaurantNames([String(one.restaurant_id)])).get(String(one.restaurant_id)) : null;
     // The detail CARD names the person in its own "Who" row, so it needs the same treatment as the
     // list — otherwise hiding the admin in the feed only moved the leak one tap deeper.
     return NextResponse.json({
@@ -84,18 +93,16 @@ export async function GET(req: NextRequest) {
 
   // Stamp each row with its restaurant NAME so a multi-restaurant owner can tell them apart
   // (one batched lookup, no N+1). Single-restaurant owners simply ignore it.
+  // One shared lookup (lib/restaurantNames) — it checks its own error, handles a JSONB name, and
+  // pages past PostgREST's row cap. All three were wrong in this local copy (T9 finding F17).
   const ids = Array.from(new Set(rows.map((a) => a.restaurant_id).filter(Boolean))) as string[];
-  const nameById = new Map<string, string>();
-  if (ids.length) {
-    const rest = await sb.from("restaurants").select("id, name").in("id", ids);
-    for (const x of rest.data ?? []) nameById.set(x.id, x.name);
-  }
+  const names = await restaurantNames(ids);
   const removals = auditForReader(
-    rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? nameById.get(a.restaurant_id) ?? null : null })),
+    rows.map((a) => ({ ...a, restaurant_name: names.get(a.restaurant_id) })),
     // An admin acting AS this owner keeps the full record; a real owner never learns Aevidine was
     // here (CLAUDE.md's standing rule, and the same call /api/owner/oplog makes). The ROW, its
     // reason and its amount are untouched either way — only the identity is withheld.
     !!scope.admin,
   );
-  return NextResponse.json({ removals });
+  return NextResponse.json({ removals, ...(names.partial ? { partial: ["restaurantNames"] } : {}) });
 }

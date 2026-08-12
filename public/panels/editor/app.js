@@ -6849,6 +6849,10 @@ const AUDIT_KIND = {
   // delete always was and the restore only reached the Activity log, which is cleared after a
   // month at most (T7 finding F4, 2026-08-11).
   order_restored: ["♻", "Bill put back"],
+  // A guest asked for their personal data to be erased and the owner did it. Irreversible, and it
+  // clears them from the pay-later person book too — so the person book losing a name is explained
+  // here rather than looking like something went wrong (owner, 2026-08-12).
+  customer_erased: ["🧑", "Guest data erased on request"],
 };
 async function loadAudit() {
   try { state.audit = await api("GET", "/audit?limit=200"); }
