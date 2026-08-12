@@ -1627,6 +1627,17 @@ function tableLabel(t) {
 function tableName(t) {
   return (((state.data.settings || {}).table_names || {})[String(t)] || "").trim();
 }
+// tileFace(t): the SHORT face of a table — exactly what the floor tile puts in its corner, so a
+// popup that lists tables says the same word the floor does. The owner's name for the table when
+// there is one ("Terrace"), else "T7".
+// WHY (T3 sweep, 2026-08-10): the tile and Change table used the name; the KOT picker, the KOT
+// menu heading, Merge, Move-a-KOT, Move-a-dish, Split and Mark-table all printed a bare "T7". The
+// KOT picker's own comment claimed "the words match the floor exactly" — the STATE words did, the
+// table's identity did not, so a restaurant that names its tables had to translate back to numbers
+// the moment it opened any of them.
+function tileFace(t) {
+  return tableName(t) || `T${t}`;
+}
 // tablePrintLabel(t): what goes on PAPER (a KOT). Names win outright here — no "(T1)"
 // tail: the printed ticket has to read exactly like the label on the table, so a waiter
 // carrying it walks to the right place (owner 2026-07-29). Unnamed → "Table 7".
@@ -4132,7 +4143,9 @@ async function markTablePaid(t, mtpOpts = {}) {
   // "On the house" only on a Family/Owner's-Guest table, "Collect later" whenever khata
   // is on for this viewer. Server re-checks both regardless of what the UI offered.
   const opts = {
-    onHouse: ["family", "guest"].includes(tagForTable(t)) && tagActionAllowed("table_tags"),
+    // partyTag, not tagForTable: on a joined party the mark may sit on a partner table while the
+    // bill sits here — which is exactly what the server's own lookup allows (T3 sweep, 2026-08-10).
+    onHouse: ["family", "guest"].includes(partyTag(t)) && tagActionAllowed("table_tags"),
     khata: tagActionAllowed("khata"),
     // A whole table's bill can be paid in parts (Other → Split the payment). Single-order and
     // khata-collect settles can't — there is no pay-split endpoint for those.
@@ -4285,7 +4298,7 @@ function openTagModal(t) {
     return `<button type="button" class="tag-opt tag-opt-${tag}${cur === tag ? " sel" : ""}" data-tag="${tag}"><span class="tago-ico">${info.emoji}</span><span>${esc(info.label)}<small>${esc(subs[tag])}</small></span></button>`;
   };
   const wrap = el(`<div class="sx-modal-overlay tag-overlay"><div class="sx-modal pay-modal">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Mark table ${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>Mark ${esc(tableLabel(t))}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body">
       <p class="muted small" style="margin:0 0 10px">How should staff treat this table? The mark clears itself when the table closes.</p>
       ${opt("vip")}${opt("family")}${opt("guest")}
@@ -7559,8 +7572,27 @@ function sliceLoaded(t) {
 const callsForTable = (t) => {
   const list = (state.data.calls || []).filter((c) => !c.resolved && (c.table_number || "").trim() === String(t));
   const sessionsOn = !!(state.data.settings || {}).sessions_enabled;
-  if (sessionsOn && !openSessionForTable(t)) return [];
+  // A MERGED CHILD'S PARTY IS ITS PARENT'S (T3 sweep, 2026-08-10) — the same fix ordersForTable
+  // was given right above, and calls were left behind. A joined table has no session of its own,
+  // so this guard answered "the table is closed, hide its calls" about a table that is serving food:
+  //   · the tile lost its 💧/🙋 badge the moment you SELECTED it (unselected it comes from the
+  //     summary, which has no such guard) — the exact "tile flips on selection" class of bug;
+  //   · and tablePanelParts builds the Calls section from this helper, so the raised hand could
+  //     not be answered from the table it was raised at (its partner's popup filters by ITS own
+  //     table number, so it wasn't there either).
+  // The call keeps the table number it was rung at (mig 308 moves only its session_id), which is
+  // what puts the badge on the right tile — so this stays a PER-TABLE list. partyCalls() below is
+  // the whole-party view the detail needs.
+  const sess = openSessionForTable(t) || (mergeParentOf(t) ? openSessionForTable(mergeParentOf(t)) : null);
+  if (sessionsOn && !sess) return [];
   return list;
+};
+// Every open call across a merged party, deduped, newest last. A party is ONE bill and ONE detail
+// popup ("every table will show every order"), so the calls it lists must be the party's — a call
+// rung at T7 is answerable from T6 and from T7, because they are the same guests.
+const partyCalls = (t) => {
+  const seen = new Set();
+  return partyTablesOf(t).flatMap((x) => callsForTable(x)).filter((c) => (seen.has(c.id) ? false : seen.add(c.id)));
 };
 // An "open" request is MOOT once the table is open (already fulfilled) — never show it
 // on an open table. join/access requests stay valid on an open table. (owner, 2026-06-18)
@@ -7655,6 +7687,16 @@ function tagForTable(t) {
   if (!adminView && !tableTagsOn()) return "";
   const tile = (state.summary.tiles || {})[String(t)];
   return (tile && tile.tag) || "";
+}
+// The mark that governs the PARTY's bill — this table's own, else any member's.
+// WHY THIS EXISTS (T3 sweep, 2026-08-10): the family sat at T7 and were then joined to T6, so the
+// bill lives on T6 while the 🏠 mark is on T7. The SERVER already reads it this way — the
+// on-the-house handler searches the parent and every child, with the comment "their comp must not
+// stop working because the bill now lives on T28" — so a panel that asked about ONE table hid a
+// button the server would have accepted. Ask the same question the server asks.
+function partyTag(t) {
+  for (const x of partyTablesOf(t)) { const g = tagForTable(x); if (g) return g; }
+  return "";
 }
 
 // ── NO MORE "OPEN" / "CLOSED" TABLES (owner, 2026-07-31) ─────────────────────────────
@@ -7979,6 +8021,9 @@ function floorTileHtml(i) {
     ? [mergedTo, ...mergeChildrenOf(mergedTo).filter((k) => String(k) !== String(i))]
     : mergeKids;
   const mergeWith = partyTables.map((k) => "T" + k);
+  // REJECTED (owner, 2026-08-11) — docs/REJECTED-IDEAS.md R9: no "how long have they been merged"
+  // age on this chip ("⇄ with T7 · 40m"). Offered as a way to spot a merge somebody forgot to undo;
+  // he skipped it. The chip names the party and nothing else.
   const mergeChip = mergeWith.length
     ? `<div class="ft-merge ft-merge-parent" title="Served as one party with ${esc(mergeWith.join(" + "))} — one bill">⇄ with ${esc(mergeWith.join(" "))}</div>`
     : "";
@@ -8119,6 +8164,8 @@ function floorTableList(baseN) {
 // floorStatsHtml(): the floor-wide stats strip (Occupied / To pay / Needs you). Computed by
 // looping tableTileState over EVERY table (cheap — no DOM) so the patch can refresh it without
 // rebuilding the grid. Shared by floorHtml and patchFloorTiles.
+// REJECTED (owner, 2026-08-11) — docs/REJECTED-IDEAS.md R10: "To pay" stays a COUNT. Do not add the
+// rupee total beside it ("To pay 2 · ₹1,659"); it was offered and refused.
 function floorStatsHtml() {
   const s = state.data.settings || {};
   // Shown WHATEVER the session setting says (fixed 2026-07-31). It used to return nothing at
@@ -8129,11 +8176,20 @@ function floorStatsHtml() {
   let cachedN = _tcKey ? parseInt(localStorage.getItem(_tcKey), 10) : NaN;
   if (!Number.isFinite(cachedN) || cachedN < 1) cachedN = 12;
   const n = Math.max(1, parseInt(s.table_count, 10) || cachedN);
-  let cOcc = 0, cPay = 0, cNew = 0, cCall = 0;
+  let cOcc = 0, cPay = 0;
   // ONE list, built once — it is walked twice below and every tile costs a tableTileState() call.
   const drawnList = floorTableList(n);
+  // NEEDS YOU COUNTS TABLES, NOT A MIXTURE OF TABLES AND ROWS (T3 sweep, 2026-08-10). It used to be
+  // cNew + cCall + reqN + joinN, where the first two were counted once per TABLE and the last two
+  // once per ROW: one table holding four waiter calls read "Needs you 1", and four people waiting to
+  // be let in at one table read "Needs you 4". A number that means two different things depending on
+  // what happened is a number staff stop trusting. It is now the plain answer to the plain question
+  // — how many TABLES want me — so it can never be larger than the floor, and a table that has both
+  // a new order and a raised hand is still one place to walk to.
+  const needy = new Set();
   for (const i of drawnList) {
     const { st, pay, hasNew, hasCall } = tableTileState(i);
+    if (hasNew || hasCall) needy.add(String(i));
     // A JOINED TABLE IS OCCUPIED, whatever the server calls it (T3 sweep, 2026-08-06). A merged
     // child has no session of its own, so mig 238 reports its state as `free` — while the tile
     // right beside this number is drawn purple and obviously busy. With T6+T7 joined and six
@@ -8144,8 +8200,6 @@ function floorStatsHtml() {
     const joined = !!mergeParentOf(i);
     if (joined || (st !== "free" && st !== "req")) cOcc++;
     if (pay === "red" || st === "bill") cPay++;
-    if (hasNew) cNew++;
-    if (hasCall) cCall++;
   }
   // Count only what a person can actually SEE and act on from this floor: something waiting at
   // a table that is drawn here. A request for a table the restaurant doesn't have (a stale row,
@@ -8154,10 +8208,16 @@ function floorStatsHtml() {
   // can act on teaches staff to ignore the number.
   const drawn = new Set(drawnList.map(String));
   const atTable = (x) => drawn.has(String(x && x.table_number));
-  const reqN = (state.summary.requests || []).filter(atTable).length;
-  const joinN = (state.summary.joiners || []).filter(atTable).length;
-  const needsYou = cNew + cCall + reqN + joinN;
-  return `<div class="floor-stats"><div class="fstat"><div class="fstat-n">${cOcc}/${n}</div><div class="fstat-l">Occupied</div></div><div class="fstat warn"><div class="fstat-n">${cPay}</div><div class="fstat-l">To pay</div></div><div class="fstat alert"><div class="fstat-n">${needsYou}</div><div class="fstat-l">Needs you</div></div></div>`;
+  for (const r of (state.summary.requests || [])) if (atTable(r)) needy.add(String(r.table_number));
+  for (const j of (state.summary.joiners || [])) if (atTable(j)) needy.add(String(j.table_number));
+  const needsYou = needy.size;
+  // THE TOTAL IS WHAT IS ON SCREEN (T3 sweep, 2026-08-10). The bottom half was the table COUNT while
+  // the top half walked floorTableList — which deliberately includes an occupied table numbered
+  // ABOVE that count, so its money can't hide. Thirty tables all busy plus one live order on table
+  // 34 printed "31/30 Occupied". The drawn list IS the floor, so it is both halves; with no strays
+  // it equals the table count exactly, which is every ordinary day.
+  const total = drawnList.length || n;
+  return `<div class="floor-stats"><div class="fstat"><div class="fstat-n">${cOcc}/${total}</div><div class="fstat-l">Occupied</div></div><div class="fstat warn"><div class="fstat-n">${cPay}</div><div class="fstat-l">To pay</div></div><div class="fstat alert" title="${needsYou === 1 ? "1 table wants you" : needsYou + " tables want you"}"><div class="fstat-n">${needsYou}</div><div class="fstat-l">Needs you</div></div></div>`;
 }
 
 // floorPlan(): this restaurant's hand-written floor plan, or null for the classic grid.
@@ -8740,6 +8800,11 @@ function layoutFloatingRow() {
 // entirely when the floor doesn't scroll (a desktop) or when you have reached the end.
 // Cheap by design: one getBoundingClientRect per tile, no layout writes, and only while the Tables
 // tab is showing. At 300 tables that is still one pass over nodes already in memory.
+// REJECTED (owner, 2026-08-11) — docs/REJECTED-IDEAS.md R8: do NOT make this chip say how many of
+// the hidden tables NEED something ("→ 15 more · 3 need you"). "If the tables are assigned to the
+// waiter, it will be assigned — they could able to see only that part, not others. And if they are
+// not assigned, all will be visible. Then why we need this all?" Who sees which tables is already
+// answered by the waiter's section; the chip stays a plain count of what is past the edge.
 function syncFloorMore() {
   const ed = $("#editor");
   const grid = ed && ed.querySelector(".ftile-grid");
@@ -9247,7 +9312,11 @@ function tablePanelParts(t, host = "float") {
   // The child's own table has no session — the bill number, the guests and the status pill all
   // belong to the party, which lives on partyHead. (A solo table: partyHead === t.)
   const sess = openSessionForTable(partyHead) || openSessionForTable(t);
-  const calls = callsForTable(t);
+  // THE PARTY'S calls, like the orders line above (T3 sweep, 2026-08-10). A call keeps the table
+  // number it was rung at, so a call from T7 was listed on neither popup once T7 joined T6: T7's
+  // was emptied by the session guard and T6's filters by its own number. Same set as the orders,
+  // same reason — these are the same guests on the same bill.
+  const calls = partyCalls(t);
 
   // ── PENDING REQUESTS for THIS table (a guest tapped "open this table" / "join" /
   // asked for a waiter on their phone). These used to live ONLY in the floor's side
@@ -10736,11 +10805,13 @@ function openShiftPicker(t, sess) {
     if (reqTables.has(String(i))) return "wants in";
     return "";
   };
-  for (let i = 1; i <= n; i++) if (!whyBlocked(i)) free.push(i);
-  const nm = (i) => ((state.data.settings || {}).table_names || {})[String(i)];
-  const grid = Array.from({ length: n }, (_, k) => k + 1).map((i) => {
+  // floorTableList, not 1..n — an occupied table numbered above the count is a real place a party
+  // can be moved to, and it was simply absent from this grid (T3 sweep, 2026-08-10).
+  const allT = floorTableList(n);
+  for (const i of allT) if (!whyBlocked(i)) free.push(i);
+  const grid = allT.map((i) => {
     const why = whyBlocked(i);
-    const label = (nm(i) || "").trim() || `T${i}`;
+    const label = tileFace(i);
     // A blocked table is a real <button> kept `disabled` rather than a <div>: it stays in the same
     // grid position and keeps its tooltip, and `disabled` is what stops the tap (and takes it out of
     // the tab order) without any handler of ours having to decide.
@@ -10759,7 +10830,7 @@ function openShiftPicker(t, sess) {
     try {
       const r = await api("POST", `/sessions/${sess.id}/shift`, { to });
       if (!r.ok) { toast("Couldn't shift: " + (KOT_REASON_TEXT[r.reason] || r.reason || ""), "err"); return; }
-      toast(`Shifted to table ${to}`, "ok");
+      toast(`Shifted to ${tileFace(to)}`, "ok");
       followShiftedTable(t, to); // follow the party to its new home in docked OR popup mode
     } catch (e) { toast("Failed: " + e.message, "err"); }
   }));
@@ -10983,20 +11054,41 @@ function openKotColumns(t, sess) {
   document.querySelector(".kotmenu-overlay")?.remove();
   const movable = ordersForTable(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid");
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
+  // THE FLOOR'S OWN TABLE LIST, not 1..table_count (T3 sweep, 2026-08-10). floorTableList exists
+  // because a table numbered ABOVE the count can still be occupied and must never vanish with its
+  // money — but every picker in this file rebuilt a bare 1..n range, so the floor could draw table
+  // 34 with a live bill and no menu here would let you merge into it or move anything to it.
+  const tables = floorTableList(n);
   let occupiedOthers = 0;
-  for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
+  for (const i of tables) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
   // The header's "bill due" is the PARTY's bill — a merged parent's movable list is per-table
   // (that is what Move-a-KOT needs), but the money line must never show half a joint bill.
   const bill = billMath(partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received"));
+  // WHAT THE FLOOR SAYS, NOT WHAT THE DATABASE SAYS (T3 sweep, 2026-08-10). Change table and Merge
+  // gated on the raw session row, so a table drawn **Free** — a party row with no guests and no
+  // orders, which normalizeTileState deliberately shows as Free — offered both. That is the exact
+  // contradiction the owner reported on 2026-08-01 ("table 30 looks closed but at back-end it says
+  // it's open … and you merge table it shows table 30 as open, why all this"): it was answered for
+  // the TARGET lists (summaryTableOpen / tableHasAnyParty) and the source gate was left behind.
+  const liveHere = !!sess && summaryTableOpen(t);
+  const movableTotal = movable.reduce((s2, o) => s2 + (parseFloat(o.total) || 0), 0);
   const OPS = [
     // Works on an EMPTY table too — see the note in openKotMenu.
     { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
     // A MERGED PARTY DOES NOT SHIFT (mig 264): moving it would renumber the child's orders —
     // the numbers an unmerge needs to be exact — and strand the merge record. The server
     // refuses too ('party_merged'); this row says why instead of offering a dead end.
-    { id: "shift", icon: "⇄", label: "Change table", sub: "To a free table", on: !!sess && !mergeGroupLabel(t), why: mergeGroupLabel(t) ? "unmerge first" : "table closed" },
-    { id: "merge", icon: "🪢", label: "Merge tables", sub: "One table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
-    { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "One order moves", on: movable.length > 0, why: "no movable KOT" },
+    { id: "shift", icon: "⇄", label: "Change table", sub: "To a free table", on: liveHere && !mergeGroupLabel(t), why: mergeGroupLabel(t) ? "unmerge first" : "table is free" },
+    // THE MONEY IS ON THE ROW (owner, 2026-08-11 — improvement 5). Merge and Move-a-KOT are the two
+    // operations here that change whose bill money sits on, and the amounts were only ever shown a
+    // step later. The hover tip explains them after a 2-second rest, which nobody waits for
+    // mid-service; the number is the part you actually weigh up.
+    { id: "merge", icon: "🪢", label: "Merge tables", sub: bill.total > 0 ? `One table, one bill · this side ${inr(bill.total)}` : "One table, one bill",
+      // A JOINED TABLE IS NOT A CLOSED ONE (T3 sweep, 2026-08-10). A merged child has no session of
+      // its own, so this row went dark with the chip "table closed" — about a table serving food on
+      // an open bill. The row above it has said "unmerge first" for that case since mig 264.
+      on: liveHere && occupiedOthers > 0, why: mergeGroupLabel(t) && !sess ? "unmerge first" : !liveHere ? "table is free" : "no other open table" },
+    { id: "movekot", icon: "🧾", label: "Move a KOT", sub: movable.length ? `One order moves · ${movable.length} KOT${movable.length === 1 ? "" : "s"}, ${inr(movableTotal)}` : "One order moves", on: movable.length > 0, why: "no movable KOT" },
     { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
     { id: "reprint", icon: "🖨️", label: "Print / reprint a KOT", sub: "Here, or in the kitchen", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
     // LAST, and only when the restaurant has switched it on (owner, 2026-08-01: "split a bill
@@ -11005,7 +11097,7 @@ function openKotColumns(t, sess) {
   ];
   let sel1 = null, sel2 = null; // op id · chosen KOT/dish id
   const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal kotm-colwrap">
-    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 T${esc(t)}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
+    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 ${esc(tileFace(t))}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
     <div class="kotm-bill">KOT &amp; table operations${bill.total > 0 ? ` · bill due ${inr(bill.total)}` : ""}${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}</div></div>
     <div class="kotm-cols"></div></div></div>`);
   document.body.appendChild(wrap);
@@ -11016,11 +11108,14 @@ function openKotColumns(t, sess) {
 
   const done = (msg) => { closeM(); toast(msg, "ok"); };
   const fail = (m) => toast(m, "err");
+  // okMsg may be a FUNCTION of the server's answer. Merge needs that: the RPC decides which table
+  // survives (always the lower number), so a message built from the table that was TAPPED can name
+  // the wrong one — "Merged into table 9" when the bill went to 4 (T3 sweep, 2026-08-10).
   const run = async (method, path, body, okMsg, after) => {
     try {
       const r = await api(method, path, body);
       if (r && r.ok === false) { fail("Couldn't do that: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected")); return; }
-      done(okMsg); if (after) after(r);
+      done(typeof okMsg === "function" ? okMsg(r) : okMsg); if (after) after(r);
     } catch (e) { fail("Failed: " + e.message); }
   };
 
@@ -11029,9 +11124,11 @@ function openKotColumns(t, sess) {
   // table and go inside merge the table, then it will show six plus seven … no hierarchy").
   // labelOf lets a picker print "T6 + T7" on the single button that stands for that whole party;
   // the VALUE stays the table that holds the bill, which is what the server needs.
+  // tileFace, not "T"+i: a restaurant that names its tables sees those names on the floor, so a
+  // picker that says "T7" is asking about something the manager cannot see (T3 sweep, 2026-08-10).
   const partyLabel = (i) => {
     const kids = mergeChildrenOf(i);
-    return kids.length ? ["T" + i, ...kids.map((k) => "T" + k)].join(" + ") : "T" + i;
+    return kids.length ? [tileFace(i), ...kids.map((k) => tileFace(k))].join(" + ") : tileFace(i);
   };
   const tiles = (list, attr, subOf, labelOf) => `<div class="kotm-grid">` +
     list.map((i) => `<button class="kotm-tile${summaryTableOpen(i) ? " occ" : ""}${mergeChildrenOf(i).length ? " kotm-tile-party" : ""}" data-${attr}="${i}"><b>${esc((labelOf || partyLabel)(i))}</b><small>${subOf(i)}</small></button>`).join("") + `</div>`;
@@ -11040,7 +11137,7 @@ function openKotColumns(t, sess) {
   // a reason keeps its place in the grid and says why, so a manager can tell "T12 is busy" apart from
   // "this restaurant has no T12". The pickable ones behave exactly as before.
   const tilesAll = (attr, subOf, blocked) => `<div class="kotm-grid">` +
-    Array.from({ length: n }, (_, k) => k + 1).map((i) => {
+    tables.map((i) => {
       const why = blocked(i);
       if (why) return `<button class="kotm-tile kotm-tile-off" disabled aria-disabled="true" title="${esc(partyLabel(i))} — ${esc(why)}"><b>${esc(partyLabel(i))}</b><small>${esc(why)}</small></button>`;
       return `<button class="kotm-tile${summaryTableOpen(i) ? " occ" : ""}${mergeChildrenOf(i).length ? " kotm-tile-party" : ""}" data-${attr}="${i}"><b>${esc(partyLabel(i))}</b><small>${subOf(i)}</small></button>`;
@@ -11061,9 +11158,16 @@ function openKotColumns(t, sess) {
     if ((state.summary && state.summary.requests || []).some((r) => String(r.table_number) === String(i))) return "wants in";
     return "";
   };
-  const freeTables = () => { const out = []; for (let i = 1; i <= n; i++) if (!shiftBlocked(i)) out.push(i); return out; };
-  const occTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t) && summaryTableOpen(i)) out.push(i); return out; };
-  const allTables = () => { const out = []; for (let i = 1; i <= n; i++) if (String(i) !== String(t)) out.push(i); return out; };
+  // MOVING SOMETHING INSIDE ONE PARTY IS NOT A MOVE (T3 sweep, 2026-08-10). The move pickers offered
+  // every other table, so on a T6+T7 party "Move a KOT from T6" showed T7 labelled "joins bill" —
+  // and lfh_staff_move_order resolves T7 to T6's own bill and answers 'same_table'. A tap that can
+  // never succeed, on a screen that already knows how to dim an impossible target.
+  const moveBlocked = (i) => {
+    if (String(i) === String(t)) return "this one";
+    return partyTablesOf(t).some((x) => String(x) === String(i)) ? "same bill" : "";
+  };
+  const freeTables = () => tables.filter((i) => !shiftBlocked(i));
+  const occTables = () => tables.filter((i) => String(i) !== String(t) && summaryTableOpen(i));
   const tileDue = (i) => { const tile = (state.summary && state.summary.tiles || {})[String(i)]; return tile && tile.due > 0 ? "due " + inr(tile.due) : "open"; };
   const kotCard = (o, attr) => { const nd = orderItemRows(o).reduce((s2, r) => s2 + (parseInt(r.qty, 10) || 1), 0); return `<button class="kotm-row${sel2 === o.id ? " sel" : ""}" data-${attr}="${esc(o.id)}"><span class="kotm-txt"><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b><small>${nd} dish${nd === 1 ? "" : "es"} · ${inr(parseFloat(o.total) || 0)}</small></span><span class="kotm-chev">›</span></button>`; };
 
@@ -11088,8 +11192,8 @@ function openKotColumns(t, sess) {
     return null;
   };
   const col3 = () => {
-    if (sel1 === "movekot" && sel2) return { title: "Send that KOT to which table?", html: tiles(allTables(), "gokot", (i) => (summaryTableOpen(i) ? "joins bill" : "free")) };
-    if (sel1 === "moveitem" && sel2) return { title: "Send that dish to which table? (new KOT there)", html: tiles(allTables(), "goitem", (i) => (summaryTableOpen(i) ? "joins bill" : "free")) };
+    if (sel1 === "movekot" && sel2) return { title: "Send that KOT to which table?", html: tilesAll("gokot", (i) => (summaryTableOpen(i) ? "joins bill" : "free"), moveBlocked) };
+    if (sel1 === "moveitem" && sel2) return { title: "Send that dish to which table? (new KOT there)", html: tilesAll("goitem", (i) => (summaryTableOpen(i) ? "joins bill" : "free"), moveBlocked) };
     // The owner's two-option print step (2026-08-04): PRINT = here, on this device;
     // REPRINT = a durable job the KITCHEN's printer picks up, branded DUPLICATE on paper.
     if (sel1 === "reprint" && sel2) return { title: "Print it where?", html:
@@ -11126,12 +11230,22 @@ function openKotColumns(t, sess) {
     // panel 2 executors / selectors
     colsEl.querySelectorAll("[data-goshift]").forEach((b) => (b.onclick = () => {
       const to = b.dataset.goshift;
-      run("POST", `/sessions/${sess.id}/shift`, { to }, `Shifted to table ${to}`, () => followShiftedTable(t, to));
+      run("POST", `/sessions/${sess.id}/shift`, { to }, `Shifted to ${tileFace(to)}`, () => followShiftedTable(t, to));
     }));
     colsEl.querySelectorAll("[data-gomerge]").forEach((b) => (b.onclick = async () => {
       const to = b.dataset.gomerge;
-      if (!(await confirmDialog(`Merge T${t} into ${partyLabel(to)}? They become ONE party on ONE bill${mergeChildrenOf(to).length ? " — Table " + t + " joins " + partyLabel(to) : ""}. The lowest table number holds the bill.`, "Merge"))) return;
-      run("POST", `/sessions/${sess.id}/merge`, { to }, `Merged into table ${to} — one bill`, async (r) => {
+      // BOTH HALVES OF THE MONEY, AND WHICH TABLE ENDS UP HOLDING IT (owner, 2026-08-11 —
+      // improvement 5). This is the one tap that puts two parties' money on one bill, so the confirm
+      // now shows what is being added to what, and names the surviving table instead of leaving
+      // "the lowest number holds the bill" as a rule the manager has to apply in their head.
+      const theirTile = (state.summary && state.summary.tiles || {})[String(to)];
+      const theirDue = (theirTile && Number(theirTile.due)) || 0;
+      const keeps = (Number(t) <= Number(to)) ? t : to;
+      const money = (bill.total > 0 || theirDue > 0)
+        ? ` ${inr(bill.total)} + ${inr(theirDue)} → ${inr(bill.total + theirDue)} on one bill.`
+        : "";
+      if (!(await confirmDialog(`Merge ${tileFace(t)} into ${partyLabel(to)}? They become ONE party on ONE bill, held by ${tileFace(keeps)} (the lowest table number).${money}`, "Merge"))) return;
+      run("POST", `/sessions/${sess.id}/merge`, { to }, (r) => `Merged into ${tileFace((r && r.parent_table) || keeps)} — one bill`, async (r) => {
         // Refresh BOTH tiles + the live merges list BEFORE the detail re-renders — otherwise the
         // panel still thinks the tables are separate and the detail/tiles count one table's food
         // until the 60s backstop (owner, 2026-08-03). And follow the table the SERVER kept: the
@@ -11155,8 +11269,8 @@ function openKotColumns(t, sess) {
       await sendKotToKitchen(o);
     }));
     // panel 3 executors
-    colsEl.querySelectorAll("[data-gokot]").forEach((b) => (b.onclick = () => run("POST", `/orders/${sel2}/move`, { to: b.dataset.gokot }, `KOT moved to table ${b.dataset.gokot}`)));
-    colsEl.querySelectorAll("[data-goitem]").forEach((b) => (b.onclick = () => run("POST", `/order-items/${sel2}/move`, { to: b.dataset.goitem }, `Dish moved to table ${b.dataset.goitem} (new KOT)`)));
+    colsEl.querySelectorAll("[data-gokot]").forEach((b) => (b.onclick = () => run("POST", `/orders/${sel2}/move`, { to: b.dataset.gokot }, `KOT moved to ${tileFace(b.dataset.gokot)}`)));
+    colsEl.querySelectorAll("[data-goitem]").forEach((b) => (b.onclick = () => run("POST", `/order-items/${sel2}/move`, { to: b.dataset.goitem }, `Dish moved to ${tileFace(b.dataset.goitem)} (new KOT)`)));
   };
   render();
 }
@@ -11187,7 +11301,7 @@ function openKotTablePicker() {
     const money = ts.pay === "red" ? "unpaid" : ts.pay === "green" ? "paid" : "";
     const nm = ((s.table_names || {})[String(i)] || "").trim();
     return `<button class="kotm-tile kotp-tile ft-${esc(ts.st)}${busy ? " occ" : ""}${ts.pay ? " pay-" + esc(ts.pay) : ""}" data-kotpick="${esc(i)}" title="${esc(nm ? nm + " (T" + i + ")" : "T" + i)}">
-      <b>${info ? info.emoji + " " : ""}T${esc(i)}</b>
+      <b>${info ? info.emoji + " " : ""}${esc(tileFace(i))}</b>
       <small class="kotp-state">${esc(ts.label)}</small>
       ${busy && ts.meta ? `<small class="kotp-meta">${esc(ts.meta)}</small>` : ""}
       ${money ? `<small class="kotp-pay ${esc(money)}">${esc(money)}</small>` : ""}
@@ -11220,19 +11334,25 @@ function openKotMenu(t, sess) {
   // Other OPEN tables (a merge target must already have a party).
   const nAll = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   let occupiedOthers = 0;
-  for (let i = 1; i <= nAll; i++) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
+  for (const i of floorTableList(nAll)) if (String(i) !== String(t) && summaryTableOpen(i)) occupiedOthers++;
   // The header's "bill due" is the PARTY's bill — a merged parent's movable list is per-table
   // (that is what Move-a-KOT needs), but the money line must never show half a joint bill.
   const bill = billMath(partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received"));
+  // Same three corrections as the desktop columns above, because a phone must never offer a
+  // different set of operations from the screen next to it (T3 sweep, 2026-08-10):
+  // the floor's own answer to "is anything happening here", the joined-table wording, and the money.
+  const liveHere = !!sess && summaryTableOpen(t);
+  const movableTotal = movable.reduce((s2, o) => s2 + (parseFloat(o.total) || 0), 0);
   const rows = [
     // Marking a table works with NO order on it — that is the point of reaching this menu from
     // the floor's own KOT button (owner, 2026-07-31: "before a table or order is taken you can
     // mark table as VIP from that option").
     { id: "type", icon: TABLE_TAG_INFO[tagForTable(t)] ? TABLE_TAG_INFO[tagForTable(t)].emoji : "🏷", label: "Table type", sub: "VIP · Family · Owner's guest", on: tagActionAllowed("table_tags"), why: "not enabled" },
     // A merged party doesn't shift (mig 264) — same rule as the desktop columns above.
-    { id: "shift", icon: "⇄", label: "Change table", sub: "Party, orders & bill move to a free table", on: !!sess && !mergeGroupLabel(t), why: mergeGroupLabel(t) ? "unmerge first" : "table closed" },
-    { id: "merge", icon: "🪢", label: "Merge tables", sub: "Join another party — one table, one bill", on: !!sess && occupiedOthers > 0, why: occupiedOthers ? "table closed" : "no other open table" },
-    { id: "movekot", icon: "🧾", label: "Move a KOT", sub: "Send one order to another table's bill", on: movable.length > 0, why: "no movable KOT" },
+    { id: "shift", icon: "⇄", label: "Change table", sub: "Party, orders & bill move to a free table", on: liveHere && !mergeGroupLabel(t), why: mergeGroupLabel(t) ? "unmerge first" : "table is free" },
+    { id: "merge", icon: "🪢", label: "Merge tables", sub: bill.total > 0 ? `One table, one bill · this side ${inr(bill.total)}` : "Join another party — one table, one bill",
+      on: liveHere && occupiedOthers > 0, why: mergeGroupLabel(t) && !sess ? "unmerge first" : !liveHere ? "table is free" : "no other open table" },
+    { id: "movekot", icon: "🧾", label: "Move a KOT", sub: movable.length ? `One order moves · ${movable.length} KOT${movable.length === 1 ? "" : "s"}, ${inr(movableTotal)}` : "Send one order to another table's bill", on: movable.length > 0, why: "no movable KOT" },
     // Only DB-backed dish rows (kind "session") can move — legacy JSON lines have no row id.
     { id: "moveitem", icon: "🍛", label: "Move a single dish", sub: "One dish moves — it gets its own new KOT there", on: movable.some((o) => orderItemRows(o).some((r) => r.kind === "session")), why: "no movable dish" },
     { id: "reprint", icon: "🖨️", label: "Print / reprint a KOT", sub: "Here, or on the kitchen's printer", on: ordersForTable(t).some((o) => o.status !== "cancelled"), why: "no KOTs" },
@@ -11245,7 +11365,7 @@ function openKotMenu(t, sess) {
     <span class="kotm-txt"><b>${r.label}</b><small>${r.sub}</small></span>
     ${r.on ? `<span class="kotm-chev">›</span>` : `<span class="kotm-off-why">${r.why}</span>`}</button>`;
   const wrap = el(`<div class="sx-modal-overlay kotmenu-overlay"><div class="sx-modal kotm-sheet">
-    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 T${esc(t)}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
+    <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 ${esc(tileFace(t))}</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
     <div class="kotm-bill">KOT &amp; table operations${bill.total > 0 ? ` · bill due ${inr(bill.total)}` : ""}${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}</div></div>
     <div class="kotm-list">${rows.map(rowHtml).join("")}</div></div></div>`);
   document.body.appendChild(wrap);
@@ -11480,7 +11600,7 @@ async function openSplitSettle(t) {
   const dishSubtotal = dishes.reduce((s, d) => s + d.amt, 0) || 1;
   const methodSel = (i, v) => `<select class="ss-method" data-leg="${i}" style="padding:8px;border-radius:8px">${METHODS.map((m) => `<option${m === (v || "Cash") ? " selected" : ""}>${m}</option>`).join("")}</select>`;
   const wrap = el(`<div class="sx-modal-overlay splitsettle-overlay"><div class="sx-modal" style="max-width:460px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split T${esc(t)}'s bill · ${inr(due)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍴 Split ${esc(tileFace(t))}'s bill · ${inr(due)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="dish-edit-body" style="padding:12px 14px 14px">
       <div class="ss-tabs" style="display:flex;gap:6px;margin-bottom:10px">
         <button class="btn ss-tab" data-mode="equal">Equal</button>
@@ -11558,7 +11678,7 @@ function openMoveItemPicker(t) {
   if (!groups) { toast("No movable dishes on this table", "err"); return; }
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
   const wrap = el(`<div class="sx-modal-overlay moveitem-overlay"><div class="sx-modal" style="max-width:440px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍛 Move a dish from T${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🍛 Move a dish from ${esc(tileFace(t))}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="muted small mvi-hint" style="padding:0 14px 8px">Step 1 · which dish should move? (a multi-plate line moves whole)</div>
     <div class="dish-edit-body mvi-body" style="padding:6px 14px 14px">${groups}</div></div></div>`);
   document.body.appendChild(wrap);
@@ -11570,19 +11690,22 @@ function openMoveItemPicker(t) {
   wrap.querySelectorAll("[data-mvitem]").forEach((b) => (b.onclick = () => {
     const itemId = b.dataset.mvitem;
     hint.textContent = "Step 2 · move it to which table? (it gets its own new KOT there)";
-    const tiles = [];
-    for (let i = 1; i <= n; i++) {
-      if (String(i) === String(t)) continue;
+    // Same rule as Move-a-KOT: the floor's list, the floor's names, and this party's own tables
+    // dimmed rather than offered (T3 sweep, 2026-08-10).
+    const party = new Set(partyTablesOf(t).map(String));
+    const tiles = floorTableList(n).map((i) => {
+      if (String(i) === String(t)) return "";
+      if (party.has(String(i))) return `<button class="kotm-tile kotm-tile-off" disabled aria-disabled="true" title="${esc(tileFace(i))} — same bill"><b>${esc(tileFace(i))}</b><small>same bill</small></button>`;
       const open = summaryTableOpen(i);
-      tiles.push(`<button class="kotm-tile${open ? " occ" : ""}" data-mvto="${i}"><b>T${i}</b><small>${open ? "joins bill" : "free"}</small></button>`);
-    }
+      return `<button class="kotm-tile${open ? " occ" : ""}" data-mvto="${i}"><b>${esc(tileFace(i))}</b><small>${open ? "joins bill" : "free"}</small></button>`;
+    });
     body.innerHTML = `<div class="kotm-grid">${tiles.join("")}</div>`;
     body.querySelectorAll("[data-mvto]").forEach((tb) => (tb.onclick = async () => {
       const to = tb.dataset.mvto; closeM();
       try {
         const r = await api("POST", `/order-items/${itemId}/move`, { to });
         if (r && r.ok === false) { toast("Couldn't move: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
-        toast(`Dish moved to table ${to} (new KOT)`, "ok");
+        toast(`Dish moved to ${tileFace(to)} (new KOT)`, "ok");
       } catch (e) { toast("Failed: " + e.message, "err"); }
     }));
   }));
@@ -11594,25 +11717,36 @@ function openMoveItemPicker(t) {
 function openMergePicker(t, sess) {
   document.querySelector(".merge-overlay")?.remove();
   const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
-  const occ = [];
-  for (let i = 1; i <= n; i++) { if (String(i) !== String(t) && summaryTableOpen(i)) occ.push(i); }
+  // floorTableList + the floor's own names, so the phone offers exactly what the desktop offers
+  // and calls each table what the floor calls it (T3 sweep, 2026-08-10).
+  const occ = floorTableList(n).filter((i) => String(i) !== String(t) && summaryTableOpen(i));
+  const partyFace = (i) => { const kids = mergeChildrenOf(i); return kids.length ? [tileFace(i), ...kids.map(tileFace)].join(" + ") : tileFace(i); };
   const tileDue = (i) => { const tile = (state.summary && state.summary.tiles || {})[String(i)]; return tile && tile.due > 0 ? inr(tile.due) : ""; };
+  const myDue = billMath(partyOrders(t).filter((o) => o.status !== "cancelled" && o.payment_status !== "paid" && o.status !== "received")).total;
   const grid = occ.length
-    ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ" data-mergeto="${i}"><b>T${i}</b><small>${tileDue(i) ? `due ${tileDue(i)}` : "open"}</small></button>`).join("") + `</div>`
+    ? `<div class="kotm-grid">` + occ.map((i) => `<button class="kotm-tile occ${mergeChildrenOf(i).length ? " kotm-tile-party" : ""}" data-mergeto="${i}"><b>${esc(partyFace(i))}</b><small>${tileDue(i) ? `due ${tileDue(i)}` : "open"}</small></button>`).join("") + `</div>`
     : `<div class="muted" style="padding:14px">No other open tables to merge with.</div>`;
-  const wrap = el(`<div class="sx-modal-overlay merge-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>🪢 Merge T${esc(t)} into →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Everything — orders, guests, calls &amp; bill — joins the other table as ONE bill. T${esc(t)} then frees up.</div><div class="shiftgrid">${grid}</div></div></div>`);
+  const wrap = el(`<div class="sx-modal-overlay merge-overlay"><div class="sx-modal shift-modal"><div class="tbl-modal-head"><div class="tp-detail-top"><h3>🪢 Merge ${esc(tileFace(t))} into →</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div><div class="muted small" style="padding:0 14px 10px">Everything — orders, guests, calls &amp; bill — joins as ONE bill, held by the LOWEST table number.</div><div class="shiftgrid">${grid}</div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
   wrap.querySelector(".tbl-modal-close").onclick = closeM;
   wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
   wrap.querySelectorAll("[data-mergeto]").forEach((b) => (b.onclick = async () => {
     const to = b.dataset.mergeto;
-    if (!(await confirmDialog(`Merge T${t} into T${to}? Both parties become ONE bill on T${to}.`, "Merge"))) return;
+    // THE BILL GOES TO THE LOWER NUMBER, WHICHEVER ONE YOU TAPPED (T3 sweep, 2026-08-10). This said
+    // "Both parties become ONE bill on T${to}" — so merging T4 into T9 promised the bill would be on
+    // T9 and the server put it on T4. The desktop path has said it correctly since mig 249; the
+    // phone was left with the old sentence. The money is shown for the same reason the desktop shows
+    // it (owner, 2026-08-11 — improvement 5): this is the tap that joins two parties' money.
+    const theirDue = (() => { const tile = (state.summary && state.summary.tiles || {})[String(to)]; return (tile && Number(tile.due)) || 0; })();
+    const keeps = (Number(t) <= Number(to)) ? t : to;
+    const money = (myDue > 0 || theirDue > 0) ? ` ${inr(myDue)} + ${inr(theirDue)} → ${inr(myDue + theirDue)} on one bill.` : "";
+    if (!(await confirmDialog(`Merge ${tileFace(t)} into ${partyFace(to)}? They become ONE party on ONE bill, held by ${tileFace(keeps)} (the lowest table number).${money}`, "Merge"))) return;
     closeM();
     try {
       const r = await api("POST", `/sessions/${sess.id}/merge`, { to });
       if (r && r.ok === false) { toast("Couldn't merge: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
-      toast(`Merged into table ${to} — one bill`, "ok");
+      toast(`Merged into ${tileFace((r && r.parent_table) || keeps)} — one bill`, "ok");
       // Fresh tiles + merges list first, then follow the table the SERVER kept (the lowest
       // number holds the bill — not always the one that was tapped). Same fix as the desktop
       // columns: without the poll the detail counts one table's food (owner, 2026-08-03).
@@ -11638,7 +11772,7 @@ function openMoveKotPicker(t) {
       <span><b>KOT #${o.kot_no != null ? esc(o.kot_no) : "—"}</b> · ${nd} dish${nd === 1 ? "" : "es"}</span><span>${inr(parseFloat(o.total) || 0)}</span></button>`;
   };
   const wrap = el(`<div class="sx-modal-overlay movekot-overlay"><div class="sx-modal" style="max-width:440px">
-    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Move a KOT from T${esc(t)}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
+    <div class="tbl-modal-head"><div class="tp-detail-top"><h3>🧾 Move a KOT from ${esc(tileFace(t))}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
     <div class="muted small" style="padding:0 14px 8px">Step 1 · which KOT should move?</div>
     <div class="dish-edit-body movekot-body" style="padding:6px 14px 14px">${movable.map(kotRow).join("")}</div></div></div>`);
   document.body.appendChild(wrap);
@@ -11651,19 +11785,23 @@ function openMoveKotPicker(t) {
     const orderId = b.dataset.kot;
     const o = movable.find((x) => x.id === orderId);
     hint.textContent = `Step 2 · move KOT #${o && o.kot_no != null ? o.kot_no : "—"} to which table?`;
-    const tiles = [];
-    for (let i = 1; i <= n; i++) {
-      if (String(i) === String(t)) continue;
+    // The floor's own list and the floor's own names — and a table of THIS party is dimmed with a
+    // reason instead of offered: it resolves to the bill this KOT is already on, so the server
+    // answers 'same_table' every time (T3 sweep, 2026-08-10).
+    const party = new Set(partyTablesOf(t).map(String));
+    const tiles = floorTableList(n).map((i) => {
+      if (String(i) === String(t)) return "";
+      if (party.has(String(i))) return `<button class="kotm-tile kotm-tile-off" disabled aria-disabled="true" title="${esc(tileFace(i))} — same bill"><b>${esc(tileFace(i))}</b><small>same bill</small></button>`;
       const open = summaryTableOpen(i);
-      tiles.push(`<button class="kotm-tile${open ? " occ" : ""}" data-moveto="${i}"><b>T${i}</b><small>${open ? "joins bill" : "free"}</small></button>`);
-    }
+      return `<button class="kotm-tile${open ? " occ" : ""}" data-moveto="${i}"><b>${esc(tileFace(i))}</b><small>${open ? "joins bill" : "free"}</small></button>`;
+    });
     body.innerHTML = `<div class="kotm-grid">${tiles.join("")}</div>`;
     body.querySelectorAll("[data-moveto]").forEach((tb) => (tb.onclick = async () => {
       const to = tb.dataset.moveto; closeM();
       try {
         const r = await api("POST", `/orders/${orderId}/move`, { to });
         if (r && r.ok === false) { toast("Couldn't move: " + (KOT_REASON_TEXT[r.reason] || r.reason || "rejected"), "err"); return; }
-        toast(`KOT moved to table ${to}`, "ok");
+        toast(`KOT moved to ${tileFace(to)}`, "ok");
         // Both tables repaint via the RPC's breadcrumbs (targeted refetch) — no manual reload.
       } catch (e) { toast("Failed: " + e.message, "err"); }
     }));
@@ -12304,10 +12442,16 @@ function patchSummaryTileAccept(t) {
 }
 function patchSummaryTileAttend(t) {
   const s = state.summary || {};
-  const calls = (s.calls || []).filter((c) => (c.table_number || "").trim() !== String(t)); // drop this table's calls
+  // The whole PARTY's tables — "Attend all" now clears the party's calls (T3 sweep, 2026-08-10),
+  // so the optimistic patch has to clear the same set or one partner's tile keeps a 🔔 for a call
+  // that has just been answered, until the next poll.
+  const party = new Set(partyTablesOf(t).map(String));
+  const calls = (s.calls || []).filter((c) => !party.has((c.table_number || "").trim()));
   const patch = { calls };
-  const tile = (s.tiles || {})[String(t)];
-  if (tile) patch.tiles = Object.assign({}, s.tiles, { [String(t)]: Object.assign({}, tile, { hasCall: false }) });
+  const tiles = Object.assign({}, s.tiles);
+  let touched = false;
+  for (const x of party) if (tiles[x]) { tiles[x] = Object.assign({}, tiles[x], { hasCall: false }); touched = true; }
+  if (touched) patch.tiles = tiles;
   state.summary = Object.assign({}, s, patch);
 }
 async function acceptTableOrders(t) {
@@ -12402,8 +12546,10 @@ async function serveAllOrders(t) {
 }
 // Quick action: mark every open call on a table attended (clears the tile's emoji).
 async function attendTableCalls(t) {
-  await ensureTableSlice(t); // the call rows for a non-selected table aren't cached otherwise
-  const cs = callsForTable(t);
+  // The PARTY's slices — "✓ Attend all" on a joined table must clear the party's calls, not one
+  // table's, for the same reason "Accept all" does (T3 sweep, 2026-08-10).
+  await ensurePartySlices(t);
+  const cs = partyCalls(t);
   // A tap always leaves a trace (owner rule; sweep 2026-08-04) — the 🔔 comes from the summary
   // tile, so another device answering the call first left this returning in total silence.
   if (!cs.length) {
@@ -13557,9 +13703,24 @@ async function pollTables(tables) {
   try { reconcileBoard(); } finally { targetedPatchTables = null; }
 }
 
-// startOrderWatch: kick off the live polling. The first call sets the "baseline"
-// counts so we don't alert for orders that were already there; then setInterval
-// repeats it every second so the floor and alerts stay near-real-time.
+// startOrderWatch: put the floor on LIVE UPDATES. Nothing here repeats on a fast beat, and the
+// summary used to say it did ("setInterval repeats it every second") — a sentence describing code
+// that was replaced long ago, sitting at the top of the one function somebody opens to answer "how
+// often does this panel ask the server?" (T3 sweep, 2026-08-10; the owner's rule is that the floor
+// is never on a poll — reads are the cost, and a fast beat from every screen in the estate is what
+// makes a busy evening worse, not better).
+//
+// What actually happens, in order of who does the work:
+//   1. ONE first read to set the baseline, so nothing chimes for orders that were already there.
+//   2. REALTIME does the updating: a breadcrumb naming the changed tables → pollTables(those), a
+//      breadcrumb without tables → one full refresh, a menu/permission change → loadAll/whoami.
+//   3. A 60-SECOND BACKSTOP, and only while the tab is visible — an idle tab in a back pocket
+//      costs nothing at all.
+//   4. LFH_RT.catchUp: ~5s, but ONLY while the socket is down AND reads are succeeding; it backs
+//      off to a minute for as long as reads FAIL, and jitters, so a struggling database is never
+//      hammered by twenty devices on the same beat.
+//   5. If realtime never loaded at all, the same shape written out small (2s → doubling to 60s on
+//      failure, jittered, nothing while hidden or offline).
 function startOrderWatch() {
   // Boot grace: the initial page load already fetches /all + /summary + /platform fresh
   // (loadAll + this pollOrders + loadPlatform). The realtime CONNECT then fires its own
@@ -13570,9 +13731,10 @@ function startOrderWatch() {
   // there's zero steady-state staleness. (egress, 2026-07-06)
   rtBootGraceUntil = Date.now() + 3000;
   pollOrders(); // sets the baseline immediately (no alert on first run)
-  // Realtime: refresh the floor the instant an order/dish changes, instead of
-  // polling every second. Slow 60s timer is the backup if the WebSocket drops;
-  // if realtime didn't load, fall back to a gentle 2s poll.
+  // Realtime does the updating — the floor refreshes the instant an order or dish changes, and is
+  // never on a beat of its own. The 60s timer below is a BACKSTOP for a dropped socket (skipped on
+  // a hidden tab); the branch after it is the last resort for a browser where realtime never
+  // loaded, and it backs off rather than repeating.
   if (window.LFH_RT) {
     // Split by topic: ops churn → cheap pollOrders(); menu content edits (dishes,
     // categories, filters, settings) → loadAll() so the dish lists refresh live too.

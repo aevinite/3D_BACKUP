@@ -108,6 +108,7 @@
     "verify:void-party": "node scripts/verify-void-on-joined-party.mjs",
     "verify:rota-clash": "node scripts/verify-rota-clash.mjs",
     "verify:merge-who": "node scripts/verify-merge-records-who.mjs",
+    "verify:merge-keeps-mark": "node scripts/verify-merge-keeps-mark.mjs",
     "verify:read-guards": "node scripts/verify-read-guards.mjs",
     "verify:personal-data": "node scripts/verify-personal-data.mjs",
     "read-timings": "node scripts/read-timings.mjs"
