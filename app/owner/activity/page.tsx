@@ -250,7 +250,7 @@ function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval }: {
               : "Nothing has been removed yet — this list fills itself as it happens."}
         </div>
       ) : (
-        <div className="adm-logwrap">
+        <div className="adm-logwrap aud-stack">
           <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>What was removed</div><div>Why · by whom</div><div>When</div></div>
           {list.map((r) => {
             const [ico, label] = REMOVAL_KIND[r.kind] || ["•", r.kind];

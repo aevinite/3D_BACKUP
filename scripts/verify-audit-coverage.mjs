@@ -218,11 +218,20 @@ else {
   // RemovalDetail (`KIND_LABEL`). Deriving is stronger than listing — it cannot fall behind — so
   // it counts as covered. Before the T15 sweep there were three hand-written maps and the owner's
   // row and the card it opened disagreed on six of the nine kinds.
-  const derives = (src) => /KIND_LABEL/.test(src) && /Object\.(keys|fromEntries)\s*\(/.test(src);
+  // DERIVING IS NOW REQUIRED, NOT MERELY ACCEPTED (T7 pass 2, 2026-08-12).
+  // This used to let a screen EITHER derive from the shared map or list every kind itself. Two of the
+  // three listed — and drifted: SIX of the eleven types were named differently in each, so one
+  // database row read "Bill reopened" to the owner and "Invoice voided" to the manager looking at the
+  // same removal, whose own button says "Reopen bill". Listing is what allowed that, so listing is no
+  // longer a pass. The words live in /panels/auditsort.js (a plain-JS module the manager panel can
+  // load as a bare <script>) and all three read them.
+  const derives = (src) =>
+    (/KIND_LABEL/.test(src) && /Object\.(keys|fromEntries)\s*\(/.test(src))
+    || /LFH_AUDITSORT/.test(src);          // the manager panel's door onto the same map
   const missing = [];
   for (const [name, src] of [["manager panel", panel], ["admin page", adminPage], ["owner page", ownerPage]]) {
     if (derives(src)) continue;
-    for (const k of kinds) if (!src.includes(`${k}:`)) missing.push(`${k} (${name})`);
+    missing.push(`${name} writes its own list of removal names instead of reading /panels/auditsort.js — that is how six of eleven ended up with a different name per panel`);
   }
   if (missing.length) fail(`kinds with no label — they render as a raw key like "qty_reduced": ${missing.join(", ")}`);
   else ok(`all ${kinds.length} kinds have a label in the manager, admin and owner views`);

@@ -24,6 +24,56 @@
 (function () {
   "use strict";
 
+  /* THE WORDS AND THE GLYPH FOR EVERY REMOVAL TYPE — the ONE set, for all three panels.
+     WHY (T7 pass 2, 2026-08-12): there were THREE hand-written maps and SIX of the eleven types were
+     named differently in each. An owner rang about "the Bill reopened on table 6" while the manager
+     was looking at a screen calling it "Invoice voided" — one database row, three names. verify:audit
+     had already fixed this once for the owner's row-versus-card pair; the three PANELS were never
+     brought together, and adding a type CHIP to each of them made it impossible to miss.
+
+     WHICH word won, per type — taken from what the product's own buttons say and from the owner's own
+     vocabulary, not from whichever panel shouted loudest:
+       · "KOT cancelled" — KOT is his word (mig 251 quotes him: "every KOT which has been deleted")
+         and the panel says KOT 152 times to Kitchen ticket's 6. The row already prints "KOT #17".
+       · "Bill reopened" — the manager panel's OWN button reads "Reopen bill" and the Access screen
+         says "Reopening a bill that was already closed… it is recorded that it was reopened". The old
+         "Invoice voided" contradicted the button beside it.
+       · "Dish removed from an order" / "Menu item deleted" — a bare "Dish removed" cannot be told
+         apart from taking a dish off the MENU, which is a different row entirely.
+       · "Settled on the house" — a bare "On the house" reads like a label, not something that happened.
+     Anything the three already agreed on is left exactly as it was. */
+  var KIND_LABEL = {
+    order_cancelled: "KOT cancelled",
+    order_deleted: "Bill deleted",
+    dish_removed: "Dish removed from an order",
+    qty_reduced: "Quantity reduced",
+    menu_item_deleted: "Menu item deleted",
+    invoice_voided: "Bill reopened",
+    discount_given: "Discount given",
+    payment_reverted: "Payment reverted",
+    on_the_house: "Settled on the house",
+    bill_changed_after_reopen: "Bill changed after a reopen",
+    order_restored: "Bill put back",
+  };
+  /* The glyph each type wears, beside the words so the two cannot drift. Plain text symbols only —
+     the manager panel renders these into its own markup and a couple of its rows print to paper. */
+  var KIND_ICON = {
+    order_cancelled: "\uD83C\uDFAB", order_deleted: "\uD83E\uDDFE", dish_removed: "\uD83C\uDF7D",
+    qty_reduced: "\u2796", menu_item_deleted: "\uD83D\uDCD5", invoice_voided: "\u21A9\uFE0F",
+    discount_given: "\uFF05", payment_reverted: "\u21BA", on_the_house: "\uD83C\uDF81",
+    bill_changed_after_reopen: "\u21C4", order_restored: "\u267B\uFE0F",
+  };
+  /* The one-tap reasons, for the same reason — the search matches on the WORDS a screen shows, so a
+     third spelling of "By mistake" would make typing it find nothing on one panel and rows on another. */
+  var REASON_LABEL = {
+    mistake: "By mistake",
+    guest_changed: "Guest changed their mind",
+    wrong_table: "Wrong table",
+    sold_out: "Not available / sold out",
+    kitchen_error: "Kitchen error",
+    other: "Other reason",
+  };
+
   var num = function (v) { var n = parseFloat(String(v == null ? "" : v)); return isFinite(n) ? n : 0; };
   var txt = function (v) { return String(v == null ? "" : v).trim().toLowerCase(); };
   var when = function (r) { var t = Date.parse(r && r.at); return isFinite(t) ? t : 0; };
@@ -137,6 +187,9 @@
   }
 
   var API = {
+    KIND_LABEL: KIND_LABEL,
+    KIND_ICON: KIND_ICON,
+    REASON_LABEL: REASON_LABEL,
     SORTS: SORTS,
     DEFAULT_SORT: DEFAULT_SORT,
     sortById: sortById,

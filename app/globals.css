@@ -4047,6 +4047,22 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   /* grid "log" tables (admin restaurants/users/log): scroll sideways, keep columns aligned */
   .adm-logwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
   .adm-logrow { min-width: 540px; }
+  /* …EXCEPT THE AUDIT, WHICH STACKS INSTEAD (T7 pass 2, 2026-08-12).
+     Keeping three columns aligned is the right call for the admin's restaurants/users tables — you
+     compare rows down a column there. It is the wrong call for the Audit: its columns are
+     "What was removed" / "Why · by whom" / "When", and measured on the owner's A35 at 360px the row
+     was forced to 540px, so 244px sat off-screen behind a sideways scroll with nothing saying so.
+     "Why, and by whom" is the entire reason the Audit exists — it cannot be the part you have to
+     drag for. So on a phone an Audit row becomes one block per row, in reading order.
+     `!important` because the column template is an inline style on the element (each screen passes
+     its own `cols`), and an inline style outranks a stylesheet rule — the same reason the
+     .ow2-stats overrides above carry it. */
+  .aud-stack .adm-logrow { min-width: 0 !important; grid-template-columns: 1fr !important; gap: 5px; padding: 12px 14px; }
+  /* A column header describes columns. Once the row is stacked there are none, so it would just be
+     three words floating above unrelated blocks. */
+  .aud-stack .adm-logrow.head { display: none; }
+  /* "When" reads as a quiet footer to the block rather than a third column. */
+  .aud-stack .adm-logrow .adm-when { font-size: 11.5px; }
   .adm-togglegrid { grid-template-columns: 1fr 1fr; }
   /* Compact the wrapped nav on phones: 3 per row instead of 2, smaller — every item
      stays visible (deliberate 2026-06-26 choice) but the block is half as tall. */
