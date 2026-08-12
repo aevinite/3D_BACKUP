@@ -3772,6 +3772,36 @@ html[data-theme="light"] .sx-mgrow { background: color-mix(in srgb, #a855f7 10%,
   background: var(--panel-2); color: var(--text); font-size: 13px; font-family: inherit; }
 .au-sort select:focus { outline: 0; border-color: var(--gold); }
 .au-count { font-size: 12px; color: var(--muted); margin: 0 0 10px; }
+/* Before / after, side by side, in the removal card (owner, 2026-08-12).
+   Two equal columns on a desktop; ONE column stacked on a phone, because two 150px columns of
+   money is unreadable — the whole point is comparing figures, and a squeezed pair defeats it.
+   `minmax(0, 1fr)` not `1fr`: a long dish name in a grid child otherwise refuses to shrink and
+   pushes the second box off the card. Tokens only, so both panel skins are right. */
+.au-sides { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin: 2px 0 4px; }
+.au-side { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; min-width: 0; }
+.au-side-gone { opacity: .72; }
+.au-side-h { font-size: 10.5px; text-transform: uppercase; letter-spacing: .7px; font-weight: 700;
+  padding: 6px 10px; background: color-mix(in srgb, var(--gold) 10%, transparent); color: var(--text); }
+.au-side-b { padding: 4px 10px 8px; }
+.au-side-r { display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; font-size: 12.5px; }
+.au-side-r > span { color: var(--muted); font-size: 11.5px; }
+.au-side-r > b { font-weight: 400; text-align: right; min-width: 0; word-break: break-word; }
+/* A figure that MOVED. Amber + bold, and the line under the boxes names them in words too — a
+   highlight nobody can read is decoration.
+   THE PANEL HAS NO --warn TOKEN, so this is the literal amber the panel already uses everywhere
+   (.avail-toggle.hid, .ldot-new) — with a DARKER one for the cream skin, exactly as .tp-req-sec
+   does two thousand lines up: #f59e0b on cream is too pale to read. Writing var(--warn, #f59e0b)
+   here would have pinned one value into both skins, which is the undeclared-token trap. */
+.au-side-r.au-hot > b { color: #f59e0b; font-weight: 700; }
+html[data-theme="light"] .au-side-r.au-hot > b { color: #96690f; }
+.au-gone-note { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; margin: 2px 0 8px;
+  font-size: 12.5px; background: color-mix(in srgb, #ef4444 10%, transparent); }
+/* The bill itself. White background always — it is a piece of paper, in both skins. */
+.au-billwrap { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; margin: 2px 0 4px; }
+.au-billframe { width: 100%; height: 560px; border: 0; display: block; background: #fff; }
+@media (max-width: 560px) {
+  .au-sides { grid-template-columns: minmax(0, 1fr); }
+}
 .au-rows { display: flex; flex-direction: column; gap: 8px; }
 .au-row { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border-radius: 12px;
   background: var(--panel-2); border: 1px solid var(--line); }

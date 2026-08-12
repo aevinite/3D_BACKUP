@@ -36,6 +36,7 @@ import { softDeleteOrders } from "@/lib/softDelete";
 // The admin stays invisible to a MANAGER too — the Audit now obeys the rule the Activity log
 // already did (lib/auditActor.ts).
 import { auditForReader, forReader } from "@/lib/auditActor";
+import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
 import { notifyAggregator } from "@/lib/aggregators";
 import { PAYMENT_METHODS } from "@/lib/payments";
 import { settleBillInParts, reverseSplitLegs } from "@/lib/paySplit";
@@ -2184,7 +2185,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         if (!one || !one.length) return err("That record isn't for this restaurant.", 404);
         // `g.user` is null ONLY for the admin super-user. A real manager never learns that Aevidine
         // removed something in their restaurant; the row, its reason and its amount are untouched.
-        return ok(forReader(one[0] as { actor?: string | null; actor_role?: string | null }, !g.user));
+        // …with the two boxes and the bill, so the manager's card is the SAME card the owner and the
+        // admin read (one record, one story — the rule this whole area exists under).
+        const dMeta = ((one[0] as Record<string, unknown>).meta || {}) as Record<string, unknown>;
+        const [dAfter, dBill] = await Promise.all([
+          auditAfter(rid, (one[0] as Record<string, unknown>).order_id ? String((one[0] as Record<string, unknown>).order_id) : null),
+          auditBillHtml(rid, (dMeta.was || null) as Record<string, unknown> | null),
+        ]);
+        return ok({
+          ...forReader(one[0] as { actor?: string | null; actor_role?: string | null }, !g.user),
+          __after: dAfter, __billHtml: dBill,
+        });
       }
       const lim = Math.min(Math.max(parseInt(String(req.nextUrl.searchParams.get("limit") || "100"), 10) || 100, 1), 300);
       const rows = must(await sb.from("deletion_audit")

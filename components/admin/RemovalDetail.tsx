@@ -101,8 +101,136 @@ function Head({ children }: { children: React.ReactNode }) {
   );
 }
 
-export function RemovalDetail({ r, canRestore, onRestore, restoring }: {
+/** One side of the BEFORE / AFTER pair. Same shape both sides, so the two boxes line up row for row
+ *  and the eye can do the comparing — which is the whole point of showing two. */
+type SideFigures = {
+  state?: "live" | "cancelled" | "removed";
+  kot_no?: number | null; table_number?: string | null;
+  status?: string | null; payment_status?: string | null;
+  item_count?: number | null;
+  items?: { title?: string | null; qty?: number | null; price?: number | null; note?: string | null }[] | null;
+  subtotal?: number | null; discount?: number | null; tax?: number | null; total?: number | null;
+} | null;
+
+/* BEFORE AND AFTER, SIDE BY SIDE (owner, 2026-08-12: "there should be two box like if you have
+   changed any KOT or edit any KOT — so before how it was looking and after how it was looking").
+
+   BEFORE is the snapshot stored at the moment of the change; AFTER is the order read LIVE, so the
+   right-hand box always answers "and how does it stand now?" rather than freezing at a moment that
+   has since passed (see lib/auditDetail.ts for why that choice).
+
+   A figure that CHANGED is marked. Nothing else is — a card where everything is highlighted has told
+   you nothing, and the one number that moved is the reason someone opened this. */
+function SideBySide({ before, after }: { before: SideFigures; after: SideFigures }) {
+  const gone = !after || after.state === "removed" || after.state === "cancelled";
+  const rows: [string, unknown, unknown][] = [
+    ["Kitchen ticket", before?.kot_no != null ? `KOT #${before.kot_no}` : null, after?.kot_no != null ? `KOT #${after.kot_no}` : null],
+    ["Table", before?.table_number ? `Table ${before.table_number}` : null, after?.table_number ? `Table ${after.table_number}` : null],
+    ["Lines", before?.item_count ?? (before?.items?.length ?? null), after?.item_count ?? (after?.items?.length ?? null)],
+    ["Subtotal", before?.subtotal, after?.subtotal],
+    ["Discount", before?.discount, after?.discount],
+    ["Tax", before?.tax, after?.tax],
+    ["Total", before?.total, after?.total],
+    ["Status", before?.status, after?.status],
+  ];
+  const isMoney = (k: string) => ["Subtotal", "Discount", "Tax", "Total"].includes(k);
+  const show = (k: string, v: unknown) => (v == null || v === "" ? "—" : isMoney(k) ? money(v) : String(v));
+  // Only compare where BOTH sides have something to compare; "—" versus a number on a removed order
+  // is not a change, it is the removal itself, and the band above already says so.
+  const changed = (a: unknown, b: unknown) => !gone && a != null && b != null && String(a) !== String(b);
+
+  return (
+    <>
+      <Head>Before and after</Head>
+      {gone ? (
+        <div style={{ border: "var(--border)", borderRadius: 10, padding: "9px 11px", marginBottom: 8, fontSize: 12.5,
+                      background: "color-mix(in srgb, var(--adm-danger) 10%, transparent)" }}>
+          {after?.state === "cancelled"
+            ? "This ticket was cancelled — nothing was charged for it. The left column is what it held."
+            : "This is off the books now. The left column is what it held when it was removed — the row itself is kept, which is why you can still read it."}
+        </div>
+      ) : null}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 10 }}>
+        {[["Before", before] as const, [gone ? "After · removed" : "After · as it stands now", after] as const].map(([label], i) => (
+          <div key={label} style={{
+            border: "var(--border)", borderRadius: 10, overflow: "hidden",
+            opacity: i === 1 && gone ? 0.72 : 1,
+          }}>
+            <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: ".7px", fontWeight: 700,
+                          padding: "6px 10px", background: "color-mix(in srgb, var(--accent) 8%, transparent)" }}>
+              {label}
+            </div>
+            <div style={{ padding: "4px 10px 8px" }}>
+              {rows.map(([k, a, b]) => {
+                const v = i === 0 ? a : b;
+                const moved = changed(a, b);
+                return (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", gap: 8, padding: "3px 0", fontSize: 12.5 }}>
+                    <span className="adm-muted" style={{ fontSize: 11.5 }}>{k}</span>
+                    <b style={{
+                      fontWeight: moved ? 700 : 400, textAlign: "right",
+                      color: moved ? "var(--adm-warn)" : undefined,
+                    }}>{show(k, v)}</b>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* Named rather than left to the colour alone — a highlight nobody can read is decoration. */}
+      {!gone && rows.some(([, a, b]) => changed(a, b)) ? (
+        <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 6 }}>
+          What moved is marked in amber: {rows.filter(([, a, b]) => changed(a, b)).map(([k]) => k.toLowerCase()).join(", ")}.
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/* THE BILL ITSELF — the real document, not a picture of one.
+   He asked for an image and said he did not know how. An image would mean generating and storing a
+   PNG per removal, and it would go blurry the moment anyone zoomed. public/panels/billdoc.js IS the
+   bill, so the server feeds it the stored snapshot and hands back the same HTML the printer gets
+   (lib/auditDetail.ts). It goes in an iframe because the bill carries print CSS of its own and that
+   must not leak onto the screen around it. `sandbox` with nothing enabled: it is evidence being read,
+   so it needs no scripts and must not be able to navigate anywhere. */
+function BillFrame({ html }: { html: string }) {
+  const [tall, setTall] = useState(560);
+  return (
+    <>
+      <Head>The bill as it stood</Head>
+      <div style={{ border: "var(--border)", borderRadius: 10, overflow: "hidden", background: "#fff" }}>
+        <iframe
+          title="The bill as it was when this happened"
+          srcDoc={html}
+          sandbox=""
+          onLoad={(e) => {
+            // Grow to the document so there is no inner scrollbar on a short bill. Cross-document
+            // reads are allowed here because srcDoc with an empty sandbox is same-origin-ish in every
+            // browser we support; wrapped anyway, since a failure just means the default height.
+            try {
+              const d = (e.currentTarget as HTMLIFrameElement).contentDocument;
+              if (d?.body) setTall(Math.min(1400, Math.max(320, d.body.scrollHeight + 24)));
+            } catch { /* keep the default */ }
+          }}
+          style={{ width: "100%", height: tall, border: 0, display: "block", background: "#fff" }}
+        />
+      </div>
+      <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 5 }}>
+        Rebuilt from what was recorded at the time — the same document the printer produces, not a photo.
+      </div>
+    </>
+  );
+}
+
+export function RemovalDetail({ r, after, billHtml, canRestore, onRestore, restoring }: {
   r: RemovalFull;
+  /** The order AS IT STANDS NOW, for the right-hand box. Absent for a removal that was never about
+   *  an order (a dish taken off the menu), in which case no comparison is drawn. */
+  after?: SideFigures;
+  /** The bill as it stood, as real HTML from billdoc.js. Absent when there is no bill to draw. */
+  billHtml?: string | null;
   canRestore?: boolean;
   onRestore?: () => void;
   restoring?: boolean;
@@ -197,6 +325,11 @@ export function RemovalDetail({ r, canRestore, onRestore, restoring }: {
         </>
       ) : null}
 
+      {/* The comparison, then the bill. Both only when there is something real to show — an empty
+          pair of boxes would be worse than none. */}
+      {was ? <SideBySide before={was as SideFigures} after={after ?? null} /> : null}
+      {billHtml ? <BillFrame html={billHtml} /> : null}
+
       {extra.length ? (
         <>
           <Head>Other details recorded</Head>
@@ -243,6 +376,11 @@ export function RemovalDetailModal({ id, base, onClose, onRestored }: {
   onRestored?: () => void;
 }) {
   const [row, setRow] = useState<RemovalFull | null>(null);
+  // The right-hand box and the bill, both built server-side (lib/auditDetail.ts) and both lazy —
+  // they ride along with the ONE record this modal already fetches, so opening a card is still a
+  // single request and the LIST still carries neither.
+  const [after, setAfter] = useState<SideFigures>(null);
+  const [billHtml, setBillHtml] = useState<string | null>(null);
   const [canRestore, setCanRestore] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
@@ -269,6 +407,8 @@ export function RemovalDetailModal({ id, base, onClose, onRestored }: {
         if (!alive) return;
         if (!res.ok) throw new Error(j.error || "Couldn't load this record.");
         setRow(j.removal as RemovalFull);
+        setAfter((j.after ?? null) as SideFigures);
+        setBillHtml(typeof j.billHtml === "string" ? j.billHtml : null);
         setCanRestore(j.canRestore === true);
       } catch (e) { if (alive) setErr(e instanceof Error ? e.message : String(e)); }
     })();
@@ -312,7 +452,7 @@ export function RemovalDetailModal({ id, base, onClose, onRestored }: {
           </div>
           {err ? <p style={{ color: "var(--adm-danger, #ef4444)", fontSize: 13 }}>{err}</p> : null}
           {!row && !err ? <p className="adm-muted" style={{ fontSize: 13 }}>Loading…</p> : null}
-          {row ? <RemovalDetail r={row} canRestore={canRestore} onRestore={restore} restoring={restoring} /> : null}
+          {row ? <RemovalDetail r={row} after={after} billHtml={billHtml} canRestore={canRestore} onRestore={restore} restoring={restoring} /> : null}
         </div>
       </div>
     </>

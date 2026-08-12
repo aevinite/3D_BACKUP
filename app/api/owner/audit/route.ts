@@ -17,6 +17,8 @@ import { ownerScope, inScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset, logViewSubset } from "@/lib/ownerEntitlements";
 // The admin stays invisible to an owner, in the AUDIT as it already is in the Activity log.
 import { auditForReader, forReader } from "@/lib/auditActor";
+// BEFORE vs AFTER, and the bill as it stood — see lib/auditDetail.ts for why "after" is read live.
+import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
 import { rd } from "@/lib/readGuard";
 import { restaurantNames } from "@/lib/restaurantNames";
 
@@ -69,8 +71,18 @@ export async function GET(req: NextRequest) {
     const rn = one.restaurant_id ? (await restaurantNames([String(one.restaurant_id)])).get(String(one.restaurant_id)) : null;
     // The detail CARD names the person in its own "Who" row, so it needs the same treatment as the
     // list — otherwise hiding the admin in the feed only moved the leak one tap deeper.
+    // The two boxes the card draws, and the bill itself (owner, 2026-08-12). Both are lazy — they
+    // only ever run when somebody opens ONE removal, never for the list.
+    const meta = (one.meta || {}) as Record<string, unknown>;
+    const was = (meta.was || null) as Record<string, unknown> | null;
+    const rid2 = String(one.restaurant_id || "");
+    const [after, billHtml] = await Promise.all([
+      auditAfter(rid2, one.order_id ? String(one.order_id) : null),
+      auditBillHtml(rid2, was),
+    ]);
     return NextResponse.json({
       removal: forReader({ ...one, restaurant_name: rn } as { actor?: string | null; actor_role?: string | null }, !!scope.admin),
+      after, billHtml,
       canRestore: false,
     });
   }
@@ -85,6 +97,17 @@ export async function GET(req: NextRequest) {
     .order("at", { ascending: false }).range(start, start + limit - 1);
   // Optional ?rid= — narrow to ONE selected restaurant. Only honoured when that id is already
   // in the caller's scope, so it can only NARROW, never widen (mirrors /api/owner/oplog).
+  // ── ONE TYPE ONLY, FILTERED IN THE DATABASE (owner, 2026-08-12) ────────────────────────────────
+  // The chips count every page (below), so filtering by type had to move here too: a chip reading
+  // "Bill deleted 14" that then showed only the deleted bills ON THIS PAGE would be the count and the
+  // list disagreeing — the exact fault this whole area has been cleaned of. Now the chip's number and
+  // the rows behind it are the same query. Validated against the recorder's own list so an unknown
+  // value narrows to nothing rather than being interpolated into the filter.
+  const kind = (url.searchParams.get("kind") || "").trim();
+  if (kind) {
+    if (!/^[a-z_]{3,40}$/.test(kind)) return NextResponse.json({ error: "bad kind" }, { status: 400 });
+    q = q.eq("kind", kind);
+  }
   const pinRid = url.searchParams.get("rid");
   if (pinRid) {
     if (!inScope(scope, pinRid)) return NextResponse.json({ removals: [], page: 1, pageSize: limit, total: 0, pages: 1 });
@@ -112,9 +135,28 @@ export async function GET(req: NextRequest) {
     !!scope.admin,
   );
   const total = r.count ?? removals.length;
+  // ── THE CHIP COUNTS MUST SPAN EVERY PAGE, NOT THIS ONE (owner, 2026-08-12) ────────────────────
+  // The Audit grew a chip per removal type with a count. That was honest while the screen held every
+  // row — and it now holds a PAGE, so "Bill deleted 10" would silently mean "10 on this page". A
+  // number that reads as the whole record and is not is worse than no number. Counted in the database
+  // over the same scope (mig 311's grouped read, one row per kind, indexed).
+  // Measured on the dev data the day this went in: 220 cancelled tickets and 14 deleted bills existed
+  // where a 200-row page showed 178 and 10.
+  const countScope = pinRid ? [pinRid] : (scope.all ? null : scope.ids);
+  let kindCounts: { kind: string; n: number; amount: number }[] | null = null;
+  if (countScope && countScope.length) {
+    const kc = await sb.rpc("lfh_audit_kind_counts", { p_restaurant_ids: countScope, p_from: null, p_to: null });
+    // A failed count is reported ABSENT, never as zeroes: the screen then counts what it holds and
+    // labels the chips as this-page-only, which is the honest fallback. Fabricating totals on the one
+    // screen built to prove nothing disappeared is exactly the wrong failure (this route's own rule).
+    if (kc.error) console.error("[owner/audit] kind counts failed:", kc.error.message);
+    else kindCounts = ((kc.data || []) as { kind: string; n: number; amount: number }[])
+      .map((x) => ({ kind: x.kind, n: Number(x.n) || 0, amount: Number(x.amount) || 0 }));
+  }
   return NextResponse.json({
     removals,
     page, pageSize: limit, total, pages: Math.max(1, Math.ceil(total / limit)),
+    ...(kindCounts ? { kindCounts } : {}),
     ...(names.partial ? { partial: ["restaurantNames"] } : {}),
   });
 }

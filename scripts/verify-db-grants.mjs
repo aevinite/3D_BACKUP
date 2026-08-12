@@ -163,6 +163,11 @@ const REQUIRED_CRON = {
   // limit on ~1.5M inserts / 1.3M deletes — the sweep measured 21 MB of index on a 152 kB table.
   // Reclaimed by hand once (7,344 kB → 48 kB); mig 289 stops it needing a human to remember.
   "lfh-reindex-breadcrumbs":          "weekly REINDEX of realtime_events so its indexes stay small (mig 289)",
+  // The AUDIT's window is in YEARS, not days — it is the money trail, not the activity diary, and it
+  // is the record that answers "where did bill #217 go" long after the fact (mig 311). If this job
+  // goes missing nothing breaks today; the setting simply stops meaning anything, which is worse than
+  // it sounds on the one record the product's safety argument rests on.
+  "lfh-prune-audit":                  "keeps the Audit to its retention window, in years (mig 311)",
 };
 // Deliberately absent — a table is ended only by a person tapping ✓ Close (mig 254).
 const FORBIDDEN_CRON = { lfh_auto_close_idle_sessions: "no table ends itself (owner rule, mig 254)" };

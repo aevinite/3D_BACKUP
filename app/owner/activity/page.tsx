@@ -69,6 +69,13 @@ export default function OwnerAuditLogs() {
   const [removalId, setRemovalId] = useState<number | null>(null);   // which removal is open in full
   const [audErr, setAudErr] = useState<string | null>(null);
   const [audQ, setAudQ] = useState("");
+  const [audCounts, setAudCounts] = useState<{ kind: string; n: number; amount: number }[] | null>(null);
+  // WHICH TYPE, held HERE rather than inside the view: it goes to the server (so a chip counting
+  // every page filters every page, not just this one) and it must reset the paging when it changes.
+  const [audKind, setAudKind] = useState("");
+  // Narrowing to a type restarts at page 1: staying on page 5 of "everything" shows nothing once the
+  // set is smaller, which reads as "no records of that kind" and is simply the wrong page.
+  const pickAudKind = (k: string) => { setAudKind(k); setAudPage(1); };
   // Removals paging, same shape and same reasoning as the Activity log's (owner, 2026-08-12).
   const [audPage, setAudPage] = useState(1);
   const [audPages, setAudPages] = useState(1);
@@ -105,16 +112,20 @@ export default function OwnerAuditLogs() {
   const loadAudit = useCallback(async () => {
     const p = scopeParams();
     if (audPage > 1) p.set("page", String(audPage));
+    if (audKind) p.set("kind", audKind);
     const qs = p.toString();
     try {
       const j = await (await fetch(`/api/owner/audit${qs ? "?" + qs : ""}`, { cache: "no-store" })).json();
       if (j.disabled) { setAudDisabled(true); setView((v) => (v === "audit" ? "activity" : v)); return; }
       if (j.error) throw new Error(j.error);
       setRemovals(j.removals || []); setAudErr(null);
+      // Counted in the database when the server can (mig 311) — absent means "count the page
+      // and say so", never a fabricated total on the record that proves nothing vanished.
+      setAudCounts(Array.isArray(j.kindCounts) ? j.kindCounts : null);
       setAudPages(Math.max(1, Number(j.pages) || 1));
       setAudTotal(Number(j.total) || 0);
     } catch (e) { setAudErr(e instanceof Error ? e.message : String(e)); }
-  }, [scopeParams, audPage]);
+  }, [scopeParams, audPage, audKind]);
 
   const loadActivity = useCallback(async () => {
     const params = scopeParams();
@@ -168,7 +179,7 @@ export default function OwnerAuditLogs() {
       {bothOff ? (
         <div className="adm-card"><div className="adm-empty">Audit &amp; logs isn&rsquo;t enabled for your restaurant — contact Aevidine.</div></div>
       ) : view === "audit" && !audDisabled ? (
-        <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} onReload={loadAudit} onOpenRemoval={setRemovalId}
+        <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} counts={audCounts} kind={audKind} setKind={pickAudKind} onReload={loadAudit} onOpenRemoval={setRemovalId}
           page={audPage} pages={audPages} total={audTotal} onPage={setAudPage} />
       ) : (
         <ActivityView rows={rows} err={err} level={level} setLevel={setLevel} q={q} setQ={setQ} onReload={loadActivity} onOpen={setDetailRow}
@@ -187,8 +198,14 @@ export default function OwnerAuditLogs() {
 }
 
 // ── Audit (removals) ─────────────────────────────────────────────────────────
-function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval, page, pages, total, onPage }: {
-  removals: Removal[] | null; err: string | null; q: string; setQ: (v: string) => void; onReload: () => void;
+function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, onOpenRemoval, page, pages, total, onPage }: {
+  removals: Removal[] | null; err: string | null; q: string; setQ: (v: string) => void;
+  /** Per-type counts over EVERY page, from the database. Null = count the page and say so. */
+  counts: { kind: string; n: number; amount: number }[] | null;
+  /** The chosen type. Owned by the page because it travels to the SERVER (a chip that counts every
+   *  page must filter every page) and it resets the paging. */
+  kind: string; setKind: (k: string) => void;
+  onReload: () => void;
   onOpenRemoval: (id: number) => void;
   // Paging (owner, 2026-08-12) — the same strip the Activity log uses, so the two halves of this
   // page behave identically.
@@ -199,18 +216,17 @@ function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval, page, page
   // manager panel and the admin console use — so the one record cannot answer three different ways.
   // All of it runs on rows already in hand: the feed is capped server-side, so re-sorting or picking
   // a type costs no request and no egress.
-  const [kind, setKind] = useState("");
   const [sort, setSort] = useState(AUDITSORT.DEFAULT_SORT);
 
   // Chips are built from the WHOLE feed, not the filtered slice — a chip's count must not change
   // when you tap it, and a type must stay reachable once you have narrowed to another one.
-  const chips = AUDITSORT.kindCounts(removals || [], KIND_LABEL, KIND_ICON);
+  const chips = AUDITSORT.kindCountsFrom(removals || [], counts, KIND_LABEL, KIND_ICON);
   // A type that vanished from the feed (a stale chip after Refresh) must not leave the list empty
   // with no way back — fall back to All.
-  const activeKind = kind && chips.some((c) => c.kind === kind) ? kind : "";
-  const list = AUDITSORT.view(removals || [], {
-    kind: activeKind, q, sort, kindLabel: KIND_LABEL, reasonLabel: REMOVAL_REASON,
-  });
+  const activeKind = kind;
+  // The SERVER already narrowed to `kind` — passing it again here would be harmless but it would also
+  // hide a mismatch between the two, so the client only searches and sorts.
+  const list = AUDITSORT.view(removals || [], { q, sort, kindLabel: KIND_LABEL, reasonLabel: REMOVAL_REASON });
   // What the visible rows come to in money — the figure an owner is really after when they pick
   // "Deleted bills". Only shown when there is money on them at all (a dish off the menu has none).
   const shownMoney = AUDITSORT.sumAmount(list);
@@ -223,7 +239,7 @@ function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval, page, page
       {chips.length > 1 && (
         <div className="own-range aud-chips" style={{ marginBottom: 10, flexWrap: "wrap" }}>
           <button className={activeKind === "" ? "on" : ""} onClick={() => setKind("")}>
-            All <i>{(removals || []).length}</i>
+            All <i>{(counts ? counts.reduce((a, c) => a + c.n, 0) : (removals || []).length).toLocaleString("en-IN")}</i>
           </button>
           {chips.map((c) => (
             <button key={c.kind} className={activeKind === c.kind ? "on" : ""} onClick={() => setKind(c.kind)}

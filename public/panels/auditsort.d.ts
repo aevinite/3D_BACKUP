@@ -57,6 +57,15 @@ export function kindCounts(
   label?: Record<string, string>,
   icon?: Record<string, string>,
 ): AuditKindCount[];
+/** The chips, counted in the DATABASE when the caller has those counts (mig 311's grouped read), so
+ *  a chip spans every page rather than the one on screen — and every type stays reachable from page 1.
+ *  Falls back to counting the rows in hand when `dbCounts` is absent. */
+export function kindCountsFrom(
+  rows: AuditRow[],
+  dbCounts: { kind: string; n: number; amount: number }[] | null | undefined,
+  label?: Record<string, string>,
+  icon?: Record<string, string>,
+): (AuditKindCount & { amount?: number })[];
 /** The search, stated once so all three panels match on the same fields. */
 export function matches(
   r: AuditRow,

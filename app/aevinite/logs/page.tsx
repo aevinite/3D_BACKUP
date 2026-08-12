@@ -128,6 +128,30 @@ export default function AdminLogs() {
     const qs = rid ? `?restaurant_id=${rid}` : "";
     try { const j = await (await fetch(`/api/admin/custlog${qs}`, { cache: "no-store" })).json(); if (j.error) setCustErr(true); else { setCust(j); setCustErr(false); } } catch { setCustErr(true); }
   }, [rid]);
+  // HOW LONG THE AUDIT IS KEPT (owner, 2026-08-12: "there should be option of three years, five
+  // years, seven years, 10 years, and one year … it's an important thing and very less things will be
+  // in the audit, so make sure to save that"). It sits at the TOP of the Audit tab, where he asked
+  // for it — the same place the activity log's own cleanup banner sits. ADMIN-ONLY, like the log's
+  // window: the owner reads the record, the platform decides how long it is kept.
+  const [auditYears, setAuditYears] = useState<number | null>(null);
+  const [auditYearOpts, setAuditYearOpts] = useState<number[]>([1, 3, 5, 7, 10]);
+  const [auditYearsMsg, setAuditYearsMsg] = useState("");
+  const loadAuditYears = useCallback(async () => {
+    const r = await adminFetch<{ audit_retention_years: number; auditYearOptions?: number[] }>("/api/admin/settings");
+    if (r.ok) { setAuditYears(r.data.audit_retention_years ?? 10); if (Array.isArray(r.data.auditYearOptions)) setAuditYearOpts(r.data.auditYearOptions); }
+  }, []);
+  useEffect(() => { loadAuditYears(); }, [loadAuditYears]);
+  const saveAuditYears = async (years: number) => {
+    const prev = auditYears;
+    setAuditYears(years); setAuditYearsMsg("");
+    const r = await adminFetch("/api/admin/settings", { method: "POST", body: JSON.stringify({ audit_retention_years: years }) });
+    // A failed save must not leave the screen showing a window the database never took — the same
+    // rule the rest of this page follows for its cleanup actions.
+    if (!r.ok) { setAuditYears(prev); setAuditYearsMsg("Couldn't save that — the window is unchanged."); return; }
+    setAuditYearsMsg(`Saved — the Audit is kept for ${years} year${years === 1 ? "" : "s"}.`);
+    toast(`Audit kept for ${years} year${years === 1 ? "" : "s"}`);
+  };
+
   // Sort + type filter for the Removals record, shared with the owner console and the manager panel
   // via /panels/auditsort.js (owner, 2026-08-11). Both act on rows already in hand.
   const [audKind, setAudKind] = useState("");
@@ -266,6 +290,32 @@ export default function AdminLogs() {
       )}
       {tab === "aud" && (
         <>
+          {/* HOW LONG THE AUDIT IS KEPT — at the top, where the log's own cleanup banner sits.
+              Not styled as a warning: this is a policy control, not a problem. The note underneath
+              changes with the choice, because "1 year" and "10 years" are very different promises. */}
+          <div className="adm-card" style={{ marginBottom: 12, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <i className="fas fa-box-archive" style={{ color: "var(--accent)" }} aria-hidden="true" />
+            <div style={{ flex: "1 1 260px", minWidth: 200 }}>
+              <b style={{ fontSize: 13 }}>Keep the Audit for</b>
+              <div className="adm-muted" style={{ fontSize: 11.5, marginTop: 2 }}>
+                {auditYears == null ? "…"
+                  : auditYears >= 8
+                    ? "Removals older than this are cleared automatically. Anything newer is kept — nothing here can be deleted by hand."
+                    : `⚠ Records are normally kept 6–8 years. At ${auditYears} year${auditYears === 1 ? "" : "s"} you would no longer have the removal trail for older bills.`}
+              </div>
+            </div>
+            <select
+              value={auditYears ?? 10}
+              disabled={auditYears == null}
+              onChange={(e) => saveAuditYears(Number(e.target.value))}
+              aria-label="How many years the Audit is kept"
+              style={{ padding: "8px 10px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 13, fontWeight: 700 }}
+            >
+              {auditYearOpts.map((y) => <option key={y} value={y}>{y} year{y === 1 ? "" : "s"}</option>)}
+            </select>
+            {auditYearsMsg ? <span className="adm-muted" style={{ fontSize: 11.5, flex: "1 1 100%" }}>{auditYearsMsg}</span> : null}
+          </div>
+
           {/* WHAT IS THE LIST OF WHAT (owner, 2026-08-11) — a chip per removal type present, with
               its count, from the SAME /panels/auditsort.js the owner console and the manager panel
               use. The search here is server-side (`&q=` above), so these work on the rows that
