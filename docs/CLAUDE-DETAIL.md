@@ -488,6 +488,40 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
 `ADMIN_PASSWORD` is in `.env.local` (must also be set in the Vercel project env for the gate to
 work in prod). **If you re-introduce a middleware, update this section in the same commit.**
 
+## Where it lives — the shape EVERY problem / idea / bug listing must take
+
+Owner, 2026-08-12, STANDING. He read a 10-problem / 12-idea list that named migration files and
+told him nothing about where any of it was, and his reply was *"I don't even know which audit,
+which log — I'm completely lost."* That is a reporting failure, not his. So:
+
+**Every single item in any list of problems, bugs, improvements or ideas carries all four of
+these, in this order, before any file path:**
+
+1. **Panel** — one of: `Guest menu` · `Manager panel` · `Kitchen panel` · `Tablet panel` ·
+   `Owner panel` · `Admin console (/aevinite)` · **`Backend only — nothing on screen`**.
+2. **Screen / tab** — the exact place: "Bills tab", "Tables floor", "Reports → Sales",
+   "Settings → Billing", "Restaurants → Recycle bin", "Live Floor (all restaurants)",
+   "Dashboard → records strip".
+3. **What the person would SEE** — in plain words. "A table goes Free in the middle of service."
+   "Two screens show different revenue for the same day."
+4. **Then** the file(s), and only then.
+
+If there is genuinely no screen, the words are **"backend only, nothing on screen"** — never
+silence. And never use a shorthand he cannot place: "history file" is banned; write
+"`supabase/migrations/099_…` — a migration FILE, not a log or an audit screen".
+
+**Panel → where its code lives** (use this to fill in field 1 and 2):
+
+| Panel | Route | Its code | Its data |
+|---|---|---|---|
+| Guest menu | `/menu`, `/r/<slug>/menu`, `/q/<code>` | `app/(guest)`, `components/*` | `lib/menu.ts`, guest RPCs (`lfh_*`) |
+| Manager panel | `/manager`, `/editor` | `public/panels/editor/app.js` (in an iframe) | `app/api/editor/*`, `lfh_floor_bundle`, `lfh_table_view_summary` |
+| Kitchen panel | `/kitchen` | `public/panels/kitchen/*` | `app/api/kitchen/*`, `lfh_kitchen_tickets` |
+| Tablet panel | `/tablet` | `public/panels/tablet/*` | `app/api/tablet/*` |
+| Owner panel | `/owner/*` (16 pages) | `app/owner/*`, `components/owner/*` | `app/api/owner/*`, `lfh_owner_*`, `lib/ownerCache.ts` |
+| Admin console | `/aevinite/*` (22 pages) | `app/aevinite/*` | `app/api/admin/*`, `lfh_admin_*` |
+| Printed paper | — | `public/panels/billdoc.js` | the one print document (bill + KOT) |
+
 ## Operational rules — one line each; open the detail/doc BEFORE working in that area
 
 CLAUDE.md carries these as one-liners; this is where each one's full text lives. They are separate
