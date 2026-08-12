@@ -215,6 +215,15 @@ update the detail doc's section in the same commit.
   keys are REFUSED.
 - **Mobile back button:** every popup/overlay registers `useBackClose(...)` (guest) or
   `LFH_BACK.layer(...)` (panels) the moment it's built — never hand-roll pushState/popstate.
+- **📍 EVERY problem / bug / improvement / idea you list MUST say WHERE IT LIVES** (owner,
+  2026-08-12, STANDING — he was left "completely lost" by a list that named files only). Each item
+  gets, in this order: **the panel** (guest menu / manager / kitchen / tablet / owner / admin /
+  none-it's-backend-only) → **the exact screen or tab** ("Bills tab", "Tables floor", "Reports →
+  Sales", "Recycle bin") → **what the person would SEE** → only then the file. If it has no screen,
+  say "backend only, nothing on screen" in those words — never leave him guessing which log, which
+  audit, which history. "History file" style shorthand is banned: name it as
+  `supabase/migrations/099…` AND say it is a migration file, not a log or an audit screen. Full text
+  + the panel→file map: `docs/CLAUDE-DETAIL.md` → "Where it lives".
 - **🙋 The owner is NOT the test subject:** drive the exact flow yourself first (headless),
   screenshot the place HE named, assert the RENDERED thing — never hand over on "the code says so".
   "Check phone/tablet view" (only when he says it) = `node scripts/view-device.mjs` (A35 emulation,
