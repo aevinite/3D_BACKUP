@@ -135,9 +135,7 @@ bug did in June.
 Everything above is built and merged. Before the first real restaurant night:
 
 1. **Turn on phone alerts** (~15 min): follow `alerts-setup.md` — ntfy app +
-   Telegram bot + the same keys in Vercel + UptimeRobot on `/api/health` (every 5 min) and a
-   second, slower monitor on `/api/health/deep` (hourly) — the first says "is it alive?", the
-   second says WHICH part is broken: the database, file storage, or the live-updates settings.
+   Telegram bot + the same keys in Vercel + UptimeRobot on `/api/health`.
 2. **Grant Full Disk Access** (~1 min): follow `nightly-agent-setup.md` so the
    overnight fixer (and the older audit jobs) can run.
 3. **Fire drill** (~20 min, strongly recommended): on a test restaurant, break
