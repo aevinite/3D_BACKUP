@@ -58,7 +58,7 @@
   <script src="/panels/maint.js?v=1b283f26"></script>
   <script src="/panels/realtime.js?v=3a9eadca"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=7b2405a7"></script>
+  <script src="/panels/outbox.js?v=8858ef12"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=c1df4baa"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
@@ -69,8 +69,8 @@
        DOMContentLoaded — by which time every tag here has run. (The old wording claimed the
        opposite of the actual order in this file and would have sent the next person reordering
        these tags the wrong way. T4 sweep, 2026-08-11.) -->
-  <script src="/panels/swreg.js?v=c82762b3"></script>
-  <script src="/panels/offline.js?v=01332551"></script>
+  <script src="/panels/swreg.js?v=0d429b78"></script>
+  <script src="/panels/offline.js?v=ce110fa3"></script>
   <script src="/panels/backstack.js?v=efe8afdb"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
   <script src="/panels/errlog.js?v=c845b17b"></script>
@@ -82,6 +82,6 @@
   <!-- billdoc: THE kitchen ticket, written down once (LFH_BILLDOC) and shared with the manager
        panel and the admin's sample, so a ticket can never look different in two places. -->
   <script src="/panels/billdoc.js?v=d1279844"></script>
-  <script src="app.js?v=ef5203cc"></script>
+  <script src="app.js?v=2dc3b5d3"></script>
 </body>
 </html>

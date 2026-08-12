@@ -195,6 +195,19 @@ await send("Tables per row");
 await wait(400);
 const sending = await page.evaluate(() => (document.querySelector(".lfh-offbar-t") || {}).textContent || "");
 if (/Sending/i.test(sending)) ok("while it is genuinely trying, it says Sending"); else bad("the bar never showed the sending state", sending);
+// AND IT SAYS HOW MANY, IN DIGITS. `/Sending/i` alone was true of "Sending true saved changes…",
+// which is exactly what every staff panel printed from the day a `var waiting = box.queued.length`
+// was re-declared inside the same function as `var waiting = dueIn > 1500` (measured on the real
+// manager panel and waiter tablet, 2026-08-12 — the connection pill beside it read "3 waiting" at
+// the same moment). A guard that only looks for a word cannot see a number go missing, so check
+// for the count AND for the two words a boolean would leave behind.
+{
+  const n = (await counts()).q;
+  if (new RegExp("\\b" + n + "\\b").test(sending)) ok(`…and it says HOW MANY (${n})`);
+  else bad("the bar does not name the number of changes waiting", sending);
+  if (/\b(true|false|undefined|NaN|\[object Object\])\b/.test(sending)) bad("a machine word leaked into the bar", sending);
+  else ok("…and no machine word leaked into it");
+}
 // Now let it be stuck long enough that "Sending…" would be a lie.
 await page.evaluate(() => window.LFH_OUTBOX.__pause && window.LFH_OUTBOX.__pause());
 const honest = await until(async () => /haven't sent|hasn't sent/i.test(await page.evaluate(() => (document.querySelector(".lfh-offbar-t") || {}).textContent || "")), 6000);

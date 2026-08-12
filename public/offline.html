@@ -71,9 +71,18 @@
     <h1 id="title">Can't open this screen</h1>
     <p id="sub">This screen hasn't been opened on this device yet, so there's nothing saved to show.</p>
     <div class="why" id="why"><b>Checking what's wrong...</b><span>One moment.</span></div>
+    <!-- SAY ONLY WHAT IS ACTUALLY GUARANTEED. This used to claim that EVERYTHING done while
+         offline was stored on this device and would send itself — a promise this
+         page cannot keep and cannot check. It is untrue in two real cases: a device whose storage
+         is refused (private browsing, no room, a locked-down tablet profile), where both queues
+         deliberately switch to "keep this open, it is NOT saved"; and the guest actions that have
+         no queue at all (joining a table, being approved, the shared cart). The queues themselves
+         are careful about this exact distinction — public/panels/outbox.js `unsafeStore`,
+         lib/guestOutbox.ts `persisted` — and this page was the one surface still over-promising,
+         on the screen that appears when things have gone most wrong. -->
     <div class="safe">
-      <b>Nothing you did is lost.</b> Any orders or changes you made while offline are stored on
-      this device and will be sent automatically the moment the connection comes back.
+      <b>Anything already saved on this device is safe.</b> It sends itself the moment the
+      connection is back — keep this open so it can.
     </div>
     <button type="button" id="retry">Try again</button>
     <button type="button" class="ghost" id="home">Go to the home screen</button>
@@ -152,9 +161,9 @@
           say("app", "The app isn't answering yet",
             "Your internet is fine — this one is on us.",
             health.timedOut
-              ? "The app's server was reached but its database isn't responding, so screens that need data can't load yet. It usually comes back on its own, and nothing you did is lost."
+              ? "The app's server was reached but its database isn't responding, so screens that need data can't load yet. It usually comes back on its own, and anything already saved on this device is safe."
               : "The app's server answered with an error (" + (health.status || "no status") +
-                "), so screens that need data can't load yet. It usually comes back on its own, and nothing you did is lost.");
+                "), so screens that need data can't load yet. It usually comes back on its own, and anything already saved on this device is safe.");
           return false;
         });
       });

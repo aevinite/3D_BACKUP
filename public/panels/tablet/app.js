@@ -126,9 +126,13 @@ const api = async (method, path, body, opts) => {
     // overwriting a change someone else made on another device while this person was typing.
     return window.LFH_OUTBOX.send({ base: "/api/tablet", method, path: ridQ(path), body, panel: "tablet", expect: opts && opts.expect });
   }
+  // Was the offline layer in charge when this read STARTED? On a device's first visit it is not,
+  // so nothing it fetched in that window was ever saved — see public/panels/swreg.js.
+  const uncontrolled = !(navigator.serviceWorker && navigator.serviceWorker.controller);
+  const url = "/api/tablet" + ridQ(path);
   let r;
   try {
-    r = await fetch("/api/tablet" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   } catch (netErr) {
     netErr.offline = true; // no reply at all → offline, not a broken server
     throw netErr;
@@ -140,6 +144,11 @@ const api = async (method, path, body, opts) => {
   // Attach the parsed body + status to the error so callers can read server flags like
   // duplicateWarning (#15) / needPin, which a bare message string would have dropped.
   if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.data = j; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; e.busy = (j && j.busy === true) || r.headers.get("X-LFH-Busy") === "1"; throw e; }
+  // Hand a first-visit read to the offline layer, so the waiter's floor opens with no internet
+  // on the SAME shift it was first opened. No second request — the body is already here.
+  if (uncontrolled && method === "GET" && j && window.LFH_WARM) {
+    try { window.LFH_WARM.data(new URL(url, location.origin).href, JSON.stringify(j)); } catch (e) { /* best effort */ }
+  }
   return j;
 };
 // #2: a write that returned { queued:true } was saved on THIS device (offline) and will

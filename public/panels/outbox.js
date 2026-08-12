@@ -246,6 +246,21 @@
   // `replay` = this is a change coming OUT of the queue (it was saved on the device
   // earlier), not a live write. Only a replay is clash-checked on the server, which is
   // what keeps the normal online path byte-for-byte unchanged.
+  // A DEADLINE, WITHOUT ASSUMING THE DEVICE CAN MAKE ONE. Both diner-side twins
+  // (lib/menu.ts orderDeadline, lib/guestOutbox.ts sendDeadline) wrap this in try/catch because
+  // READING AbortSignal.timeout throws on some older phones — and when it did, the throw was
+  // caught somewhere else and mis-reported as "the restaurant is busy". This file tested it with
+  // a bare `?:`, so the same throw would have escaped into doFetch and killed a waiter's write.
+  // Staff tablets are usually older and cheaper than the diners' phones, so if anywhere needs the
+  // guard it is here. No signal is better than no write.
+  function writeDeadline() {
+    try {
+      return typeof AbortSignal !== "undefined" && typeof AbortSignal.timeout === "function"
+        ? AbortSignal.timeout(WRITE_TIMEOUT_MS)
+        : undefined;
+    } catch (e) { return undefined; }
+  }
+
   function doFetch(item, replay) {
     var headers = {
       "Content-Type": "application/json",
@@ -272,7 +287,7 @@
       // Replaying after a timeout cannot double anything: the same X-LFH-Action-Id above is
       // what withIdempotency() dedups on, and this is the same ambiguity the offline path has
       // always had.
-      signal: typeof AbortSignal !== "undefined" && AbortSignal.timeout ? AbortSignal.timeout(WRITE_TIMEOUT_MS) : undefined,
+      signal: writeDeadline(),
     });
   }
 
@@ -352,6 +367,19 @@
   // Used by the dish-edit modal in both staff panels; see lib/clash.ts fieldClash().
   async function send({ base, method, path, body, panel, label, expect }) {
     const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now(), expect: expect || null };
+    // WHICH TABLE, ON EVERY ROW. The "Needs you" / "Saved on this device" sheet lists changes by
+    // label, and a call site that passes its own label ("Set table tag", "Place order") named no
+    // table at all — so two changes on tables 5 and 7 rendered as two identical rows with nothing
+    // to tell them apart (seen on a 360px phone, 2026-08-12). The queue already knows whose work
+    // it is (tableOf reads the path OR the body), so it is added here, once, rather than at the
+    // ~16 call sites across three panels. Skipped when the label already says it, so
+    // labelFor's own "· Table 5" is never doubled.
+    try {
+      var whose = tableOf(item);
+      if (whose != null && String(whose) !== "" && !/·\s*Table\s/i.test(item.label)) {
+        item.label += " · Table " + whose;
+      }
+    } catch (e) { /* a label is a nicety; never let it stop a write */ }
 
     // Known offline → don't even try; queue straight away.
     if (navigator.onLine === false) { const p = await enqueue(item, "offline"); return { ok: true, queued: true, action_id: item.id, persisted: p, why: "offline" }; }

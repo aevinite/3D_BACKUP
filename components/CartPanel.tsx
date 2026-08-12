@@ -660,7 +660,13 @@ export default function CartPanel() {
       };
       // Listen for the gate's result, then kick off the session flow.
       window.addEventListener("lfh:session-done", onDone);
-      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "order", table: tableTrim, payload: { items: itemsS, allergies: allergiesS, track: { tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS } } } }));
+      // `lines` = the basket as a PERSON sees it, id AND name per line. The QR path has carried
+      // this since the queue was written; the SESSION path never did, and two things needed it:
+      // a refusal that names a dish by id (`unknown_item` sends the id, not the title — a seated
+      // diner was reading "paneer-tikka__a1b2c3d4 is no longer on the menu"), and the
+      // "send the rest without the sold-out dish" rescue, which cannot work without the names
+      // and was therefore switched off for every seated party.
+      window.dispatchEvent(new CustomEvent("lfh:session-do", { detail: { action: "order", table: tableTrim, payload: { items: itemsS, allergies: allergiesS, lines: cart.map((it) => ({ id: it.id, title: it.title })), track: { tableNumber: tableTrim, total: totalS, itemCount: countS, items: trackS } } } }));
       return; // the rest below is the non-session path
     }
 

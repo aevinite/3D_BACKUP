@@ -90,9 +90,13 @@ const api = async (method, path, body, opts) => {
     // EXIST, or a value edit added here later is silently unprotectable and no guard would say so.
     return window.LFH_OUTBOX.send({ base: "/api/kitchen", method, path: ridQ(path), body, panel: "kitchen", expect: opts && opts.expect });
   }
+  // Was the offline layer in charge when this read STARTED? On a device's first visit it is not,
+  // so nothing it fetched in that window was ever saved — see public/panels/swreg.js.
+  const uncontrolled = !(navigator.serviceWorker && navigator.serviceWorker.controller);
+  const url = "/api/kitchen" + ridQ(path);
   let r;
   try {
-    r = await fetch("/api/kitchen" + ridQ(path), { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    r = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
   } catch (netErr) {
     netErr.offline = true; // no reply at all → offline, not a broken server
     throw netErr;
@@ -102,6 +106,11 @@ const api = async (method, path, body, opts) => {
   if (window.LFH_OFF) window.LFH_OFF.noteResponse(r);
   const j = await r.json().catch(() => null);
   if (!r.ok) { const e = new Error((j && j.error) || r.statusText); e.status = r.status; e.offline = (j && j.offline === true) || r.headers.get("X-LFH-Offline") === "1"; e.busy = (j && j.busy === true) || r.headers.get("X-LFH-Busy") === "1"; throw e; }
+  // Hand a first-visit read to the offline layer, so the kitchen board opens with no internet
+  // on the SAME shift it was first opened. No second request — the body is already here.
+  if (uncontrolled && method === "GET" && j && window.LFH_WARM) {
+    try { window.LFH_WARM.data(new URL(url, location.origin).href, JSON.stringify(j)); } catch (e) { /* best effort */ }
+  }
   return j;
 };
 // ── table naming (mig 131) ───────────────────────────────────────────────────

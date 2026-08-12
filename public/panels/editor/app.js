@@ -559,6 +559,10 @@ async function api(method, path, body, opts) {
     return window.LFH_OUTBOX.send({ base: "/api/editor", method, path: ridQ(path), body, panel: "editor", expect: opts && opts.expect });
   }
   const url = "/api/editor" + ridQ(path);
+  // Was the offline layer in charge when this read STARTED? On a device's first visit it is not
+  // (it takes over a moment later), so nothing it fetched in that window was ever saved — see the
+  // measurement in public/panels/swreg.js. Only in that window do we hand the body over.
+  const uncontrolled = !(navigator.serviceWorker && navigator.serviceWorker.controller);
   // On boot the page's initial load AND the realtime connect BOTH kick off the same reads
   // (/summary, /all, /platform), so a single load fired each 3–4× — ~470 KB of duplicate
   // JSON. Share one in-flight promise per identical GET url; it's cleared the instant it
@@ -596,6 +600,12 @@ async function api(method, path, body, opts) {
       // The database didn't answer (503 + X-LFH-Busy, lib/panelFailure.ts) — a moment, not a fault.
       e.busy = json.busy === true || res.headers.get("X-LFH-Busy") === "1";
       throw e;
+    }
+    // Hand this read to the offline layer if it was fetched before the layer took charge.
+    // Costs one JSON.stringify of something already in memory, only on a device's first visit —
+    // never a second network request. See LFH_WARM in public/panels/swreg.js.
+    if (uncontrolled && method === "GET" && window.LFH_WARM) {
+      try { window.LFH_WARM.data(new URL(url, location.origin).href, JSON.stringify(json)); } catch (e) { /* best effort */ }
     }
     return json;
   })();
@@ -8393,6 +8403,25 @@ function floorHtml() {
   // NOTE: with sessions on, a tile can still turn amber (new order) or pink (on the pass) with no
   // legend entry to explain it. That is his call and he made it twice; the state word is still in
   // every tile's tooltip and in the table's own detail popup.
+  // "· live" IS A PROMISE, SO IT HAS TO BE CHECKED (2026-08-12).
+  //
+  // The floor is drawn from whatever the last read returned, and with the offline layer in front
+  // of it that is sometimes the copy saved on THIS DEVICE. Measured with every read held for 12
+  // seconds: 31 tiles painted from a board saved at 9:06 pm, under a heading that still read
+  // "Table view · live", with the connection pill on a calm grey "Connecting…". A manager could
+  // settle a bill against a floor a quarter of an hour old and never be told.
+  //
+  // The offline bar above is the loud signal (public/panels/offline.js) — this is the quiet one,
+  // in the two words that made the claim in the first place. Costs nothing: the offline layer
+  // already knows, so this is a read of a boolean.
+  const floorLiveTag = () => {
+    try {
+      if (window.LFH_OFF && window.LFH_OFF.isStale && window.LFH_OFF.isStale()) {
+        return `<span class="sub floor-saved">· saved copy</span>`;
+      }
+    } catch (e) { /* the offline layer isn't there → it can only be live */ }
+    return `<span class="sub">· live</span>`;
+  };
   const LEG = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
   // Purple = merged (owner, 2026-08-01: "the background will turn purple … there should be a purple
   // colour tag also on the top where all the colour thing has been shown"). Only listed while
@@ -8414,10 +8443,11 @@ function floorHtml() {
   if (!state.boardLoaded) {
     // left: a shimmer tile per table, sized to the (cached) real count.
     let skel = "";
+    // (floorLiveTag is defined just above this renderer.)
     for (let i = 1; i <= n; i++) {
       skel += `<div class="ftile ftile-skel" aria-hidden="true"><div class="sk-num"></div><div class="sk-lbl"></div><div class="sk-meta"></div></div>`;
     }
-    const skelMain = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view <span class="sub">· live</span></h2>${legend}</div><div class="ftile-grid" style="--per-row:${floorPerRow()}">${skel}</div></div>`;
+    const skelMain = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${legend}</div><div class="ftile-grid" style="--per-row:${floorPerRow()}">${skel}</div></div>`;
     // The floor is the WHOLE width now — there is no right-hand panel to leave room for
     // (owner, 2026-07-31), so the skeleton is just the grid.
     return `<div class="floor-wrap floor-collapsed">${skelMain}</div>`;
@@ -8535,7 +8565,7 @@ function floorHtml() {
   // A chip that only announced there was more and then ignored the tap would be a dropped tap.
   const moreChip = `<button class="ftile-more" data-ftile-more hidden title="Scroll the floor to the right">→ <b data-ftile-more-n>0</b> more</button>`;
   const gridBlock = `<div class="ftile-wrap">${gridHtml}${moreChip}</div>`;
-  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view <span class="sub">· live</span></h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridBlock}${parcelStripHtml()}</div>`;
+  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridBlock}${parcelStripHtml()}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",

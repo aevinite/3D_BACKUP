@@ -41,6 +41,25 @@
 
   function isOffline() { return navigator.onLine === false; }
 
+  // How long saved data has been on screen without a live socket. See connIsBad().
+  var staleSince = 0;
+  // A RELOAD ON A BAD LINE NEVER CONNECTS AT ALL, and that used to read as "fine".
+  // `everConnected` is false in two completely different situations: the first second of a
+  // healthy boot (stay quiet — the socket is about to come up), and a panel reloaded on a
+  // crawling connection where it never will. Measured 2026-08-12 with every read held for 12s:
+  // the manager floor painted 31 tiles from a copy saved at 9:06 pm, and the bar did not appear.
+  // So "never connected" is judged on TIME, not treated as innocent: if the saved board has been
+  // on screen this long and live updates still are not flowing, they are not coming.
+  //
+  // Short on purpose. The only way we reach this test at all is that a read STALLED and was
+  // answered from the device — the service worker waits 6 seconds before doing that — so by the
+  // time this clock starts the connection has already failed to answer for six seconds, and this
+  // is not a healthy boot however much `everConnected` looks like one. So this is only long
+  // enough to swallow a single-frame flash, not a judgement. Measured: at 5s the bar arrived
+  // about eleven seconds after the reload — far too late to stop someone settling a bill against
+  // a stale board, which is the whole reason it exists.
+  var NEVER_CONNECTED_SETTLE_MS = 1200;
+
   // Is the connection ACTUALLY bad? Same source the connection badge reads, so the bar and
   // the badge can never contradict each other.
   function connIsBad() {
@@ -53,7 +72,9 @@
         // read did. Only a real drop (after we HAD been connected) counts as bad.
         if (st === "online") return false;
         if (st === "offline") return true;
-        return !!(rt.everConnected && rt.everConnected()); // reconnecting after a real drop
+        if (rt.everConnected && rt.everConnected()) return true; // reconnecting after a real drop
+        // Never connected in this session — see NEVER_CONNECTED_SETTLE_MS above.
+        return !!staleSince && (Date.now() - staleSince) > NEVER_CONNECTED_SETTLE_MS;
       }
     } catch (e) { /* fall through */ }
     return false;
@@ -79,6 +100,7 @@
       var offlineRead = res.headers.get("X-LFH-Offline") === "1";
       if (offlineRead) { stale.seenOfflineRead = true; render(); return; }
       if (fromCache) {
+        if (!stale.fromCache) staleSince = Date.now();   // first saved reply of this spell
         stale.fromCache = true;
         stale.at = Number(res.headers.get("X-LFH-Cached-At") || 0) || Date.now();
         // AUTO-HEAL: don't wait for the next poll tick. Ask the panel to refetch shortly, and
@@ -87,7 +109,7 @@
         scheduleHeal();
       } else if (res.ok) {
         // A genuinely fresh reply means we're live again — stop claiming we're stale.
-        stale.fromCache = false; stale.seenOfflineRead = false; stale.at = 0;
+        stale.fromCache = false; stale.seenOfflineRead = false; stale.at = 0; staleSince = 0;
         if (healTimer) { clearTimeout(healTimer); healTimer = null; }
         if (forgetTimer) { clearTimeout(forgetTimer); forgetTimer = null; }
       }
@@ -106,10 +128,15 @@
         try { window.dispatchEvent(new CustomEvent("lfh:stale-refresh")); } catch (e) {}
       }, 2500);
     }
+    // …and one re-draw once the "never connected" settle has passed, so the bar appears on a
+    // panel that is sitting still. Nothing else re-renders in that window: the 2s tick only runs
+    // while changes are queued, and the heartbeat is 30s — long enough for a manager to read a
+    // saved floor labelled "live" and act on it. No network, no database.
+    setTimeout(render, NEVER_CONNECTED_SETTLE_MS + 250);
     // And a hard stop: if no further saved replies arrive, drop the flag regardless.
     clearTimeout(forgetTimer);
     forgetTimer = setTimeout(function () {
-      stale.fromCache = false; stale.seenOfflineRead = false; stale.at = 0; render();
+      stale.fromCache = false; stale.seenOfflineRead = false; stale.at = 0; staleSince = 0; render();
     }, 25000);
   }
 
@@ -188,8 +215,17 @@
 
   // ── the bar ──────────────────────────────────────────────────────────────────
   // Decide the single most important thing to say right now.
-  function waiting_count(_) { return box.queued.length; }
-  function waiting_count_title(n) { return n + (n === 1 ? " change is waiting" : " changes are waiting"); }
+  //
+  // ONE NAME PER THING. `waiting` used to mean the COUNT at the top of barState() and was then
+  // re-declared inside the same function as `var waiting = dueIn > 1500` — a boolean. `var` is
+  // function-scoped, so that was not a second variable: it overwrote the count, and three of the
+  // four sentences below printed it. A waiter with three changes queued read
+  // "Sending true saved changes…" on every staff panel, while the connection pill three inches
+  // above said "Live · 3 waiting" (measured on the manager panel and the waiter tablet,
+  // 2026-08-12). Two helpers had been added to dodge it in ONE branch and the other three were
+  // missed, which is what a rename should have done in the first place — so the count is `n` and
+  // the boolean is `retryDue`, and they can never be each other again.
+  function changesWord(n) { return n === 1 ? " change" : " changes"; }
   function barState() {
     var failed = box.failed.length, waiting = box.queued.length;
     if (failed) {
@@ -218,18 +254,18 @@
       // and not overdue, this is a WAIT, not a fault — say when it will go instead.
       var nextAt = (window.LFH_OUTBOX && window.LFH_OUTBOX.nextTryAt) ? window.LFH_OUTBOX.nextTryAt() : 0;
       var dueIn = nextAt ? nextAt - Date.now() : 0;
-      var waiting = dueIn > 1500;                       // a real gap, not the last moment before it fires
-      var stuck = since && (Date.now() - since) > STUCK_MS && (Date.now() - nudgedAt) > 8000 && !waiting;
-      if (!stuck && waiting && since && (Date.now() - since) > STUCK_MS) {
+      var retryDue = dueIn > 1500;                      // a real gap, not the last moment before it fires
+      var stuck = since && (Date.now() - since) > STUCK_MS && (Date.now() - nudgedAt) > 8000 && !retryDue;
+      if (!stuck && retryDue && since && (Date.now() - since) > STUCK_MS) {
         return { tone: "tone-sync",
-                 title: waiting_count_title(waiting_count(waiting)),
+                 title: waiting + changesWord(waiting) + (waiting === 1 ? " is waiting" : " are waiting"),
                  sub: "Saved on this device since " + fmtTime(since) + " — next try in about "
                       + Math.max(1, Math.round(dueIn / 1000)) + "s. Tap Send now if you'd rather not wait.",
                  action: "Send now", onAction: sendNow, alt: "See" };
       }
       if (stuck) {
         return { tone: "tone-stale",
-                 title: waiting + (waiting === 1 ? " change hasn't sent yet" : " changes haven't sent yet"),
+                 title: waiting + changesWord(waiting) + (waiting === 1 ? " hasn't sent yet" : " haven't sent yet"),
                  sub: "Saved on this device since " + fmtTime(since) + " — the connection looks fine now.",
                  action: "Send now", onAction: sendNow, alt: "See" };
       }
@@ -251,12 +287,12 @@
       var unsafe = !!(window.LFH_OUTBOX && window.LFH_OUTBOX.storageFailed && window.LFH_OUTBOX.storageFailed());
       if (unsafe) {
         return { tone: "tone-bad",
-                 title: waiting + (waiting === 1 ? " change is NOT saved on this device" : " changes are NOT saved on this device"),
+                 title: waiting + changesWord(waiting) + (waiting === 1 ? " is NOT saved on this device" : " are NOT saved on this device"),
                  sub: "This device won't let the app store them, so closing this panel would lose them. Keep it open until they've gone.",
                  action: "See" };
       }
       return { tone: "tone-sync",
-               title: "Sending " + waiting + (waiting === 1 ? " saved change" : " saved changes") + "…",
+               title: "Sending " + waiting + " saved" + changesWord(waiting) + "…",
                sub: offlineMade
                  ? "Made while you were offline. Keep this panel open until it's done."
                  : "The system hasn't confirmed them yet. Keep this panel open until it's done.",

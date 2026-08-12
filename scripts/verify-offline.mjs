@@ -765,15 +765,45 @@ async function run() {
       // flowing, so the connection is not "struggling" in any way a person would recognise —
       // the owner caught exactly that warning sitting above a green "Live" badge. Silence is
       // the correct answer; the layer refetches by itself within seconds.
-      const slowBar = await inPanel(slowPage, () => ({
-        bar: (function () { const b = document.querySelector("#lfhOffBar"); return b ? b.innerText.replace(/\n/g, " | ") : ""; })(),
-        rt: (window.LFH_RT && window.LFH_RT.getStatus) ? window.LFH_RT.getStatus() : "?",
-      }));
+      // POLL, DON'T STOPWATCH. The bar is deliberately not instant — it waits a beat so a single
+      // frame of a healthy boot can't flash a warning (NEVER_CONNECTED_SETTLE_MS in
+      // public/panels/offline.js) — so reading it once, the instant the board paints, measures the
+      // wait rather than the behaviour. Same lesson as bodyWhenSettled above.
+      let slowBar = { bar: "", rt: "?" };
+      for (let i = 0; i < 32; i++) {
+        slowBar = await inPanel(slowPage, () => ({
+          bar: (function () { const b = document.querySelector("#lfhOffBar"); return b ? b.innerText.replace(/\n/g, " | ") : ""; })(),
+          rt: (window.LFH_RT && window.LFH_RT.getStatus) ? window.LFH_RT.getStatus() : "?",
+        }));
+        if (slowBar && (slowBar.bar || slowBar.rt === "online")) break;
+        await sleep(250);
+      }
       const liveFlowing = slowBar && slowBar.rt === "online";
-      const alarmed = /struggling|no internet/i.test((slowBar && slowBar.bar) || "");
-      liveFlowing && alarmed
-        ? bad(`it cried wolf while live updates were flowing: "${slowBar.bar.slice(0, 60)}"`)
-        : ok(liveFlowing ? "and it stays quiet, because live updates are still flowing" : `and it says so: "${(slowBar.bar || "").slice(0, 50)}"`);
+      const alarmed = /struggling|no internet|saved/i.test((slowBar && slowBar.bar) || "");
+      // THIS BRANCH USED TO ASSERT NOTHING. When live updates were NOT flowing it printed whatever
+      // the bar said and called it a pass — so it passed on 2026-08-12 printing `and it says so: ""`,
+      // i.e. NO BAR AT ALL, while the manager's floor showed 31 tiles from a copy saved a quarter
+      // of an hour earlier under a heading that still read "Table view · live". A check with a
+      // branch that can't fail is not a check.
+      //
+      // The rule is symmetric and both halves are now enforced: live updates flowing → stay quiet;
+      // live updates NOT flowing while saved data is on screen → SAY SO.
+      if (liveFlowing) {
+        alarmed
+          ? bad(`it cried wolf while live updates were flowing: "${slowBar.bar.slice(0, 60)}"`)
+          : ok("and it stays quiet, because live updates are still flowing");
+      } else {
+        alarmed
+          ? ok(`and it says so: "${(slowBar.bar || "").slice(0, 60)}"`)
+          : bad("saved data is on screen with live updates NOT flowing, and the bar says nothing", JSON.stringify((slowBar && slowBar.bar) || ""));
+      }
+      // …AND THE HEADING MUST NOT STILL CLAIM "live". It is a hard-coded caption in
+      // public/panels/editor/app.js (floorLiveTag), so a revert there is invisible to every other
+      // check in this file.
+      const heading = await inPanel(slowPage, () => (document.querySelector(".floor-head h2") || {}).innerText || "");
+      typeof heading === "string" && /saved copy/i.test(heading)
+        ? ok(`and the floor heading admits it: "${heading.replace(/\s+/g, " ").trim()}"`)
+        : bad("the floor still says '· live' over a board that came off this device", JSON.stringify(heading));
       await ctx.request.get(SLOW + "/__slow?ms=0");
       await slowPage.close();
     }
@@ -840,9 +870,18 @@ async function run() {
     /This screen hasn't been opened on this device/i.test(lastResort)
       ? ok("it shows our own page, not the browser's error page")
       : bad("the branded offline page was not served", JSON.stringify(lastResort.slice(0, 100)));
-    /Nothing you did is lost/i.test(lastResort)
-      ? ok("and it reassures them their work is safe")
-      : bad("the reassurance text is missing");
+    // The reassurance has to be TRUE as well as present. It used to promise that "any orders or
+    // changes you made while offline are stored on this device" — which is false on a device whose
+    // storage was refused, and false for the guest actions that have no queue. So the check is now
+    // for the honest form (what was SAVED is safe) and it FAILS on the old blanket promise, which
+    // is the only way a well-meaning revert gets noticed.
+    const reassures = /already saved on this device is safe/i.test(lastResort);
+    const overPromises = /Nothing you did is lost/i.test(lastResort) || /any orders or changes you made/i.test(lastResort);
+    reassures && !overPromises
+      ? ok("and it reassures them their work is safe, without promising more than we keep")
+      : bad(overPromises
+        ? "the last-resort page promises that everything was saved — it cannot know that (blocked storage; guest actions with no queue)"
+        : "the reassurance text is missing");
     // IT MUST NAME THE REASON, AND NAME THE RIGHT ONE. The page used to always blame the
     // internet; the day the app's own database stopped answering it said "No internet right
     // now" to an owner whose Wi-Fi was fine, and then waited forever. Here the device really
