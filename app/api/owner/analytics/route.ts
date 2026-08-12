@@ -26,6 +26,7 @@ import { istDateOf } from "@/lib/staffProfileShared";
 import { businessDateHi } from "@/lib/businessDay";
 import { mapLimit, FANOUT } from "@/lib/mapLimit";
 import { entitledSubset } from "@/lib/ownerEntitlements";
+import { rd } from "@/lib/readGuard";
 
 export const dynamic = "force-dynamic";
 
@@ -573,12 +574,22 @@ export async function GET(req: NextRequest) {
     //
     // The all-time RECORDS scan stays outside the cache on purpose: it is unbounded, and the
     // client asks for it once per restaurant (&records=1), not on the polled path.
+    // ── A TILE THAT VANISHES SAYS SO (improvement I5, owner 2026-08-12) ──────────────────────────
+    // A failed all-time-records read used to leave `records: null`, and the tile simply wasn't
+    // there — the exact "one fewer block and nothing says why" that `partial` exists to stop, and
+    // the last block on this page that wasn't using it. It stays NON-fatal (the rest of the
+    // dashboard is fine without it) and is fetched OUTSIDE the snapshot cache, so naming it here
+    // cannot poison a stored payload.
     let records: unknown = null;
+    let recordsUnread = false;
     if (wantRecords) {
-      const r = await sb.rpc("lfh_owner_records", { p_restaurant_id: rid });
-      if (!r.error) records = r.data ?? null;
+      const r = await rd("records", () => sb.rpc("lfh_owner_records", { p_restaurant_id: rid }));
+      if (r.error) { console.error("[owner/analytics] all-time records unread:", r.error); recordsUnread = true; }
+      else records = r.data ?? null;
     }
-    return NextResponse.json({ ...restBase, records });
+    const basePartial = (restBase as { partial?: PartialKey[] }).partial || [];
+    const partialOut = recordsUnread ? [...basePartial, "records" as PartialKey] : basePartial;
+    return NextResponse.json({ ...restBase, records, ...(partialOut.length ? { partial: partialOut } : {}) });
   } catch (e) {
     return dbFail("owner/analytics", e, {
       message: "Couldn't load your dashboard just now — please try again.",

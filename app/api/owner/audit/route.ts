@@ -75,15 +75,22 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  let q = sb.from("deletion_audit").select(COLS).order("at", { ascending: false }).limit(limit);
+  // ── PAGED, like the Activity log beside it (owner, 2026-08-12) ─────────────────────────────────
+  // The Removals record showed the newest 200-300 and stopped. On the screen whose entire purpose is
+  // "prove nothing quietly disappeared", a list that itself quietly stops is the wrong shape. The
+  // count rides along so the footer can say how many removals there really are.
+  const page = Math.max(parseInt(url.searchParams.get("page") || "1", 10) || 1, 1);
+  const start = (page - 1) * limit;
+  let q = sb.from("deletion_audit").select(COLS, { count: "exact" })
+    .order("at", { ascending: false }).range(start, start + limit - 1);
   // Optional ?rid= — narrow to ONE selected restaurant. Only honoured when that id is already
   // in the caller's scope, so it can only NARROW, never widen (mirrors /api/owner/oplog).
   const pinRid = url.searchParams.get("rid");
   if (pinRid) {
-    if (!inScope(scope, pinRid)) return NextResponse.json({ removals: [] });
+    if (!inScope(scope, pinRid)) return NextResponse.json({ removals: [], page: 1, pageSize: limit, total: 0, pages: 1 });
     q = q.eq("restaurant_id", pinRid);
   } else if (!scope.all) {
-    if (!scope.ids.length) return NextResponse.json({ removals: [] });
+    if (!scope.ids.length) return NextResponse.json({ removals: [], page: 1, pageSize: limit, total: 0, pages: 1 });
     q = q.in("restaurant_id", scope.ids);
   }
 
@@ -104,5 +111,10 @@ export async function GET(req: NextRequest) {
     // reason and its amount are untouched either way — only the identity is withheld.
     !!scope.admin,
   );
-  return NextResponse.json({ removals, ...(names.partial ? { partial: ["restaurantNames"] } : {}) });
+  const total = r.count ?? removals.length;
+  return NextResponse.json({
+    removals,
+    page, pageSize: limit, total, pages: Math.max(1, Math.ceil(total / limit)),
+    ...(names.partial ? { partial: ["restaurantNames"] } : {}),
+  });
 }

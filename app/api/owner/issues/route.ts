@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { signRows } from "@/lib/mediaLinks";
-import { ownerScope, inScope, type OwnerScope, dbFail } from "@/lib/ownerScope";
+import { ownerScope, inScope, type OwnerScope, dbFail , ownerLogPanel } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
@@ -121,7 +121,7 @@ export async function PATCH(req: NextRequest) {
   if (error) return dbFail("owner/issues.update", error, { message: "Couldn't update that complaint — please try again." });
   // The issue ROW already carries resolved_by/at, so this was never untraceable — it just never
   // reached the unified Activity log (sweep 2026-08-04).
-  await logAction("owner", status === "resolved" ? "issue_resolved" : "issue_reopened", {
+  await logAction(ownerLogPanel(scope), status === "resolved" ? "issue_resolved" : "issue_reopened", {
     restaurant_id: issue.restaurant_id, actor: who,
     detail: status === "resolved" ? "marked a complaint resolved" : "reopened a complaint",
   });
@@ -156,7 +156,7 @@ async function postImpl(req: NextRequest) {
     raised_role: (scope.all || scope.admin) ? "admin" : "owner",
   });
   if (error) return dbFail("owner/issues.raise", error, { message: "Couldn't raise that complaint — please try again." });
-  await logAction("owner", "issue_raised", {
+  await logAction(ownerLogPanel(scope), "issue_raised", {
     restaurant_id: rid, actor: (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner"),
     detail: `raised: ${subject.slice(0, 80)}`,
   });

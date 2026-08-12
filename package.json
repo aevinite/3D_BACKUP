@@ -107,7 +107,9 @@
     "verify:void-party": "node scripts/verify-void-on-joined-party.mjs",
     "verify:rota-clash": "node scripts/verify-rota-clash.mjs",
     "verify:merge-who": "node scripts/verify-merge-records-who.mjs",
-    "verify:read-guards": "node scripts/verify-read-guards.mjs"
+    "verify:read-guards": "node scripts/verify-read-guards.mjs",
+    "verify:personal-data": "node scripts/verify-personal-data.mjs",
+    "read-timings": "node scripts/read-timings.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",

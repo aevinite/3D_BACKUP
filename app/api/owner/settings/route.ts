@@ -6,7 +6,7 @@
 //          token_version. That invalidates the current cookie, so the client re-logs in.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
+import { ownerScope, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse , ownerLogPanel } from "@/lib/ownerScope";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@/lib/ownerEntitlements";
 import { USER_COOKIE, userFromCookie, hashSecret, verifySecret } from "@/lib/userAuth";
@@ -146,7 +146,7 @@ export async function PATCH(req: NextRequest) {
   // A module turning itself off changes what a whole panel offers, and nothing recorded it — so with
   // two co-owners nobody could say who flipped it (sweep 2026-08-04). Unlike issues/ratings there is
   // no in-row stamp to fall back on: the settings column holds only the value.
-  await logAction("owner", "module_toggle", {
+  await logAction(ownerLogPanel(scope), "module_toggle", {
     restaurant_id: rid, actor: scope.admin ? "admin" : (("ownerId" in scope && scope.ownerId) || "owner"),
     detail: `${def.label} → ${enabled ? "on" : "off"}`,
   });
@@ -194,6 +194,9 @@ export async function POST(req: NextRequest) {
   // Bumping token_version ends EVERY session on this account, so the visible symptom is "everyone
   // got logged out" with nothing to explain it. app/api/panel-profile already logs its equivalent
   // self-change as `password_change`; this one didn't (sweep 2026-08-04).
+  // Always the OWNER's own log: this route refuses anyone who is not a signed-in owner (the guard at
+  // the top of POST), so there is no admin path to hide here — and "everyone got logged out" is
+  // exactly the event the owner needs to find an explanation for.
   await logAction("owner", "password_change", {
     restaurant_id: owner.restaurant_id ?? undefined,
     actor: owner.name || owner.username, actor_id: owner.id,

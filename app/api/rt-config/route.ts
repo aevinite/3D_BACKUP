@@ -38,8 +38,21 @@ export async function GET(req: NextRequest) {
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
   if (!url || !anonKey) {
     console.error("[rt-config] live updates are not configured — NEXT_PUBLIC_SUPABASE_URL/ANON_KEY missing");
+    // ── A CODE, NOT JUST A SENTENCE (improvement I11, owner 2026-08-12) ──────────────────────────
+    // "Live updates aren't set up on this server" and "your wifi dropped" look identical to a waiter
+    // — the badge could only say "offline" — and they need completely different responses: one is
+    // "wait, it'll come back", the other is "call Aevidine, nobody's coming". `reason` is a CODE the
+    // connection badge branches on (the house rule: branch on codes, never on prose), so the panel
+    // can show a distinct state instead of lumping a configuration fault in with a bad signal.
     return NextResponse.json(
-      { error: "Live updates aren't set up on this server.", unconfigured: true, restaurantId },
+      {
+        error: "Live updates aren't set up on this server.",
+        reason: "rt_unconfigured",
+        unconfigured: true,
+        /** Nothing the staff member can do — this one needs Aevidine, and the badge should say so. */
+        selfFixable: false,
+        restaurantId,
+      },
       { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }

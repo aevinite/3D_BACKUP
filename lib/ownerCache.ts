@@ -91,6 +91,42 @@ const isPartial = (p: unknown): boolean =>
   !!p && typeof p === "object" && Array.isArray((p as { partial?: unknown }).partial)
      && (p as { partial: unknown[] }).partial.length > 0;
 
+// ── AND A PAYLOAD THAT WENT ALL-ZERO WITHOUT SAYING SO (improvement I2, owner 2026-08-12) ─────────
+//
+// `isPartial` above only catches a payload that ADMITS it is incomplete. That is the right first
+// line — but it can only work when the route remembered to say so, and the whole T9 sweep was a list
+// of places where nobody remembered. Two of them were serious specifically because the invented ₹0
+// then got STORED here and outlived the blip by hours.
+//
+// So there is a second line now: if the payload we are about to save has collapsed every money
+// figure to zero, and the value we are replacing did NOT, treat it as suspect and keep the old row.
+//
+// WHY THIS IS SAFE ON A GENUINELY QUIET DAY. It never invents a number and never serves the old one
+// to this caller — the fresh (zero) payload is returned exactly as computed. It only declines to
+// OVERWRITE, and the very next open recomputes. So the worst case for a restaurant that really did
+// take ₹0 is that the snapshot refreshes one open later than it would have; the best case is that a
+// half-read total never becomes what everybody sees for the next five minutes.
+//
+// Deliberately narrow: only NUMERIC fields, only a whole-payload collapse (every number that used to
+// be non-zero is now zero), never a partial dip. A single figure legitimately going to zero is
+// ordinary; every figure at once, after a non-zero snapshot, is the shape of a failed read.
+function numbersIn(v: unknown, depth = 0, out: number[] = []): number[] {
+  if (depth > 4 || out.length > 400) return out;
+  if (typeof v === "number" && Number.isFinite(v)) out.push(v);
+  else if (Array.isArray(v)) for (const x of v) numbersIn(x, depth + 1, out);
+  else if (v && typeof v === "object") for (const x of Object.values(v)) numbersIn(x, depth + 1, out);
+  return out;
+}
+function collapsedToZero(next: unknown, prev: unknown): boolean {
+  if (!prev) return false;                              // nothing to compare against — store it
+  const before = numbersIn(prev);
+  const after = numbersIn(next);
+  if (!before.length || !after.length) return false;
+  const hadValue = before.some((n) => n !== 0);
+  const allZeroNow = after.every((n) => n === 0);
+  return hadValue && allZeroNow;
+}
+
 export async function cachedOwnerPayload<T extends object>(opts: {
   key: string;
   force?: boolean;
@@ -109,7 +145,8 @@ export async function cachedOwnerPayload<T extends object>(opts: {
     if (inflight.has(key)) return;                 // already refreshing in this instance
     inflight.add(key);
     try {
-      const cur = (await sb.from(TABLE).select("computed_at, fingerprint").eq("cache_key", key).maybeSingle()).data;
+      // `payload` rides along now so the all-zero guard below has something to compare against.
+      const cur = (await sb.from(TABLE).select("computed_at, fingerprint, payload").eq("cache_key", key).maybeSingle()).data;
       if (cur && isFresh(cur.computed_at, maxAgeMs)) return; // someone beat us
       if (fingerprint && cur) {
         const fp = await fingerprint().catch(() => null);
@@ -120,6 +157,10 @@ export async function cachedOwnerPayload<T extends object>(opts: {
       }
       const payload = await compute();
       if (isPartial(payload)) return;                // see isPartial — do not freeze a half answer
+      if (collapsedToZero(payload, cur?.payload)) {  // see collapsedToZero — improvement I2
+        console.warn(`[ownerCache] refused to store an all-zero payload over a non-zero one: ${key}`);
+        return;
+      }
       const fp2 = fingerprint ? await fingerprint().catch(() => null) : null;
       await sb.from(TABLE).upsert(
         { cache_key: key, payload, fingerprint: fp2, computed_at: nowIso(), last_viewed_at: nowIso() },

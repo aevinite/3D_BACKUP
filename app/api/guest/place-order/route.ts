@@ -76,6 +76,32 @@ const MAX_ITEMS = 200;
 const MAX_ALLERGIES = 40;
 const MAX_ALLERGY_LEN = 200;
 
+// ── "THE KITCHEN IS BUSY — WAIT THIS LONG" (improvement I10, owner 2026-08-12) ────────────────────
+//
+// A 502 here means the restaurant's server did not answer, and the phone saves the order and retries
+// on its own fixed schedule. During a genuine rush that is the worst possible behaviour: every
+// waiting phone comes back at the same moment, on the same timer, and lands on the server that was
+// already struggling — the retry storm makes the rush it is reacting to worse.
+//
+// The server knows things the phone cannot: how many replays are in flight and how long the database
+// has been unhappy. So it now sends a `retryAfter` (seconds) with the refusal, and the outbox uses it
+// as its wait instead of its own constant.
+//
+// It is a HINT, deliberately, and the phone must still work if it ignores it: an old build that has
+// never heard of the field keeps its existing schedule and is exactly as correct as before. The
+// jitter is added HERE rather than on the device so a thousand phones get a thousand different
+// answers — the whole point is that they stop arriving together.
+//
+// `reason: "server_busy"` stays spelled out in full: it is the code lib/guestOutbox.ts words for the
+// diner, and `npm run verify:order-retry` greps this file for it (it caught this helper hiding it).
+function busy(): Response {
+  const retryAfter = 20 + Math.floor(Math.random() * 25);   // 20–45s, spread
+  return NextResponse.json(
+    { ok: false, reason: "server_busy", retryAfter },
+    { status: 502, headers: { "Retry-After": String(retryAfter) } },
+  );
+}
+
 async function postImpl(req: NextRequest): Promise<Response> {
   let b: Body;
   try { b = (await req.json()) as Body; } catch { return NextResponse.json({ ok: false, reason: "bad_body" }, { status: 400 }); }
@@ -92,7 +118,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     // NEVER hand the database's own words to a diner. `error.message` ends up in the phone's
     // "couldn't send" list verbatim, which is meaningless to them and internal to us. The code
     // below is what lib/guestOutbox.ts knows how to word; the detail stays in the server log.
-    if (error) { console.error("[guest/place-order] session RPC failed:", error.message); return NextResponse.json({ ok: false, reason: "server_busy" }, { status: 502 }); }
+    if (error) { console.error("[guest/place-order] session RPC failed:", error.message); return busy(); }
     // The restaurant is only used to SCOPE the limit ping — identity still comes from the token,
     // so a wrong value here can never place an order anywhere.
     //
@@ -140,7 +166,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     p_allergies: allergies,
     p_restaurant_id: publicRid,
   });
-  if (error) { console.error("[guest/place-order] public RPC failed:", error.message); return NextResponse.json({ ok: false, reason: "server_busy" }, { status: 502 }); }
+  if (error) { console.error("[guest/place-order] public RPC failed:", error.message); return busy(); }
   maybePing(data, publicRid);
   dropFloorIfPlaced(data, publicRid);
   return NextResponse.json(data ?? { ok: false, reason: "empty" });

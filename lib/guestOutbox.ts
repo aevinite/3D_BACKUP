@@ -269,12 +269,34 @@ const RETRY_MAX_MS = 120_000;
 let retryTimer: ReturnType<typeof setTimeout> | null = null;
 let retryStep = 0;
 
+// ── THE SERVER MAY ASK FOR A LONGER WAIT (improvement I10, owner 2026-08-12) ─────────────────────
+//
+// The backoff above is the phone guessing. The SERVER knows things the phone cannot — how many
+// replays are in flight, how long the database has been unhappy — so when it refuses with
+// `server_busy` it now sends `retryAfter` (seconds) and this is where that lands.
+//
+// Deliberately only ever LENGTHENS the wait (`Math.max`): a server asking for more room always gets
+// it, and a server asking for less can never talk a phone into hammering it faster than the local
+// backoff already allows. Cleared as soon as anything succeeds, so one busy moment does not slow the
+// queue down for the rest of the evening. Ignoring the field entirely — which every older build
+// does — is exactly as correct as it was before, which is what makes this a hint and not a protocol.
+let serverAskedWaitMs = 0;
+const SERVER_WAIT_CAP_MS = 5 * 60_000;   // however busy it claims to be, we come back within 5 min
+
+/** Record a `retryAfter` (seconds) from a server refusal. Ignores junk and absurd values. */
+export function noteServerRetryAfter(seconds: unknown): void {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s <= 0) return;
+  serverAskedWaitMs = Math.min(s * 1000, SERVER_WAIT_CAP_MS);
+}
+
 function scheduleRetry(progressed?: boolean) {
   if (retryTimer) { clearTimeout(retryTimer); retryTimer = null; }
-  if (!queued.length) { retryStep = 0; return; }
-  if (progressed) retryStep = 0;                       // the server answered → back to fast retries
+  if (!queued.length) { retryStep = 0; serverAskedWaitMs = 0; return; }
+  if (progressed) { retryStep = 0; serverAskedWaitMs = 0; }   // the server answered → back to fast retries
   const base = retryStep === 0 ? RETRY_FIRST_MS : Math.min(RETRY_BASE_MS * Math.pow(2, retryStep - 1), RETRY_MAX_MS);
-  const wait = Math.round(base * (0.75 + Math.random() * 0.5));
+  // The phone's own jittered backoff, or the server's request — whichever is longer.
+  const wait = Math.max(Math.round(base * (0.75 + Math.random() * 0.5)), serverAskedWaitMs);
   retryStep = Math.min(retryStep + 1, 8);
   // A timer is kept even while the phone reports itself offline: flushGuestOutbox() returns
   // without touching the network in that case, and it means a connection that comes back WITHOUT
@@ -484,8 +506,12 @@ export async function flushGuestOutbox() {
       // below, where the already-consumed stream yielded null — so a clash message never
       // reached the guest.
       const j = await res.json().catch(() => null) as
-        | { ok?: boolean; order_id?: string; duplicate?: boolean; reason?: string; item?: string; retry?: boolean; clash?: { plain?: string } }
+        | { ok?: boolean; order_id?: string; duplicate?: boolean; reason?: string; item?: string; retry?: boolean; retryAfter?: number; clash?: { plain?: string } }
         | null;
+      // THE SERVER MAY ASK FOR MORE ROOM (improvement I10). Read before any branch below returns,
+      // so a refusal that carries the hint still lengthens the next wait — that is the whole point:
+      // the hint arrives ON the refusal that proves the server is struggling.
+      if (j?.retryAfter != null) noteServerRetryAfter(j.retryAfter);
       // Idempotency says a request under this id is in flight → wait and try again. A stale claim
       // is taken over after 30s (lib/idempotency.ts), so if it KEEPS saying this something is
       // wrong and the diner has to hear about it rather than watch "Waiting" all evening. This

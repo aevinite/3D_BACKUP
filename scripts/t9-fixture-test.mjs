@@ -115,10 +115,18 @@ async function main() {
     }
   }
 
-  // (c) the erase itself, exactly as the route performs it — every table, then the audit row.
-  for (const t of ["customer_visits", "customer_devices"]) {
-    const r = await sb.from(t).delete().eq("restaurant_id", RID).eq("phone", PHONE);
-    if (r.error) bad(`erase step ${t} failed: ${r.error.message}`);
+  // (c) the erase itself, exactly as the route performs it — every declared place, then the audit.
+  // The table list comes from lib/personalData.ts now (improvement I15), and writing that list down
+  // is what turned up FOUR more places nobody had counted: session_members, requests, otp_codes and
+  // blocklist. This walks the same list the route walks, so the test cannot drift from it.
+  const { ERASABLE, RETAINED } = await import("../lib/personalData.ts");
+  ok(`the erase covers ${ERASABLE.length} place(s) and discloses ${RETAINED.length} it must keep`);
+  for (const p of ERASABLE) {
+    if (p.table === "customers" || p.scopeBy !== "restaurant") continue;   // done below / scoped differently
+    const base = sb.from(p.table);
+    const q = p.policy === "anonymise" ? base.update(p.anonymiseTo || {}) : base.delete();
+    const r = await q.eq("restaurant_id", RID).eq(p.phoneColumn, PHONE);
+    if (r.error) bad(`erase step ${p.table} failed: ${r.error.message}`);
   }
   // THE PAY-LATER ROW IS EMPTIED, NOT DELETED — and this test is the reason we know that.
   // The first version of this fixture tried to DELETE it and got:

@@ -5,13 +5,14 @@
 // columns, .in(restaurant_id), .limit, one cheap head-count for the true total.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail } from "@/lib/ownerScope";
+import { ownerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { cachedOwnerPayload, scopeKeyOf } from "@/lib/ownerCache";
 import { logAction } from "@/lib/oplog";
 import { rd, ReadSet, ReadFailed } from "@/lib/readGuard";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { safeSearch, safePhone } from "@/lib/searchText";
+import { ERASABLE, RETAINED, erasureSummary } from "@/lib/personalData";
 
 export const dynamic = "force-dynamic";
 // visits/consent added by Customer CRM (mig 212): a REAL repeat count + the DPDP
@@ -255,17 +256,40 @@ export async function DELETE(req: NextRequest) {
   // is attached to keeps a valid reference and stays in the books. This is the standard shape for
   // erasing someone who appears on a financial document, and it is genuinely better than a delete:
   // a delete would either fail or take a sale with it.
-  const wipes: { table: string; run: () => PromiseLike<{ error: unknown }> }[] = [
-    { table: "customer_visits", run: () => sb.from("customer_visits").delete().eq("restaurant_id", restaurantId).eq("phone", phone) },
-    { table: "customer_devices", run: () => sb.from("customer_devices").delete().eq("restaurant_id", restaurantId).eq("phone", phone) },
-    // The table this route had never heard of (finding F26).
-    {
-      table: "khata_customers",
-      run: () => sb.from("khata_customers")
-        .update({ name: "Erased at their request", phone: null, note: null })
-        .eq("restaurant_id", restaurantId).eq("phone", phone),
+  // ── DRIVEN BY THE DECLARED LIST, NOT BY THIS FUNCTION'S MEMORY (improvement I15) ───────────────
+  // These tables used to be typed out here. That list was wrong for months — `khata_customers` held
+  // a name and a number from the day pay-later shipped and nothing here knew — and it was only right
+  // afterwards because somebody had just gone looking. lib/personalData.ts is the declared list, and
+  // `npm run verify:personal-data` fails the build if a new table gains a phone column without
+  // joining it. `customers` itself is handled below, after these, so a failure part-way leaves the
+  // guest findable rather than half-gone.
+  // THIS OWNER'S RESTAURANT ONLY. The same phone can be a guest somewhere else on the platform, and
+  // that restaurant's data is not this owner's to touch — so the two tables that hang off a session
+  // rather than a restaurant are narrowed through that restaurant's sessions first.
+  let sessionIds: string[] | null = null;
+  if (ERASABLE.some((p) => p.scopeBy === "session")) {
+    const s = await rd("theirSessions", () => sb.from("sessions")
+      .select("id").eq("restaurant_id", restaurantId).eq("cust_phone", phone).limit(1000));
+    if (s.error) {
+      return dbFail("owner/customers.erase", s.error, { message: "Couldn't finish erasing that guest — nothing was removed. Please try again." });
+    }
+    sessionIds = ((s.data || []) as { id: string }[]).map((r) => r.id);
+  }
+
+  const wipes = ERASABLE.filter((p) => p.table !== "customers").map((p) => ({
+    table: p.table,
+    run: (): PromiseLike<{ error: unknown }> => {
+      // A session-scoped table with NO matching sessions has nothing to erase — and an unfiltered
+      // `.in("session_id", [])` would be a no-op anyway, but saying so here keeps it obvious.
+      if (p.scopeBy === "session" && !sessionIds?.length) return Promise.resolve({ error: null });
+      const base = sb.from(p.table);
+      const q = p.policy === "anonymise" ? base.update(p.anonymiseTo || {}) : base.delete();
+      const scoped = p.scopeBy === "restaurant" ? q.eq("restaurant_id", restaurantId)
+        : p.scopeBy === "session" ? q.in("session_id", sessionIds as string[])
+        : q;                                     // "phone" — global, and documented as safe
+      return scoped.eq(p.phoneColumn, phone);
     },
-  ];
+  }));
   for (const w of wipes) {
     const r = await rd(w.table, () => w.run().then((x) => ({ data: null, error: x.error })));
     if (r.error) {
@@ -285,7 +309,7 @@ export async function DELETE(req: NextRequest) {
   // second copy of the number the owner just asked us to erase.
   const who = (scope.all || scope.admin) ? "admin" : (scope.ownerId || "owner");
   const last4 = phone.slice(-4);
-  await logAction("owner", "customer_erase", {
+  await logAction(ownerLogPanel(scope), "customer_erase", {
     restaurant_id: restaurantId,
     actor: who,
     detail: `erased guest record ending ${last4} (${(del.data || []).length} ${(del.data || []).length === 1 ? "row" : "rows"}) + their visits, devices and pay-later record`,
@@ -320,5 +344,8 @@ export async function DELETE(req: NextRequest) {
     // whole change exists to close.
     if (error) console.error("[owner/customers.erase] the erase SUCCEEDED but its audit row failed:", error.message);
   });
-  return NextResponse.json({ ok: true, erased: (del.data || []).length });
+  // WHAT SURVIVED, SAID OUT LOUD (improvement I15). An erasure that cannot be complete has to say
+  // so — the guest's details stay on their issued bills, and the owner needs to know that when they
+  // answer the guest, rather than promising something the books never did.
+  return NextResponse.json({ ok: true, erased: (del.data || []).length, ...erasureSummary() });
 }
