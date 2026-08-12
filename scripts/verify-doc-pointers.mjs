@@ -42,7 +42,15 @@ const read = (p) => fs.readFileSync(R(p), "utf8");
 //
 // So: BYTES, compared with a plain number, and both printed. No conversion to guess at. 24 KB is
 // ~28% above today's file — room for ordinary rule additions, not room for a second document.
+//
+// AND IT STILL WASN'T BYTES (T10 sweep, 2026-08-12). It compared `claude.length` — the length of a
+// JavaScript string, i.e. UTF-16 code units, i.e. CHARACTERS. This file is full of em-dashes (3 bytes
+// each) and emoji headings (4 bytes each, and 2 "characters" apiece), so it printed 21,635 bytes for a
+// file that was 21,889 on disk: under by 254. Small today, but it grows with every emoji added, and the
+// whole point of the comment above is that this number must not need interpreting. Buffer.byteLength
+// is the actual answer, so measure with it and stop guessing.
 const BYTE_BUDGET = 24_000;
+const byteLen = (s) => Buffer.byteLength(s, "utf8");
 
 const claude = read("CLAUDE.md");
 const fails = [];
@@ -187,29 +195,71 @@ for (const s of [...named].sort()) {
 }
 notes.push(`${named.size} npm scripts named, all exist`);
 
+/* 3b — the GUARD MAP names every guard, and every guard it names exists -----------------
+ * WHY (T10 sweep, 2026-08-12). There are 94 `verify:` / `test:` commands, one per bug that once
+ * reached somebody's screen, and nothing told a person which one covered the file they just edited. The
+ * observed result is that people run none of them, or reach for verify:everything (40 minutes, writes
+ * to the shared database, pid-locked). docs/GUARD-MAP.md is the lookup table — and a lookup table
+ * that silently misses the newest guard is worse than none, because it reads as complete.
+ *
+ * So both directions are checked: a guard added to package.json must get a row, and a row must not
+ * name a guard that has been renamed or deleted. Both halves failed in the past week in this repo:
+ * four guards (one-number, personal-data, read-guards, merge-keeps-mark) appeared between two scans
+ * of the same afternoon.
+ */
+{
+  const MAP = "docs/GUARD-MAP.md";
+  if (!fs.existsSync(R(MAP))) {
+    fails.push(`${MAP} is missing — nothing tells a person which of the ${Object.keys(pkg.scripts).length} guards covers their change`);
+  } else {
+    const map = read(MAP);
+    // Every check-shaped alias must appear somewhere in the map. Aliases that are NOT checks
+    // (dev, build, seeds, stress, load) are deliberately out of scope — the map's last section
+    // names the dangerous ones by hand.
+    const checks = [...scripts].filter((k) => /^(verify|test|check):/.test(k) || k === "test");
+    const missing = checks.filter((k) => !map.includes(k));
+    if (missing.length) {
+      fails.push(
+        `${MAP} has no row for ${missing.length} check(s), so someone who changed the code they guard ` +
+          `will not find them:\n      · ${missing.join("\n      · ")}\n` +
+          `      Add each to the section for the panel/area it protects, with what it needs and whether it WRITES.`,
+      );
+    }
+    // …and the reverse: a row naming a guard that no longer exists sends someone to a dead command.
+    const named = new Set([...map.matchAll(/`?(?:npm run )?((?:verify|test|check):[a-z0-9-]+)`?/g)].map((m) => m[1]));
+    const dead = [...named].filter((n) => !scripts.has(n)).sort();
+    if (dead.length) {
+      fails.push(`${MAP} names ${dead.length} command(s) that no longer exist: ${dead.join(", ")}`);
+    }
+    if (!missing.length && !dead.length) {
+      notes.push(`${MAP} has a row for all ${checks.length} checks, and names no dead command`);
+    }
+  }
+}
+
 /* 4 — budget --------------------------------------------------------------------------- */
-if (claude.length > BYTE_BUDGET) {
+if (byteLen(claude) > BYTE_BUDGET) {
   fails.push(
-    `CLAUDE.md is ${claude.length} bytes, over the ${BYTE_BUDGET} budget. It is re-read on every ` +
+    `CLAUDE.md is ${byteLen(claude)} bytes, over the ${BYTE_BUDGET} budget. It is re-read on every ` +
       `request of every session, so narrative belongs in docs/CLAUDE-DETAIL.md or ${HIST}, not here. ` +
       `Move a section out rather than raising this number — raising it is how the last budget stopped working.`,
   );
 } else {
-  notes.push(`CLAUDE.md ${claude.length} bytes (budget ${BYTE_BUDGET})`);
+  notes.push(`CLAUDE.md ${byteLen(claude)} bytes (budget ${BYTE_BUDGET})`);
 }
 
 /* 5 — AGENTS.md stays a pointer -------------------------------------------------------- */
 if (fs.existsSync(R("AGENTS.md"))) {
   const agents = read("AGENTS.md");
-  if (agents.length > 2_000) {
+  if (byteLen(agents) > 2_000) {
     fails.push(
-      `AGENTS.md is ${agents.length} bytes — it has regrown into a second copy of the rules. ` +
+      `AGENTS.md is ${byteLen(agents)} bytes — it has regrown into a second copy of the rules. ` +
         `It drifted stale once already; keep it a pointer to CLAUDE.md.`,
     );
   } else if (!/CLAUDE\.md/.test(agents)) {
     fails.push(`AGENTS.md does not point at CLAUDE.md`);
   } else {
-    notes.push(`AGENTS.md is a ${agents.length}-byte pointer`);
+    notes.push(`AGENTS.md is a ${byteLen(agents)}-byte pointer`);
   }
 }
 

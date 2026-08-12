@@ -111,7 +111,8 @@
     "verify:merge-keeps-mark": "node scripts/verify-merge-keeps-mark.mjs",
     "verify:read-guards": "node scripts/verify-read-guards.mjs",
     "verify:personal-data": "node scripts/verify-personal-data.mjs",
-    "read-timings": "node scripts/read-timings.mjs"
+    "read-timings": "node scripts/read-timings.mjs",
+    "verify:push": "npm run -s typecheck && npm run -s lint && npm run -s test:money && npm run -s test:errors && npm run -s test:units && npm run -s verify:static && npm run -s verify:access"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",
