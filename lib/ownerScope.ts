@@ -160,6 +160,32 @@ export function inScope(scope: OwnerScope, restaurantId: string): boolean {
   return scope.all || scope.ids.includes(restaurantId);
 }
 
+/**
+ * WHICH LOG A `/api/owner/*` ACTION BELONGS IN.
+ *
+ * ── The leak this closes (owner, 2026-08-12) ────────────────────────────────────────────────────
+ * The owner asked about the feature-switch log line: *"if you mean feature log is shown to owner
+ * then off it, because it's also admin change — owner should not be able to see."* Checking it found
+ * the general version of that worry, and he was right.
+ *
+ * Aevidine's OWN screens already log as `panel:"admin"`, and the owner's Activity feed excludes
+ * `panel in (admin,db)` — so a switch flipped from the admin console was already invisible. But the
+ * admin can also act THROUGH the owner cockpit (the act-as pin), and those routes logged
+ * `logAction("owner", …, { actor: "admin" })`. That row is `panel:"owner"`, so it sails past the
+ * filter and appears in the owner's log with the word "admin" in it.
+ *
+ * (The oplog route blanks `actor_id` when it equals ADMIN_VIEW_ACTOR_ID, which covers the *panel*
+ * view marker — but not the plain `actor: "admin"` string these owner routes write, so the
+ * standing "admin = top power, INVISIBLY" rule was leaking through a different hole.)
+ *
+ * So: an action performed by the admin is recorded against the ADMIN panel, wherever it was
+ * performed from. Nothing is hidden from the record — it lands in Aevidine's Everything Log in full,
+ * which is where an admin action belongs — it simply stops appearing in the owner's feed.
+ */
+export function ownerLogPanel(scope: OwnerScope): "owner" | "admin" {
+  return (scope.all || scope.admin) ? "admin" : "owner";
+}
+
 // The CONCRETE restaurant-id list for a scope. A real owner already has one; the admin's
 // all-restaurants view needs every id, and that read must be PAGED.
 //

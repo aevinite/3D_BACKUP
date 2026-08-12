@@ -6,7 +6,7 @@
 // Egress-safe: explicit columns, scoped by restaurant_id, .limit — never SELECT *.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail } from "@/lib/ownerScope";
+import { ownerScope, inScope, type OwnerScope, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse, dbFail , ownerLogPanel } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { expectClash, clashJson } from "@/lib/clash";
@@ -132,7 +132,7 @@ export async function PATCH(req: NextRequest) {
   // The feedback ROW already carries acknowledged_by/at, so this was never untraceable — but it
   // never reached the unified Activity log, so "what did the owner do today?" left it out. One line
   // so the log tells the whole story (sweep 2026-08-04).
-  await logAction("owner", "rating_handled", {
+  await logAction(ownerLogPanel(scope), "rating_handled", {
     restaurant_id: row.restaurant_id, actor: who,
     detail: [hasAck ? (body.acknowledged ? "acknowledged a rating" : "un-acknowledged a rating") : null,
              hasNote ? (patch.staff_note ? "wrote a reply note" : "cleared the reply note") : null]

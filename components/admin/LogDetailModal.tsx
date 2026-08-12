@@ -19,6 +19,7 @@ import { useEffect, useRef } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { actLabel, PANEL_COLOR, formatActionDetail, fullWhen, timeAgo, isManagerPinRow, type Action } from "@/components/admin/shared";
+import { trailOf } from "@/lib/logTrail";
 
 // One "label : value" line. Renders nothing when the value is empty, so no blank rows.
 function Field({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
@@ -71,6 +72,13 @@ export function LogDetailModal({ row, onClose, showRestaurant = true }: { row: A
   const detail = isErr ? (row.detail || "") : formatActionDetail(row.action, row.detail);
   const actionLabel = actLabel(row.action);
   const panelColor = PANEL_COLOR[panel] || "#94a3b8";
+  // The full path this action happened at. Computed here rather than trusted from the API, so the
+  // card is right even when it is opened from a screen whose endpoint does not attach one yet.
+  const trail = trailOf({
+    panel: row.panel, action: row.action, table_number: row.table_number,
+    order_id: row.order_id, detail: row.detail,
+    restaurant_name: showRestaurant ? row.restaurant_name : null,
+  });
   const sevColor = isErr && !isResolved ? "var(--adm-danger, #ef4444)" : isWarn ? "var(--adm-warn, #f59e0b)" : undefined;
 
   return (
@@ -93,7 +101,11 @@ export function LogDetailModal({ row, onClose, showRestaurant = true }: { row: A
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 17, fontWeight: 800, color: sevColor || "var(--text, #e7edf3)", lineHeight: 1.25 }}>{actionLabel}</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 7 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "color-mix(in srgb, " + panelColor + " 22%, transparent)", color: panelColor }}>{panel}</span>
+                {/* The chip used to print the raw column value — "editor" for what everybody calls
+                    the manager panel. `trail.panel` is the human name (lib/logTrail). */}
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "color-mix(in srgb, " + panelColor + " 22%, transparent)", color: panelColor }}>{trail.panel}</span>
+                {/* The AREA, so the header alone already answers "roughly where did this happen?" */}
+                <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 999, background: "rgba(148,163,184,0.14)", color: "var(--muted, #93a1b0)" }}>{trail.area}</span>
                 {isErr && <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "color-mix(in srgb, var(--adm-danger, #ef4444) 20%, transparent)", color: "var(--adm-danger, #ef4444)" }}>⚠️ Error</span>}
                 {isWarn && <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "color-mix(in srgb, var(--adm-warn, #f59e0b) 20%, transparent)", color: "var(--adm-warn, #f59e0b)" }}>Notable</span>}
                 {isResolved && <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: "color-mix(in srgb, #16a34a 22%, transparent)", color: "#22c55e" }}>✓ Resolved</span>}
@@ -101,6 +113,34 @@ export function LogDetailModal({ row, onClose, showRestaurant = true }: { row: A
             </div>
             <button onClick={onClose} aria-label="Close" style={{ flex: "0 0 auto", width: 30, height: 30, borderRadius: 8, border: "1px solid rgba(148,163,184,0.25)", background: "transparent", color: "var(--muted, #93a1b0)", cursor: "pointer", fontSize: 15, lineHeight: 1 }}>✕</button>
           </div>
+
+          {/* ── WHERE — the whole path, which is what this card was missing ────────────────────
+              (owner, 2026-08-12: "there should be restaurant name, which panel, inside panel
+              which menu, inside menu … he clicked take order but from where, table detail")
+
+              The card already said WHEN, WHO and WHAT. It never said where in the app the person
+              actually was, so "Placed order" left you to guess whether it came off the floor, the
+              waiter's tablet or the parcel counter — and for which table. The trail is derived from
+              the row itself (lib/logTrail.ts), so every one of the 30,000 rows already recorded
+              gets one, not just the ones written from today. */}
+          <Section title="Where" accent="#7dd3fc">
+            <Field label="Path">
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, lineHeight: 1.5 }}>
+                {trail.crumbs.map((c, i) => (
+                  <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    {i > 0 && <span style={{ color: "var(--muted, #93a1b0)", opacity: 0.7 }}>›</span>}
+                    <span style={{
+                      fontWeight: i === trail.crumbs.length - 1 ? 700 : 500,
+                      color: i === trail.crumbs.length - 1 ? "var(--text, #e7edf3)" : "var(--muted, #93a1b0)",
+                    }}>{c}</span>
+                  </span>
+                ))}
+              </div>
+            </Field>
+            {/* The thing it was done TO — the table, the bill, the dish. This is the "from where"
+                half of the owner's question, and it is the field he would look at first. */}
+            <Field label="On">{trail.target ? <span style={{ fontWeight: 700 }}>{trail.target}</span> : null}</Field>
+          </Section>
 
           {/* WHEN */}
           <Section title="When">

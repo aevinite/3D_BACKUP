@@ -107,23 +107,56 @@ for (const [needle, why] of [
 
 // The erase must cover every table that holds a guest's name or phone.
 const cust = read("app/api/owner/customers/route.ts");
-for (const t of ["customer_visits", "customer_devices"]) {
-  if (new RegExp(`from\\("${t}"\\)\\.delete`).test(cust)) ok(`the guest erase clears ${t}`);
-  else fail(`the guest erase no longer clears ${t} — personal data would survive an erasure request (F26)`);
-}
-// `khata_customers` is ANONYMISED rather than deleted: `orders.khata_customer_id` is a foreign key
-// onto it, so a delete fails for anyone who actually used pay-later, and removing the referencing
-// order instead would be destroying a sales record. Clearing the person is the whole requirement.
-if (/from\("khata_customers"\)\s*\n?\s*\.update\(/.test(cust) && /phone:\s*null/.test(cust)) {
-  ok("the guest erase empties the pay-later person book row (name/phone/note)");
+// WHICH TABLES the erase covers is no longer checked here. It used to grep this route for
+// `from("customer_visits").delete` and friends, which only worked while the tables were typed out
+// inline — and that hand-typed list is exactly what improvement I15 removed (it had already been
+// wrong once, for months). `scripts/verify-personal-data.mjs` now reads the SCHEMA and fails when a
+// table with a guest phone is missing from lib/personalData.ts, which is a real check rather than a
+// grep for today's spelling. What stays here is that this route still defers to that list.
+if (/from "@\/lib\/personalData"/.test(cust) && /ERASABLE/.test(cust)) {
+  ok("the guest erase walks the declared personal-data list (see verify:personal-data for coverage)");
 } else {
-  fail("the guest erase no longer clears the guest out of khata_customers — their name and number would survive (F26)");
+  fail("the guest erase is back to naming tables by hand — that list has been wrong before (F26/I15)");
 }
 if (/from\("khata_customers"\)\.delete/.test(cust)) {
   fail("the guest erase tries to DELETE a khata_customers row — the orders foreign key makes that fail for any real pay-later guest; anonymise it instead");
 }
 if (/deletion_audit/.test(cust)) ok("the guest erase is recorded in the Removals record");
 else fail("the guest erase no longer writes an audit row — an irreversible erase with no trace");
+
+// ── 4. every logged action knows WHERE it happened (owner, 2026-08-12) ───────────────────────────
+// A log row's whole value is answering "who did what, and from where". If an action code has no
+// place in lib/logTrail, its trail reads "System › Other", which is exactly the uninformative row
+// the owner asked to be rid of. The label map is the list of codes that reach a screen, so every one
+// of them must resolve.
+{
+  const trail = read("lib/logTrail.ts");
+  if (!trail) fail("lib/logTrail.ts is gone — log rows lose the restaurant/panel/screen path");
+  else {
+    const shared = read("components/admin/shared.tsx");
+    // Cut the block at its OWN closing brace, not at a comment that happens to follow it. The first
+    // version sliced to a doc-comment and, when that moved, ran on to the end of the file — which
+    // dragged in a date formatter's keys ("weekday", "month", "hour") and reported them as
+    // unplaced actions. A guard that invents failures is worse than no guard.
+    const start = shared.indexOf("export const ACT_LABEL");
+    const end = shared.indexOf("\n};", start);
+    const block = start >= 0 && end > start ? shared.slice(start, end) : "";
+    const codes = [...new Set([...block.matchAll(/(?:^|[{,]\s*)([a-z_][a-z0-9_]*)\s*:\s*"/gm)].map((m) => m[1]))];
+    // Resolve the same way placeOf() does: an explicit entry, or one of the prefix rules.
+    const placed = new Set([...trail.matchAll(/^\s{2}([a-z_][a-z0-9_]*):\s*\{\s*area:/gm)].map((m) => m[1]));
+    const prefixes = [...trail.matchAll(/\[\/\^([^/]+)\/,\s*\{ area:/g)].map((m) => m[1]);
+    const byPrefix = (c) => prefixes.some((p) => { try { return new RegExp("^" + p.replace(/\^/g, "")).test(c) || new RegExp(p).test(c); } catch { return false; } });
+    const homeless = codes.filter((c) => !placed.has(c) && !byPrefix(c));
+    if (!codes.length) fail("could not read ACT_LABEL — this check is not actually running");
+    else if (homeless.length) fail(`${homeless.length} action code(s) have no place in lib/logTrail, so their rows read "System › Other": ${homeless.slice(0, 12).join(", ")}`);
+    else ok(`all ${codes.length} action codes resolve to a restaurant › panel › area › screen trail`);
+    if (/crumbs/.test(trail) && /target/.test(trail)) ok("the trail carries both the path and what it was done to");
+    else fail("lib/logTrail no longer returns crumbs + target — the detail card's Where section goes blank");
+  }
+  const modal = read("components/admin/LogDetailModal.tsx");
+  if (/trailOf/.test(modal)) ok("the log detail card shows the full path");
+  else fail("LogDetailModal no longer shows the path — 'from where did this happen' is unanswered again");
+}
 
 // ── report ───────────────────────────────────────────────────────────────────────────────────────
 for (const m of oks) console.log(`  ok   ${m}`);

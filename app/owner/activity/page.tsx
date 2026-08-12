@@ -22,6 +22,7 @@ import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail,
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
 import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { asValue } from "@/lib/ownerPin";
+import { trailOf } from "@/lib/logTrail";
 // The sort orders, the type chips and the search, shared with the manager panel and the admin
 // console (see the file's header for why it lives in /panels).
 import AUDITSORT from "@/public/panels/auditsort.js";
@@ -68,15 +69,29 @@ export default function OwnerAuditLogs() {
   const [removalId, setRemovalId] = useState<number | null>(null);   // which removal is open in full
   const [audErr, setAudErr] = useState<string | null>(null);
   const [audQ, setAudQ] = useState("");
+  // Removals paging, same shape and same reasoning as the Activity log's (owner, 2026-08-12).
+  const [audPage, setAudPage] = useState(1);
+  const [audPages, setAudPages] = useState(1);
+  const [audTotal, setAudTotal] = useState(0);
 
   // ── Activity state ────────────────────────────────────────────────────────
   const [rows, setRows] = useState<Action[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // ── PAGING (owner, 2026-08-12: "make it like pages, you can go to page 2 from bottom") ─────────
+  // The log showed the newest 200 and stopped, so "what happened last Saturday?" had no answer on
+  // the one screen built to answer it. 200 a page is the owner's own number.
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const [level, setLevel] = useState<"" | "error" | "warn" | "info">("");
   const [q, setQ] = useState("");
   const [qDebounced, setQDebounced] = useState("");
   const [detailRow, setDetailRow] = useState<Action | null>(null);
   useEffect(() => { const t = setTimeout(() => setQDebounced(q), 300); return () => clearTimeout(t); }, [q]);
+  // Changing the filter or the search starts again at page 1. Without this you keep whatever page
+  // you were on, and a narrower result set that only HAS two pages answers page 5 with nothing —
+  // which reads as "no activity" rather than "you are past the end".
+  useEffect(() => { setPage(1); }, [qDebounced, level]);
 
   const scopeParams = useCallback(() => {
     const params = new URLSearchParams();
@@ -88,27 +103,36 @@ export default function OwnerAuditLogs() {
   }, [scopePin]);
 
   const loadAudit = useCallback(async () => {
-    const qs = scopeParams().toString();
+    const p = scopeParams();
+    if (audPage > 1) p.set("page", String(audPage));
+    const qs = p.toString();
     try {
       const j = await (await fetch(`/api/owner/audit${qs ? "?" + qs : ""}`, { cache: "no-store" })).json();
       if (j.disabled) { setAudDisabled(true); setView((v) => (v === "audit" ? "activity" : v)); return; }
       if (j.error) throw new Error(j.error);
       setRemovals(j.removals || []); setAudErr(null);
+      setAudPages(Math.max(1, Number(j.pages) || 1));
+      setAudTotal(Number(j.total) || 0);
     } catch (e) { setAudErr(e instanceof Error ? e.message : String(e)); }
-  }, [scopeParams]);
+  }, [scopeParams, audPage]);
 
   const loadActivity = useCallback(async () => {
     const params = scopeParams();
     if (level) params.set("level", level);
     if (qDebounced.trim()) params.set("q", qDebounced.trim());
+    if (page > 1) params.set("page", String(page));
     const qs = params.toString();
     try {
       const j = await (await fetch(`/api/owner/oplog${qs ? "?" + qs : ""}`, { cache: "no-store" })).json();
       if (j.disabled) { setActDisabled(true); setView((v) => (v === "activity" ? "audit" : v)); return; }
       if (j.error) throw new Error(j.error);
       setRows(j.actions || []); setErr(null);
+      // Paging (owner, 2026-08-12). The server sends the total and the page count so the footer can
+      // say "page 2 of 9" rather than a bare Next that gives no sense of how much is back there.
+      setPages(Math.max(1, Number(j.pages) || 1));
+      setTotal(Number(j.total) || 0);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-  }, [scopeParams, level, qDebounced]);
+  }, [scopeParams, level, qDebounced, page]);
 
   // Both views load once up front — that is also how the page learns which views this
   // owner even HAS (a disabled answer hides its chip). Two small, capped reads.
@@ -144,9 +168,11 @@ export default function OwnerAuditLogs() {
       {bothOff ? (
         <div className="adm-card"><div className="adm-empty">Audit &amp; logs isn&rsquo;t enabled for your restaurant — contact Aevidine.</div></div>
       ) : view === "audit" && !audDisabled ? (
-        <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} onReload={loadAudit} onOpenRemoval={setRemovalId} />
+        <AuditView removals={removals} err={audErr} q={audQ} setQ={setAudQ} onReload={loadAudit} onOpenRemoval={setRemovalId}
+          page={audPage} pages={audPages} total={audTotal} onPage={setAudPage} />
       ) : (
-        <ActivityView rows={rows} err={err} level={level} setLevel={setLevel} q={q} setQ={setQ} onReload={loadActivity} onOpen={setDetailRow} />
+        <ActivityView rows={rows} err={err} level={level} setLevel={setLevel} q={q} setQ={setQ} onReload={loadActivity} onOpen={setDetailRow}
+          page={page} pages={pages} total={total} onPage={setPage} />
       )}
 
       {detailRow && <LogDetailModal row={detailRow} onClose={() => setDetailRow(null)} />}
@@ -161,9 +187,12 @@ export default function OwnerAuditLogs() {
 }
 
 // ── Audit (removals) ─────────────────────────────────────────────────────────
-function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval }: {
+function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval, page, pages, total, onPage }: {
   removals: Removal[] | null; err: string | null; q: string; setQ: (v: string) => void; onReload: () => void;
   onOpenRemoval: (id: number) => void;
+  // Paging (owner, 2026-08-12) — the same strip the Activity log uses, so the two halves of this
+  // page behave identically.
+  page: number; pages: number; total: number; onPage: (p: number) => void;
 }) {
   // SORT + FILTER BY TYPE (owner, 2026-08-11: "make something like sort thing where everything can
   // be sorted, like what is list of what"). Both come from /panels/auditsort.js — the SAME module the
@@ -285,17 +314,22 @@ function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval }: {
               </div>
             );
           })}
+          {/* The search + type filter above narrow only the PAGE you are on, so the strip stays put:
+              you sort and filter within a page, and page through the record itself. */}
+          <Pager page={page} pages={pages} total={total} onGo={onPage} />
         </div>
       )}
     </div>
   );
 }
 
-// ── Activity log (unchanged behaviour — severity chips, search, click for detail) ──
-function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen }: {
+// ── Activity log (severity chips, search, paging, click for the full trail) ──
+function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, page, pages, total, onPage }: {
   rows: Action[] | null; err: string | null;
   level: "" | "error" | "warn" | "info"; setLevel: (v: "" | "error" | "warn" | "info") => void;
   q: string; setQ: (v: string) => void; onReload: () => void; onOpen: (a: Action) => void;
+  // Paging (owner, 2026-08-12) — the list owns the strip, the page state lives with the fetch.
+  page: number; pages: number; total: number; onPage: (p: number) => void;
 }) {
   const cols = "88px 1fr auto";
   return (
@@ -367,14 +401,73 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen }:
                     : a.actor ? <span className="adm-muted"> · {a.actor}</span> : ""}
                   {a.table_number && (isPin || !a.actor) ? <span className="adm-muted"> · Table {a.table_number}</span> : ""}
                   {det ? <span className="adm-muted"> · {det.length > 60 ? det.slice(0, 60) + "…" : det}</span> : null}
-                  {a.restaurant_name ? <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}</span> : null}
+                  {/* ── THE TRAIL, ON THE ROW ITSELF (owner, 2026-08-12) ──────────────────────
+                      "in short it will show, but when you go in detail it will actually show the
+                      log." So the second line is the SHORT form — which restaurant, which area of
+                      which panel, and what it was done to — and the popup has the full path.
+                      Before this the row's second line was the restaurant name alone, which told
+                      a single-restaurant owner nothing at all. */}
+                  {(() => {
+                    const t = trailOf(a);
+                    return (
+                      <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {a.restaurant_name ? <><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}<span style={{ opacity: 0.45 }}> · </span></> : null}
+                        <span style={{ opacity: 0.85 }}>{t.area}</span>
+                        <span style={{ opacity: 0.45 }}> › </span>
+                        <span style={{ fontWeight: 600, opacity: 0.95 }}>{t.screen}</span>
+                        {t.target ? <><span style={{ opacity: 0.45 }}> · </span><span style={{ fontWeight: 600 }}>{t.target}</span></> : null}
+                      </span>
+                    );
+                  })()}
                 </div>
                 <div className="adm-when">{timeAgo(a.created_at)}</div>
               </div>
             );
           })}
+          <Pager page={page} pages={pages} total={total} onGo={onPage} />
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The page strip under a long list (owner, 2026-08-12).
+ *
+ * Deliberately shows the TOTAL as well as the page numbers: "1,240 entries · page 2 of 7" tells the
+ * owner how much history is actually there, which a bare ‹ › pair never does. Long runs are elided
+ * (1 … 4 5 6 … 62) so the strip stays one line on a phone.
+ */
+function Pager({ page, pages, total, onGo }: { page: number; pages: number; total: number; onGo: (p: number) => void }) {
+  if (pages <= 1) return null;
+  const go = (p: number) => {
+    onGo(Math.min(Math.max(1, p), pages));
+    // Back to the top: paging keeps the scroll position otherwise, so page 2 opens half way down.
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  // Which numbers to draw: always the first and last, plus a window around the current page.
+  const nums: (number | "…")[] = [];
+  for (let p = 1; p <= pages; p++) {
+    if (p === 1 || p === pages || Math.abs(p - page) <= 1) nums.push(p);
+    else if (nums[nums.length - 1] !== "…") nums.push("…");
+  }
+  const btn = (active: boolean): React.CSSProperties => ({
+    minWidth: 34, height: 32, padding: "0 9px", borderRadius: 8, cursor: "pointer",
+    border: `1px solid ${active ? "var(--adm-accent, #d4af37)" : "rgba(148,163,184,0.25)"}`,
+    background: active ? "color-mix(in srgb, var(--adm-accent, #d4af37) 18%, transparent)" : "transparent",
+    color: active ? "var(--adm-accent, #d4af37)" : "var(--text, #e7edf3)",
+    fontWeight: active ? 800 : 600, fontSize: 13,
+  });
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "14px 10px 4px", borderTop: "1px solid rgba(148,163,184,0.14)", marginTop: 6 }}>
+      <span className="adm-muted" style={{ fontSize: 12, marginRight: "auto" }}>
+        {total.toLocaleString("en-IN")} {total === 1 ? "entry" : "entries"} · page {page} of {pages}
+      </span>
+      <button className="adm-btn" style={btn(false)} disabled={page <= 1} onClick={() => go(page - 1)} aria-label="Previous page">‹</button>
+      {nums.map((n, i) => n === "…"
+        ? <span key={`gap${i}`} className="adm-muted" style={{ padding: "0 2px" }}>…</span>
+        : <button key={n} style={btn(n === page)} onClick={() => go(n)} aria-current={n === page ? "page" : undefined}>{n}</button>)}
+      <button className="adm-btn" style={btn(false)} disabled={page >= pages} onClick={() => go(page + 1)} aria-label="Next page">›</button>
     </div>
   );
 }

@@ -588,6 +588,13 @@ async function capGroupsFor(role: string, rid: string, permissions: Record<strin
     .filter((g) => g.rows.length > 0);
 }
 
+// WHICH LOG THIS BELONGS IN. An action the ADMIN performed is recorded against the admin panel even
+// when it was done from the owner's screens, so it lands in Aevidine's Everything Log and stays out
+// of the owner's feed — the standing "admin = top power, INVISIBLY" rule, which these routes were
+// leaking through `logAction("owner", …, { actor: "admin" })` (owner, 2026-08-12). Same decision as
+// ownerLogPanel() in lib/ownerScope; it takes this file's own Scope instead of an OwnerScope.
+const logPanel = (s: Extract<Scope, { ok: true }>): "owner" | "admin" => (s.actor === "admin" ? "admin" : "owner");
+
 // A human label for whoever is acting, resolved from the SESSION (never the request body) —
 // it lands in the pay ledger's "recorded by" and must be trustworthy.
 async function actorLabel(s: Extract<Scope, { ok: true }>): Promise<string> {
@@ -666,7 +673,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
       recorded_by: who, recorded_by_id: s.actorId,
     }).select("id, kind, amount, for_period, mode, paid_on, note, recorded_by, created_at").single();
     if (error) return bad("Couldn't save that payment — please try again.", 500);
-    await logAction("owner", "staff_payment", {
+    await logAction(logPanel(s), "staff_payment", {
       restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId,
       detail: `recorded ₹${p.amount} ${p.kind} for "${t.u.username}" (${p.mode}, paid ${p.paid_on})`,
     });
@@ -724,7 +731,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     if ((error as { code?: string }).code === "23505") return bad("That username is taken at this restaurant — pick another.", 409);
     return bad("Something went wrong, please try again.", 500);
   }
-  await logAction("owner", "staff_create", { restaurant_id: rid, actor: s.actor, actor_id: s.actorId, detail: `created ${role} "${display}"` });
+  await logAction(logPanel(s), "staff_create", { restaurant_id: rid, actor: s.actor, actor_id: s.actorId, detail: `created ${role} "${display}"` });
   return ok({ ok: true, id: data!.id, name: display, role, restaurant_id: rid, password });
 }
 
@@ -762,7 +769,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
       const { error } = await sb.from("staff_users").update({ profile: merged }).eq("id", id);
       if (error) return bad("Couldn't save those details — please try again.", 500);
       const changed = Object.keys(patch).slice(0, 8).join(", ");
-      await logAction("owner", "staff_profile_edit", {
+      await logAction(logPanel(s), "staff_profile_edit", {
         restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId,
         detail: `updated "${t.u.username}" profile (${changed})`,
       });
@@ -781,7 +788,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
         return bad(`${t.u.name || t.u.username} isn't on the pay list — add them to it before setting a rate.`, 409);
       const { error } = await sb.from("staff_users").update(patch).eq("id", id);
       if (error) return bad("Couldn't save those changes — please try again.", 500);
-      await logAction("owner", "staff_job_edit", {
+      await logAction(logPanel(s), "staff_job_edit", {
         restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId,
         detail: `updated "${t.u.username}" job/pay (${Object.keys(patch).join(", ")})`,
       });
@@ -793,7 +800,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     if (typeof body?.can_see_own_pay !== "boolean") return bad("`can_see_own_pay` must be true or false.");
     const { error } = await sb.from("staff_users").update({ can_see_own_pay: body.can_see_own_pay }).eq("id", id);
     if (error) return bad("Couldn't save that — please try again.", 500);
-    await logAction("owner", "staff_own_pay_visibility", {
+    await logAction(logPanel(s), "staff_own_pay_visibility", {
       restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId,
       detail: `"${t.u.username}" can${body.can_see_own_pay ? "" : "not"} see their own pay`,
     });
@@ -817,7 +824,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
       payroll_added_by: on ? who : null,
     }).eq("id", id);
     if (error) return bad("Couldn't update the pay list — please try again.", 500);
-    await logAction("owner", on ? "payroll_add" : "payroll_remove", {
+    await logAction(logPanel(s), on ? "payroll_add" : "payroll_remove", {
       restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId, level: on ? "info" : "warn",
       detail: `${on ? "added" : "removed"} "${t.u.username}" ${on ? "to" : "from"} the pay list`,
     });
@@ -842,7 +849,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
       voided_by: await actorLabel(s), voided_by_id: s.actorId,
     }).eq("id", payId).eq("restaurant_id", t.u.restaurant_id);
     if (error) return bad("Couldn't cancel that entry — please try again.", 500);
-    await logAction("owner", "staff_payment_void", {
+    await logAction(logPanel(s), "staff_payment_void", {
       restaurant_id: t.u.restaurant_id, actor: s.actor, actor_id: s.actorId, level: "warn",
       detail: `cancelled a ₹${existing.amount} ${existing.kind} entry for "${t.u.username}" — ${reason}`,
     });
@@ -909,7 +916,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     // the staffer couldn't log in and the OLD password still worked (audit 2026-07-07).
     const { error } = await sb.from("staff_users").update({ password_hash: await hashSecret(password), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
     if (error) return bad("Couldn't reset the password — please try again.", 500);
-    await logAction("owner", "staff_reset_password", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `reset "${u.username}"` });
+    await logAction(logPanel(s), "staff_reset_password", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `reset "${u.username}"` });
     return ok({ ok: true, password });
   }
   if (action === "set_active") {
@@ -919,7 +926,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     const active = body.active;
     const { error } = await sb.from("staff_users").update({ active, token_version: active ? u.token_version : (u.token_version || 0) + 1 }).eq("id", id);
     if (error) return bad("Couldn't update that account — please try again.", 500);
-    await logAction("owner", active ? "staff_enable" : "staff_disable", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `${active ? "enabled" : "disabled"} "${u.username}"` });
+    await logAction(logPanel(s), active ? "staff_enable" : "staff_disable", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `${active ? "enabled" : "disabled"} "${u.username}"` });
     return ok({ ok: true });
   }
   if (action === "set_role") {
@@ -929,7 +936,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     if (!assignableFor(s.actor).includes(role)) return bad("Pick a valid role.");
     const { error } = await sb.from("staff_users").update({ role, token_version: (u.token_version || 0) + 1 }).eq("id", id);
     if (error) return bad("Couldn't change the role — please try again.", 500);
-    await logAction("owner", "staff_set_role", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `set "${u.username}" → ${role}` });
+    await logAction(logPanel(s), "staff_set_role", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `set "${u.username}" → ${role}` });
     return ok({ ok: true });
   }
   // set_permissions — per-user capability overrides (migration 115). Body:
@@ -1011,7 +1018,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     if (!noted.length) return bad("Nothing to change.");
     const { error } = await sb.from("staff_users").update({ permissions: merged }).eq("id", id);
     if (error) return bad("Couldn't update permissions — please try again.", 500);
-    await logAction("owner", "staff_set_permissions", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `"${u.username}": ${noted.join(", ")}` });
+    await logAction(logPanel(s), "staff_set_permissions", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `"${u.username}": ${noted.join(", ")}` });
     return ok({ ok: true, permissions: merged });
   }
   if (action === "edit") {
@@ -1038,12 +1045,12 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     // (The admin's twin at app/api/admin/users `edit` stays deliberately unlogged — admin actions
     // are kept out of this log on purpose, per the standing "admin = top power, invisibly" rule.)
     if (patch.username && patch.username !== u.username) {
-      await logAction("owner", "staff_rename", {
+      await logAction(logPanel(s), "staff_rename", {
         restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId,
         detail: `login name "${u.username}" → "${patch.username}"${patch.phone !== undefined ? " (phone also updated)" : ""}`,
       });
     } else if (patch.phone !== undefined) {
-      await logAction("owner", "staff_profile_edit", {
+      await logAction(logPanel(s), "staff_profile_edit", {
         restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId,
         detail: `updated "${u.username}" phone number`,
       });
@@ -1074,6 +1081,6 @@ async function deleteImpl(req: NextRequest) {
   if (pay.blocked) return bad(PAY_HISTORY_DELETE_MESSAGE(pay.count), 409);
   const { error } = await sb.from("staff_users").delete().eq("id", id);
   if (error) return bad("Couldn't remove that account — please try again.", 500);
-  await logAction("owner", "staff_delete", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `deleted "${u.username}"` });
+  await logAction(logPanel(s), "staff_delete", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `deleted "${u.username}"` });
   return ok({ ok: true });
 }

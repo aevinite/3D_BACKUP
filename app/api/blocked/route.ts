@@ -12,6 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { clientIp, throttleIsBlocked } from "@/lib/loginThrottle";
 import { deviceIdFrom } from "@/lib/oplog";
+import { capKeyFor, withinMemoryCap } from "@/lib/publicCap";
 
 export const dynamic = "force-dynamic";
 
@@ -48,6 +49,18 @@ async function usedToday(ip: string): Promise<number | null> {
 export async function GET(req: NextRequest) {
   const ip = clientIp(req);
   const key = `admin:${ip}`;
+  // ── A CEILING ON THE READ TOO (improvement I3, owner 2026-08-12) ───────────────────────────────
+  // The POST below has been capped at 3 a day since it shipped; this GET had no limit at all, and it
+  // is a PUBLIC page that hits the database twice per load (the throttle check plus the count). One
+  // line, now that lib/publicCap holds the shape.
+  //
+  // Generous on purpose — 20 in a minute is far more than a person tapping Retry, so a genuinely
+  // stuck visitor never meets it — and it degrades to the SAME page rather than an error, just
+  // without the fresh counts. Being told "you are still blocked" is the part that matters, and that
+  // comes from the throttle, not from the count.
+  if (!withinMemoryCap(`blocked:get:${capKeyFor(req)}`, 60_000, 20)) {
+    return NextResponse.json({ blocked: true, usedToday: 0, remaining: 0, pending: false, throttled: true });
+  }
   const blocked = await throttleIsBlocked(key);
   // The PAGE fails open, deliberately: an unreadable counter must not stop a blocked visitor seeing
   // the page that explains their situation. Only the WRITE below treats "couldn't count" as a refusal.

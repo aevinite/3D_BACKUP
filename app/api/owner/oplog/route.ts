@@ -20,6 +20,7 @@ import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { loadLogVisibility, logVisibilityUnavailable } from "@/lib/logVisibility";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { safeSearch } from "@/lib/searchText";
+import { trailOf } from "@/lib/logTrail";
 
 // WHICH VISIBILITY SWITCH A ROW RIDES now lives in lib/logVisibility.ts, together with the decision
 // about what to do when the switches cannot be read (T9 finding F23, fixed 2026-08-12).
@@ -56,8 +57,18 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(Math.max(parseInt(url.searchParams.get("limit") || "200", 10) || 200, 1), 200);
   const level = url.searchParams.get("level");
   const qText = (url.searchParams.get("q") || "").trim().slice(0, 80);
+  // ── PAGING (owner, 2026-08-12: "make it like pages, you can go to page 2 from bottom") ─────────
+  // The log used to show the newest 200 and simply stop, with no way to reach last week — on the one
+  // screen whose whole job is answering "who did that, and when?". 200 a page is the owner's own
+  // number. `range()` is an indexed offset read on (restaurant_id, created_at DESC), which already
+  // exists, so page 5 costs the same as page 1.
+  const page = Math.max(parseInt(url.searchParams.get("page") || "1", 10) || 1, 1);
+  const from = (page - 1) * limit;
 
-  let q = sb.from("staff_actions").select(COLS).order("created_at", { ascending: false }).limit(limit);
+  // `count: "exact"` rides along on the same request — it is what lets the footer say "page 2 of 9"
+  // instead of a bare "next", which is the difference between navigable and guessing.
+  let q = sb.from("staff_actions").select(COLS, { count: "exact" })
+    .order("created_at", { ascending: false }).range(from, from + limit - 1);
   // Owner never sees the admin's own actions or the direct-database-edit footprints.
   q = q.not("panel", "in", "(admin,db)");
   // …nor raw app/system FAULTS (level='error'). Those are technical support signals for the
@@ -79,12 +90,12 @@ export async function GET(req: NextRequest) {
   // only NARROW, never widen. Without it, fall back to the owner's full restaurant set.
   const pinRid = url.searchParams.get("rid");
   if (pinRid) {
-    if (!inScope(scope, pinRid)) return NextResponse.json({ actions: [] });
+    if (!inScope(scope, pinRid)) return NextResponse.json({ actions: [], page: 1, pageSize: limit, total: 0, pages: 1 });
     q = q.eq("restaurant_id", pinRid);
   } else if (!scope.all) {
     // Restrict to the owner's restaurant(s). A real owner (or admin act-as one restaurant) is
     // always scope.all === false with a concrete id list; only an admin scope=all skips this.
-    if (!scope.ids.length) return NextResponse.json({ actions: [] });
+    if (!scope.ids.length) return NextResponse.json({ actions: [], page: 1, pageSize: limit, total: 0, pages: 1 });
     q = q.in("restaurant_id", scope.ids);
   }
   // Only the owner-visible severities are selectable (never "error" — excluded above).
@@ -94,7 +105,7 @@ export async function GET(req: NextRequest) {
   // scope above already allows, so it needs no extra permission of its own.
   const actorId = url.searchParams.get("actor");
   if (actorId) {
-    if (!/^[0-9a-f-]{36}$/i.test(actorId)) return NextResponse.json({ actions: [] });
+    if (!/^[0-9a-f-]{36}$/i.test(actorId)) return NextResponse.json({ actions: [], page: 1, pageSize: limit, total: 0, pages: 1 });
     q = q.eq("actor_id", actorId);
   }
   if (qText) {
@@ -125,10 +136,30 @@ export async function GET(req: NextRequest) {
   // a multi-restaurant estate makes the list unreadable with nothing saying why (T9 finding F17);
   // the shared helper reports that instead of hiding it.
   const names = await restaurantNames(ids);
-  const actions = rows.map((a) => ({ ...a, restaurant_name: a.restaurant_id ? names.get(a.restaurant_id) : null }));
+  // ── EVERY ROW CARRIES ITS TRAIL (owner, 2026-08-12) ──────────────────────────────────────────
+  // "there should be restaurant name, which panel, inside panel which menu … he clicked take order
+  // but from where, table detail." A row used to say `order_place` → "Placed order", which is true
+  // and nearly useless: it never said WHERE the person was standing. `trailOf` resolves the path —
+  // restaurant › panel › area › screen › which table — from what the row already carries, so all
+  // 30,000 rows already in the table get one too, not just the ones written from today.
+  const actions = rows.map((a) => {
+    const withName = { ...a, restaurant_name: a.restaurant_id ? names.get(a.restaurant_id) : null };
+    return { ...withName, trail: trailOf(withName) };
+  });
   // Actions the ADMIN performed from a panel view carry actor_id='admin:view' (2026-07-28).
   // Only the admin may see that marker — a REAL owner gets the row as a plain, neutral
   // panel action (the admin stays invisible, per the standing rule).
   if (!scope.admin) for (const a of actions) if (a.actor_id === ADMIN_VIEW_ACTOR_ID) a.actor_id = null;
-  return NextResponse.json({ actions, ...(names.partial ? { partial: ["restaurantNames"] } : {}) });
+  // The FILTERED count, not the raw one: `total` is what the footer divides into pages, and the
+  // per-kind visibility filter above can remove rows from this page. Reporting the unfiltered count
+  // would promise pages that render empty. When something was filtered we fall back to the count of
+  // what we can actually show, which is the honest floor.
+  const rawTotal = r.count ?? actions.length;
+  const filteredOut = fetched.length - rows.length;
+  const total = filteredOut > 0 ? Math.max(actions.length, rawTotal - filteredOut) : rawTotal;
+  return NextResponse.json({
+    actions,
+    page, pageSize: limit, total, pages: Math.max(1, Math.ceil(total / limit)),
+    ...(names.partial ? { partial: ["restaurantNames"] } : {}),
+  });
 }
