@@ -29,6 +29,11 @@ export interface CurrencyMeta {
 // BASE is now INR — prices are stored in rupees (migration 043). `rate` = how
 // many of that currency equal ₹1: INR is 1 (base); others are their old per-USD
 // rate ÷ 84. A non-developer updates these when FX moves.
+// REJECTED (owner, 2026-08-12): these rates stay HAND-MAINTAINED. Offered as T1 improvement 12 (fetch
+// them from a live FX feed, because a hand-edited table drifts from reality over months). His answer:
+// *"leave it and make sure you don't show as improvement or error again … this will be like this
+// only."* So: no scheduled FX fetch, no per-restaurant stored rate, and this is not a finding. Every
+// dev restaurant prices in INR anyway, where the rate is 1. See docs/REJECTED-IDEAS.md R14.
 export const CURRENCIES: CurrencyMeta[] = [
   { code: "INR", symbol: "₹",   label: "INR", rate: 1,          decimals: 0 },
   { code: "USD", symbol: "$",   label: "USD", rate: 1 / 84,     decimals: 2 },

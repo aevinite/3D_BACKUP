@@ -38,9 +38,14 @@ export default function PublicModelViewer({
   config,
   mvRef,
   onScriptError,
+  dishName,
 }: {
   config: PublicConfig;
   mvRef: React.RefObject<any>;
+  // What this dish is CALLED, for the alt text (T1 improvement 4, 2026-08-12). Every dish used to
+  // announce itself as the same "3D food model", which tells a screen-reader user nothing about which
+  // dish they are looking at. Optional so any other caller keeps today's generic text.
+  dishName?: string;
   // Called if the <model-viewer> web-component script can't load (e.g. a network
   // that blocks Google's CDN). Lets the parent show a real "unavailable" message
   // instead of an endless spinner.
@@ -101,7 +106,8 @@ export default function PublicModelViewer({
           "shadow-intensity": "1",      // strength of the model's shadow
           "environment-image": "neutral", // soft, even lighting on the model
           exposure: "1.1",              // overall brightness
-          alt: "3D food model",
+          // Named, not generic — see the dishName prop above.
+          alt: dishName ? `3D model of ${dishName}` : "3D food model",
           style: { width: "100%", height: "100%" },
         },
         // For each tag in the config, draw two things pinned to the model:

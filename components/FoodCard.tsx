@@ -274,8 +274,12 @@ export default function FoodCard({ item, index, viewingCategory, restaurantId, r
         // dish flag: with 3D off the badge and the cube icon correctly disappear, but the
         // card kept wearing the 4D styling with nothing to explain it (sweep 2026-08-04).
         className={`item-card fade-in ${has3d ? "is-4d" : ""} ${soldOut ? "sold-out" : ""}`}
-        // Stagger each card's fade-in slightly based on its position.
-        style={{ animationDelay: `${index * 0.06}s` }}
+        // Stagger each card's fade-in slightly based on its position — CAPPED at the tenth card
+        // (T1 improvement 9, 2026-08-12). Uncapped, a 40-dish category made its last card wait 2.4s
+        // before appearing, and Aangan has categories that size; the effect is a flourish on the
+        // first few cards, not something a diner should sit through. Ten steps keeps the cascade
+        // visible and everything after that arrives together.
+        style={{ animationDelay: `${Math.min(index, 10) * 0.06}s` }}
       >
         {/* The photo area; the class flips from "loading" to "ready" once loaded */}
         <div

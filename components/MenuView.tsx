@@ -362,7 +362,25 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       // Layout (list vs gallery) is a lasting PREFERENCE, so it lives in
       // localStorage and survives closing the browser (sessionStorage fallback
       // for anyone who set it under the old build).
-      const sl = localStorage.getItem("lfh_menu_layout") ?? sessionStorage.getItem("lfh_menu_layout");
+      // I11 — THE FIRST PERSON SEES THE RESTAURANT'S CHOICE; AFTER THAT IT IS THEIRS (owner,
+      // 2026-08-12: *"the first person who was new, what he will see — it's the restaurant dependent;
+      // after the first person has came, then it will be person dependent"*, remembered per phone AND
+      // per restaurant).
+      //
+      // This key used to be GLOBAL, so a diner who once chose the gallery at restaurant A overrode
+      // restaurant B's "list" default for ever — B could never show a first-timer what it had
+      // configured. It is now scoped with sk(), exactly like sort / diet / search / folded categories,
+      // so: nothing saved for THIS restaurant → the restaurant's own Access → Menu → Default layout
+      // (the `defaultLayout` prop this component starts from); once the guest taps list or gallery
+      // here, their pick wins on this phone at this restaurant.
+      //
+      // The old global value is read as a LAST resort so a returning guest is not visibly reset the
+      // first time they come back after this change; the moment they touch the switch it is saved
+      // scoped and the global one stops mattering.
+      const sl = localStorage.getItem(sk("lfh_menu_layout"))
+        ?? sessionStorage.getItem(sk("lfh_menu_layout"))
+        ?? localStorage.getItem("lfh_menu_layout")
+        ?? sessionStorage.getItem("lfh_menu_layout");
       if (sl === "list" || sl === "gallery") setLayout(sl);
       const ss = sessionStorage.getItem(sk("lfh_menu_sort"));
       if (ss !== null) setCurrentSort(ss);
@@ -410,7 +428,9 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // On the very first run, just mark "restored" and skip saving (see above).
     if (!restoredRef.current) { restoredRef.current = true; return; }
     try {
-      localStorage.setItem("lfh_menu_layout", layout); // lasting preference (survives browser close)
+      // Scoped per restaurant (see the restore above) and still a LASTING preference — localStorage,
+      // so it survives closing the browser, unlike the session-scoped browse state beside it.
+      localStorage.setItem(sk("lfh_menu_layout"), layout);
       sessionStorage.setItem(sk("lfh_menu_sort"), currentSort);
       sessionStorage.setItem(sk("lfh_menu_diet"), currentDiet);
       sessionStorage.setItem(sk("lfh_menu_search"), searchQuery);
@@ -459,6 +479,31 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // `searchQuery`, not the folded `q` — `q` is derived further down the component, so
     // naming it here would read a const before it is initialised and crash the render.
   }, [searchQuery, features.favorites, features.diet_filter, loaded, menuData.length]);
+
+  // I3 — "THERE ARE MORE SUGGESTIONS THAN YOU CAN SEE" (T1 improvement 3, 2026-08-12).
+  // Up to 8 suggestions are built, but the panel is max-height 340px — about five and a half rows on
+  // a 360px phone. It scrolls, so nothing is unreachable; the problem is that the only hint was a
+  // half-cut sixth row, and a diner hunting a price stops at what they can see. This stamps
+  // data-can-scroll="1" while there IS more below, which is what draws the fade in globals.css —
+  // the SAME cue, measured the same way, as the filter chip row above. Deliberately no counter text:
+  // that would need a new word in six languages to say something a fade already says.
+  useEffect(() => {
+    const box = document.querySelector<HTMLElement>(".search-dropdown");
+    if (!box) return;
+    const sync = () => {
+      const more = box.scrollHeight - box.clientHeight - box.scrollTop > 4;
+      box.setAttribute("data-can-scroll", more ? "1" : "0");
+    };
+    sync();
+    box.addEventListener("scroll", sync, { passive: true });
+    let ro: ResizeObserver | undefined;
+    try { ro = new ResizeObserver(sync); ro.observe(box); } catch {}
+    return () => { box.removeEventListener("scroll", sync); ro?.disconnect(); };
+    // `searchQuery`, NOT `searchResults` — the results list is derived further down this component,
+    // so naming it here would read a const before it is initialised and crash the render. Same trap,
+    // same answer, as the filter-row effect above. A new query is what rebuilds the rows anyway, and
+    // the ResizeObserver catches the rest.
+  }, [searchQuery]);
 
   // If the data hasn't arrived within a moment, reveal the skeleton.
   // (Wait 200ms first; if it's still loading, show the grey placeholder boxes.
@@ -525,13 +570,37 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // Every control's box, read in ONE pass. The candidate lifts below are then pure arithmetic
     // against this array — no second layout read — so scanning many positions costs no more than
     // the single check did.
-    const controlBoxes = (): DOMRect[] => {
+    // ONLY MEASURE WHAT IS NEAR THE BELL (T1 improvement 10, 2026-08-12).
+    //
+    // This used to read a rectangle for EVERY button and link in the document, and settleBell() runs
+    // it on the 600ms tick. On Aangan's 199-dish menu that is 600+ layout reads twice a second while
+    // anyone has the menu open — and the early-out ("already clear, leave it alone") happens AFTER the
+    // full sweep, so the cheap case still paid for the expensive one. The cheapest phone at a busy
+    // table is the one that stutters.
+    //
+    // The bell only ever moves within BELL_MAX_LIFT of its resting place, so a control outside that
+    // band plus a little margin can never be relevant. `band` is that window, and the filter is a
+    // pure number comparison per element — no extra layout work, because getBoundingClientRect() is
+    // what we were already paying for. Everything else about the scan is unchanged, deliberately:
+    // it is still RECTANGLES, not elementFromPoint, because a single centre probe has a blind spot
+    // that once made this read "nothing underneath" and never lift at all.
+    const BELL_BAND_PAD = 80;
+    const controlBoxes = (band?: { top: number; bottom: number }): DOMRect[] => {
       const out: DOMRect[] = [];
+      // Padded by the full lift range in BOTH directions, because the box we are handed may itself
+      // already be lifted — so the resting place can be up to BELL_MAX_LIFT *below* it. Symmetric is
+      // the only version that is correct whatever the current lift is; it is still a ~600px window
+      // instead of the whole document.
+      const top = band ? band.top - BELL_MAX_LIFT - BELL_BAND_PAD : -Infinity;
+      const bottom = band ? band.bottom + BELL_MAX_LIFT + BELL_BAND_PAD : Infinity;
       document.querySelectorAll<HTMLElement>("button, [role='button'], a").forEach((el) => {
         if (el.closest(".chef-call")) return; // the bell and its icon are not obstructions
         if (isCardLink(el)) return;           // the tile itself is scenery, not a control
         const r = el.getBoundingClientRect();
-        if (r.width && r.height) out.push(r);
+        if (!r.width || !r.height) return;
+        // Nowhere near the band the bell can occupy → it can never be in the way.
+        if (r.bottom < top || r.top > bottom) return;
+        out.push(r);
       });
       return out;
     };
@@ -545,9 +614,10 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     const settleBell = () => {
       const bell = document.querySelector<HTMLElement>(".chef-call");
       if (!bell) return;
-      const boxes = controlBoxes();
       const cur = bell.getBoundingClientRect();
       if (!cur.width) return;
+      // Read the bell FIRST so the scan can be limited to the band it could move through.
+      const boxes = controlBoxes({ top: cur.top, bottom: cur.bottom });
       const lift = parseFloat(bell.style.getPropertyValue("--bell-lift")) || 0;
       // STABILITY FIRST: if where it sits now is already clear, leave it completely alone. Without
       // this the lift is recomputed from zero on every scroll-stop and the bell visibly hops around
@@ -955,7 +1025,17 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
             box) when a filter has emptied every category, so there's no empty bar
             (regression fix). Shown while loading (skeletons). */}
         {!q && (dbCategories.length === 0 || visibleCategories.length > 0) && (
-        <div className="cat-scroller" id="cat-scroller" role="tablist" aria-label="Menu categories">
+        /* I13 — SAY WHAT THESE ACTUALLY DO (T1 improvement 13, 2026-08-12).
+            This was role="tablist" with role="tab" + aria-selected children, which tells a screen
+            reader the guest is choosing between tab PANELS — and there is no tabpanel anywhere, arrow
+            keys do nothing, and tapping a chip does not switch views: it smooth-scrolls to that
+            category's section and the highlight then FOLLOWS the scroll. A blind diner was being
+            described a widget that doesn't exist.
+            A plain group of buttons with aria-current="true" on the one you are currently inside is
+            what this really is, and aria-current is the standard way to say "this is where you are"
+            rather than "this is what you picked". The .active class (and so every bit of styling and
+            the scroll-spy) is untouched. */
+        <div className="cat-scroller" id="cat-scroller" role="group" aria-label="Jump to a menu category">
           {/* If categories haven't loaded yet, maybe show placeholders;
               otherwise draw a tab button for each category. */}
           {dbCategories.length === 0
@@ -975,13 +1055,12 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
                 <button
                   key={cat.slug}
                   type="button"
-                  role="tab"
                   // A card lights up when its category view is open, OR — in the
                   // "All" view — when the guest has SCROLLED into its section
                   // (the scroll-spy), so the bar follows them Petpooja-style.
                   // The bar highlights the category you've SCROLLED into (the
                   // scroll-spy) — there's no "selected" category anymore.
-                  aria-selected={spyCat === cat.slug}
+                  aria-current={spyCat === cat.slug ? "true" : undefined}
                   className={`cat-card ${spyCat === cat.slug ? "active" : ""}`}
                   // Only emitted when this category HAS a colour — an absent variable is what lets
                   // the stylesheet fall back to the restaurant's accent. `--cat-grad` is the same
