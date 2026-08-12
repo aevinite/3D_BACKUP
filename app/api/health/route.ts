@@ -14,7 +14,7 @@
 // So do not re-add that route, AND do not "improve" THIS one by adding storage / config checks to
 // it instead. That is the same idea in a different place, and it would also undo the 2026-08-06
 // trim that made this probe cheap — it runs 288 times a day, forever, which is the entire reason it
-// does one bounded row read and stops. Full reasoning: docs/REJECTED-IDEAS.md → R12.
+// does one bounded row read and stops. Full reasoning: docs/REJECTED-IDEAS.md → R18.
 //
 // This route itself STAYS. It is not decoration: public/offline.html uses it to tell "this device
 // lost signal" apart from "the restaurant's server is down", and the verify suite pings it.

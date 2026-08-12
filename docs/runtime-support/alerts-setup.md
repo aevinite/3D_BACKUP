@@ -58,7 +58,7 @@ where the app itself is down.
 > `/api/health/deep` that named which part was broken — database, file storage, or the live-updates
 > setting) and the owner removed it the next day: *"then we don't need it, remove it."* The setup was
 > a second account-side monitor he did not want to run. Do not re-add it, and do not fold those
-> checks into `/api/health` instead — see `docs/REJECTED-IDEAS.md` R12.
+> checks into `/api/health` instead — see `docs/REJECTED-IDEAS.md` R18.
 
 ---
 

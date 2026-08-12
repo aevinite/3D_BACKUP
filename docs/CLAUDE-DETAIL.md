@@ -463,7 +463,7 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
     being trustworthy for the routes that genuinely ARE missing one. A new public route goes on this
     list in the same commit that creates it.
   - `/api/health/deep` was built on 2026-08-12 and REMOVED the next day at the owner's word — see
-    `docs/REJECTED-IDEAS.md` R12. Do not re-add it, and do not add "which part is broken?" checks to
+    `docs/REJECTED-IDEAS.md` R18. Do not re-add it, and do not add "which part is broken?" checks to
     `/api/health` either.
   - `/api/aggregators/webhook/<source>` is an inbound POST from Zomato/Swiggy, so it cannot carry
     our cookie; it is dormant until the `aggregators` flag is on, and it now REFUSES unless a shared
