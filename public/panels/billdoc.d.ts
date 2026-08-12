@@ -63,6 +63,10 @@ export interface BillDocData {
    *  bill has no taxable value to restate). `billData` sets it from the money; a caller building
    *  figures by hand (the admin preview, `lib/billPreview.ts`) must pass it too. */
   composition?: boolean;
+  /** true = leave OFF the screen-only toolbar and its script. For a bill shown as EVIDENCE (the Audit
+   *  card renders it in a sandboxed iframe with no scripts), where the bar's Print and Close buttons
+   *  would be dead controls sitting on the document. The paper is identical either way. */
+  noBar?: boolean;
   /** true = the page opens the print dialog by itself (a real print, not a preview). */
   autoPrint?: boolean;
   /** A line of explanation in the screen-only toolbar. Never printed. */
