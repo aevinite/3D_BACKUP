@@ -151,8 +151,11 @@ export async function auditBillHtml(rid: string, was: Record<string, unknown> | 
       // A composition tenant's paper is a Bill of Supply, and this must say the same thing the
       // printer said (T7 F9) — otherwise the card shows a document the guest never received.
       composition: tm.composition,
-      // Screen only, and never a print dialog: this is evidence being read, not a bill being issued.
+      // Evidence being read, not a bill being issued: no print dialog, and no toolbar either — the
+      // frame runs no scripts, so a Print button in there could not print and a Close button could
+      // not close. Dead controls on a document are worse than none.
       autoPrint: false,
+      noBar: true,
     });
   } catch {
     // The removal record must open even if its picture cannot be drawn — the words and the money

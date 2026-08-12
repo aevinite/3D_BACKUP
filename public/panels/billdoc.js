@@ -398,10 +398,17 @@
 : "")
 + "  @media print{.bar{display:none !important}}\n"
 + "</style>\n"
-+ '<div class="bar">'
+/* NO TOOLBAR WHEN THE BILL IS BEING READ AS EVIDENCE (2026-08-12).
+   The Audit card shows the bill inside a sandboxed iframe — no scripts, by design, because it is a
+   record being read and not a bill being issued. The bar's two buttons call printAgain()/closeBill(),
+   so in that frame they were DEAD: a "Print this" that cannot print and a "✕ Close" that closes
+   nothing, sitting on top of the document. A tap that does nothing is worse than no button at all
+   (the panel's own tap rule), so the caller can leave the chrome off. Nothing else passes noBar, so
+   every real bill and every preview keeps its bar exactly as before. */
++ (d.noBar ? "" : '<div class="bar">'
 +   (d.note ? '<span class="note">' + esc(d.note) + "</span>" : "")
 +   '<button onclick="printAgain()">🖨 Print' + (d.autoPrint ? " again" : " this") + "</button>"
-+   '<button class="x" onclick="closeBill()">✕ Close</button></div>\n'
++   '<button class="x" onclick="closeBill()">✕ Close</button></div>') + "\n"
 + (d.logo ? '<img class="logo" src="' + esc(d.logo) + '" onerror="this.style.display=\'none\'"/>' : "")
 + "\n<h2>" + name + "</h2>\n"
 + '<div class="sub">' + (addr ? addr + "<br/>" : "") + (phone ? "Ph " + phone : "") + (phone && gstin ? "<br/>" : "") + (gstin ? "GSTIN " + gstin : "") + "</div>\n"
@@ -446,7 +453,7 @@
    ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">Composition taxable person — not eligible to collect tax on supplies.</div>\n'
    : "")
 + '<div class="foot">' + footer + "</div>\n"
-+ pageScript(d.autoPrint);
++ (d.noBar ? "" : pageScript(d.autoPrint));
   }
 
   /* ───────────────────────── THE KITCHEN TICKET (KOT) ─────────────────────────

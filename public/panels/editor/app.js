@@ -7038,7 +7038,7 @@ async function openRemovalDetail(id) {
   // markup is ever required.
   const billFrame = (typeof d.__billHtml === "string" && d.__billHtml)
     ? `<div class="au-d-head">The bill as it stood</div>
-       <div class="au-billwrap"><iframe class="au-billframe" sandbox="" title="The bill as it was when this happened"></iframe></div>
+       <div class="au-billwrap"><iframe class="au-billframe" sandbox="allow-same-origin" title="The bill as it was when this happened"></iframe></div>
        <div class="au-d-none">Rebuilt from what was recorded at the time — the same document the printer produces, not a photo.</div>`
     : "";
   const html = `<div class="sx-modal-overlay au-detail-overlay"><div class="sx-modal au-detail">

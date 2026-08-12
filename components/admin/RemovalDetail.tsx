@@ -204,7 +204,10 @@ function BillFrame({ html }: { html: string }) {
         <iframe
           title="The bill as it was when this happened"
           srcDoc={html}
-          sandbox=""
+          // allow-same-origin ONLY: it lets the height below be measured. Scripts stay blocked
+          // (no allow-scripts), so the bill's own auto-print and measuring code cannot run — which is
+          // why the document is asked for with noBar and does not need them.
+          sandbox="allow-same-origin"
           onLoad={(e) => {
             // Grow to the document so there is no inner scrollbar on a short bill. Cross-document
             // reads are allowed here because srcDoc with an empty sandbox is same-origin-ish in every
