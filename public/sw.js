@@ -92,7 +92,7 @@ const MAX_DATA_BYTES = 3_000_000; // don't cache a huge report payload
 // three hours later gets the no-internet page"). His answer: *"there is no off-line limit for diner.
 // Diner should be online."* A diner is expected to be on the restaurant's wifi or their own data;
 // this window exists for STAFF continuity, and one number covers everyone. Do not add a per-family
-// window, and do not re-report it. See docs/REJECTED-IDEAS.md R13.
+// window, and do not re-report it. See docs/REJECTED-IDEAS.md R16.
 const MAX_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 // A CHANGE MUST NEVER BE MASKED BY A SAVED COPY.

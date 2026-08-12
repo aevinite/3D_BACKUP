@@ -33,7 +33,7 @@ export interface CurrencyMeta {
 // them from a live FX feed, because a hand-edited table drifts from reality over months). His answer:
 // *"leave it and make sure you don't show as improvement or error again … this will be like this
 // only."* So: no scheduled FX fetch, no per-restaurant stored rate, and this is not a finding. Every
-// dev restaurant prices in INR anyway, where the rate is 1. See docs/REJECTED-IDEAS.md R14.
+// dev restaurant prices in INR anyway, where the rate is 1. See docs/REJECTED-IDEAS.md R17.
 export const CURRENCIES: CurrencyMeta[] = [
   { code: "INR", symbol: "₹",   label: "INR", rate: 1,          decimals: 0 },
   { code: "USD", symbol: "$",   label: "USD", rate: 1 / 84,     decimals: 2 },
