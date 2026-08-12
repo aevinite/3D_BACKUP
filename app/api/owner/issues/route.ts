@@ -11,6 +11,8 @@ import { ownerScope, inScope, type OwnerScope, dbFail } from "@/lib/ownerScope";
 import { entitledSubset } from "@/lib/ownerEntitlements";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
+import { rd } from "@/lib/readGuard";
+import { restaurantNames } from "@/lib/restaurantNames";
 
 export const dynamic = "force-dynamic";
 
@@ -34,11 +36,16 @@ export async function GET(req: NextRequest) {
   if (!gated) return disabledResp();
   scope = gated;
 
+  // ONE EMPTY SHAPE, NOT TWO (T9 finding F18, fixed 2026-08-12). The two early returns disagreed —
+  // `{issues:[]}` here and `{issues:[],openCount:0}` below — so a client reading `openCount` for its
+  // badge got `undefined` on one of the two paths.
+  const empty = () => NextResponse.json({ issues: [], openCount: 0 });
+
   let q = sb.from("issues")
     .select("id, restaurant_id, subject, body, raised_by, raised_role, status, created_at, resolved_at, resolved_by, image_url, audio_url")
     .order("status", { ascending: true }).order("created_at", { ascending: false }).limit(300);
   if (!scope.all) {
-    if (!scope.ids.length) return NextResponse.json({ issues: [] });
+    if (!scope.ids.length) return empty();
     q = q.in("restaurant_id", scope.ids);
   }
   // Optional ?rid= (or legacy ?restaurant_id=) filter — narrow to ONE selected restaurant:
@@ -48,25 +55,44 @@ export async function GET(req: NextRequest) {
   // NARROW, never widen.
   const oneRid = req.nextUrl.searchParams.get("rid") || req.nextUrl.searchParams.get("restaurant_id");
   if (oneRid) {
-    if (!inScope(scope, oneRid)) return NextResponse.json({ issues: [], openCount: 0 });
+    if (!inScope(scope, oneRid)) return empty();
     q = q.eq("restaurant_id", oneRid);
   }
-  const { data, error } = await q;
+  // ── THE BADGE IS COUNTED IN THE DATABASE NOW (T9 finding F19, fixed 2026-08-12) ─────────────────
+  // `openCount` was `issues.filter(i => i.status === "open").length` over the CAPPED 300-row page,
+  // so a restaurant with more than 300 complaints understated how many were open — on a number whose
+  // entire job is to be trusted at a glance. One cheap indexed head-count instead, over exactly the
+  // same scope the list uses, which is the same correction `/api/owner/khata` was given for its
+  // "total outstanding" (T7 F13: never sum the shown page).
+  const countScope = oneRid ? [oneRid] : (scope.all ? null : scope.ids);
+  let openHead = sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open");
+  if (countScope) openHead = openHead.in("restaurant_id", countScope);
+
+  const [listRes, openRes] = await Promise.all([q, rd("openCount", () => openHead)]);
+  const { data, error } = listRes;
   if (error) return dbFail("owner/issues", error, { message: "Couldn't load your complaints just now — please try again." });
   // signRows turns the stored value into a short-lived link on the way out (lib/mediaLinks.ts).
   const signed = await signRows("issue-media", (data || []) as Record<string, unknown>[], ["image_url", "audio_url"]);
 
   // Attach restaurant names via a separate small fetch (avoids a PostgREST embed).
   const list = signed as unknown as Array<{ restaurant_id: string; status: string } & Record<string, unknown>>;
-  const rids = [...new Set(list.map((i) => i.restaurant_id))];
-  const names: Record<string, string> = {};
-  const slugs: Record<string, string> = {};
-  if (rids.length) {
-    const r = await sb.from("restaurants").select("id, name, slug").in("id", rids);
-    for (const x of (r.data || []) as { id: string; name: string; slug: string }[]) { names[x.id] = x.name; slugs[x.id] = x.slug; }
-  }
-  const issues = list.map((i) => ({ ...i, restaurantName: names[i.restaurant_id] || "—", restaurantSlug: slugs[i.restaurant_id] || "" }));
-  return NextResponse.json({ issues, openCount: issues.filter((i) => i.status === "open").length });
+  // Shared lookup — checks its own error, handles a JSONB name, pages past the row cap (finding F17).
+  const names = await restaurantNames(list.map((i) => i.restaurant_id));
+  const issues = list.map((i) => ({
+    ...i,
+    restaurantName: names.get(i.restaurant_id) ?? "—",
+    restaurantSlug: names.slug(i.restaurant_id) ?? "",
+  }));
+  // Fall back to counting the shown page ONLY if the head-count failed, and say so — an undercounted
+  // badge is better than no page, but the screen should know not to trust it.
+  const openCount = openRes.error
+    ? issues.filter((i) => i.status === "open").length
+    : (openRes.count ?? 0);
+  const partial = [
+    ...(names.partial ? ["restaurantNames"] : []),
+    ...(openRes.error ? ["openCount"] : []),
+  ];
+  return NextResponse.json({ issues, openCount, ...(partial.length ? { partial } : {}) });
 }
 
 export async function PATCH(req: NextRequest) {

@@ -19,17 +19,29 @@ const MAX_PER_DAY = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 // How many requests this IP filed in the last 24h.
-async function usedToday(ip: string): Promise<number> {
+// Returns the count, or NULL when it genuinely could not be read.
+//
+// ── THE TWO CALLERS WANT OPPOSITE THINGS, AND THAT IS THE WHOLE POINT (T9 finding F25, 2026-08-12) ──
+// This used to swallow every failure as `0`, with the comment "fail-open: a count blip shouldn't
+// strand the visitor". That is exactly right for the GET, which only draws the page — and exactly
+// wrong for the POST, which uses the same function to ENFORCE the 3-per-day cap. A zero on failure
+// means "you have used none of your three", so for as long as the count was unreadable an IP could
+// file unlimited rows. A limiter that stops limiting the moment its counter breaks is not a limiter.
+//
+// So the two states are separated and each caller decides: the page still renders on doubt, the
+// write still refuses on doubt.
+async function usedToday(ip: string): Promise<number | null> {
   try {
     const since = new Date(Date.now() - DAY_MS).toISOString();
-    const { count } = await sb
+    const { count, error } = await sb
       .from("unblock_requests")
       .select("id", { count: "exact", head: true })
       .eq("ip", ip)
       .gte("created_at", since);
+    if (error) return null;
     return count ?? 0;
   } catch {
-    return 0; // fail-open: a count blip shouldn't strand the visitor
+    return null;
   }
 }
 
@@ -37,7 +49,9 @@ export async function GET(req: NextRequest) {
   const ip = clientIp(req);
   const key = `admin:${ip}`;
   const blocked = await throttleIsBlocked(key);
-  const used = blocked ? await usedToday(ip) : 0;
+  // The PAGE fails open, deliberately: an unreadable counter must not stop a blocked visitor seeing
+  // the page that explains their situation. Only the WRITE below treats "couldn't count" as a refusal.
+  const used = (blocked ? await usedToday(ip) : 0) ?? 0;
   // Any still-open request from this IP → so the page can say "already asked, waiting".
   let pending = false;
   if (blocked) {
@@ -55,6 +69,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, reason: "not_blocked" });
   }
   const used = await usedToday(ip);
+  // COULDN'T COUNT → REFUSE, and say it is temporary so the page offers a retry rather than
+  // implying they are out of requests. This is the half that must fail CLOSED (see usedToday).
+  if (used === null) {
+    return NextResponse.json({ ok: false, reason: "try_later", transient: true }, { status: 503 });
+  }
   if (used >= MAX_PER_DAY) {
     return NextResponse.json({ ok: false, reason: "limit", remaining: 0 });
   }

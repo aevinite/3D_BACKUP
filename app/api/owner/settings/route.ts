@@ -6,7 +6,8 @@
 //          token_version. That invalidates the current cookie, so the client re-logs in.
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { ownerScope, dbFail } from "@/lib/ownerScope";
+import { ownerScope, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse } from "@/lib/ownerScope";
+import { restaurantNames } from "@/lib/restaurantNames";
 import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@/lib/ownerEntitlements";
 import { USER_COOKIE, userFromCookie, hashSecret, verifySecret } from "@/lib/userAuth";
 import { MODULE_DEFS } from "@/lib/accessModel";
@@ -24,6 +25,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const scope = await ownerScope(req);
   if (!scope) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  try {
   const owner = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
   const name = owner?.name || owner?.username || (scope.admin ? "Admin" : "Owner");
 
@@ -31,6 +33,15 @@ export async function GET(req: NextRequest) {
   let restaurants: { id: string; name: string }[] = [];
   if (scope.all) {
     for (const k of OWNER_SECTION_KEYS) sections[k] = true; // admin all-view: everything on
+    // ── THE ADMIN GOT AN EMPTY PAGE (T9 finding F16, fixed 2026-08-12) ──────────────────────────
+    // `restaurants` was only ever filled in the `else` branch, so a plain admin session (scope.all,
+    // no act-as) left it `[]` — which then made `modIds` empty and skipped the module-toggle block
+    // entirely. The admin's own Settings page listed no restaurants and no switches: not obviously
+    // broken, just silently empty, which is the opposite of "admin = top power".
+    // Paged through the shared helper so a platform with more restaurants than PostgREST's row cap
+    // doesn't lose the tail (the same cap that bit `scopedRestaurantIds`).
+    const all = await restaurantNames(await scopedRestaurantIds(scope));
+    restaurants = all.ids.map((id) => ({ id, name: all.get(id) || "" })).sort((a, b) => a.name.localeCompare(b.name));
   } else {
     const ent = await getOwnerEntitlementsUnion(scope.ids);
     for (const k of OWNER_SECTION_KEYS) sections[k] = ent[k] !== false;
@@ -101,6 +112,12 @@ export async function GET(req: NextRequest) {
     }
   }
   return NextResponse.json({ name, isAdmin: !!scope.admin, canChangePassword, sections, restaurants, modules });
+  } catch (e) {
+    // A half-read restaurant list must not silently shorten the admin's page (same rule as
+    // `scopedRestaurantIds` everywhere else).
+    if (e instanceof RestaurantListIncomplete) return incompleteListResponse();
+    throw e;
+  }
 }
 
 // PATCH — the owner flips a module the admin transferred to them (mig 166).

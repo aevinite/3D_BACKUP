@@ -32,6 +32,8 @@ import { capsForRole, capGroupsForRole, capVisible, roleDefault, effectiveCap } 
 import { accessStateFor } from "@/lib/accessState";
 import { newWaiterTables } from "@/lib/tableAssign";
 import { viewAsPerson, isPersonId } from "@/lib/viewAsPerson";
+import { rd, ReadSet } from "@/lib/readGuard";
+import { loadLogVisibility } from "@/lib/logVisibility";
 import {
   PROFILE_FIELDS, hasProfile, completeness, mergeProfilePatch, jobPatchFrom, paymentFrom,
   payAccessWith, todayIST, payHistoryBlocksDelete, PAY_HISTORY_DELETE_MESSAGE, type PayAccess,
@@ -404,10 +406,16 @@ export async function GET(req: NextRequest) {
 // run when someone actually opens that person.
 async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLSearchParams) {
   const ids = s.restaurants.map((r) => r.id);
-  const { data: rows } = await sb.from("staff_users")
+  // "I COULDN'T ASK" IS NOT "THEY AREN'T YOURS" (T9 finding F7, fixed 2026-08-12). This read's
+  // `.error` was never inspected, so a database blip produced `u === undefined` and answered
+  // "That person isn't on your staff." with a 404 — a sentence that sends the owner looking for a
+  // permissions problem that does not exist, and a status no client retries. Same rule this file
+  // already applies in `scope()` via transient().
+  const detail = await rd("person", () => sb.from("staff_users")
     .select(`id, username, role, name, phone, active, restaurant_id, last_seen_at, created_at, pin_hash, permissions, can_self_reset, can_self_set_pin, ${PROFILE_COLS}`)
-    .eq("id", id).in("restaurant_id", ids).limit(1);
-  const u = (rows || [])[0] as any;
+    .eq("id", id).in("restaurant_id", ids).limit(1));
+  if (detail.error) return transient();
+  const u = (detail.data || [])[0] as any;
   if (!u) return bad("That person isn't on your staff.", 404);
   // shownActor, not s.actor: a pinned "as this manager" tab must answer this READ the way the
   // manager is answered (they can't open a peer's or an owner's record), so the view can't show
@@ -448,25 +456,40 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
     // Mumbai DB and the page sat on "Loading…"; in parallel it's one round-trip's worth.
     const yearStart = todayIST().slice(0, 4) + "-01-01";
     const monthStart = todayIST().slice(0, 8) + "01";
-    const [paysQ, sumQ, sumMQ] = await Promise.all([
+    const pay = new ReadSet("owner/staff.detail", await Promise.all([
       // Newest 60 entries — a year of monthly salary plus advances, and enough to scroll.
-      sb.from("staff_payments")
+      rd("payments", () => sb.from("staff_payments")
         .select("id, kind, amount, for_period, mode, paid_on, note, recorded_by, created_at, voided_at, void_reason, voided_by")
         .eq("staff_id", id).eq("restaurant_id", u.restaurant_id)
-        .order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(60),
-      sb.rpc("lfh_staff_pay_summary", { p_restaurant: u.restaurant_id, p_from: yearStart, p_to: todayIST() }),
-      sb.rpc("lfh_staff_pay_summary", { p_restaurant: u.restaurant_id, p_from: monthStart, p_to: todayIST() }),
-    ]);
-    out.payments = paysQ.data || [];
-    const mine = ((sumQ.data || []) as any[]).find((x) => x.staff_id === id) || null;
-    const mineM = ((sumMQ.data || []) as any[]).find((x) => x.staff_id === id) || null;
-    out.summary = {
-      thisMonth: Number(mineM?.paid || 0),
-      thisYear: Number(mine?.paid || 0),
-      advanceOutstanding: Number(mine?.advance_outstanding || 0),
-      lastPaidOn: mine?.last_paid_on || null,
-      entries: Number(mine?.entries || 0),
-    };
+        .order("paid_on", { ascending: false }).order("created_at", { ascending: false }).limit(60)),
+      rd("year", () => sb.rpc("lfh_staff_pay_summary", { p_restaurant: u.restaurant_id, p_from: yearStart, p_to: todayIST() })),
+      rd("month", () => sb.rpc("lfh_staff_pay_summary", { p_restaurant: u.restaurant_id, p_from: monthStart, p_to: todayIST() })),
+    ]));
+    // ── A ZEROED SALARY IS A CLAIM, NOT AN ABSENCE — ON THIS PAGE TOO (T9 finding F6, 2026-08-12) ──
+    // The ROSTER in this same file was given exactly this treatment on 2026-08-06 (`payUnread`), and
+    // its comment spells out why: an invented "₹0 paid this month" is "the shape that starts a 'you
+    // never paid me' argument". The person's OWN profile — the screen you would actually open to
+    // settle that argument — was missed, and read `paysQ.data || []`, so a failed read rendered an
+    // EMPTY payment history and "₹0 this month, ₹0 this year" for someone who had been paid all year.
+    //
+    // Now: no figures at all rather than wrong ones, and `payUnread` says why. Leaving the keys out
+    // is not enough on its own — a missing `thisMonth` renders as "₹0" exactly like a real zero — so
+    // the flag is what lets the screen say "couldn't read" instead of naming an amount.
+    if (pay.anyFailed) {
+      out.payUnread = true;
+      out.partial = [...((out.partial as string[]) || []), "payHistory"];
+    } else {
+      out.payments = pay.rows("payments");
+      const mine = pay.rows<any>("year").find((x) => x.staff_id === id) || null;
+      const mineM = pay.rows<any>("month").find((x) => x.staff_id === id) || null;
+      out.summary = {
+        thisMonth: Number(mineM?.paid || 0),
+        thisYear: Number(mine?.paid || 0),
+        advanceOutstanding: Number(mine?.advance_outstanding || 0),
+        lastPaidOn: mine?.last_paid_on || null,
+        entries: Number(mine?.entries || 0),
+      };
+    }
   }
 
   // Performance is OWNER-ONLY (owner's call 2026-07-29 — a manager gets no access to it).
@@ -500,14 +523,33 @@ async function staffDetail(s: Extract<Scope, { ok: true }>, id: string, sp: URLS
     || (await logViewSubset(await entitledSubset([u.restaurant_id], "logs"), "activity")).length > 0;
   if (!logsOn) { out.activity = []; out.activityOff = true; }
   else {
-    const acts = await sb.from("staff_actions")
-      .select("action, detail, created_at, panel")
+    // The row-level `action` column is needed so the per-KIND switches can be applied here exactly
+    // as they are on the Activity page — this card used to apply the page-level "logs" entitlement
+    // and then show every kind, so a sign-in the admin had hidden was still visible one tap deeper.
+    const acts = await rd("activity", () => sb.from("staff_actions")
+      .select("action, detail, created_at, panel, restaurant_id")
       .eq("restaurant_id", u.restaurant_id).eq("actor_id", id)
       .not("panel", "in", "(admin,db)")
       .or("level.is.null,level.neq.error")
       .neq("action", "ui_taps")
-      .order("created_at", { ascending: false }).limit(20);
-    out.activity = acts.data || [];
+      .order("created_at", { ascending: false }).limit(20));
+    if (acts.error) {
+      // An unread activity list must not read as "this person has done nothing" (T9 finding F6's
+      // neighbour). No list, and a reason.
+      out.activity = [];
+      out.activityUnread = true;
+      out.partial = [...((out.partial as string[]) || []), "logVisibility"];
+    } else {
+      // Per-KIND visibility, through the one module that fails CLOSED (T9 finding F23).
+      const vis = await loadLogVisibility([u.restaurant_id], s.actor === "admin");
+      if (!vis.ok) {
+        out.activity = [];
+        out.activityUnread = true;
+        out.partial = [...((out.partial as string[]) || []), "logVisibility"];
+      } else {
+        out.activity = vis.visibility.filter((acts.data || []) as { restaurant_id?: string | null; action?: string | null }[]);
+      }
+    }
   }
   return ok(out);
 }
@@ -576,8 +618,15 @@ async function noOverwrite(req: NextRequest, rid: string): Promise<Response | nu
 // profile/pay write goes through here, so scoping + the ladder are checked exactly once.
 async function target(s: Extract<Scope, { ok: true }>, id: string) {
   const ids = s.restaurants.map((r) => r.id);
-  const u = (await sb.from("staff_users").select(`id, username, role, name, restaurant_id, profile, ${PROFILE_COLS}`)
-    .eq("id", id).in("restaurant_id", ids).limit(1)).data?.[0] as any;
+  // THIS IS A WRITE PATH, AND IT WAS THE WORST PLACE FOR THIS BUG (T9 finding F7, fixed 2026-08-12).
+  // `target()` is the front door for every profile and pay write. The read's `.error` was ignored,
+  // so a transient database failure while SAVING A SALARY answered "That person isn't on your
+  // staff." with a 404 — wrong reason, and a status nothing retries, so the save was simply lost.
+  const found = await rd("target", () => sb.from("staff_users")
+    .select(`id, username, role, name, restaurant_id, profile, ${PROFILE_COLS}`)
+    .eq("id", id).in("restaurant_id", ids).limit(1));
+  if (found.error) return { err: transient() };
+  const u = (found.data || [])[0] as any;
   if (!u) return { err: bad("That person isn't on your staff.", 404) };
   if (!assignableFor(s.actor).includes(u.role)) return { err: bad("You can't manage accounts at or above your own level.", 403) };
   const r = s.restaurants.find((x) => x.id === u.restaurant_id)!;
@@ -829,19 +878,29 @@ async function patchImpl(req: NextRequest): Promise<Response> {
   // very different amounts of trust, so each is its own switch now
   // (access_config.manage_staff.manager_opts.*). The OWNER and the admin are unaffected — this
   // only ever narrows a manager, and an unset option keeps the row's own default.
-  const mgrStaffOpt = async (key: "create" | "reset_pw" | "delete", dflt: boolean): Promise<boolean> => {
+  // A GATE MUST FAIL CLOSED (T9 finding F9, fixed 2026-08-12). This ignored its read error, so a
+  // database blip made `cfg` null and handed the manager the DEFAULT power — i.e. a failure to read
+  // the restriction removed the restriction. `null` is now returned for "couldn't check", and the
+  // caller refuses. Every other rung in this file refuses on doubt; these two allowed on doubt.
+  const mgrStaffOpt = async (key: "create" | "reset_pw" | "delete", dflt: boolean): Promise<boolean | null> => {
     if (s.actor !== "manager") return true;
     const rid = s.restaurants[0]?.id;
     if (!rid) return false;
-    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data?.access_config as
+    const got = await rd("access_config", () => sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle());
+    if (got.error) return null;                       // couldn't check → the caller must refuse
+    const cfg = (got.data as { access_config?: unknown } | null)?.access_config as
       { manage_staff?: { manager_opts?: Record<string, boolean> } } | null;
     const v = cfg?.manage_staff?.manager_opts?.[key];
     return typeof v === "boolean" ? v : dflt;
   };
+  /** "couldn't check" → a retryable refusal, never a silent grant. */
+  const cantCheckPower = () => NextResponse.json(
+    { error: "Couldn't check your staff access just now — please try again.", transient: true }, { status: 503 });
 
   if (action === "reset_password") {
-    if (!(await mgrStaffOpt("reset_pw", true)))
-      return bad("Resetting a password isn't part of your staff access.", 403);
+    const mayReset = await mgrStaffOpt("reset_pw", true);
+    if (mayReset === null) return cantCheckPower();
+    if (!mayReset) return bad("Resetting a password isn't part of your staff access.", 403);
     const password = String(body?.password || "").trim() || genPassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     if (password.length > 128) return bad("Password is too long (max 128 characters).");
@@ -934,8 +993,15 @@ async function patchImpl(req: NextRequest): Promise<Response> {
           // managerCan() enforces it on every request this override could ever affect. It used to
           // be checked here as powerEntitled(power_<flag>), a key nothing has been able to write
           // since the old ladder went, so the refusal could never fire. (sweep T6, 2026-08-06)
-          const feat = (await sb.from("restaurants").select("access_config").eq("id", u.restaurant_id).maybeSingle())
-            .data?.access_config as Record<string, { on?: boolean }> | null;
+          // FAIL CLOSED (T9 finding F9). This read's error was ignored, so `feat` came back null on a
+          // blip, `feat?.[k]?.on === false` was false, and the grant went through — for a feature the
+          // admin had switched OFF for that restaurant. A permission is the last thing that may be
+          // handed out because a query happened to fail.
+          const featRead = await rd("feature_gate", () =>
+            sb.from("restaurants").select("access_config").eq("id", u.restaurant_id).maybeSingle());
+          if (featRead.error) return cantCheckPower();
+          const feat = (featRead.data as { access_config?: unknown } | null)?.access_config as
+            Record<string, { on?: boolean }> | null;
           if (feat?.[k]?.on === false)
             return bad("That feature is switched off for this restaurant by the admin — you can't grant it.", 403);
         }

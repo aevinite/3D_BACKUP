@@ -24,6 +24,44 @@ import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 // wrongly locked out of the very sections it had switched off).
 export type OwnerScope = { all: true; admin?: true } | { all: false; ids: string[]; ownerId: string; admin?: true };
 
+/**
+ * "We could not work out what you are allowed to see."
+ *
+ * Deliberately NOT the same as `null` (which means "you are nobody here" → 401). A scope we failed
+ * to READ is a transient problem, and answering 401 for it would log a legitimate owner out of their
+ * own cockpit; answering with a PARTIAL scope would quietly hide restaurants they own. So it throws,
+ * and `ownerScopeOr503()` turns it into a retryable answer. (T9 finding F22, 2026-08-12.)
+ */
+export class OwnerScopeUnavailable extends Error {
+  constructor() {
+    super("Couldn't work out which restaurants you can see");
+    this.name = "OwnerScopeUnavailable";
+  }
+}
+
+/**
+ * The shape every `/api/owner/*` route should use: resolve the scope, and get back either a scope,
+ * or the Response to return. Saves each route hand-writing the same three-way branch, and makes the
+ * "couldn't read it" case impossible to forget.
+ */
+export async function ownerScopeOr503(
+  req: NextRequest,
+): Promise<{ scope: OwnerScope; resp?: undefined } | { scope?: undefined; resp: Response }> {
+  let s: OwnerScope | null;
+  try { s = await ownerScope(req); }
+  catch (e) {
+    if (e instanceof OwnerScopeUnavailable) {
+      return { resp: Response.json(
+        { error: "Couldn't load your restaurants just now — please try again.", transient: true },
+        { status: 503 },
+      ) };
+    }
+    throw e;
+  }
+  if (!s) return { resp: Response.json({ error: "unauthorized" }, { status: 401 }) };
+  return { scope: s };
+}
+
 export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
   // PER-TAB ADMIN PIN (owner, 2026-07-28): ?scope=/?rid=/?as= are appended only by the
   // admin console's act-as flow and echoed by that tab on every call. Such a pin WITH a
@@ -96,8 +134,17 @@ export async function ownerScope(req: NextRequest): Promise<OwnerScope | null> {
         ? asOwner
         : (primary && members.includes(primary) ? primary : (members[0] ?? primary ?? null));
       if (ownerId) {
-        const { data } = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId);
-        const ids = (data || []).map((x) => x.restaurant_id as string);
+        // A BLIP MUST NOT SILENTLY SHRINK THE VIEW (T9 finding F22, fixed 2026-08-12). This read's
+        // `.error` was ignored, so a failed widen left `ids` as just the entered restaurant — an
+        // admin who opened a five-restaurant owner's cockpit saw ONE, with nothing to say the other
+        // four had been dropped rather than never existed. It never widens wrongly, which is the
+        // direction that matters for isolation; but narrowing in silence is still a wrong answer.
+        const owned = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId);
+        if (owned.error) {
+          console.error("[ownerScope] could not widen the act-as set:", owned.error.message);
+          throw new OwnerScopeUnavailable();
+        }
+        const ids = (owned.data || []).map((x) => x.restaurant_id as string);
         if (!ids.includes(acting)) ids.push(acting); // never lose the entered restaurant
         return { all: false, ids, ownerId, admin: true };
       }

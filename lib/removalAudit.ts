@@ -41,6 +41,13 @@ export type RemovalKind =
   // (owner, 2026-08-05: "before and after will also be shown in the audit section"). A reopen
   // that adds food RAISES the bill, so without this the trail only ever showed the lower number.
   | "bill_changed_after_reopen"
+  // A GUEST'S PERSONAL DATA, ERASED ON REQUEST (owner, 2026-08-12: "delete — it will go in audit
+  // and stuff"). The only irreversible erase in the owner panel: it clears the guest, their visit
+  // history, their devices and their pay-later person record, with no tombstone and no restore.
+  // The Activity log records who pressed it; this records that it HAPPENED, on the screen someone
+  // would actually check when a guest is missing. Only the last 4 phone digits are kept — an audit
+  // of an erasure must not become a fresh copy of the number we were asked to erase.
+  | "customer_erased"
   // Also not a removal — the REVERSAL of one. A delete wrote a permanent row here while a restore
   // wrote only an Activity-log line, and that log is cleared after 30 days at most (mig 158,
   // settable to 1 day). So a month later the lasting record said a bill had been removed, with a

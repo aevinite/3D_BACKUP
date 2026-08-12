@@ -77,6 +77,76 @@ export function normalizeIncoming(source: AggSource, payload: Record<string, any
 // by the target restaurant's Platform module AND that this channel is turned on — an off
 // restaurant/channel can never receive real app orders. (restaurantId defaults to #1, matching
 // the RPC's default, until the webhook resolves the tenant from the payload.)
+// ── WHICH RESTAURANT DID THIS WEBHOOK ARRIVE FOR? (T9 finding F11, 2026-08-12) ────────────────────
+//
+// Until now: nobody asked. `ingestIncoming` defaulted its `restaurantId` argument to restaurant #1
+// and the webhook route never passed one, so every Zomato/Swiggy order on a multi-restaurant stack
+// would have landed on the first restaurant's floor and in its books. Dormant (the `aggregators`
+// flag is off) is the only reason it never bit.
+//
+// The platform identifies the outlet the order is for; we store OUR side of that mapping alongside
+// the channel's on/off and key, as `platform_channels.<source>.outlet`. The admin sets it when the
+// integration is onboarded — one field, in the screen that already holds the key.
+//
+// THE RULE IS: RESOLVE, OR REFUSE. There is deliberately no fallback to a default restaurant,
+// because the failure mode of guessing is somebody else's order (and somebody else's money) on your
+// floor, which is both unrecoverable and invisible. A refusal is a 404 the aggregator can act on.
+//
+// The ONE convenience: if the payload names no outlet at all and exactly ONE restaurant on the whole
+// platform has that channel switched on, there is nothing to be ambiguous about, so that restaurant
+// is used. Two or more, and it refuses — because at that point a guess is a coin toss.
+const OUTLET_FIELDS = ["outlet_id", "outletId", "restaurant_id", "restaurantId", "store_id", "storeId", "merchant_id", "merchantId"];
+
+export function outletIdFrom(payload: Record<string, unknown>): string {
+  for (const f of OUTLET_FIELDS) {
+    const v = payload?.[f];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  }
+  // Some platforms nest it under the outlet/store object.
+  for (const holder of ["outlet", "store", "restaurant", "merchant"]) {
+    const o = payload?.[holder];
+    if (o && typeof o === "object") {
+      const v = (o as Record<string, unknown>).id ?? (o as Record<string, unknown>).code;
+      if (typeof v === "string" && v.trim()) return v.trim();
+      if (typeof v === "number" && Number.isFinite(v)) return String(v);
+    }
+  }
+  return "";
+}
+
+export async function resolveWebhookRestaurant(
+  source: AggSource,
+  payload: Record<string, unknown>,
+): Promise<string | null> {
+  const outlet = outletIdFrom(payload);
+  // Every restaurant with this channel switched ON. Small: it is an opt-in integration.
+  const r = await sb.from("settings").select("restaurant_id, platform_channels");
+  if (r.error) {
+    console.error("[aggregators] could not read channel mappings:", r.error.message);
+    return null;                       // couldn't check → refuse, never guess
+  }
+  const live = ((r.data || []) as { restaurant_id: string; platform_channels: Record<string, { on?: boolean; outlet?: string }> | null }[])
+    .filter((row) => row.platform_channels?.[source]?.on === true);
+
+  if (outlet) {
+    const matches = live.filter((row) => String(row.platform_channels?.[source]?.outlet ?? "") === outlet);
+    // Exactly one, or nothing. Two restaurants claiming the same outlet id is a configuration
+    // mistake, and picking one of them at random is the very thing this function exists to stop.
+    if (matches.length === 1) return matches[0].restaurant_id;
+    if (matches.length > 1) {
+      console.error(`[aggregators] ${matches.length} restaurants claim ${source} outlet "${outlet}" — refusing to guess`);
+    }
+    return null;
+  }
+
+  if (live.length === 1) return live[0].restaurant_id;
+  if (live.length > 1) {
+    console.error(`[aggregators] ${source} order carried no outlet id and ${live.length} restaurants have the channel on — refusing to guess`);
+  }
+  return null;
+}
+
 export async function ingestIncoming(source: AggSource, payload: Record<string, any>, restaurantId: string = DEFAULT_RESTAURANT_ID) {
   if (!(await platformLadder(restaurantId)).effective) throw new Error("platform disabled for this restaurant");
   const chRow = (await sb.from("settings").select("platform_channels").eq("restaurant_id", restaurantId).maybeSingle()).data as
