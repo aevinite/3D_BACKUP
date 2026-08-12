@@ -56,8 +56,16 @@ check("a day-kind report asks for range=day, never a calendar custom day",
 check("the day sheet's dishes + hours use the SAME window as its money",
   /const dayEff: Eff = \{ range: "day", date: day \}/.test(reportsPage),
   "a calendar-day extras window puts a 2am order's dish on a different sheet than its money");
+// WHICH date, and why this accepts two spellings (fixed 2026-08-12, T10 sweep). The thing that must
+// hold is that the `day` cache key carries A date — with no date, two different days share one
+// snapshot row and the sheet shows yesterday. It used to read the RAW query param
+// (`sp.get("date")`); ef34f2d7 changed it to the RESOLVED window (`from`), which is strictly better,
+// because windowFor() validates and falls back while the raw string did not, so a junk date could
+// mint a cache row of its own. This check kept demanding the old spelling, so it failed on the
+// improvement — and since verify:static is one `&&` chain, that took SEVEN later guards and CI's
+// whole access-model step down with it for a day. Match either; refuse a `day` key with no date.
 check("the day-sheet cache key carries the date",
-  /range === "day" \? `day:\$\{sp\.get\("date"\)\}`/.test(reportsRoute),
+  /range === "day" \? `day:\$\{(?:from|sp\.get\("date"\))\}`/.test(reportsRoute),
   "two different days would share one snapshot row");
 
 console.log("\n── 1b. BETWEEN MIDNIGHT AND 5AM, 'TODAY' IS STILL LAST NIGHT'S SHIFT ──");
