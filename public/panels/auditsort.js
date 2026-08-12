@@ -120,6 +120,31 @@
      offered a "Voided invoices 0" chip to tap. 'label' and 'icon' are passed in by the caller from
      the ONE shared KIND_LABEL/KIND_ICON map, so this file never gets a second opinion on the words.
      Ordered by count, biggest first, so the busiest type is the nearest chip. */
+  /* THE SAME LIST, BUT COUNTED IN THE DATABASE (owner, 2026-08-12).
+     Once the Audit is PAGED, counting the rows in hand describes one page — and a chip reading
+     "Bill deleted 10" that really means "10 on this page" is a number that reads as authoritative and
+     is not. 'dbCounts' is mig 311's grouped read ([{kind, n, amount}]). When it is present it wins,
+     and every type it names gets a chip even if none of its rows are on this page — that is the whole
+     point: you can reach a type from page 1. When it is absent (an older server, or a failed count)
+     this falls back to counting the rows and the caller says the counts are for this page only. */
+  function kindCountsFrom(rows, dbCounts, label, icon) {
+    var page = kindCounts(rows, label, icon);
+    if (!dbCounts || !dbCounts.length) return page;
+    return dbCounts
+      .map(function (c) {
+        var k = String(c.kind || "");
+        return {
+          kind: k,
+          count: Number(c.n) || 0,
+          amount: Number(c.amount) || 0,
+          label: (label && label[k]) || k,
+          icon: (icon && icon[k]) || "\u2022",
+        };
+      })
+      .filter(function (c) { return c.kind && c.count > 0; })
+      .sort(function (a, b) { return b.count - a.count || a.label.localeCompare(b.label); });
+  }
+
   function kindCounts(rows, label, icon) {
     var seen = {}, order = [];
     (rows || []).forEach(function (r) {
@@ -195,6 +220,7 @@
     sortById: sortById,
     sortRows: sortRows,
     kindCounts: kindCounts,
+    kindCountsFrom: kindCountsFrom,
     matches: matches,
     view: view,
     sumAmount: sumAmount,

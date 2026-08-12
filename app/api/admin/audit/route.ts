@@ -7,6 +7,8 @@
 //
 // Egress-safe: explicit column list, optional restaurant scope, hard limit — never a
 // whole-table read. deletion_audit is indexed (restaurant_id, at DESC).
+// BEFORE vs AFTER, and the bill as it stood (owner, 2026-08-12) — see lib/auditDetail.ts.
+import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
@@ -54,7 +56,15 @@ export async function GET(req: NextRequest) {
       const live = (await sb.from("orders").select("deleted_at").eq("id", String(one.order_id)).maybeSingle()).data as { deleted_at?: string | null } | null;
       restorable = !!live?.deleted_at;
     }
-    return NextResponse.json({ removal: { ...one, restaurant_name: rn }, canRestore: restorable });
+    // The two boxes and the bill. `auditAfter` re-reads the order anyway, so the restorable check
+    // above and this share the same truth about whether the row is tombstoned.
+    const meta = (one.meta || {}) as Record<string, unknown>;
+    const rid2 = String(one.restaurant_id || "");
+    const [after, billHtml] = await Promise.all([
+      auditAfter(rid2, one.order_id ? String(one.order_id) : null),
+      auditBillHtml(rid2, (meta.was || null) as Record<string, unknown> | null),
+    ]);
+    return NextResponse.json({ removal: { ...one, restaurant_name: rn }, after, billHtml, canRestore: restorable });
   }
 
   let q = sb.from("deletion_audit").select(COLS).order("at", { ascending: false }).limit(limit);

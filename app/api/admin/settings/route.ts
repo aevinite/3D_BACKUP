@@ -16,10 +16,26 @@ const clampDays = (v: unknown) => {
   return Number.isFinite(n) ? Math.min(Math.max(n, 1), 30) : 30;
 };
 
+// THE AUDIT'S WINDOW IS IN YEARS, AND IT IS A DIFFERENT QUESTION (owner, 2026-08-12).
+// The activity log is a working diary — huge, disposable, capped at a month. The AUDIT is the money
+// trail: every removal with its reason, its person and its amount, and it is what answers "where did
+// bill #217 go?" years later. It is also tiny — a few hundred rows a year. So it gets its own
+// setting, measured in YEARS, with the owner's own five options.
+// Snapped to the offered set rather than merely clamped: a stored 4 would render as a phantom option
+// on the screen, which is the exact fault the oplog default was fixed for (see the GET below).
+const AUDIT_YEAR_OPTS = [1, 3, 5, 7, 10];
+const clampYears = (v: unknown) => {
+  const n = Math.round(Number(v));
+  if (!Number.isFinite(n)) return 10;
+  // nearest offered value, ties going to the LONGER window — never silently shorten the trail
+  return AUDIT_YEAR_OPTS.reduce((best, o) =>
+    Math.abs(o - n) < Math.abs(best - n) || (Math.abs(o - n) === Math.abs(best - n) && o > best) ? o : best, 10);
+};
+
 export async function GET(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const r = await sb.from("settings").select("oplog_retention_days, custlog_retention_days").eq("id", "site").limit(1);
+  const r = await sb.from("settings").select("oplog_retention_days, custlog_retention_days, audit_retention_years").eq("id", "site").limit(1);
   if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
   const s = r.data?.[0] || {};
   return NextResponse.json({
@@ -28,6 +44,10 @@ export async function GET(req: NextRequest) {
     // maximum" that couldn't be reselected once changed (audit 2026-07-23).
     oplog_retention_days: s.oplog_retention_days ?? 30,
     custlog_retention_days: s.custlog_retention_days ?? 30,
+    // The LONGEST window is the default (mig 311) — above the top of the 6-8 year records range in
+    // docs/COMPLIANCE-GUARDRAILS.md §3, so nothing is ever removed unless a person shortens it.
+    audit_retention_years: s.audit_retention_years ?? 10,
+    auditYearOptions: AUDIT_YEAR_OPTS,
   });
 }
 
@@ -43,6 +63,7 @@ export async function POST(req: NextRequest) {
   for (const k of ["oplog_retention_days", "custlog_retention_days"]) {
     if (k in body) patch[k] = clampDays(body[k]);
   }
+  if ("audit_retention_years" in body) patch.audit_retention_years = clampYears(body.audit_retention_years);
   if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   // Every settings row carries a restaurant_id (id='site' is #1's row) → this writes them all.
   const r = await sb.from("settings").update(patch).not("restaurant_id", "is", null);
@@ -51,9 +72,14 @@ export async function POST(req: NextRequest) {
   // decides how long the operation log survives, it applies to EVERY restaurant, and it recorded
   // nothing — so shortening the trail from 30 days to 1 was indistinguishable from a trail that was
   // never written. Every neighbouring admin write already logs itself; this was the gap.
+  // HOW LONG THE TRAIL LIVES IS ITSELF AUDITED — and the audit's window says YEARS, not "days",
+  // because a line reading "audit retention years 3 days" is worse than no line at all.
   await logAction("admin", "retention_change", {
     device_id: deviceIdFrom(req),
-    detail: `log retention set for ALL restaurants — ${Object.entries(patch).map(([k, v]) => `${k.replace(/_/g, " ")} ${v} ${Number(v) === 1 ? "day" : "days"}`).join(", ")}`,
+    detail: `retention set for ALL restaurants — ${Object.entries(patch).map(([k, v]) => {
+      const unit = k === "audit_retention_years" ? (Number(v) === 1 ? "year" : "years") : (Number(v) === 1 ? "day" : "days");
+      return `${k.replace(/_years$/, "").replace(/_days$/, "").replace(/_/g, " ")} ${v} ${unit}`;
+    }).join(", ")}`,
   });
   return NextResponse.json({ ok: true });
 }

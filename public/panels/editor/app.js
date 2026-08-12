@@ -6994,6 +6994,53 @@ async function openRemovalDetail(id) {
       + (it.note ? `<small><i>“${esc(it.note)}”</i></small>` : "")
       + `</span><span class="au-d-q">×${esc(qty)}</span><span class="au-d-amt">${inr(unit * qty)}</span></div>`;
   }).join("");
+  /* BEFORE AND AFTER, SIDE BY SIDE, and the BILL — the same card the owner and the admin read
+     (owner, 2026-08-12: "two box … before how it was looking and after how it was looking", and
+     "the bill photo and all that details of the bill"). Both come ready-made from the endpoint
+     (lib/auditDetail.ts): 'after' is the order read LIVE, so the right box always answers "how does
+     it stand now" instead of freezing at a moment that has passed; the bill is the REAL document
+     built by billdoc.js from the stored snapshot, never a picture. Guarded throughout — an older
+     server that does not send them leaves the card exactly as it was. */
+  const aft = d.__after || null;
+  const goneNow = !aft || aft.state === "removed" || aft.state === "cancelled";
+  const sideRows = [
+    ["Kitchen ticket", w && w.kot_no != null ? "KOT #" + w.kot_no : null, aft && aft.kot_no != null ? "KOT #" + aft.kot_no : null],
+    ["Table", w && w.table_number ? "T" + w.table_number : null, aft && aft.table_number ? "T" + aft.table_number : null],
+    ["Lines", w && w.item_count != null ? w.item_count : null, aft && aft.item_count != null ? aft.item_count : null],
+    ["Subtotal", w ? w.subtotal : null, aft ? aft.subtotal : null, 1],
+    ["Discount", w ? w.discount : null, aft ? aft.discount : null, 1],
+    [taxLabel(), w ? w.tax : null, aft ? aft.tax : null, 1],
+    ["Total", w ? w.total : null, aft ? aft.total : null, 1],
+    ["Status", w ? w.status : null, aft ? aft.status : null],
+  ];
+  const cellTxt = (v, isMoney) => (v == null || v === "" ? "—" : isMoney ? inr(v) : esc(String(v)));
+  // Only compare where BOTH sides have a value — "—" against a number on a removed order is not a
+  // change, it IS the removal, and the band above already says so.
+  const moved = (a, b) => !goneNow && a != null && b != null && String(a) !== String(b);
+  const sideBox = (which) => `<div class="au-side${which === 1 && goneNow ? " au-side-gone" : ""}">
+      <div class="au-side-h">${which === 0 ? "Before" : (goneNow ? "After · removed" : "After · as it stands now")}</div>
+      <div class="au-side-b">${sideRows.map((r) => {
+        const v = which === 0 ? r[1] : r[2];
+        const hot = moved(r[1], r[2]);
+        return `<div class="au-side-r${hot ? " au-hot" : ""}"><span>${esc(r[0])}</span><b>${cellTxt(v, !!r[3])}</b></div>`;
+      }).join("")}</div>
+    </div>`;
+  const changedNames = sideRows.filter((r) => moved(r[1], r[2])).map((r) => String(r[0]).toLowerCase());
+  const beforeAfter = w ? `<div class="au-d-head">Before and after</div>
+      ${goneNow ? `<div class="au-gone-note">${aft && aft.state === "cancelled"
+        ? "This ticket was cancelled — nothing was charged for it. The left column is what it held."
+        : "This is off the books now. The left column is what it held when it was removed — the row itself is kept, which is why you can still read it."}</div>` : ""}
+      <div class="au-sides">${sideBox(0)}${sideBox(1)}</div>
+      ${changedNames.length ? `<div class="au-d-none">What moved is marked in amber: ${esc(changedNames.join(", "))}.</div>` : ""}` : "";
+  // The bill goes in an IFRAME: it carries print CSS of its own and that must not leak onto the panel.
+  // sandbox with nothing enabled — it is evidence being read, so it needs no scripts and must not
+  // navigate. srcdoc is set from JS (not inlined into this template) so no quoting of the bill's own
+  // markup is ever required.
+  const billFrame = (typeof d.__billHtml === "string" && d.__billHtml)
+    ? `<div class="au-d-head">The bill as it stood</div>
+       <div class="au-billwrap"><iframe class="au-billframe" sandbox="" title="The bill as it was when this happened"></iframe></div>
+       <div class="au-d-none">Rebuilt from what was recorded at the time — the same document the printer produces, not a photo.</div>`
+    : "";
   const html = `<div class="sx-modal-overlay au-detail-overlay"><div class="sx-modal au-detail">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>What exactly was removed</h3>
       <button class="tbl-modal-close" aria-label="Close">✕</button></div></div>
@@ -7022,11 +7069,27 @@ async function openRemovalDetail(id) {
         ${w.total != null ? row("Total", inr(w.total)) : ""}
         ${row("State when removed", esc(w.status || "—") + (w.payment_status ? ` · ${w.payment_status === "paid" ? "was PAID" : "unpaid"}` : "") + (w.payment_method ? ` · ${esc(w.payment_method)}` : ""))}
         ${Array.isArray(w.allergies) && w.allergies.length ? row("Allergies", esc(w.allergies.join(", "))) : ""}` : ""}
+      ${beforeAfter}
+      ${billFrame}
       <div class="au-d-note">This is a record — nothing here can be changed. Only an Aevidine admin can put a deleted bill back.</div>
     </div>
   </div></div>`;
   const wrap = el(html);
   document.body.appendChild(wrap);
+  // srcdoc set here rather than in the template: the bill's markup never has to survive being
+  // quoted inside another string, and a failure to draw it can never stop the record opening.
+  try {
+    const fr = wrap.querySelector(".au-billframe");
+    if (fr && typeof d.__billHtml === "string") {
+      fr.onload = () => {
+        try {
+          const doc = fr.contentDocument;
+          if (doc && doc.body) fr.style.height = Math.min(1400, Math.max(320, doc.body.scrollHeight + 24)) + "px";
+        } catch (e) { /* keep the default height */ }
+      };
+      fr.srcdoc = d.__billHtml;
+    }
+  } catch (e) { /* the words and the money rows ARE the record; the bill is the illustration */ }
   const close = () => wrap.remove();
   wrap.__lfhClose = close;                     // hardware Back closes THIS, not the panel
   wrap.querySelector(".tbl-modal-close").onclick = close;
