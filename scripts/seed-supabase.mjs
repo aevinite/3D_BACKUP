@@ -84,13 +84,78 @@ async function runSql(query) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // --- step 1: run every migration in supabase/migrations (in filename order) ---
+//
+// THIS SCRIPT HAS A MEMORY NOW (2026-08-13). It used to re-run all 300+ files unconditionally, with
+// no record of what had already been applied. Almost every file survives that by construction
+// (CREATE OR REPLACE, IF NOT EXISTS, backfills keyed on `… IS NULL`) — but the ones that REWRITE
+// existing rows do not, and finding them was left to whoever read the folder next:
+//   · 043 multiplied every price and every bill by 84 — a second run turned ₹36.6M of history into
+//     ₹3.08bn (measured, mig 307).
+//   · 093 replaced restaurant #1's permission bag with 5 keys, deleting the other 19 (mig 307).
+//   · 051 closed every "table 5" but one, ACROSS restaurants — 4 LIVE tables on the day it was
+//     measured (mig 311).
+//   · 049 could attach one restaurant's order to another restaurant's table (mig 311).
+// Each was wrapped by hand in `lfh_already_applied` AFTER it had already cost something. So the
+// ledger those four consult is now consulted for EVERY file, here, before it runs:
+//
+//   · a file whose name is in `lfh_applied_once` is SKIPPED, unless it is re-runnable;
+//   · a file is "re-runnable" when it says so in its own header — the marker below — which is true
+//     of every schema/function migration in this repo and is why a re-seed is useful at all;
+//   · a file that REWRITES DATA and does not say it is re-runnable is recorded after its single
+//     successful run, so the next re-seed leaves it alone.
+//
+// `--all` restores the old behaviour (run everything, ignore the ledger) for a genuinely fresh
+// database. On a fresh database the ledger table does not exist until migration 307 creates it, so
+// the first pass runs everything anyway — exactly as before.
+const RERUNNABLE = /re-?runnable|idempotent|CREATE OR REPLACE|IF NOT EXISTS/i;
+// A file that writes rows rather than shapes. If it is NOT marked re-runnable, it gets a ledger row.
+const REWRITES_DATA = /^\s*(UPDATE|DELETE|INSERT)\s/im;
+
+async function appliedOnceKeys() {
+  // Read the ledger straight through PostgREST. A missing table (fresh database, before mig 307)
+  // reads as "nothing recorded", which is the correct answer.
+  try {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/lfh_applied_once?select=key`, {
+      headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}` },
+    });
+    if (!r.ok) return new Set();
+    return new Set((await r.json()).map((x) => x.key));
+  } catch { return new Set(); }
+}
+
+async function recordApplied(key, note) {
+  try {
+    await fetch(`${SUPABASE_URL}/rest/v1/lfh_applied_once`, {
+      method: "POST",
+      headers: { apikey: SERVICE, Authorization: `Bearer ${SERVICE}`,
+                 "Content-Type": "application/json", Prefer: "resolution=ignore-duplicates" },
+      body: JSON.stringify({ key, note }),
+    });
+  } catch { /* best-effort: a missing ledger must never fail a seed */ }
+}
+
 async function runMigration() {
   const dir = join(root, "supabase", "migrations");
   const files = readdirSync(dir).filter((f) => f.endsWith(".sql")).sort();
+  const runAll = process.argv.includes("--all");
+  const done = runAll ? new Set() : await appliedOnceKeys();
+  let skipped = 0;
   for (const file of files) {
-    await runSql(readFileSync(join(dir, file), "utf8"));
+    const key = file.replace(/\.sql$/, "");
+    const sql = readFileSync(join(dir, file), "utf8");
+    const rerunnable = RERUNNABLE.test(sql.slice(0, 4000));
+    if (!runAll && done.has(key) && !rerunnable) {
+      console.log(`⏭ skipped ${file} — already applied once (it rewrites data)`);
+      skipped++;
+      continue;
+    }
+    await runSql(sql);
     console.log(`✓ ran migration ${file}`);
+    if (!rerunnable && REWRITES_DATA.test(sql)) {
+      await recordApplied(key, "recorded by seed-supabase.mjs: rewrites rows and is not marked re-runnable");
+    }
   }
+  if (skipped) console.log(`  (${skipped} one-time data migration${skipped === 1 ? "" : "s"} skipped — pass --all to force)`);
   // PostgREST caches the schema; nudge it so the JS client sees new tables/columns.
   await runSql("NOTIFY pgrst, 'reload schema';");
   console.log("✓ schema is ready (menu_items, categories, filters)");

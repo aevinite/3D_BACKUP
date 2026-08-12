@@ -69,7 +69,8 @@ export default function OwnerAuditLogs() {
   const [removalId, setRemovalId] = useState<number | null>(null);   // which removal is open in full
   const [audErr, setAudErr] = useState<string | null>(null);
   const [audQ, setAudQ] = useState("");
-  const [audCounts, setAudCounts] = useState<{ kind: string; n: number; amount: number }[] | null>(null);
+  // `risk` (money / record / data) comes from the database with each count — see the strip below.
+  const [audCounts, setAudCounts] = useState<{ kind: string; n: number; amount: number; risk?: string }[] | null>(null);
   // WHICH TYPE, held HERE rather than inside the view: it goes to the server (so a chip counting
   // every page filters every page, not just this one) and it must reset the paging when it changes.
   const [audKind, setAudKind] = useState("");
@@ -201,7 +202,7 @@ export default function OwnerAuditLogs() {
 function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, onOpenRemoval, page, pages, total, onPage }: {
   removals: Removal[] | null; err: string | null; q: string; setQ: (v: string) => void;
   /** Per-type counts over EVERY page, from the database. Null = count the page and say so. */
-  counts: { kind: string; n: number; amount: number }[] | null;
+  counts: { kind: string; n: number; amount: number; risk?: string }[] | null;
   /** The chosen type. Owned by the page because it travels to the SERVER (a chip that counts every
    *  page must filter every page) and it resets the paging. */
   kind: string; setKind: (k: string) => void;
@@ -230,10 +231,57 @@ function AuditView({ removals, err, q, setQ, counts, kind, setKind, onReload, on
   // What the visible rows come to in money — the figure an owner is really after when they pick
   // "Deleted bills". Only shown when there is money on them at all (a dish off the menu has none).
   const shownMoney = AUDITSORT.sumAmount(list);
+  // ── DID MONEY ACTUALLY MOVE? (owner, 2026-08-13: "it should also show whole risk like money wise
+  // and all that, how much money is there which reverted and all everything") ────────────────────
+  // Two numbers were sitting side by side meaning completely different things: 268 cancelled KOTs
+  // carrying ₹128,887 (nothing was ever charged for them) next to 10 deleted bills carrying ₹24,528
+  // (money that WAS charged and is now off the list). Adding those together is meaningless, and
+  // showing them in one flat feed invites exactly that.
+  // So the record is split by RISK, and the split comes from the database (lfh_audit_risk, fed
+  // through lfh_audit_kind_counts) — never re-decided here, or this screen and the manager's would
+  // start disagreeing. `record` rows still show their value; they are just not called money lost.
+  const riskTotals = (counts || []).reduce(
+    (a, c) => {
+      const r = (c as { risk?: string }).risk || AUDITSORT.riskOf(c.kind);
+      const bucket = r === "money" ? a.money : r === "data" ? a.data : a.record;
+      bucket.times += c.n; bucket.amount += c.amount;
+      return a;
+    },
+    { money: { times: 0, amount: 0 }, record: { times: 0, amount: 0 }, data: { times: 0, amount: 0 } },
+  );
+  const hasRisk = !!counts && (riskTotals.money.times + riskTotals.record.times + riskTotals.data.times) > 0;
   const cols = "1.4fr 1fr auto";
 
   return (
     <div className="adm-card">
+      {/* MONEY vs RECORD — the first thing to read, because it is the only one worth being angry
+          about. Counts and amounts come from the server over the WHOLE record, not this page. */}
+      {hasRisk && (
+        <div className="own-range" style={{ marginBottom: 10, flexWrap: "wrap", gap: 8 }}>
+          <span
+            title="Money the restaurant did not collect: discounts, on-the-house, payments reverted, bills taken off the list, and what changed when a bill was reopened."
+            style={{ padding: "6px 10px", borderRadius: 999, border: "var(--border)", background: "var(--card)", fontSize: 12.5, fontWeight: 700 }}
+          >
+            💸 Money moved · {inr(riskTotals.money.amount)}
+            <span className="adm-muted" style={{ fontWeight: 500 }}> · {riskTotals.money.times.toLocaleString("en-IN")} {riskTotals.money.times === 1 ? "time" : "times"}</span>
+          </span>
+          <span
+            title="The record changed but no money did: a KOT cancelled before anything was charged, a dish off a live order, a menu edit, a bill reopened or put back, a note or allergy changed after settling. The value is shown so you can see the size of it — it is not money lost."
+            style={{ padding: "6px 10px", borderRadius: 999, border: "var(--border)", background: "var(--card)", fontSize: 12.5 }}
+          >
+            📝 Record only · {riskTotals.record.times.toLocaleString("en-IN")} {riskTotals.record.times === 1 ? "change" : "changes"}
+            {riskTotals.record.amount > 0 ? <span className="adm-muted"> · {inr(riskTotals.record.amount)} of food, never charged</span> : null}
+          </span>
+          {riskTotals.data.times > 0 && (
+            <span
+              title="A guest's personal details erased on request. Not money, and it cannot be undone."
+              style={{ padding: "6px 10px", borderRadius: 999, border: "var(--border)", background: "var(--card)", fontSize: 12.5 }}
+            >
+              🧹 Guest data erased · {riskTotals.data.times.toLocaleString("en-IN")}
+            </span>
+          )}
+        </div>
+      )}
       {/* WHAT IS THE LIST OF WHAT — one chip per type present, with its count. Only types that
           actually have rows are offered, so there is never a "0" chip to tap. */}
       {chips.length > 1 && (
