@@ -4,6 +4,20 @@
 // it returns HTTP 503 so the watchdog notices; otherwise 200 { ok:true }.
 //
 // Setup for the owner: docs/runtime-support/alerts-setup.md.
+//
+// REJECTED (owner, 2026-08-13): a SECOND, deeper health check that names WHICH part is broken —
+// database vs file storage vs the live-updates setting. It was built on 2026-08-12 as
+// `/api/health/deep` (improvement I13) and removed the next day: *"then we don't need it remove
+// it"*, said once the setup was explained — it needs a second monitor created in HIS UptimeRobot
+// account, and he does not want to run one. A health page nobody watches is dead code.
+//
+// So do not re-add that route, AND do not "improve" THIS one by adding storage / config checks to
+// it instead. That is the same idea in a different place, and it would also undo the 2026-08-06
+// trim that made this probe cheap — it runs 288 times a day, forever, which is the entire reason it
+// does one bounded row read and stops. Full reasoning: docs/REJECTED-IDEAS.md → R12.
+//
+// This route itself STAYS. It is not decoration: public/offline.html uses it to tell "this device
+// lost signal" apart from "the restaurant's server is down", and the verify suite pings it.
 import { NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 

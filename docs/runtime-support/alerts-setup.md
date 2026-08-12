@@ -54,27 +54,11 @@ where the app itself is down.
 3. That page answers "ok" when the app + database are healthy, and fails when they're not — so
    UptimeRobot notices an outage within ~5 minutes.
 
-## 5) A SECOND monitor — "which part is broken?" (2 min, free)
-
-The one above only ever asks *"can the app reach the database?"*. That is the right question to ask
-every five minutes, but it means two real problems go unnoticed:
-
-- **file storage** fails while the database is fine → restaurant logos and photo attachments stop
-  loading, and monitor 4 still cheerfully says "ok". (Ordering, billing and the kitchen are
-  unaffected — they never touch storage.)
-- **the live-updates settings go missing from the deployment** → every panel silently stops
-  refreshing on its own. Nobody is told; a manager eventually says "the kitchen screen is stuck".
-
-So add a second monitor pointing at the deeper check:
-
-1. **Add New Monitor** → **HTTP(s)** → URL: `https://<your-live-domain>/api/health/deep`
-2. check interval **60 minutes** — deliberately slower than the first one, because this check does
-   real work and the cheap 5-minute probe already covers "is it alive at all?"
-3. It answers "ok" only when **all three** parts are healthy, and fails otherwise.
-
-When it fails, open the URL in a browser: it names the broken part in a plain sentence, e.g.
-*"File storage isn't answering — logos and photo attachments won't load. Ordering and billing are
-unaffected."* That tells you whether to stop what you're doing or deal with it in the morning.
+> **There is deliberately no second, deeper monitor.** One was built on 2026-08-12 (a
+> `/api/health/deep` that named which part was broken — database, file storage, or the live-updates
+> setting) and the owner removed it the next day: *"then we don't need it, remove it."* The setup was
+> a second account-side monitor he did not want to run. Do not re-add it, and do not fold those
+> checks into `/api/health` instead — see `docs/REJECTED-IDEAS.md` R12.
 
 ---
 
