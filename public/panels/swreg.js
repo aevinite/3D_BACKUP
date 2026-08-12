@@ -52,8 +52,55 @@
       }
       if (navigator.serviceWorker.controller) warm();
       else navigator.serviceWorker.addEventListener("controllerchange", warm, { once: true });
+      // …AND THE READS THE PAGE ALREADY HAS. Same race as the document and the chunks above, and
+      // the last piece of it. Measured 2026-08-12 on a production build, fresh browser profile,
+      // manager panel:
+      //
+      //   after the FIRST visit : /api/editor/platform  /api/rt-config
+      //   after ONE reload      : /api/editor/all  /api/editor/platform  /api/editor/summary
+      //                           /api/editor/whoami  /api/panel-profile  /api/rt-config
+      //
+      // The panel makes all six on the first visit too — they simply fire before this worker
+      // controls the page, so it never sees them and stores none of them. Lose signal that same
+      // shift and the offline layer's whole promise ("shows the LAST KNOWN board instead of an
+      // empty screen") is not kept: the waiter gets the branded "Can't open this screen" page.
+      //
+      // The guest menu was fixed for exactly this on 2026-08-07 (lib/warmData.ts → LFH_WARM_DATA)
+      // and the panels never got the same half. Nothing is re-fetched here either — the panel
+      // hands over the body it is already holding, so this costs no egress at all.
+      flushWarmData();
     }).catch(function () { /* offline layer is a bonus; never break the panel */ });
   }
+
+  // Reads offered by a panel before the worker existed, waiting for someone to hand them to.
+  var pendingData = [];
+  function flushWarmData() {
+    if (!navigator.serviceWorker.controller) return;
+    var q = pendingData; pendingData = [];
+    q.forEach(function (d) {
+      try { navigator.serviceWorker.controller.postMessage({ type: "LFH_WARM_DATA", url: d.url, body: d.body }); }
+      catch (e) { /* never throw into the panel */ }
+    });
+  }
+
+  // WHAT A PANEL CALLS. `body` is the reply's JSON as text. The worker validates everything
+  // (same origin, a read family it caches anyway, under the size cap) and NEVER overwrites a copy
+  // it fetched itself — so the worst this can do is nothing.
+  window.LFH_WARM = {
+    data: function (url, body) {
+      if (!url || typeof body !== "string") return;
+      try {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage({ type: "LFH_WARM_DATA", url: url, body: body });
+        } else if (pendingData.length < 12) {
+          // Not controlled YET — this is the very window the fix exists for. Hold it until the
+          // worker takes over, bounded so a page that never gets one can't grow a list.
+          pendingData.push({ url: url, body: body });
+          navigator.serviceWorker.addEventListener("controllerchange", flushWarmData, { once: true });
+        }
+      } catch (e) { /* never throw into the panel */ }
+    },
+  };
 
   if (document.readyState === "complete") reg();
   else window.addEventListener("load", reg);

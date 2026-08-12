@@ -32,7 +32,7 @@ import {
   callWaiterSession, setMemberName, isSessionTimeout,
 } from "@/lib/session";
 // Offline: save the order on-device and send it automatically when back online.
-import { enqueueGuestOrder, reasonMsg, refusalOf } from "@/lib/guestOutbox";
+import { enqueueGuestOrder, enqueueGuestCall, reasonMsg, refusalOf, dishFor } from "@/lib/guestOutbox";
 // Phone back button: while this sheet is open, back closes it (not the site).
 import { useBackClose } from "@/lib/backStack";
 // Which restaurant this guest is ordering at (from the /r/<slug> URL).
@@ -254,7 +254,7 @@ export default function SessionGate() {
     // EMAIL SEAM: when email verification lands, gate this on a verified member.
     // Only the item lines + allergies travel to the server — no prices. The
     // server prices the whole bill itself (see lfh_place_order).
-    const pl = p.payload as { items: unknown[]; allergies: string[]; track?: { tableNumber?: string; total?: number; itemCount?: number; items?: { title: string; qty: number }[] } };
+    const pl = p.payload as { items: unknown[]; allergies: string[]; lines?: { id: string; title: string }[]; track?: { tableNumber?: string; total?: number; itemCount?: number; items?: { title: string; qty: number }[] } };
     const rid = ridRef.current || DEFAULT_RESTAURANT_ID;
     // ONE at-most-once key for this basket, shared by the online attempt AND anything saved for
     // later — the same rule the QR path has had since 2026-07-08. Without it, an order that
@@ -269,7 +269,7 @@ export default function SessionGate() {
     // Saving it on the phone, whether because there is no signal or because the restaurant's
     // system can't take it this second. Both use the SAME key as the attempt above.
     const saveForLater = async (offline: boolean) => {
-      const q = await enqueueGuestOrder({ mode: "session", token: s.token, restaurantId: rid, items: pl.items, allergies: pl.allergies || [], track: pl.track, actionId });
+      const q = await enqueueGuestOrder({ mode: "session", token: s.token, restaurantId: rid, items: pl.items, allergies: pl.allergies || [], lines: pl.lines, track: pl.track, actionId });
       orderKeyRef.current = null;
       fireDone({ ok: true, action: "order", queued: true });
       toast(
@@ -299,7 +299,13 @@ export default function SessionGate() {
       // in refusalOf() — both guest order paths were doing their own version of that regex.
       const { reason, dish } = refusalOf(err);
       if (reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "order" }); setStep("blocked"); return; }
-      toast(reasonMsg(reason, { dish }), "order", "error");
+      // NAME THE DISH, NEVER ITS ID. `unknown_item` is the one refusal whose token is the dish's
+      // id rather than its title — the row was not found, so the server has nothing else to send
+      // — and on any restaurant but #1 that id reads "paneer-tikka__a1b2c3d4". The QR path has
+      // resolved it against the basket since dishFor() was written; this path was passing the raw
+      // token straight into the sentence, so a seated diner was told to "remove" a machine string
+      // that matches nothing on their screen.
+      toast(reasonMsg(reason, { dish: dishFor(reason, dish, pl.lines) }), "order", "error");
       fireDone({ ok: false, reason, action: "order" });
       close();
       return;
@@ -332,12 +338,43 @@ export default function SessionGate() {
       return;
     }
     // The action was "call a waiter" — send that for this table.
+    const note = (p.payload?.reason as string) || "";
+    // NO SIGNAL → SAVE IT AND RING WHEN THERE IS ONE. The walk-up QR path has done this since the
+    // call queue was written (components/ChefPopup.tsx); a SEATED party — mid-meal, the people
+    // most likely to need someone — just got "Couldn't reach staff" and nothing was kept. The
+    // machinery was already there and unused: enqueueGuestCall takes mode:"session" + the token,
+    // and app/api/guest/call-waiter has a full session branch nothing on the client ever called.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      try {
+        const q = await enqueueGuestCall({ mode: "session", token: s.token, restaurantId: ridRef.current || DEFAULT_RESTAURANT_ID, reason: note });
+        fireDone({ ok: true, action: "call", queued: true });
+        // Only promise the automatic part when it really reached this phone's storage.
+        toast(q.persisted ? "Saved — we'll call them the moment you're back online" : "Saved — keep this page open and we'll call them", "service");
+        close(); return;
+      } catch { /* couldn't even save → fall through and let the live attempt say so honestly */ }
+    }
     setStep("working"); // show the "One moment…" screen
-    const r = await callWaiterSession(s.token, (p.payload?.reason as string) || "");
+    const r = await callWaiterSession(s.token, note);
     // action:"call" so anything waiting on this action's completion isn't stranded (audit fix).
     if (r.reason === "blocked") { fireDone({ ok: false, reason: "blocked", action: "call" }); setStep("blocked"); return; }
     if (r.ok) { fireDone({ ok: true, action: "call" }); toast("On our way!", "service"); close(); }
-    else { toast("Couldn't reach staff", "service", "error"); close(); }
+    else {
+      // BRANCH ON THE CODE, NEVER ON "IT DIDN'T WORK". Every failure used to read "Couldn't reach
+      // staff", which blames the connection for things that are not the connection. The cruel one
+      // is `rate_limited`: the diner believes their signal failed, taps again, trips the same
+      // per-table limit again, and every trip pings the owner's phone about a guest who was only
+      // following what the screen implied — the exact harm reasonMsg() calls out for orders.
+      const msg = isSessionTimeout(r)
+        ? "We couldn't reach the restaurant just now — please try again in a moment."
+        : r.reason === "rate_limited"
+          ? "That's a lot of calls in a row — please wait a moment, then call again."
+          : r.reason === "banned" || r.reason === "blocked"
+            ? "Please speak to a member of staff."
+            : "Couldn't reach staff";
+      toast(msg, "service", "error");
+      fireDone({ ok: false, reason: r.reason, action: "call" });
+      close();
+    }
   }, [close, placeOrderNow]);
 
   // The nickname screen's submit: save the chosen nickname (device + DB), then

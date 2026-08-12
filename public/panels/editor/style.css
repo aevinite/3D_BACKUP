@@ -335,6 +335,12 @@ body.nav-compact .tab {
 }
 .ed-head h2 { margin: 0; font-size: 20px; flex: 1; }
 .ed-head .sub { color: var(--muted); font-size: 13px; font-weight: 400; }
+/* "· saved copy" replaces "· live" when the floor came off this device rather than the server
+   (see floorLiveTag in app.js). Amber and bold so it reads as a state, not as decoration —
+   it is the quiet half of the offline bar, and it must not look like the grey it replaced.
+   One colour that carries on BOTH panel skins, like the offline bar's own tones. */
+.ed-head .sub.floor-saved { color: #b45309; font-weight: 700; }
+html[data-theme="dark"] .ed-head .sub.floor-saved { color: #fbbf24; }
 
 .card {
   background: var(--panel); border: 1px solid var(--line);

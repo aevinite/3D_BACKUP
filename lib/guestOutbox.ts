@@ -30,6 +30,12 @@ export type GuestOrder = {
   // Set when the server refused this order because of ONE dish, so the phone can offer to send
   // the rest. Holds that dish's NAME, which is what the refusal names.
   blocked?: string;
+  // …and its LINE ID where we could work it out. The name alone was not enough: `unknown_item`
+  // answers with the dish's id (the row was not found, so there is nothing else to send), so
+  // `blocked` held an id, `orderRestWithout` compared it against each line's TITLE, matched
+  // nothing, and re-queued the whole basket unchanged — a button that visibly did something and
+  // changed nothing, for ever. An id is what the basket is actually keyed by, so match on it.
+  blockedId?: string;
   mode: "session" | "public";
   token?: string; table?: string; restaurantId?: string; restaurantSlug?: string;
   items: unknown[]; allergies: string[];
@@ -363,11 +369,37 @@ export async function enqueueGuestCall(p: {
 }): Promise<{ ok: true; queued: true; action_id: string; persisted: boolean }> {
   ensureStarted();
   const { actionId, ...rest } = p;
+  // ONE RAISED HAND, NOT SIX. Saved ORDERS are capped at MAX_QUEUED because each one is a
+  // different order and they all matter; a CALL is not like that — pressing the bell five times
+  // in a dead spot means one thing, and delivering five of them on reconnect sends a waiter over
+  // for a table that asked once. Nothing bounded this at all before, so a diner tapping the bell
+  // could fill the phone's storage until it refused, and that refusal lands on the NEWEST tap.
+  //
+  // So a still-unsent call for the same table/session simply keeps its place and takes the newer
+  // note — the diner's most recent words — instead of queuing beside it. The at-most-once id is
+  // kept too, so a call already in flight can't ring twice.
+  const sameTable = (x: GuestOrder) =>
+    isCall(x) && x.mode === p.mode && String(x.table || "") === String(p.table || "") && String(x.token || "") === String(p.token || "");
+  const already = queued.find(sameTable);
+  if (already) {
+    already.at = Date.now();
+    if (p.reason) already.reason = p.reason;
+    const kept = await persist(already);
+    notify();
+    ensureRetry();
+    return { ok: true, queued: true, action_id: already.id, persisted: kept };
+  }
   const item: GuestOrder = {
     id: actionId || uuid(), kind: "call", status: "queued", at: Date.now(),
     ...rest, restaurantSlug: p.restaurantSlug || tenantSlug(), items: [], allergies: [],
   };
   queued.push(item);
+  // …and the same ceiling every other saved thing has, for a phone that somehow gets past the
+  // collapse above (several tables on one device, a browser that lost the queue mid-write).
+  while (queued.length > MAX_QUEUED) {
+    const oldest = queued[0];
+    await moveToFailed(oldest, "This one waited too long to send — please ask a member of staff if you still need someone.");
+  }
   const persisted = await persist(item);
   notify();
   ensureRetry();
@@ -402,6 +434,38 @@ function sendDeadline(): AbortSignal | undefined {
 }
 
 const isCall = (it: GuestOrder) => it.kind === "call";
+
+/**
+ * THE LIST THAT ACTUALLY HAS NAMES ON IT.
+ *
+ * `items` is the payload built for the SERVER — `{id, qty, options, removed, note}` — and it
+ * carries no title at all, by design (the server prices and names everything itself; nothing
+ * about a dish is trusted from the phone). `lines` is the same basket as a PERSON sees it,
+ * `{id, title}`.
+ *
+ * Every dishFor() call in this file was handed `items`, so the id could never resolve to a name
+ * and a saved order refused with `unknown_item` fell back to "A dish is no longer on the menu"
+ * — while the name sat one field away on the same row. Older rows (saved before `lines` existed,
+ * and every session order until 2026-08-12) have no `lines`, so fall back to `items`: that
+ * cannot resolve a name either, but it is exactly the behaviour those rows had before.
+ */
+const namedLines = (it: GuestOrder): ReadonlyArray<{ id?: string; title?: string } | unknown> =>
+  (it.lines && it.lines.length ? it.lines : it.items);
+
+/**
+ * WHICH LINE of the basket the server refused, as an ID.
+ *
+ * `unknown_item` answers with the id itself; `sold_out` and `hidden_item` answer with the title,
+ * so the id has to come back off the basket. Returns undefined when we genuinely cannot tell —
+ * and `orderRestWithout` then refuses to guess rather than re-sending the same basket.
+ */
+function blockedLineId(it: GuestOrder, reason?: string, token?: string): string | undefined {
+  const t = String(token || "").trim();
+  if (!t) return undefined;
+  if (reason === "unknown_item") return t;   // the token IS the id on this one
+  const hit = (it.lines || []).find((l) => String(l.title || "").trim().toLowerCase() === t.toLowerCase());
+  return hit?.id;
+}
 
 function doPost(item: GuestOrder) {
   if (isCall(item)) {
@@ -536,7 +600,7 @@ export async function flushGuestOutbox() {
       // an order the diner had been promised would send simply vanished — no ticket, no entry in
       // their list, no message. Now it is surfaced like any other refusal.
       if (res.ok && j?.duplicate) {
-        if (j.ok === false) { await moveToFailed(item, reasonMsg(j.reason, { queued: true, dish: dishFor(j.reason, j.item, item.items) })); notify(); continue; }
+        if (j.ok === false) { await moveToFailed(item, reasonMsg(j.reason, { queued: true, dish: dishFor(j.reason, j.item, namedLines(item)) })); notify(); continue; }
         progressed = true;
         if (j.order_id) recordActive(item, j.order_id as string);
         await removeItem(item.id); notify(); continue;
@@ -565,11 +629,12 @@ export async function flushGuestOutbox() {
       // unknown_item all name a single dish, and the whole order was thrown away for it — a table
       // of six losing everything because one dish ran out, and rebuilding the basket by hand.
       // Remember which line it was so the phone can offer to send the rest.
-      const oneDish = dishFor(j?.reason, j?.item, item.items) || (typeof j?.item === "string" ? j.item : "");
+      const oneDish = dishFor(j?.reason, j?.item, namedLines(item));
       if (oneDish && ["sold_out", "hidden_item", "unknown_item"].includes(String(j?.reason))) {
         item.blocked = oneDish;
+        item.blockedId = blockedLineId(item, j?.reason, j?.item);
       }
-      await moveToFailed(item, reasonMsg(j?.reason, { queued: true, dish: dishFor(j?.reason, j?.item, item.items) })); notify(); continue;
+      await moveToFailed(item, reasonMsg(j?.reason, { queued: true, dish: oneDish })); notify(); continue;
     }
   } finally {
     flushing = false;
@@ -594,17 +659,37 @@ export async function dismissGuestFailed(id: string) { await removeItem(id); not
 export async function orderRestWithout(id: string): Promise<{ ok: boolean; left: number }> {
   const it = failed.find((x) => x.id === id);
   if (!it || !it.blocked) return { ok: false, left: 0 };
-  const drop = String(it.blocked).trim().toLowerCase();
-  const keptLines = (it.lines || []).filter((l) => String(l.title || "").trim().toLowerCase() !== drop);
+  const allLines = it.lines || [];
+  // DROP BY ID WHERE WE HAVE ONE. Matching on the NAME was the whole bug: `unknown_item` puts an
+  // id in `blocked`, so the comparison never matched, nothing was dropped, and the "rest" that got
+  // re-queued was the identical basket — refused again for the identical reason, for ever. Names
+  // are also not unique; ids are what the basket is keyed by.
+  const dropName = String(it.blocked).trim().toLowerCase();
+  const keptLines = it.blockedId
+    ? allLines.filter((l) => l.id !== it.blockedId)
+    : allLines.filter((l) => String(l.title || "").trim().toLowerCase() !== dropName);
+  // NOTHING WAS ACTUALLY DROPPED → we could not identify the line, so do not re-send the same
+  // basket. This is the guard that makes the button honest: it either removes something or says
+  // it can't, and it never quietly re-queues an order the server has already turned down.
+  if (keptLines.length === allLines.length) return { ok: false, left: 0 };
   const keptIds = new Set(keptLines.map((l) => l.id));
   const keptItems = (it.items || []).filter((x) => keptIds.has(String((x as { id?: string })?.id || "")));
   // Nothing left, or we cannot tell the lines apart → don't guess at a diner's order.
   if (!keptLines.length || !keptItems.length) return { ok: false, left: 0 };
+  // THE DINER'S OWN SUMMARY MUST KEEP THE REAL QUANTITIES. This rebuilt every line as "1 ×", so
+  // someone who ordered three coffees and lost one dish then watched a tracker saying "1 × Coffee".
+  // The order reaching the kitchen was always right; only the diner's copy of it was wrong, which
+  // is the worst place to be wrong quietly. The quantities are on `keptItems`, keyed by the same id.
+  const qtyOf = (lineId: string) => {
+    const line = keptItems.find((x) => String((x as { id?: string })?.id || "") === lineId) as { qty?: unknown } | undefined;
+    const n = Number(line?.qty);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  };
   await removeItem(it.id);
   await enqueueGuestOrder({
     mode: it.mode, token: it.token, table: it.table, restaurantId: it.restaurantId, restaurantSlug: it.restaurantSlug,
     items: keptItems, allergies: it.allergies || [], lines: keptLines,
-    track: { ...(it.track || {}), itemCount: keptItems.length, items: keptLines.map((l) => ({ title: l.title, qty: 1 })) },
+    track: { ...(it.track || {}), itemCount: keptItems.length, items: keptLines.map((l) => ({ title: l.title, qty: qtyOf(l.id) })) },
   });
   notify();
   void flushGuestOutbox();

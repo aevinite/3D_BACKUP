@@ -64,6 +64,27 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
     return res.end('{"dishes":[]}');
   }
+  // A STAFF PANEL's board read. Same family as the real /api/editor/all — the one that matters
+  // most offline, and the one a first visit used to save none of. See /panelpage below.
+  if (req.url.startsWith("/api/editor/all")) {
+    res.writeHead(200, { "content-type": "application/json" });
+    return res.end('{"orders":[],"tables":[]}');
+  }
+  if (req.url.startsWith("/panelpage")) {
+    res.writeHead(200, { "content-type": "text/html" });
+    // Loads the REAL public/panels/swreg.js and hands over a read the way each panel's api() now
+    // does. Deliberately fetched BEFORE the worker can be controlling, which is the whole point.
+    return res.end(`<!doctype html><meta charset="utf-8"><body>panel
+      <script>
+        window.__uncontrolled = !(navigator.serviceWorker && navigator.serviceWorker.controller);
+        fetch("/api/editor/all").then(function (r) { return r.json(); }).then(function (j) {
+          if (window.__uncontrolled && window.LFH_WARM) {
+            window.LFH_WARM.data(new URL("/api/editor/all", location.origin).href, JSON.stringify(j));
+          }
+        });
+      </script>
+      <script>${readFileSync(join(ROOT, "public/panels/swreg.js"), "utf8")}</script>`);
+  }
   if (req.url.startsWith("/page")) {
     res.writeHead(200, { "content-type": "text/html" });
     // Registers the worker exactly as components/OfflineShell.tsx does, including the asset list.
@@ -196,6 +217,42 @@ console.log("\n6) A read the page already holds is saved without re-fetching it"
     return r ? await r.text() : "";
   });
   !body.includes("OVERWRITTEN") ? ok("an already-saved read is never overwritten by a later offer") : bad("a saved read was overwritten");
+}
+
+// ── 7. A STAFF PANEL's first visit ────────────────────────────────────────────────────────────
+// The guest menu got the read-warming fix on 2026-08-07; the panels did not, and nobody noticed
+// because nothing checked them. Measured on a production build, fresh profile, manager panel:
+//
+//   after the FIRST visit : /api/editor/platform  /api/rt-config
+//   after ONE reload      : /api/editor/all  + four more
+//
+// So a waiter who opened a panel for the first time and then lost signal that same shift got the
+// branded "Can't open this screen" page instead of the last board — the exact thing this layer
+// exists to prevent. public/panels/swreg.js now exposes LFH_WARM.data and each panel's api()
+// hands over first-visit reads; this drives the REAL file.
+console.log("\n7) A staff panel's FIRST visit saves its board too");
+{
+  const p2 = await ctx.newPage();
+  p2.on("pageerror", (e) => bad("the panel page threw", String(e).slice(0, 120)));
+  const netBefore = hits.length;
+  await p2.goto(`${BASE}/panelpage`, { waitUntil: "networkidle" });
+  const got = await until(async () => {
+    const d = await p2.evaluate(async () => {
+      const k = (await caches.keys()).find((x) => x.startsWith("lfh-data"));
+      if (!k) return [];
+      return (await (await caches.open(k)).keys()).map((r) => new URL(r.url).pathname);
+    });
+    return d.some((x) => x.startsWith("/api/editor/"));
+  }, 12000);
+  got
+    ? ok("the panel's board read is saved on the FIRST visit, before any reload")
+    : bad("a panel's first visit still saves no board — an offline reload that shift shows nothing");
+  // …and it cost no second request: the panel handed over the body it already had.
+  const boardFetches = hits.slice(netBefore).filter((u) => u.startsWith("/api/editor/all")).length;
+  boardFetches <= 1
+    ? ok("…and it was not re-fetched to do it (egress unchanged)")
+    : bad("the panel's read was fetched twice to warm it", `${boardFetches} requests`);
+  await p2.close();
 }
 
 await browser.close();

@@ -31,7 +31,7 @@
  */
 // BUMP THIS whenever /offline.html changes. The page is precached at install, so devices
 // keep serving the OLD copy from the old cache until new cache names force a re-precache.
-const VERSION = "v8"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out. v8: the page you're ON is saved on the FIRST visit, and the offline page's re-checks are jittered.
+const VERSION = "v9"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out. v8: the page you're ON is saved on the FIRST visit, and the offline page's re-checks are jittered. v9: a STAFF PANEL's first visit saves its reads too (it saved none), and the last-resort page no longer promises work it can't know was saved.
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
 const DATA = `lfh-data-${VERSION}`;
@@ -409,7 +409,11 @@ async function offlinePage() {
     'font:600 15px/1.5 system-ui,sans-serif;text-align:center;padding:24px">' +
     '<div><h1 style="font-size:20px;margin:0 0 10px">Can\'t open this screen</h1>' +
     '<p style="color:#b8c5de;margin:0 0 14px">This screen hasn\'t been opened on this device yet, and it couldn\'t be loaded — either this device is offline or the app isn\'t answering.</p>' +
-    '<p style="color:#86efac;margin:0">Nothing you did is lost — anything saved on this device will send itself when the connection is back.</p>' +
+    // Same honesty rule as /offline.html: promise only what is actually guaranteed. "Nothing you
+    // did is lost" is untrue on a device whose storage was refused, and for the guest actions that
+    // have no queue — and this bare copy is the one a device falls back to when even the branded
+    // page is missing, i.e. the worst moment to overstate anything.
+    '<p style="color:#86efac;margin:0">Anything already saved on this device is safe — it sends itself when the connection is back.</p>' +
     // The ids MATTER: offline.html carries #retry / #home, and verify:offline looks for #home to
     // prove the page isn't a dead end. This bare fallback offered the same two ways out but with
     // no ids, so the check read it as "the last-resort page has no way out" (2026-07-31). Same

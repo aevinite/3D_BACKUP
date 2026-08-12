@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=1bcff366" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=5cc6643e" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -123,14 +123,14 @@
   <script src="/panels/maint.js?v=1b283f26"></script>
   <script src="/panels/realtime.js?v=3a9eadca"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
-  <script src="/panels/outbox.js?v=7b2405a7"></script>
+  <script src="/panels/outbox.js?v=8858ef12"></script>
   <!-- Connection light (🟢 Live / 🟡 Reconnecting / 🔴 Offline) + "waiting to sync" list, top-right. AFTER realtime.js + outbox.js. -->
   <script src="/panels/connbadge.js?v=c1df4baa"></script>
   <!-- OFFLINE LAYER: installs public/sw.js so this panel still OPENS and READS with no
        internet, then shows an honest "no internet / showing saved data / needs you" bar.
        offline.js must load AFTER outbox.js (it reads the queue) and before app.js. -->
-  <script src="/panels/swreg.js?v=c82762b3"></script>
-  <script src="/panels/offline.js?v=01332551"></script>
+  <script src="/panels/swreg.js?v=0d429b78"></script>
+  <script src="/panels/offline.js?v=ce110fa3"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
@@ -161,6 +161,6 @@
   <script src="/panels/auditsort.js?v=f0d809bb"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=1adaf9bb"></script>
+  <script src="/panels/editor/app.js?v=d085f77f"></script>
 </body>
 </html>
