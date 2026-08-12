@@ -436,7 +436,9 @@ export const SECTIONS: Section[] = [
           { id: "favourites", name: "Favourites", def: true, bind: { t: "feature", key: "favorites" },
             what: "The heart button on a dish and the Favourites tab. This is also what the loyalty feature will be built on later." },
           { id: "veg", name: "Veg / non-veg", def: true, bind: { t: "feature", key: "diet_filter" },
-            what: "The veg / non-veg chips AND the little green-or-red veg mark on each dish. Switch it off for a pure-veg restaurant so nothing needs marking." },
+            what: "The veg / non-veg chips AND the little green-or-red veg mark on each dish. Switch it off for a pure-veg restaurant so nothing needs marking. On a menu where every dish is veg (or every dish isn't) the chips and marks are hidden anyway — there is nothing to tell apart." },
+          { id: "prep_time", name: "Prep time on a dish", def: false, bind: { t: "feature", key: "prep_time" },
+            what: "Shows the Prep time you type on a dish (e.g. \"20 min\") on its menu card, next to the rating. Off by default: most restaurants would rather not promise a time. A dish with no prep time typed shows nothing either way — nothing is ever invented." },
           {
             id: "format", name: "Design and styling", bind: { t: "none" },
             what: "How the menu looks when a guest opens it for the first time — its theme, logo and wording — and which languages and currencies it offers.",

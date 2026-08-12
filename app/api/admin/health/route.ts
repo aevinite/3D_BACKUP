@@ -20,7 +20,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ latencyMs, dbOk: false, error: pingQ.error.message }, { status: 200 });
   }
 
-  const [estimatesQ, restQ, staffQ, issuesQ] = await Promise.all([
+  const [estimatesQ, restQ, staffQ, issuesQ, broken3dQ] = await Promise.all([
     sb.rpc("lfh_admin_table_estimates"),
     // Live restaurants only (bug H4/#6, 2026-07-06): binned restaurants must not be
     // counted as "suspended". With deleted_at excluded, suspended = live-but-inactive.
@@ -29,6 +29,29 @@ export async function GET(req: NextRequest) {
     // into a full-table pull as staff count climbs across all tenants (egress guard).
     sb.from("staff_users").select("id, last_seen_at").eq("active", true).limit(5000),
     sb.from("issues").select("id", { count: "exact", head: true }).eq("status", "open"),
+    // A DISH THAT PROMISES 3D AND CANNOT DELIVER IT (owner, 2026-08-12: *"whenever the 3-D is not
+    // available, it should show me as a problem also notification"*).
+    //
+    // Three things have to be true for a diner to get a 3D view: the dish is ticked "4D", the
+    // restaurant has the feature on, and the model FILES exist. The guest card now checks all three
+    // so it stops advertising a view that can't open (see components/FoodCard.tsx → has3d) — but the
+    // owner still needs to KNOW, otherwise the dish just quietly stops being special.
+    //
+    // Deliberately reported HERE rather than by the diner's browser or as an `issues` row:
+    //   · a browser report would go through /api/log/client-error, which files at level 'error',
+    //     caps at 5 per device per 10 minutes and can raise an alert — three un-uploaded models
+    //     would push real crashes off the Repair board;
+    //   · raiseIssue() pings the owner's phone, and a file that hasn't been uploaded is not a
+    //     middle-of-service emergency;
+    //   · and both of those only notice if a diner happens to open that menu.
+    // This is a plain indexed read on a page that is already open in front of an admin.
+    //
+    // `.or()` = either file missing (null or empty). Capped like every other read on this page.
+    sb.from("menu_items")
+      .select("slug, title, restaurant_id, model_small_url, model_optimized_url")
+      .eq("is4d", true)
+      .or("model_small_url.is.null,model_small_url.eq.,model_optimized_url.is.null,model_optimized_url.eq.")
+      .limit(200),
   ]);
 
   const restaurants = restQ.data || [];
@@ -65,6 +88,20 @@ export async function GET(req: NextRequest) {
     realtime: { configuredHost: supaHost || null },
     openIssues: issuesQ.error ? null : (issuesQ.count || 0),
     issuesFeedWired: !issuesQ.error,
+    // Dishes ticked "4D" whose model file was never uploaded — the 3D view cannot open for them.
+    // A restaurant with the 3D feature switched OFF is not a fault, so the page groups by
+    // restaurant and the admin reads it next to that restaurant's switch. `null` means the read
+    // itself failed, so the page can say "unreadable" instead of a reassuring zero.
+    broken3d: broken3dQ.error ? null : {
+      count: (broken3dQ.data || []).length,
+      dishes: (broken3dQ.data || []).slice(0, 20).map((d: { slug: string; title: string; restaurant_id: string; model_small_url: string | null; model_optimized_url: string | null }) => ({
+        slug: d.slug,
+        title: d.title,
+        restaurantId: d.restaurant_id,
+        missing: [!d.model_small_url && "small", !d.model_optimized_url && "optimized"].filter(Boolean).join(" + "),
+      })),
+    },
+    broken3dError: broken3dQ.error?.message || null,
     checkedAt: new Date().toISOString(),
   });
 }

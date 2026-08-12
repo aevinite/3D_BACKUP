@@ -69,7 +69,10 @@ export default async function RestaurantItemPage({
   return (
     <>
       {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
-      <ItemClient slug={slug} fromCat={cat} restaurantId={r.id} restaurantSlug={restaurant} />
+      {/* r.slug, not the address-bar text — the same reason as the menu page: this prop namespaces
+          the cart/favourites and builds the back-to-menu link, so a capitalised URL must land in
+          the SAME scope as the lower-case one (owner, 2026-08-12). */}
+      <ItemClient slug={slug} fromCat={cat} restaurantId={r.id} restaurantSlug={r.slug} />
     </>
   );
 }

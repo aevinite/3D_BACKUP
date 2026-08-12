@@ -120,6 +120,10 @@ export default function OfflineNotice() {
 
   if (!shown) return null;
 
+  // REJECTED (owner, 2026-08-12): this strip stays ENGLISH on the guest menu too. Guest sweep T1
+  // reported it as "hardcoded English at the moment a diner loses signal"; asked directly, the owner
+  // chose *"No — English is fine for these"*. Do not wire it to lib/i18n.ts, do not re-report it.
+  // See docs/REJECTED-IDEAS.md R15.
   const msg = offline
     ? savedAt
       ? `No internet — showing saved figures from ${ago(savedAt)}.`

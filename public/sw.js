@@ -31,6 +31,12 @@
  */
 // BUMP THIS whenever /offline.html changes. The page is precached at install, so devices
 // keep serving the OLD copy from the old cache until new cache names force a re-precache.
+// THE SHELL-KEY CHANGE (2026-08-12) NEEDS NO BUMP OF ITS OWN. The table number is no longer part of a
+// page's cache key (see shellKey), so entries saved under the old table-specific keys are simply never
+// looked up again — they are capped (CAPS.shell), trimmed oldest-first, and the first online visit
+// re-saves the page under the new key. It rides along with whatever the current VERSION is: v9 below
+// wipes the caches anyway for its own reasons, which for this change is strictly the nicer outcome
+// (every device re-saves under the new key immediately instead of missing once).
 const VERSION = "v9"; // v4: no false alarm. v5: a saved copy can't mask a change you just made. v6: the offline page names the real reason. v7: the last-resort page survives a sign-out. v8: the page you're ON is saved on the FIRST visit, and the offline page's re-checks are jittered. v9: a STAFF PANEL's first visit saves its reads too (it saved none), and the last-resort page no longer promises work it can't know was saved.
 const SHELL = `lfh-shell-${VERSION}`;
 const ASSET = `lfh-asset-${VERSION}`;
@@ -80,6 +86,13 @@ const MAX_DATA_BYTES = 3_000_000; // don't cache a huge report payload
 // window (2026-07-30): a tablet left lying around goes blank quickly, and the trade-off he
 // accepted is that an outage longer than this comes back to an empty screen rather than
 // the last known board.
+//
+// REJECTED (owner, 2026-08-12): do NOT give the GUEST menu a longer window than this. Offered as T1
+// improvement 7 ("the 2-hour limit was tuned for staff tablets, not diners — a diner who comes back
+// three hours later gets the no-internet page"). His answer: *"there is no off-line limit for diner.
+// Diner should be online."* A diner is expected to be on the restaurant's wifi or their own data;
+// this window exists for STAFF continuity, and one number covers everyone. Do not add a per-family
+// window, and do not re-report it. See docs/REJECTED-IDEAS.md R16.
 const MAX_STALE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 // A CHANGE MUST NEVER BE MASKED BY A SAVED COPY.
@@ -120,7 +133,13 @@ const LOGOUT = /^\/api\/(panel|staff)-logout/; // the only two logout routes tha
 // Read families worth remembering for offline (panel + dashboard + guest-menu reads).
 const DATA_PATHS = [
   /^\/api\/editor\//, /^\/api\/tablet\//, /^\/api\/kitchen\//, /^\/api\/admin\//,
-  /^\/api\/owner\//, /^\/api\/guest\//, /^\/api\/inventory\//,
+  /^\/api\/owner\//, /^\/api\/inventory\//,
+  // `/^\/api\/guest\//` used to sit above and, like the one below, matched NOTHING. Every route
+  // under app/api/guest/ — place-order, call-waiter, limit-hit — is POST only, and a non-GET
+  // returns from the fetch handler before this list is ever consulted. It read as "the diner's
+  // reads are saved for offline", and none of them are: what a diner actually needs offline is
+  // the menu (/api/r/, below) and their own queued order (lib/guestOutbox.ts, on the device).
+  // Removed for exactly the reason given for the next one. (Guest sweep T1, 2026-08-12.)
   // `/^\/api\/menu/` used to sit here and matched NOTHING — there is no /api/menu route; the
   // guest menu has always been served by /api/r/<restaurant>/menu-data, the entry below. A dead
   // pattern is worse than a missing one: it reads as "guest menu reads are covered here", which
@@ -223,7 +242,7 @@ self.addEventListener("message", (e) => {
     const url = e.data && e.data.url;
     if (url) e.waitUntil((async () => {
       try {
-        const key = new URL(url, self.location.origin).href;
+        const key = shellKey(new URL(url, self.location.origin).href);
         if (new URL(key).origin !== self.location.origin) return;
         const cache = await caches.open(SHELL);
         if (await cache.match(key, { ignoreVary: true })) return; // already saved — do nothing
@@ -428,6 +447,33 @@ async function offlinePage() {
 // share a cache key with the HTML document, so give it its own suffix.
 const rscKey = (url) => url + (url.includes("?") ? "&" : "?") + "__lfh_rsc=1";
 
+// WHATEVER TABLE THEY SCAN IS THE TABLE THEY ORDER FOR — offline too (owner, 2026-08-12:
+// *"whatever the table he scans, you can order for that"*; T1 improvement 8).
+//
+// A guest menu page is byte-identical whichever table opened it: the table number is not rendered
+// into the HTML, it is read from the address by the page's own JavaScript (MenuView's table capture)
+// and stored per restaurant. So `?table=4` and `?table=7` were filling the shell cache with
+// duplicate copies of one page — and the offline fallback then had to guess between them. It guessed
+// with `{ ignoreSearch: true }`, which is how a phone that had saved table 7 could be handed table
+// 7's document after scanning table 4.
+//
+// Stripping the table out of the KEY fixes both halves at once: one saved copy per page (so scanning
+// ANY table finds it, first time, instead of only the table you happened to save), and no guessing
+// left to do, because there is only ever one candidate. The live URL still carries the real
+// `?table=N`, and that is what the page reads — so the scanned table always wins.
+//
+// Only these two are dropped. Everything else in the query (`?cat=`, anything future) still
+// distinguishes pages, because it can change what is rendered.
+const TABLE_PARAMS = ["table", "t"];
+const shellKey = (rawUrl) => {
+  try {
+    const u = new URL(rawUrl);
+    let touched = false;
+    for (const p of TABLE_PARAMS) if (u.searchParams.has(p)) { u.searchParams.delete(p); touched = true; }
+    return touched ? u.href : rawUrl;
+  } catch { return rawUrl; }
+};
+
 // ── the router ──────────────────────────────────────────────────────────────────
 self.addEventListener("fetch", (event) => {
   const req = event.request;
@@ -501,11 +547,13 @@ self.addEventListener("fetch", (event) => {
 // Pages: always try the network, fall back to this page's saved HTML, then to a
 // same-path match ignoring the query, then to the branded offline page.
 async function handleNav(req, url) {
+  // The table number is not part of what this page IS — see shellKey.
+  const key = shellKey(req.url);
   // Same rule as reads: the request is never thrown away. If it's merely slow we show the
   // saved page, but the real one still lands and is saved for next time.
   const live = fetch(req).then((res) => {
     // Don't memorise redirects or error pages — only a real rendered page.
-    if (res && res.ok && res.status === 200 && res.type !== "opaqueredirect") putStamped(SHELL, req.url, res);
+    if (res && res.ok && res.status === 200 && res.type !== "opaqueredirect") putStamped(SHELL, key, res);
     return res;
   });
   try {
@@ -514,8 +562,9 @@ async function handleNav(req, url) {
     try { return await Promise.race([live, stalled]); } finally { clearTimeout(timer); }
   } catch {
     live.catch(() => {});
-    return (await cachedCopy(SHELL, req.url))
-      || (await cachedCopy(SHELL, req.url, { ignoreSearch: true }))
+    // No `ignoreSearch` guess any more: the table is out of the key, so an exact hit is the right
+    // answer for every table, and anything else in the query genuinely IS a different page.
+    return (await cachedCopy(SHELL, key))
       || (await offlinePage()); // always answers: cache → network → an inline branded page
   }
 }

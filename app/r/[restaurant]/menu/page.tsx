@@ -68,7 +68,14 @@ export default async function RestaurantMenuPage({
       )}
       <MenuView
         restaurantId={r.id}
-        restaurantSlug={restaurant}
+        /* THE RESOLVED slug, never the text from the address bar (owner, 2026-08-12: capitals and
+           lower case must behave identically). getRestaurantBySlug now folds case, so
+           /r/French-House/menu resolves — but this prop goes on to build every dish link AND to
+           NAMESPACE this restaurant's cart, favourites and browse state (lib/tenantStorage.ts,
+           MenuView's sk()). Handing it "French-House" would give that link its own separate cart
+           from "french-house": add two dishes, reopen the lower-case link, empty basket. Passing
+           r.slug makes one restaurant one scope however the address was typed. */
+        restaurantSlug={r.slug}
         restaurantName={r.name ?? undefined}
         logoText={r.logoText ?? undefined}
         heroTitle={r.heroTitle ?? undefined}
