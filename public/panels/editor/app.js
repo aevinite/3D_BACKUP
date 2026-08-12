@@ -6838,22 +6838,30 @@ const CHAIR_SVG = `<i class="fas fa-chair ft-chair" aria-hidden="true"></i>`;
 // Keep in step with REMOVAL_KIND in app/aevinite/logs/page.tsx + app/owner/activity/page.tsx and
 // with RemovalKind in lib/removalAudit.ts — a kind with no label here renders as its raw key.
 // Guarded by npm run verify:audit.
-const AUDIT_KIND = {
-  order_cancelled: ["✕", "KOT cancelled"], order_deleted: ["🗑", "Bill deleted"],
-  dish_removed: ["🍽", "Dish removed"], menu_item_deleted: ["📕", "Menu item deleted"],
-  invoice_voided: ["↩", "Invoice voided"],
-  qty_reduced: ["➖", "Quantity reduced"], discount_given: ["％", "Discount given"],
-  payment_reverted: ["↺", "Payment reverted"], on_the_house: ["🎁", "On the house"],
-  bill_changed_after_reopen: ["⇄", "Bill changed after a reopen"],
-  // The reversal of a removal — a deleted bill put back. Recorded permanently now, because the
-  // delete always was and the restore only reached the Activity log, which is cleared after a
-  // month at most (T7 finding F4, 2026-08-11).
-  order_restored: ["♻", "Bill put back"],
-  // A guest asked for their personal data to be erased and the owner did it. Irreversible, and it
-  // clears them from the pay-later person book too — so the person book losing a name is explained
-  // here rather than looking like something went wrong (owner, 2026-08-12).
-  customer_erased: ["🧑", "Guest data erased on request"],
-};
+const AUDIT_KIND = (function () {
+  // ONE SET OF WORDS FOR ALL THREE PANELS (T7 pass 2, 2026-08-12). This was a third hand-written map
+  // and it disagreed with the owner console on SIX of the eleven types — it said "Invoice voided"
+  // while the manager's own button beside it reads "Reopen bill", and the owner reading the same
+  // database row saw "Bill reopened". They live in /panels/auditsort.js now, loaded as a bare
+  // <script> by index.html exactly as billdoc.js is (which is why they are not in lib/).
+  // A stale cached app.js talking to a page without the script must not lose the Audit screen, so
+  // there is a small literal fallback — the same words, so a cached panel says nothing different.
+  var A = typeof LFH_AUDITSORT !== "undefined" ? LFH_AUDITSORT : null;
+  if (A && A.KIND_LABEL) {
+    var out = {};
+    Object.keys(A.KIND_LABEL).forEach(function (k) { out[k] = [A.KIND_ICON[k] || "\u2022", A.KIND_LABEL[k]]; });
+    return out;
+  }
+  return {
+    order_cancelled: ["\uD83C\uDFAB", "KOT cancelled"], order_deleted: ["\uD83E\uDDFE", "Bill deleted"],
+    dish_removed: ["\uD83C\uDF7D", "Dish removed from an order"], qty_reduced: ["\u2796", "Quantity reduced"],
+    menu_item_deleted: ["\uD83D\uDCD5", "Menu item deleted"], invoice_voided: ["\u21A9\uFE0F", "Bill reopened"],
+    discount_given: ["\uFF05", "Discount given"], payment_reverted: ["\u21BA", "Payment reverted"],
+    on_the_house: ["\uD83C\uDF81", "Settled on the house"],
+    bill_changed_after_reopen: ["\u21C4", "Bill changed after a reopen"],
+    order_restored: ["\u267B\uFE0F", "Bill put back"],
+  };
+})();
 async function loadAudit() {
   try { state.audit = await api("GET", "/audit?limit=200"); }
   catch (e) { state.audit = { error: e.message }; }

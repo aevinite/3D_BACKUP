@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { actLabel, panelChipStyle, panelLabel, timeAgo, inr, formatActionDetail, isManagerPinRow, type Action } from "@/components/admin/shared";
 import { LogDetailModal } from "@/components/admin/LogDetailModal";
-import { RemovalDetailModal } from "@/components/admin/RemovalDetail";
+import { RemovalDetailModal, KIND_LABEL, KIND_ICON } from "@/components/admin/RemovalDetail";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { useToast } from "@/components/admin/toast";
 import { useAdminModal } from "@/components/admin/useAdminModal";
@@ -49,36 +49,17 @@ const CLEANUP_OPTS = [
   { days: 7, label: "Keep 7 days" },
 ];
 
-// The removal kinds and one-tap reasons — same wording as the manager panel's Removals
-// screen (public/panels/editor/app.js AUDIT_KIND / REMOVAL_REASONS), so the two never
-// describe the same row differently.
-const REMOVAL_KIND: Record<string, [string, string]> = {
-  customer_erased: ["🧑‍🦰", "Guest data erased on request"],
-  order_cancelled: ["🎫", "KOT cancelled"],
-  order_deleted: ["🧾", "Bill deleted"],
-  dish_removed: ["🍽", "Dish removed from an order"],
-  menu_item_deleted: ["📕", "Menu item deleted"],
-  invoice_voided: ["↩️", "Invoice voided (reopened)"],
-  qty_reduced: ["➖", "Quantity reduced"],
-  discount_given: ["％", "Discount given"],
-  payment_reverted: ["↺", "Payment reverted"],
-  on_the_house: ["🎁", "On the house"],
-  bill_changed_after_reopen: ["⇄", "Bill changed after a reopen"],
-  // The reversal of a removal — a deleted bill put back (T7 finding F4, 2026-08-11).
-  order_restored: ["♻️", "Bill put back"],
-};
+// The removal kinds — DERIVED from the one shared map (T7 pass 2, 2026-08-12), never listed here
+// again. This page kept its own copy and disagreed with the owner console on six of eleven types:
+// it said "Invoice voided (reopened)" where the owner read "Bill reopened", for the same row.
+const REMOVAL_KIND: Record<string, [string, string]> = Object.fromEntries(
+  Object.keys(KIND_LABEL).map((k) => [k, [KIND_ICON[k] || "•", KIND_LABEL[k]] as [string, string]]),
+);
 // The same two maps flattened, for /panels/auditsort.js — which takes plain label/icon lookups so it
 // stays free of any import and can be loaded by the manager panel as a bare <script>.
 const AUD_ICON: Record<string, string> = Object.fromEntries(Object.entries(REMOVAL_KIND).map(([k, v]) => [k, v[0]]));
 const AUD_LABEL: Record<string, string> = Object.fromEntries(Object.entries(REMOVAL_KIND).map(([k, v]) => [k, v[1]]));
-const REMOVAL_REASON: Record<string, string> = {
-  mistake: "By mistake",
-  guest_changed: "Guest changed their mind",
-  wrong_table: "Wrong table",
-  sold_out: "Not available / sold out",
-  kitchen_error: "Kitchen error",
-  other: "Other reason",
-};
+const REMOVAL_REASON: Record<string, string> = AUDITSORT.REASON_LABEL;
 
 export default function AdminLogs() {
   const toast = useToast();
@@ -460,7 +441,7 @@ function AudTable({ rows, err, onRetry, scopedName, onOpenRemoval }: { rows: Rem
   if (rows === null) return <SkelList rows={6} label="Loading removals" />;
   if (rows.length === 0) return <div className="adm-empty">Nothing has been removed {scopedName ? `at ${scopedName}` : "yet"} — this list fills itself as it happens.</div>;
   return (
-    <div className="adm-logwrap">
+    <div className="adm-logwrap aud-stack">
       <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>What was removed</div><div>Why · by whom</div><div>When</div></div>
       {rows.map((r) => {
         const [ico, label] = REMOVAL_KIND[r.kind] || ["•", r.kind];

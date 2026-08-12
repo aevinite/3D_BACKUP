@@ -17,6 +17,7 @@
 // because an owner arguing with a manager about a deleted bill needs the whole picture. The only
 // difference is `canRestore`, which the OWNER route always returns false for and never offers a
 // write path to. Putting a bill back is the admin's alone.
+import AUDITSORT from "@/public/panels/auditsort.js";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useBackClose } from "@/lib/backStack";
 import { inr } from "@/components/admin/shared";
@@ -53,30 +54,19 @@ export type RemovalFull = {
 // six of the nine kinds changed name inside a single click (T15 sweep, 2026-08-05). This set won
 // because it is the plainest: no KOT jargon, and "Bill reopened" rather than "Invoice voided".
 // The owner list now imports it; do NOT add a fourth map.
-export const KIND_LABEL: Record<string, string> = {
-  order_cancelled: "Kitchen ticket cancelled", order_deleted: "Bill deleted",
-  dish_removed: "Dish taken off an order", qty_reduced: "Quantity reduced",
-  menu_item_deleted: "Taken off the menu", invoice_voided: "Bill reopened",
-  discount_given: "Discount given", payment_reverted: "Payment un-booked",
-  on_the_house: "Settled on the house",
-  bill_changed_after_reopen: "Bill changed after a reopen",
-  // A REMOVAL THAT WAS REVERSED SAYS SO, PERMANENTLY (2026-08-11, T7 finding F4). A delete wrote a
-  // permanent audit row; a restore wrote only an Activity-log line, and that log is cleared after at
-  // most 30 days (mig 158, settable to 1 day). So a month later the lasting record showed a bill
-  // removed, with a reason and a person, and nothing anywhere saying it had been put back.
-  order_restored: "Bill put back",
-  customer_erased: "Guest data erased on request",
-};
+// THE WORDS AND THE GLYPHS COME FROM ONE PLACE (T7 pass 2, 2026-08-12).
+// These used to be written out here, again in app/aevinite/logs/page.tsx and a third time in
+// public/panels/editor/app.js — and SIX of the eleven types ended up with a different name in each,
+// so one database row had three names on three screens. They live in /panels/auditsort.js now (a
+// plain-JS module the manager panel can load as a bare <script>, which is why they are not in lib/),
+// and all three panels read them. Re-exported under the old names so every existing importer is
+// untouched. See that file's own note for WHICH word won each type, and why.
+export const KIND_LABEL: Record<string, string> = AUDITSORT.KIND_LABEL;
 /** The little glyph each kind wears in a list. Kept beside the words so the two can't drift. */
-export const KIND_ICON: Record<string, string> = {
-  order_cancelled: "🎫", order_deleted: "🧾", dish_removed: "🍽", menu_item_deleted: "📕",
-  invoice_voided: "↩️", qty_reduced: "➖", discount_given: "％", payment_reverted: "↺",
-  on_the_house: "🎁", bill_changed_after_reopen: "⇄", order_restored: "♻️", customer_erased: "🧑‍🦰",
-};
-const REASON_LABEL: Record<string, string> = {
-  mistake: "Punched by mistake", guest_changed: "Guest changed their mind",
-  wrong_table: "Wrong table", sold_out: "Sold out", kitchen_error: "Kitchen error", other: "Other",
-};
+export const KIND_ICON: Record<string, string> = AUDITSORT.KIND_ICON;
+// Same one-place rule for the reasons: the search matches the WORDS a screen shows, so a second
+// spelling of "By mistake" would find rows on one panel and nothing on another.
+const REASON_LABEL: Record<string, string> = AUDITSORT.REASON_LABEL;
 const ROLE_LABEL: Record<string, string> = {
   admin: "Aevidine admin", owner: "Owner", manager: "Manager", tablet: "Waiter", kitchen: "Kitchen",
 };

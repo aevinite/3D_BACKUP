@@ -38,6 +38,13 @@ export interface AuditKindCount {
 
 /** The five sort orders, in the order they are offered. Every comparator is TOTAL (it tie-breaks
  *  on the row id), so equal rows never swap places between renders. */
+/** THE words and glyph for every removal type, and the words for every one-tap reason — the ONE set,
+ *  read by the owner console, the manager panel and the admin console. They lived in three
+ *  hand-written maps and six of the eleven types were named differently in each (T7 pass 2).
+ *  `components/admin/RemovalDetail.tsx` re-exports these as KIND_LABEL / KIND_ICON. */
+export const KIND_LABEL: Record<string, string>;
+export const KIND_ICON: Record<string, string>;
+export const REASON_LABEL: Record<string, string>;
 export const SORTS: AuditSort[];
 export const DEFAULT_SORT: string;
 export function sortById(id: string): AuditSort;
