@@ -55,22 +55,39 @@ GRANT  EXECUTE ON FUNCTION lfh_staff_place_order(text, jsonb, text[], text) TO s
 
 -- One-time backfill: link EXISTING orphan active orders to an open session for
 -- their table, so they stop hiding on the editor floor. (No-op once clean.)
-DO $$
+-- ⚠️ ONE-TIME, AND SCOPED PER RESTAURANT SINCE 311. Every lookup here used to match on
+-- table_number ALONE and the session it created named no restaurant_id — so it fell to the column
+-- DEFAULT, restaurant #1. On today's multi-restaurant database that means restaurant B's
+-- session-less order for "table 7" could be attached to restaurant A's open table 7, or to a brand
+-- new French House session, breaking mig 232's rule that an order never outlives its own table's
+-- session. Measured when this was fixed: 0 such rows, so it was latent — but
+-- `lfh_place_order_public` (the sessions-off guest order path) writes exactly that row shape, and 6
+-- of 9 live restaurants have table sessions off.
+-- Now: keyed on (restaurant_id, table_number) throughout, the created session is stamped, and the
+-- whole block runs only while the ledger has no row for it (migration 311 records it).
+DO $reseed_guard$
 DECLARE r record; v_sess uuid;
 BEGIN
-  FOR r IN SELECT DISTINCT table_number FROM orders
+IF lfh_already_applied('049_link_orphan_orders') THEN
+  RAISE NOTICE '049_link_orphan_orders: already applied — skipped (it could re-link orders across restaurants)';
+  RETURN;
+END IF;
+
+  FOR r IN SELECT DISTINCT restaurant_id, table_number FROM orders
            WHERE session_id IS NULL AND NOT archived AND status <> 'cancelled' AND table_number IS NOT NULL LOOP
-    SELECT id INTO v_sess FROM sessions WHERE table_number = r.table_number AND status = 'open'
+    SELECT id INTO v_sess FROM sessions
+      WHERE table_number = r.table_number AND status = 'open' AND restaurant_id = r.restaurant_id
       ORDER BY last_activity_at DESC LIMIT 1;
     IF v_sess IS NULL THEN
-      INSERT INTO sessions(table_number, status, opened_by, opened_at)
-        VALUES (r.table_number, 'open', 'waiter', NOW()) RETURNING id INTO v_sess;
+      INSERT INTO sessions(table_number, status, opened_by, opened_at, restaurant_id)
+        VALUES (r.table_number, 'open', 'waiter', NOW(), r.restaurant_id) RETURNING id INTO v_sess;
     END IF;
     UPDATE orders SET session_id = v_sess
-      WHERE table_number = r.table_number AND session_id IS NULL AND NOT archived AND status <> 'cancelled';
+      WHERE table_number = r.table_number AND restaurant_id = r.restaurant_id
+        AND session_id IS NULL AND NOT archived AND status <> 'cancelled';
     UPDATE order_items oi SET session_id = v_sess
       FROM orders o WHERE oi.order_id = o.id AND o.session_id = v_sess AND oi.session_id IS NULL;
   END LOOP;
-END $$;
+END $reseed_guard$;
 
 NOTIFY pgrst, 'reload schema';

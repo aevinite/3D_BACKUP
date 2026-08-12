@@ -19,52 +19,16 @@
 -- Returns { closed, skipped, closed_tables } — closed_tables drives the client's 8s UNDO (reopen).
 -- service-role only (the editor endpoint calls it via supabaseAdmin).
 
-CREATE OR REPLACE FUNCTION lfh_staff_close_all_tables(p_restaurant_id uuid, p_force boolean DEFAULT false)
-RETURNS json LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_closed       int := 0;
-  v_skipped      int := 0;
-  v_closed_tabs  text[] := '{}';
-  v_sess         record;
-  v_blocked      boolean;
-BEGIN
-  FOR v_sess IN
-    SELECT id, table_number FROM sessions
-    WHERE restaurant_id = p_restaurant_id AND status = 'open'
-  LOOP
-    -- closeBlock(): blocked when any live order is still cooking OR unpaid.
-    SELECT EXISTS (
-      SELECT 1 FROM orders
-      WHERE session_id = v_sess.id AND archived = false AND status <> 'cancelled'
-        AND (status IN ('received', 'preparing') OR payment_status <> 'paid')
-    ) INTO v_blocked;
-
-    IF v_blocked AND NOT p_force THEN
-      v_skipped := v_skipped + 1;
-      CONTINUE;
-    END IF;
-
-    -- close + cleanup, mirroring closeSession() step for step.
-    UPDATE sessions SET status = 'closed', closed_at = now() WHERE id = v_sess.id;
-    UPDATE orders SET status = 'cancelled', archived = true
-      WHERE session_id = v_sess.id AND archived = false AND payment_status <> 'paid'
-        AND status IN ('received', 'preparing');
-    UPDATE orders SET archived = true
-      WHERE session_id = v_sess.id AND archived = false;
-    UPDATE session_members SET removed = true
-      WHERE session_id = v_sess.id AND removed = false;
-
-    v_closed := v_closed + 1;
-    IF v_sess.table_number IS NOT NULL THEN
-      v_closed_tabs := array_append(v_closed_tabs, v_sess.table_number);
-    END IF;
-  END LOOP;
-
-  RETURN json_build_object('closed', v_closed, 'skipped', v_skipped, 'closed_tables', to_json(v_closed_tabs));
-END; $$;
-
--- Lock down: service-role only.
-REVOKE EXECUTE ON FUNCTION lfh_staff_close_all_tables(uuid, boolean) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION lfh_staff_close_all_tables(uuid, boolean) TO service_role;
+-- ═════════════════════════════════════════════════════════════════════════════════════════════
+-- THE CODE THAT USED TO BE HERE IS GONE, ON PURPOSE (2026-08-13, T8 sweep problem P2).
+--
+-- Everything above is KEPT AS REASONING ONLY. `lfh_staff_close_all_tables` — which closed every table on the floor in one call and, with force, CANCELLED cooking food and unpaid bills — was dropped by
+-- migration 281 under the owner's "no table ends itself" rule, and the panels and routes were
+-- updated to match (/sessions/open-all and /sessions/close-all are gone from the server too).
+--
+-- This file nevertheless still CREATED it. A full re-seed healed that, because 281 sorts after and
+-- drops it again; running THIS FILE ALONE — which CLAUDE.md recommends — brought it back. So the
+-- body is now the removal itself. Idempotent; safe where it never existed.
+DROP FUNCTION IF EXISTS public.lfh_staff_close_all_tables(uuid, boolean);
 
 NOTIFY pgrst, 'reload schema';

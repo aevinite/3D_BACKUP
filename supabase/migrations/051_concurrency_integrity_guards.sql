@@ -5,15 +5,36 @@
 -- L3: at most ONE open session per table. Dedupe any existing dups (keep the most
 -- recently active), then enforce with a partial unique index — kills duplicate-
 -- session races in request-approve / shift / join (a whole class of bugs).
+-- ⚠️ ONE-TIME, AND SCOPED PER RESTAURANT SINCE 311. Written when ONE restaurant existed, this
+-- partitioned by table_number ALONE — so on today's multi-restaurant database it treated
+-- "table 5 at Aangan" and "table 5 at French House" as duplicates of each other and CLOSED all
+-- but the most recently active. Closing is not a quiet flag: the close trigger then empties the
+-- shared cart, marks every member removed (their phones stop working mid-meal), resolves the
+-- table's waiter calls and denies its pending requests. Measured on the backup database the day
+-- this was fixed: 27 open tables, 4 table numbers open at more than one restaurant, so a re-seed
+-- would have shut 4 LIVE tables. `seed-supabase.mjs` re-runs every file in this folder, so that
+-- was one command away. Migration 307's audit cleared this block as safe; that judgement was made
+-- in a single-restaurant frame and was wrong.
+-- Now: PARTITION BY (restaurant_id, table_number), and the whole block runs only while the ledger
+-- has no row for it (migration 311 records it, so every existing database skips it for good).
+DO $reseed_guard$
+BEGIN
+IF lfh_already_applied('051_one_open_session_per_table') THEN
+  RAISE NOTICE '051_one_open_session_per_table: already applied — skipped (it would close live tables)';
+  RETURN;
+END IF;
+
 WITH ranked AS (
   SELECT id, row_number() OVER (
-    PARTITION BY table_number
+    PARTITION BY restaurant_id, table_number
     ORDER BY last_activity_at DESC NULLS LAST, opened_at DESC NULLS LAST
   ) AS rn
   FROM sessions WHERE status = 'open' AND table_number IS NOT NULL
 )
 UPDATE sessions s SET status = 'closed', closed_at = now()
   FROM ranked r WHERE s.id = r.id AND r.rn > 1;
+
+END $reseed_guard$;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_session_per_table
   ON sessions (table_number) WHERE status = 'open';
 

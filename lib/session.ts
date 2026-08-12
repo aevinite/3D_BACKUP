@@ -267,7 +267,13 @@ export const verifyOtp = (token: string, phone: string, code: string) =>
 // Shared session cart (migration 019). getSessionCart reads it; setSessionCart
 // writes it (approved members only — the RPC enforces that).
 export const getSessionCart = (token: string) => rpc("lfh_get_cart", { p_token: token });
-export const setSessionCart = (token: string, cart: unknown[]) => rpc("lfh_set_cart", { p_token: token, p_cart: cart });
+// `seen` is the cart_updated_at this device READ before it built `cart`. The RPC refuses with
+// reason 'cart_moved' (and hands back the newer cart) if another phone changed the shared cart in
+// between — first save wins, and the loser is TOLD instead of silently overwriting a co-diner's
+// dish (mig 311). Omit it and the old overwrite behaviour is unchanged, which is what a guest
+// running an older cached build still gets.
+export const setSessionCart = (token: string, cart: unknown[], seen?: string | null) =>
+  rpc("lfh_set_cart", { p_token: token, p_cart: cart, p_seen: seen ?? null });
 // mergeSessionCart (migration 144): apply just THIS device's change (a delta) to
 // the shared cart on the server, so a co-diner adding a dish at the same moment
 // isn't clobbered. Returns the merged cart to adopt. See SessionCartSync.
