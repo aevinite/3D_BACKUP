@@ -52,6 +52,26 @@ const REMOVAL_REASON: Record<string, string> = {
   other: "Other reason",
 };
 
+/**
+ * True while the viewport is narrower than `px`.
+ *
+ * Both lists here lay out with inline `gridTemplateColumns`, so a CSS media query cannot reach them
+ * — the column widths have to be decided in JS. Returns false during server render and on the first
+ * paint, which is the safe direction: the desktop layout simply reflows once on a phone rather than
+ * the phone layout flashing on a desktop.
+ */
+function useIsNarrow(px: number): boolean {
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${px}px)`);
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, [px]);
+  return narrow;
+}
+
 export default function OwnerAuditLogs() {
   // Admin-in-one-restaurant scope pin (?rid=) — rides on every call as ?scope= so a second
   // tab's shared act-as cookie can't repoint this one. Null for a real owner.
@@ -214,7 +234,9 @@ function AuditView({ removals, err, q, setQ, onReload, onOpenRemoval, page, page
   // What the visible rows come to in money — the figure an owner is really after when they pick
   // "Deleted bills". Only shown when there is money on them at all (a dish off the menu has none).
   const shownMoney = AUDITSORT.sumAmount(list);
-  const cols = "1.4fr 1fr auto";
+  // Same reasoning as the Activity list below — see useIsNarrow.
+  const narrow = useIsNarrow(560);
+  const cols = narrow ? "1.5fr 1fr 52px" : "1.4fr 1fr auto";
 
   return (
     <div className="adm-card">
@@ -331,7 +353,11 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
   // Paging (owner, 2026-08-12) — the list owns the strip, the page state lives with the fetch.
   page: number; pages: number; total: number; onPage: (p: number) => void;
 }) {
-  const cols = "88px 1fr auto";
+  // NARROW SCREENS GET NARROWER COLUMNS. At 360px the fixed 88px panel chip plus an `auto` time
+  // column pushed the row wider than the viewport, so the right-hand end — including "when" — was
+  // simply off-screen, and the trail line was chopped mid-word. The owner reads this page on an A35.
+  const narrow = useIsNarrow(560);
+  const cols = narrow ? "58px 1fr 52px" : "88px 1fr auto";
   return (
     <div className="adm-card">
       {/* Severity filter + search + refresh */}
@@ -410,7 +436,18 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
                   {(() => {
                     const t = trailOf(a);
                     return (
-                      <span className="adm-muted" style={{ display: "block", fontSize: 11.5, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      // IT MUST WRAP, NOT BE CHOPPED. The first build used nowrap + ellipsis, and on
+                      // a 360px phone the line read "My Little French House · Sign–" — the trail is
+                      // the whole point of this row, and it was the part being thrown away. Wrapping
+                      // to at most two lines keeps every row a predictable height while letting the
+                      // screen and the table number survive on a narrow screen (seen on the A35).
+                      <span
+                        className="adm-muted"
+                        style={{
+                          display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical",
+                          overflow: "hidden", fontSize: 11.5, marginTop: 2, lineHeight: 1.35, wordBreak: "break-word",
+                        }}
+                      >
                         {a.restaurant_name ? <><i className="fas fa-store" style={{ fontSize: 9, marginRight: 4, opacity: 0.7 }} aria-hidden="true" />{a.restaurant_name}<span style={{ opacity: 0.45 }}> · </span></> : null}
                         <span style={{ opacity: 0.85 }}>{t.area}</span>
                         <span style={{ opacity: 0.45 }}> › </span>
