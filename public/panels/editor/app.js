@@ -10199,7 +10199,7 @@ function openTakeOrder(table, rerender, opts = {}) {
   const wrap = el(`<div class="sx-modal-overlay to-overlay"><div class="sx-modal to-modal${quick ? " to-quick" : ""}">
     <div class="tbl-modal-head"><div class="tp-detail-top"><h3>${headTitle}</h3><button class="tbl-modal-close" aria-label="Close">✕</button></div>${parcel ? `<div class="to-cust"><input class="to-cust-name" maxlength="120" placeholder="Customer name (optional)"><input class="to-cust-phone" maxlength="20" inputmode="tel" placeholder="Phone (optional)"></div>` : ""}</div>
     <div class="to-body">
-      ${quick ? "" : `<aside class="to-rail"><div class="to-rail-h">Categories<i>${sections.length}</i></div><div class="to-crail">${catChips()}</div></aside>`}
+      ${quick ? "" : `<aside class="to-rail"><div class="to-rail-h">Categories<i>${sections.length}</i></div><div class="to-crail" data-swipe-hint data-swipe-count>${catChips()}</div></aside>`}
       <div class="to-menu">
         <input type="search" class="to-search" placeholder="🔎 Search dishes…">
         ${quick ? `<div class="qo-drill">${drillHtml()}</div>` : ""}

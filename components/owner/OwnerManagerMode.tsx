@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { attachSafeAreaBridge } from "@/lib/safeAreaBridge";
 import { useBackClose } from "@/lib/backStack";
 import { useOwnerSkin, pushSkinTo } from "./useOwnerSkin";
 
@@ -66,7 +67,11 @@ export default function OwnerManagerMode({
     el.addEventListener("load", () => pushSkin(skinRef.current));
     mount.current.appendChild(el);
     frame.current = el;
-    return () => { frame.current = null; el.remove(); };
+    // The phone's notch / gesture-bar insets, pushed in as --safe-t/-b/-l/-r (T12, 2026-08-13).
+    // Manager mode IS the floor on his own phone, so its "Send to kitchen" and undo bar are
+    // exactly the controls that were landing in the gesture strip. Same bridge as PanelFrame.
+    const stopSafeArea = attachSafeAreaBridge(() => el);
+    return () => { stopSafeArea(); frame.current = null; el.remove(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rid]);
 

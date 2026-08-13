@@ -58,7 +58,13 @@ export default function LoginForm({ next, initialError }: { next: string; initia
         <img src="/brand/aevidine-mark.svg" alt="Aevidine" width={48} height={48} />
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.2 }}>Aevidine</div>
-          <div style={{ fontSize: 12.5, color: "#8aa0c6" }}>Restaurant OS · staff sign in</div>
+          {/* THIS DOOR IS THE ADMIN CONSOLE, AND IT NOW SAYS SO (owner, 2026-08-13). It used to
+              read "Restaurant OS · staff sign in" — the SAME line /login shows — while asking for
+              a single password and no username. A waiter who landed here saw a door that claimed
+              to be theirs, had nowhere to type their username, and refused their password. The
+              two doors are told apart by their words now, and the link below sends a person who
+              took the wrong one to the right one instead of leaving them stuck. */}
+          <div style={{ fontSize: 12.5, color: "#8aa0c6" }}>Restaurant OS · admin console</div>
         </div>
       </div>
       <input type="hidden" name="next" value={next} />
@@ -88,6 +94,11 @@ export default function LoginForm({ next, initialError }: { next: string; initia
         style={{ marginTop: 12, width: "100%", padding: 12, borderRadius: 10, border: 0, background: busy ? "#2f5fb0" : "#3b82f6", color: "#fff", fontWeight: 700, fontSize: 15, cursor: busy ? "default" : "pointer" }}>
         {busy ? "Checking…" : "Enter"}
       </button>
+      {/* The way out for someone who took the wrong door. It is a plain link, not a redirect:
+          an admin who bookmarked this page must still land here. */}
+      <a href="/login" style={{ display: "block", marginTop: 14, textAlign: "center", fontSize: 12.5, color: "#8aa0c6", textDecoration: "none" }}>
+        Staff sign in →
+      </a>
     </form>
   );
 }

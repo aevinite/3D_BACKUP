@@ -451,6 +451,28 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
 
   // "Add to Cart" — instead of adding directly, it opens the shared confirm
   // popup (quantity + total) by broadcasting an event the modal listens for.
+  // ── A PINNED "Add to Cart" WHILE THE REAL ONE IS OFF SCREEN (owner, 2026-08-13) ──────────────
+  // Measured on his phone: the real button starts ~880px down this page, so every guest read the
+  // dish and then had to scroll to buy it. A pinned copy fixes that — but pinned FOREVER is not
+  // what he asked for: "it will stuck if you scroll up, when you come to page where it exist with
+  // smooth way it will unpin and merge like actual button, not pin". So the bar is visible ONLY
+  // while the real row is out of view, and it fades/slides away as the real row arrives, which
+  // reads as the two becoming one. IntersectionObserver, so there is no scroll handler at all.
+  const btnRowRef = useRef<HTMLDivElement>(null);
+  const [realBtnOffScreen, setRealBtnOffScreen] = useState(false);
+  useEffect(() => {
+    const el = btnRowRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(
+      ([e]) => setRealBtnOffScreen(!e.isIntersecting),
+      // A margin at the bottom so the pinned bar leaves BEFORE the real button is under it —
+      // otherwise the two overlap for a moment and it looks like two Add buttons.
+      { root: null, rootMargin: "0px 0px -96px 0px", threshold: 0 },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [item?.slug]);
+
   const addToCart = () => {
     // No item, or it's sold out -> do nothing (the button is disabled too; this is
     // the belt-and-braces guard so a sold-out dish can never reach the cart).
@@ -817,7 +839,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
 
         {/* The action buttons: Add to Cart, plus View in 3D (or a disabled
             placeholder when this dish has no 3D model). */}
-        <div className="btn-row">
+        <div className="btn-row" ref={btnRowRef}>
           {/* Sold-out dishes show a disabled "Not available" button instead of
               Add to Cart — matching the menu card, so you can't order one here. */}
           {(item.tags || []).includes("sold-out") ? (
@@ -1040,6 +1062,20 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           </button>
         </div>
       </div>
+
+      {/* THE PINNED ADD BAR. Shown only while the real button row is off screen (see the
+          IntersectionObserver above) and it carries the dish's price, so the one thing this page
+          exists for is always one tap away. A sold-out dish never gets one — there is nothing to
+          tap. It clears the chef bell / offline bar the same way the mini-cart does, through the
+          shared --lfh-offbar-h and the safe-area inset. */}
+      {item && !(item.tags || []).includes("sold-out") && (
+        <div className={`item-addbar${realBtnOffScreen ? " on" : ""}`} aria-hidden={!realBtnOffScreen}>
+          <span className="item-addbar-price">{currency ? formatPrice(item.price, currency) : `$${item.price}`}</span>
+          <button className="btn btn-gold" onClick={addToCart} tabIndex={realBtnOffScreen ? 0 : -1}>
+            <i className="fas fa-shopping-bag"></i> {t.addToCart}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

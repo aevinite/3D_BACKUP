@@ -3531,6 +3531,34 @@ body[data-lfh-minicart] .gob-chip {
 /* ...and the order tracker steps up over the chip, keeping the same order every time:
    chip (saved on this phone) < tracker (orders the kitchen HAS) < the rest of the screen. */
 body[data-lfh-outbox] .order-tracker { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+
+/* ── THE DISH PAGE'S PINNED "Add to Cart" (owner, 2026-08-13) ──────────────────────────────────
+   Measured on his phone: the real button starts ~880px down the dish page, so every guest read the
+   dish and then had to scroll back to buy it. This bar carries the same action while the real one
+   is off screen, and — his instruction, not an extra — it does NOT stay pinned: as you scroll to
+   where the real button lives it slides down and fades out, so the two read as one button rather
+   than a permanent floating copy. `translateY` + `opacity` only, so it composites on the GPU and a
+   cheap phone mid-scroll does not repaint the page for it.
+   Bottom offset matches the mini-cart's: the gesture-bar inset plus whatever the offline bar is
+   currently taking (--lfh-offbar-h), so the three can never land on top of each other. */
+.item-addbar {
+  position: fixed; left: 0; right: 0;
+  bottom: calc(12px + var(--lfh-offbar-h, 0px) + env(safe-area-inset-bottom, 0px));
+  z-index: 60; display: flex; align-items: center; gap: 12px;
+  margin: 0 auto; width: min(560px, calc(100% - 24px)); padding: 10px 12px;
+  border-radius: 16px; border: 1px solid var(--line, rgba(212,165,116,0.25));
+  background: color-mix(in srgb, var(--card, #1a120c) 92%, transparent);
+  backdrop-filter: blur(20px);
+  box-shadow: 0 14px 34px rgba(0,0,0,0.34);
+  transform: translateY(140%); opacity: 0; pointer-events: none;
+  transition: transform .28s cubic-bezier(0.22,1,0.36,1), opacity .2s ease;
+}
+.item-addbar.on { transform: translateY(0); opacity: 1; pointer-events: auto; }
+.item-addbar-price { font-size: 17px; font-weight: 800; color: var(--text); font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+.item-addbar .btn { flex: 1 1 auto; min-height: 46px; margin: 0; justify-content: center; }
+@media (prefers-reduced-motion: reduce) { .item-addbar { transition: opacity .15s ease; transform: none; } }
+/* A phone in landscape has almost no height to spare — the bar would cover the dish it is selling. */
+@media (max-height: 420px) { .item-addbar { display: none; } }
 body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + env(safe-area-inset-bottom, 0px)); }
 
 /* ABOVE THE WAITER BELL. The bell is z-index 100, so at 63 the sheet opened UNDERNEATH it and the

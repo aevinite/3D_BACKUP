@@ -1268,6 +1268,14 @@ export function TreeStyle() {
      -webkit- properties (the frosted-glass lesson), and a clamp that silently vanished would put
      the wall straight back. */
   .at-recent .d { color:var(--text); word-break:break-word; max-height:2.9em; overflow:hidden; }
+  /* …and SAY that it continues (T12 phone sweep, 2026-08-13). The straight cut ended the strip
+     mid-value — on a 360px phone the last thing you read was "Guest can add their own allergy:"
+     with nothing after the colon, which reads as a bug rather than as "there is more". A gradient
+     mask fades the final line out instead. mask-image unprefixed ONLY (no backtick quoting in here —
+     this whole block is a template literal and one backtick ends the string), for the same reason the
+     comment above avoids -webkit-line-clamp: this build drops hand-written -webkit- properties and
+     auto-prefixes the standard one itself. Applied only while FOLDED — open shows everything. */
+  .at-recent ul:not(.open) .d { mask-image: linear-gradient(180deg, #000 0, #000 1.55em, transparent 2.85em); }
   .at-recent ul.open .d { max-height:none; }
   @media (max-width:640px) { .at-recent li { flex-direction:column; gap:1px; } .at-recent .w { min-width:0; } }
   .acc2-main, .at-head { --hov: var(--accent); }

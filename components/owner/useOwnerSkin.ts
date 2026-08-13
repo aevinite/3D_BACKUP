@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { attachSafeAreaBridge } from "@/lib/safeAreaBridge";
 
 // ONE place that answers "which skin is the owner cockpit wearing RIGHT NOW?", and one
 // place that carries that answer into an embedded staff-panel iframe (Manager mode, Menu,
@@ -85,7 +86,12 @@ export function useEmbedFrame(src: string, skin: "light" | "dark", deps: unknown
     el.addEventListener("load", () => pushSkinTo(el, skinRef.current));
     host.appendChild(el);
     frame.current = el;
-    return () => { frame.current = null; el.remove(); };
+    // …and the phone's notch / gesture-bar insets, which the skin push alone never carried
+    // (T12 phone sweep, 2026-08-13). Without this the embedded panel computes `--safe-b: 0`
+    // and its bottom-docked controls — Send to kitchen, the undo bar, the sheets — sit in the
+    // strip Android draws its gesture bar in. Same bridge components/PanelFrame.tsx uses.
+    const stopSafeArea = attachSafeAreaBridge(() => el);
+    return () => { stopSafeArea(); frame.current = null; el.remove(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
 

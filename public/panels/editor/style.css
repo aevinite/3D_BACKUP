@@ -902,6 +902,11 @@ body {
    as the list scrolled up. */
 .tbl-modal-head { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; background: var(--panel-2); border-radius: 18px 18px 0 0; }
 .tbl-modal-head h3 { margin: 0; font-size: 19px; }
+/* REJECTED (owner, 2026-08-13): widening this ✕'s tap area. The T12 phone sweep measured it at
+   25x22px at 360 — under the ~44px guideline, in the corner a right thumb reaches last — and
+   showed him a zoomed screenshot. His answer: "x is fine". The phone's BACK button closes every
+   one of these sheets too, so nobody is ever trapped. Leave the size alone and do not re-raise
+   it as a tap-target fault. Row R22 in docs/REJECTED-IDEAS.md. */
 .tbl-modal-close { background: transparent; border: none; color: var(--muted); font-size: 17px; cursor: pointer; }
 .tbl-modal-body { padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
 .tmo { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
@@ -2710,6 +2715,29 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
   white-space: normal; line-height: 1.16; overflow-wrap: break-word;
   font-size: var(--rail-fs, 13px); padding: var(--rail-pad, 8px 10px); min-height: var(--rail-h, 38px); }
 .to-crail .to-cat.on { box-shadow: 0 0 0 1px var(--gold) inset; }
+
+/* ── "THERE IS MORE THIS WAY" (T12 phone sweep, 2026-08-13) ──────────────────────────────────
+   A row that scrolls sideways used to slice the next chip with a hard straight edge, which reads
+   as a rendering fault rather than an invitation to swipe. public/panels/swipehint.js measures the
+   row and sets data-more="start|end|both"; everything visible is here, so a row can be given the
+   hint by adding one attribute in the markup and nothing else.
+   The fade is a mask, written UNPREFIXED on a single line — this build drops a hand-added
+   -webkit- twin and the property vanishes with it (the frosted-glass lesson). */
+[data-swipe-hint][data-more="end"] { mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 44px), transparent 100%); }
+[data-swipe-hint][data-more="start"] { mask-image: linear-gradient(90deg, transparent 0, #000 44px, #000 100%); }
+[data-swipe-hint][data-more="both"] { mask-image: linear-gradient(90deg, transparent 0, #000 44px, #000 calc(100% - 44px), transparent 100%); }
+/* The count chip — the same wording and shape as the floor's own "→ 15 more tables", because it
+   is the same promise. A SIBLING of the row (inside it, it would scroll away), so its parent is
+   the positioning context; swipehint.js sets that if the parent is static. */
+.lfh-swipe-more { position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  z-index: 2; display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px;
+  border-radius: 999px; border: 1px solid color-mix(in srgb, var(--gold) 45%, var(--line));
+  background: var(--panel); color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 700;
+  white-space: nowrap; cursor: pointer; box-shadow: 0 2px 10px rgba(0,0,0,.28); }
+.lfh-swipe-more b { color: var(--text); font-variant-numeric: tabular-nums; }
+.lfh-swipe-more:hover { border-color: var(--gold); color: var(--text); }
+.lfh-swipe-more[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .lfh-swipe-more { transition: none; } }
 .to-cat { flex: 0 0 auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .15s, color .15s, border-color .15s; }
 .to-cat:hover { color: var(--text); border-color: color-mix(in srgb, var(--gold) 45%, var(--line)); }
 .to-cat.on { background: color-mix(in srgb, var(--gold) 18%, transparent); color: var(--gold-strong); border-color: var(--gold); }
@@ -2798,6 +2826,14 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
   .to-crail::-webkit-scrollbar { display: none; }
   .to-crail .to-cat { width: auto; flex: 0 0 auto; min-height: 34px; white-space: nowrap; font-size: 13px; padding: 6px 13px; }
+  /* …and real room on the right for the "→ N more" chip. It has to be a MARGIN on the scroller,
+     not padding inside it: padding only adds space at the END of the scrolled content, so at the
+     start of the row the floating chip sat on top of the third category (seen in the check).
+     Keyed on the bare presence of data-more — which the script sets whenever the row can scroll at
+     all, whatever edge you are at — so the strip's width does NOT change as you swipe. Keying it to
+     "end"/"both" made the row narrower and wider by turns, and a width that changes on scroll can
+     flip the at-end test back and forth. */
+  .to-crail[data-more] { margin-right: 84px; }
   .to-list { max-height: 42vh; }
   .to-cart { flex: 1 1 auto; }
   .to-lines { max-height: 28vh; }
