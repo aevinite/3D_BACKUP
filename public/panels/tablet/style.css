@@ -282,7 +282,9 @@ html[data-theme="light"] .tile .tmerge { color: #7e22ce; }
 /* ── compact ONE-LINE legend (manager style — replaced the old two-row block, 2026-08-03) ── */
 .floor-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 0 0 12px; font-size: 12px; color: var(--muted); }
 .floor-legend:empty { display: none; }
-.lgcap { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: #7a6e58; }
+/* Follows --muted rather than a fixed hex, so the light-skin darkening above reaches it too
+   (it was pinned at #7a6e58 = 4.22:1 on --bg and so missed the token fix). */
+.lgcap { font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .lgi { display: inline-flex; align-items: center; gap: 6px; }
 .ldot { width: 11px; height: 11px; border-radius: 4px; display: inline-block; }
 .ldot-free { background: #6b6253; }
@@ -599,7 +601,11 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
 
 html[data-theme="light"]{
   --bg:#f1ebe1; --panel:#ffffff; --panel-2:#f6f0e6; --line:#e6dcc9;
-  --text:#2c2219; --muted:#857655; --gold:#c98f3f; --gold-strong:#b07a28;
+  /* Secondary words on the light skin (the DEFAULT skin for every panel). #857655
+     measured 4.45:1 on white and 3.75:1 on --bg — under the 4.5:1 minimum on the
+     floor legend, the seat counts, the filter buttons and the take-order dish price
+     (T11 sweep, 2026-08-13). Same hue, one step deeper: 5.37:1 / 4.53:1. */
+  --text:#2c2219; --muted:#77694c; --gold:#c98f3f; --gold-strong:#b07a28;
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
 }
 /* Hardcoded dark surfaces → light. */

@@ -319,7 +319,7 @@ function PeriodDrop({ value, onChange }: { value: Range; onChange: (r: Range) =>
         .owr-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--bg); border: var(--border); border-radius: 8px; padding: 5px 10px; font: inherit; font-size: 11.5px; font-weight: 700; color: var(--muted); cursor: pointer; white-space: nowrap; }
         .owr-btn:hover { color: var(--accent); border-color: var(--accent); }
         .owr-btn i { font-size: 9px; opacity: .7; }
-        .owr-btn.main { background: color-mix(in srgb, #34d399 16%, transparent); border: 1px solid #34d399; color: #059669; font-size: 12.5px; font-weight: 800; padding: 7px 14px; border-radius: 10px; }
+        .owr-btn.main { background: color-mix(in srgb, var(--accent) 16%, transparent); border: 1px solid var(--accent); color: var(--accent); font-size: 12.5px; font-weight: 800; padding: 7px 14px; border-radius: 10px; }
         .owr-btn.main:hover { background: color-mix(in srgb, #34d399 26%, transparent); color: #047857; }
         :global([data-skin="dark"]) .owr-btn.main { color: #34d399; }
         :global([data-skin="dark"]) .owr-btn.main:hover { color: #6ee7b7; }
