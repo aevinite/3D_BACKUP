@@ -160,7 +160,26 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   useEffect(() => {
     // Reconcile with localStorage only if it and the SSR cookie disagree (rare) — keeps
     // the toggle working even if the cookie was cleared but localStorage kept.
-    try { const s = localStorage.getItem("aevidine_skin"); if ((s === "dark" || s === "light") && s !== skin) setSkin(s); } catch {}
+    //
+    // …AND PUT THE COOKIE BACK when it is the missing one (T14 tablet sweep, 2026-08-13).
+    // components/admin/AdminShell.tsx carries this exact comment AND does this second half;
+    // this shell had the comment without the fix. It matters more here than there, because
+    // THREE owner pages build their embedded panel's URL from the COOKIE on the server —
+    // app/owner/manager/page.tsx, app/owner/menu/page.tsx and app/owner/inventory/page.tsx all
+    // read `store.get("aevidine_skin")` to decide `skin=light|dark` — while the shell around
+    // them paints from localStorage. Disagree, and the console and the panel inside it are
+    // being told different things. Reaching that state is not exotic on the tablet this sweep
+    // covers: both shells save the cookie with `document.cookie` (below), and Safari caps a
+    // script-written cookie at a few days while localStorage stays forever.
+    try {
+      const s = localStorage.getItem("aevidine_skin");
+      if (s === "dark" || s === "light") {
+        if (s !== skin) setSkin(s);
+        if (!document.cookie.includes("aevidine_skin=")) {
+          document.cookie = `aevidine_skin=${s}; path=/; max-age=31536000; samesite=lax`;
+        }
+      }
+    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

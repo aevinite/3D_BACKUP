@@ -768,6 +768,7 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     }
   }, [spyCat]);
 
+
   // Restore that scroll position once the list has actually painted.
   // Re-runs when menuData arrives; only does the jump one time.
   useEffect(() => {
@@ -982,6 +983,30 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
   const nonEmptyCatSlugs = new Set(filteredItems.map((it) => it.category));
   const visibleCategories = categories.filter((c) => nonEmptyCatSlugs.has(c.slug));
 
+  // "SLIDE →" IS ONLY TRUE WHEN THE ROW ACTUALLY HAS MORE (T14 tablet sweep, 2026-08-13).
+  // The hint was rendered whenever there were categories at all, with no check on the thing it
+  // describes. Measured at 1194x834: the row is 1100px wide, and on FOUR of five restaurants
+  // every category already fits — Green Bowl, Sakura Sushi and Pizza Palace (4 each) and even
+  // My Little French House (9) all came out scrollWidth == clientWidth — yet all four told the
+  // guest to swipe. Only Aangan's 22 categories genuinely overflow (2054 / 1100). It reads right
+  // on a phone, which is the width it was written for; on a tablet it is an instruction that
+  // does nothing, and a hint that lies teaches people to ignore hints.
+  // Measured, not guessed at from the count: how many chips fit depends on their names.
+  const [catOverflows, setCatOverflows] = useState(false);
+  useEffect(() => {
+    const bar = document.getElementById("cat-scroller");
+    if (!bar) { setCatOverflows(false); return; }
+    const measure = () => setCatOverflows(bar.scrollWidth - bar.clientWidth > 4);
+    measure();
+    // Re-measure when the row or its contents resize: rotating a tablet, a filter changing which
+    // categories are listed, and the web font landing all change the answer.
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(bar);
+    window.addEventListener("resize", measure);
+    window.addEventListener("orientationchange", measure);
+    return () => { ro?.disconnect(); window.removeEventListener("resize", measure); window.removeEventListener("orientationchange", measure); };
+  }, [dbCategories, visibleCategories.length, q]);
+
   // Everything below is the actual on-screen layout (JSX = HTML-like markup).
   // Curly braces { } drop a value or a bit of logic into the markup.
   return (
@@ -1007,13 +1032,18 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
         {!(loaded && menuData.length === 0) && (<>
         {/* "Categories" heading + "slide →" hint — also hidden when a filter has
             emptied EVERY category, so the label doesn't hover over an empty bar
-            (regression fix). Still shown while categories are loading. */}
+            (regression fix). Still shown while categories are loading.
+            The HINT itself only appears when the row really does have more off to the right
+            (`catOverflows`, measured above) — on a tablet most menus fit and there is nothing
+            to slide to. */}
         {!q && (dbCategories.length === 0 || visibleCategories.length > 0) && (
         <div className="section-header">
           <span className="section-title">{t.categories}</span>
+          {catOverflows && (
           <span className="browse-hint" aria-hidden="true">
             {t.slide} <i className="fas fa-arrow-right"></i>
           </span>
+          )}
         </div>
         )}
         {/* PINNED block — ONLY the category bar + the search box stay pinned at the
