@@ -94,6 +94,13 @@ export interface Category {
 // If we ever want it, the shape is already there: `searchAlias` on the item payload takes extra
 // words a search should match, so translated dish names can be added WITHOUT translating the
 // titles themselves. Do that when the owner asks — not before.
+//
+// REJECTED (owner, 2026-08-12): do NOT build an automatic translator for this, and do not offer one
+// as an improvement again. Raised a THIRD time by guest sweep T1 (as idea I6, "let a diner find a
+// dish in their own language"). His answer: *"we will not do auto translator … I will tell you only,
+// I will add the translated word, and we will fix that and keep that for the menu … So don't show it
+// as a problem again."* When he wants it he supplies the words and we put them in `searchAlias`.
+// See docs/REJECTED-IDEAS.md R14.
 // Guarded by `npm run verify:i18n-scope` so a future sweep re-reports it as a finding.
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -343,7 +350,28 @@ export async function getOrderStatus(
 export const CARD_COLUMNS =
   // tax_mode rides along (mig 270): the cart has to know whether a printed price already
   // contains GST before it can quote an honest total, and it is one short text column.
-  "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, description, tags, allergens, search_alias, options, open_price, tax_mode, sort_order, restaurant_id";
+  //
+  // `description` AND `open_price` ARE DELIBERATELY NOT HERE (owner, 2026-08-12: *"when you click
+  // more info, then only the dish paragraph and all that loads for the particular dish so that load
+  // doesn't happen"*). Measured on restaurant #1's live guest menu: 59 dishes, 34,933 characters, of
+  // which 3,741 (10.7%) was `description` — a paragraph NOTHING on the grid draws. The cards do not
+  // print it, and the search matches title / category / category name / search_alias, never it. The
+  // dish page reads the full row separately (getMenuItem uses "*"), so "more info" still has it.
+  // `open_price` STAYS SELECTED but never reaches the browser: getMenuItems filters open-price
+  // dishes out using it, so dropping it from the SELECT would silently put them back on the guest
+  // menu — it is stripped from the payload instead, by DETAIL_ONLY below. `restaurant_id` is gone
+  // outright: the scoping is done in SQL (`.eq("restaurant_id", …)`) and mapRow never mapped it.
+  // `time` IS selected, unconditionally, even though the switch that shows it (`prep_time`) is off
+  // for almost everyone. It is one short text column and is empty on every dish today (~9 bytes),
+  // whereas gating the FETCH on the switch would mean reading a restaurant's settings inside
+  // lib/menuDataServer's `unstable_cache` — and that cache is busted by menu EDITS, not by settings
+  // changes, so flipping the switch on would show nothing until the next menu edit. A presentational
+  // switch stays presentational. This is the opposite trade from `description`, and deliberately so:
+  // that one was a 3.7 KB paragraph, this is a word.
+  //
+  // This is the single hottest read in the product. If a card ever needs a description, add it back
+  // here on purpose.
+  "id, slug, title, price, image, category, veg, is4d, model_folder, model_small_url, model_optimized_url, tags, allergens, search_alias, options, open_price, tax_mode, time, sort_order";
 
 // The slugs of the categories this restaurant currently has switched ON.
 //
@@ -414,10 +442,13 @@ export const isHidden = (tags?: string[] | null): boolean => Array.isArray(tags)
  * the cards automatically and only these five stay out. It lives HERE and not in lib/menuDataServer
  * because the guest menu is a client component and that file imports `next/cache`.
  */
-export type MenuCardItem = Omit<MenuItem, "longDescription" | "nutrition" | "ingredients" | "reviews" | "relatedSlugs">;
+export type MenuCardItem = Omit<MenuItem, "longDescription" | "nutrition" | "ingredients" | "reviews" | "relatedSlugs" | "description" | "openPrice">;
 
 /** The detail-only keys the card shape drops. One list, used by the type above and the mapper below. */
-const DETAIL_ONLY = ["longDescription", "nutrition", "ingredients", "reviews", "relatedSlugs"] as const;
+// `description` and `openPrice` joined this list on 2026-08-12 (owner: the paragraph should load
+// only when a diner opens the dish). `description` is not even selected any more; `openPrice` still
+// is, because getMenuItems needs it to hide open-price dishes — it is just never shipped.
+const DETAIL_ONLY = ["longDescription", "nutrition", "ingredients", "reviews", "relatedSlugs", "description", "openPrice"] as const;
 
 /** Strip the detail-only keys off one dish, for the payload the menu grid is sent. */
 export function toCardItem(it: MenuItem): MenuCardItem {

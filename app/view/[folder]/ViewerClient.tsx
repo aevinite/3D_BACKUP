@@ -103,7 +103,13 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // Phone back button closes the details sheet first, not the whole viewer page
   // (every overlay must register with the back manager — audit fix 2026-07-06).
   useBackClose("viewer-info", showInfo, () => setShowInfo(false));
-  const [hintVisible, setHintVisible] = useState(false); // is the "triple-tap to replay" hint showing?
+  const [hintVisible, setHintVisible] = useState(false); // is the hint pill showing?
+  // I5 (owner, 2026-08-12): NOTHING told a diner the dish can be turned. The 3D dish is what makes
+  // this product different and it relied on people fiddling to find out. The FIRST time the pill pops
+  // it now says "Drag to turn it around"; every pop after that is the existing triple-tap reminder.
+  // Reusing the one pill means no second thing on screen and no new styling — and the first sentence
+  // a diner reads is the one that teaches them the feature.
+  const [hintSpin, setHintSpin] = useState(true);
   // Refs hold values across redraws without triggering one:
   const mvRef = useRef<ModelViewerElement>(null); // a handle to the actual <model-viewer> element
   const startedRef = useRef(false);   // has the reveal animation started yet?
@@ -246,7 +252,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // Show the hint, then hide it again after 3 seconds.
     const pop = () => {
       setHintVisible(true);
-      hideTimer = setTimeout(() => setHintVisible(false), 3000);
+      hideTimer = setTimeout(() => {
+        setHintVisible(false);
+        // After the first pop has been READ (i.e. once it fades), fall back to the replay reminder.
+        setHintSpin(false);
+      }, 3000);
     };
     const first = setTimeout(pop, 1200);  // first pop ~1.2s in
     const loop = setInterval(pop, 7000);  // then repeat every 7s
@@ -807,13 +817,20 @@ export default function ViewerClient({ folder }: { folder: string }) {
       </div>
 
       {/* The "triple-tap to replay" hint; the "show" class fades it in/out. */}
-      <div id="dbl-hint" className={hintVisible ? "show" : ""}>👆 {t.tripleTapReplay}</div>
+      <div id="dbl-hint" className={hintVisible ? "show" : ""}>
+        {hintSpin ? <>🔄 {t.dragToSpin}</> : <>👆 {t.tripleTapReplay}</>}
+      </div>
 
       {/* The actual 3D model element — only once we have a config AND a chosen
           model file. We pass the chosen file in as modelUrl. */}
       {config && activeUrl && (
         <PublicModelViewer
           config={{ ...config, modelUrl: activeUrl }}
+          /* I4 (2026-08-12): every dish used to announce itself to a screen reader as the same
+             "3D food model", so a blind diner could not tell the croissant from the waffle. Prefer
+             the LIVE menu name, fall back to the config's, then to the folder — the same order the
+             bottom bar uses for its title. */
+          dishName={menuItem?.title || config.title || folder}
           mvRef={mvRef}
           onScriptError={() => { if (!modelSeenRef.current) setLoadFailed(true); }}
         />

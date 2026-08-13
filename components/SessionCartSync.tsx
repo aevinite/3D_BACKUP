@@ -125,7 +125,18 @@ export default function SessionCartSync() {
         writeLocalGuarded(merged);
         lastJson.current = JSON.stringify(merged);
         reconciledToken.current = s.token;
-        if (lastJson.current !== JSON.stringify(serverCart)) await setSessionCart(s.token, merged);
+        if (lastJson.current !== JSON.stringify(serverCart)) {
+          // THIS is the one write that still sends the WHOLE array (every later change goes through
+          // mergeSessionCart's delta). If a co-diner added a dish between the read above and this
+          // write, the whole-array write would have silently dropped it. Passing the
+          // cart_updated_at we READ makes the server refuse instead (reason 'cart_moved'), and we
+          // re-run this first-sync merge on the next tick against the newer cart — first save wins,
+          // the loser is told. (mig 311)
+          const w = await setSessionCart(s.token, merged, (r as { cart_updated_at?: string | null }).cart_updated_at ?? null);
+          if (!w.ok && (w as { reason?: string }).reason === "cart_moved") {
+            reconciledToken.current = null; // someone else got there first — merge again next tick
+          }
+        }
         return;
       }
 

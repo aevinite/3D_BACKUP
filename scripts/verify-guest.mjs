@@ -88,8 +88,19 @@ check(110, "getMenuItem no longer pulls a review list nothing reads", () =>
   !has(F.menuLib, "mapped.reviews = revs"));
 check("394-395", "no internal dev text on a guest 3D screen", () =>
   !has(F.pmv, "config.json") && !has(F.pmv, "Supabase") && !rx(F.viewer, /\{error\}<\/p>/));
-check(115, "the is-4d card styling follows the 3D switch", () =>
-  has(F.food, 'item.is4d && features.model3d ? "is-4d"'));
+// This asserted the literal `item.is4d && features.model3d ? "is-4d"` until 2026-08-12, when that
+// test got STRICTER: the badge, the cube icon and the card styling now also require the model FILES
+// to exist, because a dish ticked "4D" before its model was uploaded was advertising a 3D view that
+// could not open (guest sweep T1; owner: *"do the problem nine also"*). So the guard checks the
+// INVARIANT — one derived value, gated on the switch AND both files, used by all three — rather than
+// one spelling of it. Checking the string is what made the sibling guard below read FAIL against
+// better code.
+check(115, "the 4D badge, icon and card styling all follow ONE test: switch on AND both model files present", () => {
+  const def = /const has3d = !!\(item\.is4d && features\.model3d && item\.modelSmallUrl && item\.modelOptimizedUrl\)/.test(F.food || "");
+  const uses = (F.food.match(/has3d \?/g) || []).length;      // is-4d class, badge, cube icon
+  const noBareGate = !rx(F.food, /item\.is4d && features\.model3d \?/); // nothing gated on the tick alone
+  return { ok: def && uses >= 3 && noBareGate, note: `def=${def} uses=${uses} noBareGate=${noBareGate}` };
+});
 // The "off" branch became stopAll() on 2026-08-04 — setQueue([],[],[],[]) only emptied the WAITING
 // LINE, so a GLB already in flight still finished downloading. This guard kept asserting the OLD
 // call and so read FAIL against the better code; it asserts the switch-then-queue order, not the

@@ -67,6 +67,10 @@ export interface Translations {
   back: string;
   contains: string;
   tripleTapReplay: string;
+  // I5 (owner asked for it, 2026-08-12): nothing on screen told a diner the 3D dish can be TURNED.
+  // The 3D dish is the whole point of this product and it relied on people fiddling to discover it.
+  // Shown once, briefly, when the model first appears — the same quiet pill as tripleTapReplay.
+  dragToSpin: string;
   notAvailable: string; // a sold-out dish's button label, shared by the dish page and 3D view
   // The menu's EMPTY states. They were hardcoded English on a screen whose chips, headings and
   // search box all translate, so a Hindi guest whose search found nothing was told what to do
@@ -161,6 +165,7 @@ const translations: Record<LanguageCode, Translations> = {
     back: "Back",
     contains: "Contains",
     tripleTapReplay: "Triple-tap to replay",
+    dragToSpin: "Drag to turn it around",
     notAvailable: "Not available",
   },
   de: {
@@ -229,6 +234,7 @@ const translations: Record<LanguageCode, Translations> = {
     back: "Zurück",
     contains: "Enthält",
     tripleTapReplay: "Dreimal tippen zum Wiederholen",
+    dragToSpin: "Ziehen, um es zu drehen",
     notAvailable: "Nicht verfügbar",
   },
   fr: {
@@ -297,6 +303,7 @@ const translations: Record<LanguageCode, Translations> = {
     back: "Retour",
     contains: "Contient",
     tripleTapReplay: "Triple-tapez pour rejouer",
+    dragToSpin: "Faites glisser pour le tourner",
     notAvailable: "Non disponible",
   },
   ar: {
@@ -365,6 +372,7 @@ const translations: Record<LanguageCode, Translations> = {
     back: "رجوع",
     contains: "يحتوي على",
     tripleTapReplay: "انقر ثلاث مرات للإعادة",
+    dragToSpin: "\u0627\u0633\u062d\u0628 \u0644\u062a\u062f\u0648\u064a\u0631\u0647",
     notAvailable: "غير متوفر",
   },
   hi: {
@@ -433,6 +441,7 @@ const translations: Record<LanguageCode, Translations> = {
     back: "पीछे",
     contains: "इसमें है",
     tripleTapReplay: "दोहराने के लिए तीन बार टैप करें",
+    dragToSpin: "\u0918\u0941\u092e\u093e\u0928\u0947 \u0915\u0947 \u0932\u093f\u090f \u0938\u094d\u0932\u093e\u0907\u0921 \u0915\u0930\u0947\u0902",
     notAvailable: "उपलब्ध नहीं",
   },
   ko: {
@@ -501,6 +510,7 @@ const translations: Record<LanguageCode, Translations> = {
     back: "뒤로",
     contains: "포함 성분",
     tripleTapReplay: "세 번 탭하여 다시 재생",
+    dragToSpin: "\ub4dc\ub798\uadf8\ud558\uc5ec \ub3cc\ub824\ubcf4\uc138\uc694",
     notAvailable: "판매 종료",
   },
 };

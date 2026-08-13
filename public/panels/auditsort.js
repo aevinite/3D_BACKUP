@@ -54,6 +54,11 @@
     on_the_house: "Settled on the house",
     bill_changed_after_reopen: "Bill changed after a reopen",
     order_restored: "Bill put back",
+    /* NEW 2026-08-13 (owner: "you can edit after the bill, but it will go in the audit — minor
+       section, not the risky one, no money one"). A note or an allergy changed on a bill that was
+       ALREADY settled. It moves no money at all — see KIND_RISK below, which is what keeps it out
+       of the money figures. */
+    bill_annotated: "Note or allergy changed after settling",
   };
   /* The glyph each type wears, beside the words so the two cannot drift. Plain text symbols only —
      the manager panel renders these into its own markup and a couple of its rows print to paper. */
@@ -62,6 +67,37 @@
     qty_reduced: "\u2796", menu_item_deleted: "\uD83D\uDCD5", invoice_voided: "\u21A9\uFE0F",
     discount_given: "\uFF05", payment_reverted: "\u21BA", on_the_house: "\uD83C\uDF81",
     bill_changed_after_reopen: "\u21C4", order_restored: "\u267B\uFE0F",
+    bill_annotated: "\u270E",
+  };
+  /* HOW RISKY IS THIS ROW — the ONE answer, for all three panels (owner, 2026-08-13:
+     "it should also show whole risk like money wise and all that, how much money is there which
+     reverted and all everything … editing after a bill, that goes in the minor section, not the
+     risky one, no money one").
+     Three levels, and the difference is not severity-by-feeling — it is whether MONEY MOVED:
+       · "money"  — the restaurant collected less, or nothing, than the food was worth. These are the
+                    rows that add up to a number an owner can be angry about, and the only ones the
+                    money summary counts (SQL: lfh_audit_money_summary).
+       · "record" — the RECORD changed but not the money: a KOT voided before anything was charged,
+                    a dish taken off a live (unpaid) order, a menu dish deleted, a bill reopened or
+                    put back, a note changed after settling. Worth keeping, never worth alarming.
+       · "data"   — someone's personal information was erased on request. Not money, not a bill; it
+                    has its own level because it is the one thing that cannot be undone.
+     Kept in step with lfh_audit_risk() in the database by npm run verify:audit — two answers to
+     "is this row about money" is exactly how a summary starts disagreeing with the list above it. */
+  var KIND_RISK = {
+    discount_given: "money",             // money taken off a bill
+    on_the_house: "money",               // settled with nothing collected
+    payment_reverted: "money",           // collected, then un-collected
+    order_deleted: "money",              // a bill taken off the working list (it stays in the reports)
+    bill_changed_after_reopen: "money",  // what the bill was worth before vs after — the amount moved
+    order_cancelled: "record",           // a KOT voided: nothing was charged to the guest
+    dish_removed: "record",              // one dish off a LIVE order, before it was ever billed
+    qty_reduced: "record",               // same, one plate fewer
+    menu_item_deleted: "record",         // the menu changed, no bill involved
+    invoice_voided: "record",            // reopened FOR editing; what actually moved is recorded as bill_changed_after_reopen
+    order_restored: "record",            // the reversal of a removal — it puts money back, never takes it
+    bill_annotated: "record",            // a note / allergy after settling: touches no total, tax or discount
+    customer_erased: "data",             // a person's details, erased on request, irreversibly
   };
   /* The one-tap reasons, for the same reason — the search matches on the WORDS a screen shows, so a
      third spelling of "By mistake" would make typing it find nothing on one panel and rows on another. */
@@ -213,6 +249,8 @@
 
   var API = {
     KIND_LABEL: KIND_LABEL,
+    KIND_RISK: KIND_RISK,
+    riskOf: function (kind) { return KIND_RISK[kind] || "record"; },
     KIND_ICON: KIND_ICON,
     REASON_LABEL: REASON_LABEL,
     SORTS: SORTS,

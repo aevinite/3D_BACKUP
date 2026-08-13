@@ -144,9 +144,27 @@ export default function AppShell({ children, logoText, accentColor, restaurantId
   const darkCanvas = bt.dark ? buildCanvasBlock(bt.dark) : "";
   const lightCanvas = bt.light ? buildCanvasBlock(bt.light) : "";
   const themed = !!(darkBody || lightBody);
+  // THE PALETTE HAS TO REACH THE THINGS THAT ARE NOT INSIDE #app (guest sweep T1, 2026-08-12).
+  //
+  // The cart, the bill sheet, the toasts and the session widgets are GuestChrome, mounted at BODY
+  // level in app/layout.tsx — siblings of #app, not children. So the `#app.brand-themed` block below
+  // could never reach them, and they fell back to whatever `:root` said, i.e. the restaurant's
+  // accent_color. On a restaurant whose theme accent differs from its accent_color that is a
+  // different colour: measured on Aangan, the menu was blue and the bill sheet orange.
+  //
+  // So the same block is ALSO emitted at `html[data-theme=…]`, exactly as the canvas vars already
+  // are (see the 2026-08-05 note above — same reasoning, one step further). Two things make this
+  // safe rather than a leak: this <style> is rendered ONLY by AppShell, which only wraps the guest
+  // pages, and one page only ever shows one restaurant. `html[data-theme="dark"]` also outranks the
+  // `:root` accentPaletteCss block above it (type+attribute beats a lone pseudo-class), so a
+  // restaurant that sets a real theme wins over its own accent_color instead of fighting it.
+  // The #app block is KEPT and still comes last: it is the most specific, so nothing inside the app
+  // changes, and #1 and the staff panels are untouched either way.
   const themedCss = themed
     ? `${darkCanvas ? `html[data-theme="dark"]{${darkCanvas}}` : ""}` +
       `${lightCanvas ? `html[data-theme="light"]{${lightCanvas}}` : ""}` +
+      `${darkBody ? `html[data-theme="dark"]{${darkBody}}` : ""}` +
+      `${lightBody ? `html[data-theme="light"]{${lightBody}}` : ""}` +
       `${darkBody ? `[data-theme="dark"] #app.brand-themed{${darkBody}}` : ""}` +
       `${lightBody ? `[data-theme="light"] #app.brand-themed{${lightBody}}` : ""}`
     : "";

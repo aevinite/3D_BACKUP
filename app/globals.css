@@ -841,6 +841,14 @@ body.menu-frost .nav {
 }
 .search-container { position: relative; width: 100%; }
 /* search autocomplete dropdown */
+/* REJECTED (owner, 2026-08-12): the hardcoded #1b120c brown and rgba(212,165,116,…) gold below are
+   DELIBERATE and stay. Guest sweep T1 reported them as a white-label leak — the suggestion panel
+   renders in French House's colours on green-bowl, sakura-sushi, spice-route and aangan alike. The
+   owner's answer: *"P3 is completely trash. I want … all the panels and all that stuff write in a
+   code as a comment that should be this colour only like golden and little french house theme one."*
+   So: GOLDEN + the little-French-house theme is the intended house style for this and for the
+   panels. Do not "fix" these to var(--accent), and do not re-report it.
+   See docs/REJECTED-IDEAS.md R13. */
 .search-dropdown {
   position: absolute; top: calc(100% + 8px); left: 0; right: 0; z-index: 40;
   background: #1b120c; border: 1px solid rgba(212,165,116,0.3); border-radius: 14px;
@@ -859,6 +867,15 @@ body.menu-frost .nav {
 .search-result-side { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; flex: none; }
 .search-result-price { color: var(--accent-ink, var(--accent)); font-size: 13px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
 [data-theme="light"] .search-dropdown { background: #fff; }
+/* "THERE ARE MORE SUGGESTIONS BELOW" (T1 improvement 3, owner asked for it 2026-08-12).
+   Up to 8 suggestions are built and about 5.5 rows fit on a 360px phone, so the rest were behind a
+   half-cut row that reads as the end of the list rather than as "scroll me". Same cue, same shape, as
+   the filter chip row's right-edge fade — vertical instead of horizontal. Only drawn while there IS
+   more below (data-can-scroll, stamped by the measuring effect in MenuView), so a short list of two
+   results stays perfectly crisp and the last row is never dimmed once you reach it. */
+.search-dropdown[data-can-scroll="1"] {
+  mask-image: linear-gradient(to bottom, #000 0, #000 calc(100% - 26px), transparent 100%);
+}
 .search-input {
   /* THEME-TRIAL: follow --card so the search bar matches the theme (was a hardcoded brown) */
   width: 100%; background: color-mix(in srgb, var(--card) 78%, transparent); border: var(--border);
@@ -1298,6 +1315,13 @@ body.menu-frost .nav {
      make that one card shorter than its neighbours. */
   min-height: 1.35em;
 }
+/* REJECTED (owner, 2026-08-12): do NOT add `!important` here to beat the `a *, .item-card-link *
+   { color: inherit !important }` reset further down this file. Reported by guest sweep T1 as "the
+   dish price lost its brand colour on every restaurant" (it computes as --text, not --accent, and
+   the same reset also stops .dish-meta being muted and a sold-out price greying out). The owner's
+   answer: *"I don't think P1 is a problem … it's not a problem … because bill will be black and
+   white colour will stand out."* The plain-text price is accepted. Leave this rule as it is, and do
+   not re-report it. See docs/REJECTED-IDEAS.md R12. */
 .dish-price {
   font-family: 'Inter', sans-serif;
   font-weight: 700;

@@ -127,9 +127,34 @@ try {
     );
   });
   log("  GLB requests during phase 3:", p3);
-  if (p3.length !== 0) {
+  // COUNT EACH FILE ACROSS THE WHOLE JOURNEY, NOT PER PHASE (T1 improvement 14, 2026-08-12).
+  //
+  // This used to fail if ANY GLB request landed inside phase 3's window, and against a deployed
+  // origin that is a FALSE ALARM: phase 2 closes the moment the "View in 3D" button appears, so on a
+  // slower origin the heavy model is still downloading and its single, correct request gets blamed on
+  // the viewer. Measured on the deployed site: the guard said "Viewer re-fetched croissant-optimized"
+  // while instrumenting the whole run showed croissant_small 1, waffle_small 1,
+  // croissant-optimized 1 — nothing re-fetched at all.
+  //
+  // The thing this guard actually exists to protect is "download once, never again on navigation"
+  // (CLAUDE.md). That is a statement about TOTALS, so count totals: a file requested twice is the
+  // real bug, and a file requested once is fine wherever the stopwatch happened to be. This also
+  // makes the check meaningful with --base against a real deployment, which is exactly what somebody
+  // will do — a guard that cries wolf is a guard people learn to ignore.
+  const allGlb = [...p1, ...p2, ...p3];
+  const perFile = {};
+  for (const u of allGlb) { const n = String(u).split("/").pop().split("?")[0]; perFile[n] = (perFile[n] || 0) + 1; }
+  log("  GLB requests across the WHOLE run:", perFile);
+  const refetched = Object.entries(perFile).filter(([, n]) => n > 1);
+  if (refetched.length) {
     verdict = "FAIL";
-    findings.push("Viewer re-fetched GLBs (should be 0): " + JSON.stringify(p3));
+    findings.push("A GLB was fetched more than once (download-once is broken): " + JSON.stringify(Object.fromEntries(refetched)));
+  }
+  // Still worth SAYING when the heavy tier lands late, because on a fast origin it should already be
+  // warm by the time the viewer opens — it is just not a failure.
+  if (p3.length !== 0) {
+    log("  ℹ️  the optimized tier finished during the viewer step, not the dish page — expected on a" +
+        " remote/cold origin, and not a re-fetch (see the totals above).");
   }
 
   log("\n=== Phase 3b: viewer back button points at source item ===");

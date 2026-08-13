@@ -448,7 +448,7 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
 - **`/api/owner/**`** — `ownerScope()` (`lib/ownerScope.ts`); null → 401.
 - **Deliberately public** (the COMPLETE list — an API route absent from here must have a gate;
   re-checked route by route in the T9 sweep 2026-08-05, which found the last two missing):
-  `/api/health`, `/api/health/deep`, `/api/blocked`, `/api/log/client-error`, `/api/guest/limit-hit`,
+  `/api/health`, `/api/blocked`, `/api/log/client-error`, `/api/guest/limit-hit`,
   `/api/guest/place-order`, `/api/guest/call-waiter`, `/api/r/<slug>/menu-data`, `/api/rt-config`,
   `/api/aggregators/webhook/<source>`, and the guest menu itself.
   - `/api/guest/place-order` is a diner's own order — identity is the session token / the table in
@@ -462,13 +462,9 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
     have a gate") then points the next audit at a route that is entirely correct, and the list stops
     being trustworthy for the routes that genuinely ARE missing one. A new public route goes on this
     list in the same commit that creates it.
-  - `/api/health/deep` is the SECOND, slower probe (improvement I13, 2026-08-12): it answers WHICH
-    part is broken — database, file storage, or the live-updates configuration — where `/api/health`
-    only ever answers "the database is reachable". Public for the same reason as `/api/health`: an
-    outside watchdog has no cookie. It returns booleans and plain sentences only — no counts, no
-    tenant data, no error text, no secrets — and caches its answer for 60s so it costs the same when
-    hammered as when politely polled. Put it on a SLOWER schedule than `/api/health` (hourly);
-    the 5-minute probe is deliberately the cheap one.
+  - `/api/health/deep` was built on 2026-08-12 and REMOVED the next day at the owner's word — see
+    `docs/REJECTED-IDEAS.md` R18. Do not re-add it, and do not add "which part is broken?" checks to
+    `/api/health` either.
   - `/api/aggregators/webhook/<source>` is an inbound POST from Zomato/Swiggy, so it cannot carry
     our cookie; it is dormant until the `aggregators` flag is on, and it now REFUSES unless a shared
     secret is configured AND matches (constant-time). Before 2026-08-06 a missing secret meant

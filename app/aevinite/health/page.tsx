@@ -22,6 +22,10 @@ type Health = {
   realtime: { configuredHost: string | null };
   openIssues: number | null;
   issuesFeedWired: boolean;
+  // Dishes ticked "4D" whose model file was never uploaded, so their 3D view cannot open.
+  // null = the read failed (say "unreadable", never a reassuring zero).
+  broken3d: { count: number; dishes: { slug: string; title: string; restaurantId: string; missing: string }[] } | null;
+  broken3dError: string | null;
   checkedAt: string;
   error?: string;
 };
@@ -164,6 +168,54 @@ export default function AdminHealth() {
                   ? `Staff-raised issues (the closest thing to an error feed): ${h.openIssues} open across the platform.`
                   : "Couldn't reach the issues table — no error feed available right now."}
               </p>
+            </div>
+          </div>
+
+          {/* 3D THAT CANNOT OPEN (owner, 2026-08-12). A dish ticked "4D" whose model file was never
+              uploaded used to wear a "4D" badge on the menu and then tell the diner "3D view isn't
+              ready for this dish". The badge no longer lies (components/FoodCard.tsx → has3d), and
+              this is where the owner finds out there is something to upload. Read-only and quiet on
+              purpose — no phone alert for a missing file. */}
+          <div className="adm-card" style={{ marginTop: 14 }}>
+            <div className="adm-cardbody">
+              <h2>3D dishes with no model file</h2>
+              <p className="hint">
+                A dish marked <strong>4D</strong> needs its model uploaded before a diner can spin it.
+                These are ticked but have no file, so their 3D view cannot open — the menu quietly shows
+                them as ordinary dishes until the file is there.
+              </p>
+              {h.broken3d === null ? (
+                <p className="hint" style={{ marginBottom: 0 }}>
+                  Couldn&rsquo;t check this right now{h.broken3dError ? ` (${h.broken3dError})` : ""} — so this is
+                  <strong> unknown</strong>, not zero.
+                </p>
+              ) : h.broken3d.count === 0 ? (
+                <p className="hint" style={{ marginBottom: 0 }}>
+                  <span className="adx-pill good"><span className="dot" />Nothing to fix</span>{" "}
+                  Every dish marked 4D has both of its model files.
+                </p>
+              ) : (
+                <>
+                  <p style={{ margin: "0 0 10px" }}>
+                    <span className="adx-pill warn"><span className="dot" />
+                      {h.broken3d.count} dish{h.broken3d.count === 1 ? "" : "es"} to fix
+                    </span>
+                  </p>
+                  <div className="adm-logwrap">
+                    {h.broken3d.dishes.map((d) => (
+                      <div key={`${d.restaurantId}-${d.slug}`} className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}>
+                        <span>{d.title || d.slug}</span>
+                        <span className="mono adm-muted">missing: {d.missing}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {h.broken3d.count > h.broken3d.dishes.length && (
+                    <p className="hint" style={{ marginTop: 8, marginBottom: 0 }}>
+                      Showing the first {h.broken3d.dishes.length} of {h.broken3d.count}.
+                    </p>
+                  )}
+                </>
+              )}
             </div>
           </div>
         </>

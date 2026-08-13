@@ -20,6 +20,8 @@
     "verify:db-parity": "node scripts/verify-db-parity.mjs",
     "verify:grants": "node scripts/verify-db-grants.mjs",
     "verify:one-number": "node scripts/verify-one-number.mjs",
+    "verify:purge": "node scripts/verify-purge-classified.mjs",
+    "verify:guest-pass": "node scripts/verify-guest-pass-private.mjs",
     "verify:write-paths": "node scripts/verify-write-paths.mjs",
     "verify:live-rush": "node scripts/verify-manager-live-rush.mjs",
     "verify:owner-reports": "node scripts/verify-owner-reports.mjs",
