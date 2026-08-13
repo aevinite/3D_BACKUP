@@ -132,14 +132,29 @@ export function deviceIdFrom(req: { cookies: { get(name: string): { value: strin
   return req.cookies.get("lfh_panel_device")?.value ?? null;
 }
 
-// deviceBlocked: true if this staff device has been blocked (a blocklist row
-// carries its device_id). Used by the tablet/kitchen APIs to refuse a blocked
-// device. Fail-open (returns false on error) so a transient DB hiccup never
-// locks every device out.
-export async function deviceBlocked(deviceId: string | null): Promise<boolean> {
-  if (!deviceId) return false;
+// deviceBlocked: true if this staff device has been blocked FOR THIS RESTAURANT (a blocklist row
+// carries its device_id). Used by the tablet/kitchen APIs to refuse a blocked device. Fail-open
+// (returns false on error) so a transient DB hiccup never locks every device out.
+//
+// A BAN BELONGS TO THE RESTAURANT THAT SET IT (T13 sweep, 2026-08-13). This read had no
+// restaurant_id filter while everything around it did, so one restaurant's block refused the device
+// at EVERY restaurant — and the most likely victim was the owner's/admin's own browser, which
+// carries ONE `lfh_panel_device` cookie across every restaurant it opens from /aevinite. Worse, the
+// other restaurant could not clear it: the list (editor route, blocklist GET) and the unblock
+// (blocklist DELETE) are both `.eq("restaurant_id", rid)`, so the row was invisible and unremovable
+// to the restaurant it was refusing. Both ban WRITES already stamp the restaurant — the comment
+// above the tablet one records that omitting it was itself a bug, fixed in mig 142 on 2026-07-07 —
+// so this read was the last unscoped step in the chain.
+//
+// `restaurantId` is REQUIRED, not optional-with-a-default: both callers already hold their `rid`
+// (they resolved it to answer the request at all), and a default would let a future caller silently
+// re-open the same hole. A falsy rid means "we do not know whose floor this is" — fail open, exactly
+// like a database error, rather than guessing restaurant #1 and refusing a device nobody blocked.
+export async function deviceBlocked(deviceId: string | null, restaurantId: string | null): Promise<boolean> {
+  if (!deviceId || !restaurantId) return false;
   try {
-    const { data } = await sb.from("blocklist").select("id").eq("device_id", deviceId).limit(1);
+    const { data } = await sb.from("blocklist").select("id")
+      .eq("device_id", deviceId).eq("restaurant_id", restaurantId).limit(1);
     return !!(data && data.length);
   } catch {
     return false;

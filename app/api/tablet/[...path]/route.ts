@@ -704,8 +704,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (emptyIdSegment(b) || emptyIdSegment(c)) return err("Missing id — please refresh and try again.");
     const body = await readBody(req);
     const dev = deviceIdFrom(req); // which tablet/device is acting
-    // A staff-blocked device can't do anything from the tablet.
-    if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
+    // A staff-blocked device can't do anything from the tablet — but only where it was BLOCKED.
+    // `rid` is resolved above (the route already refuses without one), so the ban is read against
+    // this restaurant instead of platform-wide; see the note on deviceBlocked in lib/oplog.ts.
+    if (await deviceBlocked(dev, rid)) return err("This device has been blocked by staff.", 403);
 
     // ── WAITER SECTIONS (mig 222) — ONE gate for every table-scoped write ──────
     // Deliberately checked HERE, once, instead of inside each of the ~38 action branches

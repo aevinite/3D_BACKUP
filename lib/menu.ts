@@ -660,6 +660,31 @@ const SETTINGS_TTL_MS = 8000;
 const settingsCache = new Map<string, { at: number; val: Settings }>();
 const settingsInflight = new Map<string, Promise<Settings>>();
 
+/**
+ * Forget this restaurant's cached settings so the NEXT getSettings() genuinely re-reads.
+ *
+ * WHY THIS HAS TO EXIST (T13 sweep, 2026-08-13). The TTL above is "deliberately short so a realtime
+ * feature/tax toggle is picked up within seconds" — but a breadcrumb does not wait for a TTL, it
+ * arrives and asks for the value NOW. refreshFeatures() (lib/features.ts) cleared its OWN two maps
+ * and then called getFeatures() → getSettings(), landed on this 8-second cache, and recomputed the
+ * feature map from the PRE-TOGGLE settings row — then stored that stale map in a cache with no TTL
+ * of its own and pushed it to every mounted useFeatures() as if it were the new truth. So the owner
+ * flipped a guest switch, the breadcrumb arrived in about a second, and nothing changed on a guest's
+ * phone until the 60-second safety poll happened to re-run the handler AFTER the TTL had lapsed.
+ * That 8-second window is not an edge case: the guest page reads settings on mount (AppShell) and
+ * again for the features, so a browsing guest has almost always read settings very recently.
+ *
+ * A cache in front of a breadcrumb is the known way these updates die (mig 299) — the breadcrumb
+ * must be able to say "drop it", which is all this does.
+ *
+ * `inflight` is dropped too: a request already in flight was started BEFORE the change and would
+ * settle into the cache carrying the old row.
+ */
+export function invalidateSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): void {
+  settingsCache.delete(restaurantId);
+  settingsInflight.delete(restaurantId);
+}
+
 export async function getSettings(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<Settings> {
   const hit = settingsCache.get(restaurantId);
   if (hit && Date.now() - hit.at < SETTINGS_TTL_MS) return hit.val; // fresh enough

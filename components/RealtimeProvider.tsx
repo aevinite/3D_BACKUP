@@ -48,16 +48,38 @@ export default function RealtimeProvider() {
       currentTopic = topic;
       metrics.topic = topic;
       if (!topic) return; // no table yet → backup poll covers us until they connect
+      // SCOPE THE SOCKET TO THIS RESTAURANT, SERVER-SIDE (T13 sweep, 2026-08-13).
+      //
+      // `table:N` is NOT unique across restaurants, so filtering on the bare `topic` meant a guest
+      // sitting at table 5 was DELIVERED every breadcrumb for table 5 of every restaurant on the
+      // platform and threw them away in JavaScript below. The display was always right; the traffic
+      // grew with the number of RESTAURANTS instead of with this restaurant's own business — the
+      // exact wording mig 267 / sweep F7 used when it closed the same gap on the staff panels, and
+      // the owner's #1 scaling worry. This was the last subscriber still on the bare topic.
+      //
+      // The fix needs no migration: mig 145 added `realtime_events.topic_rid` ('<topic>:<rid>') for
+      // precisely this, and lfh_set_topic_rid() populates it on EVERY breadcrumb — `table:N` rows
+      // included — so the column is already correct on these rows. public/panels/realtime.js and
+      // lib/useRealtime.ts have both used it for a while.
+      //
+      // `rid` resolves ASYNC (RestaurantProvider starts at #1 then corrects itself), so until it
+      // lands we stay on the bare topic rather than subscribe to a `topic_rid` built from the WRONG
+      // restaurant — that would filter out the guest's own events, which is a missed update, far
+      // worse than a few extra ones. The effect's [rid] dependency rebuilds this the moment the real
+      // id arrives, and the JS check below still runs as the safety net either way.
+      const scoped = rid ? `${topic}:${rid}` : null;
       channel = supabase
-        .channel(`rt:${topic}`)
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_events", filter: `topic=eq.${topic}` },
+        .channel(scoped ? `rt:${scoped}` : `rt:${topic}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "realtime_events",
+              filter: scoped ? `topic_rid=eq.${scoped}` : `topic=eq.${topic}` },
           (payload) => {
-            // The topic is `table:N`, which is NOT unique across restaurants — restaurant
-            // A's "table 5" and restaurant B's "table 5" share the channel. Drop any event
-            // whose breadcrumb belongs to a DIFFERENT restaurant so a guest never refetches
-            // on another restaurant's activity (mig 086 added realtime_events.restaurant_id
-            // for exactly this; mirrors lib/useRealtime.ts). If either id is missing we keep
-            // the event (safe: at worst one extra refetch, never a missed update).
+            // Belt and braces: the filter above already scopes the socket once `rid` is known, but
+            // this stays because the pre-`rid` window (and any future caller that passes none) is
+            // still on the bare topic, where restaurant A's "table 5" and restaurant B's "table 5"
+            // share the channel. Drop any event whose breadcrumb belongs to a DIFFERENT restaurant
+            // (mig 086 added realtime_events.restaurant_id for exactly this; mirrors
+            // lib/useRealtime.ts). If either id is missing we keep the event (safe: at worst one
+            // extra refetch, never a missed update).
             const pnew = (payload as { new?: { restaurant_id?: string; created_at?: string } })?.new;
             const evRid = pnew?.restaurant_id;
             if (rid && evRid && evRid !== rid) return;

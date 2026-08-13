@@ -17,10 +17,43 @@ type Topic = "ops" | "menu" | "audit";
 type Handlers = Partial<Record<Topic, () => void | Promise<void>>>;
 
 // One shared client per tab (the anon url+key are public — same values the guest
-// bundle already ships). Lazily created from /api/rt-config.
+// bundle already ships).
+//
+// ONE WEBSOCKET PER TAB, NOT TWO (T13 sweep, 2026-08-13). This always built its OWN client from
+// /api/rt-config, while components/RealtimeProvider.tsx uses the module singleton in lib/supabase.ts
+// — and supabase-js opens a websocket PER CLIENT INSTANCE, with no pooling between them. Both are
+// live on every guest menu view where a table is known (RealtimeProvider is mounted from the root
+// layout via GuestChrome, and MenuView calls this hook), so every seated guest held TWO connections
+// where one would do: 200 guests = 400 connections. That is the exact resource the idle-drop timers
+// in this file and in public/panels/realtime.js were both written to protect ("the stale 41
+// connections problem") — they cut IDLE connections and neither could remove the duplicate on an
+// ACTIVE one.
+//
+// So: prefer the shared client when the public values are compiled in (the normal case — the guest
+// bundle already ships them, which is what makes lib/supabase.ts work at all), and keep the
+// /api/rt-config path as the fallback for a deployment where they are not. The two clients are
+// built with the SAME realtime options (worker:true, eventsPerSecond:10), so nothing about delivery
+// changes; lib/supabase.ts additionally wraps its REST fetch in a timeout, which the websocket does
+// not use.
+//
+// The import is DYNAMIC on purpose. lib/supabase.ts builds its client at module scope from those
+// two values, so a top-level import here would run that construction — and throw — on a deployment
+// where they are missing, which is precisely the case the /api/rt-config fallback below exists to
+// survive. Importing it only after we have checked the values keeps that fallback genuinely
+// reachable instead of decorative.
 let clientPromise: Promise<SupabaseClient> | null = null;
 async function getClient(): Promise<SupabaseClient> {
   if (clientPromise) return clientPromise;
+  // Read through locals so a bundler cannot fold these into truthy strings at build time.
+  const inlineUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const inlineKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (inlineUrl && inlineKey) {
+    clientPromise = import("@/lib/supabase").then((m) => m.supabase);
+    // A failed import must not be remembered forever (the same rule the rt-config path follows
+    // below, and the lesson public/panels/realtime.js records at length).
+    clientPromise.catch(() => { clientPromise = null; });
+    return clientPromise;
+  }
   clientPromise = (async () => {
     const cfg = await (await fetch("/api/rt-config", { cache: "no-store" })).json();
     // See the note in public/panels/realtime.js: a 503 { unconfigured:true } is a real answer, and
@@ -141,6 +174,15 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("focus", wake);
+    // pageshow fires on a BACK-FORWARD-CACHE restore — a phone coming back from another app or a
+    // back gesture. Both twins of this file already had it (public/panels/realtime.js and
+    // components/RealtimeProvider.tsx); this one did not, so the guest's DISH LIST was the one thing
+    // with no wake-up on that path and a dish that went sold-out while the phone was away stayed
+    // tappable until the 60s poll below (T13 sweep, 2026-08-13). visibilitychange usually covers a
+    // bfcache restore, which is why this was only ever a narrow gap — but iOS Safari does not fire
+    // it reliably on a gesture-restore, and that is exactly the case the panel twin added it for.
+    // `wake` is throttled to one socket rebuild per 1.5s, so the extra signal costs a refetch at most.
+    window.addEventListener("pageshow", wake);
     window.addEventListener("online", wake);
     const poll = setInterval(() => { if (!document.hidden) fireAll(); }, 60000); // safety net — paused while hidden
 
@@ -153,6 +195,7 @@ export function useRealtime(handlers: Handlers, restaurantId?: string) {
       Object.values(timers).forEach((t) => t && clearTimeout(t));
       document.removeEventListener("visibilitychange", onVisibility);
       window.removeEventListener("focus", wake);
+      window.removeEventListener("pageshow", wake);
       window.removeEventListener("online", wake);
       getClient().then((sb) => channels.forEach((c) => sb.removeChannel(c))).catch(() => {});
     };
