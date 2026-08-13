@@ -5470,7 +5470,13 @@ function syncGuestBell() {
 
 function renderEditor() {
   const ed = $("#editor");
-  syncGuestBell();   // a top-bar button, so it is kept current on every tab, not just the floor
+  // DEFERRED ON PURPOSE. Both panels rebuild chunks of their own chrome during the render that
+  // follows this call, and the waiter tablet's rebuild takes the top bar with it — so mounting
+  // the bell first meant mounting it into markup that was about to be thrown away, and the
+  // button simply never appeared (measured on the real tablet: the sheet worked, the button
+  // did not exist). Running it after the current render settles costs one empty task and makes
+  // the bell independent of what each panel happens to redraw.
+  setTimeout(syncGuestBell, 0);   // a top-bar button — kept current on every tab, not just the floor
   if (state.tab === "tables") {
     const _t0 = performance.now();
     ed.innerHTML = floorHtml();

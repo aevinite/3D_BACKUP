@@ -1271,7 +1271,7 @@ function syncGuestBell() {
     // Waiting-to-be-let-in and requests are COUNTS on this panel's tile, not rows (the waiter's
     // summary is the slim tier), so they are reported as a count rather than one line each.
     for (const t of mine) {
-      const tile = tableTileState(t);
+      const tile = summaryTile(t);
       if (!tile) continue;
       if (tile.hasNew) {
         const n = Number((tile.counts || {}).nw) || 1;
@@ -1281,12 +1281,25 @@ function syncGuestBell() {
       if (tile.reqs) rows.push({ kind: "request", table: t, text: tile.reqs === 1 ? "1 request" : tile.reqs + " requests", at: 0, key: "req:" + t + ":" + tile.reqs });
     }
     window.LFH_BELL.sync({ menuOn: true, rows, onOpen: (table) => { try { selectTable(table); } catch (e) {} } });
-  } catch (e) { /* the bell is a readout; it must never be able to stop the floor rendering */ }
+  } catch (e) {
+    // The bell is a readout: it must never be able to stop the floor rendering. But a silent
+    // catch is how a typo hides — this one swallowed a call to a function that does not exist
+    // on this panel (`tableTileState`, which is the MANAGER's name for `summaryTile`), so the
+    // bell simply never appeared and every check still reported 'no page errors'. Say it in
+    // the console, once, so the next mistake is visible without being fatal.
+    if (!syncGuestBell._warned) { syncGuestBell._warned = 1; console.warn('[guest bell] not shown:', e && e.message); }
+  }
 }
 
 function renderFloor() {
   bindFloorDelegation(); // attach the ONE delegated tile/quick/chip handler (boolean-guarded)
-  syncGuestBell();
+  // DEFERRED ON PURPOSE. Both panels rebuild chunks of their own chrome during the render that
+  // follows this call, and the waiter tablet's rebuild takes the top bar with it — so mounting
+  // the bell first meant mounting it into markup that was about to be thrown away, and the
+  // button simply never appeared (measured on the real tablet: the sheet worked, the button
+  // did not exist). Running it after the current render settles costs one empty task and makes
+  // the bell independent of what each panel happens to redraw.
+  setTimeout(syncGuestBell, 0);
   const _t0 = performance.now();
 
   const navEl = document.getElementById("floorNav");

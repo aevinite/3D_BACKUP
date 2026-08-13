@@ -246,7 +246,11 @@
     if (!sheet) return;
     sheet.remove(); sheet = null;
     if (backOff) { try { backOff(); } catch (e) {} backOff = null; }
-    paintButton();
+    // Repaint the count (the rows just went from new to read) — but ONLY if there is still
+    // supposed to be a bell. unmount() removes the button and then closes the sheet, so an
+    // unconditional paint here put the button straight back: switch the guest menu off with
+    // the sheet open and the bell survived it. Measured on both panels before this guard.
+    if (last.menuOn) paintButton();
   }
 
   /**
