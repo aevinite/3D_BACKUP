@@ -176,15 +176,31 @@ export async function POST(req: NextRequest) {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
     const activate = body?.activate === true;
-    const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
+    const r = (await sb.from("restaurants").select("id, name, slug, deleted_at").eq("id", rid).limit(1)).data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     if (!r.deleted_at) return bad("That restaurant isn't in the recycle bin.", 409);
+    // THE NAME MAY HAVE BEEN TAKEN WHILE IT SAT IN THE BIN (owner, 2026-08-13: "inside bin no name
+    // lock… and that name will be rewritten if same name exist"). Since mig 319 only LIVE
+    // restaurants reserve a slug, so restoring can collide — and a collision on the unique index
+    // would surface as a raw database error. So the RETURNING one is renamed, never the restaurant
+    // currently using the name: whoever is live and serving guests keeps their web address.
+    let slug = r.slug as string;
+    let renamed: string | null = null;
+    const taken = async (s: string) =>
+      ((await sb.from("restaurants").select("id").eq("slug", s).is("deleted_at", null).neq("id", rid).limit(1)).data || []).length > 0;
+    if (await taken(slug)) {
+      const base = slug.replace(/-\d+$/, "");
+      let n = 2;
+      while (await taken(`${base}-${n}`) && n < 50) n++;
+      slug = `${base}-${n}`;
+      renamed = slug;
+    }
     const { error } = await sb.from("restaurants")
-      .update({ deleted_at: null, deleted_by: null, delete_reason: null, active: activate })
+      .update({ deleted_at: null, deleted_by: null, delete_reason: null, active: activate, slug })
       .eq("id", rid);
     if (error) return bad(error.message, 500);
-    await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}` });
-    return ok({ ok: true, restored: true, active: activate });
+    await logAction("admin", "restaurant_restore", { restaurant_id: rid, actor: "admin", detail: `${r.name} restored${activate ? " and reactivated" : " (suspended)"}${renamed ? ` — its web address was taken, so it came back as "${renamed}"` : ""}` });
+    return ok({ ok: true, restored: true, active: activate, ...(renamed ? { renamed } : {}) });
   }
 
   // ── purge_restaurant — PERMANENT, irreversible erase of a binned restaurant and
@@ -220,7 +236,11 @@ export async function POST(req: NextRequest) {
     // slug from the name (lowercase, hyphenated), made unique with a numeric suffix if taken.
     const base = (name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40)) || "restaurant";
     let slug = base, n = 1;
-    while (((await sb.from("restaurants").select("id").eq("slug", slug).limit(1)).data || []).length) slug = `${base}-${++n}`;
+    // Only a LIVE restaurant reserves a name (mig 319 made the unique index partial, the same rule
+    // mig 245 gave staff logins). A restaurant sitting in the 90-day recycle bin no longer blocks
+    // the name, so "Aangan" deleted this morning can be created again this afternoon without
+    // silently becoming "aangan-2".
+    while (((await sb.from("restaurants").select("id").eq("slug", slug).is("deleted_at", null).limit(1)).data || []).length) slug = `${base}-${++n}`;
     // Chosen panels (default M+K+T on, Owner off). Coerce to honest booleans.
     const wp = (body?.panels && typeof body.panels === "object") ? body.panels as Record<string, unknown> : {};
     const panels = {
