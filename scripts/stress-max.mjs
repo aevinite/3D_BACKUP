@@ -18,13 +18,12 @@ const sb = createClient(get("NEXT_PUBLIC_SUPABASE_URL") || get("SUPABASE_URL"), 
 // actually took the database down on 2026-07-31 — the test rig, not the product. verify-everything
 // and load-ramp-orders both learned that lesson; these three had neither guard.
 {
-  const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
-  const ref = (() => { try { return new URL(get("NEXT_PUBLIC_SUPABASE_URL") || get("SUPABASE_URL")).hostname.split(".")[0]; } catch { return ""; } })();
-  if (ref !== BACKUP_REF) {
-    console.error(`This points at project "${ref}", not the backup database (${BACKUP_REF}). Refusing.`);
-    console.error("Load-testing anything else — a client's database above all — is never the right call.");
-    process.exit(1);
-  }
+  // ONE shared allow-list (T10 sweep, 2026-08-12). This carried its own copy of a single
+  // hard-coded project id, so it refused on BACKUP-2 — the failover stack the owner uses when
+  // backup-1 hits its 100-deploys-a-day cap. scripts/sweep/devStacks.mjs knows both dev stacks
+  // and has never known the client one. Load-testing a CLIENT database is still refused.
+  refuseUnlessDevTestDb(get("NEXT_PUBLIC_SUPABASE_URL") || get("SUPABASE_URL"), "this places load-test orders");
+
   const { existsSync, writeFileSync, unlinkSync, readFileSync: rf, mkdirSync } = await import("node:fs");
   const LOCKDIR = ".claude";
   const MINE = `${LOCKDIR}/stress.lock`;

@@ -213,8 +213,22 @@ const check = (name, ok, detail) => { checks.push({ name, ok }); if (!ok) fails.
   //     once (mig 267 found 17), so being able to ask the live stack the same question is the
   //     point of the guard. Read-only still has to be announced in chat by the person running it.
   const BY_DESIGN = /verify-db-parity\.mjs|verify-avlive-offline-complete\.mjs|resolve-fix-request\.mjs|verify-db-grants\.mjs/;
+  // "This file already refuses to run anywhere but a dev database" — in either of the two ways a
+  // script can say it.
+  //
+  // THE SECOND WAY IS THE POINT (T10 sweep, 2026-08-12). This used to accept only the FIRST: the
+  // file must contain the literal backup-1 project id. That quietly required every write-capable
+  // script to keep its own copy of one hard-coded id — which is exactly the drift
+  // scripts/sweep/devStacks.mjs was written to end, and why eight scripts refused to run on
+  // BACKUP-2, the failover stack the owner uses when backup-1 hits its deploy cap. Moving those
+  // eight onto the shared allow-list made THIS check fail them, because the id they were exempted
+  // by had (correctly) gone.
+  //
+  // A file that calls refuseUnlessDevTestDb() is guarded by construction, against BOTH dev stacks
+  // and never against the client one — which is strictly stronger than the literal it replaced.
   const refusesNonBackup = (src) =>
-    /wnsfcizclkbobwzcxqsf/.test(src) && /(Refusing|refuse|process\.exit\(1\)|throw new Error)/.test(src);
+    (/wnsfcizclkbobwzcxqsf/.test(src) && /(Refusing|refuse|process\.exit\(1\)|throw new Error)/.test(src)) ||
+    (/refuseUnlessDevTestDb\s*\(/.test(src) && /devStacks\.mjs/.test(src));
   const bad = [];
   for (const f of files) {
     if (BY_DESIGN.test(f)) continue;

@@ -15,6 +15,7 @@
 
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const MAIN_ENV = "/Users/aevinite/Documents/Projects/backup_Menu/.env.local";
 const RID = "00000000-0000-0000-0000-000000000001";
@@ -26,6 +27,11 @@ const env = Object.fromEntries(
   readFileSync(MAIN_ENV, "utf8").split(/\r?\n/).filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; })
 );
+// Which database is this? (T10 sweep, 2026-08-12 — this script had no answer.)
+// One shared allow-list, in scripts/sweep/devStacks.mjs, so it knows about BOTH dev stacks
+// (backup-1 and the backup-2 failover) and never about the client one.
+refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "this writes months of trading history");
+
 const db = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
 // ── deterministic RNG (mulberry32) so a re-run is reproducible ────────────────

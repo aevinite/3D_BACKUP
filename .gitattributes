@@ -4,6 +4,19 @@
 # a human remembering to check `git diff --stat` per file — because a Python or byte-level
 # write to a CRLF file rewrites EVERY line ending, and a one-line change then arrives as a
 # whole-file diff that hides what actually changed. Several panel stylesheets are CRLF too.
+#
+# ADDING THIS LINE DID NOT CONVERT WHAT WAS ALREADY STORED (found by the T10 sweep, 2026-08-12,
+# and fixed the same day). An attribute governs future checkouts; it does not touch the blobs
+# already in the index. So for a week 44 tracked files still sat in git as CRLF while this file
+# declared them LF — app/globals.css, lib/staffAuth.ts, lib/panelGate.ts, six
+# components/Session*.tsx, app/login/*, three panel layouts, ~28 migrations, AGENTS.md, and
+# docs/ACCESS-LADDER.md with MIXED endings. Each was one whole-file diff waiting to happen, and
+# the "67" above had already drifted to 46, which means it had been happening quietly, one file
+# at a time. `git add --renormalize` fixed the stored copies without touching a byte on disk.
+#
+# It cannot come back unnoticed: verify:ui (check 14, a PostToolUse hook + CI) fails when any
+# tracked file is stored CRLF while its attribute says eol=lf. A file that is DELIBERATELY CRLF
+# gets `-text` below, which is the honest way to say so.
 * text=auto eol=lf
 
 # Binary, never touched

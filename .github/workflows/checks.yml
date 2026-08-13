@@ -77,6 +77,12 @@ jobs:
       #
       # The test for "does this belong in CI" is therefore not "is it fast and green here" — it is
       # "does it read anything outside the repo".
+      # It RUNS ALL OF THEM and reports every failure (scripts/verify-static.mjs). It used to be a
+      # single `&&` chain in package.json, and a chain stops at its first non-zero exit — so one stale
+      # guard switched off every guard behind it, twice in two days: verify-owner-reports muted SEVEN
+      # (main red for 15 runs) and verify-merge-party muted TEN (main red for five hours). Both times
+      # the product was fine and the guard was asserting the spelling of code that had legitimately
+      # changed shape. The false alarm was not the damage; the muted checks were.
       - name: static guards
         run: npm run -s verify:static
 

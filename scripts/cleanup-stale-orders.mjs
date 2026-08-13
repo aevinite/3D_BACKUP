@@ -10,6 +10,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -20,6 +21,11 @@ for (const line of readFileSync(join(root, ".env.local"), "utf8").split(/\r?\n/)
   if (m) env[m[1]] = m[2].trim();
 }
 const token = env.SUPABASE_ACCESS_TOKEN;
+// Which database is this? (T10 sweep, 2026-08-12 — this script had no answer.)
+// One shared allow-list, in scripts/sweep/devStacks.mjs, so it knows about BOTH dev stacks
+// (backup-1 and the backup-2 failover) and never about the client one.
+refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "this bulk-updates orders");
+
 const url = env.NEXT_PUBLIC_SUPABASE_URL || "";
 const ref = (url.match(/https?:\/\/([a-z0-9]+)\.supabase\.co/) || [])[1];
 if (!token) { console.error("missing SUPABASE_ACCESS_TOKEN"); process.exit(1); }

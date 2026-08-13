@@ -41,12 +41,11 @@ const env = Object.fromEntries(
     .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; }),
 );
 const ref = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
-const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
-if (ref !== BACKUP_REF) {
-  console.error(`This points at project "${ref}", not the backup database (${BACKUP_REF}). Refusing.`);
-  console.error("Demo history is never reset on the client stack.");
-  process.exit(1);
-}
+// ONE shared allow-list (T10 sweep, 2026-08-12). This carried its own copy of a single
+// hard-coded project id, so it refused on BACKUP-2 — the failover stack the owner uses when
+// backup-1 hits its 100-deploys-a-day cap, i.e. the only place a merged fix can be checked that
+// day. scripts/sweep/devStacks.mjs knows both dev stacks and has never known the client one.
+refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "this REPLACES the demo restaurants trading history");
 const APPLY = process.argv.includes("--apply");
 
 // Never pull the data out from under a running test suite — that is how a green suite turns into

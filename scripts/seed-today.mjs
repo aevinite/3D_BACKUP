@@ -4,12 +4,17 @@
 // --skip-default omits restaurant #1 (the live French House) — use it for PROD.
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const envPath = process.argv[2] || ".env.local";
 const skipDefault = process.argv.includes("--skip-default");
 const env = readFileSync(envPath, "utf8");
 const get = (k) => ((env.match(new RegExp("^" + k + "=(.*)$", "m")) || [])[1] || "").trim();
 const url = get("NEXT_PUBLIC_SUPABASE_URL") || get("SUPABASE_URL");
+// Which database is this? (T10 sweep, 2026-08-12 — this script had no answer.)
+// One shared allow-list, in scripts/sweep/devStacks.mjs, so it knows about BOTH dev stacks
+// (backup-1 and the backup-2 failover) and never about the client one.
+refuseUnlessDevTestDb(url, "this writes today's orders");
 const ref = (url.match(/https:\/\/([a-z0-9]+)\.supabase/) || [])[1] || "";
 const DEFAULT_RID = "00000000-0000-0000-0000-000000000001";
 const sb = createClient(url, get("SUPABASE_SERVICE_ROLE_KEY"), { auth: { persistSession: false } });

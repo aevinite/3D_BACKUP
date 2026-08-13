@@ -6,6 +6,7 @@
 //   5. tapping a chip jumps so the section lands BELOW the pinned header.
 // Prints pass/fail only. Usage: node scripts/verify-scrollspy.mjs [--base http://localhost:PORT]
 import { chromium } from "playwright";
+import { requireAppUp } from "./sweep/appUp.mjs";
 
 // A guard that can only run when port 4000 happens to be up is a guard that gets skipped — and
 // 4000 belongs to the human, so a parallel session or CI could never run this at all. Accept a
@@ -14,6 +15,12 @@ const BASE = (() => {
   const i = process.argv.indexOf("--base");
   return (i > -1 && process.argv[i + 1]) || process.env.VERIFY_BASE || "http://localhost:4000";
 })().replace(/\/$/, "");
+
+// Nothing answering at the base used to surface nine different ways across these guards — from a
+// tidy 'Verdict: FAIL' to a raw node:internal stack trace that reads as 'the guard is broken'.
+// One shared preflight, one sentence, exit 2 = COULD NOT RUN (never 'ran and found a fault').
+// T10 sweep, 2026-08-12.
+await requireAppUp(["--base", BASE], "the scroll-spy check");
 
 
 let failures = 0;

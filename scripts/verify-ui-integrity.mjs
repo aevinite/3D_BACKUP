@@ -14,7 +14,7 @@
 // runs in milliseconds — no browser, no network. The live counterpart (rendered text, UI that
 // contradicts itself) is scripts/verify-no-fatal-ui.mjs, which runs against a DEPLOYED site.
 import fs from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFileSync } from "node:child_process";
 
 // HOOK MODE (--hook): the harness pipes the tool call in on stdin after every edit. Stay silent
 // when clean; exit 2 with an explanation to refuse the edit. Same contract as the sibling guards
@@ -534,6 +534,42 @@ if (!HOOK || !touched || /supabase\/migrations\//.test(touched)) {
     `${strays.length} HTML file(s) under public/ are PUBLICLY REACHABLE and are not part of the product`,
     strays.join("\n         ") + "\n         Everything in public/ is on the internet. Move it to docs/ (kept out of the deploy\n         by .vercelignore), or add it to ALLOWED here with the reason it must be served.",
   );
+}
+
+// ── 14. NO FILE IS STORED WITH WINDOWS LINE ENDINGS WHILE .gitattributes SAYS eol=lf ─────────
+// WHY (T10 sweep, 2026-08-12). `.gitattributes` was added to end this exact problem — its own
+// header explains that a byte-level write to a CRLF file rewrites EVERY line, so a one-line change
+// arrives as a whole-file diff that hides what actually changed. But adding the attribute does not
+// convert what is already stored, and nobody ran the renormalise, so 44 tracked files still sat in
+// git with CRLF while their attribute said LF: app/globals.css, lib/staffAuth.ts, six
+// components/Session*.tsx, ~28 migrations. Every one of them was a whole-file diff waiting to
+// happen, and the header's own "67 files were CRLF" had already drifted to 46 — i.e. it HAD been
+// happening, silently, file by file.
+//
+// They were renormalised in that sweep. This is what stops the next one arriving: `git ls-files
+// --eol` reports how a file is stored (i/…) next to the attribute that is meant to govern it, and
+// the two disagreeing is the whole bug. The deliberate CRLF files (public/panels/**/*.css|js) carry
+// `-text`, so they say i/-text and are correctly invisible to this.
+{
+  let rows = "";
+  try {
+    rows = execFileSync("git", ["ls-files", "--eol"], { cwd: process.cwd(), encoding: "utf8", maxBuffer: 1 << 26 });
+  } catch { rows = ""; }        // not a git checkout — skip rather than fail the run
+  if (rows) {
+    const offenders = rows
+      .split("\n")
+      .filter((l) => /^i\/(crlf|mixed)\b/.test(l) && !/attr\/-text/.test(l))
+      .map((l) => l.split("\t").pop().trim());
+    if (offenders.length === 0) ok("no file is stored with Windows line endings against its own eol=lf rule");
+    else bad(
+      `${offenders.length} tracked file(s) are STORED with Windows line endings while .gitattributes says eol=lf`,
+      offenders.slice(0, 12).join("\n         ") +
+        (offenders.length > 12 ? `\n         …and ${offenders.length - 12} more` : "") +
+        "\n         The next edit to any of these arrives as a whole-file diff that hides the real change." +
+        "\n         Fix: git add --renormalize -- <files>   (index only; the bytes on disk are untouched)" +
+        "\n         If a file is DELIBERATELY CRLF, give it `-text` in .gitattributes instead.",
+    );
+  }
 }
 
 if (fail) {

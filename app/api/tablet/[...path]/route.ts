@@ -1559,6 +1559,23 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) return err(editErrMsg(data.reason), data.reason === "order_paid" ? 409 : 400);
       await log("order_item_note", { order_id: data?.order_id, device_id: dev });
+      // EDITING AFTER THE BILL IS ALLOWED, AND RECORDED (owner, 2026-08-13) — the SAME rule the
+      // manager's identical endpoint got that day. It was added there and not here, so for one day a
+      // waiter could annotate an already-SETTLED bill and leave no record while a manager doing the
+      // exact same thing left one. Two panels, one action, two different truths in the Audit — which
+      // is the whole reason verify:twins exists. (Found 2026-08-13 by the T10 sweep, the first run
+      // after verify:twins was wired into verify:static; it had been running nowhere at all.)
+      //
+      // Risk level `record`, never `money`: mig 312 patches just this line's note and touches no
+      // total, tax or discount (auditsort.js KIND_RISK / SQL lfh_audit_risk).
+      if (data?.settled) {
+        await recordRemoval({
+          rid, kind: "bill_annotated", user: g.user, deviceId: dev,
+          orderId: data?.order_id, itemId: b,
+          reason: reasonFromBody(body),
+          meta: { field: "note", note_now: data?.note ?? null },
+        });
+      }
       await stampEdited(data?.order_id, rid);
       return ok(data);
     }

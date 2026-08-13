@@ -6,8 +6,12 @@
 // The exact combination that broke it: guest key dark + console skin light.
 import { chromium } from "playwright";
 import { loginAs, adminCookie } from "./sweep/login.mjs";
+import { requireAppUp } from "./sweep/appUp.mjs";
 const argv=process.argv.slice(2);
-const B=(argv.includes("--base")?argv[argv.indexOf("--base")+1]:null)||process.env.BASE||"http://localhost:4000";
+// Nothing answering used to end this as an uncaught ReferenceError under node:internal/…, which
+// reads as "the guard is broken" rather than "start the dev server". One shared preflight, one
+// sentence, exit 2 = could not run (never confused with "ran and found a fault"). T10, 2026-08-12.
+const B = await requireAppUp(process.argv, "the skin-ink contrast check");
 let bad=0;
 const lum=(r,g,b)=>{const f=x=>{x/=255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4)};return .2126*f(r)+.7152*f(g)+.0722*f(b)};
 const P=s=>{const m=String(s).match(/-?[\d.]+/g);const k=/^color\(\s*srgb/i.test(String(s))?255:1;return [+m[0]*k,+m[1]*k,+m[2]*k]};

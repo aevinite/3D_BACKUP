@@ -50,8 +50,21 @@ check("the toast only promises automatic sending when it really reached storage"
 
 console.log("\n#5) One sold-out dish doesn't cost the whole basket");
 check("the phone remembers which id is which dish", /lines\?: \{ id: string; title: string \}\[\]/.test(outbox));
-check("…recorded by the cart at the moment it saves the order",
-  (cart.match(/lines: cart\.map\(\(it\) => \(\{ id: it\.id, title: it\.title \}\)\)/g) || []).length === 2);
+// EVERY save path, not "exactly two of them" (T10 sweep, 2026-08-12). This asserted the count was
+// === 2. A third save path was added (CartPanel.tsx:762) and carried the lines correctly, so the
+// app became MORE compliant and the guard went red — the third time in three days that a check
+// pinned to a count or a spelling failed on code that was right. main was red on it, and while
+// verify:static was still an `&&` chain that also muted every guard behind this one.
+//
+// The rule is "every path that saves an order remembers which id is which dish", so count the save
+// paths and require all of them to carry it. Adding a fourth is then automatically covered, and
+// REMOVING it from one still fails — which is the thing that actually matters.
+{
+  const saves = (cart.match(/lines: cart\.map\(\(it\) => \(\{ id: it\.id, title: it\.title \}\)\)/g) || []).length;
+  const dispatches = (cart.match(/enqueueGuestOrder\(|action: "order"/g) || []).length;
+  check(`…recorded by the cart at every one of its ${dispatches} save paths (found ${saves})`,
+    saves >= 2 && saves >= dispatches);
+}
 check("a one-dish refusal is remembered as such", /item\.blocked = oneDish/.test(outbox));
 check("…for the three refusals that really do name one dish",
   /\["sold_out", "hidden_item", "unknown_item"\]/.test(outbox));

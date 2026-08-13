@@ -32,12 +32,11 @@ const URL = env.NEXT_PUBLIC_SUPABASE_URL, ANON = env.NEXT_PUBLIC_SUPABASE_ANON_K
 // run is alive. Two heavy runs at once is what took the database down on 2026-07-31 — the test
 // rig, not the product. verify-everything and load-ramp-orders already do both; these did not.
 {
-  const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
-  const ref = (() => { try { return new globalThis.URL(URL).hostname.split(".")[0]; } catch { return ""; } })();
-  if (ref !== BACKUP_REF) {
-    console.error(`This points at project "${ref}", not the backup database (${BACKUP_REF}). Refusing.`);
-    process.exit(1);
-  }
+  // ONE shared allow-list (T10 sweep, 2026-08-12). This carried its own copy of a single
+  // hard-coded project id, so it refused on BACKUP-2 — the failover stack the owner uses when
+  // backup-1 hits its 100-deploys-a-day cap. scripts/sweep/devStacks.mjs knows both dev stacks
+  // and has never known the client one. Load-testing a CLIENT database is still refused.
+  refuseUnlessDevTestDb(URL, "this opens load-test realtime sockets");
   const MINE = ".claude/stress.lock";
   for (const other of ["verify-everything.lock", "load-ramp.lock", "stress.lock"]) {
     const q = `.claude/${other}`;

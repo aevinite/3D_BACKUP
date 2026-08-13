@@ -5,6 +5,7 @@
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) =>
@@ -17,6 +18,11 @@ const parseEnv = (t) =>
 
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
 const pat = env.SUPABASE_DEV_ACCESS_TOKEN;
+// Which database is this? (T10 sweep, 2026-08-12 — this script had no answer.)
+// One shared allow-list, in scripts/sweep/devStacks.mjs, so it knows about BOTH dev stacks
+// (backup-1 and the backup-2 failover) and never about the client one.
+refuseUnlessDevTestDb(env.SUPABASE_DEV_URL, "this applies a migration");
+
 const projectRef = env.SUPABASE_DEV_PROJECT_REF || new URL(env.SUPABASE_DEV_URL).hostname.split(".")[0];
 if (!pat) throw new Error("Missing SUPABASE_DEV_ACCESS_TOKEN in .env.local");
 if (!projectRef) throw new Error("Missing SUPABASE_DEV_PROJECT_REF / SUPABASE_DEV_URL in .env.local");

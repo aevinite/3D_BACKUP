@@ -49,12 +49,11 @@ const SB = env.NEXT_PUBLIC_SUPABASE_URL, KEY = env.SUPABASE_SERVICE_ROLE_KEY;
 
 // POSITIVE refusal: name the one database this may run against, rather than checking it is not
 // some other one. A new stack would then be refused by default instead of silently accepted.
-const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
-const ref = new URL(SB).hostname.split(".")[0];
-if (ref !== BACKUP_REF) {
-  console.error(`\nThis writes test rows. It points at project "${ref}", not the backup database (${BACKUP_REF}). Refusing.\n`);
-  process.exit(1);
-}
+// ONE shared allow-list (T10 sweep, 2026-08-12). This carried its own copy of a single
+// hard-coded project id, so it refused on BACKUP-2 — the failover stack the owner uses when
+// backup-1 hits its 100-deploys-a-day cap, i.e. the only place a merged fix can be checked that
+// day. scripts/sweep/devStacks.mjs knows both dev stacks and has never known the client one.
+refuseUnlessDevTestDb(SB, "this writes test rows");
 
 const db = (q, init) => fetch(`${SB}/rest/v1/${q}`, {
   ...init,

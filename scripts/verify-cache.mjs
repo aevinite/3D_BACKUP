@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import { requireAppUp } from "./sweep/appUp.mjs";
 
 // Accept a target the same way every other guard here does. Requiring port 4000 meant this
 // could only run when the human's dev server happened to be up — so in practice it was skipped,
@@ -8,6 +9,12 @@ const BASE = (() => {
   return (i > -1 && process.argv[i + 1]) || process.env.VERIFY_BASE || process.env.BASE_URL
     || process.env.BASE || "http://localhost:4000";
 })().replace(/\/$/, "");
+
+// Nothing answering at the base used to surface nine different ways across these guards — from a
+// tidy 'Verdict: FAIL' to a raw node:internal stack trace that reads as 'the guard is broken'.
+// One shared preflight, one sentence, exit 2 = COULD NOT RUN (never 'ran and found a fault').
+// T10 sweep, 2026-08-12.
+await requireAppUp(["--base", BASE], "the 3D no-re-fetch check");
 const SMALL =
   "/models/croissant_small.glb";
 const OPT =

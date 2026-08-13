@@ -1,36 +1,101 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Aevidine — a multi-tenant restaurant OS
 
-## Getting Started
+One Next.js app that runs a whole restaurant: the diner's menu (with a 3D dish viewer), the
+manager's floor, the kitchen screen, the waiter's tablet, the owner's reports and the admin console
+— for many restaurants at once, out of one codebase and one database.
 
-First, run the development server:
+> **If you are an AI assistant working in this repo, read `CLAUDE.md` first.** It is the rulebook,
+> it is short on purpose, and every rule's full text is in `docs/CLAUDE-DETAIL.md` under the same
+> heading. This README is the human's five-minute orientation.
+
+---
+
+## Run it
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
+npm run dev            # http://localhost:4000   ← 4000, not 3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+You need `.env.local` in the repo root (it is gitignored — ask the owner for it). Without it the
+app boots but every read fails, and the scripts that talk to the database refuse to start.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`npm run build` runs a production build. `npm start` serves it, also on 4000.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## The six surfaces, and where each one's code is
 
-## Learn More
+It is **one app on one port**. Every "panel" is a route, not a separate server.
 
-To learn more about Next.js, take a look at the following resources:
+| What | URL | Who uses it | Its code |
+|---|---|---|---|
+| Guest menu | `/menu`, `/r/<slug>/menu`, `/q/<code>` | the diner, on their phone | `app/menu`, `app/r/[restaurant]`, `app/q/[code]`, `components/*` |
+| Manager panel | `/manager` (and `/editor`) | the manager: floor, bills, menu editing | `public/panels/editor/app.js`, loaded in an iframe |
+| Kitchen panel | `/kitchen` | the cooks | `public/panels/kitchen/*` |
+| Tablet panel | `/tablet` | the waiter, walking the floor | `public/panels/tablet/*` |
+| Owner panel | `/owner/…` (16 pages) | the owner: reports, staff, settings | `app/owner/*`, `components/owner/*` |
+| Admin console | `/aevinite/…` (22 pages) | us: every restaurant, every switch | `app/aevinite/*` |
+| Printed paper | — | the bill and the kitchen ticket | `public/panels/billdoc.js` — one file for both |
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+**Three of those panels are plain HTML+JS in `public/panels/`, not React.** That surprises people.
+A "manager panel bug" almost always means editing `public/panels/editor/app.js`. Those files are
+served as static assets and cache-busted by a content hash (`app.js?v=<hash>`), which
+`npm run verify:panel-cache` keeps honest — a stale hash is how staff once ran a weeks-old panel.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Panel APIs live at `app/api/<panel>/[...path]/route.ts`. The owner's at `app/api/owner/*`, the
+admin's at `app/api/admin/*`.
 
-## Deploy on Vercel
+## There is no `middleware.ts`, and that is deliberate
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+The login check moved to each route: the admin console's layout and all 48 `/api/admin/*` handlers
+check `tokenIsValid`, the panel APIs use `requireRole()`, the owner's use `ownerScope()`. Looking
+for a middleware file finds nothing and makes it look like the gate is missing — it isn't.
+The complete list of the few deliberately login-free routes is in `docs/CLAUDE-DETAIL.md`
+under "Security gate".
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Two stacks — get this right before you touch anything
+
+| | **AV LIVE** (paying restaurants) | **this folder — DEV/TEST** |
+|---|---|---|
+| Folder | `~/Documents/LIVE_PROJECTS/3D_Menu_Av` | `~/Documents/Projects/backup_Menu` |
+| Deploys to | aevinite.shop | `3-d-backup.vercel.app` |
+| Database | its own | its own (`.env.local`) |
+
+**Build and break things freely here — that is what this stack is for.** AV live is read-only by
+default and every single change to it needs the owner to ask for it in his own words. The full rule,
+including what does and does not count as permission, is the first thing in `CLAUDE.md`.
+
+## Before you push
+
+```bash
+npm run verify:push
+```
+
+That runs exactly what CI runs: type-check, lint, the unit tests, the static guards and the access
+model — about 90 seconds, no database, no login. CI (`.github/workflows/checks.yml`) runs the same
+set on every push, so a green run locally means a green run there.
+
+There are ~120 more `verify:*` scripts, one per bug that once reached somebody's screen.
+**`docs/GUARD-MAP.md` tells you which ones your change needs** — look up the file you touched.
+
+Do **not** run `npm run verify:everything` casually: it is the 500-phase suite, it writes to the
+shared database, it takes ~40 minutes and only one run is allowed at a time.
+
+## Where to read next
+
+| You want to… | Read |
+|---|---|
+| know the rules before changing code | `CLAUDE.md`, then `docs/CLAUDE-DETAIL.md` |
+| know which check covers your change | `docs/GUARD-MAP.md` |
+| find any document at all | `docs/README.md` |
+| know what the owner has already refused | `docs/REJECTED-IDEAS.md` — read it *before* suggesting |
+| see what is still owed | `.claude/REQUESTS.md` |
+| understand how a feature must be built | `CLAUDE.md` → the 11-point module checklist |
+
+## Stack
+
+Next.js 16 (App Router) · React 19 · TypeScript strict · Tailwind 4 · GSAP · Supabase (Postgres +
+Storage + realtime) · `<model-viewer>` for the 3D dishes · deployed on Vercel.
+
+One shared database, one row per tenant carrying `restaurant_id`, isolation enforced at the database
+level. Migrations live in `supabase/migrations/` and that folder is the source of truth for **both**
+stacks.
