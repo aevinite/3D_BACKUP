@@ -1229,10 +1229,21 @@ Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French Hou
       6. `OwnerShell` lacked `AdminShell`'s skin-cookie back-fill.
       Extra, which the sweep itself had missed: the 3-column landscape dish tile was **already**
       breaking names mid-word ("Cappucci/no", "Cucumbe/r Mint Cooler"). Fixed too.
-- [ ] **Still owed from that sweep (2):** `/q/<code>` never got a live tablet check (it needs a
-      table QR row, which is a write), and the manager/kitchen top bar for a NON-#1 restaurant was
-      code-read rather than opened (it needs a 5th/6th staff sign-in against a rate limit that
-      alerts the owner's phone). Guest-side branding WAS confirmed live on five tenants.
+- [x] **Nothing owed — all 9 skipped phases closed live the same day (2026-08-13):**
+      `/q/<code>` opened at 1194×834 and 834×1194 (French House's own branding, ~1,020 nodes, no
+      scroll/clipping/leaks/errors, the table never in the address bar, and an unknown code lands on
+      "This QR code isn't active" rather than somebody's menu) · the manager AND kitchen top bars for
+      **Green Bowl and Sakura Sushi**, both orientations, each naming its own restaurant with #1's
+      branding absent (the login wall was a non-issue: it is keyed per username, so four diag
+      accounts are four buckets at attempt 1 of 5) · the tables-per-row setting changed for real to 8
+      and restored to 12, with both the database and the screen re-checked · `verify:tablet` 90/90 ·
+      and the two cross-panel traces (a kitchen ✓ reaching the tablet's "x/y served", and one status
+      vocabulary behind both the kitchen's lanes and the floors' counts).
+      **✅ 488 · ❌ 12 · ⏭ 0 of 500.**
+      Dev-stack side effects, nothing hidden: four DIAG TEST accounts (diagm7, diagk7, diagm5,
+      diagk5) had their passwords reset to the documented convention with
+      `scripts/reset-diag-password.mjs`. No orders, no bills, no settings left changed, Aangan
+      untouched.
 - [x] **One improvement idea logged, not padded** (`.claude/sweep/T14-improvements.md`): the
       waiter tablet caps the floor at 6 tables per row for a finger but uses the same 6 upright,
       where tiles drop from 176px to 116px. Five other candidates were dropped, three of them
