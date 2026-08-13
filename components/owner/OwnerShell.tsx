@@ -305,6 +305,14 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
   // phone layout already uses, so the embedded manager floor gets the full viewport.
   const managerMode = path.startsWith("/owner/manager");
 
+  // REJECTED (owner, 2026-08-13): the `.owx-scope` chip below stays "Owner overview" — do NOT
+  // make it name the PAGE you are on: "why you need to know where we are you can click 3 line
+  // and know or on top there is many written like heading and stuff". The sidebar and the page
+  // heading already say where you are. See docs/REJECTED-IDEAS.md R20.
+  // (RECONSTRUCTED 2026-08-13 from the doc row after a parallel session's uncommitted edit
+  // here was destroyed by a `git reset --hard` in this shared folder — the decision and the
+  // quote are the owner's; the wording is not the original, and that session had OTHER
+  // unsaved changes in this file that could not be recovered.)
   return (
     <div className={"adm owx" + (managerMode ? " mmode" : "")} data-skin={skin}>
       {navOpen && <div className="owx-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />}

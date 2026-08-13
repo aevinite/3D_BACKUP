@@ -1346,14 +1346,28 @@ html[data-theme="light"] .ft-take:hover { color: var(--text); }
    PORTRAIT — a tall thin rectangle (owner screenshots). Now the height follows the
    width, so shrinking a tile shrinks BOTH sides and it stays a square.
      · aspect-ratio gives the square;
-     · min-height:fit-content lets an unusually busy tile (ribbon + progress strip +
-       two quick buttons) grow instead of clipping — squareness is the rule, not a cage;
      · container-type makes the tile its own query container so the text inside can be
        sized in cqw (1cqw = 1% of THIS tile's width). That is what keeps a 104px tile
-       readable instead of a 30px table number spilling over the edge. */
+       readable instead of a 30px table number spilling over the edge.
+   ── SQUARE MEANS SQUARE, NOT "SQUARE UNLESS BUSY" (owner, 2026-08-13) ──────────────
+   This carried `min-height: fit-content` so an unusually busy tile could grow rather
+   than clip. The cost was that a tile with a progress strip AND the two quick buttons
+   grew past its own width — so on his floor the OCCUPIED tiles were visibly taller than
+   the free ones: "it's rectangle, you can make it square". `min-height: 0` lets
+   aspect-ratio win at every size, and `overflow: hidden` keeps a tile that genuinely
+   cannot fit inside its own box instead of spilling over its neighbour (the bug that
+   fit-content was papering over). The room comes from the padding ladder below:
+   the tile tightens its own padding as it narrows, so the same rows still fit.
+   The COLUMN COUNT is untouched — that is still exactly `--per-row`, his number. */
 .ftile { --c: #6b6253; position: relative; text-align: left; cursor: pointer;
-  aspect-ratio: 1 / 1; min-height: fit-content; container-type: inline-size;
-  display: flex; flex-direction: column; padding: 13px 14px; border-radius: 15px;
+  aspect-ratio: 1 / 1; min-height: 0; overflow: hidden; container-type: inline-size;
+  /* The padding is a PERCENTAGE of the tile's own width, capped at the roomy desktop values.
+     A container query can't do this — `container-type` is on this element, so a @container rule
+     can never restyle the tile itself, only its children (which is why every rung below targets
+     .ft-* children). Percentage padding resolves against this box's own width, so a 225px tile
+     keeps exactly the 13/14px it always had while a 72px tile tightens to ~6px and its rows still
+     fit inside the square. */
+  display: flex; flex-direction: column; padding: min(13px, 8.5%) min(14px, 9.5%); border-radius: 15px;
   border: 1.5px solid color-mix(in srgb, var(--c) 55%, var(--line));
   background: linear-gradient(157deg, color-mix(in srgb, var(--c) 16%, var(--panel)), var(--panel) 78%);
   transition: transform .12s ease, box-shadow .16s ease; }
@@ -2241,8 +2255,16 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
    give without changing its shape. PHONE ONLY: the desktop panel is a mouse and he said explicitly
    he does not want it changed there. */
 @media (max-width: 760px) {
-  .ftile .ft-act { margin-top: 3px; min-height: 30px; }
-  .ftile .ft-act > button { min-height: 30px; }
+  /* …and since the tile became a STRICT square (2026-08-13, min-height:0 on .ftile), a flat 30px
+     here is 2px more than the smallest tile can hold: at the measured 72px floor the four rows came
+     to ~74px and the last one got clipped. So the 30px is now a CEILING reached only when the tile
+     has the room, measured in cqw against the tile's own width (the tile is the query container, so
+     this is the tile asking "how wide am I?"). 22px is the bottom — the size he already accepted on
+     this row (R4) — and it keeps every row inside the square. */
+  .ftile .ft-act { margin-top: 3px; min-height: clamp(22px, 34cqw, 30px); }
+  /* The BUTTON is what actually sets the row's height, so it takes the same ceiling — a flat 30px
+     here kept the row at 30 however small the tile got, which is what clipped it inside the square. */
+  .ftile .ft-act > button { min-height: clamp(22px, 34cqw, 30px); }
   /* The ⏻ and 🧾 squares: the 30cqw cap is what pinned them to 17px on a 58px container. A finger
      needs width as much as height, and at most three controls ever share this row. */
   .ftile .ft-ico { width: min(34px, 46cqw); }
