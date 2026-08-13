@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=37183472" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=52982d95" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -151,6 +151,9 @@
   <!-- My profile & pay (mig 220) — shared with the waiter tablet -->
   <script src="/panels/myprofile.js?v=e61d5127"></script>
   <!-- undobar: the shared "take it back" bar after a Serve/Settle mis-tap. -->
+  <!-- "there is more this way" on any row that scrolls sideways (T12, 2026-08-13): a soft edge
+       fade plus a "-> N more" chip, driven by measurement. Marked rows carry data-swipe-hint. -->
+  <script src="/panels/swipehint.js?v=77850684"></script>
   <script src="/panels/undobar.js?v=26fc85cb"></script>
   <!-- "who is this bill for?" sheet — phone-first customer capture (shared with the tablet) -->
   <script src="/panels/billcustomer.js?v=1a505d43"></script>
@@ -166,6 +169,6 @@
   <script src="/panels/auditsort.js?v=3c3f7207"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=111596f8"></script>
+  <script src="/panels/editor/app.js?v=4dede02f"></script>
 </body>
 </html>

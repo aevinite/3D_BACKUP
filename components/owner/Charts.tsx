@@ -281,7 +281,7 @@ export function TimeBar({ data, color, height = 240 }: { data: { label: string; 
       <ResponsiveContainer>
         <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
           <CartesianGrid stroke={GRID} vertical={false} />
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={16} />
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={16} padding={{ left: 2, right: 14 }} />
           <YAxis domain={[0, max]} ticks={tk(0, max)} tick={{ fontSize: 11, fill: AXIS }} width={48} tickFormatter={compact} allowDecimals={false} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name="Revenue" fill={color} radius={[5, 5, 0, 0]} maxBarSize={42} />
@@ -698,7 +698,12 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
             {mode === "bar" ? (
               <BarChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
                 <CartesianGrid stroke={GRID} vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" />
+              {/* The LAST date label kept getting clipped to one character at 360px: with
+                  interval="preserveStartEnd" the final tick is centred on the final bar, which
+                  sits at the plot's right edge, so half its text fell outside the SVG (T12 phone
+                  sweep, 2026-08-13). `padding.right` moves the last bar inside the plot instead of
+                  widening the chart, so the label has room at every width and nothing else moves. */}
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={14} interval="preserveStartEnd" padding={{ left: 2, right: 14 }} />
                 <YAxis domain={[0, max]} ticks={tk(0, max)} tick={{ fontSize: 11, fill: AXIS }} width={money ? 48 : 36} tickFormatter={fmt} allowDecimals={false} />
                 <Tooltip content={money ? <MoneyTip /> : <CountTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
                 <Bar dataKey="value" name={label} fill={color} radius={[5, 5, 0, 0]} maxBarSize={46} />
@@ -708,7 +713,7 @@ export function ToggleChart({ data, color, money = true, height = 240, name, tit
               <AreaChart data={data} margin={{ left: 4, right: 14, top: 6, bottom: 4 }}>
                 <defs><linearGradient id={gid} x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={color} stopOpacity={0.28} /><stop offset="100%" stopColor={color} stopOpacity={0.02} /></linearGradient></defs>
                 <CartesianGrid stroke={GRID} vertical={false} />
-                <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={24} interval="preserveStartEnd" />
+                <XAxis dataKey="label" tick={{ fontSize: 10, fill: AXIS }} minTickGap={24} interval="preserveStartEnd" padding={{ left: 2, right: 14 }} />
                 <YAxis domain={cost ? [0, max] : fitDomain(values)} ticks={cost ? tk(0, max) : tk(...fitDomain(values))} tick={{ fontSize: 11, fill: AXIS }} width={money ? 48 : 36} tickFormatter={fmt} allowDecimals={false} />
                 <Tooltip content={money ? <MoneyTip /> : <CountTip />} />
                 <Area type="monotone" dataKey="value" name={label} stroke={color} strokeWidth={2.25} dot={false} activeDot={{ r: 4 }} fill={`url(#${gid})`} />
