@@ -200,7 +200,7 @@ want the rare cases a single-panel guard cannot reach.
 | `verify:tablet` | POSTs a force-close. Writes rows. Not a hook, not for parallel runs. |
 | `verify:avlive-release` | reads the **client** stack folder. Never in CI, never casually — announce it first. |
 | `verify:live` | runs against a deployed site: `verify:live -- --base <url>`. Read-only. Run it after every deploy. |
-| `load:ramp`, `stress*`, `demo:reset`, `db:maintain`, `seed-*` | these are not checks. They write. Read the header before typing the name. |
+| `load:ramp`, `stress*`, `db:replace-demo-history`, `db:vacuum-rebuild`, `seed-*` | these are not checks. They write. Read the header before typing the name. |
 
 ## What is NOT covered by anything
 

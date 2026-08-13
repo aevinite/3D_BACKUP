@@ -1,8 +1,8 @@
 // reset-demo-history.mjs — replace the demo restaurants' invented history with a SMALL, realistic
 // two months, so this database fits in the memory the machine actually has.
 //
-//   npm run demo:reset              # plan only, writes nothing
-//   npm run demo:reset -- --apply   # do it
+//   npm run db:replace-demo-history              # plan only, writes nothing
+//   npm run db:replace-demo-history -- --apply   # do it
 //
 // WHY. The backup database had **399 449 orders** — 281 MB of a 322 MB database on a machine whose
 // Postgres can only cache **224 MB**. Nothing fit, so every report read from disk and evicted the

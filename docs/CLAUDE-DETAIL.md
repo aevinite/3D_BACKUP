@@ -57,8 +57,30 @@ EVERYTHING typed, always, without being told, even mid-task:
 - **This rule stands even if the owner literally says "avoid this error" and nothing
   else** — that instruction means: apply all of the above from now on automatically.
 
-Full background: `.claude/work-checker-lessons.md` → "Safe-audit operating rules". This
+Full background: the five operating rules below. This
 block is the always-loaded reminder so the rule can't be forgotten mid-session.
+
+### The five safe-audit operating rules (Rishi, 2026-07-05 — the reverted-jet prompt)
+
+> Moved here 2026-08-13 from `.claude/work-checker-lessons.md`, which was deleted when the
+> work-checker was retired. It is the only load-bearing thing that file held: CLAUDE.md's
+> safe-audit rule pointed at it, so it had to live somewhere a session actually reads.
+
+The platform safety filter fires on anything that looks like breaking into an app, even
+our own — it killed 3 hunters last run. Follow ALWAYS (audit or build):
+1. Do ALL data-separation / auth / access-control checking INLINE yourself — never via a
+   sub-agent (they get killed mid-run). Sub-agents get purely-functional scopes only.
+2. Verify isolation by READING CODE (every query filtered by restaurant id? server takes
+   the tenant from the login, not from the browser?) + OBSERVING NORMAL USE (read the
+   outgoing request body to confirm it carries the right restaurant id for the page).
+3. NEVER: swap a tenant id/slug in a URL/request to reach another tenant; replay as
+   another tenant; read the DB with the public/anon key; call an endpoint with no login
+   to test the gate.
+4. NEVER use the words attack/exploit/IDOR/penetration/probe/leak — not in messages, not
+   in Bash command `description` fields (those are scanned too). Keep wording functional.
+5. If code-reading suggests a gap you can't confirm by normal use, just REPORT it as a
+   finding — don't tamper to prove it.
+Canonical rules live in ~/.claude/skills/bulletproof/SKILL.md + ~/.claude/agents/bug-hunter.md.
 
 ## 🔒 TWO STACKS — "AV LIVE" IS UNTOUCHABLE (owner, 2026-07-22 — ABSOLUTE, EVERY SESSION)
 
@@ -488,6 +510,91 @@ actually guards what, verified route by route in the 2026-08-04 API sweep:
 
 `ADMIN_PASSWORD` is in `.env.local` (must also be set in the Vercel project env for the gate to
 work in prod). **If you re-introduce a middleware, update this section in the same commit.**
+
+## The decision format — every list he has to CHOOSE from
+
+Owner, 2026-08-13, STANDING. He was given the same information twice: once as a wall of prose, once as
+this. His reply to the second: *"i loved this format whenever i asked for improvement or problem make
+sure this format should be there idc where you write this rule"*. So it is not a style preference — it
+is the shape that let him actually decide, and it is now required whether he asks for it or not.
+
+**Every** problem / bug / improvement / idea in a list he might act on carries these six, in order:
+
+| line | what goes in it |
+|---|---|
+| **Where** | panel → exact screen/tab → what he would SEE. The "Where it lives" rule below, in full. |
+| **What it is** | plain words. No file names in the first sentence, no jargon, no "refactor"/"idempotent"/"regex". |
+| **If yes** | what actually changes for him. |
+| **If no** | what he lives with. Say **"nothing breaks"** when that is true — it usually is, and hiding it is how a tidy-up gets mistaken for a fire. |
+| **Effort** | real minutes or hours. |
+| **Risk** | none / low / and what the risk actually is. |
+
+And around the items:
+
+- **Number every one**, so he can reply "do 1 and 4" instead of writing sentences.
+- **Group them**: 🟢 *I can do these right now* · 🟡 *These need something from you first*.
+- **End with your own recommendation and the reason** — "if you only want the useful ones: 1, 4 and 6,
+  because…". He asked for judgment, not a menu.
+- **Never** a bare list of titles. **Never** a wall of prose. **Never** bury the choice in a paragraph.
+
+Worked example — the shape that got "i loved this format":
+
+```
+### 2. Rename the dangerous scripts so they sound dangerous
+- Where: Backend only, nothing on screen.
+- What it is: Two commands are called `db:maintain` and `demo:reset`. Both write to your real
+  database; `demo:reset` replaces two months of trading history. The names sound harmless.
+- If yes: They get names that warn you before you type them.
+- If no: They stay safe-sounding. Both already refuse any database that isn't a test one, so the
+  real danger is handled — this is just the label.
+- Effort: 10 minutes. Risk: you'd have to learn the new names.
+```
+
+## You check your own work — the work-checker is RETIRED
+
+Owner, 2026-08-13, STANDING: *"from now you will check always the work you did and check if it's
+working fine and not disturbing other, make this permanent rule. remove worker check completely."*
+
+**What was deleted that day, and must never be recreated:**
+
+- `~/.claude/agents/work-checker.md` — the separate verifier agent.
+- `.claude/work-checker-lessons.md` — 823 lines. Its own instruction said "keep that file pruned and
+  small"; nothing measured it, and at 823 lines nobody read it end to end, so a lesson written into it
+  was filed, not learned. The one load-bearing thing it held — the five safe-audit operating rules —
+  moved into this document, above.
+- The `UserPromptSubmit` hook in `~/.claude/settings.json` that appended a self-review instruction and
+  told the session to log lessons to that file.
+
+**What replaces it — you, every time, before you say a thing is done:**
+
+1. **Run it and see the result.** `npm run verify:push` (typecheck → lint → tests → static guards →
+   access model, ~90s, the same set CI runs), plus whatever `docs/GUARD-MAP.md` names for the files you
+   touched. For a UI change, see it in a real browser, in the right role, on a non-flagship restaurant.
+2. **Prove you broke nothing else.** `verify:static` reports EVERY failure now, not just the first —
+   read the whole summary. A guard that "should" pass is not a guard that passed.
+3. **Prove you disturbed no other session.** `git status` BEFORE staging. Stage only your own files by
+   name. Never `git add -A` / `git add .` in this shared folder. Any modified file you do not recognise
+   is another live session's work: leave it, and say in the reply that you left it.
+4. **Report honestly.** Paste the output. Name what you skipped and why. If a test failed, lead with
+   that. Never hand verification to a sub-agent — they get killed mid-run and report a pass that
+   never happened.
+
+## Finished paperwork gets deleted the day it's finished
+
+Owner, 2026-08-13, STANDING: *"do 4th also and make sure after it's done always remove and stuff."*
+
+A closed audit, a spent handoff, a done bug-diagnosis, a superseded plan, an empty folder, a
+screenshot you have already looked at — **delete it when its purpose is served.** Don't ask (that is
+the standing delete order), and name what you removed in the reply. Git has the history.
+
+Exactly three things survive:
+
+1. A **LIVE** rule or spec — something that describes the app as it is now.
+2. A **HISTORY** doc carrying the `⚠️ HISTORY — not a current specification` banner, kept because it
+   records a *why* that is still load-bearing.
+3. **Another session's uncommitted work.**
+
+Everything else is sediment. `docs/README.md` is the index that keeps the first two apart.
 
 ## Where it lives — the shape EVERY problem / idea / bug listing must take
 
