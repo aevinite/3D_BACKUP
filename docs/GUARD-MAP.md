@@ -1,8 +1,8 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **95** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **96** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
-can hold 94 names in their head, so in practice a person runs none of them, or reaches for
+can hold 96 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
 time). Both of those are the wrong answer.
 
@@ -32,7 +32,7 @@ Kept honest by `npm run verify:pointers`: it fails if a guard named here has van
 | `npm run verify:push` | type-check → lint → unit tests → all static guards → access model. The same set CI runs. | nothing | no |
 | `npm run typecheck` | `tsc --noEmit`. **`npm run lint` does NOT check types** — they are separate gates. | nothing | no |
 | `npm run test` | `test:money` + `test:errors` + `test:units` — 37 tests, ~0.1s. | nothing | no |
-| `npm run verify:static` | all 22 static guards. Runs **every** one and reports **every** failure — add `-- --quiet` for failures only. Inside `verify:push`. | nothing | no |
+| `npm run verify:static` | all 31 static guards. Runs **every** one and reports **every** failure — add `-- --quiet` for failures only. Inside `verify:push`. | nothing | no |
 | `npm run check:current` | is this folder level with `origin/main`? **Run before any audit or "X is broken" claim.** | nothing | no |
 
 Everything in section 0 is also inside `verify:push`, so normally you just run that.
@@ -134,6 +134,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | the admin's super-access view | `verify:xray` ← it MARKS what someone lacks, never hides it | nothing | no |
 | a permission the manager must not see | `verify:manager-hidden` | `.env.local` | no |
 | a rule the owner has already refused | `verify:rejected` — and **read `docs/REJECTED-IDEAS.md` first** | nothing | no |
+| the Recycle bin's **purge** (permanently clears a deleted restaurant) | `verify:purge` ← the tenant keys have no cascade, so a purge names each child table by hand and can forget one | nothing | no |
 
 ## 8 · Any write endpoint, anywhere (`app/api/**/route.ts`)
 
@@ -147,6 +148,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | behaviour when the server is overloaded | `verify:busy` | starts its own local server | no |
 | behaviour with no internet | `verify:offline`, `verify:outbox`, `verify:warm-shell` | mixed | no |
 | a route that must require a login | `verify:read-guards`, `verify:server-only` | nothing | no |
+| anything that returns a guest's session data to STAFF | `verify:guest-pass` ← a diner's access pass (`session_members.token`) is their whole identity; it must never ride along in a staff payload | nothing | no |
 
 ## 9 · Database — `supabase/migrations/*.sql`
 

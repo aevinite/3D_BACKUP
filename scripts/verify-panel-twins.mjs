@@ -34,6 +34,18 @@ const ROUTES = {
 // ── differences we have decided are correct, and why ─────────────────────────────────────────────
 // key: "<endpoint>|<panel>|<missing-trait>"  →  the reason it is missing ON PURPOSE.
 const ALLOWED = {
+  // A WAITER CANNOT EDIT A SETTLED BILL AT ALL, so there is nothing for him to record (checked
+  // 2026-08-13, T10 sweep, the first run after this guard was wired into verify:static — it had been
+  // running nowhere). The manager's items/removed ALLOWS an allergy edit after payment and writes a
+  // `bill_annotated` record for it (owner, 2026-08-13); the tablet's refuses outright —
+  // `if (order?.payment_status === "paid") return err(editErrMsg("order_paid"), 409)` at
+  // app/api/tablet/[...path]/route.ts:1598 — so the branch that would record it is unreachable.
+  //
+  // THIS EXEMPTION IS CONDITIONAL. If the waiter is ever allowed to edit a paid bill, that 409 goes
+  // and the recordRemoval MUST arrive in the same commit — an edit to a settled bill that leaves no
+  // record is the thing docs/COMPLIANCE-GUARDRAILS.md exists to prevent. Delete this line then.
+  "items/removed|waiter|removal": "the waiter refuses the edit on a paid bill (409), so no money change can happen for him to record",
+
   // The kitchen is a cooking display: it holds no bills, so nothing it does can lower money.
   "orders/accept|kitchen|removal": "the kitchen takes no money off a bill — nothing to audit",
   "orders/ready|kitchen|removal": "same — cooking a dish is not a money change",
