@@ -32,9 +32,26 @@ ALTER TABLE settings
   ADD COLUMN IF NOT EXISTS platform_enabled       BOOLEAN NOT NULL DEFAULT true,
   ADD COLUMN IF NOT EXISTS platform_channels      JSONB   NOT NULL DEFAULT '{}'::jsonb;
 
+-- ⚠️ ONE-TIME — GUARDED SINCE 2026-08-13 (T16 finding 7510). Three of the four statements below
+-- OVERWRITE stored choices rather than filling in a missing one, so a re-seed used to re-enable
+-- the Platform board for a manager an admin had removed it from, and reset restaurant #1's
+-- delivery-channel switches to all-on — and since migration 263 made Parcel & Platforms permanent,
+-- those channel switches are the ONLY ones left in that group. Same guard shape as 043/093.
+DO $reseed_guard$
+DECLARE v_applied boolean := false;
+BEGIN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('209_platform_module_defaults') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
+  RAISE NOTICE '209_platform_module_defaults: already applied — skipped (a re-run would undo admin channel + manager choices)';
+ELSE
+
 UPDATE settings SET platform_allowed = true;
 
 -- 2) Channels: existing restaurants keep Zomato + Swiggy ON (today's board), website OFF.
+--    This one IS keyed on absence, so it is safe either way — kept inside the guard only so the
+--    whole "what this file sets up" block stays in one place.
 UPDATE settings
    SET platform_channels = '{"zomato":{"on":true},"swiggy":{"on":true},"website":{"on":false}}'::jsonb
  WHERE platform_channels IS NULL OR platform_channels = '{}'::jsonb;
@@ -51,6 +68,9 @@ UPDATE settings
 --    get it from NR_MP_DEFAULT / MP_DEFAULT.
 UPDATE restaurants
    SET manager_permissions = COALESCE(manager_permissions, '{}'::jsonb) || '{"platform": true}'::jsonb;
+
+END IF;
+END $reseed_guard$;
 
 -- 4) Parcel gets its own source; migrate every existing takeaway row (all staff parcels).
 ALTER TABLE aggregator_orders DROP CONSTRAINT IF EXISTS aggregator_orders_source_check;

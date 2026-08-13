@@ -18,9 +18,17 @@
 -- delete the other 19 and flip `delete_bill` from a deliberate false back to absent — a seed
 -- script quietly handing back powers an admin removed.
 
+-- ⚠️ THE HELPER MAY NOT EXIST YET, AND THAT IS NOT AN ERROR (fixed 2026-08-13, T16 finding 7511).
+-- Same shape as migration 043: `lfh_already_applied` arrives with migration 307, 214 files after
+-- this one, so on a FRESH database this file used to abort the whole seed. `to_regprocedure` asks
+-- whether the helper exists, and EXECUTE keeps the call from being planned when it does not.
 DO $reseed_guard$
+DECLARE v_applied boolean := false;
 BEGIN
-IF lfh_already_applied('093_grandfather_r1_manager_powers') THEN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('093_grandfather_r1_manager_powers') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
   RAISE NOTICE '093_grandfather_r1_manager_powers: already applied — skipped (a re-run would wipe 19 permission keys)';
   RETURN;
 END IF;

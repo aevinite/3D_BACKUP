@@ -15,18 +15,39 @@
 
 -- Belt-and-braces: nothing should be muted yet (the table was minutes old and empty on both
 -- stacks when this was written), but if anything WAS muted, un-mute it rather than keep it hidden.
-UPDATE staff_actions sa
-   SET resolved_at = NULL
- WHERE sa.level = 'error'
-   AND sa.resolved_at IS NOT NULL
-   AND EXISTS (
-     SELECT 1 FROM error_signatures es
-      WHERE es.state = 'ignored'
-        AND es.panel = sa.panel AND es.action = sa.action
-        AND (es.restaurant_id IS NULL OR es.restaurant_id = sa.restaurant_id)
-   );
-
-DELETE FROM error_signatures WHERE state = 'ignored';
+--
+-- ⚠️ THESE TWO STATEMENTS READ A COLUMN THIS FILE DELETES 12 LINES LOWER, so they are correct
+-- exactly ONCE (fixed 2026-08-13, T16 finding 7620). On the second run `error_signatures.state`
+-- is gone — migration 218's `CREATE TABLE IF NOT EXISTS` is a no-op on an existing table, so
+-- nothing re-adds it — and `es.state` raised `column es.state does not exist`.
+-- seed-supabase.mjs throws on the first failing file, so a re-seed DIED HERE and migrations
+-- 220–312 never ran: no merge record, no tax stamping, no discount gross-up, and never reaching
+-- migration 307, the file whose whole job is making a re-seed safe.
+-- So the un-mute only runs while the column is still there. Wrapped, not deleted: on a fresh
+-- database 218 does create `state`, and that single run must still un-mute anything muted.
+DO $unmute_once$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'error_signatures' AND column_name = 'state'
+  ) THEN
+    EXECUTE $q$
+      UPDATE staff_actions sa
+         SET resolved_at = NULL
+       WHERE sa.level = 'error'
+         AND sa.resolved_at IS NOT NULL
+         AND EXISTS (
+           SELECT 1 FROM error_signatures es
+            WHERE es.state = 'ignored'
+              AND es.panel = sa.panel AND es.action = sa.action
+              AND (es.restaurant_id IS NULL OR es.restaurant_id = sa.restaurant_id)
+         )
+    $q$;
+    EXECUTE $q$ DELETE FROM error_signatures WHERE state = 'ignored' $q$;
+  ELSE
+    RAISE NOTICE '219: error_signatures.state already removed — nothing to un-mute (this file has run before)';
+  END IF;
+END $unmute_once$;
 
 ALTER TABLE error_signatures
   DROP COLUMN IF EXISTS state,

@@ -16,9 +16,22 @@
 -- `lfh_applied_once` has no row for it — absent table (a fresh database) counts as "not yet",
 -- which is the single legitimate run. Do NOT unwrap this.
 
+-- ⚠️ THE HELPER MAY NOT EXIST YET, AND THAT IS NOT AN ERROR (fixed 2026-08-13, T16 finding 7511).
+-- `lfh_already_applied` is created by migration 307 — 264 files AFTER this one. On a database that
+-- already has it (every live stack) the call below is a plain check. On a FRESH database seeded
+-- from zero it does not exist when this file runs, and calling it directly raised
+-- `function lfh_already_applied(unknown) does not exist`, which made seed-supabase.mjs abort at
+-- file 043 of 319 — so a brand-new database could not be built from this repo at all. The
+-- `to_regprocedure` gate answers "is the helper there?" without touching it, and the call itself
+-- goes through EXECUTE so PostgreSQL only PLANS it when the answer is yes. "No helper" means
+-- "nothing has been recorded", which reads as not-yet-applied — exactly the single legitimate run.
 DO $reseed_guard$
+DECLARE v_applied boolean := false;
 BEGIN
-IF lfh_already_applied('043_inr_base_currency') THEN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('043_inr_base_currency') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
   RAISE NOTICE '043_inr_base_currency: already applied — skipped (a second x84 would corrupt every price and bill)';
   RETURN;
 END IF;
