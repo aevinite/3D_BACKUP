@@ -104,3 +104,14 @@ docs/research/
 # have nothing to do with a restaurant billing app).
 .agents/
 .codex/
+
+# ── Big things that live on this Mac, not in the repo (T10 sweep, 2026-08-12) ────────────────
+# 186 tracked files / 26 MB that no build, no deploy and no test has ever read. .vercelignore
+# already kept them out of deploys (that was the expensive half); this keeps them out of every
+# clone and every worktree, which matters in a repo that runs 20 parallel sessions.
+#
+# THE FILES ARE STILL ON DISK — `git rm --cached` only stopped tracking them. Nothing was deleted.
+# Competitor research: 185 screenshots + a macOS .app bundle (with spaces in its path).
+/All_compitior_POs_INFO/
+# The owner's handover PDF (760 KB, last changed 2026-07-25). Read by a person, never by the app.
+/PROJECT-HANDOFF.pdf

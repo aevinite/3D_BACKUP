@@ -1,4 +1,10 @@
-# The 500-phase whole-app test
+# The whole-app test suite
+
+> **How many phases?** Ask the suite, never a document: `npm run verify:everything -- --list`.
+> Three places used to answer differently — this file's old title said 500, the code says 506,
+> and the project's shorthand is "the 501-phase suite". Phases get added; a number typed into a
+> heading cannot keep up, and a stale one makes a reader think phases went missing. (T10 sweep,
+> 2026-08-12.)
 
 `npm run verify:everything` — every numbered phase, run one at a time against a chosen site.
 
