@@ -1208,3 +1208,32 @@ Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French Hou
 - [x] **New guard** so this class can't come back quietly: the clash check now verifies the table an
   expectation names is one the server actually compares (it could be ignored in silence before).
 - Verified live on 3-d-backup after merge; full report in `.claude/sweep/T17-findings.md`.
+
+## T14 TABLET SWEEP — swept, then FIXED and LIVE on backup (2026-08-13, PR #954)
+
+- [x] **500-phase tablet sweep** (iPad 1194×834 landscape AND 834×1194 portrait, touch, dpr 2,
+      both skins, all four panels + 16 owner pages + 22 admin pages + the guest doors).
+      ✅ 479 · ❌ 12 · ⏭ 9. Report: `.claude/sweep/T14-findings.md`.
+- [x] **All 6 findings fixed, merged (PR #954) and verified ON the deployed backup**, not just
+      locally — 43 rendered-geometry assertions at both orientations, plus the screenshots looked
+      at by eye:
+      1. manager ＋ Take order: **"Send to kitchen" was sliced off by 17px on an iPad, both ways
+         up** — the tablet band narrowed the cart to 286px and the footer needs 303px.
+      2. upright, the dishes got **one column** — now two, and a narrow tile drops its photo
+         instead of spelling the dish downwards (`Ha/zel/nut/Col/d/Co/ffe/e`).
+      3. upright, Bills / Audit & logs / Settings gave a four-row menu **320px (38%) of the
+         screen** — now 220px, and the drag handle is a visible 16px grab bar on touch.
+      4. the guest menu said **"SLIDE →" over a category row that cannot move** on 4 of 5
+         restaurants — the hint is now measured.
+      5. the manager panel declared the landscape side safe-area insets and used neither.
+      6. `OwnerShell` lacked `AdminShell`'s skin-cookie back-fill.
+      Extra, which the sweep itself had missed: the 3-column landscape dish tile was **already**
+      breaking names mid-word ("Cappucci/no", "Cucumbe/r Mint Cooler"). Fixed too.
+- [ ] **Still owed from that sweep (2):** `/q/<code>` never got a live tablet check (it needs a
+      table QR row, which is a write), and the manager/kitchen top bar for a NON-#1 restaurant was
+      code-read rather than opened (it needs a 5th/6th staff sign-in against a rate limit that
+      alerts the owner's phone). Guest-side branding WAS confirmed live on five tenants.
+- [x] **One improvement idea logged, not padded** (`.claude/sweep/T14-improvements.md`): the
+      waiter tablet caps the floor at 6 tables per row for a finger but uses the same 6 upright,
+      where tiles drop from 176px to 116px. Five other candidates were dropped, three of them
+      because `docs/REJECTED-IDEAS.md` already refuses them.
