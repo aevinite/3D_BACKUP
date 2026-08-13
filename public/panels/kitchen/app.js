@@ -582,6 +582,14 @@ function applyView() {
 // Used by the 86-board toggle/undo — a single deliberate tap, so a reload is fine.
 // freshLoad, not load: this runs a WRITE and then refreshes, so it must not be handed a read that
 // started before the write (see the note on freshLoad).
+//
+// REJECTED (owner, 2026-08-13): do NOT give this the manager/tablet `errText()` treatment — the
+// shared helper that tells "no internet", "the system is very busy" and a clash apart instead of
+// "Failed: <code>". Offered as sweep idea I6 and turned down: *"i don't thing i6 is require mainly
+// in kitchen panel is only use for kot print"*. This screen prints KOTs; it does not edit values,
+// so the clash wording it would gain is one it can never reach. `Failed: <message>` stays, and the
+// kitchen being the odd one of the three panels here is deliberate, not drift. See
+// docs/REJECTED-IDEAS.md R21.
 const act = async (fn) => { try { await fn(); await freshLoad(); } catch (e) { toast("Failed: " + e.message); } };
 
 // Marking dishes READY is OPTIMISTIC. In a rush the cook taps ✓ down a long ticket

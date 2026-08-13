@@ -5426,8 +5426,57 @@ const featureOn = (key) => {
   return typeof f[key] === "boolean" ? f[key] : def;
 };
 
+// WHAT THE GUEST MENU IS WAITING FOR → the 🔔 in the top bar (owner, 2026-08-13).
+//
+// This is an ADAPTER, not a feature: every row below is already in `state.summary`, which this
+// panel polls and refreshes from the realtime breadcrumb anyway. It makes no request of its own —
+// a notification centre that fetched would be paying a second time for data already on the device,
+// which is the shape 96% of this product's egress bill once had. The sheet, the count and the
+// hide-when-off rule live in public/panels/guestbell.js, shared with the waiter tablet.
+function syncGuestBell() {
+  if (!window.LFH_BELL) return;
+  try {
+    const s = state.data.settings || {};
+    // WITH THE GUEST MENU OFF THERE IS NO BELL AT ALL (his words: "it will not even show that").
+    // `menu_enabled` is the ADMIN's switch on the Access screen, so this is admin-controlled
+    // through the setting that already decides it, not a second toggle for the same decision.
+    const menuOn = s.menu_enabled !== false;
+    if (!menuOn) { window.LFH_BELL.sync({ menuOn: false, rows: [], onOpen: null }); return; }
+    const at = (v) => { const t = v ? new Date(v).getTime() : 0; return Number.isFinite(t) ? t : 0; };
+    const rows = [];
+    // A raised hand, with what they actually said — the note is the useful half.
+    for (const c of (state.summary.calls || [])) {
+      if (c && !c.resolved) rows.push({ kind: "call", table: c.table_number, text: c.note || "", at: at(c.created_at) });
+    }
+    // Someone waiting to be let in to a table, and anything else a table asked for.
+    for (const j of (state.summary.joiners || [])) rows.push({ kind: "join", table: j.table_number, text: j.name || "", at: at(j.created_at) });
+    for (const r of (state.summary.requests || [])) rows.push({ kind: "request", table: r.table_number, text: r.note || r.kind || "", at: at(r.created_at) });
+    // A NEW GUEST ORDER NOBODY HAS ACCEPTED YET. Read off the same tile state the floor draws
+    // from, so the bell can never disagree with the tile beside it.
+    //
+    // The summary carries no timestamp for this (mig 238 returns a STATE, not a time), so there is
+    // nothing honest to show as "when" — `key` is what tells the bell whether this is the same
+    // waiting order it has already been shown or another one on top of it. It folds in how many
+    // are waiting, so a second order at the same table counts as new again.
+    for (const t of Object.keys(state.summary.tiles || {})) {
+      const tile = (state.summary.tiles || {})[t];
+      if (!tile || !tile.hasNew) continue;
+      const n = Number((tile.counts || {}).nw) || 1;
+      rows.push({ kind: "order", table: t, text: n > 1 ? n + " waiting to be accepted" : "waiting to be accepted", at: 0, key: "order:" + t + ":" + n });
+    }
+    window.LFH_BELL.sync({ menuOn: true, rows, onOpen: (table) => { try { openFloatingTable(table); } catch (e) {} } });
+  } catch (e) { /* the bell is a readout; it must never be able to stop the panel rendering */ }
+}
+
 function renderEditor() {
   const ed = $("#editor");
+  // DEFERRED ON PURPOSE. Both panels rebuild chunks of their own chrome during the render that
+  // follows this call, and the waiter tablet's rebuild takes the top bar with it — so mounting
+  // the bell first meant mounting it into markup that was about to be thrown away, and the
+  // button simply never appeared (measured on the real tablet: the sheet worked, the button
+  // did not exist). Running it after the current render settles costs one empty task and makes
+  // the bell independent of what each panel happens to redraw.
+  setTimeout(syncGuestBell, 0);   // a top-bar button — kept current on every tab, not just the floor
   if (state.tab === "tables") {
     const _t0 = performance.now();
     ed.innerHTML = floorHtml();

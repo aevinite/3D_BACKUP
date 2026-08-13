@@ -242,35 +242,28 @@ export default function ConnectionBadge({ className = "", pollMode = false, gues
 
           {v.kind === "live" && <Sparkline history={history} />}
 
+          {/* ONE PLACE FOR AN ORDER THAT COULDN'T SEND, NOT TWO (owner, 2026-08-13).
+              This popup used to list every saved and failed order with its own Try again /
+              Order the rest / Dismiss buttons — and so does the chip at the bottom of the menu
+              (components/GuestOutboxChip.tsx), which is the surface a diner actually notices.
+              Two lists of the same orders, with DIFFERENT buttons on each: the top one had
+              "Order the rest" and the bottom one didn't. Asked what he was looking at, the owner
+              read the mini-cart, the badge and the chip as one thing and could not tell which was
+              which — which is the answer: there should have been one.
+              So the badge keeps what a CONNECTION badge is for — how many are still on the phone —
+              and the chip owns the orders and the buttons. Nothing is lost: the chip is on screen
+              whenever this count is above zero (it renders on exactly the same condition). */}
           {(waiting > 0 || failed > 0) && (
             <span className="lfh-conn-pop-sync">
               <span className="lfh-conn-pop-sub">{failed > 0 ? "Couldn't send" : level === "offline" ? "Saved on this device" : "Sending…"}</span>
-              {box.failed.map((o) => (
-                <span key={o.id} className="lfh-conn-row">
-                  <span className="lfh-conn-row-t"><b>{orderLabel(o)}</b><small className="err">{o.error} · {fmtAgo(o.at)}</small></span>
-                  {/* Try again comes FIRST, and it is the point: the only control here used to be
-                      "Dismiss", i.e. throw the order away. An order that failed for a reason that
-                      has since passed (the system was busy, the dish came back) could not be sent
-                      without building the whole basket again. */}
-                  {/* ONE DISH WAS THE PROBLEM — offer the rest (improvement #5). A table of six
-                      used to lose the whole basket because one item ran out, and had to rebuild it
-                      by hand. Shown ONLY when the phone still knows which line to drop and there
-                      is something left after dropping it, so the button can never do nothing. */}
-                  {o.blocked && (o.lines || []).length > 1 && (
-                    <button className="lfh-conn-go" onClick={() => orderRestWithout(o.id)}>
-                      Order the rest
-                    </button>
-                  )}
-                  <button className="lfh-conn-go" onClick={() => retryGuestFailed(o.id)}>Try again</button>
-                  <button className="lfh-conn-x" onClick={() => dismissGuestFailed(o.id)}>Dismiss</button>
+              <span className="lfh-conn-row">
+                <span className="lfh-conn-row-t">
+                  <b>{failed > 0
+                    ? (failed === 1 ? "1 order couldn’t send" : `${failed} orders couldn’t send`)
+                    : (waiting === 1 ? "1 order waiting to send" : `${waiting} orders waiting to send`)}</b>
+                  <small>Open the list at the bottom of the screen to see it.</small>
                 </span>
-              ))}
-              {box.queued.map((o) => (
-                <span key={o.id} className="lfh-conn-row">
-                  <span className="lfh-conn-row-t"><b>{orderLabel(o)}</b><small>{fmtAgo(o.at)}</small></span>
-                  <span className="lfh-conn-pill">{level === "offline" ? "Waiting" : "Sending…"}</span>
-                </span>
-              ))}
+              </span>
             </span>
           )}
           {waiting === 0 && failed === 0 && (
