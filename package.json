@@ -39,7 +39,7 @@
     "verify:everything": "npx esbuild lib/accessTree.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/accessTree.mjs --log-level=warning && node scripts/verify-everything.mjs",
     "access:defaults": "npx esbuild lib/accessTree.ts --bundle --platform=node --format=esm --alias:@=. --outfile=node_modules/.cache/accessTree.mjs --log-level=warning && node scripts/set-access-defaults.mjs",
     "verify:live": "node scripts/verify-no-fatal-ui.mjs",
-    "verify:clash": "node scripts/verify-clash-coverage.mjs",
+    "verify:clash": "npm run -s verify:clash-coverage",
     "verify:owner-clash": "node scripts/verify-owner-clash.mjs",
     "verify:customer-erase": "node scripts/verify-customer-erase.mjs",
     "verify:outbound": "node scripts/verify-outbound-honesty.mjs",
@@ -112,7 +112,8 @@
     "verify:read-guards": "node scripts/verify-read-guards.mjs",
     "verify:personal-data": "node scripts/verify-personal-data.mjs",
     "read-timings": "node scripts/read-timings.mjs",
-    "verify:push": "npm run -s typecheck && npm run -s lint && npm run -s test:money && npm run -s test:errors && npm run -s test:units && npm run -s verify:static && npm run -s verify:access"
+    "verify:push": "npm run -s typecheck && npm run -s lint && npm run -s test:money && npm run -s test:errors && npm run -s test:units && npm run -s verify:static && npm run -s verify:access",
+    "verify:clash-coverage": "node scripts/verify-clash-coverage.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",

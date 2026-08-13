@@ -139,7 +139,8 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 
 | you touched | run | needs | writes |
 |---|---|---|---|
-| **added or changed ANY write** | `verify:clash` (say what you edited from), `verify:floor` (drop the floor snapshot), `verify:taps` (never a silent return) | nothing | no |
+| **added or changed ANY write** | `verify:clash-coverage` (say what you edited from), `verify:floor` (drop the floor snapshot), `verify:taps` (never a silent return) | nothing | no |
+| ↳ *(`verify:clash` is kept as a short alias for the same thing — the file is `scripts/verify-clash-coverage.mjs`)* | — | — | — |
 | an order write | `verify:order`, `verify:order-retry`, `verify:closed-session` | mixed | some **YES** |
 | anything that lowers a bill | `verify:audit` ← every money change leaves a record | nothing | no |
 | a reply we send to an outside system | `verify:outbound` | `.env.local` | no |

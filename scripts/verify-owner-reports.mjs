@@ -432,5 +432,59 @@ check("the dashboard imports the same one",
   /from "@\/lib\/restaurantColor"/.test(dashPage) && !/^const PORTFOLIO_COLORS/m.test(dashPage),
   "two copies of a palette is how they drift");
 
+console.log("\n── 22. EVERY CHART GOES THROUGH THE 'IS THERE ENOUGH DATA' GATE ──");
+// CLAUDE.md: "Charts are DYNAMIC, never a lonely 1-bar plot: route through populated() / NotEnough /
+// ScrollX in components/owner/Charts.tsx; sparse timelines auto-drill to finer buckets."
+//
+// Nothing enforced it (T10 sweep, 2026-08-12). Worse, populated/NotEnough/ScrollX are module-PRIVATE
+// — not exported — so a chart built in any other file physically CANNOT route through them. The rule
+// held only because no chart happened to live anywhere else. That is an accident, not a guarantee,
+// and the rule exists because a brand-new restaurant with one day of trade got a single lonely bar.
+//
+// So: charts live in Charts.tsx. A file that draws its own plot elsewhere is the thing to catch.
+// A decorative <svg> (an icon, a logo) is not a chart — what makes it one is plotting DATA, so this
+// looks for an <svg> in the same file as the shapes a plot is made of, driven by a mapped array.
+{
+  const dirs = ["components/owner", "app/owner"];
+  const skip = /Charts\.tsx$/;
+  // readdirSync, NOT fs.readdirSync — this file imports the function, not the namespace. The first
+  // draft used `fs.` and the try/catch swallowed the ReferenceError, so the check scanned nothing and
+  // passed on an empty list. A guard that cannot fail is worse than no guard: it reports safety it
+  // never established. Hence the scanned-count assertion below.
+  const walk = (d, out = []) => {
+    let ents = [];
+    try { ents = readdirSync(d, { withFileTypes: true }); } catch { return out; }
+    for (const e of ents) {
+      const p = `${d}/${e.name}`;
+      if (e.isDirectory()) walk(p, out);
+      else if (/\.tsx?$/.test(e.name) && !skip.test(p)) out.push(p);
+    }
+    return out;
+  };
+  const scanned = dirs.flatMap((d) => walk(d));
+  const offenders = [];
+  for (const f of scanned) {
+    const src = read(f);
+    if (!/<svg/i.test(src)) continue;
+    // plot shapes driven by a data array — an icon has neither
+    const plots = /<(rect|polyline|circle|path)\b[^>]*\{/i.test(src) && /\.map\(/.test(src);
+    if (!plots) continue;
+    // …unless it already routes through the gate, or re-uses a charted component
+    if (/NotEnough|populated\(|ScrollX|from "@?\/?.*owner\/Charts"/.test(src)) continue;
+    offenders.push(f);
+  }
+  // Prove the walk really walked. This is the check that catches the check.
+  check("…and the chart scan really looked at the owner files", scanned.length > 20,
+    `only ${scanned.length} file(s) scanned under ${dirs.join(", ")} — the walk found nothing, so the result below means nothing`);
+  check(
+    "no chart is drawn outside components/owner/Charts.tsx",
+    offenders.length === 0,
+    offenders.join(", ") +
+      " — draws a data plot but never asks whether there is enough data to draw one. Move it into " +
+      "Charts.tsx (where populated()/NotEnough/ScrollX live and are private), or export the gate and use it. " +
+      "A brand-new restaurant with one day of trade must get an honest 'not enough yet' card, never a single bar.",
+  );
+}
+
 console.log(`\n${fails.length ? "✗ FAIL" : "✓ PASS"} — ${pass} checks passed, ${fails.length} failed`);
 if (fails.length) { for (const f of fails) console.log(`  · ${f.name}: ${f.why}`); process.exit(1); }

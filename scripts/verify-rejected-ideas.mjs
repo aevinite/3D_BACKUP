@@ -50,11 +50,38 @@ for (const r of rows) {
   if (!/\bNO\b/.test(r.decision)) fail(`${r.id} does not record a clear NO`, r.decision.slice(0, 90));
   const files = [...r.sites.matchAll(/`([^`]+?\.(?:ts|tsx|js|css|mjs))`/g)].map((m) => m[1].split(" ")[0]);
   if (!files.length) { fail(`${r.id} names no code file in its "code site" column`, r.sites.slice(0, 90)); continue; }
+  // WHICH LINE the comment sits on, not just which file (T10 sweep, 2026-08-12).
+  //
+  // CLAUDE.md promises "a `REJECTED (owner, <date>):` comment on the exact line someone would
+  // otherwise change". This only checked that the FILE contained one somewhere. Four of the eight
+  // rows name public/panels/tablet/app.js, so a single comment anywhere in an 11,000-line file
+  // satisfied all four — and the one thing that actually stops the mistake is the comment being
+  // where the person is already looking. (Checked by hand at the time: every row really did have
+  // its own comment at the right function. The guard simply would not have noticed if it didn't.)
+  //
+  // The row already names the site — "`public/panels/tablet/app.js` → `tileHtml()`" — so use it.
+  // NEAR means within 60 lines: close enough that the comment is on screen with the code, loose
+  // enough that adding a few lines between them is not a failure.
+  const NEAR = 60;
+  const siteHints = [...r.sites.matchAll(/→\s*`([^`]+)`/g)].map((m) => m[1].replace(/\(\)$/, ""));
   for (const f of files) {
     if (!existsSync(`${ROOT}/${f}`)) { fail(`${r.id} points at a file that does not exist`, f); continue; }
     const src = readFileSync(`${ROOT}/${f}`, "utf8");
-    if (!/REJECTED \(owner,/.test(src)) fail(`${r.id}: ${f} carries no "REJECTED (owner, …)" comment`, "the doc says no, the code does not");
-    else ok(`${r.id} → ${f} carries its REJECTED comment`);
+    const lines = src.split("\n");
+    const marks = lines.map((l, i) => (/REJECTED \(owner,/.test(l) ? i : -1)).filter((i) => i >= 0);
+    if (!marks.length) { fail(`${r.id}: ${f} carries no "REJECTED (owner, …)" comment`, "the doc says no, the code does not"); continue; }
+
+    // Which symbol should this row's comment be next to? Match the hint against this file.
+    const hint = siteHints.find((h) => h && !h.includes("/") && lines.some((l) => l.includes(h)));
+    if (!hint) { ok(`${r.id} → ${f} carries its REJECTED comment`); continue; }
+    const at = lines.map((l, i) => (l.includes(hint) ? i : -1)).filter((i) => i >= 0);
+    const near = marks.some((m) => at.some((a) => Math.abs(a - m) <= NEAR));
+    if (near) ok(`${r.id} → ${f} carries its REJECTED comment AT ${hint}`);
+    else fail(
+      `${r.id}: ${f} has a REJECTED comment, but not near \`${hint}\` — the place someone would edit`,
+      `comment(s) at line ${marks.map((m) => m + 1).join(", ")}; \`${hint}\` at line ${at.map((a) => a + 1).join(", ")}. ` +
+        `A rejection nobody sees while editing is the one that gets re-suggested — that is what this file exists to stop.`,
+    );
   }
 }
 
