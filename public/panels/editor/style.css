@@ -41,7 +41,15 @@ body {
 /* ---------- top bar ---------- */
 .topbar {
   display: flex; align-items: center; gap: 24px;
-  padding: var(--sat) 20px 0; height: calc(60px + var(--sat));
+  /* --sal/--sar are the LEFT/RIGHT insets, and they are the ones that matter in LANDSCAPE —
+     which is how a panel is actually held on a tablet or a notched phone. This file DECLARED
+     both at the top and then used neither anywhere in 3,900 lines (T14 sweep, 2026-08-13),
+     while the waiter tablet uses them in four places and the kitchen board in three, and
+     components/PanelFrame.tsx goes to the trouble of measuring all four and pushing them in.
+     On an iPad both read 0, so nothing moves today — but the first sideways device that DOES
+     report a side inset would have run this bar and the content below under its notch. */
+  padding: var(--sat) calc(20px + var(--sar)) 0 calc(20px + var(--sal));
+  height: calc(60px + var(--sat));
   background: var(--panel);
   border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 10;
@@ -210,6 +218,21 @@ body.nav-compact .tab {
 .sidebar { position: relative; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .sidebar-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 6; transition: background .15s; }
 .sidebar-resizer:hover { background: color-mix(in srgb, var(--gold) 45%, transparent); }
+/* A 7px STRIP WHOSE ONLY CUE IS :hover IS INVISIBLE ON A TABLET (T14 sweep, 2026-08-13).
+   It genuinely works with a finger — the handler is `pointerdown` + setPointerCapture, and the
+   width is remembered — but on a touch screen there is no hover, so nobody discovers it, and on
+   an 834px iPad upright that left the Bills / Audit / Settings tabs stuck with a 320px column
+   holding four short rows. A finger also wants more than 7px. So on a coarse pointer it becomes
+   a 16px band with a visible grab bar, always drawn. */
+@media (pointer: coarse) {
+  .sidebar-resizer { width: 16px; right: -8px; }
+  .sidebar-resizer::before {
+    content: ""; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 4px; height: 38px; border-radius: 3px;
+    background: color-mix(in srgb, var(--gold) 55%, var(--line));
+  }
+  .sidebar-resizer:active::before { background: var(--gold); }
+}
 /* align-items center keeps the button vertically tidy next to the search box. */
 .sidebar-head { position: relative; display: flex; align-items: center; gap: 8px; padding: 14px; border-bottom: 1px solid var(--line); }
 .search {
@@ -321,7 +344,8 @@ body.nav-compact .tab {
 .dish-no { font-size: 11px; font-weight: 700; color: var(--gold); opacity: 0.75; font-variant-numeric: tabular-nums; }
 
 /* ---------- editor panel ---------- */
-.editor { overflow-y: auto; padding: 0 28px 80px; }
+/* Right/left padding carries the landscape side insets too — see the note on .topbar. */
+.editor { overflow-y: auto; padding: 0 calc(28px + var(--sar)) 80px calc(28px + var(--sal)); }
 .empty { color: var(--muted); padding: 60px 0; text-align: center; }
 
 /* Full-width sticky header — spans the panel padding so scrolled content can't
@@ -1087,6 +1111,27 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    to the screen width, which is what lets the grid below scroll sideways instead of overflowing
    into a clipped box. */
 @media (max-width: 1040px) { .floor-wrap { flex-direction: column; align-items: stretch; margin-right: 0; } .floor-side { width: 100% !important; flex: none !important; margin-top: 0; position: static; max-height: none; overflow-y: visible; } }
+
+/* ── 320px OF SIDEBAR IS 38% OF A TABLET HELD UPRIGHT (T14 sweep, 2026-08-13) ────────────────
+   On the tabs whose sidebar is a SHORT NAV rather than the dish list — Bills (Live · Previous
+   bills · Pay Later · Calls), Audit & logs, Settings — the 320px default column held four rows
+   and then ~1,000px of empty panel, while the bill cards were squeezed into the remaining 514px
+   of an 834px screen. Narrowed to 220px there, which hands the content 100px back.
+   Scoped THREE ways on purpose:
+     · `body[data-tab=…]` (the attribute setTab writes, the same hook #bulkBtn uses) so the
+       Editor tab's dish LIST keeps every pixel of its 320px — it needs the width, a nav does not;
+     · `max-width: 1040px` so a desktop is untouched — at 1194 sideways the same 320px is only
+       27% of the screen and reads fine;
+     · written as `grid-template-columns`, not as `--sidebar-w`, because app.js sets that variable
+       INLINE from localStorage (`lfh_editor_sidebar_w`) and an inline custom property would beat
+       any stylesheet rule — so overriding the variable would have done nothing on a device that
+       had ever dragged the divider. A manager who HAS dragged it keeps their own width on the
+       Editor tab, which is the one that reads the variable. */
+@media (max-width: 1040px) {
+  body[data-tab="orders"] .layout:not(.no-sidebar),
+  body[data-tab="log"] .layout:not(.no-sidebar),
+  body[data-tab="general"] .layout:not(.no-sidebar) { grid-template-columns: 220px 1fr; }
+}
 
 /* TRUE TWO-PANE SCROLL (desktop side-by-side only, ≥1041px) — owner 2026-07-06.
    Before: the tile grid (.floor-main) and the right panel (.floor-side) shared ONE
@@ -1883,7 +1928,9 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
      (owner request 2026-07-20 — the old wrap-to-many-rows tab strip ate a third of
      the phone screen). --- */
   .topbar {
-    height: auto; flex-wrap: wrap; gap: 8px 10px; padding: 10px 12px;
+    /* side insets ride along here too — landscape on a notched phone (see .topbar above) */
+    height: auto; flex-wrap: wrap; gap: 8px 10px;
+    padding: calc(10px + var(--sat)) calc(12px + var(--sar)) 10px calc(12px + var(--sal));
   }
   .brand { font-size: 18px; }
   .conn { margin-left: auto; }              /* stays top-right, on the brand's row */
@@ -1915,7 +1962,7 @@ body { background: radial-gradient(1100px 560px at 78% -12%, #1d160f 0%, var(--b
     min-width: 0;                           /* let the grid cell shrink so children can scroll, not stretch the page */
   }
   .sidebar-resizer { display: none; }       /* no drag-to-resize on touch */
-  .editor { padding: 0 16px 60px; }
+  .editor { padding: 0 calc(16px + var(--sar)) 60px calc(16px + var(--sal)); }
 
   /* On a phone the item list becomes a HORIZONTAL, swipeable strip of cards
      (instead of a tall vertical list that pushes the editor off-screen). You
@@ -2813,6 +2860,72 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
      when a word genuinely cannot fit on a line of its own. */
   .to-dish-t { overflow-wrap: break-word; }
   .to-dish-img { width: 54px; height: 54px; }
+  /* …AND THE FOOTER HAS TO WRAP ONCE THE PANE IS NARROWER (T14 tablet sweep, 2026-08-13).
+     Narrowing .to-cart to 286px above is a good trade for the dish columns, but the footer
+     row was never re-checked against it. `≈ ₹0` + `− Discount` + `Send to kitchen` needs
+     303px and does not wrap above 760px, and `.to-body` is `overflow: hidden` — so on a
+     1194x834 iPad (and 834x1194, and any window from 761 to 1200) the PRIMARY action came out
+     at x1044..1182 against a clip edge at 1165: 17px of `Send to kitchen` was neither painted
+     nor tappable, its rounded corner sliced flat. The phone band below already solves this the
+     right way; this is the same treatment, at the widths that actually needed it too. Sending
+     food to the kitchen is the last thing tapped on every order — it may not look half-drawn. */
+  .to-foot { flex-wrap: wrap; row-gap: 8px; }
+  .to-foot .to-send, .to-foot .to-pay { flex: 1 1 100%; margin-left: 0; justify-content: center; }
+  .to-foot .to-pay { display: flex; gap: 8px; }
+  .to-foot .to-pay .to-send { flex: 1 1 0; }
+  .to-foot .qo-cartbtn { margin-left: auto; }
+}
+/* ── A TABLET HELD UPRIGHT IS 834px, AND THAT USED TO MEAN ONE DISH PER ROW (T14 sweep, 2026-08-13)
+   Measured at 834x1194: rail 188 + cart 286 left the dishes a 302px strip, and `minmax(190px)`
+   in a 277px grid is ONE column — so a manager taking an order upright scrolled a single-file
+   list past 59 dishes while 474px of the 834px screen showed a nine-chip rail and an empty
+   "This order". The only rule that reshapes this window is the 760px phone band below, and an
+   iPad upright sits 74px above it, so it got the desktop shape inside a phone's worth of width.
+   WHAT IS DELIBERATELY NOT DONE HERE: the rail is NOT narrowed and NOT laid down. `.to-cat` is
+   `white-space: nowrap` inside an `overflow: hidden` box, so a narrower rail CLIPS long category
+   names on a big menu, and laying it flat is the top strip the owner moved away from on
+   2026-08-03 ("every button should fit on the left side so I don't have to scroll"). The rail
+   stays exactly where he put it, at the width that is proven to fit. What gives way is 36px of
+   the order pane and the tile minimum — 150px is the size the guest menu and quick order already
+   use, so it is a proven tile, not a new one. Result upright: 2 columns of ~153px. */
+@media (max-width: 950px) {
+  .to-cart { flex: 0 0 250px; }
+  .to-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+}
+/* ── AND A NARROW TILE DROPS ITS PHOTO, IT DOES NOT SPELL THE DISH DOWNWARDS ────────────────
+   First cut of the two-column fix above looked WORSE than the bug: a 152px tile spends 22px on
+   padding, 22px on gaps, 44px on the photo and 40px on the ✎, which left 24px for the name —
+   and `.to-dish-t` is `overflow-wrap: anywhere`, so "Hazelnut Cold Coffee" rendered as
+   "Ha / zel / nut / Col / d / Co / ffe / e", one syllable per line. Seen in a screenshot, not
+   inferred: that is the whole reason to look at the picture as well as the numbers.
+   ⚡ Quick order already answers this exact question — `qo-noimg` drops the dish photo below a
+   190px tile ("where it would leave ~50px for the name", PR #738) — so this is the same rule,
+   for the same reason, at the same 190px. It is written as a CONTAINER query on the TILE rather
+   than a viewport width, because what decides it is how wide the TILE came out (which depends on
+   tables-per-… no: on the pane widths AND the restaurant's own grid), never the screen.
+   The ✎ / ×N cluster moves into the corner so the name gets the whole width instead of 88px.
+   NAMED container on purpose: quick mode sizes its tiles from a JS measurement and must not
+   pick this up — `.to-grid:not(.qo-fit)` keeps it out, and a name makes that belt-and-braces. */
+/* 166px, NOT 190px: a container query measures the container's CONTENT box, and this tile spends
+   22px on padding plus 2px of border — so a 206px tile is 182px inside and a 152px tile is 128px.
+   Written as 190 it fired on the 3-column landscape tile too and threw away a photo that had
+   room (caught by the screenshot check, same trap the floor tile's own ladder documents). */
+.to-grid:not(.qo-fit) .to-dish { container-type: inline-size; container-name: todish; }
+/* RUNG 1 — the ✎ moves into the corner and the photo gives up 10px, so the NAME gets the room.
+   This was already wrong at 1194 landscape BEFORE any of today's changes, and the screenshot is
+   what showed it: a 206px tile spends 22px on padding, 22px on the two gaps, 54px on the photo
+   and 40px on the ✎ — 68px left for the name — so "Cappuccino" rendered as "Cappucci / no" and
+   "Cucumber Mint Cooler" as "Cucumbe / r Mint Cooler". Corner ✎ (44px of clearance instead of
+   40+11 inline) plus a 44px photo gives the name ~83px, and a ten-letter word fits on its line. */
+@container todish (max-width: 200px) {
+  .to-dish-img { width: 44px; height: 44px; }
+  .to-dish-side { position: absolute; top: 7px; right: 7px; }
+  .to-dish-meta { padding-right: 44px; }        /* clear the ✎ corner */
+  .to-dish-t { overflow-wrap: break-word; }     /* break a word only when it truly cannot fit */
+}
+/* RUNG 2 — narrower still and the photo goes altogether (see the note above). */
+@container todish (max-width: 166px) {
+  .to-dish-img { display: none; }
 }
 @media (max-width: 760px) {
   .to-modal { width: calc(100vw - 18px); max-height: 92vh; }
@@ -3363,7 +3476,7 @@ html[data-theme="light"] .badge-hidden{ color:#b45309; }
    ═══════════════════════════════════════════════════════════════════════ */
 @media (max-width: 760px) {
   html, body { height: auto; overflow-y: auto; }
-  .topbar { flex-wrap: wrap; height: auto; padding: 8px 12px; gap: 8px 10px; position: sticky; top: 0; z-index: 30; }
+  .topbar { flex-wrap: wrap; height: auto; padding: calc(8px + var(--sat)) calc(12px + var(--sar)) 8px calc(12px + var(--sal)); gap: 8px 10px; position: sticky; top: 0; z-index: 30; }
   /* (The 360px overflow of this row — the 👤 Profile button running off the edge — was found
      independently by two sweeps on the same day. The fix that shipped is the one ~1350 lines above:
      a 6px gap PLUS an icon-only Profile, which also covers the case this one missed — the latency
@@ -3378,7 +3491,7 @@ html[data-theme="light"] .badge-hidden{ color:#b45309; }
   .layout { grid-template-columns: 1fr; height: auto; }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--line); max-height: 50vh; }
   .sidebar-resizer { display: none; }
-  .editor { padding: 0 14px 70px; }
+  .editor { padding: 0 calc(14px + var(--sar)) 70px calc(14px + var(--sal)); }
   /* Section headers + their action buttons wrap instead of overflowing. */
   .ed-head { flex-wrap: wrap; gap: 10px; }
   .ed-head h2 { font-size: 20px; flex: 1 1 100%; }
