@@ -132,6 +132,16 @@
   // Every code below is one the table-ops database functions really answer with
   // (lfh_staff_shift_table, lfh_staff_move_order, lfh_staff_move_order_item — migs 166/264).
   // If you add a reason to any of those, add its sentence here in the same commit.
+  //
+  // THE PANELS ARE ENGLISH. FULL STOP. (owner, 2026-08-13: *"make sure you write the code also
+  // that the panel will be in English, only the other things can be changed."*)
+  //
+  // These are literals on purpose and must stay literals: do NOT move them into lib/i18n.ts, do
+  // not add a locale argument, do not "finish the translation" here later. The guest MENU is the
+  // multilingual surface — staff screens are one language so that a manager, a waiter and a cook
+  // reading the same refusal are reading the same words, and so a bug report quotes a sentence
+  // anyone on the team can search for. The same rule covers the offline bar's wording in
+  // public/panels/offline.js and the two panels' errText().
   const REASONS = {
     party_merged: "this party spans merged tables — unmerge first, then move it",
     merged_child: "that table is joined with another and shares its bill — unmerge it first",

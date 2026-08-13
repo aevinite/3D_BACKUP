@@ -33,6 +33,7 @@ import {
   useGuestOutbox,
   retryGuestFailed,
   dismissGuestFailed,
+  orderRestWithout,
   type GuestOrder,
 } from "@/lib/guestOutbox";
 import { formatPrice, getCurrency, DEFAULT_CURRENCY, type CurrencyMeta } from "@/lib/format";
@@ -155,6 +156,24 @@ export default function GuestOutboxChip() {
                   <div className="gob-row-sub">{whenText(o.at)}</div>
                 </div>
                 <div className="gob-row-acts">
+                  {/* ONE DISH WAS THE PROBLEM — offer the rest of the basket.
+                      This existed only on the connection badge at the TOP of the menu, which is a
+                      small icon nobody taps; THIS is the surface a diner actually sees, and it is
+                      the one that was missing the rescue. A table of six losing everything because
+                      one item ran out — and rebuilding the basket by hand, on a phone, having
+                      already waited — is the whole reason the function was written.
+                      Shown only when the phone still knows which line to drop and there is
+                      something left after dropping it, so the button can never do nothing. */}
+                  {o.blocked && (o.lines || []).length > 1 && (
+                    <button
+                      type="button"
+                      className="gob-btn gob-rest"
+                      disabled={busyId === o.id}
+                      onClick={() => act(o.id, async (id) => { await orderRestWithout(id); })}
+                    >
+                      Order the rest
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="gob-btn gob-retry"

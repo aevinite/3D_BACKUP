@@ -1243,8 +1243,50 @@ function syncQuickOrderBtn() {
   qb.classList.toggle("xray-off", on && tperm("tablet_take_orders") === "off" && tHigher());
 }
 
+// WHAT THE GUEST MENU IS WAITING FOR → the 🔔 in the top bar (owner, 2026-08-13).
+//
+// The waiter's half of the same readout the manager panel has; the sheet, the count and the
+// hide-when-off rule are shared in public/panels/guestbell.js so the two can never drift.
+// An ADAPTER, not a feature: every row is already in `state.summary`, which this panel polls and
+// refreshes from the realtime breadcrumb — it makes no request of its own.
+//
+// ONE DIFFERENCE FROM THE MANAGER, AND IT IS DELIBERATE: a waiter with a SECTION sees only their
+// own tables here. `floorTableList()` is the same list the floor draws, so the bell can never point
+// at a table this person cannot open — which is exactly what tapping a row does.
+function syncGuestBell() {
+  if (!window.LFH_BELL) return;
+  try {
+    const s = state.data.settings || {};
+    // Guest menu off for this restaurant → no bell at all. Not a zero, not a greyed button.
+    if (s.menu_enabled === false) { window.LFH_BELL.sync({ menuOn: false, rows: [], onOpen: null }); return; }
+    const at = (v) => { const t = v ? new Date(v).getTime() : 0; return Number.isFinite(t) ? t : 0; };
+    const mine = new Set(floorTableList().map(String));
+    const rows = [];
+    for (const c of (state.summary.calls || [])) {
+      if (!c || c.resolved) continue;
+      const t = String(c.table_number || "").trim();
+      if (!mine.has(t)) continue;
+      rows.push({ kind: "call", table: t, text: c.note || "", at: at(c.created_at), id: c.id });
+    }
+    // Waiting-to-be-let-in and requests are COUNTS on this panel's tile, not rows (the waiter's
+    // summary is the slim tier), so they are reported as a count rather than one line each.
+    for (const t of mine) {
+      const tile = tableTileState(t);
+      if (!tile) continue;
+      if (tile.hasNew) {
+        const n = Number((tile.counts || {}).nw) || 1;
+        rows.push({ kind: "order", table: t, text: n > 1 ? n + " waiting to be accepted" : "waiting to be accepted", at: 0, key: "order:" + t + ":" + n });
+      }
+      if (tile.pending) rows.push({ kind: "join", table: t, text: tile.pending === 1 ? "1 person" : tile.pending + " people", at: 0, key: "join:" + t + ":" + tile.pending });
+      if (tile.reqs) rows.push({ kind: "request", table: t, text: tile.reqs === 1 ? "1 request" : tile.reqs + " requests", at: 0, key: "req:" + t + ":" + tile.reqs });
+    }
+    window.LFH_BELL.sync({ menuOn: true, rows, onOpen: (table) => { try { selectTable(table); } catch (e) {} } });
+  } catch (e) { /* the bell is a readout; it must never be able to stop the floor rendering */ }
+}
+
 function renderFloor() {
   bindFloorDelegation(); // attach the ONE delegated tile/quick/chip handler (boolean-guarded)
+  syncGuestBell();
   const _t0 = performance.now();
 
   const navEl = document.getElementById("floorNav");
