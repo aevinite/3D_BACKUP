@@ -34,7 +34,7 @@ import path from "node:path";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const QUIET = process.argv.includes("--quiet");
 
-// The 22 static guards, in the order they used to run. Each line is [script, what it protects] —
+// The static guards, in the order they used to run. Each line is [script, what it protects] —
 // the second half is what a person needs when the name alone doesn't say it. Adding one? It must
 // read repo files only, and it needs a row in docs/GUARD-MAP.md (verify:pointers enforces that).
 const GUARDS = [
@@ -61,7 +61,7 @@ const GUARDS = [
   ["verify-ready-tile-and-kitchen.mjs", "a ready tile shows before EVERY dish is ready"],
   ["verify-tablet-wants-in.mjs", "a free table with a raised hand says 'Wants in'"],
 
-  // ── NINE THAT RAN NOWHERE (added by the T10 sweep, 2026-08-12) ───────────────────────────
+  // ── SEVEN THAT RAN NOWHERE (added by the T10 sweep, 2026-08-12) ──────────────────────────
   // Each of these reads repo files only, finishes in under a second, and was green — and each one
   // was run by nobody but a person remembering to. Not in the old chain, not in the PostToolUse
   // hook (which runs six), not in CI. That is the same silence the CI file's own header was written
@@ -75,11 +75,29 @@ const GUARDS = [
   ["verify-dead-css.mjs", "no :global() rule that can never match anything"],
   ["verify-panel-twins.mjs", "the same action agrees across manager, kitchen and tablet"],
   ["verify-server-only-imports.mjs", "no client file reaches a server-only module"],
-  ["verify-outbox-drain.mjs", "saved work always finds its way out, in the order it was made"],
   ["verify-guest-recovery.mjs", "a diner loses neither their basket nor their waiter call"],
   ["verify-hidden-dishes.mjs", "a dish taken off the menu is really off the menu"],
-  ["verify-warm-shell.mjs", "a device's first visit leaves it able to open the app"],
 ];
+
+// NOT HERE, AND WHY — the admission test is stricter than it first looks.
+//
+// "Does it read anything outside the repo" has a second half nobody had had to think about:
+// verify-outbox-drain and verify-warm-shell import PLAYWRIGHT and drive a real (headless) browser
+// against a little local server they start themselves. No database, no login, no deployed site — so
+// they LOOK static, they finish in a second, and on this Mac they pass, because the browser binaries
+// are installed here. On a CI runner `npm ci` installs the playwright package but not its browsers,
+// so both die with ERR_MODULE_NOT_FOUND / a missing executable. Adding them turned the whole step red
+// on a machine where nothing was actually wrong. (T10 sweep, 2026-08-13 — caught by CI within minutes
+// of adding them, which is the system working.)
+//
+// So the test is: reads repo FILES only, and needs nothing installed beyond `npm ci`. A guard that
+// launches a browser belongs with verify:busy and verify:cache — run it locally, or in a job that
+// installs browsers first.
+//
+//   verify:outbox      · saved work always finds its way out, in the order it was made
+//   verify:warm-shell  · a device's first visit leaves it able to open the app
+//
+// Both are in docs/GUARD-MAP.md with "app running"/browser noted, so they are still findable.
 
 const failed = [];
 const missing = [];
