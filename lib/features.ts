@@ -14,7 +14,7 @@
 // flipping them is a by-hand database/settings change.
 
 import { useEffect, useState } from "react";
-import { getSettings } from "./menu";
+import { getSettings, invalidateSettings } from "./menu";
 import { DEFAULT_RESTAURANT_ID } from "./tenant";
 
 export const FEATURE_DEFAULTS = {
@@ -92,6 +92,13 @@ function readSaved(rid: string): FeatureMap | null {
 export async function refreshFeatures(restaurantId: string = DEFAULT_RESTAURANT_ID): Promise<void> {
   cached.delete(restaurantId);
   inflight.delete(restaurantId);
+  // …AND the settings cache these switches are DERIVED from (T13 sweep, 2026-08-13). Clearing only
+  // the two maps above looked like a refresh and was not one: getFeatures() below calls getSettings(),
+  // which has its own 8-second cache, so within that window this re-read the PRE-TOGGLE row and then
+  // stored the old feature map in `cached` — which has no TTL — and pushed it to every subscriber as
+  // the new truth. The real delivery time for a feature switch was therefore the 60-second backstop,
+  // not the breadcrumb that had just arrived. See invalidateSettings() in lib/menu.ts.
+  invalidateSettings(restaurantId);
   const fresh = await getFeatures(restaurantId);
   subsFor(restaurantId).forEach((cb) => cb(fresh));
 }

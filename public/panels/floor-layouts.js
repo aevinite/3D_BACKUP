@@ -1,5 +1,25 @@
 // ── CUSTOM FLOOR PLANS — hand-written, one per restaurant (owner, 2026-07-31) ──────────────
 //
+// ⚠️⚠️ READ THIS BEFORE YOU WRITE A PLAN — THE WAITER TABLET DOES NOT READ THIS FILE YET. ⚠️⚠️
+//
+//   A plan written below draws on the MANAGER floor ONLY. The waiter tablet keeps showing the
+//   plain classic grid, so the two screens will show the SAME floor arranged two different ways,
+//   side by side in the same restaurant.
+//
+//   WHY IT IS LIKE THIS. The manager half is built (floorPlan() + customFloorHtml() in
+//   public/panels/editor/app.js). The tablet half never was: public/panels/tablet/index.html does
+//   not load this file and public/panels/tablet/app.js never mentions LFH_FLOOR_LAYOUTS. Nobody has
+//   noticed because no plan has ever been written here — both occurrences of LFH_FLOOR_LAYOUTS
+//   below are inside comments, so today floorPlan() returns null and the manager ALSO draws the
+//   classic grid. The disagreement appears the moment this file gains a real plan.
+//
+//   TO FINISH IT: add this file to public/panels/tablet/index.html and port customFloorHtml() to
+//   the tablet's own tile builder (~50 lines + the .fplan-cell / .fplan-zone CSS), then bring the
+//   Classic/Custom selector back to components/admin/RestaurantSettings.tsx — it was removed on
+//   2026-08-02 because "the Custom half was never built and was only ever shown for show", and
+//   app/api/admin/restaurants/settings/route.ts still accepts the value.
+//   (Found by the T13 cross-panel sweep, 2026-08-13. Owner chose "warn, don't build".)
+//
 // This file is DATA, not logic. The owner writes a restaurant's real floor shape here — where the
 // window tables are, which ones sit in the A/C section, where the counter is — and the manager's
 // Tables view draws exactly that when the restaurant's layout mode is set to **Custom**

@@ -289,8 +289,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     const adminMark = g.user
       ? { actor: g.user.name || g.user.username, actor_id: g.user.id }
       : { actor_id: ADMIN_VIEW_ACTOR_ID };
-    // A staff-blocked device can't do anything from the kitchen screen.
-    if (await deviceBlocked(dev)) return err("This device has been blocked by staff.", 403);
+    // A staff-blocked device can't do anything from the kitchen screen — but only where it was
+    // BLOCKED. `rid` is resolved above (the route already refuses without one), so the ban is read
+    // against this restaurant instead of platform-wide; see the note on deviceBlocked in lib/oplog.ts.
+    if (await deviceBlocked(dev, rid)) return err("This device has been blocked by staff.", 403);
 
     // ── OFFLINE REPLAY CLASH (offline sync 2026-07-30) ────────────────────────────
     // A change saved on a screen with no signal, arriving only now, must not be applied

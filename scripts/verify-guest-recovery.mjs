@@ -29,7 +29,14 @@ const check = (name, ok) => { console.log((ok ? "  ok   " : "  FAIL ") + name); 
 const outbox = read("lib/guestOutbox.ts");
 const route = read("app/api/guest/call-waiter/route.ts");
 const chef = read("components/ChefPopup.tsx");
-const badge = read("components/ConnectionBadge.tsx");
+// The SAVED-ORDERS STRIP, wherever it currently lives. It began inside ConnectionBadge and was
+// later extracted into its own GuestOutboxChip component, which turned this guard red on main
+// while the product was completely correct — the exact trap this file's own header warns about
+// ("check whether the guard is asserting the SPELLING of code that has legitimately changed
+// shape"). Reading the UNION asserts the RULE ("the button is gated") instead of the address, so
+// moving the strip again, or splitting it in two, cannot turn main red on its own. A rule that
+// genuinely disappears still fails, which is the part that matters.
+const badge = read("components/ConnectionBadge.tsx") + read("components/GuestOutboxChip.tsx");
 const cart = read("components/CartPanel.tsx");
 
 console.log("\n#4) A waiter call survives losing signal");

@@ -8577,9 +8577,17 @@ function floorHtml() {
   const gridHtml = plan
     ? customFloorHtml(plan, n)
     : `<div class="ftile-grid" style="--per-row:${floorPerRow()}">${tiles}</div>`;
+  // Two different honest notes, because "custom is on" has two very different states.
+  // The SECOND one is the T13 cross-panel finding (2026-08-13): when a plan IS drawn here, the
+  // waiter tablet still shows the classic grid — it does not load floor-layouts.js at all — so the
+  // same floor is arranged two ways on two devices in the same room. Say so on the screen that has
+  // the plan rather than leaving a waiter and a manager to discover it mid-shift. (The owner chose
+  // to warn rather than build the tablet half; the full note is at the top of floor-layouts.js.)
   const planNote = (s.floor_layout_mode === "custom" && !plan)
     ? `<div class="floor-plan-note">Custom layout is on for this restaurant, but no floor plan has been written for it yet — showing the classic grid. The plan lives in <b>public/panels/floor-layouts.js</b>.</div>`
-    : "";
+    : plan
+      ? `<div class="floor-plan-note">This is your custom floor plan. Note: the <b>waiter tablet</b> still shows the plain grid — it doesn't draw the plan yet.</div>`
+      : "";
   // Parcels hang BELOW the room, in their own strip — they are floor work with no table,
   // so they must not be mixed into the table grid (classic or custom).
   // Header order (owner, 2026-08-02): the two buttons stay TOGETHER in the right-hand
