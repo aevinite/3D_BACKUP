@@ -61,8 +61,6 @@
     "verify:outbox": "node scripts/verify-outbox-drain.mjs",
     "verify:order-retry": "node scripts/verify-order-retry.mjs",
     "load:ramp": "node scripts/load-ramp-orders.mjs",
-    "db:maintain": "node scripts/db-maintain.mjs",
-    "demo:reset": "node scripts/reset-demo-history.mjs",
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
     "verify:print-format": "node scripts/verify-print-format.mjs",
     "verify:merged-floor": "node scripts/verify-merged-floor.mjs",
@@ -115,7 +113,9 @@
     "verify:personal-data": "node scripts/verify-personal-data.mjs",
     "read-timings": "node scripts/read-timings.mjs",
     "verify:push": "npm run -s typecheck && npm run -s lint && npm run -s test:money && npm run -s test:errors && npm run -s test:units && npm run -s verify:static && npm run -s verify:access",
-    "verify:clash-coverage": "node scripts/verify-clash-coverage.mjs"
+    "verify:clash-coverage": "node scripts/verify-clash-coverage.mjs",
+    "db:replace-demo-history": "node scripts/reset-demo-history.mjs",
+    "db:vacuum-rebuild": "node scripts/db-maintain.mjs"
   },
   "dependencies": {
     "@sentry/nextjs": "^10.57.0",

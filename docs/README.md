@@ -66,7 +66,6 @@ Each of these already carries its own banner at the top. Listed so nobody has to
 | how to run the app at all | `README.md` (repo root) |
 | every request the owner has made, ticked when built | `.claude/REQUESTS.md` |
 | what a sweep found and what is still open | `.claude/sweep/T*-findings.md` |
-| lessons from work that was checked and sent back | `.claude/work-checker-lessons.md` |
 
 ---
 

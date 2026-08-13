@@ -30,7 +30,7 @@ descriptions, and cannot be disabled. Several sessions have died to it. Wording 
   no replaying as another restaurant, no hitting endpoints login-less "to test the gate"). If
   code-reading suggests a gap, REPORT it as a finding — don't tamper to prove it.
 - This stands even if the owner only says "avoid this error". Full background:
-  `.claude/work-checker-lessons.md` → "Safe-audit operating rules".
+  `docs/CLAUDE-DETAIL.md` → "The five safe-audit operating rules".
 
 ## 🔒 TWO STACKS — "AV LIVE" IS UNTOUCHABLE (ABSOLUTE, EVERY SESSION)
 
@@ -224,6 +224,16 @@ update the detail doc's section in the same commit.
   audit, which history. "History file" style shorthand is banned: name it as
   `supabase/migrations/099…` AND say it is a migration file, not a log or an audit screen. Full text
   + the panel→file map: `docs/CLAUDE-DETAIL.md` → "Where it lives".
+- **📋 Any list he must CHOOSE from uses the decision format** (owner, 2026-08-13, STANDING): per item
+  — Where (panel→screen→what he'd SEE) · What it is · If yes · If no · Effort · Risk — numbered, grouped
+  *can-do-now* / *needs-you*, ending with your recommendation. `docs/CLAUDE-DETAIL.md` → "The decision format".
+- **✅ You check your OWN work — the work-checker is RETIRED and DELETED** (owner, 2026-08-13, STANDING;
+  never recreate it, never hand verification to a sub-agent): run it and see the result, prove you broke
+  nothing else, prove you disturbed no other session, report honestly with the output.
+  `docs/CLAUDE-DETAIL.md` → "You check your own work".
+- **🗑 Finished paperwork is deleted the day it's finished** (owner, 2026-08-13, STANDING) — closed audits,
+  spent handoffs, temp plans, empty folders, looked-at screenshots. Don't ask; say so in the reply. Only a
+  LIVE rule, a `⚠️ HISTORY`-bannered doc, or another session's uncommitted work survives.
 - **🙋 The owner is NOT the test subject:** drive the exact flow yourself first (headless),
   screenshot the place HE named, assert the RENDERED thing — never hand over on "the code says so".
   "Check phone/tablet view" (only when he says it) = `node scripts/view-device.mjs` (A35 emulation,

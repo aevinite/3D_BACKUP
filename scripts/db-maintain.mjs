@@ -1,7 +1,7 @@
 // db-maintain.mjs — reclaim the memory this database wastes on bloated indexes and dead rows.
 //
-//   npm run db:maintain              # report only, changes nothing
-//   npm run db:maintain -- --apply   # actually rebuild and vacuum
+//   npm run db:vacuum-rebuild              # report only, changes nothing
+//   npm run db:vacuum-rebuild -- --apply   # actually rebuild and vacuum
 //
 // WHY THIS EXISTS (measured 2026-07-31/08-01). This instance is small: shared_buffers is **224 MB**
 // and effective_cache_size 384 MB (a ~1 GB machine). The database was **367 MB** — so the working set
