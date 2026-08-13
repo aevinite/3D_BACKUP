@@ -40,11 +40,10 @@ for (const l of readFileSync(join(ROOT, ".env.local"), "utf8").split("\n")) {
 const SB = env.NEXT_PUBLIC_SUPABASE_URL, KEY = env.SUPABASE_SERVICE_ROLE_KEY;
 
 // ── rail 1: the backup stack, or nothing ──────────────────────────────────────────────────
-const BACKUP_DB = "wnsfcizclkbobwzcxqsf";
-if (!SB || !SB.includes(BACKUP_DB)) {
-  console.error(`⛔ This points at ${SB ? new URL(SB).hostname : "(no database)"} — it only ever runs against the backup database (${BACKUP_DB}). Never AV live.`);
-  process.exit(2);
-}
+// ONE shared allow-list (T10 sweep, 2026-08-12). This carried its own copy of a single hard-coded
+// project id, so it refused on BACKUP-2 — the failover stack the owner uses when backup-1 hits its
+// 100-deploys-a-day cap. scripts/sweep/devStacks.mjs knows both dev stacks, never the client one.
+refuseUnlessDevTestDb(SB, "this places a ramp of load-test orders");
 if (!/^https:\/\/3-d-backup\.vercel\.app$|^http:\/\/localhost:\d+$|^http:\/\/127\.0\.0\.1:\d+$/.test(BASE)) {
   console.error(`⛔ Refusing to load ${BASE}. Allowed: the backup site or a local dev server.`);
   process.exit(2);

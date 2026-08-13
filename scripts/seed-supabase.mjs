@@ -54,13 +54,12 @@ if (!SUPABASE_URL || !ANON || !SERVICE) throw new Error("Missing keys in .env.lo
 // (db-maintain.mjs, reset-demo-history.mjs, set-access-defaults.mjs, load-ramp-orders.mjs);
 // the most destructive one did not, so whoever's keys happened to be in .env.local had every
 // dish overwritten by a JSON file with no plan step and no confirmation.
-const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
-if (!DEV && projectRef !== BACKUP_REF) {
-  console.error(`This points at project "${projectRef}", not the backup database (${BACKUP_REF}). Refusing.`);
-  console.error("A reseed OVERWRITES every dish from menu.json. On any other database that is a data loss,");
-  console.error("and on the live client stack it would revert a paying restaurant's menu.");
-  process.exit(1);
-}
+// ONE shared allow-list (T10 sweep, 2026-08-12). This carried its own copy of a single hard-coded
+// project id, so it refused on BACKUP-2 — the failover stack the owner uses when backup-1 hits its
+// 100-deploys-a-day cap. scripts/sweep/devStacks.mjs knows both dev stacks, never the client one.
+// A reseed OVERWRITES every dish. On any database but a dev one that is data loss, and on the
+// client stack it would revert a paying restaurant's menu.
+refuseUnlessDevTestDb(SUPABASE_URL, "a reseed OVERWRITES every dish and re-runs every migration");
 if (!pat) throw new Error("Missing SUPABASE_ACCESS_TOKEN in .env.local");
 
 // Run arbitrary SQL through the Management API (uses the PAT).

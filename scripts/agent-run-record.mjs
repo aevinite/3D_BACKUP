@@ -11,6 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const parseEnv = (t) =>
@@ -22,6 +23,11 @@ const parseEnv = (t) =>
 
 try {
   const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
+// Which database is this? (T10 sweep, 2026-08-12 — this script had no answer.)
+// One shared allow-list, in scripts/sweep/devStacks.mjs, so it knows about BOTH dev stacks
+// (backup-1 and the backup-2 failover) and never about the client one.
+refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "this writes agent run records");
+
   const url = env.NEXT_PUBLIC_SUPABASE_URL;
   const key = env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) throw new Error("missing supabase env");

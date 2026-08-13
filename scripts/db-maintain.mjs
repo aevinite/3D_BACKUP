@@ -37,12 +37,11 @@ const ref = new URL(env.NEXT_PUBLIC_SUPABASE_URL).hostname.split(".")[0];
 
 // AV LIVE is read-only by standing rule. Its project ref is kclqkmdxnwlhtyrducku; this refuses to
 // run anywhere but the backup database, so no maintenance can be aimed at clients by accident.
-const BACKUP_REF = "wnsfcizclkbobwzcxqsf";
-if (ref !== BACKUP_REF) {
-  console.error(`This points at project "${ref}", not the backup database (${BACKUP_REF}). Refusing.`);
-  console.error("Maintenance on AV live is a separate, asked-first decision.");
-  process.exit(1);
-}
+// ONE shared allow-list (T10 sweep, 2026-08-12). This carried its own copy of a single
+// hard-coded project id, so it refused on BACKUP-2 — the failover stack the owner uses when
+// backup-1 hits its 100-deploys-a-day cap, i.e. the only place a merged fix can be checked that
+// day. scripts/sweep/devStacks.mjs knows both dev stacks and has never known the client one.
+refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "this runs database maintenance");
 
 const APPLY = process.argv.includes("--apply");
 const sql = async (query) => {

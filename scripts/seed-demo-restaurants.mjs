@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { createClient } from "@supabase/supabase-js";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 function parseEnv(t) {
@@ -23,6 +24,11 @@ function parseEnv(t) {
   return o;
 }
 const env = parseEnv(readFileSync(join(root, ".env.local"), "utf8"));
+// Which database is this? (T10 sweep, 2026-08-12 — this script had no answer.)
+// One shared allow-list, in scripts/sweep/devStacks.mjs, so it knows about BOTH dev stacks
+// (backup-1 and the backup-2 failover) and never about the client one.
+refuseUnlessDevTestDb(env.SUPABASE_DEV_URL, "this creates demo restaurants");
+
 const URL_ = env.SUPABASE_DEV_URL;
 const SERVICE = env.SUPABASE_DEV_SERVICE_ROLE_KEY;
 if (!URL_ || !SERVICE) {

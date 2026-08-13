@@ -6,6 +6,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const env = Object.fromEntries(
@@ -13,6 +14,11 @@ const env = Object.fromEntries(
     .filter((l) => l.includes("=") && !l.trim().startsWith("#"))
     .map((l) => { const i = l.indexOf("="); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^["']|["']$/g, "")]; })
 );
+// Which database is this? (T10 sweep, 2026-08-12 — this script had no answer.)
+// One shared allow-list, in scripts/sweep/devStacks.mjs, so it knows about BOTH dev stacks
+// (backup-1 and the backup-2 failover) and never about the client one.
+refuseUnlessDevTestDb(env.NEXT_PUBLIC_SUPABASE_URL, "this seeds a whole restaurant's menu");
+
 const sb = createClient(env.NEXT_PUBLIC_SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
 const RID = "6c6fadb6-da23-4ab3-9f90-d164773f60b3"; // AANGAN GARDEN RESTAURANT
