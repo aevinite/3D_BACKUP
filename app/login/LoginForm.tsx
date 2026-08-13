@@ -64,6 +64,13 @@ export default function LoginForm({
     border: "1px solid #2a3a5f", background: "#0b1220", color: "#eaf1ff", fontSize: 16, outline: "none",
   };
 
+  // REJECTED (owner, 2026-08-13): the `minHeight: "100vh"` below stays — do NOT change it to
+  // `100dvh`. Raised by the T12 phone sweep (on Android the card sits low and the on-screen
+  // keyboard can cover "Sign in") and judged not a problem in practice: "i don't thing 7th is
+  // problem". See docs/REJECTED-IDEAS.md R19.
+  // (RECONSTRUCTED 2026-08-13 from the doc row after a parallel session's uncommitted edit
+  // here was destroyed by a `git reset --hard` in this shared folder — the decision and the
+  // quote are the owner's; the wording is not the original.)
   return (
     <main style={{ margin: 0, minHeight: "100vh", display: "grid", placeItems: "center", background: "radial-gradient(1200px 600px at 50% -10%, #16223e 0%, #0b1220 60%)", color: "#dbe7ff", fontFamily: "system-ui, sans-serif", padding: 16 }}>
       <form onSubmit={submit} style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 18, padding: 28, width: "min(92vw, 380px)", boxShadow: "0 20px 60px rgba(0,0,0,.45)" }}>

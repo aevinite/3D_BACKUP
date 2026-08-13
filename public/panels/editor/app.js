@@ -10984,7 +10984,40 @@ function tableOpsOn() {
      sheet inherits them), and a sheet that is a panel rather than the whole window. The placement
      never changes with content — every tile holds the same rows whether it has one ticket or five. */
   .kotp-sheet { max-width: min(92vw, 880px); width: min(92vw, 880px); }
-  .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 9px; max-height: min(64vh, 560px); overflow-y: auto; padding: 2px; }
+  .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 9px; padding: 2px; }
+  /* ONE scroller for the whole picker, not one per grid — the sheet now holds two SECTIONS
+     (in use, then free) and a scrollbar per section would be two thumbs on one sheet. */
+  .kotp-scroll { max-height: min(64vh, 560px); overflow-y: auto; }
+  /* EXPAND IT ON A PHONE (owner, 2026-08-13: "also expand the selection screen and stuff").
+     The desktop cap he asked for on 2026-08-01 — "it's too wide, keep the max width, not this
+     broad" — is untouched above; this only widens and lengthens the sheet where the screen is
+     small, because at 360px the old 92vw + 96px columns showed about two tables at a time. */
+  @media (max-width: 760px) {
+    /* The overlay's own 20px padding was the real cap — it left a 360px phone a 320px sheet no
+       matter what width the sheet asked for. 8px here is what actually widens it. */
+    .kotpick-overlay { padding: 8px; }
+    .kotp-sheet { max-width: 100%; width: 100%; max-height: 94vh; }
+    .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 7px; }
+    .kotp-scroll { max-height: calc(94vh - 132px); }
+  }
+  /* AUTO-SWITCH BY COUNT (owner, 2026-08-13: "when there are less table which can be visible on
+     the screen then ok, but when there are more then it auto switch"). A big floor gets denser
+     squares so more of it lands on one screen. Small but NOT too small — 62px stays above the
+     44px tappable floor, and the least useful line (the sub-line) is the only thing that goes. */
+  .kotp-grid.dense { grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; }
+  .kotp-grid.dense .kotp-tile b { font-size: 14px; }
+  .kotp-grid.dense .kotp-tile .kotp-state { font-size: 9px; }
+  .kotp-grid.dense .kotp-tile .kotp-meta { display: none; }
+  /* SECTIONS — IN USE FIRST, FREE AFTER (owner, 2026-08-13). Every operation behind this button
+     (merge, move a KOT, split, reprint, mark VIP) is about a table that has something on it, and
+     on a 300-table floor the two that were in use sat buried under 298 free ones. Free tables stay
+     pickable — marking a table VIP before the guests order is one reason this button exists. */
+  .kotp-sec-title { display: flex; align-items: center; gap: 8px; margin: 12px 2px 8px;
+    font-size: 11.5px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+  .kotp-sec-title:first-child { margin-top: 2px; }
+  .kotp-sec-title .n { color: var(--text); }
+  .kotp-sec-title::after { content: ""; flex: 1 1 auto; height: 1px; background: var(--line); }
+  .kotp-empty { margin: 2px 2px 8px; font-size: 12px; color: var(--muted); }
   /* NO --c HERE. This stylesheet is injected at runtime, so it lands AFTER style.css: setting --c
      on .kotp-tile beat the .ft-prep / .ft-bill state colours the tile also carries, and every tile
      came out the neutral grey. The ft-* class is the one source of the state colour (.ft-free
@@ -11371,7 +11404,12 @@ function openKotTablePicker() {
   // while the floor says "Free". One screen, two spellings of the same state. It prints ts.label now,
   // which IS the floor's word for every state including Free — so the claim above is finally honest.
   let busyN = 0;
-  const grid = floorTableList(n).map((i) => {
+  // IN USE FIRST, FREE AFTER (owner, 2026-08-13). Same tiles, same states, same words — only the
+  // ORDER changes, plus a heading per group so the count is readable instead of counted. Two
+  // buckets are collected in ONE pass over the floor list so the tile order inside each group is
+  // still the floor's own order (T3 before T6), which is how he reads the floor.
+  const busyTiles = [], freeTiles = [];
+  floorTableList(n).forEach((i) => {
     const ts = tableTileState(i);
     const busy = ts.st !== "free";
     if (busy) busyN++;
@@ -11379,17 +11417,29 @@ function openKotTablePicker() {
     // pay: red = an accepted bill still owing, green = settled. Say it in words, not just colour.
     const money = ts.pay === "red" ? "unpaid" : ts.pay === "green" ? "paid" : "";
     const nm = ((s.table_names || {})[String(i)] || "").trim();
-    return `<button class="kotm-tile kotp-tile ft-${esc(ts.st)}${busy ? " occ" : ""}${ts.pay ? " pay-" + esc(ts.pay) : ""}" data-kotpick="${esc(i)}" title="${esc(nm ? nm + " (T" + i + ")" : "T" + i)}">
+    (busy ? busyTiles : freeTiles).push(`<button class="kotm-tile kotp-tile ft-${esc(ts.st)}${busy ? " occ" : ""}${ts.pay ? " pay-" + esc(ts.pay) : ""}" data-kotpick="${esc(i)}" title="${esc(nm ? nm + " (T" + i + ")" : "T" + i)}">
       <b>${info ? info.emoji + " " : ""}${esc(tileFace(i))}</b>
       <small class="kotp-state">${esc(ts.label)}</small>
       ${busy && ts.meta ? `<small class="kotp-meta">${esc(ts.meta)}</small>` : ""}
       ${money ? `<small class="kotp-pay ${esc(money)}">${esc(money)}</small>` : ""}
-    </button>`;
-  }).join("");
+    </button>`);
+  });
+  const total = floorTableList(n).length;
+  // The denser arrangement switches itself on for a big floor (his "auto switch"). 48 is the point
+  // where the roomy 96px squares stop fitting one screenful on a laptop, so beyond it more tables
+  // on screen beats a slightly bigger square.
+  const dense = total > 48 ? " dense" : "";
+  const sec = (title, tiles, emptyWord) =>
+    `<div class="kotp-sec-title">${title} <span class="n">${tiles.length}</span></div>` +
+    (tiles.length ? `<div class="kotm-grid kotp-grid${dense}">${tiles.join("")}</div>`
+                  : `<div class="kotp-empty">${emptyWord}</div>`);
   const wrap = el(`<div class="sx-modal-overlay kotpick-overlay"><div class="sx-modal kotm-sheet kotp-sheet">
     <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 Table &amp; KOT operations</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
-    <div class="kotm-bill">Which table? <span class="muted">· ${busyN} of ${floorTableList(n).length} in use</span></div></div>
-    <div class="kotm-list"><div class="kotm-grid kotp-grid">${grid}</div></div></div>`);
+    <div class="kotm-bill">Which table? <span class="muted">· ${busyN} of ${total} in use</span></div></div>
+    <div class="kotm-list"><div class="kotp-scroll">
+      ${sec("In use", busyTiles, "No table has anything on it right now.")}
+      ${sec("Free", freeTiles, "Every table is in use.")}
+    </div></div></div>`);
   document.body.appendChild(wrap);
   const closeM = () => wrap.remove();
   wrap.__lfhClose = closeM;
