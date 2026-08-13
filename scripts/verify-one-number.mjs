@@ -138,6 +138,28 @@ try {
   else fail("billdoc.js no longer reads each order's tax_rate — the paper and orders.net_amount can now disagree");
 } catch { fail("public/panels/billdoc.js not found"); }
 
+head("the ROLLUP carries the same one number (mig 315)");
+for (const [tbl, cols] of [["orders_daily_agg", ["net_paid"]], ["orders_report_monthly_agg", ["net_paid", "net_canc"]]]) {
+  const got = await q(`SELECT a.attname FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname='public'
+    WHERE c.relname = '${tbl}' AND NOT a.attisdropped AND a.attname = ANY(ARRAY['net_paid','net_canc'])`);
+  const have = got.map((x) => x.attname);
+  const missing = cols.filter((c) => !have.includes(c));
+  if (!missing.length) pass(`${tbl} stores ${cols.join(" + ")} — the owner's older-than-2-days figures read the same number as today's`);
+  else fail(`${tbl} is missing ${missing.join(", ")} — those readers are back to subtracting two columns for history`);
+}
+// The two must agree on the same rows, or history and today tell different stories.
+const rollDrift = await q(`
+  SELECT (SELECT COALESCE(SUM(net_paid) - SUM(gross_paid - COALESCE(disc_gross_paid,0)), 0) FROM public.orders_daily_agg) AS d,
+         (SELECT COALESCE(SUM(net_paid) - SUM(gross_paid - COALESCE(disc_gross_paid,0)), 0) FROM public.orders_report_monthly_agg) AS m,
+         (SELECT COALESCE(SUM(net_canc) - SUM(gross_canc - COALESCE(disc_gross_canc,0)), 0) FROM public.orders_report_monthly_agg) AS c,
+         (SELECT count(*)::int FROM public.orders_daily_agg WHERE net_paid IS NULL) AS nulls`);
+const rd = rollDrift[0];
+if (Number(rd.d) === 0 && Number(rd.m) === 0 && Number(rd.c) === 0) pass("the stored rollup net equals the old gross-minus-discount arithmetic exactly (drift 0)");
+else fail(`a rollup's stored net drifted from the arithmetic it replaced: daily ${rd.d}, monthly ${rd.m}, cancelled ${rd.c}`);
+if (Number(rd.nulls) === 0) pass("every rollup row carries the net (no row falls back to the old expression)");
+else fail(`${rd.nulls} rollup rows have no net_paid — they silently fall back to the old arithmetic`);
+
 head("the stored column cannot be stale");
 const drift = await q(`SELECT count(*)::int AS n FROM public.orders WHERE net_amount IS DISTINCT FROM (total - disc_gross)`);
 if (drift[0].n === 0) pass(`all orders agree with the definition (0 rows out of step)`);
