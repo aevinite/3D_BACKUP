@@ -124,7 +124,7 @@ const api = async (method, path, body, opts) => {
   if (method !== "GET" && window.LFH_OUTBOX) {
     // `expect` (optional) travels as X-LFH-Expect so the server can refuse instead of
     // overwriting a change someone else made on another device while this person was typing.
-    return window.LFH_OUTBOX.send({ base: "/api/tablet", method, path: ridQ(path), body, panel: "tablet", expect: opts && opts.expect });
+    return window.LFH_OUTBOX.send({ base: "/api/tablet", method, path: ridQ(path), body, panel: "tablet", expect: opts && opts.expect, table: opts && opts.table });
   }
   // Was the offline layer in charge when this read STARTED? On a device's first visit it is not,
   // so nothing it fetched in that window was ever saved — see public/panels/swreg.js.

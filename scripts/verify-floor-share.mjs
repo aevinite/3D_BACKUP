@@ -243,6 +243,31 @@ function walkRoutes(dir, out = []) {
     "the warning is the only thing standing between a future caller and the same bug");
 }
 
+// ── A TAP MADE WITH NO SIGNAL MUST NOT BE PUT BACK BY A READ THAT PREDATES IT ─────────────────
+//
+// The floor's optimistic tile (patchSummaryTileAccept) was always correct; what undid it was the
+// next routine poll, which with no signal is answered from the device's SAVED copy. Measured on
+// the real manager floor 2026-08-13: ✓ Accept flipped the tile to "Preparing" and four seconds
+// later a background poll turned it back to "New order" — with the change still queued. So the
+// waiter taps again.
+//
+// Two properties keep that fixed and both are easy to lose in a refactor:
+//   · every place that applies a fetched summary goes through mergeServerSummary()
+//   · the "still on its way" set is read from the QUEUED list only. pendingByTable() counts the
+//     FAILED list too, and using it would leave a REFUSED change holding the tile all shift —
+//     the same lie pointing the other way, and the worse one, because the kitchen never got it.
+{
+  const app = read("public/panels/editor/app.js") || "";
+  const guarded = (app.match(/state\.summary = mergeServerSummary\(/g) || []).length;
+  const raw = (app.match(/if \(!floorOpsInFlight\) \{ state\.summary = summary;/g) || []).length;
+  check("every fetched summary goes through mergeServerSummary()",
+    guarded >= 2 && raw === 0, `${guarded} guarded, ${raw} applied raw`);
+  const fn = (app.match(/function tablesWithUnsentWork\(\)[\s\S]*?\n\}/) || [""])[0];
+  check("only work still ON ITS WAY holds a tile (never the refused list)",
+    /getSnapshot\(\)\.queued/.test(fn) && !/pendingByTable/.test(fn),
+    "a refused change holding a tile would show food the kitchen never got");
+}
+
 const bad = results.filter((r) => !r.pass);
 console.log(`\n${results.length - bad.length}/${results.length} checks passed`);
 if (bad.length) {
@@ -254,4 +279,6 @@ if (bad.length) {
   console.log("  · narrowing in place → `const summary = limit ? structuredClone(shared) : shared;`\n");
   process.exit(1);
 }
+
+
 console.log("✅ PASS — the shared floor read can't hand a device a stale tile\n");
