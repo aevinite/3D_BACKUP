@@ -22,7 +22,11 @@
     // the bright dot/bars. Every `text` was darkened one step on 2026-08-05 — "Live" measured
     // 2.63:1 on its own tint (T11 re-run), so the indicator staff are told to trust was the least
     // readable thing in the bar. Keep this table in step with components/ConnectionBadge.tsx.
-    if (ms <= 700)  return { color: "#22c55e", text: "#15803d", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
+    // `text` is the LIGHT-skin ink and it sits on `tint`, a wash of the same hue — not on plain
+    // white. #15803d measured 4.38:1 on that wash (T11 sweep, 2026-08-13), just under the 4.5:1
+    // a 12.5px label needs; green-800 takes it to 6.23:1 at the same hue. `color` (the dark-skin
+    // ink and the bar colour) is untouched.
+    if (ms <= 700)  return { color: "#22c55e", text: "#166534", tint: "rgba(34,197,94,.16)",  bars: 3, label: "Excellent" };
     if (ms <= 1500) return { color: "#eab308", text: "#a16207", tint: "rgba(234,179,8,.18)",  bars: 2, label: "Good" };
     if (ms <= 3000) return { color: "#f97316", text: "#c2410c", tint: "rgba(249,115,22,.16)", bars: 1, label: "Slow" };
     // 0 bars, not 1 — Slow and Poor used to show the same bars, so the two worst states differed

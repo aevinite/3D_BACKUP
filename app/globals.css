@@ -3867,7 +3867,12 @@ body[data-lfh-minicart][data-lfh-outbox] .order-tracker { bottom: calc(144px + e
 .adm-adminbar-tag {
   display: inline-flex; align-items: center; gap: 6px; margin-left: auto;
   font-size: 11.5px; font-weight: 800; letter-spacing: .03em; text-transform: uppercase;
-  color: #f59e0b; background: color-mix(in srgb, #f59e0b 20%, transparent);
+  /* The ribbon's own words were the least readable text in the product: amber ink on a 20%
+     amber wash measured 1.85:1 on white and 1.60:1 on the panel tint (T11 sweep, 2026-08-13).
+     The WASH keeps the bright amber so the ribbon still reads as a warning stripe at a glance;
+     only the INK deepens, to 5.10:1 / 4.42:1. Admin-only surface, but this ribbon is what tells
+     an admin whose panel they are looking at, so it has to be legible. */
+  color: #8a5a06; background: color-mix(in srgb, #f59e0b 20%, transparent);
   padding: 4px 10px; border-radius: 999px;
 }
 .adm-adminbar .adm-btn { padding: 7px 13px; font-size: 12.5px; }
@@ -4153,7 +4158,11 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent: #3b82f6; --accent-dim: rgba(59,130,246,0.6);
   --accent-grad: linear-gradient(120deg, #0066ff 0%, #8b5cf6 50%, #ff5e7e 100%);
   --accent-glow: rgba(59,130,246,0.32);
-  --adm-cta: #d97706;
+  /* White text sits ON this fill (.adx .adm-btn.primary), and on #d97706 that measured
+     3.19:1 — under the 4.5:1 a 12px label needs (T11 sweep, 2026-08-13: "New restaurant",
+     "Restore (suspended)", "Go to Manager panel"). #b45309 is the same amber one step
+     deeper — already this file's --adm-warn — and takes white to 5.02:1. */
+  --adm-cta: #b45309;
   --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   --elev: 0 1px 0 rgba(255,255,255,.03); --elev-hi: 0 1px 0 rgba(255,255,255,.03);
   /* Access-control page tokens (it styles inline with --ac-* fallbacks). */
@@ -4175,7 +4184,11 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent: #2563eb; --accent-dim: rgba(37,99,235,0.6);
   --accent-grad: linear-gradient(120deg, #2563eb 0%, #7c3aed 52%, #fb7185 100%);
   --accent-glow: rgba(37,99,235,0.18);
-  --adm-cta: #d97706;
+  /* White text sits ON this fill (.adx .adm-btn.primary), and on #d97706 that measured
+     3.19:1 — under the 4.5:1 a 12px label needs (T11 sweep, 2026-08-13: "New restaurant",
+     "Restore (suspended)", "Go to Manager panel"). #b45309 is the same amber one step
+     deeper — already this file's --adm-warn — and takes white to 5.02:1. */
+  --adm-cta: #b45309;
   /* One step darker than the dark-skin values: in LIGHT these are drawn as TEXT on a pale
      tint of themselves, where #16a34a/#d97706 measured 2.1-2.8:1 across every status pill
      in both consoles (2026-08-06). Green-700/amber-700/red-700 clear 4.5:1 on those tints
@@ -4519,7 +4532,7 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      already does for its filled accent chips (.oc-choice.on). Consoles whose accent is dark
      (the admin's purple) keep #fff via the default below. */
   --accent-on: #06251a;
-  --own-cta: #d97706;
+  --own-cta: #b45309;   /* same fix as --adm-cta above: white on it was 3.19:1 */
   --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
   --elev: 0 1px 0 rgba(255,255,255,.03);
   background: var(--bg);
@@ -4530,9 +4543,15 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --bg: #f6f7f9; --card: #ffffff; --border: 1px solid #e5e8ee; --border-c: #e5e8ee;
   --side: #ffffff;
   --text: #111827; --muted: #6b7280; --muted2: rgba(17,24,39,0.08);
-  --accent: #059669; --accent-dim: rgba(5,150,105,0.6);
-  --accent-grad: #059669; --accent-glow: rgba(5,150,105,0.18);
-  --own-cta: #d97706;
+  /* The owner cockpit's light accent is drawn as TEXT far more than as a fill — the active
+     nav item, the range buttons, the restaurant picker, the "Coming soon"/"Soon" badges and
+     the report eyebrow. On #059669 those measured 3.77:1 on white and 3.52:1 on --bg, under
+     the 4.5:1 that 9-13px text needs (T11 sweep, 2026-08-13). One step deeper, same hue:
+     4.83:1 and 4.50:1. NOTE the paired change to --accent-on below — darkening a fill makes
+     dark ink on it WORSE, so that ink flips to white in the same edit. */
+  --accent: #04825b; --accent-dim: rgba(4,130,91,0.6);
+  --accent-grad: #04825b; --accent-glow: rgba(4,130,91,0.18);
+  --own-cta: #b45309;   /* same fix as --adm-cta above: white on it was 3.19:1 */
   /* One step darker than the dark-skin values: in LIGHT these are drawn as TEXT on a pale
      tint of themselves, where #16a34a/#d97706 measured 2.1-2.8:1 across every status pill
      in both consoles (2026-08-06). Green-700/amber-700/red-700 clear 4.5:1 on those tints
@@ -4544,7 +4563,10 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      the selected Bar/Line pill, just under the 4.5:1 that 11.5px bold text needs (T5 sweep,
      2026-08-11). #041710 on #059669 is 4.90:1. The DARK block keeps its own value, where the
      same ink is already ~9:1 on the brighter fill. */
-  --accent-on: #041710;
+  /* PAIRED WITH THE DARKER --accent ABOVE. The old near-black ink was tuned to #059669
+     (4.91:1); on the new #04825b it would fall to 3.83:1. White on the darker fill is
+     4.83:1, so the ink flips rather than the fix being half-done. */
+  --accent-on: #ffffff;
   --elev: 0 1px 2px rgba(16,24,40,.04);
   background: var(--bg);
 }

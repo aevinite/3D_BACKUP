@@ -303,7 +303,11 @@ html[data-theme="light"] .age.age-stale { color: #b91c1c; }
 .theme-toggle:active{ transform:scale(.93); }
 
 html[data-theme="light"]{
-  --bg:#f1ebe1; --panel:#ffffff; --line:#e6dcc9; --text:#2c2219; --muted:#857655;
+  /* Secondary words on the light skin (the DEFAULT skin for every panel). #857655
+     measured 4.45:1 on white and 3.75:1 on --bg — under the 4.5:1 minimum on the
+     floor legend, the seat counts, the filter buttons and the take-order dish price
+     (T11 sweep, 2026-08-13). Same hue, one step deeper: 5.37:1 / 4.53:1. */
+  --bg:#f1ebe1; --panel:#ffffff; --line:#e6dcc9; --text:#2c2219; --muted:#77694c;
   --blue:#c98f3f; --green:#16a34a; --amber:#d97706; --red:#dc2626;
   /* --blue (the house gold) is a FILL/BORDER colour. On white it measured 2.81:1, so anything
      drawn with it as TEXT was the faintest thing on the board — including .tbl, the TABLE NUMBER,
@@ -315,6 +319,11 @@ html[data-theme="light"]{
 }
 html[data-theme="light"] .tbl,
 html[data-theme="light"] #col-cooking h2 { color: var(--blue-ink); }
+/* The other two column headings are the same fault as #col-cooking was: --amber measured
+   3.19:1 and --green 3.30:1 as INK on the white column head, and these three words are what
+   a cook reads first (T11 sweep, 2026-08-13). Same hues, deepened for the light skin only. */
+html[data-theme="light"] #col-new h2 { color: #a1560a; }
+html[data-theme="light"] #col-ready h2 { color: #15803d; }
 html[data-theme="light"] .done.rdy{ color:#be185d; }
 html[data-theme="light"] .line-ready .ltitle{ color:#9d174d; }
 /* Deepen the "new — waiting for the waiter" footer text in light mode: the dark-theme

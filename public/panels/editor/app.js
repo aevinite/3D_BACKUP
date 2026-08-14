@@ -15029,6 +15029,13 @@ function xraySettingUrl(flag) {
   #xrayRibbon .rb-crumbs { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; flex-wrap: wrap; }
   #xrayRibbon .rb-crumbs a { color: #b45309; text-decoration: none; cursor: pointer; }
   #xrayRibbon .rb-crumbs a:hover { text-decoration: underline; }
+  /* LIGHT SKIN: the ribbon's own words were the least readable text in the product — amber
+     ink on the ribbon's 14% amber wash measured 1.85:1 (T11 sweep, 2026-08-13). The WASH and
+     the border keep the bright amber, so the stripe still reads as a warning at a glance;
+     only the ink deepens, to 5.10:1. The dark skin keeps #f59e0b, where amber on a dark
+     panel was already fine. This ribbon is how an admin knows whose panel they are in. */
+  html[data-theme="light"] #xrayRibbon .rb-tag,
+  html[data-theme="light"] #xrayRibbon .rb-crumbs a { color: #8a5a06; }
   #xrayRibbon .rb-sep { font-size: 9px; color: var(--muted, #888); }
   #xrayRibbon .rb-spacer { margin-left: auto; }
   #xrayRibbon button { font: inherit; cursor: pointer; border-radius: 999px; border: 1px solid color-mix(in srgb, #d97706 45%, transparent);
