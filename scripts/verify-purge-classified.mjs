@@ -68,6 +68,10 @@ const KEEP = new Map([
   ["inv_purchases", "stock bought — money out"],
   ["inv_purchase_lines", "the lines of those purchases"],
   ["khata_customers", "a kept pay-later bill points at the person who owes it"],
+  ["owner_records_agg",
+    "DERIVED from the kept bills (best day, biggest bill, busiest hour — mig 321) and rebuilt nightly, "
+    + "so purging it would be undone by the next refresh anyway. It holds no row a purge could orphan: "
+    + "the restaurants row itself is kept (mig 309), which is what it is keyed on."],
   ["settings", "deleted LAST by the purge, after every child (checked separately below)"],
   ["staff_users", "deleted LAST by the purge, after every child (checked separately below)"],
 ]);
