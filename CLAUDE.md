@@ -215,6 +215,8 @@ update the detail doc's section in the same commit.
   keys are REFUSED.
 - **Mobile back button:** every popup/overlay registers `useBackClose(...)` (guest) or
   `LFH_BACK.layer(...)` (panels) the moment it's built — never hand-roll pushState/popstate.
+- **🧱 A new MODULE adds no column to `settings`** (110 already): declare `moduleBag: true` in
+  `lib/accessModel.ts`, ladder goes in `settings.modules` (mig 320). `verify:settings-columns`.
 - **📍 EVERY problem / bug / improvement / idea you list MUST say WHERE IT LIVES** (owner,
   2026-08-12, STANDING — he was left "completely lost" by a list that named files only). Each item
   gets, in this order: **the panel** (guest menu / manager / kitchen / tablet / owner / admin /

@@ -35,6 +35,11 @@ export type Perm = {
   section?: string;            // owner_entitlements[<section>] (owner-section switch)
   power?: string;              // manager power flag → owner_entitlements.power_<flag> + manager_permissions[<flag>]
   module?: { allowed: string; control: string; enabled: string }; // settings module-ladder columns
+  /** A NEW module keeps its ladder in settings.modules[<key>] (jsonb, mig 320) instead of adding
+   *  four columns to the 109-column settings row. Set this on a new module and give `module` the
+   *  module key in all three slots; lib/tableTags.ts reads the bag for it. Existing modules do NOT
+   *  set it — they stay on their columns, unconverted, on purpose. */
+  moduleBag?: boolean;
   tablet?: string;             // settings.tablet_<x> tri-state column (the tablet rung)
   adminSwitch?: string;        // settings boolean the ADMIN alone flips (auto_print_kot_allowed)
   isNew?: boolean;             // power that has no legacy enforcement yet (revert_payment/export_reports/view_logs)
@@ -347,10 +352,18 @@ export const ABSENT_ON_POWERS: ReadonlySet<string> = new Set(PERMISSIONS.filter(
 // Every real tablet tri-state settings column (the waiter rung).
 export const TABLET_PERM_KEYS: readonly string[] = PERMISSIONS.filter((p) => p.tablet && !p.tabletNew).map((p) => p.tablet!);
 // One entry per MODULE (capabilities sharing columns — khata + table types — dedupe).
-export type ModuleDef = { key: string; label: string; allowed: string; control: string; enabled: string };
+export type ModuleDef = {
+  key: string; label: string; allowed: string; control: string; enabled: string;
+  /** TRUE = this module's ladder lives in settings.modules[key] instead of three columns
+   *  (mig 320). Declare `moduleBag: true` on the permission and give `module` the SAME key three
+   *  times — the column names are then never used, and no migration is needed for a new module.
+   *  The eleven modules that predate the bag are deliberately NOT converted; see mig 320. */
+  bag?: boolean;
+};
 export const MODULE_DEFS: ModuleDef[] = PERMISSIONS.reduce<ModuleDef[]>((acc, p) => {
   if (p.module && !acc.some((m) => m.allowed === p.module!.allowed))
-    acc.push({ key: p.module.allowed.replace("_allowed", ""), label: p.moduleLabel || p.name, ...p.module });
+    acc.push({ key: p.module.allowed.replace("_allowed", ""), label: p.moduleLabel || p.name, ...p.module,
+               ...(p.moduleBag ? { bag: true } : {}) });
   return acc;
 }, []);
 

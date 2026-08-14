@@ -134,6 +134,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | the admin's super-access view | `verify:xray` ← it MARKS what someone lacks, never hides it | nothing | no |
 | a permission the manager must not see | `verify:manager-hidden` | `.env.local` | no |
 | a rule the owner has already refused | `verify:rejected` — and **read `docs/REJECTED-IDEAS.md` first** | nothing | no |
+| the ACCESS ladder of a NEW module (a feature the admin grants, the owner may be given, the waiter may reach) | `verify:settings-columns` ← `settings` is one row per restaurant with 110 columns, ~44 of them the same four repeated per module; a new module's ladder belongs in `settings.modules` (mig 320), not in four more columns | `.env.local` | no |
 | the Recycle bin's **purge** (permanently clears a deleted restaurant) | `verify:purge` ← the tenant keys have no cascade, so a purge names each child table by hand and can forget one | nothing | no |
 
 ## 8 · Any write endpoint, anywhere (`app/api/**/route.ts`)

@@ -7,6 +7,10 @@
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { MODULE_DEFS } from "@/lib/accessModel";
 
+/** One module's ladder as it is stored in settings.modules (mig 320) — the JSONB alternative to the
+ *  four columns a module used to need. Absent keys read as false/false/true (new modules start OFF). */
+export type ModuleBagEntry = { allowed?: boolean; owner_control?: boolean; enabled?: boolean; tablet?: string };
+
 export const TABLE_TAGS = ["vip", "family", "guest"] as const;
 export type TableTag = (typeof TABLE_TAGS)[number];
 export const isTableTag = (v: unknown): v is TableTag =>
@@ -50,14 +54,22 @@ export async function moduleLadder(
 // modules at once (the editor whoami used to fire five separate selects for the same
 // row); a new module added to accessModel appears here with no code change.
 export async function allModuleLadders(rid: string): Promise<Record<string, TableTagsLadder>> {
-  const cols = MODULE_DEFS.flatMap((m) => [m.allowed, m.control, m.enabled]);
-  const s = (await sb.from("settings").select(cols.join(", ")).eq("restaurant_id", rid).maybeSingle())
-    .data as Record<string, boolean> | null;
+  // COLUMNS for the eleven modules that predate the bag, and settings.modules for any module that
+  // declares itself bag-backed (mig 320: a new module needs no new column). Both are read in the
+  // SAME single select, so this stays one round-trip however many modules exist. No module declares
+  // the bag today, which is why this cannot change a single answer yet — it is the road, not a turn.
+  const cols = MODULE_DEFS.filter((m) => !m.bag).flatMap((m) => [m.allowed, m.control, m.enabled]);
+  const s = (await sb.from("settings").select([...cols, "modules"].join(", ")).eq("restaurant_id", rid).maybeSingle())
+    .data as (Record<string, boolean> & { modules?: Record<string, ModuleBagEntry> }) | null;
+  const bag = (s?.modules && typeof s.modules === "object" ? s.modules : {}) as Record<string, ModuleBagEntry>;
   const out: Record<string, TableTagsLadder> = {};
   for (const m of MODULE_DEFS) {
-    const allowed = s?.[m.allowed] === true;
-    const ownerControl = s?.[m.control] === true;
-    const enabled = s?.[m.enabled] !== false;
+    // An ABSENT bag entry reads exactly like absent columns would: not allowed, not transferred,
+    // enabled — i.e. a new module is OFF until the admin grants it (the house rule since mig 107).
+    const src = m.bag ? bag[m.key] : undefined;
+    const allowed      = m.bag ? src?.allowed === true       : s?.[m.allowed] === true;
+    const ownerControl = m.bag ? src?.owner_control === true  : s?.[m.control] === true;
+    const enabled      = m.bag ? src?.enabled !== false       : s?.[m.enabled] !== false;
     out[m.key] = { allowed, ownerControl, enabled, effective: allowed && (!ownerControl || enabled) };
   }
   return out;
