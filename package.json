@@ -21,6 +21,7 @@
     "verify:grants": "node scripts/verify-db-grants.mjs",
     "verify:one-number": "node scripts/verify-one-number.mjs",
     "verify:settings-columns": "node scripts/verify-settings-columns.mjs",
+    "verify:dish-counts": "node scripts/verify-dish-counts.mjs",
     "verify:purge": "node scripts/verify-purge-classified.mjs",
     "verify:guest-pass": "node scripts/verify-guest-pass-private.mjs",
     "verify:write-paths": "node scripts/verify-write-paths.mjs",
