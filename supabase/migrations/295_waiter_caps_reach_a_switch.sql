@@ -28,6 +28,21 @@
 -- on the tablet whatever this column says.
 
 -- 1 · the six floor capabilities → 'on' (the default their new Access rows show)
+--
+-- ⚠️ ONE-TIME — GUARDED SINCE 2026-08-13 (T16 finding 7510). The WHERE below does not test
+-- ABSENCE, it tests "is it not the value I want" — this statement exists to overwrite a stored
+-- tri-state. That is right once, as the repair it was written to be. On a re-seed it forced all six
+-- of a waiter's capability switches back to 'on', throwing away any 'off' or 'pin' an admin had
+-- since set on Access → Waiter, with nothing on screen and nothing in the Activity log to say so.
+DO $reseed_guard$
+DECLARE v_applied boolean := false;
+BEGIN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('295_waiter_caps_default_on') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
+  RAISE NOTICE '295_waiter_caps_default_on: already applied — skipped (a re-run would force all six waiter switches back on)';
+ELSE
 UPDATE settings SET
   tablet_take_orders = 'on',
   tablet_table_ops   = 'on',
@@ -41,6 +56,8 @@ WHERE tablet_take_orders IS DISTINCT FROM 'on'
    OR tablet_khata       IS DISTINCT FROM 'on'
    OR tablet_parcel      IS DISTINCT FROM 'on'
    OR tablet_banquet     IS DISTINCT FROM 'on';
+END IF;
+END $reseed_guard$;
 
 -- 2 · the walk-out close moves to its own key, carrying any stored value with it.
 --

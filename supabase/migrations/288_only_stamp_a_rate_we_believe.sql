@@ -74,9 +74,28 @@ CREATE TRIGGER trg_stamp_order_tax_rate BEFORE INSERT ON orders
 -- ── 3. Un-stamp the rates already written that we do not believe ─────────────
 -- Nothing is lost: these rows return to falling back on the restaurant's settings, which is what
 -- they did before mig 284 landed.
+-- ⚠️ ONE-TIME — GUARDED SINCE 2026-08-13 (T16 finding 7822). "Plausible" is measured against the
+-- restaurant's rate RIGHT NOW. That is the correct test on the day this migration ran, and the
+-- wrong test forever after: once an owner changes GST from 5% to 12%, every historical order's
+-- honest 0.05 stamp stops looking plausible, and a re-seed would NULL the stamp on all of them.
+-- Readers fall back to the restaurant's current rate when the stamp is NULL (see the comment 20
+-- lines up), so `orders.disc_gross` and the generated `net_amount` (mig 310) would be recomputed at
+-- 12% and months of already-filed revenue would silently change value — the exact thing migration
+-- 284 exists to make impossible. So it runs once, as the repair it is.
+DO $reseed_guard$
+DECLARE v_applied boolean := false;
+BEGIN
+IF to_regprocedure('public.lfh_already_applied(text)') IS NOT NULL THEN
+  EXECUTE $probe$ SELECT lfh_already_applied('288_null_implausible_tax_rates') $probe$ INTO v_applied;
+END IF;
+IF v_applied THEN
+  RAISE NOTICE '288_null_implausible_tax_rates: already applied — skipped (a re-run after a rate change would re-price history)';
+ELSE
 UPDATE orders o SET tax_rate = NULL
  WHERE o.tax_rate IS NOT NULL
    AND NOT lfh_plausible_tax_rate(COALESCE(o.restaurant_id, '00000000-0000-0000-0000-000000000001'::uuid), o.tax_rate);
+END IF;
+END $reseed_guard$;
 
 -- Afterwards every stamped rate should be one the restaurant is actually on:
 --   select tax_rate, count(*) from orders where tax_rate is not null group by 1 order by 2 desc;
