@@ -35,6 +35,13 @@ function rangeBounds(range: string): { from: Date; to: Date } {
 // orders must plot as 0, not vanish (a missing tick compresses the time axis and
 // makes the chart lie about gaps). Day keys arrive as 'YYYY-MM-DD' (3-arg RPC
 // heritage), hour keys as timestamptz ISO; both are matched by their IST bucket key.
+// The UTC bounds of ONE IST calendar day — used by the ?day= drill so its buckets line up with
+// the day buckets the trend just handed the page (both are whole IST days).
+function istDayBounds(ymd: string): { from: Date; to: Date } {
+  const startIst = Date.parse(`${ymd}T00:00:00+05:30`);
+  return { from: new Date(startIst), to: new Date(startIst + 86400000) };
+}
+
 function zeroFill(range: string, from: Date, to: Date, rows: { bucket: string; orders: number }[]): { day: string; orders: number }[] {
   const hourly = range === "today";
   const stepMs = hourly ? 3600000 : 86400000;
@@ -73,7 +80,15 @@ export async function GET(req: NextRequest) {
   // response or into zeroFill/bucket (it used to echo the raw string — audit 2026-07-06).
   const rawRange = new URL(req.url).searchParams.get("range") || "7d";
   const range = ["today", "7d", "30d"].includes(rawRange) ? rawRange : "7d";
-  const { from, to } = rangeBounds(range);
+  // ?day=YYYY-MM-DD — the DRILL (lib/timeView.ts). When a window's orders are all piled into one
+  // day, the page asks for that ONE day back, bucketed by hour, instead of plotting a chart that
+  // is 90% empty columns. Deliberately cheap and scoped: the SAME RPC as the trend, just a
+  // narrower from/to and p_bucket:'hour' — 24 rows for one IST day on an indexed created_at, not
+  // a second read of anything. Validated to a strict date so a junk value can never widen the
+  // window or echo back out (the same lesson as ?range= above).
+  const rawDay = new URL(req.url).searchParams.get("day") || "";
+  const drillDay = /^\d{4}-\d{2}-\d{2}$/.test(rawDay) ? rawDay : "";
+  const { from, to } = drillDay ? istDayBounds(drillDay) : rangeBounds(range);
   const fromIso = from.toISOString();
   const toIso = to.toISOString();
   // ?refresh=1 — the page's ↻ button asks for the live value and waits for it.
@@ -92,15 +107,15 @@ export async function GET(req: NextRequest) {
   // true, [])), and the change-detector is the same cheap orders fingerprint the owner reports
   // use — with ids = null meaning "every restaurant", so a single order anywhere refreshes it.
   const payload = await cachedOwnerPayload({
-    key: `admin:v1:${scopeKeyOf(null, true, [])}:analytics:${range}`,
+    key: `admin:v1:${scopeKeyOf(null, true, [])}:analytics:${drillDay ? `day:${drillDay}` : range}`,
     force,
     fingerprint: () => ordersFingerprint(null, fromIso, toIso),
-    compute: () => computeAnalytics(range, from, to, fromIso, toIso),
+    compute: () => computeAnalytics(drillDay ? "today" : range, from, to, fromIso, toIso, !!drillDay),
   });
   return NextResponse.json(payload);
 }
 
-async function computeAnalytics(range: string, from: Date, to: Date, fromIso: string, toIso: string) {
+async function computeAnalytics(range: string, from: Date, to: Date, fromIso: string, toIso: string, hourly = false) {
   const [restQ, staffCountQ, openSessionsQ, tableCountQ, ordersCountQ, trendQ, busiestQ, sourceQ] = await Promise.all([
     // Live restaurants only (bug H4, 2026-07-06): binned restaurants must not inflate
     // total/active counts. The busiest-restaurants RPC gets the same guard in mig 130.
@@ -113,7 +128,7 @@ async function computeAnalytics(range: string, from: Date, to: Date, fromIso: st
     sb.from("orders").select("id", { count: "exact", head: true }).neq("status", "cancelled").gte("created_at", fromIso).lt("created_at", toIso),
     // Today buckets HOURLY (adaptive time-axis rule — a one-day window ticks by
     // hours, never one flat day bucket); 7d/30d bucket by day. 4-arg overload = mig 129.
-    sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: null, p_from: fromIso, p_to: toIso, p_bucket: range === "today" ? "hour" : "day" }),
+    sb.rpc("lfh_admin_orders_timeseries", { p_restaurant_id: null, p_from: fromIso, p_to: toIso, p_bucket: hourly || range === "today" ? "hour" : "day" }),
     sb.rpc("lfh_admin_busiest_restaurants", { p_from: fromIso, p_to: toIso, p_limit: 10 }),
     sb.rpc("lfh_admin_orders_by_source", { p_from: fromIso, p_to: toIso }),
   ]);

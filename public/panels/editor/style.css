@@ -220,6 +220,24 @@ body.nav-compact .tab {
 /* Tables tab: no left sidebar — collapse the first column so the floor fills the width. */
 .layout.no-sidebar { grid-template-columns: 1fr; }
 .layout.no-sidebar > .sidebar { display: none; }
+/* BROWSE WIDE, THEN SPLIT (owner, 2026-08-14: "when you choose any one dish it will go side like
+   right now, till then it show full screen"). Before anything is picked there is nothing to show
+   on the right, so the old layout spent a 320px strip on the list and left ~735px of a 1280px
+   screen holding a plate icon. Editing a menu means SCANNING NAMES, and a narrow column is
+   exactly what cuts names short. So while nothing is selected the list takes the whole width and
+   lays itself out in columns; picking a dish snaps back to the normal master-detail split. Only
+   the browsing state changes — the editing state is untouched. */
+.layout.list-wide { grid-template-columns: 1fr; }
+.layout.list-wide > .editor { display: none; }
+.layout.list-wide > .sidebar { border-right: 0; }
+.layout.list-wide .sidebar-resizer { display: none; }
+/* The list itself becomes a responsive grid instead of one tall thin column. auto-fill +
+   minmax keeps rows a comfortable reading width on any screen and collapses to a single
+   column on a phone, where the strip was already full width. */
+.layout.list-wide #list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 6px; align-content: start; padding-inline: 4px;
+}
 .sidebar { position: relative; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .sidebar-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 6; transition: background .15s; }
 .sidebar-resizer:hover { background: color-mix(in srgb, var(--gold) 45%, transparent); }

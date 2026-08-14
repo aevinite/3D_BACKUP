@@ -5481,8 +5481,22 @@ function syncGuestBell() {
   } catch (e) { /* the bell is a readout; it must never be able to stop the panel rendering */ }
 }
 
+// BROWSE WIDE, THEN SPLIT — the class half of the rule in style.css (.layout.list-wide).
+// Called from renderEditor(), which already runs on EVERY path that can change the selection:
+// switching tab, clicking a row, "+ New", Cancel and Save. Keeping it here means there is one
+// writer instead of five call sites that could drift apart.
+function syncListWide() {
+  const layout = document.querySelector(".layout");
+  if (!layout) return;
+  // Only the master-detail tabs have a "nothing picked yet" state at all. The floor-style tabs
+  // already run full-width via .no-sidebar, and toggling both would fight over the same grid.
+  const masterDetail = !layout.classList.contains("no-sidebar");
+  layout.classList.toggle("list-wide", masterDetail && !state.sel);
+}
+
 function renderEditor() {
   const ed = $("#editor");
+  syncListWide();
   // DEFERRED ON PURPOSE. Both panels rebuild chunks of their own chrome during the render that
   // follows this call, and the waiter tablet's rebuild takes the top bar with it — so mounting
   // the bell first meant mounting it into markup that was about to be thrown away, and the

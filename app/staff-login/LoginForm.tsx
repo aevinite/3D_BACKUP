@@ -55,6 +55,9 @@ export default function LoginForm({ next, initialError }: { next: string; initia
       style={{ background: "#111a2e", border: "1px solid #1f2c49", borderRadius: 16, padding: 28, width: "min(92vw, 360px)" }}>
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10, marginBottom: 18 }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
+        {/* REJECTED (owner, 2026-08-14): unifying this with the text ✦ that /login draws.
+            Offered by the T11 visual sweep as a brand-consistency fix and declined —
+            docs/REJECTED-IDEAS.md R24. Do not re-offer. */}
         <img src="/brand/aevidine-mark.svg" alt="Aevidine" width={48} height={48} />
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.2 }}>Aevidine</div>
