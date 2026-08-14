@@ -14,7 +14,7 @@
 // /login. A manager granted "manage_staff" manages staff from the EDITOR panel, which
 // reuses this same API (they can't change the power toggles — those stay owner-only).
 import { useCallback, useEffect, useRef, useState } from "react";
-import { asSuffix } from "@/lib/ownerPin";
+import { asSuffix, asValue } from "@/lib/ownerPin";
 
 type Perms = Record<string, boolean>;
 type Restaurant = { id: string; name: string; slug: string; accentColor: string; managerPermissions: Perms; ownerEntitlements?: Perms; modules?: Record<string, boolean>; payAccess?: PayAccess; tableCount?: number };
@@ -77,15 +77,32 @@ export default function OwnerStaffPage() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
   // Same pin, but for a PAGE link (the profile route) rather than an API call.
-  const withRid = useCallback((p: string) => (scopePin ? `${p}?rid=${scopePin}` : p), [scopePin]);
+  //
+  // IT CARRIES ?as= TOO (T19 sweep, 2026-08-14). Every API call this page makes already appends
+  // the chosen-owner pin through `withScope` → `asSuffix()`, but the PROFILE LINK didn't — so
+  // opening a person dropped it, and the profile page (which reads `as` from its own URL, see
+  // app/owner/staff/[id]/page.tsx) then asked the server without it. One screen, two ideas of
+  // whose cockpit this is. Built from parts rather than a template so a pin that arrives alone
+  // still rides along.
+  const withRid = useCallback((p: string) => {
+    const as = asValue();
+    const q = [
+      scopePin ? `rid=${encodeURIComponent(scopePin)}` : "",
+      as ? `as=${encodeURIComponent(as)}` : "",
+    ].filter(Boolean).join("&");
+    return q ? `${p}?${q}` : p;
+  }, [scopePin]);
   const withScope = useCallback(
     (p: string) => (scopePin ? `${p}${p.includes("?") ? "&" : "?"}scope=${scopePin}${asSuffix()}` : p),
     [scopePin]);
-  // Deep-link from an X-ray zone ("open the setting that controls this"): ?focus=<flag>
-  // scrolls to that power toggle and pulses it.
-  const [linked] = useState<{ focus: string | null; rid: string | null }>(() =>
-    typeof window === "undefined" ? { focus: null, rid: null }
-    : { focus: new URLSearchParams(window.location.search).get("focus"), rid: new URLSearchParams(window.location.search).get("rid") });
+  // THE ?focus= DEEP LINK WAS DELETED HERE (T19 sweep, 2026-08-14). It read `?focus=<flag>` and
+  // scrolled to `[data-perm-key="<flag>"]`, pulsing it — a hand-off from the X-ray "open the
+  // setting that controls this" row. No element on this page has carried `data-perm-key` since
+  // the Powers tab went in the access rebuild (the attribute is rendered in exactly one place in
+  // the product now: the manager panel's per-person dropdown), and nothing links ?focus= here
+  // either — components/owner/OwnerShell.tsx routes that row to /aevinite/access?focus=…, which
+  // is where the switch actually lives. A handler that can never fire is a promise the next
+  // reader would believe.
 
   const load = useCallback(async () => {
     try {
@@ -110,18 +127,6 @@ export default function OwnerStaffPage() {
     const t = setTimeout(() => { pwRef.current?.focus(); pwRef.current?.select(); }, 250);
     return () => clearTimeout(t);
   }, [reveal]);
-
-  // After a deep-linked load, locate the named power toggle and pulse it once.
-  useEffect(() => {
-    if (loading || !linked.focus) return;
-    const el = document.querySelector<HTMLElement>(`[data-perm-key="${CSS.escape(linked.focus)}"]`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.style.transition = "box-shadow .3s";
-    el.style.boxShadow = "0 0 0 4px rgba(217,119,6,.55)";
-    const t = setTimeout(() => { el.style.boxShadow = ""; }, 2200);
-    return () => clearTimeout(t);
-  }, [loading, linked.focus]);
 
   const canEditPowers = actor === "owner" || actor === "admin";
 
@@ -253,7 +258,12 @@ export default function OwnerStaffPage() {
 
   return (
     <>
-      <div className="own-bar"><div className="own-crumb"><span className="cur">{restaurants.some((r) => r.modules?.payroll) ? "Team & pay" : "Staff & powers"}</span></div></div>
+      {/* "Team", not "Staff & powers" (T19 sweep, 2026-08-14). The POWERS tab left in the access
+          rebuild of 2026-07-31 and the sidebar label was corrected for exactly this reason on
+          2026-08-05 — "the sidebar promised a screen that no longer exists" — but this crumb kept
+          the old name for every restaurant WITHOUT the payroll module, which is the only branch
+          that still rendered it. "& pay" stays where pay genuinely exists. */}
+      <div className="own-bar"><div className="own-crumb"><span className="cur">{restaurants.some((r) => r.modules?.payroll) ? "Team & pay" : "Team"}</span></div></div>
 
       {/* People first, toggles second — the roster is what an owner opens this page for. */}
       {/* The POWERS tab was removed in the access rebuild (owner, 2026-07-31: "only admin
@@ -417,6 +427,16 @@ export default function OwnerStaffPage() {
                 {ROLES.map((ro) => <option key={ro} value={ro}>{ro === "tablet" ? "waiter" : ro}</option>)}
               </select>
               <input className="ost-in" name="password" placeholder="Password (blank = auto)" autoComplete="off" />
+              {/* PHONE IS NOT A PAY DETAIL (T19 sweep, 2026-08-14). It used to live inside the
+                  payroll-gated "Add their details now" block below, so at a restaurant without
+                  the pay module the owner had to add the person FIRST and then reopen the row
+                  with "Rename / edit phone" to type the number they were already holding. The
+                  roster shows a phone on every row and offers that edit button either way, so
+                  the value was always wanted — just unreachable at the one moment it is in
+                  someone's hand. The server has always accepted `phone` on create regardless of
+                  the module. Full name / designation / joining date stay in the block: those
+                  really are the profile feature. */}
+              <input className="ost-in" name="phone" placeholder="Phone (optional)" autoComplete="off" inputMode="tel" />
               <button className="ost-btn" type="submit"
                 disabled={busy || (newRole[r.id] === "tablet" && !(newTables[r.id] || []).length)}
                 title={newRole[r.id] === "tablet" && !(newTables[r.id] || []).length ? "Pick at least one table for this waiter first" : ""}>
@@ -456,7 +476,8 @@ export default function OwnerStaffPage() {
                 <details className="ost-more">
                   <summary>Add their details now <span className="adm-muted">· optional, you can do this later</span></summary>
                   <div className="ost-moregrid">
-                    <input className="ost-in" name="phone" placeholder="Phone" autoComplete="off" inputMode="tel" />
+                    {/* No phone input here — it moved up to the always-visible Add row (one field,
+                        one name, so a form with payroll ON can't submit two `phone` values). */}
                     <input className="ost-in" name="full_name" placeholder="Full name" autoComplete="off" maxLength={80} />
                     <input className="ost-in" name="designation" placeholder="Designation (e.g. Senior waiter)" autoComplete="off" maxLength={80} />
                     <label className="ost-lbl">Joined on<input className="ost-in" name="joined_on" type="date" /></label>

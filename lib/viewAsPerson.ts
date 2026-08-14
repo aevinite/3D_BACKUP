@@ -40,10 +40,20 @@ export const isPersonId = (v: string | undefined | null): v is string => !!v && 
 const TTL_MS = 20_000;
 const cache = new Map<string, { at: number; row: StaffUser | null }>();
 
+// EXACTLY what a pinned view needs — never `select("*")` (T19 sweep, 2026-08-14). The star
+// pulled `password_hash` and `pin_hash` into this module's 20-second cache on every panel poll
+// from a view-as tab, and four routes call this helper, so it sits on a hot path. Nothing ever
+// echoed them; there is simply no reason to move secret material at all — the same change was
+// made in app/api/owner/staff for the same reason on 2026-08-04. The columns below are the ones
+// the callers actually read: the gate fields (role, restaurant_id, active), the per-person
+// overrides that shape the tri-state switches, the waiter's sections that narrow the floor, and
+// the two name fields the ribbon prints through personLabel().
+const PIN_COLS = "id, username, name, role, restaurant_id, active, permissions, assigned_tables";
+
 async function personById(id: string): Promise<StaffUser | null> {
   const hit = cache.get(id);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.row;
-  const res = await sb.from("staff_users").select("*").eq("id", id).eq("active", true).limit(1);
+  const res = await sb.from("staff_users").select(PIN_COLS).eq("id", id).eq("active", true).limit(1);
   if (res.error) return null; // a blip just means "no pin this time" — never an error page
   const row = (res.data?.[0] as StaffUser | undefined) ?? null;
   cache.set(id, { at: Date.now(), row });

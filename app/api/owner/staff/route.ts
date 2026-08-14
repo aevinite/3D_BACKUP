@@ -215,9 +215,33 @@ async function scope(req: NextRequest): Promise<Scope> {
       ]);
       const members = (membersQ.data || []).map((m) => m.user_id as string);
       const primary = primaryQ.data?.owner_user_id as string | null | undefined;
-      const ownerId = primary && members.includes(primary) ? primary : (members[0] ?? null);
+      // ?as=<ownerId> — WHICH owner's cockpit this tab was opened for (T19 sweep, 2026-08-14).
+      // lib/ownerScope.ts has honoured this since 2026-07-25 (the dashboard's "which owner?"
+      // chooser); this route had its own copy of the resolution and never looked at it, so on a
+      // restaurant with two owners the Dashboard and Reports showed the picked owner while the
+      // Team page silently showed the PRIMARY owner's estate — a restaurant of theirs the picked
+      // owner doesn't own would list its whole team under the wrong person's name. Honoured ONLY
+      // when that owner really co-owns this restaurant, exactly as ownerScope does, so a stale or
+      // hand-typed id can never widen the set; otherwise fall back to primary/first as before.
+      const asOwner = sp?.get("as");
+      const ownerId = (asOwner && members.includes(asOwner))
+        ? asOwner
+        : (primary && members.includes(primary) ? primary : (members[0] ?? null));
       let ids: string[] = [];
-      if (ownerId) ids = ((await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId)).data || []).map((x) => x.restaurant_id as string);
+      if (ownerId) {
+        // A BLIP MUST NOT SILENTLY SHRINK THE VIEW (T19 sweep, 2026-08-14 — the twin of T9's F22,
+        // which was fixed in lib/ownerScope.ts on 2026-08-12 and missed here). This read's
+        // `.error` was ignored, so a failed widen left `ids` as just the entered restaurant and
+        // the page rendered a complete-looking Team screen for ONE restaurant, with nothing
+        // saying the others had been dropped rather than never existed. Every other read in this
+        // function already answers `transient()`; this one allowed a wrong answer through.
+        const owned = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", ownerId);
+        if (owned.error) {
+          console.error("[owner/staff] could not widen the act-as set:", owned.error.message);
+          return { ok: false, resp: transient() };
+        }
+        ids = (owned.data || []).map((x) => x.restaurant_id as string);
+      }
       if (!ids.includes(pin)) ids.push(pin); // never lose the entered restaurant
       const { data, error } = await sb.from("restaurants").select(cols).in("id", ids).order("name");
       if (error) return { ok: false, resp: transient() };

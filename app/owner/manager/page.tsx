@@ -57,8 +57,18 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
       .map((r) => r.user_id as string);
     const estateIds = new Set<string>([rid]);
     if (ownerIds.length) {
-      const links = (await sb.from("restaurant_owners").select("restaurant_id").in("user_id", ownerIds).limit(50)).data || [];
-      for (const l of links) estateIds.add(l.restaurant_id as string);
+      // Paged, not `.limit(50)` (T19 sweep, 2026-08-14): past the 50th link the siblings were
+      // dropped with no notice, so the "Switch restaurant" bar would quietly stop offering some
+      // of the owner's floors. Same rule as lib/panelAccess.ts → ownedLinkIds() and
+      // lib/ownerScope.ts → scopedRestaurantIds(): a list is complete or it says so.
+      const PAGE = 1000;
+      for (let offset = 0; ; offset += PAGE) {
+        const q = await sb.from("restaurant_owners").select("restaurant_id").in("user_id", ownerIds)
+          .order("restaurant_id").range(offset, offset + PAGE - 1);
+        const batch = q.data || [];
+        for (const l of batch) estateIds.add(l.restaurant_id as string);
+        if (q.error || batch.length < PAGE) break;
+      }
     }
     const rows = (await sb.from("restaurants").select("id, name, accent_color").in("id", [...estateIds]).is("deleted_at", null)).data || [];
     restaurants = rows.map((r) => ({ id: r.id as string, name: r.name as string, accentColor: (r.accent_color as string) || undefined }));

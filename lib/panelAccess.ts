@@ -97,11 +97,34 @@ function staleOrThrow(userId: string, cause: unknown): string[] {
   throw new OwnedLookupFailed(cause);
 }
 
+// AN OWNER'S ESTATE IS NOT CAPPED AT 50 (T19 sweep, 2026-08-14). This read was
+// `.limit(50)` — past the 50th ownership link the rest were dropped with no error and no note,
+// and the short answer was then CACHED for the TTL. Because this helper is the one source of
+// truth (see the block above), a 51st restaurant would simply be absent from the owner's
+// sidebar, the Menu picker, Manager mode and every /api/owner/* call at once, with nothing on
+// any screen to say so. The sibling helper for the same job already refuses to do that —
+// `scopedRestaurantIds` in lib/ownerScope.ts pages in thousands and throws
+// `RestaurantListIncomplete` rather than hand back a partial list — so the two disagreed about
+// what a complete list means. Paged the same way here; a page read that fails goes through
+// staleOrThrow like every other read in this function, so a blip is never a shorter estate.
+const OWNED_PAGE = 1000;
+async function ownedLinkIds(userId: string): Promise<{ ids?: string[]; error?: unknown }> {
+  const ids: string[] = [];
+  for (let offset = 0; ; offset += OWNED_PAGE) {
+    const r = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", userId)
+      .order("restaurant_id").range(offset, offset + OWNED_PAGE - 1);
+    if (r.error) return { error: r.error };
+    const batch = (r.data || []).map((x) => x.restaurant_id as string);
+    ids.push(...batch);
+    if (batch.length < OWNED_PAGE) return { ids };
+  }
+}
+
 export async function enabledOwnedRestaurantIds(userId: string, cached = true): Promise<string[]> {
   if (!userId) return [];
   const hit = cached ? _ownerCache.get(userId) : undefined;
   if (hit && Date.now() - hit.at < PANEL_TTL_MS) return hit.ids;
-  const links = await sb.from("restaurant_owners").select("restaurant_id").eq("user_id", userId).limit(50);
+  const links = await ownedLinkIds(userId);
   // A FAILED read must never look like "this owner has no restaurants". Every `.data || []`
   // here used to swallow the error, so one DB blip produced an empty list — and the caller
   // then told the owner "no restaurants are assigned to you" / "staff management isn't
@@ -109,7 +132,7 @@ export async function enabledOwnedRestaurantIds(userId: string, cached = true): 
   // Now: reuse the last known-good answer if we have one, else throw so the caller can say
   // "couldn't load, try again" instead of inventing a configuration problem. (2026-07-31)
   if (links.error) return staleOrThrow(userId, links.error);
-  const owned = (links.data || []).map((r) => r.restaurant_id as string);
+  const owned = links.ids || [];
   let ids: string[] = [];
   if (owned.length) {
     // One scoped read: live restaurants ∩ owned ids, joined against their settings.
