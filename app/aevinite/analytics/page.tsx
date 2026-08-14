@@ -67,17 +67,25 @@ export default function AdminAnalytics() {
 
   // `live` = the ↻ button: ask the server to recompute and wait for it (?refresh=1). A normal open
   // and the 60s backstop take the snapshot, which is one row read.
-  const load = useCallback(async (r: Range, live = false) => {
+  // THE DRILL (lib/timeView.ts). When a window's orders are all piled into one day, the chart
+  // offers that day hour-by-hour instead of plotting mostly-empty columns. `drillDay` holds the
+  // IST date we drilled into; clearing it returns to the whole window. It is ONE extra scoped
+  // request (the same RPC, one day, bucketed by hour) and only when the person asks for it —
+  // never on load, so a quiet platform costs exactly what it did before.
+  const [drillDay, setDrillDay] = useState<string | null>(null);
+  const load = useCallback(async (r: Range, live = false, day: string | null = null) => {
     setLoading(true); setErr(null);
     try {
-      const res = await fetch(`/api/admin/analytics?range=${r}${live ? "&refresh=1" : ""}`, { cache: "no-store" });
+      const q = day ? `day=${encodeURIComponent(day)}` : `range=${r}`;
+      const res = await fetch(`/api/admin/analytics?${q}${live ? "&refresh=1" : ""}`, { cache: "no-store" });
       const j = await res.json();
       if (!res.ok) throw new Error(j.error || "Couldn't load analytics.");
       setData(j);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
   }, []);
-  useEffect(() => { load(range); }, [range, load]);
-  useActiveAutoRefresh(() => load(range), 60000);
+  // Changing the range always drops any drill — the drilled day belongs to the window it came from.
+  useEffect(() => { setDrillDay(null); load(range); }, [range, load]);
+  useActiveAutoRefresh(() => load(range, false, drillDay), 60000);
 
   const t = data?.totals;
   const occupancy = t && t.totalTables > 0 ? Math.min(1, t.activeTablesNow / t.totalTables) : 0;
@@ -181,8 +189,13 @@ export default function AdminAnalytics() {
 
         <div className="adm-card" style={{ marginBottom: 14 }}>
           <h2>Orders per {range === "today" ? "hour" : "day"}</h2>
-          <p className="hint">Platform-wide order count for {RANGE_LABEL[range].toLowerCase()} — every bucket plotted, quiet ones as zero.</p>
-          {data ? <OrdersTrend data={data.trend} bucket={data.bucket || "day"} /> : <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>}
+          <p className="hint">Platform-wide order count for {RANGE_LABEL[range].toLowerCase()} — the chart follows the data: a normal spread is plotted, a window whose orders all land on one day offers that day hour by hour, and too little to chart is said in words.</p>
+          {data ? <OrdersTrend data={data.trend} bucket={data.bucket || "day"}
+            windowLabel={RANGE_LABEL[range].toLowerCase()}
+            drilledInto={drillDay}
+            onDrill={(d) => { setDrillDay(d); load(range, false, d); }}
+            onBack={() => { setDrillDay(null); load(range); }} />
+          : <div className="adm-empty">{err ? "Couldn't load — press Refresh." : "Loading…"}</div>}
         </div>
 
         <div className="adx-grid2col">
