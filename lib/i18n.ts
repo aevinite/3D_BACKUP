@@ -3,7 +3,7 @@
 // two small React "hooks" that tell a component which language is currently active.
 
 import { useState, useEffect } from "react";
-import { type LanguageCode } from "./format";
+import { type LanguageCode, GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS } from "./format";
 
 // The list of every UI phrase the app needs to translate. Think of it as the
 // "keys" in our dictionary — each language below must fill in all of these.
@@ -525,6 +525,14 @@ export const useLanguage = (): LanguageCode => {
 
   // useEffect runs after the component appears on screen (only in the browser).
   useEffect(() => {
+    // REJECTED (owner, 2026-08-14) — the guest language picker is OFF, so the menu is English
+    // for everyone and a language saved on this device before today is ignored. This hook reads
+    // localStorage DIRECTLY (it does not go through getLanguage()), so the switch has to be
+    // honoured here too or a returning Hindi guest would still get Hindi with no picker to change
+    // it back with. Full reasoning + how to turn it back on: lib/format.ts →
+    // GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS, and docs/REJECTED-IDEAS.md → R23.
+    // Never re-add the picker without asking him.
+    if (!GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS) return;
     // Read the saved language from localStorage (key "lfh_language").
     setLang((localStorage.getItem("lfh_language") as LanguageCode) || "en");
     // This little function re-reads the language whenever it changes elsewhere.

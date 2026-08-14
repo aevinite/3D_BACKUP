@@ -53,8 +53,16 @@ export const viewport: Viewport = {
 // document dark from the very first frame. Without it a new laptop (no saved theme) briefly
 // flashed the cream guest background before the dark owner shell mounted — the "white wide
 // screen" the owner reported (2026-07-26). Uses the raw pathname (available pre-hydration).
+//
+// REJECTED (owner, 2026-08-14) — the `lang` line no longer reads the guest's saved language: the
+// language picker is OFF and every screen is English, so `<html lang>` is pinned to the `<html>`
+// attribute below. This was the LAST reader of `lfh_language` outside lib/, and it runs before
+// React, so leaving it would have stamped `lang="hi"` on an English page for any device that
+// picked Hindi before today — wrong for a screen reader and wrong for hyphenation. Why, and how to
+// turn the picker back on: lib/format.ts → GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS and
+// docs/REJECTED-IDEAS.md → R23 (restore the `var lang=…` read in the same change).
 const themeBootScript = `
-(function(){try{var saved=localStorage.getItem('lfh_theme');document.documentElement.setAttribute('data-theme',saved==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}try{var lang=localStorage.getItem('lfh_language')||'en';document.documentElement.setAttribute('lang',lang);}catch(e){}try{if(/^\\/(owner|admin|aevinite|manager|kitchen|tablet|login|staff-login)(\\/|$|\\?)/.test(location.pathname)){document.documentElement.setAttribute('data-staffdark','1');}}catch(e){}})();
+(function(){try{var saved=localStorage.getItem('lfh_theme');document.documentElement.setAttribute('data-theme',saved==='dark'?'dark':'light');}catch(e){document.documentElement.setAttribute('data-theme','light');}try{if(/^\\/(owner|admin|aevinite|manager|kitchen|tablet|login|staff-login)(\\/|$|\\?)/.test(location.pathname)){document.documentElement.setAttribute('data-staffdark','1');}}catch(e){}})();
 `.trim();
 
 // The main layout function. "children" is whatever page is currently showing —
