@@ -596,6 +596,44 @@ Exactly three things survive:
 
 Everything else is sediment. `docs/README.md` is the index that keeps the first two apart.
 
+## A new module adds no column to `settings` (2026-08-14)
+
+`settings` is ONE row per restaurant and it has **110 columns**. Roughly 44 of them are the same four
+repeated once per module:
+
+```
+<module>_allowed · <module>_owner_control · <module>_enabled · tablet_<module>
+```
+
+Eleven modules × four columns — banquet, khata, parcel, platform, payroll, inventory, take_orders,
+table_ops, table_tags, table_assign, takeaway. Each one cost a migration, an entry in
+`lib/settingsClone.ts`, and four more columns on the widest row in the database. And the app never
+wanted them as columns: `lib/accessModel.ts` already models a module as a NAMED ladder
+(`state.modules["banquet"] = { allowed, control, enabled }`) and `lib/tableTags.ts` is the single
+place that turns that name into storage.
+
+**So a new module goes in the bag.** Migration 320 added `settings.modules` (jsonb):
+
+```json
+{ "<module>": { "allowed": false, "owner_control": false, "enabled": true, "tablet": "off" } }
+```
+
+To add one: set `moduleBag: true` on the permission in `lib/accessModel.ts` and give `module` the
+module key in all three slots. `lib/tableTags.ts` reads the bag for it — **no migration at all**. An
+absent entry reads as `allowed:false / owner_control:false / enabled:true`, which is the same "new
+modules default OFF" rule the columns follow.
+
+**What is deliberately NOT done:** the eleven existing modules are NOT converted. Moving them would
+touch every panel and the Access screen for no visible gain, and a change has to earn its risk. They
+keep their columns forever; the bag is for what comes next.
+
+**Money, tax and identity stay real columns** (`tax_rate`, `tax_components`, `gstin`,
+`restaurant_name`…): a JSONB bag has no CHECK constraint and no visible default, which is fine for an
+on/off switch and wrong for money.
+
+Guarded by `npm run verify:settings-columns` — it fails on any NEW ladder-shaped or `tablet_` column
+whose module is not on the closed legacy list, and tells you to use the bag.
+
 ## Where it lives — the shape EVERY problem / idea / bug listing must take
 
 Owner, 2026-08-12, STANDING. He read a 10-problem / 12-idea list that named migration files and
