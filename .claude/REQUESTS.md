@@ -1248,3 +1248,56 @@ Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French Hou
       waiter tablet caps the floor at 6 tables per row for a finger but uses the same 6 upright,
       where tiles drop from 176px to 116px. Five other candidates were dropped, three of them
       because `docs/REJECTED-IDEAS.md` already refuses them.
+
+### T19 — owner panel B (menu editor, Team, portfolio): 500 phases swept, all 9 faults fixed + 1 improvement (2026-08-14)
+
+- [x] **Sweep:** ✅ 433 · ❌ 9 · ⏭ 58 of 500 (`.claude/sweep/T19-phases.md`). Scope: the owner
+      Menu editor and its embed, `/owner/staff` + the one person profile, `/api/owner/staff`,
+      Manager mode and the `?as=` person pin, the portfolio/roster/recycle-bin rules, and the
+      `aevidine_skin` key.
+- [x] **All 9 fixed and proved, worst first:**
+      1. **Switching "Edit menu" off stopped the owner's SCREEN but not the owner's SAVE.**
+         `managerCan()` returned `true` for role owner before ever reaching the Feature-half
+         check, so the read-only "👁 View menu" was the only thing holding that switch — against
+         the panel's own comment ("the server refuses the writes regardless, never the only
+         guard"). Proved by A/B on the running app: pre-fix the owner's save returned **200** with
+         the switch off, post-fix **403**, and **200** either way with it on. The restaurant's
+         `access_config` was restored byte-exact in the same run.
+      2. **The Team page ignored which owner Aevidine had picked** (`?as=`), showing the PRIMARY
+         owner's restaurants instead — `lib/ownerScope` has honoured that pin since 2026-07-25 and
+         this route had its own copy that didn't. The profile LINK dropped the pin too; it carries
+         it now.
+      3. **A failed read silently shrank that same page to one restaurant** with nothing saying so
+         — the twin of T9's F22, fixed in `lib/ownerScope` on 2026-08-12 and missed here. Now 503
+         "please try again".
+      4. **A dish photo could only be an outside web address.** There was no upload anywhere for
+         the one picture a guest actually looks at (a logo, a staff photo, an inventory photo and
+         an issue photo could all be uploaded). Now: **📷 Upload a photo** in the dish form, new
+         public `menu-media` bucket (**migration 325**, applied to the backup DB), route
+         `POST /api/editor/dish-photo` gated by the SAME "Edit menu → Edit a dish" permission —
+         no new switch, nothing new on the Access screen. PNG/JPG/WEBP ≤ 4 MB, SVG refused, a
+         replaced photo deletes the one it replaces, and with no signal it refuses visibly rather
+         than queueing a file the outbox cannot hold.
+      5. **The "＋ New" dish button was unreadable on its own fill** — the X-ray cyan marker
+         painted the label onto the emerald pill: measured **1.42:1** dark / **2.12:1** light.
+         The ring and the dot keep the cue; the label keeps its own ink. Re-measured after:
+         **8.54:1**.
+      6. **An owner's estate stopped at 50 restaurants, silently** (`.limit(50)`, then cached).
+         Paged now, like `scopedRestaurantIds` already was.
+      7. **The Team page still called itself "Staff & powers"** on restaurants without the pay
+         module — a tab removed in the access rebuild. Now "Team" / "Team & pay".
+      8. The view-as person read moved `password_hash`/`pin_hash` (`select("*")`) — explicit
+         column list now.
+      9. A dead `?focus=` deep-link handler on the Team page — deleted.
+- [x] **Improvement shipped (1 of 1 raised):** the **phone number** box on the Add-a-person form
+      was inside the payroll-gated block, so at a restaurant without the pay module the owner had
+      to add the person first and then reopen the row to type a number they were already holding.
+      It is in the Add row now. Full name / designation / joining date stay in the block — those
+      really are the profile feature.
+- [x] **Checked, not assumed:** typecheck + build + ESLint (0 errors) · `verify:ui`,
+      `verify:panel-cache`, `verify:access` (37), `verify:clash-coverage`, `verify:taps` (33),
+      `verify:grants`-adjacent `verify:rejected`, `verify:no-ask`, `verify:server-only`,
+      `verify:twins` — all green · and a regression pass on a PRIVATE port (4310, stopped
+      afterwards) covering all 11 owner pages, the manager/kitchen/waiter panels and three guest
+      menus: every one 200, no leaked code text, no page errors. Test uploads deleted; no dish row
+      points at the new bucket.

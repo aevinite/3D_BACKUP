@@ -85,17 +85,32 @@ async function managerCan(g: { user: StaffUser | null }, rid: string, flag: stri
   const u = g.user;
   if (!u) return true; // admin super-user — X-ray honesty, always passes
   if (u.role === "owner") {
-    // The owner passes every power automatically EXCEPT menu editing, which now cascades
-    // from the ADMIN rung (owner, 2026-07-25): when the admin turns menu editing OFF the
-    // owner also drops to a read-only "View menu" — matching the ladder (a rung that's off
-    // is refused by the server, not merely hidden). No extra DB read for any other power.
-    // The owner's menu-editing cascade used to read owner_entitlements.power_edit_menu, which no
-    // screen has been able to write since the old ladder went — so it answered "allowed" for every
-    // restaurant, always. The ADMIN's real switch for menu editing is the Feature half of
-    // Access → Manager → Edit menu (access_config.menus.manager.editor) plus the owner's own
-    // "Edit menu" page row (owner_entitlements.menu), and both are enforced where they belong.
-    // Reading a key nothing can set is the dead-switch shape this model removes. (2026-08-06)
-    return true;
+    // The owner passes every power automatically EXCEPT menu editing, which cascades from the
+    // ADMIN rung (owner, 2026-07-25): when the admin turns menu editing OFF the owner also drops
+    // to a read-only "View menu" — matching the ladder (a rung that's off is refused by the
+    // server, not merely hidden).
+    //
+    // THE CASCADE WAS LOST AND IS BACK (T19 sweep, 2026-08-14). The old reader was
+    // `owner_entitlements.power_edit_menu`, a key no screen has been able to write since the old
+    // ladder went, so it answered "allowed" for every restaurant, always. Deleting it on
+    // 2026-08-06 was right; what went with it was the cascade itself — this branch became a bare
+    // `return true`, which returns BEFORE the Feature-half check on the line below. So the panel
+    // correctly flipped the owner to "👁 View menu" (menuEditAllowed() in public/panels/editor/
+    // app.js reads the same switch through offByAdmin) while this route went on accepting that
+    // owner's saves. The panel's own comment there promises the opposite — "the server refuses
+    // the writes regardless, so this is the honest matching UI, never the only guard" — and
+    // "hiding is never the only guard" is the access model's first rule.
+    //
+    // The switch is the Feature half of Access → Manager → Edit menu (`access_config.edit_menu.on`),
+    // which is exactly what the panel reads, so the two can't disagree again. ONE tiny indexed
+    // read, and only when the question is edit_menu — every other power still costs nothing, as
+    // the note above has always promised. It fails OPEN on a read error, deliberately and in step
+    // with the manager path six lines down: this rung decides whether an owner may edit their own
+    // menu, and a database blip must not lock them out of their own restaurant mid-service.
+    if (flag !== "edit_menu") return true;
+    const cfg = (await sb.from("restaurants").select("access_config").eq("id", rid).maybeSingle()).data as
+      { access_config?: Record<string, { on?: boolean }> | null } | null;
+    return cfg?.access_config?.edit_menu?.on !== false;
   }
   const r = (await sb.from("restaurants").select("manager_permissions, owner_entitlements, access_config").eq("id", rid).maybeSingle()).data as
     { manager_permissions?: Record<string, boolean>; owner_entitlements?: Record<string, boolean>; access_config?: Record<string, { on?: boolean }> } | null;
@@ -447,6 +462,61 @@ const bustMenuCache = (rid: string) => {
   // entry makes the next read recompute. (T13 sweep, 2026-08-05)
   try { revalidateTag(menuTag(rid), { expire: 0 }); } catch {}
 };
+
+// ── A DISH PHOTO, UPLOADED (T19 sweep, 2026-08-14) ───────────────────────────────────────────
+// POST /api/editor/dish-photo, multipart { file, replaces? } → { ok, url }.
+//
+// Until now the dish form's Image card was a bare "Image URL" box, so the only way to give a
+// dish a picture was to host that picture somewhere yourself and paste its address — something a
+// beginner owner cannot do, and the arrangement that had to be undone once already when
+// restaurant #1's 41 photos were being served from an outside website. A restaurant LOGO, a
+// STAFF photo, an inventory photo and an issue photo could all be uploaded; the one picture a
+// guest actually looks at could not.
+//
+// NOT A NEW MODULE, and deliberately so: this fills in a field the "Edit menu → Edit a dish"
+// permission already governs, so it is gated by exactly that pair — managerCan("edit_menu") and
+// the edit_dish sub-part — and nothing new appears on the Access screen. The bucket is `menu-media`
+// (migration 325), public-read like `branding` and deliberately NOT like `inv-media`/`issue-media`:
+// migration 279 made those two private because they hold a restaurant's paperwork, and named the
+// exception in its own text — a picture rendered on the guest menu, to the public, by design.
+//
+// SVG is refused for the same reason the logo route refuses it: an SVG can carry a <script> that
+// runs when its public storage URL is opened directly.
+const PHOTO_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+const PHOTO_BUCKET = "menu-media";
+const PHOTO_MAX = 4 * 1024 * 1024;   // 4 MB — a phone photo, not a print master
+
+async function dishPhotoUpload(req: NextRequest, g: { user: StaffUser | null }, rid: string): Promise<NextResponse> {
+  if (!(await managerCan(g, rid, "edit_menu"))) return permDenied("edit the menu");
+  if (!(await menuSubAllowed(g, rid, "edit_dish"))) return permDenied("edit dishes");
+  const form = await req.formData().catch(() => null);
+  const file = form?.get("file");
+  if (!(file instanceof File)) return err("No photo was attached — pick a file and try again.");
+  const ext = PHOTO_EXT[file.type];
+  // Say WHICH formats, not just "wrong type": the person is standing in front of a file picker.
+  if (!ext) return err("A dish photo must be a PNG, JPG or WEBP image.");
+  if (file.size > PHOTO_MAX) return err("That photo is larger than 4 MB — please use a smaller one.");
+  // restaurant id + time + randomness, so a photo's address can't be guessed from a restaurant id.
+  const path = `${rid}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
+  const buf = new Uint8Array(await file.arrayBuffer());
+  const up = await sb.storage.from(PHOTO_BUCKET).upload(path, buf, { contentType: file.type, upsert: false });
+  // Never hand a storage library's own sentence to a person standing at a file picker.
+  if (up.error) { console.error("[editor/dish-photo] upload failed:", up.error.message); return err("Couldn't save that photo — please try again.", 500); }
+  const url = sb.storage.from(PHOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+  // Replacing a photo removes the one it replaces, so re-photographing a dish twenty times does
+  // not leave twenty files behind. Only ever an object in OUR bucket, under THIS restaurant's
+  // folder — a `replaces` naming anything else is simply ignored, never followed. Best-effort:
+  // a cleanup miss must not fail an upload that already succeeded.
+  const replaces = String(form?.get("replaces") || "");
+  const mine = replaces.split(`/${PHOTO_BUCKET}/`)[1];
+  if (mine && mine.startsWith(`${rid}/`) && !mine.includes("..")) {
+    try { await sb.storage.from(PHOTO_BUCKET).remove([mine]); } catch { /* best-effort */ }
+  }
+  // The dish row itself is NOT written here — the panel drops this URL into the Image field and
+  // the ordinary dish save writes it, which is what keeps one save path, one clash check and one
+  // cache bust. Nothing a guest sees has changed yet, so there is nothing to bust.
+  return ok({ ok: true, url });
+}
 
 // Money-integrity lock: while a session holds a LIVE (non-voided) invoice, its bill
 // is frozen — reject any money-changing edit so the printed invoice total can't drift.
@@ -2272,6 +2342,13 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
   const { path = [] } = await ctx.params;
   // Manager's-menu rung: refuse a tab this restaurant switched off (see tabGate).
   { const tg = await tabGate(g, rid, path, req.method); if (tg) return tg; }
+  // ── A DISH PHOTO, UPLOADED (T19 sweep, 2026-08-14) ─────────────────────────────────────
+  // Handled HERE, before the `try` below, because the very first thing in there is
+  // `readBody(req)` — which calls req.json() and consumes the request stream, leaving
+  // req.formData() with nothing to parse. Not a new module and it needs no switch of its own:
+  // it is the same "Edit menu → Edit a dish" permission that already governs the Image field
+  // this fills in, checked inside dishPhotoUpload().
+  if (path[0] === "dish-photo") return await dishPhotoUpload(req, g, rid);
   try {
     const [a, b, c] = path;
     // A missing client id arrives as literal "undefined"/"null"/"NaN" — reject before it
