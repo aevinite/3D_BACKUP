@@ -662,7 +662,7 @@ silence. And never use a shorthand he cannot place: "history file" is banned; wr
 |---|---|---|---|
 | Guest menu | `/menu`, `/r/<slug>/menu`, `/q/<code>` | `app/(guest)`, `components/*` | `lib/menu.ts`, guest RPCs (`lfh_*`) |
 | Manager panel | `/manager`, `/editor` | `public/panels/editor/app.js` (in an iframe) | `app/api/editor/*`, `lfh_floor_bundle`, `lfh_table_view_summary` |
-| Kitchen panel | `/kitchen` | `public/panels/kitchen/*` | `app/api/kitchen/*`, `lfh_kitchen_tickets` |
+| Kitchen panel | `/kitchen` | `public/panels/kitchen/*` | `app/api/kitchen/*` → `lib/liveBoard.ts` (`liveOrdersAndItems`). NOT `lfh_kitchen_tickets` — that function is unused (checked 2026-08-14); the panel picks dish rows vs the items JSON itself, in `rowsOf()` |
 | Tablet panel | `/tablet` | `public/panels/tablet/*` | `app/api/tablet/*` |
 | Owner panel | `/owner/*` (16 pages) | `app/owner/*`, `components/owner/*` | `app/api/owner/*`, `lfh_owner_*`, `lib/ownerCache.ts` |
 | Admin console | `/aevinite/*` (22 pages) | `app/aevinite/*` | `app/api/admin/*`, `lfh_admin_*` |

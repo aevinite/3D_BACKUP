@@ -122,13 +122,35 @@ const src = await q(`SELECT pg_get_functiondef(p.oid) AS def FROM pg_proc p
   ? pass("the floor tile still counts SUM(qty) — plates, not dish rows (mig 105's fix, reverted once by 122)")
   : fail("lfh_table_view_summary is counting rows again, not plates — that is mig 105's bug back for a third time");
 
-// 4. the kitchen must be ON the shared definition (that is the half we could afford to share)
+// 4. lfh_kitchen_tickets reads the shared definition. NOTE WHAT THIS IS AND IS NOT: nothing in the
+// app calls that function — checked, and only docs and old migrations mention it. The kitchen BOARD
+// is served by /api/kitchen/board → lib/liveBoard.ts, which hands the panel BOTH the dish rows and
+// the orders, and the choice is made in JavaScript (check 5). So this only keeps the SQL side
+// consistent for whatever reads it next; it is not the kitchen's live path.
 const kt = await q(`SELECT pg_get_functiondef(p.oid) AS def FROM pg_proc p
   JOIN pg_namespace n ON n.oid = p.pronamespace
   WHERE n.nspname='public' AND p.proname='lfh_kitchen_tickets'`);
 /order_dish_lines/.test(kt[0]?.def || "")
-  ? pass("the kitchen board reads the shared definition")
+  ? pass("lfh_kitchen_tickets reads the shared definition (an unused function, kept consistent)")
   : fail("lfh_kitchen_tickets stopped reading order_dish_lines — it is back to its own copy of the rule");
+
+// 5. THE KITCHEN'S REAL RULE IS IN JAVASCRIPT, and it is the third copy. public/panels/kitchen/app.js
+// → rowsOf(o) decides the same thing the view decides: use the dish ROWS when the order has any, else
+// map the order's items JSON. It cannot read a Postgres view, so it cannot share the definition — but
+// it must not disagree with it either, which is precisely how migs 105/122/136 happened one level up.
+{
+  const app = readFileSync(join(root, "public/panels/kitchen/app.js"), "utf8");
+  const fn = app.slice(app.indexOf("const rowsOf ="), app.indexOf("const rowsOf =") + 900);
+  /if \(dbRows\.length\) return dbRows/.test(fn)
+    ? pass("the kitchen panel still PREFERS the dish rows (rowsOf: `if (dbRows.length) return dbRows`)")
+    : fail("public/panels/kitchen/app.js rowsOf() no longer prefers the dish rows — it can now disagree with the floor about a dish");
+  /Array\.isArray\(o\.items\)/.test(fn)
+    ? pass("…and still falls back to the order's items JSON for an order with no rows (96% of history)")
+    : fail("rowsOf() lost its items-JSON fallback — 96% of orders have no dish rows, so those tickets would render empty");
+  /qty: i\.qty \|\| 1/.test(fn)
+    ? pass("…and a missing qty on a JSON line still counts as 1, as the view does")
+    : fail("rowsOf() no longer defaults a missing qty to 1 — the kitchen would count a dish the floor counts");
+}
 
 console.log(failed
   ? `\n✗ ${failed} check${failed === 1 ? "" : "s"} failed — the floor and the kitchen can disagree about a dish again`
