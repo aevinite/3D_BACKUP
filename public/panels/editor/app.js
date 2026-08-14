@@ -1834,7 +1834,7 @@ async function saveWaiterTables(userId, tables) {
       before ? { expect: { table: "staff_users", id: userId, fields: { assigned_tables: before } } } : undefined);
     // Saved on this device instead of sent — the optimistic grid above is already right, so keep
     // it and let the queue deliver. Never overwrite it with a server answer that doesn't exist yet.
-    if (d && d.queued) toast("Saved ✓ — syncing automatically.", "ok");
+    if (d && d.queued) toast("Saved on this device ✓ — it will send by itself.", "ok");
     else if (w && d.user) w.assigned_tables = d.user.assigned_tables || [];
   } catch (e) {
     if (w && before) w.assigned_tables = before;       // put it back — never lie about what's saved
@@ -2464,7 +2464,7 @@ function formGeneral(s) {
   }
   // default: the "general" section — site basics.
   return `
-  <div class="card"><h3>Service mode</h3>
+  <div class="card"><h3>Menu maintenance</h3>
     <p style="color:var(--muted);font-size:13px;margin:0 0 16px;line-height:1.5">
       When ON, the public menu is replaced by a full-screen <b>"We'll be right back"</b>
       maintenance screen — customers can't view or order anything until you switch it
@@ -3576,7 +3576,7 @@ async function freeTable(t, opts = {}) {
     if (sess) { try { await api("POST", "/sessions/" + sess.id + "/close", { force: true }); } catch (e) { /* orders are already off the floor; the tile reads free */ } }
     await loadSessions();
     toast(`${tableLabel(t)} is free`, "ok");
-  } catch (e) { toast("Could not free: " + errText(e), "err"); }
+  } catch (e) { toast("Couldn't free: " + errText(e), "err"); }
 }
 
 // The 30-minute grace window for undoing a settled bill (migration 112) — must
@@ -3692,7 +3692,7 @@ async function setOrderStatus(id, status, reason) {
     if (o && prev !== null) o.status = prev;         // server said no -> undo
     renderEditor();
     renderTablePanel();
-    toast("Could not update order: " + e.message, "err");
+    toast("Couldn't update the order: " + e.message, "err");
   } finally {
     opEnd(id);
   }
@@ -3845,7 +3845,7 @@ async function setOrderPayment(id, paid, opts = {}) {
     if (o && prev !== null) o.payment_status = prev;   // undo on failure
     renderEditor();
     renderTablePanel();
-    if (!opts.quiet) toast("Could not update payment: " + e.message, "err");
+    if (!opts.quiet) toast("Couldn't update the payment: " + e.message, "err");
     return false;
   } finally {
     opEnd(id);
@@ -4363,7 +4363,7 @@ async function resolveCall(id) {
   } catch (e) {
     state.data.calls = before; // bring it back — the server didn't get it
     renderEditor();
-    toast("Could not update call: " + e.message, "err");
+    toast("Couldn't update the call: " + e.message, "err");
   }
 }
 
@@ -4931,7 +4931,7 @@ function printBill(t, sess, os, opts = {}) {
   // saying which — so the old "close on afterprint" also threw the bill away on Cancel. The window
   // closes only from its own ✕ Close, and a NAMED target means the next bill reuses it.
   const w = window.open("", "lfh_bill_print", "width=380,height=680");
-  if (!w) { toast("Allow popups for this site to print the bill", "err"); return; }
+  if (!w) { toast("Allow pop-ups for this site to print the bill", "err"); return; }
   try { w.document.open(); } catch (e) {} // reused window: start from a blank document
   w.document.write(html);
   w.document.close();
@@ -4960,7 +4960,7 @@ async function printManagerReport() {
   const cats = Object.entries(s.cats || {}).sort((a, b) => b[1] - a[1]).slice(0, 6);
   const catMax = Math.max(1, ...cats.map(([, n]) => n));
   const w = window.open("", "_blank", "width=760,height=920");
-  if (!w) { toast("Allow popups to download the report", "err"); return; }
+  if (!w) { toast("Allow pop-ups to download the report", "err"); return; }
   const kpi = (l, v, sub) => `<div class="kpi"><div class="kl">${l}</div><div class="kv">${v}</div>${sub ? `<div class="ks">${sub}</div>` : ""}</div>`;
   const barRow = (label, n, max) => `<div class="row"><span class="n">${esc(label)}</span><span class="bar"><i style="width:${Math.round((n / max) * 100)}%"></i></span><span class="c">${n}</span></div>`;
   w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${name} — Performance report</title>
@@ -5199,7 +5199,7 @@ async function printZReport() {
   const di = z.dineIn;
   const row = (l, v, b) => `<div class="zr${b ? " b" : ""}"><span>${esc(l)}</span><span>${v}</span></div>`;
   const w = window.open("", "_blank", "width=380,height=720");
-  if (!w) { toast("Allow popups to print the report", "err"); return; }
+  if (!w) { toast("Allow pop-ups to print the report", "err"); return; }
   w.document.write(`<!doctype html><title>Day-close Z report — ${esc(z.date)}</title>
 <style>
   /* Same thermal recipe as printBill: margin:0 (no browser header/footer), no @page
@@ -6554,7 +6554,7 @@ const OP_ACTION_LABELS = {
   restaurant_reactivate: "Reactivated a restaurant", restaurant_suspend: "Suspended a restaurant",
   error_reopened: "Reopened a problem",
   owner_restore: "Restored an owner", owner_suspend: "Suspended an owner",
-  maintenance_on: "Turned Service Mode on", maintenance_off: "Turned Service Mode off",
+  maintenance_on: "Put the menu under maintenance", maintenance_off: "Took the menu out of maintenance",
   // Not from this PR — the printing feature (80a39a5f) added these three codes without labels, so
   // `npm run verify:audit` was already red on main and they were printing as raw keys on the
   // Activity screens. Three lines, same class of gap as the nine this PR fixed.
@@ -6889,7 +6889,7 @@ async function loadSessions(fromPoll) {
       if (!floorOpsInFlight) sels.forEach((t, i) => mergeTableSlice(t, slices[i][0], slices[i][1], slices[i][2]));
       state.boardLoaded = true; // the live floor has arrived at least once → real tiles, not the skeleton
     } catch (e) {
-      toast("Could not load tables: " + errText(e), "err");
+      toast("Couldn't load tables: " + errText(e), "err");
       return;
     }
   }
@@ -7537,7 +7537,7 @@ async function closeFinishedTable(t) {
   } catch (e) {
     // errText(), not e.message: a busy server or a dropped connection must read as itself here
     // (this panel already has that translator) — never "TimeoutError: The operation was aborted".
-    toast("Could not close: " + errText(e), "err");
+    toast("Couldn't close: " + errText(e), "err");
   }
 }
 // setSessAutoApprove: turn on/off "let new joiners in automatically" for a table.
@@ -7567,7 +7567,7 @@ async function memberAction(id, kind) {
 // add to the blocklist (by member id, and phone if we have one).
 async function kickMember(id) {
   if (!(await confirmDialog("Kick this guest from the table? Their access ends now — the table stays open.", "Kick"))) return;
-  try { await api("POST", "/members/" + id + "/remove"); await loadSessions(); toast("Kicked", "ok"); }
+  try { await api("POST", "/members/" + id + "/remove"); await loadSessions(); toast("Guest removed", "ok"); }
   catch (e) { toast("Failed: " + e.message, "err"); }
 }
 // Transfer the table: this guest becomes the HEAD (owns the tab, approves
@@ -7628,12 +7628,12 @@ async function resolveRequest(id, status) {
 // block: add a phone/table to the blocklist (opts says which).
 async function block(opts) {
   try { await api("POST", "/blocklist", opts); await loadSessions(); toast("Blocked", "ok"); }
-  catch (e) { toast("Could not block: " + e.message, "err"); }
+  catch (e) { toast("Couldn't block: " + e.message, "err"); }
 }
 // unblock: remove an entry from the blocklist.
 async function unblock(id) {
   try { await api("DELETE", "/blocklist/" + id); await loadSessions(); toast("Unblocked", "ok"); }
-  catch (e) { toast("Could not unblock: " + e.message, "err"); }
+  catch (e) { toast("Couldn't unblock: " + e.message, "err"); }
 }
 // attendCall: mark a waiter call as handled.
 // OPTIMISTIC: the row leaves the "Needs" list (and the tile emoji) instantly. The "Needs"
@@ -8928,14 +8928,14 @@ function addFloating(t) {
     return true;
   }
   if (state.floatingTables.some((f) => f.table === t)) return true;         // already open
-  if (state.floatingTables.length >= MAX_FLOATING) { toast(`Up to ${MAX_FLOATING} popups at once.`, "err"); return false; }
+  if (state.floatingTables.length >= MAX_FLOATING) { toast(`Up to ${MAX_FLOATING} table windows open at once.`, "err"); return false; }
   const slotted = state.floatingTables.filter((f) => !f.pinned && f.slot != null);
   if (!slotted.length) state.floatCols = 0; // fresh grid → this popup starts big in the middle
   const used = new Set(slotted.map((f) => f.slot));
   let slot = null;
   for (let s = 0; s < state.floatCols; s++) if (!used.has(s)) { slot = s; break; } // re-use a vacated gap first
   if (slot == null) {
-    if (state.floatCols >= MAX_FLOATING) { toast(`Up to ${MAX_FLOATING} popups at once.`, "err"); return false; }
+    if (state.floatCols >= MAX_FLOATING) { toast(`Up to ${MAX_FLOATING} table windows open at once.`, "err"); return false; }
     slot = state.floatCols; state.floatCols += 1; // no gap → grow the grid (existing cards shrink to fit)
   }
   state.floatingTables.push({ table: t, pinned: false, slot, x: null, y: null, w: null, h: null });
@@ -12473,7 +12473,7 @@ function bindTablePanel(root, t, parts, { rerender, close }) {
     try {
       const r = await api("POST", `/tables/${child}/unmerge`, {});
       if (r && r.queued) { toast("Saved — will split when the connection is back", "ok"); return; }
-      toast(`T${child} split from T${parent}` + (r && r.moved ? ` · ${r.moved} ${r.moved === 1 ? "order" : "orders"} returned` : ""), "ok");
+      toast(`${tileFace(child)} split from ${tileFace(parent)}` + (r && r.moved ? ` · ${r.moved} ${r.moved === 1 ? "order" : "orders"} returned` : ""), "ok");
       closeFloatingTable(child);
       await pollTables([String(child), String(parent)]);
     } catch (e) { toast("Couldn't unmerge: " + e.message, "err"); }
@@ -12976,8 +12976,8 @@ async function restartTable(t) {
     await api("POST", "/tables/" + t + "/restart", {});
     release();
     await pollTables([String(t)]); // refresh this tile's summary (cheap, single-table)
-    toast(`T${t} restarted — still open`, "ok");
-  } catch (e) { release(); toast("Could not restart: " + e.message, "err"); await pollTables([String(t)]); }
+    toast(`${tableLabel(t)} restarted — still open`, "ok");
+  } catch (e) { release(); toast("Couldn't restart: " + e.message, "err"); await pollTables([String(t)]); }
   finally { release(); }
 }
 // CLS: free the table (archive orders + close any open session).
@@ -12988,7 +12988,7 @@ async function restartTable(t) {
 // order/call activity) and redraw if the Log tab is showing.
 async function loadUsers() {
   try { state.users = await api("GET", "/users"); if (state.tab === "log") renderEditor(); }
-  catch (e) { toast("Could not load log: " + errText(e), "err"); }
+  catch (e) { toast("Couldn't load log: " + errText(e), "err"); }
 }
 
 // logHtml: build the Log tab — a table listing every guest (name, table, role,
@@ -13154,7 +13154,7 @@ function oplogHtml() {
 // Fetch the operation log (lazily, when that view is shown).
 async function loadOplog() {
   try { state.oplog = await api("GET", "/oplog"); if (state.tab === "log") renderEditor(); }
-  catch (e) { toast("Could not load operation log: " + errText(e), "err"); }
+  catch (e) { toast("Couldn't load the activity log: " + errText(e), "err"); }
 }
 
 // bindLog: wire up the Log tab's buttons (refresh, exit a guest, block, unblock).
@@ -13710,7 +13710,7 @@ async function loadOrders() {
     } catch {}
     if (state.tab === "orders") { renderList(); renderEditor(); } // sidebar counts + cards
   } catch (e) {
-    toast("Could not load orders: " + errText(e), "err");
+    toast("Couldn't load orders: " + errText(e), "err");
   }
 }
 
@@ -16006,5 +16006,5 @@ loadAll()
     }
     $("#conn").textContent = "connection failed";
     $("#conn").className = "conn err";
-    toast("Could not load: " + e.message, "err");
+    toast("Couldn't load: " + e.message, "err");
   });

@@ -71,40 +71,6 @@ export const LANGUAGES: LanguageMeta[] = [
 const CURRENCY_KEY = "lfh_currency";
 const LANGUAGE_KEY = "lfh_language";
 
-// ── ONE LANGUAGE, ONE CURRENCY — THE GUEST SWITCHERS ARE OFF ──────────────────────────────────
-//
-// REJECTED (owner, 2026-08-14) — docs/REJECTED-IDEAS.md → R23. The guest-facing LANGUAGE picker
-// and CURRENCY picker do not appear
-// on the menu, and must not be brought back, offered as an improvement, or re-reported as a missing
-// feature — *"remove the language and the money thing completely from the page … right now we have
-// only two things: it will be in the English, and money will be in the rupees. If I change to
-// someone else, the money will be changed … make sure you write in the code that this language thing
-// doesn't show until and unless I told."*
-//
-// WHY he decided it (the T15 wording sweep, 2026-08-13). Six languages were only ever half-built:
-// exactly FOUR files translated anything (the menu grid, the dish card, the dish page, the 3D
-// viewer). The cart, the table gate, the live order strip, the guest's bill, the waiter-call popup
-// and the rating box were all hardcoded English — so a guest could BROWSE in Hindi and then had to
-// ORDER in English. Offering six languages we support one-third of is worse than offering one we
-// support completely. The currency picker had the same shape of problem the other way round: a guest
-// could read prices in $ or € while the printed bill, the KOT and every report stayed in ₹.
-//
-// HOW IT IS ENFORCED — in CODE, not in a setting, because a setting is not enough:
-// `lib/settingsClone.ts` copies restaurant #1's `menu_languages` to every NEW restaurant
-// (docs/REJECTED-IDEAS.md R8 — deliberate), so a data-only switch-off would come back by itself the
-// next time a restaurant is created. This flag is read by BOTH getters below, by `useLanguage()` in
-// lib/i18n.ts, by the boot script in app/layout.tsx, and by the two `show…` gates in
-// components/Header.tsx — so the stored choice is ignored everywhere at once and there is no screen
-// left that can drift.
-//
-// TO TURN IT BACK ON when he says so: set this to `true`. Nothing else. The dictionary
-// (lib/i18n.ts — 6 languages × 66 keys), the CURRENCIES/LANGUAGES tables, the per-restaurant
-// Access → Menu → Format → Languages/Currencies settings and the pickers themselves are all still
-// here and still wired. Deleting any of that is NOT part of this decision — and before it goes back
-// on, finish translating the ordering flow (T15 finding F1) and fix Arabic letter-joining in the
-// animated hero (T15 finding F2), or the same half-built promise returns with it.
-export const GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS = false;
-
 // The default currency is RUPEES (₹) — everything shows in INR unless a guest
 // explicitly picks another from the currency switcher. setCurrency only ever
 // writes on an explicit pick, so a guest who never chose (new OR existing) gets
@@ -115,10 +81,6 @@ export const DEFAULT_CURRENCY: CurrencyMeta = CURRENCIES.find((c) => c.code === 
 // localStorage only exists in the browser, so if it's missing we just return
 // the default so nothing crashes on the server.
 export const getCurrency = (): CurrencyMeta => {
-  // Switchers off (owner, 2026-08-14) → ₹ for everyone, whatever this device saved earlier.
-  // Read here rather than only hiding the picker: a guest who chose $ before today would
-  // otherwise keep seeing $ prices on a bill that prints in ₹.
-  if (!GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS) return DEFAULT_CURRENCY;
   if (typeof localStorage === "undefined") return DEFAULT_CURRENCY;
   const stored = localStorage.getItem(CURRENCY_KEY);
   if (!stored) return DEFAULT_CURRENCY;
@@ -139,10 +101,6 @@ export const setCurrency = (code: CurrencyCode) => {
 
 // Same idea as getCurrency, but for the chosen language (defaults to English).
 export const getLanguage = (): LanguageMeta => {
-  // Switchers off (owner, 2026-08-14) → English for everyone. Same reasoning as getCurrency:
-  // a guest who picked हिन्दी last week must not be left on a half-translated menu with no
-  // picker left to change it back with. LANGUAGES[0] is `en`.
-  if (!GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS) return LANGUAGES[0];
   if (typeof localStorage === "undefined") return LANGUAGES[0];
   const code = (localStorage.getItem(LANGUAGE_KEY) || "en") as LanguageCode;
   return LANGUAGES.find((l) => l.code === code) || LANGUAGES[0];

@@ -3,7 +3,7 @@
 // two small React "hooks" that tell a component which language is currently active.
 
 import { useState, useEffect } from "react";
-import { type LanguageCode, GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS } from "./format";
+import { type LanguageCode } from "./format";
 
 // The list of every UI phrase the app needs to translate. Think of it as the
 // "keys" in our dictionary — each language below must fill in all of these.
@@ -110,7 +110,7 @@ const translations: Record<LanguageCode, Translations> = {
     noMatchSub: "Try turning a filter off.",
     noSearchResults: "No dishes found for \u201c{q}\u201d",
     noSearchResultsSub: "Try a different word, or check your spelling.",
-    greeting: "BONSOIR",
+    greeting: "BONJOUR",
     heroTitle: "All-Day Café & Bakery",
     categories: "CATEGORIES",
     slide: "Slide",
@@ -119,9 +119,9 @@ const translations: Record<LanguageCode, Translations> = {
     filterVeg: "🌿 Veg",
     filterNonVeg: "🍖 Non-Veg",
     filterChef: "⭐ Chef's Special",
-    filterFav: "❤️ Favorites",
+    filterFav: "❤️ Favourites",
     sortTopRated: "⭐ Top Rated",
-    sortLowPrice: "💲 Low Price",
+    sortLowPrice: "↓ Low Price",
     catAll: "All",
     catBurgers: "Burgers",
     catPizza: "Pizza",
@@ -179,7 +179,7 @@ const translations: Record<LanguageCode, Translations> = {
     noMatchSub: "Schalten Sie einen Filter aus.",
     noSearchResults: "Keine Gerichte gefunden f\u00fcr \u201e{q}\u201c",
     noSearchResultsSub: "Versuchen Sie ein anderes Wort oder pr\u00fcfen Sie die Schreibweise.",
-    greeting: "GUTEN ABEND",
+    greeting: "HERZLICH WILLKOMMEN",
     heroTitle: "Ganztags Café & Bäckerei",
     categories: "KATEGORIEN",
     slide: "Wischen",
@@ -190,7 +190,7 @@ const translations: Record<LanguageCode, Translations> = {
     filterChef: "⭐ Chef-Empfehlung",
     filterFav: "❤️ Favoriten",
     sortTopRated: "⭐ Top bewertet",
-    sortLowPrice: "💲 Günstigster Preis",
+    sortLowPrice: "↓ Günstigster Preis",
     catAll: "Alle",
     catBurgers: "Burger",
     catPizza: "Pizza",
@@ -248,7 +248,7 @@ const translations: Record<LanguageCode, Translations> = {
     noMatchSub: "Essayez de d\u00e9sactiver un filtre.",
     noSearchResults: "Aucun plat trouv\u00e9 pour \u00ab\u202f{q}\u202f\u00bb",
     noSearchResultsSub: "Essayez un autre mot, ou v\u00e9rifiez l\u2019orthographe.",
-    greeting: "BONSOIR",
+    greeting: "BONJOUR",
     heroTitle: "Café & Boulangerie Toute la Journée",
     categories: "CATÉGORIES",
     slide: "Glisser",
@@ -259,7 +259,7 @@ const translations: Record<LanguageCode, Translations> = {
     filterChef: "⭐ Spécialité du chef",
     filterFav: "❤️ Favoris",
     sortTopRated: "⭐ Les mieux notés",
-    sortLowPrice: "💲 Prix bas",
+    sortLowPrice: "↓ Prix bas",
     catAll: "Tout",
     catBurgers: "Burgers",
     catPizza: "Pizza",
@@ -317,7 +317,7 @@ const translations: Record<LanguageCode, Translations> = {
     noMatchSub: "\u062c\u0631\u0651\u0628 \u0625\u064a\u0642\u0627\u0641 \u0623\u062d\u062f \u0627\u0644\u0645\u0631\u0634\u062d\u0627\u062a.",
     noSearchResults: "\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u0639\u062b\u0648\u0631 \u0639\u0644\u0649 \u0623\u0637\u0628\u0627\u0642 \u0644\u0640 \u201c{q}\u201d",
     noSearchResultsSub: "\u062c\u0631\u0651\u0628 \u0643\u0644\u0645\u0629 \u0623\u062e\u0631\u0649\u060c \u0623\u0648 \u062a\u062d\u0642\u0642 \u0645\u0646 \u0627\u0644\u0625\u0645\u0644\u0627\u0621.",
-    greeting: "مساء الخير",
+    greeting: "أهلاً وسهلاً",
     heroTitle: "مقهى ومخبز طوال اليوم",
     categories: "الفئات",
     slide: "اسحب",
@@ -328,7 +328,7 @@ const translations: Record<LanguageCode, Translations> = {
     filterChef: "⭐ اختيار الشيف",
     filterFav: "❤️ المفضلة",
     sortTopRated: "⭐ الأعلى تقييماً",
-    sortLowPrice: "💲 السعر الأقل",
+    sortLowPrice: "↓ السعر الأقل",
     catAll: "الكل",
     catBurgers: "برجر",
     catPizza: "بيتزا",
@@ -386,7 +386,7 @@ const translations: Record<LanguageCode, Translations> = {
     noMatchSub: "\u0915\u094b\u0908 \u090f\u0915 \u092b\u093c\u093f\u0932\u094d\u091f\u0930 \u092c\u0902\u0926 \u0915\u0930\u0915\u0947 \u0926\u0947\u0916\u0947\u0902\u0964",
     noSearchResults: "\u201c{q}\u201d \u0915\u0947 \u0932\u093f\u090f \u0915\u094b\u0908 \u0935\u094d\u092f\u0902\u091c\u0928 \u0928\u0939\u0940\u0902 \u092e\u093f\u0932\u093e",
     noSearchResultsSub: "\u0915\u094b\u0908 \u0926\u0942\u0938\u0930\u093e \u0936\u092c\u094d\u0926 \u0906\u091c\u092e\u093e\u090f\u0901, \u092f\u093e \u0935\u0930\u094d\u0924\u0928\u0940 \u091c\u093e\u0901\u091a\u0947\u0902\u0964",
-    greeting: "शुभ संध्या",
+    greeting: "नमस्ते",
     heroTitle: "ऑल-डे कैफ़े और बेकरी",
     categories: "श्रेणियां",
     slide: "स्लाइड करें",
@@ -397,7 +397,7 @@ const translations: Record<LanguageCode, Translations> = {
     filterChef: "⭐ शेफ स्पेशल",
     filterFav: "❤️ पसंदीदा",
     sortTopRated: "⭐ टॉप रेटेड",
-    sortLowPrice: "💲 कम कीमत",
+    sortLowPrice: "↓ कम कीमत",
     catAll: "सभी",
     catBurgers: "बर्गर",
     catPizza: "पिज्जा",
@@ -466,7 +466,7 @@ const translations: Record<LanguageCode, Translations> = {
     filterChef: "⭐ 셰프 추천",
     filterFav: "❤️ 즐겨찾기",
     sortTopRated: "⭐ 최고 평점",
-    sortLowPrice: "💲 낮은 가격",
+    sortLowPrice: "↓ 낮은 가격",
     catAll: "전체",
     catBurgers: "버거",
     catPizza: "피자",
@@ -525,14 +525,6 @@ export const useLanguage = (): LanguageCode => {
 
   // useEffect runs after the component appears on screen (only in the browser).
   useEffect(() => {
-    // REJECTED (owner, 2026-08-14) — the guest language picker is OFF, so the menu is English
-    // for everyone and a language saved on this device before today is ignored. This hook reads
-    // localStorage DIRECTLY (it does not go through getLanguage()), so the switch has to be
-    // honoured here too or a returning Hindi guest would still get Hindi with no picker to change
-    // it back with. Full reasoning + how to turn it back on: lib/format.ts →
-    // GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS, and docs/REJECTED-IDEAS.md → R23.
-    // Never re-add the picker without asking him.
-    if (!GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS) return;
     // Read the saved language from localStorage (key "lfh_language").
     setLang((localStorage.getItem("lfh_language") as LanguageCode) || "en");
     // This little function re-reads the language whenever it changes elsewhere.
@@ -548,6 +540,32 @@ export const useLanguage = (): LanguageCode => {
   return lang;
 };
 
+// ── DON'T OFFER TO FINISH THE TRANSLATION. IT IS NOT ON THE LIST. ─────────────────────────────
+//
+// REJECTED (owner, 2026-08-14) — docs/REJECTED-IDEAS.md → R23. The language picker and the
+// currency picker STAY on the guest menu exactly as they are; what is rejected is *raising this as
+// work*: *"you don't have to remove option … what I wanted is just don't suggest that improvement
+// right now."*
+//
+// So do not put either of these in front of him again as a problem or an improvement:
+//
+//  1. **"The ordering flow is still English."** Measured by the T15 sweep, 2026-08-13, and true:
+//     only FOUR files call useTranslation() — components/MenuView.tsx, components/FoodCard.tsx,
+//     app/item/[slug]/ItemClient.tsx and app/view/[folder]/ViewerClient.tsx. The cart, the table
+//     gate, the live order strip, the guest's bill, the waiter-call popup and the rating box are
+//     hardcoded English, so a guest can BROWSE in हिन्दी and then has to ORDER in English. He knows.
+//     It is parked, not missed. (R15 already said the same about three individual labels.)
+//  2. **Arabic renders as disconnected letters** in the animated hero and the intro wordmark —
+//     each grapheme sits in its own `display:inline-block` span (app/globals.css → the
+//     `.hero-title-wrap … span` rule), and browsers cannot join Arabic across element boundaries,
+//     so every letter falls back to its isolated form. Measured, with a screenshot, same sweep.
+//     Note the claim in lib/brandText.ts's splitGraphemes header — *"Arabic benefits too — its
+//     letters keep their joining forms"* — is WRONG; grapheme splitting fixes Devanagari but cannot
+//     fix Arabic. Left here so nobody re-discovers it and files it as new.
+//
+// If he ever asks for languages properly, those two are the work — in that order. Until he does,
+// they are recorded and closed. Do not re-report them, and do not "helpfully" start on them.
+//
 // useTranslation is the easy one components actually call: it gives back the
 // whole phrase-set for the current language (falling back to English if missing).
 export const useTranslation = (): Translations => {

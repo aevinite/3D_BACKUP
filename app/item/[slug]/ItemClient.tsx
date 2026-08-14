@@ -617,7 +617,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       {features.favorites && showFavHint && (
         <div className="fav-hint" role="status">
           <span className="fav-hint-tip" aria-hidden="true"></span>
-          Tap the <i className="fas fa-heart" aria-hidden="true"></i> to save this to your Favorites
+          Tap the <i className="fas fa-heart" aria-hidden="true"></i> to save this to your Favourites
         </div>
       )}
 

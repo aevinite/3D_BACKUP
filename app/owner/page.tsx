@@ -20,7 +20,7 @@
 //   · Report ▾ (top right): Print / CSV / Excel of what's currently on screen.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { inr, useActiveAutoRefresh } from "@/components/admin/shared";
+import { inr, useActiveAutoRefresh, actLabel, panelLabel } from "@/components/admin/shared";
 import { asSuffix } from "@/lib/ownerPin";
 import {
   AreaTrend, TimeBar, LeaderBar, WhoEarnsMore, CategoryDonut, PaymentDonut, canonPayMethod,
@@ -1600,9 +1600,16 @@ export default function OwnerDashboard() {
                 : (
                   <div className="ow2-acts">
                     {acts.map((a) => (
+                      // P2 (T15, 2026-08-14): this card printed the RAW database values — `order_place`,
+                      // `bill_paid`, `invoice_void`, and a chip reading `editor` or `db` — on the one owner
+                      // screen that gets opened every day, while /owner/activity one click away printed
+                      // "Placed order", "Marked paid", "Manager panel". Both translators were already
+                      // exported from the file this page imports `inr` from. `npm run verify:audit` passed
+                      // throughout because it checks that every action code HAS a label, not that a screen
+                      // USES one — so never render `a.action` or `a.panel` bare.
                       <div key={a.id} className="ow2-act">
-                        <span className={`pn pn-${a.panel}`}>{a.panel}</span>
-                        <span className="tx">{a.action}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
+                        <span className={`pn pn-${a.panel}`}>{panelLabel(a.panel)}</span>
+                        <span className="tx">{actLabel(a.action)}{a.table_number ? ` · table ${a.table_number}` : ""}</span>
                         <span className="who">{a.actor || "—"}</span>
                         <span className="when">{timeAgo(a.created_at)}</span>
                       </div>

@@ -454,7 +454,7 @@ function platTicketHtml(p) {
 // Advance a platform order (accept/ready/handed_over), then refresh.
 function platAct(id, status) {
   api("POST", `/platform/${id}/status`, { status })
-    .then((r) => { if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; } freshLoad(); })
+    .then((r) => { if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; } freshLoad(); })
     .catch((e) => { toast("Failed: " + e.message); freshLoad(); });
 }
 
@@ -669,7 +669,7 @@ function markItemReady(id, btn) {
     // Saved on this device rather than sent — say so, and skip the reconcile (which would refetch
     // the board and paint the dish back as still cooking, exactly the "did my tap work?" moment
     // this panel had no answer for).
-    if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; }
+    if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; }
     scheduleReadyReconcile();
     // A ✓ is easy to mis-tap in a rush — give the cook a few seconds to send the
     // dish back to where it was (owner undo bar, 2026-07-22).
@@ -708,7 +708,7 @@ async function undoReady(snap, orderId) {
     // round trip either way, so the fallback costs nothing where it is used.
     if (orderId != null && snap.length > 1) {
       const r = await api("POST", `/orders/${orderId}/unready`, { dishes: snap.map((s) => ({ id: s.id, prev: s.prev })) });
-      if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; }
+      if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; }
     } else {
       for (const s of snap) await api("POST", `/items/${s.id}/status`, { status: s.prev });
     }
@@ -767,7 +767,7 @@ function markOrderReady(orderId) {
     }
   }
   api("POST", `/orders/${orderId}/ready`).then((r) => {
-    if (r && r.queued) { toast("Saved ✓ — syncing automatically."); return; } // saved on this device, not sent
+    if (r && r.queued) { toast("Saved on this device ✓ — it will send by itself."); return; } // saved on this device, not sent
     scheduleReadyReconcile();
     // Offer a takeback only when we captured per-dish rows to revert (session
     // orders); legacy JSON-item orders have no per-dish id, so we skip the bar there.
@@ -854,7 +854,7 @@ function renderDishes() {
       // SAVED, NOT SENT. This panel was the only one that never said so: the optimistic tile
       // flipped, nothing reached the server, and a cook could close the tab believing the board
       // was updated. (The offline bar counts it, but the tap itself said nothing.)
-      if (r && r.queued) toast("Saved ✓ — syncing automatically.");
+      if (r && r.queued) toast("Saved on this device ✓ — it will send by itself.");
       const dish = state.dishes.find((d) => d.id === id);
       // No confirm — kitchens move fast — but always an UNDO escape hatch, now the shared
       // ring-card bar (owner, 2026-07-22). The UNDO targets the dish by ID (re-querying the
@@ -1591,7 +1591,28 @@ applyView(); // honour the saved layout (sets which <main> shows) before the fir
 // A failed first load that's simply "no internet" stays quiet — the offline bar already
 // says so, and shouting "can't reach the database" at a cook mid-service is worse than
 // useless. Any OTHER failure still toasts, because that one needs looking at.
-load().catch((e) => { if (!(window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))) toast("Can't reach the database: " + e.message); });
+//
+// …AND A BUSY DATABASE IS NOT A FAULT EITHER (T15 finding P1, 2026-08-14). The guard above only
+// recognised "no internet", so a saturated shared instance — the 2026-08-03 morning, 56 rows before
+// lunch, every endpoint measured at 65-1000 ms afterwards — put this in front of a cook:
+//
+//     Can't reach the database: TimeoutError: The operation was aborted due to timeout
+//
+// which is the exact red toast lib/dbRefusal.ts's BUSY_MESSAGE was written to abolish, in the exact
+// words the comment above calls worse than useless. `isBusyErr` already existed in
+// public/panels/offline.js (three lines below `isOfflineErr`) and simply wasn't called here.
+//
+// DELIBERATELY NOT THE R21 TREATMENT. docs/REJECTED-IDEAS.md R21 turned down giving this panel the
+// manager/tablet `errText()` helper — *"kitchen panel is only use for kot print"* — and that still
+// stands: no shared helper is imported, no clash wording is added, and every other toast on this
+// screen keeps its plain `Failed: <message>`. This is one string on the first-load path, using a
+// classifier the panel already loads. Do not grow it into errText().
+load().catch((e) => {
+  if (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e)) return;                  // the offline bar says it
+  if (window.LFH_OFF && window.LFH_OFF.isBusyErr && window.LFH_OFF.isBusyErr(e)) // up, but not answering
+    return toast("The system is very busy right now — the board will fill in by itself in a moment.");
+  toast("Couldn't load the board — try again. " + e.message);
+});
 // Realtime: refetch only when an order/dish actually changes (instant), instead of
 // polling every second. A slow 60s timer is the backup if the WebSocket drops.
 // If realtime didn't load for any reason, fall back to a gentle 2s poll.

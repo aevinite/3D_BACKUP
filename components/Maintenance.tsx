@@ -44,9 +44,17 @@ export default function Maintenance({ logoText, logoUrl, isDefault = true }: { l
       <div className="maint-badge">🔧 Under Maintenance</div>
       {/* The big friendly headline */}
       <h1 className="maint-title">We&apos;ll be right back</h1>
-      {/* The reassuring sentence underneath */}
+      {/* The reassuring sentence underneath.
+          P5 (T15, 2026-08-14): this used to end "Please check back in a few minutes." Nothing turns
+          this screen off on a timer — it stays until a person flips Menu maintenance back off — so a
+          restaurant that left it on overnight told every diner, all night, to come back in a few
+          minutes. The admin's own confirm text was already honest about that ("Guests can't browse or
+          order until you turn it back on"); the guest's copy was not. Say the true thing: we're not
+          taking orders right now, and ask them to check with the staff, who DO know when. Do not put
+          a time back in unless the switch gains one. */}
       <p className="maint-sub">
-        Our kitchen is getting a little tune-up. Please check back in a few minutes.
+        We&apos;re not taking orders right now. Please ask a member of staff — they can tell you when
+        the menu is back.
       </p>
       {/* Three bouncing dots, the classic "still working..." animation */}
       <div className="maint-dots" aria-hidden="true">

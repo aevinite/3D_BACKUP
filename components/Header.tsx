@@ -13,7 +13,6 @@ import { useRestaurantId } from "@/lib/restaurant-context";
 import {
   CURRENCIES,
   LANGUAGES,
-  GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS,
   getCurrency,
   getLanguage,
   setCurrency,
@@ -151,18 +150,8 @@ export default function Header({ logoText }: { logoText?: string }) {
   const currencyOptions = CURRENCIES.filter((c) => (menuCurrs ? menuCurrs.includes(c.code) : true));
   const languageOptions = LANGUAGES.filter((l) => (menuLangs ? menuLangs.includes(l.code) : true));
   // The switcher exists only when there is a real choice to make.
-  //
-  // REJECTED (owner, 2026-08-14) — docs/REJECTED-IDEAS.md → R23. The FIRST condition is the one
-  // that matters: the guest
-  // language and currency pickers do not appear on the menu at all. English, rupees, no buttons.
-  // Do not remove `GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS &&` to "let a restaurant that offers two
-  // languages show its picker" — that is exactly the behaviour he switched off, and a data setting
-  // is not enough to hold it (lib/settingsClone.ts copies #1's three languages to every new
-  // restaurant, docs/REJECTED-IDEAS.md R8). Why, and how to turn it back on: lib/format.ts →
-  // GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS. The per-restaurant Access → Menu → Format settings and
-  // both pickers stay wired underneath, so flipping that one flag brings them straight back.
-  const showCurrency = GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS && features.currency && !!menuCurrs && currencyOptions.length > 1;
-  const showLanguage = GUEST_LANGUAGE_AND_CURRENCY_SWITCHERS && features.languages && !!menuLangs && languageOptions.length > 1;
+  const showCurrency = features.currency && !!menuCurrs && currencyOptions.length > 1;
+  const showLanguage = features.languages && !!menuLangs && languageOptions.length > 1;
 
   // toggleTheme(): flip between dark and light when the toggle is tapped.
   const toggleTheme = () => {

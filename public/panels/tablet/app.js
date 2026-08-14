@@ -161,7 +161,12 @@ const isQueued = (r) => !!(r && r.queued === true);
 // automatically" is only true for one of them. The queue knows which (`why`, returned by
 // LFH_OUTBOX.send), so say it: a waiter who hears "saved" about something the kitchen has not got
 // may never chase it, and the busy case is exactly when that matters.
-const OFFLINE_SAVED_MSG = "Saved ✓ — syncing automatically.";
+// P3 (T15, 2026-08-14): was "Saved ✓ — syncing automatically." — "syncing" is the one code word
+// in the offline family, and this is the most-fired message in the product. The rest of that
+// family already speaks plainly ("Saved on this device — not sent yet", "waiting for internet"),
+// so this now matches them. A waiter needs to know the work is SAFE and that they need do
+// nothing — those are the two facts; "syncing" carried neither.
+const OFFLINE_SAVED_MSG = "Saved on this device ✓ — it will send by itself.";
 const savedMsg = (r) => {
   const why = r && r.why;
   if (why === "busy") return "Saved ✓ — the system is busy, so the kitchen hasn't got it yet.";
@@ -1661,7 +1666,7 @@ function renderPanel() {
     // there was no bug; but the next person to add `await load()` to this branch would have awaited
     // a string (or hit a TDZ error above the declaration) and the failure would have been silent.
     const loadHtml = dishN
-      ? `<div class="ord"><div class="ordh"><span class="left"><span class="skel skel-kot"></span><span class="when" style="display:flex;align-items:center;gap:7px"><span class="tsl-dot"></span> syncing…</span></span></div>${[52, 38, 61, 45].slice(0, Math.min(4, dishN)).map(skelRow).join("")}</div>`
+      ? `<div class="ord"><div class="ordh"><span class="left"><span class="skel skel-kot"></span><span class="when" style="display:flex;align-items:center;gap:7px"><span class="tsl-dot"></span> sending…</span></span></div>${[52, 38, 61, 45].slice(0, Math.min(4, dishN)).map(skelRow).join("")}</div>`
       : `<div class="muted" style="display:flex;align-items:center;gap:8px;padding:6px 0"><span class="tsl-dot"></span> Loading order details…</div>`;
     const payCls = a.unpaid ? "unpaid" : a.paid ? "paid" : "";
     const billBox = (a.due > 0 || dishN) ? `<div class="foot"><div class="billbox ${payCls}"><span class="bn">bill</span>${a.due > 0 ? `<span class="due">${inr(a.due)} due</span>` : ""}<span class="pay">${a.unpaid ? "● UNPAID" : a.paid ? "paid ✓" : "● new"}</span></div></div>` : "";
@@ -1703,7 +1708,7 @@ function renderPanel() {
 
   const reqRows = reqs.map((r) => `<div class="row"><span>📨 ${r.type === "open" ? "Asked to open" : "Asked for access"}${r.name ? ` · ${esc(r.name)}` : ""}</span><span class="reqbtns"><button class="btn small primary" data-req-approve="${esc(r.id)}">Approve</button><button class="btn small" data-req-deny="${esc(r.id)}">Deny</button></span></div>`).join("");
   const joinRows = joiners.map((m) => `<div class="row"><span>🙋 ${esc(m.name || "Guest")} wants to join</span><button class="btn small primary" data-approve="${esc(m.id)}">Approve</button></div>`).join("");
-  const partyRows = members.map((m) => `<div class="row"><span>${m.role === "owner" ? "👑" : "•"} ${esc(m.name || "Guest")}${m.approved ? "" : ` <span class="muted">(pending)</span>`}</span>${m.role === "owner" ? `<span class="muted small">head</span>` : `<span class="reqbtns"><button class="btn small" data-makehead="${esc(m.id)}">Make head</button><button class="btn small" data-kick="${esc(m.id)}">Kick</button><button class="btn small danger" data-ban="${esc(m.id)}">Ban</button></span>`}</div>`).join("");
+  const partyRows = members.map((m) => `<div class="row"><span>${m.role === "owner" ? "👑" : "•"} ${esc(m.name || "Guest")}${m.approved ? "" : ` <span class="muted">(waiting to join)</span>`}</span>${m.role === "owner" ? `<span class="muted small">head</span>` : `<span class="reqbtns"><button class="btn small" data-makehead="${esc(m.id)}">Make head</button><button class="btn small" data-kick="${esc(m.id)}">Remove</button><button class="btn small danger" data-ban="${esc(m.id)}">Ban</button></span>`}</div>`).join("");
   // Each order is a card: KOT chip, time, "via app" badge for guest/phone orders,
   // every dish with a tappable status pill, and an Accept button when it's new.
   // One dish row: qty · name · price · status badge · Serve button, with per-item
@@ -1919,9 +1924,11 @@ function renderPanel() {
   }));
   document.querySelectorAll("[data-approve]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.approve}/approve`))));
   document.querySelectorAll("[data-makehead]").forEach((b) => (b.onclick = () => act(() => api("POST", `/members/${b.dataset.makehead}/make-head`))));
-  // Kick a guest off the table (table stays open). Confirm first — it ends access.
+  // Remove a guest from the table (the table stays open). Confirm first — it ends their access.
+  // The button said "Kick" until 2026-08-14 (T15 P4): gaming slang for the one act that touches a
+  // paying customer, and the audit log already called it "Removed guest". One word now.
   document.querySelectorAll("[data-kick]").forEach((b) => (b.onclick = async () => {
-    if (await confirmDialog("Kick this guest from the table? Their access ends now — the table stays open.", "Kick"))
+    if (await confirmDialog("Remove this guest from the table? Their access ends now — the table stays open.", "Remove"))
       act(() => api("POST", `/members/${b.dataset.kick}/remove`));
   }));
   // Ban a guest: kicked now AND blocklisted so they can't rejoin. Destructive — confirm.
@@ -2522,7 +2529,7 @@ function renderMergePicker(t, s) {
     dropLayer();
     actGated("POST", `/sessions/${s.id}/merge`, { to }, {
       message: "Enter a manager PIN to merge these tables.",
-      onSuccess: () => { state.table = String(to); toast(`Merged into table ${to} — one bill`); renderFloor(); renderPanel(); },
+      onSuccess: () => { state.table = String(to); toast(`Merged into ${tname(to) || "T" + to} — one bill`); renderFloor(); renderPanel(); },
     });
   }));
 }
@@ -2750,7 +2757,7 @@ function optimisticPay(t, method, note) {
 async function markBillUnpaid(t) {
   if (!(await confirmDialog("Reopen this bill as UNPAID? This reverses the recorded payment — a refund or correction.", "Mark unpaid"))) return;
   const reason = await reasonPrompt("Why are you reopening this paid bill?", "e.g. refund, wrong table, entered by mistake");
-  if (!reason) { toast("Cancelled — a reason is required.", false); return; }
+  if (!reason) { toast("Not reopened — a reason is required.", false); return; }
   actGated("POST", `/tables/${t}/unpay`, { reason }, { message: "Enter a manager PIN to mark this bill unpaid.", toast: "Bill reopened — marked unpaid" });
 }
 function payBill(t, method, note) {
@@ -4548,7 +4555,20 @@ try {
 state._menuStale = true;
 // "No internet" is explained by the offline bar — don't also alarm the waiter with a
 // database error. Anything else still toasts.
-load().catch((e) => { if (!(window.LFH_OFF && window.LFH_OFF.isOfflineErr(e))) toast("Can't reach the database: " + e.message, false); });
+//
+// A BUSY DATABASE IS THE THIRD CASE, and it used to fall through to the second (T15 finding P1,
+// 2026-08-14). The guard only knew "no internet", so a saturated shared instance showed a waiter
+// "Can't reach the database: TimeoutError: The operation was aborted due to timeout" — the raw
+// sentence lib/dbRefusal.ts's BUSY_MESSAGE exists to replace, and the word "database" in front of
+// someone carrying plates. `isBusyErr` was already sitting next to `isOfflineErr` in
+// public/panels/offline.js, unused here. Wording matches the manager panel's errText(), so all
+// three panels say the same thing about the same state.
+load().catch((e) => {
+  if (window.LFH_OFF && window.LFH_OFF.isOfflineErr(e)) return;                  // the offline bar says it
+  if (window.LFH_OFF && window.LFH_OFF.isBusyErr && window.LFH_OFF.isBusyErr(e)) // up, but not answering
+    return toast("The system is very busy right now — this will come back by itself in a moment.", false);
+  toast("Couldn't load the floor — try again. " + errText(e), false);
+});
 
 // ── HIERARCHY X-RAY ribbon (Phase 3) ─────────────────────────────────────────
 // Marks the admin act-as view and counts the billing controls that are off for
@@ -5193,11 +5213,11 @@ function renderBanquetBody() {
         r = await api("POST", "/banquet/place", { table: t, lines });
       } catch (e) {
         if (!wantsPin(e)) throw e;
-        let pin = await pinPrompt("Banquet billing needs a manager PIN.");
+        let pin = await pinPrompt("Enter a manager PIN to open banquet billing.");
         while (pin) {
           try { r = await api("POST", "/banquet/place", { table: t, lines, managerPin: pin }); break; }
           catch (e2) {
-            if (wantsPin(e2)) { pin = await pinPrompt("Banquet billing needs a manager PIN.", "That PIN didn't match — try again."); continue; }
+            if (wantsPin(e2)) { pin = await pinPrompt("Enter a manager PIN to open banquet billing.", "That PIN didn't match — try again."); continue; }
             throw e2;
           }
         }
