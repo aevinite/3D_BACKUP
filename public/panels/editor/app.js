@@ -1333,11 +1333,24 @@ function formItems(it) {
     </div>
   </div>
 
+  ${/* THE PHOTO CAN BE UPLOADED (T19 sweep, 2026-08-14). This card used to be the URL box
+        alone, so the only way to give a dish a picture was to host that picture somewhere
+        yourself and paste its address — not something a beginner owner can do, and it meant
+        the guest menu loaded photos from an outside site (the arrangement undone once already
+        for restaurant #1's 41 dishes). The box STAYS for anyone who already has an address;
+        the button is simply the way that doesn't require one. Same permission as the rest of
+        the card (data-menu-part="edit_dish"), so a restricted manager loses both together. */""}
   <div class="card"><h3 data-menu-part="edit_dish">Image</h3>
     <div class="grid cols-2" style="align-items:start">
-      ${tf("Image URL", "image", it.image, { ph: "https://…" })}
+      ${tf("Image URL", "image", it.image, { ph: "https://… — or use the button below" })}
       <img id="imgPreview" class="preview-img" src="${esc(it.image || "")}" alt="" style="opacity:${it.image ? 1 : 0.2}"/>
     </div>
+    <div data-menu-part="edit_dish" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px">
+      <button type="button" class="btn small" data-action="pickDishPhoto" id="dishPhotoBtn">📷 Upload a photo</button>
+      ${it.image ? `<button type="button" class="btn small" data-action="clearDishPhoto">Remove photo</button>` : ""}
+      <span class="hint" id="dishPhotoNote">PNG, JPG or WEBP · up to 4 MB. It uploads straight away; the dish itself still needs Save.</span>
+    </div>
+    <input type="file" id="dishPhotoFile" accept="image/png,image/jpeg,image/webp" style="display:none" />
   </div>
 
   ${menuPartVisible("edit_3d") ? `<div class="card" data-menu-part="edit_3d"><h3>3D · 4D</h3>
@@ -5901,6 +5914,48 @@ function bindEditor() {
     node.addEventListener("click", () => handleAction(node.dataset.action, node.dataset.arg, node));
   });
 
+  // ── A dish photo, uploaded (T19 sweep, 2026-08-14) ──────────────────────────────────────
+  // Deliberately a PLAIN fetch, not api(): every write in this panel goes through the offline
+  // outbox, and the outbox stores its queue as JSON — a File cannot be put in it, so queuing an
+  // upload would either throw or silently save an empty body. A photo also isn't the kind of
+  // work that should wait for signal: the person is standing at a file picker watching for the
+  // picture to appear. So with no connection this REFUSES, visibly, and says to try when the
+  // internet is back — it never vanishes and it never pretends to have saved (the panel's
+  // "a tap must never vanish in silence" rule). The dish row itself is untouched here; the URL
+  // lands in the Image field and the ordinary Save writes it, so there is still exactly one save
+  // path, one clash check and one menu-cache bust.
+  const photoInput = document.getElementById("dishPhotoFile");
+  if (photoInput) photoInput.onchange = async () => {
+    const file = photoInput.files && photoInput.files[0];
+    photoInput.value = "";                       // so picking the SAME file twice still fires
+    if (!file) return;
+    const btn = document.getElementById("dishPhotoBtn");
+    const note = document.getElementById("dishPhotoNote");
+    const say = (t) => { if (note) note.textContent = t; };
+    if (btn) { btn.disabled = true; btn.textContent = "Uploading…"; }
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      // What this photo replaces, so the route can drop the old file instead of leaving one
+      // behind for every re-photograph. It only ever acts on an address in our own bucket.
+      if (state.sel && state.sel.image) fd.append("replaces", String(state.sel.image));
+      const res = await fetch("/api/editor" + ridQ("/dish-photo"), { method: "POST", body: fd });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.url) throw new Error(j.error || "Couldn't upload that photo.");
+      setPath(state.sel, "image", j.url);
+      renderEditor();                            // redraws the card (preview + "Remove photo")
+      toast("Photo uploaded — press Save to put it on the menu.", "ok");
+    } catch (e) {
+      // No reply at all = no internet. Say that, rather than the browser's own wording.
+      const offline = !navigator.onLine || (e && e.name === "TypeError");
+      if (btn) { btn.disabled = false; btn.textContent = "📷 Upload a photo"; }
+      say(offline
+        ? "No internet, so the photo couldn't be uploaded — try again once you're back online."
+        : (e && e.message) || "Couldn't upload that photo.");
+      toast(offline ? "No internet — the photo wasn't uploaded." : ((e && e.message) || "Couldn't upload that photo."), "err");
+    }
+  };
+
   // Live filter for the "dishes in this tag" list (keeps focus, no re-render).
   const ms = $("#membSearch");
   if (ms) ms.oninput = () => {
@@ -6061,6 +6116,18 @@ function bindEditor() {
 function handleAction(action, arg, node) {
   const it = state.sel;
   if (action === "toggleMember") { toggleTagMembership(it.slug, arg, node); return; }
+  // A dish photo (T19 sweep, 2026-08-14). The button opens the file picker; the picker's
+  // change handler (bindEditor) does the upload. Both return here rather than falling through
+  // to the re-render at the bottom — nothing in state.sel has changed yet.
+  if (action === "pickDishPhoto") { const f = document.getElementById("dishPhotoFile"); if (f) f.click(); return; }
+  if (action === "clearDishPhoto") {
+    // Clears the LINK on this dish, not the stored file: the dish isn't saved yet, so removing
+    // the object now would break the photo if the person then cancels. A replaced photo is
+    // cleaned up by the upload route, which is the point where the swap is real.
+    setPath(it, "image", "");
+    renderEditor();
+    return;
+  }
   if (action === "toggleSoldOut") {
     it.tags = it.tags || [];
     const i = it.tags.indexOf("sold-out");
@@ -15128,11 +15195,24 @@ function xraySettingUrl(flag) {
   .xray-off::after { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%;
     background: var(--xray-c-dot); margin-left: 6px; vertical-align: middle;
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--xray-c-dot) 28%, transparent); }
-  /* A FILLED button (primary/gold or pay/green) keeps its shape but takes a cyan ring +
-     cyan label, so it still reads as a button while saying "not theirs". No grayscale —
-     that was the thing that made it look dead rather than annotated. */
-  .btn.primary.xray-off, .tp-take-order.xray-off, .btn.pay.xray-off, .btn.green.xray-off {
-    opacity: 1 !important; filter: none;
+  /* A FILLED button (primary/gold or pay/green) keeps its shape and takes a cyan RING + the
+     cyan dot, so it still reads as a button while saying "not theirs". No grayscale — that was
+     the thing that made it look dead rather than annotated.
+     ITS LABEL KEEPS ITS OWN INK (T19 sweep, 2026-08-14). It used to inherit the cyan from
+     .xray-off above, which paints a light cyan word on a saturated fill: measured on the
+     deployed backup, the owner panel's "＋ New" dish button came out at 1.42:1 in dark and
+     2.12:1 in light, against a 4.5:1 floor for 13px bold. The variables above were checked for
+     contrast against the PAGE background ("darker, for contrast on cream") — nobody checked
+     cyan-on-green, because a filled button is the one place the label does not sit on the page.
+     This is the same call the CARD rule below already makes for the same reason: keep the
+     element's own colours, let the ring and the dot carry the cue. Values restated from
+     style.css (.btn.primary #2a1d0c, .btn.green #06281a) because .xray-off wins with !important
+     and there is no way to un-set it. */
+  .btn.primary.xray-off, .tp-take-order.xray-off, .btn.pay.xray-off {
+    opacity: 1 !important; filter: none; color: #2a1d0c !important;
+    box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xray-c-dot) 75%, transparent); }
+  .btn.green.xray-off {
+    opacity: 1 !important; filter: none; color: #06281a !important;
     box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xray-c-dot) 75%, transparent); }
   /* A whole CARD marked cyan must NOT turn all its text cyan — .xray-off sets an inherited
      colour, and on a card that repaints the labels, hints and inputs inside it, which reads
