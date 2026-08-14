@@ -7329,6 +7329,26 @@ function mergeParentOf(t) {
   const m = mergeList().find((x) => String(x.child_table) === String(t));
   return m ? String(m.parent_table) : null;
 }
+// WHO PUT THESE TABLES TOGETHER, AND WHEN (owner, 2026-08-14 — improvement 2).
+// `table_merges` has recorded the person and the time on every merge since mig 308, and the floor
+// summary has always SELECTed both (`merged_at, merged_by`) — nothing ever read them back. Two
+// tables sharing one bill is the change most likely to be questioned afterwards ("who joined
+// these?"), and until now the only way to answer was the audit log.
+// Costs nothing: no new column, no new query, no extra byte on the wire — this reads fields the
+// panel already has in `state.summary.merges`.
+// A PARENT can hold several children, each joined at a different moment, so it reports the most
+// recent one — that is the answer to "who did this to my floor just now". A CHILD reports its own.
+// Returns "" when the row predates mig 308 (merged_by NULL): silence is honest, a made-up name
+// is not.
+function mergeCredit(t) {
+  const rows = mergeList().filter((m) => String(m.child_table) === String(t) || String(m.parent_table) === String(t));
+  if (!rows.length) return "";
+  const latest = rows.slice().sort((a, b) => new Date(b.merged_at || 0) - new Date(a.merged_at || 0))[0];
+  const who = String(latest.merged_by || "").trim();
+  if (!who) return "";
+  const when = latest.merged_at ? fmtClock(latest.merged_at) : "";
+  return when ? `joined by ${who} at ${when}` : `joined by ${who}`;
+}
 // "T6 + T7" for a bill or a heading — the parent first, then every table joined to it.
 function mergeGroupLabel(t) {
   const parent = mergeParentOf(t) || String(t);
@@ -7926,45 +7946,29 @@ function tableTileStateFromBoard(t) {
 // the small printer opens the bill preview — where Print / Generate invoice / Mark paid
 // live, so paying a table is one popup instead of a chain of confirms. ⏻ CLOSE joins the row on
 // a FINISHED table only (see finishedHere below) and ends the table in one tap.
-// ── PARCEL TILES on the live floor (owner, 2026-08-02) ─────────────────────────────
-// A parcel has no table, but it is still a live job the floor has to finish, so it gets
-// its own tile in a strip at the very bottom — and it stays there until it has been BOTH
-// printed and paid. Nothing extra is fetched for this: the Platform board's rows are
-// already in memory (loadPlatform), so the strip costs zero additional reads.
+// ── PARCELS ARE NOT ON THE FLOOR (owner, 2026-08-14) ──────────────────────────────
+// They used to be: a strip of Parcel tiles under the tables, each staying until it had been BOTH
+// printed and paid (his 2026-08-02 rule). He removed it — "below the table, the parcel will not
+// show. Parcel will only show in the platform thing." The 🛵 Platform / 🥡 Parcels tab is the one
+// place a parcel is worked now, it carries a live count on its own badge, and it hides itself
+// entirely when neither the parcel nor the delivery module is on (syncPlatformTab), which is the
+// second half of the same instruction.
 //
-// The NUMBER is the parcel's place among TODAY's parcels, counted over every one of them
-// including cancelled and handed-over rows (a sale is never deleted here — see the billing
-// compliance rules). That is what keeps "Parcel 3" called Parcel 3 for the rest of the day
-// whatever happens to Parcel 2.
+// todaysParcels() STAYS — the parcel's NUMBER is still needed wherever a parcel is opened
+// (openParcelTile, the Platform board). The number is its place among TODAY's parcels, counted
+// over every one of them including cancelled and handed-over rows (a sale is never deleted here —
+// see the billing compliance rules), which is what keeps "Parcel 3" called Parcel 3 for the rest
+// of the day whatever happens to Parcel 2.
 function todaysParcels() {
   // THE RESTAURANT'S DAY, NOT THE CLOCK'S (sweep 2026-08-04). This used local midnight while
-  // every other day on this panel starts at 05:00 (businessDayStartMs, used by the Bills tab).
-  // Since openParcels() below is what implements "a parcel stays on the floor until it is BOTH
-  // printed and paid", a parcel taken at 23:50 and not yet paid VANISHED from the floor at
-  // midnight — five hours before the business day it belongs to ends, and it is the
-  // collect-the-money half that disappeared. Numbering rolled over at midnight too, so between
-  // 00:00 and 05:00 "Parcel 1" and the bill series disagreed about which day it was.
+  // every other day on this panel starts at 05:00 (businessDayStartMs, used by the Bills tab), so
+  // between 00:00 and 05:00 "Parcel 1" and the bill series disagreed about which day it was — the
+  // numbering rolled over hours before the business day it belongs to ended.
   const dayStart = businessDayStartMs();
   return (state.data.platform || [])
     .filter((o) => o.source === "parcel" && o.created_at && new Date(o.created_at) >= dayStart)
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
     .map((o, i) => ({ ...o, parcel_no: i + 1 }));
-}
-// Still on the floor = not cancelled, and not yet BOTH printed and paid.
-function openParcels() {
-  return todaysParcels().filter((o) => o.status !== "cancelled" && !(o.paid === true && !!o.printed_at));
-}
-function parcelTileHtml(o) {
-  const n = (Array.isArray(o.items) ? o.items : []).reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0);
-  // Two small marks say exactly what is still owed on this parcel, in the same order the
-  // owner described the job: print it, then take the money.
-  const marks = `<span class="pctile-mark ${o.printed_at ? "on" : ""}" title="${o.printed_at ? "Bill printed" : "Not printed yet"}">🖨</span>`
-    + `<span class="pctile-mark ${o.paid ? "on" : ""}" title="${o.paid ? "Paid" : "Not paid yet"}">💰</span>`;
-  return `<button class="ftile pctile" data-parcel-tile="${esc(o.id)}" title="Parcel ${esc(o.parcel_no)} — tap to print or take payment">
-    <span class="pctile-n">Parcel ${esc(o.parcel_no)}</span>
-    <span class="pctile-meta">${n} item${n === 1 ? "" : "s"} · ${platMoney(o.total)}</span>
-    <span class="pctile-marks">${marks}</span>
-  </button>`;
 }
 // What the CURRENT viewer may do, for the floor's own gating. Same rule the order builder
 // uses: an admin/owner looking in sees everything (tinted where it's off for the staff
@@ -7996,12 +8000,12 @@ function moduleOn(prefix) {
 }
 const parcelModuleOn = () => moduleOn("parcel");
 const platformModuleOn = () => moduleOn("takeaway");
-function parcelStripHtml() {
-  const list = openParcels();
-  if (!list.length) return "";
-  return `<div class="pcstrip"><div class="pcstrip-h">🥡 Parcels <span class="sub">· stay here until printed &amp; paid</span></div>
-    <div class="ftile-grid pcstrip-grid" style="--per-row:${floorPerRow()}">${list.map(parcelTileHtml).join("")}</div></div>`;
-}
+// (parcelStripHtml lived here. The floor no longer carries a Parcel strip — owner, 2026-08-14:
+// "below the table, the parcel will not show. Parcel will only show in the platform thing." The
+// 🛵 Platform / 🥡 Parcels tab is the ONE place a parcel is worked, and that tab already appears
+// whenever EITHER module is on and disappears when both are off (syncPlatformTab), which is the
+// rest of the same instruction. parcelTileHtml + openParcels went with it rather than being left
+// as builders nothing calls; todaysParcels stays — openParcelTile still numbers a parcel with it.)
 function floorTileHtml(i) {
   const s = state.data.settings || {};
   const { st, label, meta, badges, counts, pay, hasNew, guests, done } = tableTileState(i); // everything this tile needs
@@ -8083,8 +8087,12 @@ function floorTileHtml(i) {
   // REJECTED (owner, 2026-08-11) — docs/REJECTED-IDEAS.md R9: no "how long have they been merged"
   // age on this chip ("⇄ with T7 · 40m"). Offered as a way to spot a merge somebody forgot to undo;
   // he skipped it. The chip names the party and nothing else.
+  // The tooltip now also names WHO joined them and when (owner, 2026-08-14 — improvement 2), read
+  // from fields the summary already carries. A hover is desktop-only, so the same sentence is
+  // printed as text in the table's own detail head, which is where a phone reads it.
+  const credit = mergeCredit(i);
   const mergeChip = mergeWith.length
-    ? `<div class="ft-merge ft-merge-parent" title="Served as one party with ${esc(mergeWith.join(" + "))} — one bill">⇄ with ${esc(mergeWith.join(" "))}</div>`
+    ? `<div class="ft-merge ft-merge-parent" title="Served as one party with ${esc(mergeWith.join(" + "))} — one bill${credit ? " · " + esc(credit) : ""}">⇄ with ${esc(mergeWith.join(" "))}</div>`
     : "";
   // The child's row is the LOUDEST thing on the tile (owner, 2026-08-01: "in the seven it should be
   // written in big words, it is merge with six … it should be written in big and all those things
@@ -8622,7 +8630,7 @@ function floorHtml() {
   // A chip that only announced there was more and then ignored the tap would be a dropped tap.
   const moreChip = `<button class="ftile-more" data-ftile-more hidden title="Scroll the floor to the right">→ <b data-ftile-more-n>0</b> more</button>`;
   const gridBlock = `<div class="ftile-wrap">${gridHtml}${moreChip}</div>`;
-  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridBlock}${parcelStripHtml()}</div>`;
+  const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridBlock}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
   // The floor used to end in a 300–460px rail that was either whole-floor cards ("To accept",
@@ -8934,7 +8942,6 @@ function bindFloor() {
   // "parcel" → the original parcel builder (a different screen); "quick" → the drill-down.
   ed.querySelectorAll("[data-qop]").forEach((b) => (b.onclick = () =>
     openTakeOrder(null, null, b.dataset.qop === "parcel" ? { parcel: true } : { quick: true })));
-  ed.querySelectorAll("[data-parcel-tile]").forEach((b) => (b.onclick = () => openParcelTile(b.dataset.parcelTile)));
   // (No #floorSections binding — the 👥 "Who serves what" button left the floor on 2026-07-31
   //  ("I do not want this option completely on top") and its ONE home is Settings → Access. The
   //  binding outlived the button by five weeks; removed in the T3 sweep, 2026-08-06.)
@@ -9719,7 +9726,11 @@ function tablePanelParts(t, host = "float") {
   // the whole party, so listing each table again was the same information twice.
   if (isParty) {
     headPill = `<span class="sx-party-title">${partyAll.map((x) => "T" + esc(x)).join(" + ")}</span>`;
-    headMeta = `one party · one bill${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}`;
+    // …and WHO joined them (owner, 2026-08-14 — improvement 2). This head line is the phone's copy
+    // of the tile tooltip: a phone has no hover, so without it the answer would exist only on a
+    // desktop. Absent (silently) on a merge made before mig 308 started recording the actor.
+    const credit = mergeCredit(t);
+    headMeta = `one party · one bill${sess && sess.bill_no != null ? ` · bill #${esc(sess.bill_no)}` : ""}${credit ? ` · ${esc(credit)}` : ""}`;
     // ONE button, for the table whose screen this is. Opening T7 offers "Unmerge T7"; opening the
     // table that holds the bill offers to release each of the others, one button each, because there
     // is nothing to detach IT from.
@@ -10992,7 +11003,12 @@ function tableOpsOn() {
      sheet inherits them), and a sheet that is a panel rather than the whole window. The placement
      never changes with content — every tile holds the same rows whether it has one ticket or five. */
   .kotp-sheet { max-width: min(92vw, 880px); width: min(92vw, 880px); }
-  .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 9px; padding: 2px; }
+  /* --kotp-min is the tile's minimum width, and fitKotPicker() below LOWERS it until the whole
+     floor fits on one screen (owner, 2026-08-14: "when the amount of table is more that we have to
+     scroll, at that time make it like it will show all on table first"). It is a starting point
+     here, not a fixed size. */
+  .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(var(--kotp-min, 96px), 1fr));
+    gap: var(--kotp-gap, 9px); padding: 2px; }
   /* ONE scroller for the whole picker, not one per grid — the sheet now holds two SECTIONS
      (in use, then free) and a scrollbar per section would be two thumbs on one sheet. */
   .kotp-scroll { max-height: min(64vh, 560px); overflow-y: auto; }
@@ -11005,17 +11021,31 @@ function tableOpsOn() {
        matter what width the sheet asked for. 8px here is what actually widens it. */
     .kotpick-overlay { padding: 8px; }
     .kotp-sheet { max-width: 100%; width: 100%; max-height: 94vh; }
-    .kotp-grid { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 7px; }
+    .kotp-grid { --kotp-min: 78px; --kotp-gap: 7px; }
     .kotp-scroll { max-height: calc(94vh - 132px); }
   }
   /* AUTO-SWITCH BY COUNT (owner, 2026-08-13: "when there are less table which can be visible on
      the screen then ok, but when there are more then it auto switch"). A big floor gets denser
      squares so more of it lands on one screen. Small but NOT too small — 62px stays above the
      44px tappable floor, and the least useful line (the sub-line) is the only thing that goes. */
-  .kotp-grid.dense { grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; }
-  .kotp-grid.dense .kotp-tile b { font-size: 14px; }
-  .kotp-grid.dense .kotp-tile .kotp-state { font-size: 9px; }
-  .kotp-grid.dense .kotp-tile .kotp-meta { display: none; }
+  /* ── IT FITS, IT DOES NOT SCROLL (owner, 2026-08-14) ──────────────────────────────────────
+     "When the amount of table is more that we have to scroll — at that time make it like it will
+     show all on table first." So the size is MEASURED, not guessed: fitKotPicker() shrinks
+     --kotp-min a step at a time until the sections stop overflowing their box. That keeps his
+     earlier "auto switch" rule (2026-08-13) and goes further — a 48-table floor and a 300-table
+     floor both land on one screen instead of only the first one doing so.
+     WHAT SHRINKING COSTS, shed in the same priority order the floor tiles use: first the sub-line
+     (₹ due / served count), then the state word, then the paid/unpaid pill. The NUMBER and the
+     STATE COLOUR never go — those are what you are picking by.
+     THE FLOOR IS 44px AND IS NOT NEGOTIABLE: below that a square stops being reliably tappable, so
+     a floor too big to fit at 44px scrolls, honestly, rather than becoming untappable. */
+  .kotp-scroll.kotp-sm .kotp-tile b { font-size: 14px; }
+  .kotp-scroll.kotp-sm .kotp-tile .kotp-state { font-size: 9px; }
+  .kotp-scroll.kotp-sm .kotp-tile .kotp-meta { display: none; }
+  .kotp-scroll.kotp-xs .kotp-tile { padding: 4px 3px; }
+  .kotp-scroll.kotp-xs .kotp-tile b { font-size: 12.5px; }
+  .kotp-scroll.kotp-xs .kotp-tile .kotp-state,
+  .kotp-scroll.kotp-xs .kotp-tile .kotp-pay { display: none; }
   /* SECTIONS — IN USE FIRST, FREE AFTER (owner, 2026-08-13). Every operation behind this button
      (merge, move a KOT, split, reprint, mark VIP) is about a table that has something on it, and
      on a 300-table floor the two that were in use sat buried under 298 free ones. Free tables stay
@@ -11399,6 +11429,43 @@ function openKotColumns(t, sess) {
 // Then it hands straight over to the per-table menu, so everything downstream behaves exactly as
 // it did when the button lived inside a table's own popup. Free tables are pickable on purpose:
 // marking a table VIP before the guests order is one of the reasons this button exists.
+// fitKotPicker(wrap): make the WHOLE floor fit the picker's box (owner, 2026-08-14: "when the
+// amount of table is more that we have to scroll — at that time make it like it will show all on
+// table first"). It measures instead of guessing, because the right size depends on three things a
+// constant cannot know: how many tables the restaurant has, how big the screen is, and how tall the
+// sections' headings make the content.
+//
+// The loop steps --kotp-min down 6px at a time and re-measures, so it stops at the LARGEST size
+// that fits — a 30-table floor on a laptop never shrinks at all. Detail is shed on the way down in
+// the floor tiles' own priority order (sub-line → state word → paid pill); the number and the state
+// colour always stay, because those are what you are picking by.
+//
+// 44px IS THE FLOOR AND IT IS NOT NEGOTIABLE: a square smaller than that is not reliably tappable
+// with a thumb, so a floor too big to fit even then keeps its scrollbar. That is the honest
+// outcome — "everything on one screen" must never mean "everything too small to hit".
+//
+// Cost: up to ~9 layout measurements when the sheet opens (and again on resize). No data, no
+// request; it reads geometry that the browser is about to compute anyway.
+const KOTP_MIN_PX = 44;   // the tappable floor — see above
+function fitKotPicker(wrap) {
+  const scroll = wrap && wrap.querySelector(".kotp-scroll");
+  if (!scroll) return;
+  const phone = window.matchMedia("(max-width: 760px)").matches;
+  let min = phone ? 78 : 96;
+  const apply = (v) => {
+    scroll.style.setProperty("--kotp-min", v + "px");
+    scroll.style.setProperty("--kotp-gap", (v < 62 ? 5 : v < 80 ? 6 : 9) + "px");
+    scroll.classList.toggle("kotp-sm", v < 80);
+    scroll.classList.toggle("kotp-xs", v < 58);
+  };
+  apply(min);
+  // scrollHeight > clientHeight means the sections are taller than the box they live in — i.e. it
+  // would scroll. +2 absorbs sub-pixel rounding so we don't shrink a floor that already fits.
+  while (scroll.scrollHeight > scroll.clientHeight + 2 && min > KOTP_MIN_PX) {
+    min = Math.max(KOTP_MIN_PX, min - 6);
+    apply(min);
+  }
+}
 function openKotTablePicker() {
   document.querySelector(".kotpick-overlay")?.remove();
   const s = state.data.settings || {}; // (the sheet's styles are injected once at load)
@@ -11433,13 +11500,13 @@ function openKotTablePicker() {
     </button>`);
   });
   const total = floorTableList(n).length;
-  // The denser arrangement switches itself on for a big floor (his "auto switch"). 48 is the point
-  // where the roomy 96px squares stop fitting one screenful on a laptop, so beyond it more tables
-  // on screen beats a slightly bigger square.
-  const dense = total > 48 ? " dense" : "";
+  // No fixed size any more: fitKotPicker() below MEASURES the sheet and shrinks the squares until
+  // the whole floor is on one screen (owner, 2026-08-14). His earlier "auto switch" at 48 tables
+  // (2026-08-13) was a two-step guess — it fixed a 60-table floor and still scrolled a 300-table
+  // one, and on a big monitor it shrank tiles that already fitted.
   const sec = (title, tiles, emptyWord) =>
     `<div class="kotp-sec-title">${title} <span class="n">${tiles.length}</span></div>` +
-    (tiles.length ? `<div class="kotm-grid kotp-grid${dense}">${tiles.join("")}</div>`
+    (tiles.length ? `<div class="kotm-grid kotp-grid">${tiles.join("")}</div>`
                   : `<div class="kotp-empty">${emptyWord}</div>`);
   const wrap = el(`<div class="sx-modal-overlay kotpick-overlay"><div class="sx-modal kotm-sheet kotp-sheet">
     <div class="tbl-modal-head kotm-head"><div class="tp-detail-top"><div class="kotm-title"><h3>🧾 Table &amp; KOT operations</h3></div><button class="tbl-modal-close" aria-label="Close">✕</button></div>
@@ -11449,7 +11516,10 @@ function openKotTablePicker() {
       ${sec("Free", freeTiles, "Every table is in use.")}
     </div></div></div>`);
   document.body.appendChild(wrap);
-  const closeM = () => wrap.remove();
+  fitKotPicker(wrap);                       // shrink the squares until the whole floor is on screen
+  const onFit = () => fitKotPicker(wrap);   // a rotate / window resize changes the box it must fit
+  window.addEventListener("resize", onFit);
+  const closeM = () => { window.removeEventListener("resize", onFit); wrap.remove(); };
   wrap.__lfhClose = closeM;
   wrap.querySelector(".tbl-modal-close").onclick = closeM;
   wrap.onclick = (e) => { if (e.target === wrap) closeM(); };
@@ -13233,7 +13303,6 @@ function updatePlatformBadge() {
   syncBurgerNews();
 }
 let platSeq = 0; // own latest-wins guard so platform loads never cancel the board loaders
-let parcelStripSig = ""; // last painted set of open parcels — see loadPlatform
 async function loadPlatform() {
   // Skip the poll entirely when BOTH the platform and parcel modules are off for this
   // restaurant (mig 209) — no board to show, and hitting GET /platform would 403 every tick.
@@ -13260,14 +13329,11 @@ async function loadPlatform() {
     state.platformOn = res.platform_on;             // is the platform module effective
     state.parcelOn = res.parcel_on;                 // is the parcel module effective
     updatePlatformBadge();
-    // The live floor now carries a Parcel tile per open parcel, so a change to THAT set has
-    // to repaint the Tables tab as well — otherwise a parcel just taken (or just printed /
-    // just paid) wouldn't show up until something else forced a render. Compared by a small
-    // signature so an unchanged poll still repaints nothing.
-    const sig = openParcels().map((p) => `${p.id}:${p.status}:${p.paid ? 1 : 0}:${p.printed_at ? 1 : 0}`).join("|");
-    const parcelsChanged = sig !== parcelStripSig;
-    parcelStripSig = sig;
-    if (state.tab === "platform" || (state.tab === "tables" && parcelsChanged)) renderEditor();
+    // Only the Platform board draws parcels now (owner, 2026-08-14), so a parcel change no longer
+    // has any reason to repaint the TABLES tab — the strip it used to keep fresh is gone. The tab's
+    // own badge is refreshed by updatePlatformBadge() just above, which is what tells a manager on
+    // the floor that a parcel is waiting.
+    if (state.tab === "platform") renderEditor();
   } catch { /* keep last good board */ }
 }
 
