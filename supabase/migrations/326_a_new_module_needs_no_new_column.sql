@@ -1,4 +1,9 @@
--- 320_a_new_module_needs_no_new_column.sql
+-- 326_a_new_module_needs_no_new_column.sql
+-- (RENUMBERED 320 → 326 on merge: a parallel session's access migration also took 320. Two files
+--  sharing a number apply in FILENAME order, not intent order — the trap this sweep itself reported.
+--  Already applied to the backup database under the old name; every statement is idempotent, so
+--  re-running under this one is a no-op. Every "mig 326" reference below and in the guard was moved
+--  with it, so nothing points at a number that means something else now.)
 -- ─────────────────────────────────────────────────────────────────────────────────────────────
 -- WHERE: behind Admin console → a restaurant → Access, and Manager panel → Settings.
 -- BACKEND ONLY — NOTHING ON SCREEN CHANGES. Every existing module keeps reading exactly the
@@ -36,6 +41,6 @@
 ALTER TABLE public.settings ADD COLUMN IF NOT EXISTS modules jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 COMMENT ON COLUMN public.settings.modules IS
-  'THE HOME FOR A NEW MODULE''S PERMISSION LADDER, so it needs no new columns (mig 320). Shape: {"<module>": {"allowed": bool, "owner_control": bool, "enabled": bool, "tablet": "off"|"on"|"pin"}}. An ABSENT module reads as allowed:false / owner_control:false / enabled:true — the same "new modules default OFF" rule the columns follow. The eleven modules that predate this (banquet, khata, parcel, platform, payroll, inventory, take_orders, table_ops, table_tags, table_assign, takeaway) stay on their own columns and are NOT migrated; lib/tableTags.ts reads whichever a module declares in lib/accessModel.ts. Guarded by npm run verify:settings-columns.';
+  'THE HOME FOR A NEW MODULE''S PERMISSION LADDER, so it needs no new columns (mig 326). Shape: {"<module>": {"allowed": bool, "owner_control": bool, "enabled": bool, "tablet": "off"|"on"|"pin"}}. An ABSENT module reads as allowed:false / owner_control:false / enabled:true — the same "new modules default OFF" rule the columns follow. The eleven modules that predate this (banquet, khata, parcel, platform, payroll, inventory, take_orders, table_ops, table_tags, table_assign, takeaway) stay on their own columns and are NOT migrated; lib/tableTags.ts reads whichever a module declares in lib/accessModel.ts. Guarded by npm run verify:settings-columns.';
 
 NOTIFY pgrst, 'reload schema';

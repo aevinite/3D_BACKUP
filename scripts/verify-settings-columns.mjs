@@ -10,7 +10,7 @@
 // first place: lib/accessModel.ts already models a module as a NAMED ladder and lib/tableTags.ts is
 // the single place that turns that name into storage.
 //
-// Migration 320 gave a module a cheaper home — `settings.modules` (jsonb, keyed by module name) —
+// Migration 326 gave a module a cheaper home — `settings.modules` (jsonb, keyed by module name) —
 // and lib/tableTags.ts reads it for any module that declares `moduleBag: true`. The eleven existing
 // ones are deliberately NOT converted (that would touch every panel for no visible gain).
 //
@@ -79,7 +79,7 @@ pass(`the row has ${names.length} columns (it was 109 when the bag was added —
 
 // 1. the bag exists and still defaults to an empty object
 const bag = cols.find((c) => c.column_name === "modules");
-if (!bag) fail("settings.modules is gone — a new module has nowhere to put its ladder (mig 320)");
+if (!bag) fail("settings.modules is gone — a new module has nowhere to put its ladder (mig 326)");
 else if (bag.data_type !== "jsonb") fail(`settings.modules is ${bag.data_type}, not jsonb`);
 else {
   const d = await q(`SELECT column_default FROM information_schema.columns
@@ -98,7 +98,7 @@ for (const n of ladder) {
 }
 if (!strays.length) pass(`all ${ladder.length} ladder columns belong to the ${LEGACY_MODULES.size} modules that predate the bag`);
 else for (const n of strays) {
-  fail(`settings.${n} is a NEW module ladder column. Put the ladder in settings.modules instead: declare moduleBag: true on the permission in lib/accessModel.ts and give module the same key three times — lib/tableTags.ts already reads it, and no migration is needed. (mig 320)`);
+  fail(`settings.${n} is a NEW module ladder column. Put the ladder in settings.modules instead: declare moduleBag: true on the permission in lib/accessModel.ts and give module the same key three times — lib/tableTags.ts already reads it, and no migration is needed. (mig 326)`);
 }
 
 // 3. same for the tablet rung
@@ -106,7 +106,7 @@ const tabs = names.filter((n) => n.startsWith("tablet_"));
 const strayTabs = tabs.filter((n) => !LEGACY_TABLET.has(n));
 if (!strayTabs.length) pass(`all ${tabs.length} tablet-rung columns are ones that predate the bag`);
 else for (const n of strayTabs) {
-  fail(`settings.${n} is a NEW tablet-rung column. It belongs in settings.modules["<module>"].tablet (mig 320).`);
+  fail(`settings.${n} is a NEW tablet-rung column. It belongs in settings.modules["<module>"].tablet (mig 326).`);
 }
 
 // 4. the declaration side: nothing may quietly claim to be bag-backed AND own columns

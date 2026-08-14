@@ -1,4 +1,6 @@
--- 321_the_records_strip_stops_re_reading_all_time.sql
+-- 327_the_records_strip_stops_re_reading_all_time.sql
+-- (RENUMBERED 321 → 327 on merge: a parallel session's layer-B sweep also took 321. Same reason as
+--  above; already applied under the old name and every statement is idempotent.)
 -- ─────────────────────────────────────────────────────────────────────────────────────────────
 -- WHERE: Owner panel → Dashboard → the records strip — the brag cards "Best day", "Biggest bill",
 -- "Fastest hour", "Star dish", "Regulars".
@@ -52,7 +54,7 @@ ALTER TABLE public.owner_records_agg ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.owner_records_agg FROM anon, authenticated;
 
 COMMENT ON TABLE public.owner_records_agg IS
-  'The Owner dashboard''s all-time records, pre-summed per restaurant up to `through` (mig 321). Read together with the days AFTER `through` so the strip never walks the whole bill history again. Rebuilt nightly by lfh_refresh_owner_records(); a missing row means "no history yet" and is safe.';
+  'The Owner dashboard''s all-time records, pre-summed per restaurant up to `through` (mig 327). Read together with the days AFTER `through` so the strip never walks the whole bill history again. Rebuilt nightly by lfh_refresh_owner_records(); a missing row means "no history yet" and is safe.';
 
 -- ── the refresh: one full recompute of the history side ───────────────────────────────────────
 CREATE OR REPLACE FUNCTION public.lfh_refresh_owner_records()
