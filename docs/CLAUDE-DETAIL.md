@@ -612,7 +612,7 @@ wanted them as columns: `lib/accessModel.ts` already models a module as a NAMED 
 (`state.modules["banquet"] = { allowed, control, enabled }`) and `lib/tableTags.ts` is the single
 place that turns that name into storage.
 
-**So a new module goes in the bag.** Migration 320 added `settings.modules` (jsonb):
+**So a new module goes in the bag.** Migration 326 added `settings.modules` (jsonb):
 
 ```json
 { "<module>": { "allowed": false, "owner_control": false, "enabled": true, "tablet": "off" } }
