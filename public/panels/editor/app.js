@@ -556,7 +556,7 @@ async function api(method, path, body, opts) {
   if (method !== "GET" && window.LFH_OUTBOX) {
     // `expect` (optional) travels as X-LFH-Expect so the server can refuse instead of
     // overwriting a change someone else made on another device while this person was typing.
-    return window.LFH_OUTBOX.send({ base: "/api/editor", method, path: ridQ(path), body, panel: "editor", expect: opts && opts.expect });
+    return window.LFH_OUTBOX.send({ base: "/api/editor", method, path: ridQ(path), body, panel: "editor", expect: opts && opts.expect, table: opts && opts.table });
   }
   const url = "/api/editor" + ridQ(path);
   // Was the offline layer in charge when this read STARTED? On a device's first visit it is not
@@ -6869,7 +6869,7 @@ async function loadSessions(fromPoll) {
       if (seq !== dataSeq) return; // a newer refresh started — drop this stale snapshot
       // Take the summary unless a floor action's save is still travelling (same shield the
       // board used) — or a refresh landing mid-action would flicker an optimistic tile back.
-      if (!floorOpsInFlight) { state.summary = summary; noticePrinterNews(); }
+      if (!floorOpsInFlight) { state.summary = mergeServerSummary(summary); noticePrinterNews(); }
       // Merge EVERY open-detail table's full slice into the board/data caches (the rest of the
       // board is no longer fetched whole). The detail's ordersForTable/itemsForOrder read these.
       if (!floorOpsInFlight) sels.forEach((t, i) => mergeTableSlice(t, slices[i][0], slices[i][1], slices[i][2]));
@@ -12637,7 +12637,8 @@ async function acceptOrder(orderId) {
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; if (o) opEnd(o.id); } };
   try {
-    await api("POST", "/orders/" + orderId + "/accept"); release(); await loadSessions();
+    const qA = wasQueued(await api("POST", "/orders/" + orderId + "/accept", null, { table: o && o.table_number })); release();
+    if (!qA) await loadSessions();   // saved-not-sent → keep what the tap just showed
     if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: "Order accepted", sub: o ? `T${o.table_number} · tap undo to unsend` : "Tap undo to unsend", icon: "✋", onUndo: () => editorUndoServe(snap) });
     else toast("Order accepted → preparing", "ok");
   }
@@ -12685,7 +12686,8 @@ async function serveAllOrder(orderId) {
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; if (o) opEnd(o.id); } };
   try {
-    await api("POST", "/orders/" + orderId + "/serve-all"); release(); await loadSessions();
+    const qS = wasQueued(await api("POST", "/orders/" + orderId + "/serve-all", null, { table: o && o.table_number })); release();
+    if (!qS) await loadSessions();   // saved-not-sent → keep what the tap just showed
     // The undo bar IS the confirmation now (message + a few-second takeback line),
     // so it replaces the old plain "served" toast.
     if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
@@ -12704,6 +12706,70 @@ async function serveAllOrder(orderId) {
 // from state.summary (NOT the board), so an accept/attend that only patched state.data.*
 // left the tile looking dead until the server round-trip (fixed 2026-07-06). These patch
 // the slim summary tile immediately; pollTables() reconciles exact counts right after.
+// WAS THAT WRITE ACTUALLY DELIVERED, OR ONLY SAVED ON THIS DEVICE?
+//
+// `api()` answers { ok:true, queued:true } when the change went into this device's queue instead
+// of to the server (no signal, or the server could not take it). Every optimistic path below
+// finishes by REFRESHING from the server — and with no signal that refresh is answered from the
+// device's saved copy, which is by definition older than the tap that just happened. So the
+// screen flipped correctly and was then put straight back.
+//
+// Measured on the real manager floor (2026-08-13): a waiter tapped ✓ Accept on table 19 with no
+// signal, the change WAS saved (the queue held it, the bar said so, the undo bar appeared) — and
+// the tile went on reading "New order" as though nothing had been touched. So they tap again.
+//
+// Nothing here invents a state: patchSummaryTileAccept() already flips the tile and is already
+// trusted on the online path. This only stops a stale read undoing it. The truth still lands the
+// moment the queue drains — the panel refreshes on `lfh:outbox-flushed` (see the listener at the
+// bottom of this file) — and until then the table carries the ⏳ mark that says so.
+const wasQueued = (r) => !!(r && r.queued === true);
+
+// ── WHERE SERVER TRUTH MEETS THIS DEVICE'S OWN WORK ──────────────────────────────────────────
+//
+// A tile the person has just changed must not be put back by a read that predates the change.
+// The two `!floorOpsInFlight` guards below already say exactly this — "don't clobber an optimistic
+// tile mid-action" — but they only hold while the save is IN FLIGHT. With no signal the save is
+// not in flight; it is sitting in this device's queue, sometimes for minutes, and every routine
+// poll in between was handing the tile back its old state.
+//
+// Measured on the real manager floor: a waiter tapped ✓ Accept with no signal, the tile flipped to
+// "Preparing" exactly as it does online — and four seconds later a background poll turned it back
+// to "New order", with the change still saved and still waiting. So they tap again.
+//
+// Nothing is invented here. The tile was already flipped by patchSummaryTileAccept(), which is
+// shipped and trusted on the online path; this only stops a read that is older than the tap from
+// undoing it. It ends by itself: the moment the change reaches the server the table has nothing
+// unsent, the incoming tile wins again, and what is on screen is the server's own answer.
+// STILL ON ITS WAY — not "has ever been stuck here".
+//
+// pendingByTable() deliberately counts the failed list too (it drives the ⏳/⚠ marks), and using it
+// here would be the one way this whole idea could tell a lie: a change the server has REFUSED — the
+// table was closed by someone else while the phone was down — never leaves that list until a person
+// taps "Not needed anymore", so the tile would sit on "Preparing" for the rest of the shift for food
+// the kitchen never heard about. That is exactly the fault this change exists to avoid, pointed the
+// other way. So only work that is genuinely still queued holds a tile; the moment it lands in
+// "These changes need you" the person has been told, and the tile goes back to the server's truth.
+function tablesWithUnsentWork() {
+  try {
+    const ob = window.LFH_OUTBOX;
+    if (!ob || !ob.getSnapshot || !ob.tablesOf) return null;
+    const out = new Set();
+    for (const it of (ob.getSnapshot().queued || [])) for (const t of ob.tablesOf(it)) out.add(String(t));
+    return out.size ? out : null;
+  } catch (e) { return null; }
+}
+// Merge a freshly-read summary over the one on screen, keeping OUR tile for any table that is
+// still carrying work this device has not managed to send.
+function mergeServerSummary(incoming) {
+  const held = tablesWithUnsentWork();
+  if (!held) return incoming;                       // nothing waiting → the server is the truth
+  const mine = (state.summary || {}).tiles || {};
+  const tiles = Object.assign({}, (incoming || {}).tiles || {});
+  let kept = 0;
+  for (const t of held) if (mine[t]) { tiles[t] = mine[t]; kept++; }
+  return kept ? Object.assign({}, incoming, { tiles }) : incoming;
+}
+
 function patchSummaryTileAccept(t) {
   const s = state.summary || {};
   const tile = (s.tiles || {})[String(t)];
@@ -12763,8 +12829,12 @@ async function acceptTableOrders(t) {
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; recv.forEach((o) => opEnd(o.id)); } };
   try {
-    for (const o of recv) await api("POST", "/orders/" + o.id + "/accept");
-    release(); await pollTables([String(t)]); // refresh THIS tile's summary so the grid reflects truth
+    let qAll = false;
+    for (const o of recv) { if (wasQueued(await api("POST", "/orders/" + o.id + "/accept", null, { table: t }))) qAll = true; }
+    release();
+    // refresh THIS tile's summary so the grid reflects truth — unless the change is still on
+    // this device, in which case the saved copy would revert the tile we just flipped.
+    if (!qAll) await pollTables([String(t)]);
     if (snap.length && window.LFH_UNDO) LFH_UNDO.show({ message: recv.length > 1 ? `${recv.length} orders accepted` : "Order accepted", sub: `T${t} · tap undo to unsend`, icon: "✋", onUndo: () => editorUndoServe(snap) });
     else toast(recv.length > 1 ? recv.length + " orders accepted → preparing" : "Order accepted → preparing", "ok");
   }
@@ -12806,8 +12876,10 @@ async function serveAllOrders(t) {
   let released = false;
   const release = () => { if (!released) { released = true; floorOpsInFlight--; orders.forEach((o) => opEnd(o.id)); } };
   try {
-    for (const o of orders) await api("POST", "/orders/" + o.id + "/serve-all");
-    release(); await pollTables([String(t)]);
+    let qSt = false;
+    for (const o of orders) { if (wasQueued(await api("POST", "/orders/" + o.id + "/serve-all", null, { table: t }))) qSt = true; }
+    release();
+    if (!qSt) await pollTables([String(t)]);   // saved-not-sent → keep what the tap just showed
     if (snap.length && window.LFH_UNDO) LFH_UNDO.show({
       message: "All dishes served",
       sub: `T${t} · ${snap.length} dish${snap.length > 1 ? "es" : ""}`,
@@ -13760,7 +13832,7 @@ async function pollOrders(opts) {
     return;
   }
   if (seq !== dataSeq) return; // a newer loader started — this poll snapshot is stale
-  if (!floorOpsInFlight) { state.summary = summary; noticePrinterNews(); } // don't clobber an optimistic tile mid-action
+  if (!floorOpsInFlight) { state.summary = mergeServerSummary(summary); noticePrinterNews(); } // don't clobber an optimistic tile mid-action
   state.boardLoaded = true;
 
   // Orders tab → also pull the full order/call lists it renders (merged, optimistic-safe).
@@ -13933,6 +14005,9 @@ async function pollTables(tables) {
     for (const r of results) {
       const t = r.table;
       if (mySeq[t] !== tileSeq[t]) continue; // a newer targeted poll for THIS table won → skip just its tile
+      // A table still holding unsent work keeps what is on screen — see mergeServerSummary().
+      const heldNow = tablesWithUnsentWork();
+      if (heldNow && heldNow.has(String(t)) && tiles[t]) { latest = r.sum; continue; }
       const tile = r.sum.tiles && r.sum.tiles[t];
       if (tile) tiles[t] = tile;            // the table now has a tile (occupied)
       else delete tiles[t];                 // the table dropped off the floor universe → back to plain Free

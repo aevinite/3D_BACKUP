@@ -227,6 +227,15 @@
 
   function tableOf(item) {
     try {
+      // WHOSE WORK IS THIS? An action that names a ROW rather than a table — /orders/:id/accept is
+      // the commonest, and it is what the floor's one-tap ✓ sends — has no table in its path OR its
+      // body, so this answered null and the table carried no ⏳ mark at all. Measured on the manager
+      // floor: with no signal the only sign anywhere was a bar at the top of the screen, nowhere
+      // near the table that had just been tapped.
+      // The caller always knows the table (it is the argument to acceptTableOrders), so it may now
+      // say so. Deliberately NOT put on the body: the body is what the server parses, and a readout
+      // must never be able to change what a write means.
+      if (item.table != null && String(item.table) !== "") return String(item.table);
       var b = item.body || {};
       if (b.table != null && b.table !== "") return String(b.table);
       if (b.table_number != null && b.table_number !== "") return String(b.table_number);
@@ -375,8 +384,8 @@
   // { note: "more spicy" }. It travels with the write so the server can refuse instead of
   // silently overwriting a change someone else made on another device in the meantime.
   // Used by the dish-edit modal in both staff panels; see lib/clash.ts fieldClash().
-  async function send({ base, method, path, body, panel, label, expect }) {
-    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now(), expect: expect || null };
+  async function send({ base, method, path, body, panel, label, expect, table }) {
+    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now(), expect: expect || null, table: (table == null || table === "") ? null : String(table) };
     // WHICH TABLE, ON EVERY ROW. The "Needs you" / "Saved on this device" sheet lists changes by
     // label, and a call site that passes its own label ("Set table tag", "Place order") named no
     // table at all — so two changes on tables 5 and 7 rendered as two identical rows with nothing

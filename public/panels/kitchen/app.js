@@ -88,7 +88,7 @@ const api = async (method, path, body, opts) => {
     // another screen made in the meantime. The kitchen's writes are all one-way transitions
     // today (accept / ready / sold-out), so nothing passes it yet — but the parameter has to
     // EXIST, or a value edit added here later is silently unprotectable and no guard would say so.
-    return window.LFH_OUTBOX.send({ base: "/api/kitchen", method, path: ridQ(path), body, panel: "kitchen", expect: opts && opts.expect });
+    return window.LFH_OUTBOX.send({ base: "/api/kitchen", method, path: ridQ(path), body, panel: "kitchen", expect: opts && opts.expect, table: opts && opts.table });
   }
   // Was the offline layer in charge when this read STARTED? On a device's first visit it is not,
   // so nothing it fetched in that window was ever saved — see public/panels/swreg.js.
