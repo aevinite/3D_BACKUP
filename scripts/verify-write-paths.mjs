@@ -115,9 +115,28 @@ const cleanup = [];
   chk("3819 the 2-day lag is the designed one, not drift", lag <= 3, `${lag} day(s) behind today`);
 }
 
-// ── cleanup: CLOSE every session this test opened ──────────────────────────────────────────────
-for (const s of [...new Set(cleanup)]) await sb.from("sessions").update({ status: "closed" }).eq("id", s);
-const left = (await sb.from("sessions").select("id").in("id", [...new Set(cleanup)]).eq("status", "open")).data || [];
+// ── cleanup: CLOSE every session this test opened, AND TAKE ITS TICKETS OFF THE BOARD ──────────
+//
+// P16 (T15 wording sweep, 2026-08-14). Closing the sessions was never enough. The kitchen board
+// reads ORDERS, not sessions, so every run of this file left its own tickets sitting in the New
+// column — and because two of them carry the notes "merge parent" / "merge child" (the phase 3664
+// merge test, above), a cook was reading `✎ merge child` under a real dish. Found on the live board
+// at French House: tickets #39, #84 and #120, six days old.
+//
+// So the sweep-up now removes the orders too, and it does it the way the memory says to: **by the
+// exact ids this run created**, never "whatever is on those tables" — another session's real order
+// could be sitting on the same table number by the time this runs.
+const sessionIds = [...new Set(cleanup)];
+for (const s of sessionIds) await sb.from("sessions").update({ status: "closed" }).eq("id", s);
+const left = (await sb.from("sessions").select("id").in("id", sessionIds).eq("status", "open")).data || [];
 chk("cleanup: every table this test opened is closed again", left.length === 0, `${left.length} left open`);
+// The orders belonging to THOSE sessions — scoped to the restaurant as well, so a stray id can
+// never reach another tenant's rows.
+if (sessionIds.length) {
+  await sb.from("orders").delete().eq("restaurant_id", rid).in("session_id", sessionIds);
+  const stillThere = (await sb.from("orders").select("id").eq("restaurant_id", rid).in("session_id", sessionIds)).data || [];
+  chk("cleanup: no ticket this test placed is left on the kitchen board", stillThere.length === 0,
+      `${stillThere.length} order(s) left — a cook would read this run's notes as a real dish`);
+}
 console.log(ok ? "\n✓ ALL WRITE-TESTS PASS\n" : "\n✗ SOMETHING FAILED — see above\n");
 process.exit(ok ? 0 : 1);

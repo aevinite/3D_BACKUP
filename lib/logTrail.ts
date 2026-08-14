@@ -204,8 +204,10 @@ const PLACE: Record<string, Place> = {
   feature_flip: { area: "Settings & features", screen: "Feature switches" },
   staff_feature: { area: "Settings & features", screen: "Feature switches" },
   google_review: { area: "Settings & features", screen: "Settings" },
-  maintenance_on: { area: "Settings & features", screen: "Service mode" },
-  maintenance_off: { area: "Settings & features", screen: "Service mode" },
+  // P5 (T15, 2026-08-14): the screen is called "Menu maintenance" in the manager panel and
+  // "maintenance" in the admin console — "Service mode" was a fifth name for one switch.
+  maintenance_on: { area: "Settings & features", screen: "Menu maintenance" },
+  maintenance_off: { area: "Settings & features", screen: "Menu maintenance" },
   retention_change: { area: "Settings & features", screen: "Settings" },
   printer_problem: { area: "Settings & features", screen: "Printing" },
   printer_problem_resolved: { area: "Settings & features", screen: "Printing" },

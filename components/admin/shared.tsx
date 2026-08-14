@@ -94,7 +94,7 @@ export const ACT_LABEL: Record<string, string> = {
   restaurant_reactivate: "Reactivated a restaurant", restaurant_suspend: "Suspended a restaurant",
   error_reopened: "Reopened a problem",
   owner_restore: "Restored an owner", owner_suspend: "Suspended an owner",
-  maintenance_on: "Turned Service Mode on", maintenance_off: "Turned Service Mode off",
+  maintenance_on: "Put the menu under maintenance", maintenance_off: "Took the menu out of maintenance",
   // Not from this PR — the printing feature (80a39a5f) added these three codes without labels, so
   // `npm run verify:audit` was already red on main and they were printing as raw keys on the
   // Activity screens. Three lines, same class of gap as the nine this PR fixed.
