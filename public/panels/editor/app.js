@@ -5355,7 +5355,13 @@ function openParcelTile(id) {
     const b = e.currentTarget; b.disabled = true;
     // Print FIRST, then record it: a printer that never opened must not leave a stamp
     // saying paper went out.
-    try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items, total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method }); }
+    // THE DISCOUNT TRAVELS ONTO THE PAPER (T18 sweep, 2026-08-16). This bag carried no discount, so
+    // printParcelReceipt read it as 0, priced the full lines and added tax on all of them: the tile
+    // above says "Discount (10%) − ₹50 · Total ₹472.50" and the customer was handed ₹525. The value
+    // is on the row (the Platform read aliases payload->discount) and this very function shows it
+    // two lines up — only the print bag dropped it. Same shape as the Bills tab's parcel print,
+    // which has always passed both.
+    try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items, total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method, discount: pcDisc, discount_note: pcDiscNote || null }); }
     catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
     try { await api("POST", `/platform/${o.id}/printed`, {}); toast("Bill printed ✓", "ok"); closeP(); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
@@ -5524,7 +5530,19 @@ function syncListWide() {
   if (!layout) return;
   // Only the master-detail tabs have a "nothing picked yet" state at all. The floor-style tabs
   // already run full-width via .no-sidebar, and toggling both would fight over the same grid.
-  const masterDetail = !layout.classList.contains("no-sidebar");
+  //
+  // WHICH TABS THOSE ARE IS NAMED, NOT INFERRED (T18 sweep, 2026-08-16 — this was live and blank).
+  // `!no-sidebar` reads as "has a sidebar", and THREE tabs have one without being master-detail:
+  // Bills, Audit & logs and Settings hold a short NAV there, not a list you pick a record from.
+  // setTab() sets `state.sel = null` on every tab except Settings, so opening Bills or Audit &
+  // logs matched `masterDetail && !state.sel`, took the browse-wide class — and its stylesheet
+  // half is `.layout.list-wide > .editor { display: none }`, which is the pane those two tabs
+  // render EVERYTHING into. Measured on the live backup: the Bills tab showed its four nav rows
+  // and then an empty screen at 1280, 834 and 360 alike, with 8 bill cards sitting in the DOM
+  // unrendered and 15 live bills behind them. Browse-wide is a MENU-EDITOR idea (a wide dish list
+  // while nothing is picked), so it is scoped to the three tabs that actually have one.
+  const BROWSE_WIDE_TABS = ["items", "categories", "filters"];
+  const masterDetail = !layout.classList.contains("no-sidebar") && BROWSE_WIDE_TABS.includes(state.tab);
   layout.classList.toggle("list-wide", masterDetail && !state.sel);
 }
 
@@ -5839,8 +5857,19 @@ function renderEditor() {
     // reach with the active-orders bulk bar).
     const clearFreed = document.getElementById("clearFreed");
     if (clearFreed) clearFreed.onclick = async () => {
-      const ids = (state.data.orders || []).filter((o) => o.archived).map((o) => o.id);
-      if (!ids.length) return;
+      // TWO FAULTS, ONE TAP (T18 sweep, 2026-08-16).
+      //   · It read `state.data.orders` — the newest-200 board — while the button sits under the
+      //     BILLS RECORD, which is the wider ?bills=1 window. So on a busy day it cleared less than
+      //     the list in front of the person showed. billOrdersPool() is the union every other
+      //     action on this screen already resolves a bill from, scoped here to the day the divider
+      //     is actually about.
+      //   · With nothing to clear it returned in SILENCE: a red button that does nothing is
+      //     indistinguishable from a broken one (the never-drop-a-tap rule). It says so now.
+      const dayStart = businessDayStartMs();
+      const ids = billOrdersPool()
+        .filter((o) => o.archived && new Date(o.created_at || 0).getTime() >= dayStart)
+        .map((o) => o.id);
+      if (!ids.length) { toast("Nothing to clear — no freed tables in today's record.", "ok"); return; }
       deleteOrders(ids); // reason prompt inside deleteOrders is the confirmation
     };
     return;
@@ -9977,6 +10006,18 @@ async function openBillPreview(t) {
   const pct = Math.round(m.rate * 10000) / 100;
   const invoiced = !!sess && sess.invoice_no != null && !sess.invoice_voided;
   const anyUnpaid = os.some((o) => o.payment_status !== "paid");
+  // "DUE" MUST MEAN WHAT IS STILL OWED (T18 sweep, 2026-08-16). This popup adds up every
+  // non-cancelled order — paid ones included — and then labelled that figure "Total due". On a
+  // part-settled bill (one order collected, another not — a state ordersLiveHtml explicitly
+  // counts) it read "Total due ₹1,000" while only ₹400 was owed, and 💳 Mark paid then opened the
+  // payment sheet asking for ₹400. Two screens, two taps apart, answering "what do they owe?"
+  // differently is how a cashier stops trusting the till. The bill TOTAL is unchanged — the paper
+  // must still show the whole bill — so when part of it is already collected the popup states all
+  // three figures instead of putting the wrong word over one of them.
+  const paidOs = os.filter((o) => o.payment_status === "paid");
+  const partPaid = anyUnpaid && paidOs.length > 0;
+  const paidSoFar = partPaid ? billMath(paidOs).total : 0;
+  const stillDue = Math.round((m.total - paidSoFar) * 100) / 100;
   // A brand-new order can't be paid before staff accept it — the same rule the orders list
   // enforces. Say so on the button instead of letting the tap fail.
   const anyReceived = os.some((o) => o.status === "received");
@@ -9994,7 +10035,11 @@ async function openBillPreview(t) {
       <div class="bm-items">${lines}</div>
       <div class="bm-totals">
         ${mrpTotalsRows(m, pct)}
-        <div class="bm-trow grand"><span>${anyUnpaid ? "Total due" : "Total"}</span><span>${inr(m.total)}</span></div>
+        ${partPaid
+          ? `<div class="bm-trow"><span>Total</span><span>${inr(m.total)}</span></div>
+             <div class="bm-trow"><span>Already paid</span><span>− ${inr(paidSoFar)}</span></div>
+             <div class="bm-trow grand"><span>Still due</span><span>${inr(stillDue)}</span></div>`
+          : `<div class="bm-trow grand"><span>${anyUnpaid ? "Total due" : "Total"}</span><span>${inr(m.total)}</span></div>`}
       </div>
       <div class="bm-actions">
         ${/* Print below already issues-then-prints; a separate issue-only button is the confusion
@@ -10277,7 +10322,10 @@ function openTakeOrder(table, rerender, opts = {}) {
     return rate > 0 ? sp.taxableBase : Math.max(0, Math.round((sp.taxableBase + sp.nontax - sp.mrpAmount) * 100) / 100);
   };
   const discOf = () => Math.round(Math.min(Math.max(discAmount, 0), discCap()) * 100) / 100;
-  const estTotal = () => {
+  // THE NUMBER, and then the way it is written. They were one function returning a formatted
+  // string, so the one caller that needed the FIGURE — the parcel's "Pay now & print" sheet —
+  // could not have it and reached for the pre-tax subtotal instead (T18 sweep, 2026-08-16).
+  const estTotalNum = () => {
     const sp = cartSplit();
     const rate = (taxModel(state.data.settings) || {}).rate || 0;
     const d = discOf();
@@ -10285,12 +10333,23 @@ function openTakeOrder(table, rerender, opts = {}) {
     // what is left of the taxable base. It stays right when the rate is 0 and the discount
     // has landed on the untaxed part, which a `taxable + tax + untaxed` shape would not.
     const taxable = Math.max(0, sp.taxableBase - Math.min(d, sp.taxableBase));
-    return inr(Math.round((sp.taxableBase + sp.nontax - d + Math.round(taxable * rate * 100) / 100) * 100) / 100);
+    return Math.round((sp.taxableBase + sp.nontax - d + Math.round(taxable * rate * 100) / 100) * 100) / 100;
   };
+  const estTotal = () => inr(estTotalNum());
   // May THIS person discount? Same power the table detail's − Discount button is gated by
-  // (XRAY_CONTROLS → [data-disc] → give_discounts). Checked in JS, not left to the x-ray
-  // observer, because this modal lives on document.body — outside the panel the observer
-  // watches — exactly as the destination picker's own permission checks have to be.
+  // (XRAY_CONTROLS → [data-disc] → give_discounts), checked HERE in JS as well.
+  //
+  // WHY IN JS — AND NOT FOR THE REASON THIS COMMENT USED TO GIVE (T18 sweep, 2026-08-16). It said
+  // the x-ray observer cannot see this modal "because it lives on document.body — outside the
+  // panel the observer watches". That is not true and was worth correcting where someone can read
+  // it: applyHierarchyView() queries `document.querySelectorAll(entry.selector)` document-WIDE and
+  // its MutationObserver watches document.body with `subtree: true`, which is exactly how the bill
+  // modal's own money buttons get hidden. The real reason is narrower and still binding: this
+  // button carried NO `data-disc`, so the x-ray's selector never matched it and the JS check was
+  // the only gate it had. A future session reading the old reason, finding it false, and deleting
+  // this check as redundant would have handed a manager without give_discounts a working discount
+  // button. Both halves now: the marker below so the x-ray covers it like every other money
+  // control, and this check so the button is never even built.
   const canDiscount = () => (XRAY_WHO && XRAY_WHO.higherView ? true : xrayGrantedForManager("give_discounts"));
 
   const headTitle = quick ? "⚡ QO/P <span class=\"qo-sub\">· quick order / parcel</span>"
@@ -10315,7 +10374,7 @@ function openTakeOrder(table, rerender, opts = {}) {
         </div>
         <div class="to-foot">
           <div class="to-total">≈ <b>${estTotal()}</b><span class="to-disc-tag" hidden></span></div>
-          ${canDiscount() ? `<button class="btn to-disc-btn" type="button" title="Give a discount on this order">− Discount</button>` : ""}
+          ${canDiscount() ? `<button class="btn to-disc-btn" type="button" data-disc title="Give a discount on this order">− Discount</button>` : ""}
           ${quick
             ? `<button class="qo-cartbtn" type="button" aria-expanded="false" title="Show / hide the order you're building"><b class="qo-cartn">0</b> <span class="qo-cartl">items</span> <span class="qo-cartcar" aria-hidden="true">▴</span></button><button class="btn primary to-send qo-place" ${cart.length ? "" : "disabled"}>Place order →</button>`
             : parcel
@@ -10787,15 +10846,25 @@ function openTakeOrder(table, rerender, opts = {}) {
     const n = Math.max(1, parseInt((state.data.settings || {}).table_count, 10) || 12);
     const tiles = [];
     for (let i = 1; i <= n; i++) {
-      const busy = summaryTableOpen(i);
-      tiles.push(`<button class="qo-dest-t${busy ? " busy" : ""}" data-qodest="${i}"><b>${esc(tableLabel(i))}</b><small>${busy ? "joins bill" : "free"}</small></button>`);
+      // A JOINED TABLE IS NOT A FREE ONE (T18 sweep, 2026-08-16). summaryTableOpen() reads the
+      // tile state, and a merged CHILD's own tile says "free" because its party lives on the
+      // parent — the same lie the shift picker already guards against (mig 264) and the floor tile
+      // already writes its own state for. So this grid offered T7 as "free" while T7 was joined to
+      // T6, and the order then landed on T6's bill: the right bill, but not the one the person was
+      // told they were opening. It names the bill it will join instead.
+      const par = mergeParentOf(String(i));
+      const busy = summaryTableOpen(i) || !!par;
+      const mark = par ? `joins ${esc(tableLabel(par))}` : busy ? "joins bill" : "free";
+      tiles.push(`<button class="qo-dest-t${busy ? " busy" : ""}" data-qodest="${i}"><b>${esc(tableLabel(i))}</b><small>${mark}</small></button>`);
     }
     // EACH destination re-checks its OWN permission here (owner, 2026-08-02). QO/P is one
     // door onto two features, so a manager given only one of them must be offered only that
     // one: parcel-only staff get the Parcel bar with no table grid, dine-in-only staff get
-    // the tables with no Parcel bar. Checked in JS rather than left to the x-ray observer
-    // because this picker lives on document.body — outside the panel the observer watches —
-    // so the tint/hide pass never reaches it.
+    // the tables with no Parcel bar. Checked in JS rather than left to the x-ray observer —
+    // NOT because the observer can't see this picker (it can: applyHierarchyView queries
+    // document-wide and observes document.body with subtree, corrected T18 2026-08-16), but
+    // because these two destinations carry no XRAY_CONTROLS selector of their own, and a
+    // destination that would be REFUSED must not be offered at all rather than shown greyed.
     // TWO gates per destination, and BOTH must pass (mig 258):
     //   · the admin's sub-switch under QO/P in Access — "may this screen send there at all";
     //   · the underlying permission — "may this person do that anywhere".
@@ -10858,7 +10927,15 @@ function openTakeOrder(table, rerender, opts = {}) {
       // Pay-on-pickup takes no money here, so it keeps the plain confirm.
       let payMethod = null;
       if (payNow) {
-        const picked = await openPaymentMethodModal(Math.max(0, cartSub() - discOf()), "Take payment for this parcel", { methodOnly: true, crm: false });
+        // THE SHEET ASKS FOR WHAT THE PAPER WILL SAY (T18 sweep, 2026-08-16). This handed the sheet
+        // `cartSub() - discOf()` — the PRE-TAX subtotal — while the /parcel route stores, and
+        // printParcelReceipt prints, `splitBill(...).total` = subtotal − discount + tax. So the
+        // counter was told to collect ₹250 on a parcel whose receipt and whose recorded sale both
+        // said ₹263, and the till came up short by the tax on every counter-paid parcel. It is the
+        // THIRD home of one fault: the on-screen quote (2026-08-05) and the stored total
+        // (2026-08-02) were each moved onto the real total and this one was left behind. One
+        // function answers now — estTotalNum() — so they cannot drift again.
+        const picked = await openPaymentMethodModal(Math.max(0, estTotalNum()), "Take payment for this parcel", { methodOnly: true, crm: false });
         if (!picked || picked.special) return;   // cancelled — nothing is sent
         payMethod = picked.method;
       } else if (!quick && !(await confirmDialog("Send this parcel to the kitchen (pay on pickup)?", "Send"))) return;
@@ -13461,7 +13538,10 @@ function bindPlatform() {
     const o = (state.data.platform || []).find((x) => String(x.id) === String(id));
     if (!o) { toast("That order is no longer on the board", "err"); return; }
     b.disabled = true;
-    try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method }); }
+    // The discount rides along here too — same reason as the floor tile's Print (T18, 2026-08-16):
+    // the row carries it (payload->discount, aliased by the Platform read) and a bill printed
+    // without it charges the customer more than the record says they paid.
+    try { printParcelReceipt({ kot: o.kot_no, phone: o.customer_phone, bill_no: o.bill_no, invoice_no: o.invoice_no, invoice_at: o.invoice_at, created_at: o.created_at, items: Array.isArray(o.items) ? o.items : [], total: o.total, customer: o.customer_name, paid: !!o.paid, method: o.payment_method, discount: o.discount ?? (o.payload || {}).discount, discount_note: o.discount_note ?? (o.payload || {}).discount_note ?? null }); }
     catch { toast("Couldn't open the print window", "err"); b.disabled = false; return; }
     try { await api("POST", `/platform/${id}/printed`, {}); toast("Bill printed ✓", "ok"); await loadPlatform(); }
     catch (err) { b.disabled = false; toast("Printed, but couldn't record it: " + ((err && err.message) || err), "err"); }
