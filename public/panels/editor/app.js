@@ -11,6 +11,39 @@ const LANGS = [
   ["en", "English"], ["de", "German"], ["fr", "French"],
   ["ar", "Arabic"], ["hi", "Hindi"], ["ko", "Korean"],
 ];
+
+// WHICH OF THOSE SIX THIS RESTAURANT ACTUALLY USES (owner, 2026-08-15).
+// LANGS is the catalogue of what the product CAN do; a restaurant chooses its own subset in
+// Access & permissions → Menu → Format (settings.menu_languages), and the guest menu already
+// honours it — its language picker only appears when there is more than one. The editor did not:
+// it drew all six name boxes for every restaurant, so a shop that is English-only (Aangan, and
+// every restaurant created since) got six boxes, five of them permanently blank, and had to scroll
+// past them on every category and every tag. His words: "if there is dollar or other currency are
+// listed in the menu, you can add a different price for different thing. But if this is the thing,
+// then you don't need to add that … make that thing like all sync."
+//
+// English is always kept, even if somehow absent from the list: it is the fallback every other
+// language falls back TO, so a form without it could not be filled in at all.
+function enabledLangs() {
+  const raw = (state.data && state.data.settings ? state.data.settings.menu_languages : null);
+  const want = Array.isArray(raw) ? raw.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim()) : [];
+  const set = new Set(want.length ? want : ["en"]);
+  set.add("en");
+  const list = LANGS.filter(([c]) => set.has(c));
+  return list.length ? list : LANGS.filter(([c]) => c === "en");
+}
+// The card's own heading + hint, which only make sense when there IS more than one box.
+function nameCardHead() {
+  const n = enabledLangs().length;
+  return n > 1
+    ? `<h3>Name — one box per language</h3>`
+    : `<h3>Name</h3>`;
+}
+function nameCardHint() {
+  return enabledLangs().length > 1
+    ? `<span class="hint">English is the fallback if a language is left empty.</span>`
+    : "";
+}
 // keep in sync with lib/allergens.ts
 const ALLERGENS = [
   { slug: "gluten", label: "🌾 Gluten" },
@@ -1420,11 +1453,11 @@ function formCategories(c) {
     </div>
     <span class="hint">Icon names: fontawesome.com (free solid). Type just the class, e.g. fa-pizza-slice.</span>
   </div>
-  <div class="card"><h3>Name — one box per language</h3>
+  <div class="card">${nameCardHead()}
     <div class="grid cols-2">
-      ${LANGS.map(([code, label]) => tf(label, `name.${code}`, (c.name || {})[code])).join("")}
+      ${enabledLangs().map(([code, label]) => tf(label, `name.${code}`, (c.name || {})[code])).join("")}
     </div>
-    <span class="hint">English is the fallback if a language is left empty.</span>
+    ${nameCardHint()}
   </div>`;
 }
 
@@ -1444,10 +1477,11 @@ function formFilters(f) {
         </div></div>
     </div>
   </div>
-  <div class="card"><h3>Name — one box per language</h3>
+  <div class="card">${nameCardHead()}
     <div class="grid cols-2">
-      ${LANGS.map(([code, label]) => tf(label, `name.${code}`, (f.name || {})[code])).join("")}
+      ${enabledLangs().map(([code, label]) => tf(label, `name.${code}`, (f.name || {})[code])).join("")}
     </div>
+    ${nameCardHint()}
   </div>
   ${filterMembersHtml(f)}`;
 }
