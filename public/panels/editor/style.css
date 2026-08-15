@@ -229,7 +229,17 @@ body.nav-compact .tab {
    the browsing state changes — the editing state is untouched. */
 .layout.list-wide { grid-template-columns: 1fr; }
 .layout.list-wide > .editor { display: none; }
-.layout.list-wide > .sidebar { border-right: 0; }
+.layout.list-wide > .sidebar { border-right: 0;
+  /* A 1fr GRID TRACK IS NOT ALLOWED TO BE INFLATED BY ITS CONTENT (regression fixed 2026-08-15,
+     the same day browse-wide shipped). `1fr` will not shrink below the item's MIN-CONTENT, and the
+     sidebar holds a nowrap horizontal chip strip — one chip per category. On a 22-category menu
+     that strip's min-content is 2650px, so the whole column blew past the 1280px window, and with
+     it the Dishes / Categories / Tags buttons above (three `flex: 1` children of the same column):
+     measured Categories at x=889 and Tags at x=1767, both OFF SCREEN and unreachable. min-width:0
+     lets the column hold the window and the chip strip scroll sideways, which is what it was
+     written to do — it has its own overflow. Caught on Aangan, which has 22 categories; French
+     House has 9 and fitted, which is why it looked fine when it shipped. */
+  min-width: 0; }
 .layout.list-wide .sidebar-resizer { display: none; }
 /* The list itself becomes a responsive grid instead of one tall thin column. auto-fill +
    minmax keeps rows a comfortable reading width on any screen and collapses to a single
@@ -238,6 +248,15 @@ body.nav-compact .tab {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 6px; align-content: start; padding-inline: 4px;
 }
+/* A GRID TRACK MUST NEVER BE WIDENED BY ITS CONTENT (regression fixed 2026-08-15, same day it
+   shipped). `1fr` will not shrink a track below its item's min-content, so one unbreakable string
+   — a UUID slug on an imported menu — stretched the whole list, and with it the full-width sidebar
+   that holds it: measured 2637px against a 1280px window. Everything above the list is laid out in
+   that same sidebar, so the Dishes / Categories / Tags strip (three `flex: 1` buttons) stretched
+   with it and put Categories at x=889 and Tags at x=1767 — OFF SCREEN and unreachable. min-width:0
+   lets the track hold its 300px floor and the row ellipsize inside it, which is what the row was
+   always meant to do. */
+.layout.list-wide #list > * { min-width: 0; }
 .sidebar { position: relative; border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
 .sidebar-resizer { position: absolute; top: 0; right: -3px; width: 7px; height: 100%; cursor: col-resize; z-index: 6; transition: background .15s; }
 .sidebar-resizer:hover { background: color-mix(in srgb, var(--gold) 45%, transparent); }
@@ -351,7 +370,12 @@ body.nav-compact .tab {
 }
 .list-item .meta { min-width: 0; }
 .list-item .meta b { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.list-item .meta small { color: var(--muted); font-size: 12px; }
+/* ELLIPSIS, like the name above it. The sub-line holds the slug — and on a restaurant whose
+   dishes were imported with UUID slugs that is a 36-character unbreakable string. `b` already
+   ellipsized; `small` did not, so it forced the row to its min-content width. Harmless while the
+   sidebar was a fixed 320px (it just clipped), but it became visible the moment the browse-wide
+   list made the column elastic — see the note on .layout.list-wide #list. (2026-08-15) */
+.list-item .meta small { color: var(--muted); font-size: 12px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .list-item.hidden-row { opacity: .45; }
 .badge-off { font-size: 10px; background: var(--line); color: var(--muted); padding: 1px 6px; border-radius: 6px; margin-left: 6px; }
 /* Dishes multi-select (bulk edit) */
