@@ -586,7 +586,11 @@ export default function OwnerDashboard() {
   // Sidebar "My restaurants" rows open a restaurant from any page (event / ?focus=).
   useEffect(() => {
     const focus = new URLSearchParams(window.location.search).get("focus");
-    if (focus) { setView({ level: "restaurant", rid: focus }); drillRestored.current = true; }
+    // focus=all is an explicit "show me everything" from the top-bar switcher on another page.
+    // It must BEAT the saved drill — without it, "All restaurants" landed here and the restore
+    // below quietly put you back inside the last restaurant you had opened.
+    if (focus === "all") { setView({ level: "home" }); drillRestored.current = true; }
+    else if (focus) { setView({ level: "restaurant", rid: focus }); drillRestored.current = true; }
     else {
       try {
         const saved = JSON.parse(sessionStorage.getItem(drillKey) || "null");

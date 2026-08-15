@@ -52,6 +52,19 @@ export default function OwnerManagerMode({
   // project rule: every screen is a back step, never a whole-site exit.
   useBackClose("owner-mmode-panel", !!rid && many, () => setRid(null));
 
+  // Tell the cockpit bar WHICH restaurant is on the floor, the same way the dashboard and
+  // reports do it (lfh:owner-crumb). Without this the top pill kept saying the restaurant you
+  // ARRIVED as, even after the switcher had swapped the floor underneath it — the name on
+  // screen and the floor on screen disagreed. An empty tail on the launcher / on unmount.
+  useEffect(() => {
+    const name = restaurants.find((r) => r.id === rid)?.name;
+    const emit = (tail: string[]) => {
+      window.dispatchEvent(new CustomEvent("lfh:owner-crumb", { detail: { tail } }));
+    };
+    emit(name ? [name] : []);
+    return () => { emit([]); };
+  }, [rid, restaurants]);
+
   // The top bar's "Switch restaurant" dropdown re-scopes THIS page instead of bouncing out to
   // the owner home — the same event trick Reports uses. That is what let the page's own 47px
   // switch row be deleted: one switcher, in the bar that was already there. "All restaurants"
