@@ -276,14 +276,25 @@ html[data-theme="light"] .age.age-stale { color: #b91c1c; }
 .ticket.plat { border-left: 5px solid var(--line); }
 .ticket.plat.plat-z { border-left-color: #e23744; }
 .ticket.plat.plat-s { border-left-color: #fc8019; }
-.ticket.plat.plat-t { border-left-color: #6f9a6a; }
+/* EVERY CHANNEL GETS ITS OWN EDGE (owner, 2026-08-15). The comment above says the left border
+   exists so "the source is obvious at arm's length" — and that held for the three delivery apps
+   while the two the restaurant creates ITSELF had nothing: a counter PARCEL kept the neutral
+   hairline, i.e. it looked like a dine-in ticket, and a cook could hand it to a waiter for a table
+   while the customer stood at the counter. "Other" had no rule at all. Zomato red and Swiggy
+   orange are the real brand colours and stay untouched; parcel and other are ours, so they get
+   colours that are distinct from those two, from Website's sky, and from this board's own state
+   colours (green ready / amber new / red allergy / gold accent). Website was ALSO inconsistent —
+   sky on both badges but green on the kitchen's border — so both panels now say sky. */
+.ticket.plat.plat-t { border-left-color: #0ea5e9; }   /* Website — matches its badge and the manager */
+.ticket.plat.plat-p { border-left-color: #7c3aed; }   /* Parcel — counter takeaway */
+.ticket.plat.plat-o { border-left-color: #475569; }   /* Other platform — the quiet catch-all */
 .ticket.plat.st-plat-new { box-shadow: 0 0 0 1px rgba(230,180,80,0.28); }
 .src-badge { font-size: 13px; font-weight: 900; color: #fff; padding: 3px 10px; border-radius: 8px; letter-spacing: .04em; }
 .src-badge.z { background: #e23744; }
 .src-badge.s { background: #fc8019; }
 .src-badge.t { background: #0ea5e9; }   /* Website */
-.src-badge.p { background: #6b7280; }   /* Parcel */
-.src-badge.o { background: var(--blue); color: #201500; }
+.src-badge.p { background: #7c3aed; }   /* Parcel — 5.7:1 with the white label */
+.src-badge.o { background: #475569; }   /* Other — 7.6:1 with the white label */
 .plat-cust-line { color: var(--muted); font-size: 13.5px; margin: -2px 0 8px; }
 
 /* ═══════════════════════════════════════════════════════════════════════
