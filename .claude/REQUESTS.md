@@ -1309,16 +1309,21 @@ Owner reviewed all 20 items and chose. Order: 1 → 2 → 6 → 3 → 5 → 4.
       Not changed: `/editor` (deliberate redirect) · "SLIDE →" (already fixed 08-13).
       Withdrawn as MY measurement errors: the "ON" pill (text is `font-size:0`, never visible) and
       the Usage column header (it exists).
-- [ ] **Phase 2 — kitchen**: give PARCEL its own coloured edge (`.plat-p`/`.plat-o` have none), AND
-      go through the live-order DETAIL view and make it right. Owner: "if you want to change the UI,
-      I don't care, but make sure it should look perfectly fine."
+- [x] **Phase 2 — kitchen** (PR #971, live): parcel + "other" got their own channel colours, and the
+      kitchen/manager disagreement over Website (green vs sky) was fixed — five channels, one colour
+      each, both screens. The live-order DETAIL popup was opened in both skins on a real parcel and
+      is already right (inside the viewport, one ✕, no leaks, no cut-off), so it was left alone.
 - [ ] **Phase 6 — housekeeping** (moved early: it REDUCES token cost): record the floor-legend
       decision in REJECTED-IDEAS, and prune token-heavy docs. Owner: "if there are many other things
       which are increasing the token usage, please remove it or change it."
-- [ ] **Phase 3 — currency & language sync**: default is ₹ + English. When a restaurant has only ONE
-      currency/language enabled in Access → Menu, the menu editor must NOT show the extra-price /
-      extra-language fields at all, and the space must close up. When several ARE enabled, show them.
-      Owner: "make that thing like all sync" — asked before, so this one has to land properly.
+- [x] **Phase 3 — language sync** (PR #974, live): the editor's name boxes now follow
+      settings.menu_languages — Aangan (["en"]) gets ONE box headed "Name"; French House
+      (["en","fr","hi"]) gets three. The card closes up on its own (153px → 131px).
+      NO per-currency price field exists to hide (prices are in rupees since mig 043; the picker is
+      a guest-side conversion), so that half already held by construction.
+      ALSO fixed here: a REGRESSION from PR #968 — browse-wide let a 22-category chip strip inflate
+      the column to 2650px, pushing Categories and Tags OFF SCREEN. Caught on Aangan; French House
+      has 9 categories and fitted, which is why it looked fine when it shipped.
 - [ ] **Phase 5 — numbers & guest polish**: short-form big numbers (NEVER on a bill), the dish photo
       on desktop, the role chip borrowing the guest menu's tan.
 - [ ] **Phase 4 — manager panel redesign** (last, needs his eyes): move the manager nav from the TOP
