@@ -8594,6 +8594,11 @@ function floorHtml() {
     } catch (e) { /* the offline layer isn't there → it can only be live */ }
     return `<span class="sub">· live</span>`;
   };
+  // REJECTED (owner, said twice; recorded 2026-08-15 as docs/REJECTED-IDEAS.md R25): adding the
+  // missing colours to this strip. A tile can turn AMBER (new order) or PINK (on the pass) with no
+  // entry here, so the legend explains 3 of the 5 colours — that is deliberate, not an oversight.
+  // The state word is still in every tile's tooltip and in the table's own detail popup. Do not
+  // "complete" this array.
   const LEG = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
   // Purple = merged (owner, 2026-08-01: "the background will turn purple … there should be a purple
   // colour tag also on the top where all the colour thing has been shown"). Only listed while
