@@ -1020,9 +1020,9 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
             "I set 12, why does my phone show 2?" (owner's rule, 2026-08-15). */}
         <p className="hint" style={{ marginTop: 8 }}>
           <b>Touchscreens ignore this number, on purpose.</b> A phone held upright always shows <b>2</b> tables a row
-          and a phone turned sideways always shows <b>4</b>, so the boxes stay big enough to read and tap. A tablet from
-          about 10.5 inches upwards uses your number, as does <b>every computer — even with the window made small</b>.
-          The floor never slides sideways; it only scrolls down.
+          and a phone turned sideways always shows <b>4</b>. A tablet uses your number but never more than <b>6</b> a row,
+          so a finger always has a box big enough to hit. Only a <b>computer</b> draws your number in full — and it does
+          so at any size, <b>even with the window made small</b>. The floor never slides sideways; it only scrolls down.
         </p>
         <p className="hint" style={{ marginTop: 8 }}>
           How many people fit at each table is set per table in <b>Table setting</b> below — that is the number beside
