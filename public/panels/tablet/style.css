@@ -252,8 +252,15 @@ html[data-theme="light"] .tclose { color: #b91c1c; }
    sits in the top row where the seat chip would be (never its own row — that overflowed the
    square and sliced the progress bar), sized in cqw like everything else on the tile. */
 .tmerge { display: inline-block; font-size: 11px; font-weight: 800; color: var(--accent, #f0b232); }
-.tile .tmerge { flex: 0 1 auto; min-width: 0; font-size: clamp(8px, 7.4cqw, 11px); line-height: 1.2;
+.tile .tmerge { flex: 1 1 auto; min-width: 0; font-size: clamp(8px, 7.4cqw, 11px); line-height: 1.2;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #c084fc; }
+/* THE TABLE NUMBER WINS THE ROW (owner, 2026-08-15). On a merged tile the "⇄T11 T12" chip takes
+   the seat count's place beside the number, and BOTH could shrink — so the number, which is the
+   one thing a waiter needs to walk to the right table, was the part that got cut: tables 11-14
+   all rendered as "1.." (T11 sweep). The manager floor never had this because its merge label is
+   a block on its own line. Here the number keeps its natural width (capped so a long custom NAME
+   can still yield) and the merge chip is the one that ellipsizes. */
+.tile.t-merged .tnum { flex: 0 1 auto; min-width: max-content; max-width: 62%; }
 .tile .tmerge i { font-style: normal; }
 /* Light mode: a pale violet on a pale violet tile is nearly invisible — the merged mark has
    to read in BOTH skins (the "check both skins for fixed colours" rule). */
@@ -1103,10 +1110,26 @@ body:has(.detail-pop) #tabletClose { display: none; }
 html[data-theme="light"] { --tag-guest: #3a4150; --tag-vip: #6d28d9; }
 html[data-theme="light"] .tile.tag-guest .t-ribbon { background: linear-gradient(135deg, #3a4150, #0d0f14 52%, #2b313d); color: #eef1f6; border: 1px solid #565d6d; }
 html[data-theme="light"] .tile.tag-vip { box-shadow: 0 0 18px color-mix(in srgb, #6d28d9 40%, transparent); }
+/* ONE MARKER PER TAG, NOT TWO (owner, 2026-08-15). A tagged table carried BOTH the diagonal
+   corner ribbon AND this pill, saying the same three characters ("👑 VIP") twice inside one
+   190px square. The ribbon is the one readable across a room, so it stays and the pill goes.
+   This also fixes a second fault with one change: the pill sat IN THE FLOW, so a tagged tile's
+   number and seat count were pushed 37px down the tile while its untagged neighbours sat at
+   14px — the row of numbers no longer lined up (T11 sweep; the manager floor moved the same
+   tag's content by 1px). Hidden rather than deleted from the markup because the same element
+   is what the tag's LABEL is read from elsewhere. */
+.tile .t-tagbadge { display: none; }
 .t-tagbadge { position: relative; z-index: 1; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start;
   margin: 2px 0; font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 999px;
   background: color-mix(in srgb, var(--tagc) 26%, transparent); color: color-mix(in srgb, var(--tagc) 65%, #fff);
   border: 1px solid color-mix(in srgb, var(--tagc) 55%, transparent); }
-.tile.t-tag > * { position: relative; z-index: 1; }
+/* …EXCEPT THE RIBBON (T11 sweep, 2026-08-15). This rule lifts a tagged tile's children above the
+   ::after tint overlay — but `.tile.t-tag > *` is two classes and beats `.t-ribbon`'s one, so it
+   also overwrote the ribbon's own `position: absolute` with `relative`. The ribbon then re-entered
+   the flow as a 115px-tall first child and pushed everything below it down: a tagged tile's number
+   and seat count sat at 37px where its untagged neighbours sat at 14px, so the row of numbers no
+   longer lined up — on the VIP tables a waiter most needs to find. The ribbon carries its own
+   z-index:2, so excluding it here costs nothing and it goes back to floating in the corner. */
+.tile.t-tag > *:not(.t-ribbon) { position: relative; z-index: 1; }
 
 /* (Parcel left the tablet on 2026-08-03 — its cart styles went with it.) */

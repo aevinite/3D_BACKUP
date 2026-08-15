@@ -4600,7 +4600,14 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px;
   color: var(--text) !important; text-decoration: none; font-size: 13px; font-weight: 500;
   transition: background .15s ease, color .15s ease;
+  /* ONE LINE, ALWAYS (T11 sweep, 2026-08-15). "Inventory & expenses" is the longest label in this
+     menu, and the ACTIVE style's heavier weight tipped it just past the 203px column — so opening
+     that one page wrapped its row from 30px to 46px and slid every item below it (and the whole
+     restaurant list) down 16px, WHILE the pointer was still on it. Measured: every other page
+     keeps all 13 rows at 30px. Nowrap + ellipsis keeps the row height fixed whatever the label. */
+  white-space: nowrap; min-width: 0;
 }
+.owx-navlink .lbl, .owx-navlink span { overflow: hidden; text-overflow: ellipsis; }
 .owx-navlink i { width: 16px; text-align: center; font-size: 13px; color: var(--muted); }
 .owx-navlink:hover { background: var(--muted2); }
 .owx-navlink.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent) !important; font-weight: 600; }

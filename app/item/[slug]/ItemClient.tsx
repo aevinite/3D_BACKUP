@@ -599,8 +599,11 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
       {/* The floating top bar: a back arrow on the left, the heart on the right. */}
       <div className="nav" style={{ position: 'fixed', top: 0, left: 0, width: '100%', background: 'transparent', backdropFilter: 'none', WebkitBackdropFilter: 'none', borderBottom: 'none', zIndex: 51 }}>
         {/* Back to the menu. */}
-        <Link href={`${itemBase}/menu`} className="nav-btn" style={{ textDecoration: 'none' }}>
-          <i className="fas fa-arrow-left"></i>
+        {/* aria-label, because the only thing inside is an icon: a screen reader announced this
+            as just "link", with no name — on the ONE control that returns a guest to the menu,
+            while every other button in this header has a name (T11 sweep, 2026-08-15). */}
+        <Link href={`${itemBase}/menu`} className="nav-btn" aria-label={t.backToMenu || "Back to menu"} title={t.backToMenu || "Back to menu"} style={{ textDecoration: 'none' }}>
+          <i className="fas fa-arrow-left" aria-hidden="true"></i>
         </Link>
         {/* A flexible spacer that pushes the heart to the right edge. */}
         <div style={{ flex: 1 }}></div>

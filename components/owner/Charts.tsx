@@ -393,9 +393,19 @@ function ColumnsChart({ data, onSelect }: { data: RevDatum[]; onSelect?: (id: st
             column it needs room past the column's own right edge; with 8 the final label
             was sliced in half by the SVG's edge on an A35 phone ("₹16.7L" read "₹16.").
             top:24 is the matching room for the tallest column's label. */}
-        <BarChart data={data} margin={{ left: 0, right: 22, top: 24, bottom: 6 }}>
+        {/* left:10 — the names print at −28° with textAnchor="end", so each one extends LEFT and
+            DOWN from its tick. The FIRST column's tick sits just past the y-axis, so the longest
+            name ran off the card: "My Little French House" rendered as "le French House" on the
+            owner's own dashboard, and started off-screen entirely on a phone (T11 sweep). It is
+            the biggest earner, so it is always the first column and always the one that breaks. */}
+        <BarChart data={data} margin={{ left: 10, right: 22, top: 24, bottom: 6 }}>
           <CartesianGrid vertical={false} stroke={GRID} />
-          <XAxis dataKey="name" tick={{ fontSize: 11, fill: AXIS }} interval={0} angle={-28} textAnchor="end" height={74} />
+          {/* Truncate from the END, never the start. An angled label that overflows is cut on its
+              LEFT — which removes the words that identify it ("My Little" → gone) and leaves the
+              generic tail. Bounding the label keeps its horizontal reach inside the plot AND means
+              what survives is the part you recognise. The full name is still on the tooltip. */}
+          <XAxis dataKey="name" tick={{ fontSize: 11, fill: AXIS }} interval={0} angle={-28} textAnchor="end" height={74}
+            tickFormatter={(v: string) => (typeof v === "string" && v.length > 15 ? v.slice(0, 14).trimEnd() + "…" : v)} />
           <YAxis domain={[0, max]} ticks={tk(0, max)} tickFormatter={compact} tick={{ fontSize: 11, fill: AXIS }} width={46} allowDecimals={false} />
           <Tooltip content={<MoneyTip />} cursor={{ fill: "rgba(128,128,128,.08)" }} />
           <Bar dataKey="revenue" name="Revenue" shape={<Column3D uid={uid} />} maxBarSize={72} isAnimationActive={false}
