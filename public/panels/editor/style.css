@@ -1412,8 +1412,21 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
    `orientation` is deliberately NOT used: a 700px-wide window on a laptop is not a phone lying on
    its side, and width is the thing that decides whether four tiles can be read. A phone turned
    sideways is 640–930px wide, which is exactly the middle band. */
-@media (max-width: 599px)  { body:not(.floor-preview) .ftile-grid { --per-row: 2; } }
-@media (min-width: 600px) and (max-width: 1023px) { body:not(.floor-preview) .ftile-grid { --per-row: 4; } }
+/* ── A FINGER GETS THE FIXED COUNTS; A MOUSE GETS HIS NUMBER (owner, 2026-08-16) ──────────────
+   `pointer: coarse` is the browser's own answer to "is the main pointing device a finger?", and it
+   is the FIRST test on purpose: "sometimes in the laptop also the screen is not full, like
+   minimised — so if it is in laptop, I want it to show 12. If it is in touchscreen, it should be
+   shown according to screen size." A half-width window on a 14-inch laptop is still a laptop, and
+   the width-only version this replaced drew it a phone's floor.
+   The second test is the SCREEN, not the window: both edges under 1150px means the long edge is
+   under ~10.5 inches (an iPad mini is 1133, a 10.9-inch iPad is 1180), so a tablet big enough for
+   his number keeps it in either orientation. Then, and only then, the WIDTH picks 2 or 4.
+   Written as two `and`ed maximums rather than `max(width,height)` because a media query has no such
+   function — "neither edge reaches 1150" is the same statement. */
+@media (pointer: coarse) and (max-width: 1149px) and (max-height: 1149px) {
+  @media (max-width: 599px) { body:not(.floor-preview) .ftile-grid { --per-row: 2; } }
+  @media (min-width: 600px) { body:not(.floor-preview) .ftile-grid { --per-row: 4; } }
+}
 /* The faint chair watermark on a free/off table — top-right, subtle, premium. Carries
    the table's seat count (migration 111) alongside the icon, so "free" also answers
    "how many can sit here" without opening the tile. */
