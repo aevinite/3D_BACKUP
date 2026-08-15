@@ -158,6 +158,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 |---|---|---|---|
 | **created a new Postgres function** | `verify:grants` ← a new function is PUBLIC-executable by default | `.env.local` | no |
 | a one-time migration that rewrites existing data | `verify:grants` — and wrap it in `lfh_already_applied('<key>')` or a re-seed applies it twice | `.env.local` | no |
+| **CREATE OR REPLACE of a function that already existed** | `verify:fix-survives` ← it asserts every earlier fix is still in the NEWEST definition. Three rewrites have silently dropped one (203/215 put a flat 5% tax back for 55 migrations; 190 dropped the pay-later day from four reports) | nothing | no |
 | a table storing a guest's phone number | `verify:personal-data` | nothing | no |
 | session / table ownership | `verify:table-ownership`, `verify:two-parties`, `verify:lifecycle`, `verify:closed-session` | `.env.local` | **YES** |
 | realtime breadcrumbs (`lfh_rt_emit`) | `verify:realtime` | `.env.local` | **YES** |

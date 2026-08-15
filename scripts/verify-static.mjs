@@ -77,6 +77,7 @@ const GUARDS = [
   ["verify-server-only-imports.mjs", "no client file reaches a server-only module"],
   ["verify-guest-recovery.mjs", "a diner loses neither their basket nor their waiter call"],
   ["verify-hidden-dishes.mjs", "a dish taken off the menu is really off the menu"],
+  ["verify-fix-survives.mjs", "a rewritten database function has not dropped a fix it already had"],
 ];
 
 // NOT HERE, AND WHY — the admission test is stricter than it first looks.
