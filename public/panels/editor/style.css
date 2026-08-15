@@ -3262,10 +3262,12 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
 .plat-card.z { border-left-color: #e23744; }
 .plat-card.s { border-left-color: #fc8019; }
 .plat-card.t { border-left-color: #0ea5e9; }   /* Website (own site) */
-.plat-card.p { border-left-color: #6b7280; }   /* Parcel (counter) */
+.plat-card.p { border-left-color: #7c3aed; }   /* Parcel (counter) — same edge as the kitchen board */
+.plat-card.o { border-left-color: #475569; }   /* Other platform — was unstyled, so it fell back to the neutral hairline */
 .plat-ch { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .plat-badge { font-size: 11px; font-weight: 800; color: #fff; padding: 3px 9px; border-radius: 7px; letter-spacing: .03em; }
-.plat-badge.z { background: #e23744; } .plat-badge.s { background: #fc8019; } .plat-badge.t { background: #0ea5e9; } .plat-badge.p { background: #6b7280; } .plat-badge.o { background: var(--muted); }
+/* The same five channel colours the kitchen board uses — one channel, one colour, both screens. */
+.plat-badge.z { background: #e23744; } .plat-badge.s { background: #fc8019; } .plat-badge.t { background: #0ea5e9; } .plat-badge.p { background: #7c3aed; } .plat-badge.o { background: #475569; }
 .plat-kot { font-weight: 800; font-size: 14px; }
 .plat-age { margin-left: auto; font-size: 12px; color: var(--muted); font-weight: 600; }
 .plat-cust { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
