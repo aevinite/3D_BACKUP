@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
-  <link rel="stylesheet" href="/panels/editor/style.css?v=718002f1" />
+  <link rel="stylesheet" href="/panels/editor/style.css?v=3a66edcb" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
   <script src="/panels/theme.js?v=e909d1de"></script>
 </head>
@@ -31,29 +31,32 @@
       <!-- Drawer-only header row (hidden on desktop): title + ✕ close. Not a .tab, so
            app.js's querySelectorAll(".tab") loops ignore it. -->
       <div class="tabs-head"><span>Sections</span><button id="navClose" type="button" aria-label="Close menu">✕</button></div>
-      <button class="tab active" data-tab="items">📝 Editor</button>
-      <button class="tab" data-tab="orders">🧾 Bills<span id="ordersBadge" class="tab-badge" hidden></span></button>
-      <button class="tab" data-tab="tables">Tables<span id="tablesBadge" class="tab-badge" hidden></span></button>
-      <button class="tab" data-tab="platform">🛵 Platform<span id="platformBadge" class="tab-badge" hidden></span></button>
+      <!-- DESKTOP RAIL ONLY: collapse to icons / expand to full names. Hidden on phone, where
+           the same nav is already a full-width drawer with labels. -->
+      <button class="tab active" data-tab="items" title="Editor"><i class="tab-ico" aria-hidden="true">📝</i><span class="tab-lbl">Editor</span></button>
+      <button class="tab" data-tab="orders" title="Bills"><i class="tab-ico" aria-hidden="true">🧾</i><span class="tab-lbl">Bills</span><span id="ordersBadge" class="tab-badge" hidden></span></button>
+      <button class="tab" data-tab="tables" title="Tables"><i class="tab-ico" aria-hidden="true">🪑</i><span class="tab-lbl">Tables</span><span id="tablesBadge" class="tab-badge" hidden></span></button>
+      <button class="tab" data-tab="platform" title="Platform"><i class="tab-ico" aria-hidden="true">🛵</i><span class="tab-lbl">Platform</span><span id="platformBadge" class="tab-badge" hidden></span></button>
       <!-- Banquet module (mig 130): admin-entitled per restaurant — unhidden by syncBanquetTab() only when settings.banquet_allowed. -->
-      <button class="tab" data-tab="banquet" hidden>🎪 Banquet</button>
+      <button class="tab" data-tab="banquet" hidden title="Banquet"><i class="tab-ico" aria-hidden="true">🎪</i><span class="tab-lbl">Banquet</span></button>
       <!-- Inventory module (mig 221): admin-entitled per restaurant — unhidden by syncInventoryTab(). -->
-      <button class="tab" data-tab="inventory" hidden>📦 Inventory</button>
+      <button class="tab" data-tab="inventory" hidden title="Inventory"><i class="tab-ico" aria-hidden="true">📦</i><span class="tab-lbl">Inventory</span></button>
       <!-- Every drawer row carries a glyph: on a phone the icon is the fastest thing to aim at,
            and Dashboard + Settings were the only two bare-text rows in the list, which read as
            half-finished beside the other seven (T12 phone sweep, 2026-08-05). -->
-      <button class="tab" data-tab="dash">📊 Dashboard</button>
+      <button class="tab" data-tab="dash" title="Dashboard"><i class="tab-ico" aria-hidden="true">📊</i><span class="tab-lbl">Dashboard</span></button>
       <!-- Guest ratings (mig 140): gated by the view_ratings manager power via XRAY_TABS. -->
       <!-- "Rating review", not "Ratings" (owner, 2026-08-02) — the Access screen row says the
            same. Only the LABEL changed: the tab key, the stored menus key and the view_ratings
            grant all keep their names (renaming a label must never rename a key). -->
-      <button class="tab" data-tab="ratings">⭐ Rating review</button>
+      <button class="tab" data-tab="ratings" title="Rating review"><i class="tab-ico" aria-hidden="true">⭐</i><span class="tab-lbl">Rating review</span></button>
       <!-- "Audit & logs", not "Audit" (owner, 2026-08-02) — one tab holding the removals
            record, the activity log and the customer log. Only the LABEL changed: the tab
            key, the stored menus key and the view_logs grant all keep their names. -->
-      <button class="tab" data-tab="log">🗂 Audit &amp; logs</button>
+      <button class="tab" data-tab="log" title="Audit &amp; logs"><i class="tab-ico" aria-hidden="true">🗂</i><span class="tab-lbl">Audit &amp; logs</span></button>
       
-      <button class="tab" data-tab="general">⚙️ Settings</button>
+      <button class="tab" data-tab="general" title="Settings"><i class="tab-ico" aria-hidden="true">⚙️</i><span class="tab-lbl">Settings</span></button>
+        <button id="railToggle" class="rail-toggle" type="button" aria-label="Expand menu" aria-expanded="false" title="Expand menu"><i class="tab-ico" aria-hidden="true">»</i><span class="tab-lbl">Collapse</span></button>
     </nav>
     <!-- Right-side actions cluster. The shared connbadge.js mounts the 🟢/🟡/🔴 connection
          light as the FIRST child of .top-actions (kitchen/tablet have this wrapper too); without
@@ -169,6 +172,6 @@
   <script src="/panels/auditsort.js?v=3c3f7207"></script>
   <!-- ?v= on app.js too: the /manager iframe otherwise keeps a STALE cached app.js
        across deploys (the original gotcha) — bump whenever app.js changes. -->
-  <script src="/panels/editor/app.js?v=426de4e4"></script>
+  <script src="/panels/editor/app.js?v=3cb399f3"></script>
 </body>
 </html>

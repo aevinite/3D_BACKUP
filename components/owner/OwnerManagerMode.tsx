@@ -114,13 +114,17 @@ export default function OwnerManagerMode({
     <div className="omm-full">
       {many && (
         <div className="omm-bar">
-          <button type="button" className="omm-switchbtn" onClick={() => setRid(null)}>
-            <i className="fas fa-arrow-right-arrow-left" aria-hidden="true" /> Switch restaurant
-          </button>
-          <span className="omm-cur">
+          {/* ONE control, not a button plus a label. The restaurant's name was printed here a
+              THIRD time — the owner bar above it and the panel's own bar below it both already
+              say it — so it is folded into the button, which now reads as "you are in Aangan,
+              tap to change". Owner, 2026-08-15: "there are too much thing" up top. */}
+          <button type="button" className="omm-switchbtn" onClick={() => setRid(null)}
+                  title={`In ${current?.name || "this restaurant"} — switch to another`}>
             <span className="dot" style={{ background: current?.accentColor || "#34d399" }} aria-hidden="true" />
-            {current?.name}
-          </span>
+            <span className="nm">{current?.name}</span>
+            <i className="fas fa-arrow-right-arrow-left" aria-hidden="true" />
+            <span className="sw">Switch</span>
+          </button>
         </div>
       )}
       <div ref={mount} className="omm-mount" />
@@ -138,8 +142,9 @@ export default function OwnerManagerMode({
           background:transparent; border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius:9px; }
         .omm-switchbtn:hover{ background:color-mix(in srgb, var(--accent) 12%, transparent); }
         .omm-switchbtn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
-        .omm-cur{ display:inline-flex; align-items:center; gap:8px; font-size:13px; font-weight:700; color:var(--text); }
-        .omm-cur .dot{ width:9px; height:9px; border-radius:50%; }
+        .omm-switchbtn .dot{ width:9px; height:9px; border-radius:50%; flex:none; }
+        .omm-switchbtn .nm{ font-weight:700; color:var(--text); }
+        .omm-switchbtn .sw{ opacity:.85; }
       `}</style>
     </div>
   );
