@@ -40,7 +40,14 @@ for (const [what, needle] of [
 ]) doc.includes(needle) ? ok(`doc keeps ${what}`) : fail(`doc lost ${what}`, `expected to find: "${needle}"`);
 
 // 2 · parse the table rows: | R1 | idea | decision | code site |
-const rows = [...doc.matchAll(/^\|\s*(R\d+)\s*\|([^|]+)\|([^|]+)\|(.+?)\|\s*$/gm)]
+// ONLY the rows ABOVE "## Reversed". A reversed row is no longer a rejection — the doc's own
+// how-to says to move one there when he changes his mind — and the two checks below cannot hold
+// for it: it records a reversal rather than a NO, and the code it named is often the code that was
+// DELETED, which is exactly why the decision changed. (Found the first time a row was ever moved:
+// R8, 2026-08-15. The Reversed section had said "(none yet)" since the file was written, so this
+// half of the guard had never once run.)
+const active = doc.includes("## Reversed") ? doc.slice(0, doc.indexOf("## Reversed")) : doc;
+const rows = [...active.matchAll(/^\|\s*(R\d+)\s*\|([^|]+)\|([^|]+)\|(.+?)\|\s*$/gm)]
   .map((m) => ({ id: m[1], idea: m[2].trim(), decision: m[3].trim(), sites: m[4].trim() }));
 if (!rows.length) fail("no rejection rows found in the doc's table");
 else ok(`${rows.length} rejection${rows.length === 1 ? "" : "s"} listed (${rows.map((r) => r.id).join(", ")})`);
