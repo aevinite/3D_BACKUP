@@ -12,7 +12,14 @@
 //
 //     a mouse or trackpad (a laptop / desktop)  →  EXACTLY the number set below, at ANY window size
 //     a touchscreen, long edge under ~10.5"     →  2 per row upright, 4 turned sideways   (fixed)
-//     a touchscreen, long edge ~10.5" and over  →  EXACTLY the number set below
+//     a touchscreen, long edge ~10.5" and over  →  the number set below, CAPPED AT 6
+//
+// THE TABLET CAP (owner, 2026-08-05, applied to both panels 2026-08-16): "when it is horizontal at
+// least four to five to six can be shown… IF THERE IS TWELVE, THEN SIX WILL BE SHOWN… it should
+// look properly and able to click properly." 12 → 6, 8 → 6, and a restaurant that chose 4 keeps 4.
+// It lived in the waiter panel alone for eleven days, so the same iPad showed 6 tiles to a waiter
+// and 12 to a manager, and a 10.9-inch iPad held UPRIGHT drew 57px squares with no room for the
+// buttons. Both panels now apply it, from the same sentence, with the same code shape.
 //
 // and NOWHERE does the floor scroll sideways — "there should be only be vertical scroll".
 //
@@ -90,6 +97,9 @@ export const PER_ROW_PHONE_WIDE = 4;     // a TOUCH screen turned sideways
 // using the fixed counts. Not a measurement of glass — see the box above for the devices it
 // separates and how narrow the gap is.
 export const PER_ROW_TOUCH_BIG_PX = 1150;
+// The most tiles a TOUCHSCREEN ever draws, whatever the admin set. His number, in his words:
+// "if there is twelve, then six will be shown". Applied in BOTH panels' floorPerRow().
+export const PER_ROW_TOUCH_MAX = 6;
 
 /** Clamp anything (form input, DB value, URL param) into the allowed range. */
 export function clampPerRow(v: unknown): number {

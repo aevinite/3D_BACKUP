@@ -1207,9 +1207,12 @@ const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 //
 // ⚠️ AND BELOW TABLET WIDTH THE SCREEN BANDS OVERRIDE ALL OF IT (owner, 2026-08-15): a phone draws
 // 2 per row and a phone turned sideways draws 4, in CSS, whatever this function returns. The cap
-// above still decides a TABLET, because it is his separate instruction about this panel's tiles
-// being too small on an iPad ("if there is twelve, then six will be shown") — which is why the
-// waiter floor and the manager floor can legitimately show different counts on the same iPad.
+// above is what decides a TABLET.
+//
+// THE MANAGER FLOOR NOW HAS THE SAME CAP (2026-08-16). It used to be this panel's alone, so the two
+// floors showed different counts on the same iPad — 6 here, 12 there. That was never a decision,
+// just an instruction applied to one panel; the manager's own copy quotes the same sentence of his
+// and mirrors this function line for line.
 const FLOOR_PER_ROW_TOUCH_MAX = 6;
 function isTouchDevice() {
   try { return window.matchMedia("(pointer: coarse)").matches; } catch { return false; }

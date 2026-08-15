@@ -6,7 +6,7 @@
 //
 //     a mouse / trackpad (a laptop, at ANY window size) → the admin's number, exactly
 //     a touchscreen under ~10.5" (long edge < 1150px)   → 2 upright, 4 turned      fixed
-//     a touchscreen ~10.5" and over                     → the admin's number
+//     a touchscreen ~10.5" and over                     → the admin's number, CAPPED AT 6
 //     and NOWHERE does the floor scroll sideways — "there should be only be vertical scroll"
 //
 // What this checks, and why each one can rot on its own:
@@ -46,6 +46,23 @@ check("lib/floorLayout.ts states the two fixed counts", /PER_ROW_PHONE\s*=\s*2/.
 check("…and the long edge where a touchscreen gets the admin's number", /PER_ROW_TOUCH_BIG_PX\s*=\s*1150/.test(lib));
 check("it explains why the POINTER decides before the width", /pointer: coarse/.test(lib) && /minimised/.test(lib),
   "a half-width laptop window is still a laptop — losing that is how this rule broke once already");
+check("…and the tablet cap, in his words", /PER_ROW_TOUCH_MAX\s*=\s*6/.test(lib) && /THEN SIX WILL BE SHOWN/.test(lib));
+
+// ── 1b · BOTH panels cap a touchscreen at 6 ────────────────────────────────────────────────
+// This lived in the waiter panel alone for eleven days, so the same iPad showed a waiter 6 tiles
+// and a manager 12 — and upright, the manager's came out at 57px squares with no room for the
+// buttons. One instruction, one behaviour, both floors.
+for (const [name, src] of [["manager", mgrJs], ["waiter tablet", tabJs]]) {
+  check(`${name}: a touchscreen is capped at 6 per row`, /FLOOR_PER_ROW_TOUCH_MAX\s*=\s*6/.test(src)
+    && /Math\.min\([^)]*FLOOR_PER_ROW_TOUCH_MAX\)/.test(src),
+    "his rule for a tablet: \"if there is twelve, then six will be shown\"");
+  check(`${name}: it asks the same question the CSS asks`, /matchMedia\("\(pointer: coarse\)"\)/.test(src),
+    "if the JS and the CSS disagreed about what a touchscreen is, the count and the layout would drift");
+}
+check("the manager does NOT cap the admin's layout preview", /if \(FLOOR_PREVIEW\) return v;/.test(mgrJs),
+  "that iframe exists to show the PC floor the admin is actually setting");
+check("the CACHED first-paint number is his, not the capped one", /The number CACHED is his, uncapped/.test(mgrJs),
+  "caching the capped value on a tablet would teach that browser to draw 6 everywhere");
 check("it records that this REVERSED the old rule", /REVERSAL/.test(lib),
   "without the history, the previous law's own comments read as the current one");
 
@@ -94,6 +111,8 @@ check("the editor keeps its x-hidden backstop", /\.editor:has\(\.floor-wrap\)\s*
 
 // ── 5 · the admin screen no longer promises the number on every device ──────────────────────
 const adminCard = read("components/admin/RestaurantSettings.tsx");
+check("the admin card names the tablet cap", /never more than <b>6<\/b> a row/.test(adminCard),
+  "otherwise the next question is \"I set 12, why does my iPad show 6?\"");
 check("the admin card says touchscreens ignore the number", /Touchscreens ignore this number/.test(adminCard),
   "otherwise the first question is \u201cI set 12, why does my phone show 2?\u201d");
 check("…and no longer claims it applies to any screen", !/on this screen and on\s*\n?\s*any other/.test(adminCard));
@@ -101,6 +120,6 @@ check("…and promises a computer keeps it even in a small window", /even with t
   "that promise IS the rule he asked for on 2026-08-16");
 
 console.log(pass
-  ? "\n✅ PASS — a laptop always gets his number, a touchscreen gets 2/4 under ~10.5in, nothing scrolls sideways"
+  ? "\n✅ PASS — a laptop gets his number at any size, a touchscreen gets 2/4/6, nothing scrolls sideways"
   : "\n❌ FAIL — the floor is not drawing the number the owner's rule says it should");
 process.exit(pass ? 0 : 1);

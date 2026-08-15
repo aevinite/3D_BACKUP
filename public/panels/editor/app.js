@@ -8535,6 +8535,30 @@ function customFloorHtml(plan, n) {
 // Bounds and the band constants both live in lib/floorLayout.ts — if these change, change them
 // there too, and keep the database CHECK constraint no narrower than the max.
 const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
+// ── A FINGER NEEDS A BIGGER SQUARE THAN A MOUSE DOES (owner, 2026-08-05, applied here 2026-08-16)
+// "When it is horizontal at least four to five to six can be shown… IF THERE IS TWELVE, THEN SIX
+// WILL BE SHOWN… it should look properly and able to click properly."
+//
+// He said that about the WAITER panel and it was built there and only there, so the two floors
+// disagreed on the same iPad — 6 tiles on the waiter's, 12 on the manager's — and a 10.9-inch iPad
+// held UPRIGHT drew 12 across 820px, which is 57px squares: the number and the colour fit, the
+// buttons do not, and a long table name truncates. That was never a decision anybody made; it was
+// one instruction applied to one panel. Same sentence, same cap, same code shape as
+// public/panels/tablet/app.js — so a manager and a waiter looking at the same tablet see the same
+// floor.
+//
+// 12 becomes 6, 8 becomes 6, and a restaurant that deliberately chose a small number keeps it
+// (4 stays 4). A PC is untouched: a mouse reports `pointer: fine`, so `coarse` is what tells the
+// two apart — the same question the stylesheet's bands ask, so the JS and the CSS can never
+// disagree about what a touchscreen is.
+//
+// It does NOT apply in the admin's layout PREVIEW: that iframe exists to show what the PC floor
+// will look like, so capping it there would preview a screen the admin is not setting.
+// Below tablet size the CSS bands are tighter anyway (2 upright, 4 turned) and simply win.
+const FLOOR_PER_ROW_TOUCH_MAX = 6;
+function isTouchDevice() {
+  try { return window.matchMedia("(pointer: coarse)").matches; } catch { return false; }
+}
 function floorPerRow() {
   // The admin preview slider wins while it's driving (never persisted — see state).
   const raw = state.floorPerRowPreview != null
@@ -8546,14 +8570,23 @@ function floorPerRow() {
     const v = clamp(n);
     // Remember the REAL number (never the preview slider's temporary one) so the next open paints
     // the floor at the right width straight away instead of re-flowing once /all lands.
+    // The number CACHED is his, uncapped — the cap is a property of the DEVICE, not of the
+    // restaurant, so a manager who opens the floor on a tablet and later on a laptop must not have
+    // taught the laptop to draw 6.
     if (state.floorPerRowPreview == null) { const k = perRowKey(); if (k) { try { localStorage.setItem(k, String(v)); } catch {} } }
-    return v;
+    return touchCap(v);
   }
   // Settings haven't arrived yet — use what this restaurant drew last time, not the generic
   // default. Falls back to the default only on a device that has never opened this floor.
   const k = perRowKey();
   const cached = k ? parseInt(localStorage.getItem(k), 10) : NaN;
-  return Number.isFinite(cached) ? clamp(cached) : FLOOR_PER_ROW_DEFAULT;
+  return touchCap(Number.isFinite(cached) ? clamp(cached) : FLOOR_PER_ROW_DEFAULT);
+}
+// The cap, in one place, applied to BOTH the settings answer and the cached-first-paint one — a
+// first paint that drew 12 and then re-flowed to 6 is exactly the flicker the cache exists to stop.
+function touchCap(v) {
+  if (FLOOR_PREVIEW) return v;                       // the admin is previewing the PC floor
+  return isTouchDevice() ? Math.min(v, FLOOR_PER_ROW_TOUCH_MAX) : v;
 }
 
 // The admin layout-preview slider talks to this panel here. Only listened for in preview
