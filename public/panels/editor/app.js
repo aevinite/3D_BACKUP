@@ -14245,11 +14245,59 @@ window.addEventListener("resize", () => {
 // This REPLACES the fixed <=1279px drawer breakpoint from PR #527 and keeps its promise:
 // a touch device (Aangan's tablet) skips the tight stage entirely and goes to the drawer,
 // because shrinking the pills would leave fiddly tap targets instead of 44px rows.
+// ── THE DESKTOP RAIL (owner, 2026-08-15) ────────────────────────────────────────────────────
+// "instead from top on the left side, just like the owner panel … it will just show the icon, and
+// if you click over that icon it will expand itself and you can see the full name".
+//
+// On a wide screen the sections move OUT of the top bar and become a vertical rail down the left,
+// which fixes two things at once:
+//   · the top stops eating the screen — measured 213px of chrome above the floor in owner→manager
+//     mode ("half of the screen has been covered by the top thing");
+//   · a vertical list NEVER runs out of room, so the ☰-because-they-don't-fit case disappears. A
+//     restaurant with one extra module (Green Bowl, 10 sections) used to lose its whole visible
+//     nav to a hamburger while a 9-section one kept it.
+// Collapsed it is icons only; the label is still in the DOM for screen readers and the button
+// carries a title, because an icon with no name is a guess (the UI/UX rule this follows). The
+// expanded/collapsed choice is remembered per device.
+const RAIL_MIN_W = 1024;   // below this the existing phone/tablet drawer stays exactly as it was
+const RAIL_KEY = "lfh_nav_rail_open";
+function railOpen() { try { return localStorage.getItem(RAIL_KEY) === "1"; } catch (e) { return false; } }
+function syncNavRail() {
+  const on = window.innerWidth >= RAIL_MIN_W;
+  document.body.classList.toggle("nav-rail", on);
+  const open = on && railOpen();
+  document.body.classList.toggle("nav-rail-open", open);
+  const btn = document.getElementById("railToggle");
+  if (btn) {
+    btn.setAttribute("aria-expanded", open ? "true" : "false");
+    const word = open ? "Collapse menu" : "Expand menu";
+    btn.setAttribute("aria-label", word);
+    btn.setAttribute("title", word);
+    const lbl = btn.querySelector(".tab-lbl"); if (lbl) lbl.textContent = "Collapse";
+    const ico = btn.querySelector(".tab-ico"); if (ico) ico.textContent = open ? "«" : "»";
+    if (!btn.__railWired) {
+      btn.__railWired = true;
+      btn.addEventListener("click", () => {
+        try { localStorage.setItem(RAIL_KEY, railOpen() ? "0" : "1"); } catch (e) {}
+        syncNavRail();
+      });
+    }
+  }
+}
+window.addEventListener("resize", syncNavRail);
+
 let navFitBusy = false;
 function syncNavFit() {
   const bar = document.querySelector(".topbar");
   const tabs = document.getElementById("mainTabs");
   if (!bar || !tabs || navFitBusy) return;
+  // The rail owns the nav on a wide screen: it cannot overflow, so there is nothing to fit and
+  // neither the tight pills nor the drawer must be left switched on from a narrower moment.
+  syncNavRail();
+  if (document.body.classList.contains("nav-rail")) {
+    document.body.classList.remove("nav-tight", "nav-compact");
+    return;
+  }
   navFitBusy = true;
   try {
     const body = document.body;
@@ -15575,7 +15623,17 @@ function applyMenuPartLocks(msub, higher) {
 function xraySetHidden(el, hide) { if (el.hidden !== hide) el.hidden = hide; }
 function xraySetTint(el, on, title) {
   if (el.classList.contains("xray-off") !== on) el.classList.toggle("xray-off", on);
-  const want = on ? title : null;
+  // Tint OFF is not the same as "this button needs no name". In the left rail (nav-rail) the
+  // button is an ICON and its name lives ONLY in the tooltip, so clearing it outright left
+  // Dashboard, Rating review, Audit & logs and Settings as four unlabelled pictures — measured
+  // 2026-08-15, they were the exact four tabs XRAY_TABS gates. Fall back to the section's own
+  // label instead of nothing.
+  const base = (el.querySelector(".tab-lbl")?.textContent || "").trim();
+  const want = (on ? title : base) || null;
+  // Write into whichever slot the panel's tooltip layer is using for this button: it migrates
+  // title → data-tip on first hover so the native bubble never doubles up, and putting the
+  // text back on `title` after that migration would show BOTH.
+  if (el.dataset.tip) { if (want && el.dataset.tip !== want) el.dataset.tip = want; if (el.hasAttribute("title")) el.removeAttribute("title"); return; }
   if ((el.getAttribute("title") || null) !== want) { if (want) el.setAttribute("title", want); else el.removeAttribute("title"); }
 }
 
@@ -15604,10 +15662,19 @@ function applyMenuReadonly() {
   const ro = !menuEditAllowed();
   // Rename the top Editor tab (📝 Editor ⇄ 👁 View menu). The items tab is plain text
   // (no child element), so setting textContent is safe; skip if a badge is ever added.
+  // The tab is now <i class="tab-ico"> + <span class="tab-lbl"> so the desktop RAIL can show the
+  // icon alone; the old code wrote textContent on the button and bailed out if it had any child
+  // element — which after that split would have silently stopped the 📝 Editor ⇄ 👁 View menu
+  // flip from ever happening. Write the two parts instead, and keep the title (the rail's
+  // tooltip when it is collapsed) in step with them.
   const tab = document.querySelector('.tabs .tab[data-tab="items"]');
-  if (tab && !tab.firstElementChild) {
-    const want = ro ? "👁 View menu" : "📝 Editor";
-    if (tab.textContent !== want) tab.textContent = want;
+  if (tab) {
+    const ico = tab.querySelector(".tab-ico"), lbl = tab.querySelector(".tab-lbl");
+    const wantIco = ro ? "👁" : "📝", wantLbl = ro ? "View menu" : "Editor";
+    if (ico && ico.textContent !== wantIco) ico.textContent = wantIco;
+    if (lbl && lbl.textContent !== wantLbl) lbl.textContent = wantLbl;
+    if (tab.getAttribute("title") !== wantLbl) tab.setAttribute("title", wantLbl);
+    if (!ico && !lbl && tab.textContent !== `${wantIco} ${wantLbl}`) tab.textContent = `${wantIco} ${wantLbl}`;
   }
   const inMenu = state.tab === "items" || state.tab === "categories" || state.tab === "filters";
   const active = ro && inMenu;

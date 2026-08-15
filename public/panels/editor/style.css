@@ -220,6 +220,63 @@ body.nav-compact .tab {
 /* Tables tab: no left sidebar — collapse the first column so the floor fills the width. */
 .layout.no-sidebar { grid-template-columns: 1fr; }
 .layout.no-sidebar > .sidebar { display: none; }
+
+/* ══ THE DESKTOP RAIL — sections down the LEFT, not across the top ══════════════════════════
+   Owner, 2026-08-15. Applied only when app.js sets body.nav-rail (>=1024px); every narrower
+   width keeps the drawer it already had, untouched. Collapsed shows icons with a tooltip and
+   the real label still in the DOM for screen readers; the toggle expands it to full names and
+   the choice is remembered. See syncNavRail() for the why. */
+body.nav-rail { --rail-w: 62px; }
+body.nav-rail.nav-rail-open { --rail-w: 208px; }
+body.nav-rail .tabs {
+  /* The bar is NOT at y=0: the injected admin/owner "view" ribbon sits above it and publishes
+     its height as --ribbon-h (see syncRibbonH). Starting the rail at a flat 50px slid it UP
+     over the bar and sliced the left edge off the restaurant's name. Same story at the bottom
+     with the offline bar's --offbar-h. */
+  position: fixed; left: 0; width: var(--rail-w); z-index: 30;
+  top: calc(var(--ribbon-h, 0px) + 50px + var(--sat)); bottom: var(--offbar-h, 0px);
+  display: flex; flex-direction: column; align-items: stretch; gap: 4px;
+  padding: 10px 8px; margin: 0; overflow-y: auto; overflow-x: hidden;
+  background: var(--panel-2); border-right: 1px solid var(--line);
+  transition: width .16s ease;
+}
+body.nav-rail .tab {
+  display: flex; align-items: center; gap: 12px;
+  border-radius: 10px; padding: 0 12px; min-height: 44px;   /* a real touch target */
+  font-size: 14px; white-space: nowrap; overflow: hidden; flex: none;
+}
+body.nav-rail .tab-ico { flex: none; width: 22px; text-align: center; font-size: 16px; font-style: normal; }
+/* Collapsed: the label is CLIPPED, never display:none — a screen reader must still read it,
+   and the button keeps its title so a mouse gets the name too. */
+body.nav-rail .tab-lbl { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+body.nav-rail:not(.nav-rail-open) .tab-lbl,
+body.nav-rail:not(.nav-rail-open) .rail-toggle .tab-lbl {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+body.nav-rail:not(.nav-rail-open) .tab { justify-content: center; padding: 0 8px; }
+body.nav-rail .tab-badge { margin-left: auto; }
+body.nav-rail:not(.nav-rail-open) .tab-badge { position: absolute; margin: 0; transform: translate(12px, -12px); }
+body.nav-rail .rail-toggle {
+  display: flex; align-items: center; gap: 12px; margin-top: auto;
+  background: transparent; border: 1px solid var(--line); color: var(--muted);
+  border-radius: 10px; padding: 0 12px; min-height: 40px; cursor: pointer; font: inherit; font-size: 13px;
+}
+body.nav-rail:not(.nav-rail-open) .rail-toggle { justify-content: center; padding: 0 8px; }
+body.nav-rail .rail-toggle:hover { border-color: var(--gold); color: var(--text); }
+/* The content moves over to sit beside the rail. */
+body.nav-rail .layout { margin-left: var(--rail-w); transition: margin-left .16s ease; }
+/* The bar keeps only the brand and the actions, so it stops competing with the rail. */
+/* With the sections gone from it, the bar only carries the name and the live-status pill, so it
+   can be shorter — the owner's complaint was that chrome ate the screen. Both the bar's own
+   height and .layout's matching calc() have to move together or the floor overflows. */
+body.nav-rail .topbar { gap: 12px; height: calc(50px + var(--sat)); }
+body.nav-rail .layout { height: calc(100vh - 50px - var(--ribbon-h, 0px) - var(--offbar-h, 0px)); }
+body.nav-rail .top-actions { margin-left: auto; }
+@media (prefers-reduced-motion: reduce) {
+  body.nav-rail .tabs, body.nav-rail .layout { transition: none; }
+}
+.rail-toggle { display: none; }   /* the rail's own control never shows in the drawer or the bar */
 /* BROWSE WIDE, THEN SPLIT (owner, 2026-08-14: "when you choose any one dish it will go side like
    right now, till then it show full screen"). Before anything is picked there is nothing to show
    on the right, so the old layout spent a 320px strip on the list and left ~735px of a 1280px
