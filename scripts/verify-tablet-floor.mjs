@@ -42,7 +42,14 @@ const bad = (m) => { failed++; console.log("  FAIL " + m); };
 const expect = (c, m) => (c ? ok(m) : bad(m));
 
 const browser = await chromium.launch();
-const ctx = await browser.newContext({ viewport: { width: 1194, height: 834 } });
+// hasTouch, because THIS PANEL IS A TOUCH PANEL and since 2026-08-16 the floor's tables-per-row
+// rule asks the browser whether the pointer is a finger: a mouse gets the admin's number at any
+// window size, a touchscreen gets 2 upright / 4 turned below ~10.5in. Resizing a MOUSE browser to
+// 360px is a laptop window, not a phone — so without this every "iPhone 390px" / "A35 360px" check
+// below measured a 12-per-row laptop floor squeezed into a phone's width (22px tiles) and reported
+// it as the phone being broken. The pass at the bottom of this file already emulated touch for
+// exactly this reason; this brings the device walk in line with it.
+const ctx = await browser.newContext({ viewport: { width: 1194, height: 834 }, hasTouch: true });
 await loginAs(ctx, "tablet", BASE);
 const page = await ctx.newPage();
 const errors = [];
@@ -600,8 +607,21 @@ if (READ_ONLY) {
     if (attempt === 1) expect((await F.textContent(".om.lite .om-head h2")).includes("Quick order"), "⚡ Quick order opens the dish browser with NO table chosen yet");
     await F.click(".dish:not(.out)");
     await page.waitForTimeout(400);
-    await F.click("#omViewBtn");
-    await F.waitForSelector(".om.lite.vieworder", { timeout: 8000 });
+    // TWO LAYOUTS, AND ONLY A TOUCH DEVICE SEES THE SECOND ONE. On a touchscreen held sideways the
+    // ⚡ Quick order screen is TWO PANES — dishes on the left, the order on the right — so the
+    // bottom "View order" pill has nothing to do and the stylesheet hides it
+    // (`@media (orientation: landscape) and (pointer: coarse)`, an approved design). There is no
+    // separate review step there: Send is already on screen. This walk only started running in
+    // touch mode on 2026-08-16, which is why it had never met that layout and clicked a button that
+    // was `display: none`, waiting 30s for it.
+    const hasPill = await F.evaluate(() => { const b = document.querySelector("#omViewBtn"); return !!b && !!b.offsetParent; });
+    if (hasPill) {
+      await F.click("#omViewBtn");
+      await F.waitForSelector(".om.lite.vieworder", { timeout: 8000 });
+      if (attempt === 1) ok("the bottom View-order pill opens the review step (single-pane layout)");
+    } else if (attempt === 1) {
+      ok("sideways on a touchscreen the order is already beside the dishes — no review step needed");
+    }
     const sendTxt = await F.textContent("#sendOrder");
     if (attempt === 1) expect(/CHOOSE TABLE/i.test(sendTxt), `the send button asks for the table (${sendTxt.trim()})`);
     await F.click("#sendOrder");

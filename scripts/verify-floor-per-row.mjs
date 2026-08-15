@@ -1,24 +1,26 @@
 // verify-floor-per-row.mjs — the floor's tables-per-row rule, and the ban on sideways scrolling.
 //
-// THE RULE (owner, 2026-08-15). It REPLACED the opposite rule, which is exactly why it needs a
-// guard: the old one was stated as law in three files and quoted back by two later sessions.
+// THE RULE (owner, 2026-08-15, refined 2026-08-16). It REPLACED the opposite rule, which is exactly
+// why it needs a guard: the old one was stated as law in three files and quoted back by two later
+// sessions.
 //
-//     phone, upright                →  2 per row      fixed
-//     phone turned / small tablet   →  4 per row      fixed
-//     ~10 inches (1024px) and up    →  the admin's number, exactly
+//     a mouse / trackpad (a laptop, at ANY window size) → the admin's number, exactly
+//     a touchscreen under ~10.5" (long edge < 1150px)   → 2 upright, 4 turned      fixed
+//     a touchscreen ~10.5" and over                     → the admin's number
 //     and NOWHERE does the floor scroll sideways — "there should be only be vertical scroll"
 //
 // What this checks, and why each one can rot on its own:
-//   1. the bands exist, in CSS, at the right widths — in JS they would need a resize listener and
-//      would lag a rotation;
-//   2. the panels write --per-row-pc, NOT --per-row. This is the whole mechanism: an inline
-//      --per-row beats every stylesheet rule, so getting this wrong makes the bands silently do
+//   1. the bands are scoped to `pointer: coarse`. This is the half that is easy to lose: a
+//      width-only band draws a phone's floor in a half-width laptop window, which is the exact
+//      complaint that produced this version;
+//   2. the size test uses BOTH edges, so a tablet keeps its number when it is turned;
+//   3. the panels write --per-row-pc, NOT --per-row. This is the whole mechanism: an inline
+//      --per-row beats every stylesheet rule, so getting it wrong makes the bands silently do
 //      nothing and the bug looks like "the CSS is ignored";
-//   3. the bands do not apply inside the admin's layout preview, where the point is to see the PC
-//      floor whatever size the iframe is;
-//   4. nothing on the floor scrolls sideways any more — no x-scroll on the grid, no "→ N more"
-//      chip, no measuring pass left behind;
-//   5. both panels obey it. The manager floor and the waiter floor drifted apart once already.
+//   4. the bands do not apply inside the admin's layout preview;
+//   5. nothing on the floor scrolls sideways — no x-scroll on the grid, no "→ N more" chip, no
+//      measuring pass left behind;
+//   6. both panels obey it. The manager floor and the waiter floor drifted apart once already.
 //
 // Read-only and offline. `npm run verify:floor-per-row`
 import { readFileSync, existsSync } from "node:fs";
@@ -41,7 +43,9 @@ const tabCss = read("public/panels/tablet/style.css");
 // ── 1 · one source for the numbers ──────────────────────────────────────────────────────────
 check("lib/floorLayout.ts states the two fixed counts", /PER_ROW_PHONE\s*=\s*2/.test(lib) && /PER_ROW_PHONE_WIDE\s*=\s*4/.test(lib),
   "the bands drifted across three files last time because each one wrote the rule out in prose");
-check("…and where the admin's number takes over", /PER_ROW_SET_FROM_PX\s*=\s*1024/.test(lib));
+check("…and the long edge where a touchscreen gets the admin's number", /PER_ROW_TOUCH_BIG_PX\s*=\s*1150/.test(lib));
+check("it explains why the POINTER decides before the width", /pointer: coarse/.test(lib) && /minimised/.test(lib),
+  "a half-width laptop window is still a laptop — losing that is how this rule broke once already");
 check("it records that this REVERSED the old rule", /REVERSAL/.test(lib),
   "without the history, the previous law's own comments read as the current one");
 
@@ -55,13 +59,21 @@ for (const [name, src] of [["manager", mgrJs], ["waiter tablet", tabJs]]) {
 // ── 3 · the bands, in CSS, at the right widths ──────────────────────────────────────────────
 for (const [name, css] of [["manager", mgrCss], ["waiter tablet", tabCss]]) {
   check(`${name}: the grid reads --per-row-pc`, /--per-row:\s*var\(--per-row-pc/.test(css));
-  check(`${name}: a phone gets 2 per row`, /@media\s*\(max-width:\s*599px\)[\s\S]{0,220}--per-row:\s*2/.test(css),
-    "his fixed rule for a phone held upright");
-  check(`${name}: turned sideways gets 4`, /@media\s*\(min-width:\s*600px\)\s*and\s*\(max-width:\s*1023px\)[\s\S]{0,220}--per-row:\s*4/.test(css),
-    "his fixed rule for a phone on its side (and a small/upright tablet)");
-  check(`${name}: above 1023px nothing overrides the set number`,
-    !/@media\s*\(min-width:\s*1024px\)[\s\S]{0,200}--per-row:\s*\d/.test(css),
-    "from ~10 inches up the number he set must be drawn exactly");
+  // Anchor on the FULL opener: `@media (pointer: coarse)` on its own also opens unrelated blocks
+  // (the manager stylesheet widens its sidebar grab-handle for a finger 1000 lines earlier), and
+  // slicing from the first one made this guard read the wrong rules and fail a correct floor.
+  const BAND_OPEN = "@media (pointer: coarse) and (max-width: 1149px)";
+  const band = css.includes(BAND_OPEN) ? css.slice(css.indexOf(BAND_OPEN), css.indexOf(BAND_OPEN) + 900) : "";
+  check(`${name}: the fixed counts apply to a TOUCHSCREEN only`, /@media\s*\(pointer:\s*coarse\)/.test(css),
+    "without this, a laptop window made small draws a phone's floor — the complaint this version fixes");
+  check(`${name}: …and only under ~10.5 inches, measured on BOTH edges`,
+    /\(max-width:\s*1149px\)\s*and\s*\(max-height:\s*1149px\)/.test(band),
+    "one edge only would drop a big tablet to 4 per row the moment it was turned");
+  check(`${name}: a touchscreen upright gets 2 per row`, /@media\s*\(max-width:\s*599px\)[\s\S]{0,260}--per-row:\s*2/.test(band));
+  check(`${name}: turned sideways gets 4`, /@media\s*\(min-width:\s*600px\)[\s\S]{0,260}--per-row:\s*4/.test(band));
+  check(`${name}: nothing overrides the set number on a fine pointer`,
+    !/@media\s*\(pointer:\s*fine\)[\s\S]{0,200}--per-row:\s*\d/.test(css),
+    "a laptop must draw his number at every window size");
 }
 check("the manager's bands are switched off in the admin layout preview", /body:not\(\.floor-preview\)\s*\.ftile-grid/.test(mgrCss),
   "the preview exists to show the PC floor, whatever size that iframe is");
@@ -82,11 +94,13 @@ check("the editor keeps its x-hidden backstop", /\.editor:has\(\.floor-wrap\)\s*
 
 // ── 5 · the admin screen no longer promises the number on every device ──────────────────────
 const adminCard = read("components/admin/RestaurantSettings.tsx");
-check("the admin card says small screens ignore the number", /Small screens ignore this number/.test(adminCard),
+check("the admin card says touchscreens ignore the number", /Touchscreens ignore this number/.test(adminCard),
   "otherwise the first question is \u201cI set 12, why does my phone show 2?\u201d");
 check("…and no longer claims it applies to any screen", !/on this screen and on\s*\n?\s*any other/.test(adminCard));
+check("…and promises a computer keeps it even in a small window", /even with the window made small/.test(adminCard),
+  "that promise IS the rule he asked for on 2026-08-16");
 
 console.log(pass
-  ? "\n✅ PASS — 2 on a phone, 4 turned, his number from ~10 inches up, and no sideways scroll"
+  ? "\n✅ PASS — a laptop always gets his number, a touchscreen gets 2/4 under ~10.5in, nothing scrolls sideways"
   : "\n❌ FAIL — the floor is not drawing the number the owner's rule says it should");
 process.exit(pass ? 0 : 1);
