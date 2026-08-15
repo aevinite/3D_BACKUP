@@ -280,6 +280,12 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
       // event-driven, no-new-fetch idea the dashboard uses for its own switcher.
       setNavOpen(false);
       window.dispatchEvent(new CustomEvent("lfh:owner-scope", { detail: { rid } }));
+    } else if (path === "/owner/manager") {
+      // Manager mode re-scopes IN PLACE too. It used to throw you back to the owner home, which
+      // is why the page carried its own switch row — a second switcher, and a 47px band of chrome
+      // on the screen the owner said was already too full. Now the one in this bar does the job.
+      setNavOpen(false);
+      window.dispatchEvent(new CustomEvent("lfh:owner-manager-rid", { detail: { rid } }));
     } else {
       // navigating → the path-effect closes the drawer after the route commits
       const q = [rid ? `focus=${rid}` : "", ridPin ? `rid=${ridPin}${asSuffix()}` : ""].filter(Boolean).join("&");

@@ -14,8 +14,10 @@ import { useOwnerSkin, pushSkinTo } from "./useOwnerSkin";
 // TWO SCREENS (owner, 2026-08-02: "there should be first screen to select the
 // restaurant, and you can launch the manager mode"):
 //   • >1 restaurant and none picked → a LAUNCHER of restaurant cards; tapping one
-//     opens its floor. Hardware BACK inside the floor returns here (useBackClose),
-//     and a slim "Switch restaurant" bar on top does the same by tap.
+//     opens its floor. Hardware BACK inside the floor returns here (useBackClose), and
+//     the cockpit bar's own "Switch restaurant" dropdown re-scopes the floor in place —
+//     this page had a second switch bar of its own until 2026-08-15, when it was deleted
+//     for being 47px of duplicate chrome on a screen the owner said was already too full.
 //   • 1 restaurant (or a ?rid deep link / admin act-as) → straight into the floor,
 //     no ceremony.
 //
@@ -42,7 +44,6 @@ export default function OwnerManagerMode({
   const skinRef = useRef(skin);
   skinRef.current = skin;
   const many = restaurants.length > 1;
-  const current = restaurants.find((r) => r.id === rid);
 
   const pushSkin = (s: "light" | "dark") => pushSkinTo(frame.current, s);
   useEffect(() => { pushSkin(skin); }, [skin]);
@@ -50,6 +51,16 @@ export default function OwnerManagerMode({
   // Hardware BACK inside the floor peels back to the launcher (multi-restaurant only) —
   // project rule: every screen is a back step, never a whole-site exit.
   useBackClose("owner-mmode-panel", !!rid && many, () => setRid(null));
+
+  // The top bar's "Switch restaurant" dropdown re-scopes THIS page instead of bouncing out to
+  // the owner home — the same event trick Reports uses. That is what let the page's own 47px
+  // switch row be deleted: one switcher, in the bar that was already there. "All restaurants"
+  // sends rid null, which lands back on the restaurant launcher.
+  useEffect(() => {
+    const onPick = (e: Event) => setRid((e as CustomEvent).detail?.rid ?? null);
+    window.addEventListener("lfh:owner-manager-rid", onPick as EventListener);
+    return () => window.removeEventListener("lfh:owner-manager-rid", onPick as EventListener);
+  }, []);
 
   // The iframe is created IMPERATIVELY, with src set BEFORE it enters the DOM. Rendered
   // as JSX, React inserts the element first and assigns src after — the browser treats
@@ -112,21 +123,13 @@ export default function OwnerManagerMode({
   // ── Screen 2: the floor ───────────────────────────────────────────────────────
   return (
     <div className="omm-full">
-      {many && (
-        <div className="omm-bar">
-          {/* ONE control, not a button plus a label. The restaurant's name was printed here a
-              THIRD time — the owner bar above it and the panel's own bar below it both already
-              say it — so it is folded into the button, which now reads as "you are in Aangan,
-              tap to change". Owner, 2026-08-15: "there are too much thing" up top. */}
-          <button type="button" className="omm-switchbtn" onClick={() => setRid(null)}
-                  title={`In ${current?.name || "this restaurant"} — switch to another`}>
-            <span className="dot" style={{ background: current?.accentColor || "#34d399" }} aria-hidden="true" />
-            <span className="nm">{current?.name}</span>
-            <i className="fas fa-arrow-right-arrow-left" aria-hidden="true" />
-            <span className="sw">Switch</span>
-          </button>
-        </div>
-      )}
+      {/* THE SWITCH ROW IS GONE (owner, 2026-08-15: "there are too much thing. Half of the screen
+          has been covered by the top thing"). It was a whole 47px row carrying one button, under
+          a bar that ALREADY has a "Switch restaurant" dropdown — and it printed the restaurant's
+          name a third time, under two bars that both name it. The shell's dropdown used to bounce
+          you out to the owner home from here; it now re-scopes this page in place instead (see
+          openRestaurant in OwnerShell), which is the same trick Reports already uses, so nothing
+          was lost by deleting the row. The floor gained the full 47px. */}
       <div ref={mount} className="omm-mount" />
       <style>{`
         /* Break out of the owner content padding / centered max-width — only on this page. */
@@ -135,16 +138,6 @@ export default function OwnerManagerMode({
         .omm-full{ height:100%; display:flex; flex-direction:column; min-height:0; }
         .omm-mount{ flex:1 1 auto; min-height:0; display:flex; }
         .omm-frame{ flex:1 1 auto; width:100%; border:0; display:block; background:var(--bg, #0a0c10); }
-        .omm-bar{ display:flex; align-items:center; gap:12px; padding:7px 12px; min-height:44px;
-          border-bottom:1px solid var(--line, #1d2430); background:var(--card); }
-        .omm-switchbtn{ display:inline-flex; align-items:center; gap:8px; min-height:32px; padding:5px 12px;
-          font:inherit; font-size:12.5px; font-weight:700; color:var(--accent); cursor:pointer;
-          background:transparent; border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius:9px; }
-        .omm-switchbtn:hover{ background:color-mix(in srgb, var(--accent) 12%, transparent); }
-        .omm-switchbtn:focus-visible{ outline:2px solid var(--accent); outline-offset:2px; }
-        .omm-switchbtn .dot{ width:9px; height:9px; border-radius:50%; flex:none; }
-        .omm-switchbtn .nm{ font-weight:700; color:var(--text); }
-        .omm-switchbtn .sw{ opacity:.85; }
       `}</style>
     </div>
   );
