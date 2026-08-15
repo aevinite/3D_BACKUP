@@ -204,45 +204,48 @@ function dateWindow() {
 }
 
 // ── D · THE PARCEL DAY ───────────────────────────────────────────────────────────────────────
-// The bug: local midnight, so an unprinted/unpaid parcel dropped off the floor five hours before
-// the business day it belongs to ended.
+// The bug this guards: local midnight, so a parcel fell out of the day it belongs to five hours
+// early. A business day runs 05:00 → 05:00 IST, so a parcel taken at 00:30 is still TODAY's.
+//
+// ⚠ THE FLOOR'S PARCEL STRIP IS GONE, AND WITH IT openParcels() (owner, 2026-08-14: "below the
+// table, the parcel will not show. Parcel will only show in the platform thing"). This section
+// used to lift openParcels() out of the panel and assert which parcels stayed on the floor; that
+// function no longer exists, which turned this guard red on a panel that is exactly as the owner
+// asked for it. The whole check was NOT deleted with it, because the DAY rule it protects is still
+// live: todaysParcels() still carries it, and openParcelTile() still numbers a parcel from it — so
+// a parcel can still be named "Parcel 3" on the wrong day if that boundary breaks.
+// So the day boundary is asserted through the function that survived. (T13, 2026-08-15)
 function parcelDay() {
-  console.log("\nD · the parcel strip's day");
+  console.log("\nD · the parcel day (05:00 → 05:00 IST)");
   const bd = lift("public/panels/editor/app.js", "function businessDayStartMs()", "\n}", "businessDay");
   const tp = lift("public/panels/editor/app.js", "function todaysParcels()", "\n}", "todaysParcels");
-  const op = lift("public/panels/editor/app.js", "function openParcels()", "\n}", "openParcels");
   const state = { data: { platform: [] } };
-  const f = new Function("state", `${bd}\n${tp}\n${op}\nreturn { businessDayStartMs, todaysParcels, openParcels };`);
-  const { businessDayStartMs, todaysParcels, openParcels } = f(state);
+  const f = new Function("state", `${bd}\n${tp}\nreturn { businessDayStartMs, todaysParcels };`);
+  const { businessDayStartMs, todaysParcels } = f(state);
 
   const start = businessDayStartMs();
   const startIst = new Date(start + 5.5 * 3600e3);
   eq("the business day starts at 05:00 IST", startIst.getUTCHours(), 5);
 
-  // A parcel taken 10 minutes before midnight, not printed, not paid. It must still be on the
-  // floor at 00:30 — which is inside the SAME business day (that day runs to 05:00).
-  const lateParcel = { id: "p1", source: "parcel", created_at: new Date(start + 60 * 3600e3 / 3).toISOString(), paid: false, printed_at: null, status: "new", items: [{ qty: 1 }], total: 200 };
-  // Place it just after the business day began, which is what matters for the filter.
-  lateParcel.created_at = new Date(start + 1000).toISOString();
-  state.data.platform = [lateParcel];
-  eq("an unfinished parcel from this business day is ON the floor", openParcels().length, 1);
+  const parcel = { id: "p1", source: "parcel", created_at: new Date(start + 1000).toISOString(), paid: false, printed_at: null, status: "new", items: [{ qty: 1 }], total: 200 };
 
-  // A parcel from BEFORE this business day started must not be.
-  state.data.platform = [{ ...lateParcel, id: "p0", created_at: new Date(start - 60_000).toISOString() }];
-  eq("a parcel from the previous business day is gone", openParcels().length, 0);
+  // Just AFTER the boundary → today's. This is the 00:30 case: past midnight, same business day.
+  state.data.platform = [parcel];
+  eq("a parcel taken after 05:00 counts as today's", todaysParcels().length, 1);
 
-  // Finished ones leave; cancelled ones never show.
+  // Just BEFORE it → yesterday's, so today's numbering starts clean.
+  state.data.platform = [{ ...parcel, id: "p0", created_at: new Date(start - 60_000).toISOString() }];
+  eq("a parcel from before 05:00 belongs to the previous day", todaysParcels().length, 0);
+
+  // Numbering counts every one of today's parcels — finished and cancelled included — so
+  // "Parcel 3" keeps its name for the whole day instead of being reused.
   state.data.platform = [
-    { ...lateParcel, id: "a", paid: true, printed_at: new Date().toISOString() },
-    { ...lateParcel, id: "b", paid: true, printed_at: null },
-    { ...lateParcel, id: "c", paid: false, printed_at: new Date().toISOString() },
-    { ...lateParcel, id: "d", status: "cancelled" },
+    { ...parcel, id: "a", paid: true, printed_at: new Date().toISOString() },
+    { ...parcel, id: "b", paid: true, printed_at: null },
+    { ...parcel, id: "c", paid: false, printed_at: new Date().toISOString() },
+    { ...parcel, id: "d", status: "cancelled" },
   ];
-  const open = openParcels().map((o) => o.id).sort().join(",");
-  eq("stays until BOTH printed and paid; cancelled never shows", open, "b,c");
-
-  // Numbering counts every one of today's parcels, cancelled included, so "Parcel 3" keeps its name.
-  eq("numbering includes cancelled rows", todaysParcels().length, 4);
+  eq("numbering includes finished and cancelled rows", todaysParcels().length, 4);
 }
 
 // ── E · THE TIP CEILING ──────────────────────────────────────────────────────────────────────

@@ -1,6 +1,13 @@
 // verify-offline.mjs — proves the app KEEPS WORKING with no internet.
 //
-//   node scripts/verify-offline.mjs [--base http://localhost:4000] [--keep]
+//   ⚠ AGAINST A PRODUCTION BUILD ONLY — `next dev` cannot answer this question (see below).
+//   npm run build && npx next start --port 4938
+//   node scripts/verify-offline.mjs --base http://localhost:4938 [--keep]
+//
+//   The script now REFUSES a server whose JavaScript is served no-cache, rather than running for
+//   five minutes and reporting a fault that belongs to the server. The old usage line here said
+//   `--base http://localhost:4000` — a dev server — one paragraph above the warning not to do
+//   that, which is exactly how it kept happening.
 //
 // What it checks, in the order a real shift would hit it:
 //   1. The offline layer (public/sw.js) installs and takes control of the page.
@@ -211,7 +218,57 @@ async function waitFor(fn, ms = 20000, step = 500) {
   }
 }
 
+// ── REFUSE A SERVER THAT CANNOT ANSWER THE QUESTION (2026-08-15) ─────────────────────────────
+// The header has warned since 2026-07-31 that this must run against a production build, and the
+// two client-rendered checks even explain themselves when they fail. It did not help: the usage
+// line one paragraph above the warning still said `--base http://localhost:4000`, which is a dev
+// server, and nobody reads twenty-seven lines of comment before typing a command. So the run went
+// ahead, spent five minutes, and reported "the guest menu is empty offline" — a sentence that reads
+// like a real fault and sent a later session hunting a bug that did not exist.
+//
+// This does not sniff for "dev". It measures THE PROPERTY THE TEST DEPENDS ON: can the browser
+// keep this server's JavaScript? A production build serves its chunks
+// `Cache-Control: public, max-age=31536000, immutable`; `next dev` serves them
+// `no-cache, must-revalidate`. With no-cache chunks the page can never hydrate once the network is
+// cut, so every offline check below is answering a question about the SERVER, not the app — and it
+// is better to say so in one second than to be red in five minutes.
+//
+// Deliberately fails fast and loud rather than skipping: a guard that quietly does nothing is how
+// you end up trusting a green that never ran.
+async function refuseUnlessCacheableBuild(base) {
+  const say = (msg) => { console.log(msg); };
+  let chunk = null;
+  try {
+    const html = await (await fetch(`${base}/login`, { cache: "no-store" })).text();
+    chunk = (html.match(/\/_next\/static\/chunks\/[^"']+?\.js/) || [])[0] || null;
+  } catch (e) {
+    say(`\n❌ Could not reach ${base} — is the server running?\n   ${String(e).slice(0, 140)}`);
+    process.exit(1);
+  }
+  if (!chunk) return; // shape changed — say nothing rather than block a legitimate run
+  let cc = "";
+  try { cc = (await fetch(base + chunk, { cache: "no-store" })).headers.get("cache-control") || ""; } catch { return; }
+  if (/immutable/i.test(cc)) return; // a real build — carry on
+  say([
+    "",
+    "❌ This server cannot be tested for offline behaviour, so nothing below was run.",
+    "",
+    `   ${base} serves its JavaScript as "${cc}".`,
+    "   A browser is not allowed to keep that, so once the network is cut the page can never",
+    "   finish loading — every offline check would fail for a reason that has nothing to do",
+    "   with the app. (A production build serves chunks as `immutable`.)",
+    "",
+    "   Run it against a production build instead:",
+    "",
+    "     npm run build && npx next start --port 4938",
+    "     npm run verify:offline -- --base http://localhost:4938",
+    "",
+  ].join("\n"));
+  process.exit(1);
+}
+
 async function run() {
+  await refuseUnlessCacheableBuild(BASE);
   const browser = await chromium.launch({ headless: !KEEP });
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
   const consoleErrors = [];
