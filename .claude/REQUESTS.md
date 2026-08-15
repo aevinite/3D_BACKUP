@@ -1301,3 +1301,31 @@ Driven as the real manager (diagm11) on Aangan and (diagm1/diagt1) on French Hou
       afterwards) covering all 11 owner pages, the manager/kitchen/waiter panels and three guest
       menus: every one 200, no leaked code text, no page errors. Test uploads deleted; no dish row
       points at the new bucket.
+
+## T11 visual-sweep follow-up — owner picked 2026-08-15, 6 phases
+Owner reviewed all 20 items and chose. Order: 1 → 2 → 6 → 3 → 5 → 4.
+- [x] **Phase 1 — quick fixes** (PR #970, live): merged-tile number, VIP tile shove, "👑 VIP" twice,
+      "le French House" chart label, owner nav 16px jump, guest back-arrow name.
+      Not changed: `/editor` (deliberate redirect) · "SLIDE →" (already fixed 08-13).
+      Withdrawn as MY measurement errors: the "ON" pill (text is `font-size:0`, never visible) and
+      the Usage column header (it exists).
+- [ ] **Phase 2 — kitchen**: give PARCEL its own coloured edge (`.plat-p`/`.plat-o` have none), AND
+      go through the live-order DETAIL view and make it right. Owner: "if you want to change the UI,
+      I don't care, but make sure it should look perfectly fine."
+- [ ] **Phase 6 — housekeeping** (moved early: it REDUCES token cost): record the floor-legend
+      decision in REJECTED-IDEAS, and prune token-heavy docs. Owner: "if there are many other things
+      which are increasing the token usage, please remove it or change it."
+- [ ] **Phase 3 — currency & language sync**: default is ₹ + English. When a restaurant has only ONE
+      currency/language enabled in Access → Menu, the menu editor must NOT show the extra-price /
+      extra-language fields at all, and the space must close up. When several ARE enabled, show them.
+      Owner: "make that thing like all sync" — asked before, so this one has to land properly.
+- [ ] **Phase 5 — numbers & guest polish**: short-form big numbers (NEVER on a bill), the dish photo
+      on desktop, the role chip borrowing the guest menu's tan.
+- [ ] **Phase 4 — manager panel redesign** (last, needs his eyes): move the manager nav from the TOP
+      to a LEFT icon rail that expands on click (like the owner panel); the manager sees only the
+      items his permissions allow; fix the crowded header in BOTH manager mode and the owner panel
+      ("half the screen has been covered by the top thing").
+- Declined: unify the two sign-in marks (R24) · the shared browser-tab name ("I don't care").
+- Verified for him 2026-08-15: **nothing is reachable without logging in** — 48/48 admin API routes,
+  12/12 owner routes, both consoles bounce to a login, and every panel data call answers
+  "Not authorised" without a valid cookie.
