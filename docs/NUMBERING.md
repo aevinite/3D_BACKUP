@@ -55,6 +55,13 @@ draws a fresh one (migration 073). So the invoice series can skip a number, and 
 still findable on the voided record with its reason and timestamp. That is the compliant
 behaviour — a void that silently reused its number would be the opposite.
 
+**A bill that was CANCELLED before any invoice existed never takes a number at all** (owner,
+2026-08-16; migration 331). Until then `lfh_generate_invoice` would happily draw the next number
+for a bill whose every order was cancelled — the series gained a number attached to ₹0 and the
+paper that printed was the "CANCELLED — NO CHARGE" sheet carrying a live invoice number. The two
+cases read the same in a list and are opposites: **no supply → no invoice**, but **invoice already
+issued → the number is retired, not freed**. Full rule: `docs/COMPLIANCE-GUARDRAILS.md` §3.0.
+
 ## One KOT series, all channels
 
 Dine-in, parcel, banquet and delivery-platform orders all draw from the **same** daily KOT counter

@@ -316,43 +316,34 @@ async function menuSubAllowed(g: { user: StaffUser | null }, rid: string, action
   return (await menuPartsFor(g, rid))[action] === true;
 }
 
-// Delete-a-bill sub-permission (owner 2026-07-24). Deleting a bill is the MOST destructive
-// money action, so unlike the other void_bills sub-options (and unlike menuSubAllowed above)
-// it defaults OFF: a plain manager may delete a bill ONLY when the owner has explicitly ticked
-// "Delete a bill" (access_config.void_bills.manager_opts.delete_bill === true). Admin (no
-// cookie) + owner always may. The caller must already have passed managerCan("void_bills").
-async function canDeleteBill(g: { user: StaffUser | null }, rid: string): Promise<boolean> {
-  const u = g.user;
-  if (!u || u.role !== "manager") return true; // admin / owner: full power
-  // The Access screen's "Delete a bill" row writes manager_permissions.delete_bill. This used to
-  // read ONLY the buried access_config.void_bills.manager_opts.delete_bill, so the row on screen
-  // changed nothing and the switch that mattered was reachable from nowhere (found 2026-08-01).
-  // The row wins when it has been set; otherwise the legacy value still decides, so a restaurant
-  // configured under the old screen keeps exactly what it had. Absent everywhere → OFF, which is
-  // deliberate: deleting a bill is the most destructive money action there is.
-  // THIS PERSON's own setting wins over the restaurant's, exactly as managerCan() resolves it.
-  // It was missing here, so the profile could show "Delete a bill · On" for one manager and the
-  // server would still refuse them — a switch that saves and is never read, which is the bug
-  // class this model exists to prevent (found 2026-08-02 while proving "off means gone AND
-  // refused"). The admin's own caps are still checked by the managerCan("void_bills") call that
-  // must run before this one, so an override can't climb above them.
-  const r = (await sb.from("restaurants").select("manager_permissions, access_config").eq("id", rid).maybeSingle()).data as
-    { manager_permissions?: Record<string, boolean>; access_config?: Record<string, { on?: boolean; manager_opts?: Record<string, boolean> }> } | null;
-  // THE FEATURE HALF FIRST, above the person's own setting (2026-08-04). managerCan() has always
-  // checked `access_config[flag].on === false` — "does this restaurant HAVE the thing at all" —
-  // and this gate did not. The call before it checks void_bills' feature half, which is a
-  // DIFFERENT row, so switching "Delete a bill" off for the whole restaurant removed the row from
-  // every screen (capVisible hides it) and left a manager with a stored `delete_bill: "on"` still
-  // deleting bills. Hiding is never the only guard — least of all on the most destructive money
-  // action there is.
-  if (r?.access_config?.delete_bill?.on === false) return false;
-  // THIS PERSON's own setting wins over the restaurant's, exactly as managerCan() resolves it.
-  const ov = u.permissions?.delete_bill;
-  if (ov === "on" || ov === "pin") return true;
-  if (ov === "off") return false;
-  const row = r?.manager_permissions?.delete_bill;
-  if (typeof row === "boolean") return row;
-  return r?.access_config?.void_bills?.manager_opts?.delete_bill === true;
+// ── NOBODY AT THE RESTAURANT REMOVES A BILL (owner, 2026-08-16) ──────────────────────────────
+// His words, after being shown that a cancelled bill could still draw an invoice number: "I don't
+// want to give permission to the restaurant owner to delete the bill because he will fake the bill
+// and delete the bill … so what can we do that the restaurant doesn't cheat, and at the same time
+// we can keep the track?"
+//
+// The answer is that CANCEL becomes the only way a bill leaves the working list. A cancel is a ₹0
+// sale that stays visible with its reason, its person and its time; a delete is the shape a books
+// check objects to, and it is the capability that put PetPooja's founders under summons
+// (docs/COMPLIANCE-GUARDRAILS.md §2).
+//
+// THE OWNER IS INSIDE THE RESTAURANT, so the owner loses it too — that is the whole point, and it
+// is the sentence this product sells: a client cannot make a real sale vanish, and cannot ask us
+// to either. Note what a delete ever actually did: lib/softDelete.ts keeps the row and every tax
+// figure (Z-report, GST report, owner money) still counts it, so no RECORD changes here. What goes
+// is the button.
+//
+// The Aevidine ADMIN console (no staff cookie) keeps it for support work — still a soft delete,
+// still into the ledger and the 90-day recycle bin.
+//
+// WHAT WAS DELETED WITH THIS: the per-manager resolution that read access_config.delete_bill.on,
+// then the person's own `permissions.delete_bill` override, then manager_permissions.delete_bill,
+// then the legacy void_bills.manager_opts.delete_bill (built 2026-07-24, corrected 2026-08-01/02/04).
+// Those stored values are LEFT IN THE DATABASE untouched — nothing reads them now, and if the row
+// is ever handed back it should be rebuilt deliberately rather than resurrected. The matching rows
+// went from lib/accessTree.ts and lib/accessModel.ts in the same commit.
+async function canDeleteBill(g: { user: StaffUser | null }, _rid: string): Promise<boolean> {
+  return !g.user; // the Aevidine admin console only; owner and manager alike get cancel, not delete
 }
 
 // Gate for the KOT ▾ menu (Table & KOT operations — canonical module ladder, mig 177).
@@ -880,14 +871,12 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         // person this view got wrong.
         // The FEATURE half caps the simulated answer too, or "view as a manager" would show a
         // Delete-bill button for a restaurant that doesn't have the row at all (2026-08-04).
-        canDeleteBill: simulate
-          ? ((r?.access_config as Record<string, { on?: boolean }> | null)?.delete_bill?.on === false ? false
-            : myOv.delete_bill === "on" || myOv.delete_bill === "pin" ? true
-            : myOv.delete_bill === "off" ? false
-            : typeof r?.manager_permissions?.delete_bill === "boolean"
-              ? r.manager_permissions.delete_bill
-              : (r?.access_config as { void_bills?: { manager_opts?: Record<string, boolean> } } | null)?.void_bills?.manager_opts?.delete_bill === true)
-          : await canDeleteBill(g, rid),
+        // NOBODY AT THE RESTAURANT REMOVES A BILL (owner, 2026-08-16) — see canDeleteBill above.
+        // The simulate branch used to replay the whole per-manager resolution so "view as a
+        // manager" showed exactly what a real one gets; there is nothing left to resolve, and a
+        // manager is now always `false`. Kept as its own line rather than folded away, because the
+        // rule it states — the ADMIN CONSOLE is the only door — is the thing a reader needs.
+        canDeleteBill: simulate ? false : await canDeleteBill(g, rid),
         // One entry per module-backed capability (same keys as before: table_tags, khata,
         // banquet, table_ops, take_orders, parcel) — derived, so new modules appear here.
         features: Object.fromEntries(PERMISSIONS.filter((mp) => mp.module).map((mp) => [mp.id, !!ladders[moduleKey(mp)]?.effective])),
@@ -1408,9 +1397,21 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       // Z-report net reconciles to the penny with the sum of the day's printed bills.
       // (Taxing each order separately could drift a rupee or two on multi-order tables.)
       const groups = new Map<string, any[]>();
-      let orderCount = 0, cancelled = 0;
+      // CANCELLATIONS ARE REPORTED, NOT JUST COUNTED (owner, 2026-08-16). The day-close sheet has
+      // always said how MANY orders were cancelled and never what they were WORTH — and the value
+      // is the number that means something: nine voids on a quiet night is a conversation, and a
+      // manager voiding ₹40,000 of food is a different conversation from one voiding ₹400. Nothing
+      // was collected on any of it, so this never touches gross/net/tax; it is stated beside them.
+      // Same shape as the money below: the taxable base plus the untaxed part, falling back to
+      // subtotal for legacy rows — i.e. what the guest WOULD have been charged before tax.
+      let orderCount = 0, cancelled = 0, cancelledNet = 0;
       for (const o of orders) {
-        if (o.status === "cancelled") { cancelled++; continue; }
+        if (o.status === "cancelled") {
+          cancelled++;
+          cancelledNet += (o.taxable_base == null ? (Number(o.subtotal) || 0) : (Number(o.taxable_base) || 0))
+            + (Number(o.nontax_amount) || 0);
+          continue;
+        }
         orderCount++;
         const key = o.session_id || ("solo:" + o.id);
         (groups.get(key) || (groups.set(key, []), groups.get(key)!)).push(o);
@@ -1599,7 +1600,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
           // MRP / nil-rated turnover, shown as its own line so the day's takings still add up
           // on the page: taxable + tax + mrp = net. 0 for every restaurant not using it.
           mrp: r2(mrp),
-          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled, tips,
+          paidCount, paidNet: r2(paidNet), unpaidCount, unpaidNet: r2(unpaidNet), cancelled, cancelledNet: r2(cancelledNet), tips,
           onHouseCount, onHouseNet: r2(onHouseNet) },
         // The till count: what came in and how. `total` is the sum of the methods, so a manager can
         // check it against paidNet — a gap means a bill was settled without a method recorded.
@@ -3329,7 +3330,16 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         .order("at", { ascending: false }).limit(1)).data as { id: number; at: string; meta: Record<string, unknown> | null }[] | null;
       const reopened = priorVoid && priorVoid[0];
       const { data, error } = await sb.rpc("lfh_generate_invoice", { p_session: b, p_reason: genReason || null, p_actor: actorName });
-      if (error) { if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409); throw pgError(error); }
+      if (error) {
+        if (error.code === "LFH01" || /invoice locked/i.test(error.message)) return err("This bill is settled — its invoice can't be reopened. Make a credit note instead.", 409);
+        // A CANCELLED SALE TAKES NO INVOICE NUMBER (mig 331, owner 2026-08-16). The RPC refuses
+        // before the counter is touched, so a refused request never burns a number; this only
+        // turns its code into the sentence a manager reads.
+        if (error.code === "LFH02" || /cancelled sale never takes an invoice/i.test(error.message)) {
+          return err("This bill was cancelled — a cancelled sale never gets a tax invoice.", 409);
+        }
+        throw pgError(error);
+      }
       // Say WHICH table and bill, not the session's uuid. The Activity log's "Where" column read
       // `session dce216b5-72d7-4ba2-…` — a value that identifies nothing to the person reading it
       // (2026-08-03). table_number also fills the column the log row renders on its own.

@@ -124,7 +124,8 @@ export const PERMISSIONS: Perm[] = [
     what: "Cancelling a bill after it's generated. Every use is logged with the typed reason.",
     sub: [
       { id: "void_bill", name: "Void a bill", what: "Cancels a generated bill but KEEPS it in the records marked voided (nothing collected)." },
-      { id: "delete_bill", name: "Delete a bill", what: "Removes a bill from the working list. A PAID bill can never be deleted. What is removed is kept in the records for tax and audit, is restorable, and stores who deleted it and the reason they typed." },
+      // "Delete a bill" was removed here on 2026-08-16 (owner) — cancel is the only way out of a
+      // bill for anyone at the restaurant, owner included. See lib/accessTree.ts for the full note.
       { id: "close_unpaid", name: "Close a table unpaid", what: "Frees the table, money marked never collected (walk-out / write-off)." },
     ] },
   { id: "mark_paid", group: "money", kind: "ladder", tablet: "tablet_mark_paid", waiter: true, fixedTop: true, ownerUse: "manager", name: "Mark a bill paid (& undo)",
