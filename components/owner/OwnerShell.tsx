@@ -269,8 +269,18 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
 
   // Open one restaurant's dashboard from anywhere: on /owner the dashboard listens
   // for this event (no reload); from any other page we navigate home with ?focus=.
+  // WHO CLOSES THE SWITCHER, AND WHEN (bug found 2026-08-15 on Team/Menu/Customers/…):
+  // closing it BEFORE navigating silently ate the tap. The popup owns a back-button layer;
+  // when it closes, backStack rewinds that entry with history.go(-1). router.push is async,
+  // so at that moment the new page had not landed yet — the rewind's popstate won the race and
+  // put us straight back on the page we were leaving. backStack ALREADY guards this ("a real
+  // navigation pushed on top of our buffer → leave it alone"), but the guard can only see a
+  // push that has actually happened. So: pages that re-scope IN PLACE close it here, and pages
+  // that NAVIGATE leave it open and let the [path] effect close it once the route commits —
+  // exactly what the nav drawer a few lines below has always done.
   const openRestaurant = (rid: string | null) => {
     if (path === "/owner") {
+      setRestOpen(false);
       setNavOpen(false); // no navigation happens on the home page → close explicitly
       window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid } }));
     } else if (path === "/owner/reports") {
@@ -278,17 +288,22 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
       // "toggle on top to all restaurants" must work here without bouncing back to the
       // dashboard). The reports page listens for lfh:owner-scope and sets its rid — same
       // event-driven, no-new-fetch idea the dashboard uses for its own switcher.
+      setRestOpen(false);
       setNavOpen(false);
       window.dispatchEvent(new CustomEvent("lfh:owner-scope", { detail: { rid } }));
     } else if (path === "/owner/manager") {
       // Manager mode re-scopes IN PLACE too. It used to throw you back to the owner home, which
       // is why the page carried its own switch row — a second switcher, and a 47px band of chrome
       // on the screen the owner said was already too full. Now the one in this bar does the job.
+      setRestOpen(false);
       setNavOpen(false);
       window.dispatchEvent(new CustomEvent("lfh:owner-manager-rid", { detail: { rid } }));
     } else {
       // navigating → the path-effect closes the drawer after the route commits
-      const q = [rid ? `focus=${rid}` : "", ridPin ? `rid=${ridPin}${asSuffix()}` : ""].filter(Boolean).join("&");
+      // "All restaurants" must SAY so. Landing on a bare /owner means "no instruction", and the
+      // dashboard then restores whichever restaurant you last drilled into — so picking
+      // "All restaurants" from Team dropped you on the dashboard still focused on one place.
+      const q = [`focus=${rid || "all"}`, ridPin ? `rid=${ridPin}${asSuffix()}` : ""].filter(Boolean).join("&");
       router.push(`/owner${q ? `?${q}` : ""}`);
     }
   };
@@ -479,7 +494,7 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                   aria-haspopup="menu" aria-expanded={restOpen} title="Switch restaurant">
                   <span className="dot" aria-hidden="true" />
                   <span className="lbl">{
-                    path === "/owner" || path.startsWith("/owner/reports")
+                    path === "/owner" || path.startsWith("/owner/reports") || path === "/owner/manager"
                       ? (crumbTail[0] || "All restaurants")
                       : adminViewing ? shownName : "Owner overview"
                   }</span>
@@ -489,13 +504,13 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                   <div className="owx-switch-pop" role="menu" aria-label="Switch restaurant">
                     <div className="hd">Switch restaurant</div>
                     <button type="button" className="rrow all" role="menuitem"
-                      onClick={() => { setRestOpen(false); openRestaurant(null); }}>
+                      onClick={() => openRestaurant(null)}>
                       <i className="fas fa-layer-group" aria-hidden="true" />
                       <span className="nm">All restaurants</span>
                     </button>
                     {myRests.map((r) => (
                       <button key={r.id} type="button" className="rrow" role="menuitem"
-                        onClick={() => { setRestOpen(false); openRestaurant(r.id); }} title={`Open ${r.name}`}>
+                        onClick={() => openRestaurant(r.id)} title={`Open ${r.name}`}>
                         {/* the SAME colour the dashboard's charts, table and switcher use — keyed by id, not the
                       restaurant's brand accent, which made one restaurant orange here and blue three inches
                       to the right (T5 sweep, 2026-08-07). lib/restaurantColor carries the reasoning. */}
