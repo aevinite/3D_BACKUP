@@ -1226,12 +1226,23 @@ html[data-theme="light"] .sx-sec.tp-req-sec .sx-sec-h { color: #96690f; } /* dar
        Editor tab's dish LIST keeps every pixel of its 320px — it needs the width, a nav does not;
      · `max-width: 1040px` so a desktop is untouched — at 1194 sideways the same 320px is only
        27% of the screen and reads fine;
+     · AND `min-width: 761px`, because a PHONE IS NOT A SMALL TABLET (T18 sweep, 2026-08-16).
+       Without that floor this rule also matched every phone, and its selector — three
+       class-level parts — beat the two plain `.layout { grid-template-columns: 1fr }` rules
+       that collapse the panel into ONE column below 760px. Measured on the live backup at
+       360, 390 and with A35 emulation: the layout stayed `220px 140px`, so the Bills tab's
+       content column was 140px wide and every bill card (274px) hung off the right edge with
+       the page unable to scroll sideways. After browse-wide shipped (2026-08-15) the same
+       clash got worse rather than better — the content moved INTO the sidebar, so a phone
+       showed the four nav rows and then nothing at all, with 140px of dead track beside them.
+       Audit & logs and Settings were caught by the same rule. A media query is not a
+       tie-breaker: only the width floor keeps this off phones;
      · written as `grid-template-columns`, not as `--sidebar-w`, because app.js sets that variable
        INLINE from localStorage (`lfh_editor_sidebar_w`) and an inline custom property would beat
        any stylesheet rule — so overriding the variable would have done nothing on a device that
        had ever dragged the divider. A manager who HAS dragged it keeps their own width on the
        Editor tab, which is the one that reads the variable. */
-@media (max-width: 1040px) {
+@media (min-width: 761px) and (max-width: 1040px) {
   body[data-tab="orders"] .layout:not(.no-sidebar),
   body[data-tab="log"] .layout:not(.no-sidebar),
   body[data-tab="general"] .layout:not(.no-sidebar) { grid-template-columns: 220px 1fr; }
