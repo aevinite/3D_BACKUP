@@ -525,9 +525,10 @@ Owner reviewed all 20 items and chose. Order: 1 → 2 → 6 → 3 → 5 → 4.
       kitchen/manager disagreement over Website (green vs sky) was fixed — five channels, one colour
       each, both screens. The live-order DETAIL popup was opened in both skins on a real parcel and
       is already right (inside the viewport, one ✕, no leaks, no cut-off), so it was left alone.
-- [ ] **Phase 6 — housekeeping** (moved early: it REDUCES token cost): record the floor-legend
-      decision in REJECTED-IDEAS, and prune token-heavy docs. Owner: "if there are many other things
-      which are increasing the token usage, please remove it or change it."
+- [x] **Phase 6 — housekeeping** (PR #975, live): floor-legend decision recorded as R25 + a REJECTED
+      comment on `const LEG` in BOTH panels. REQUESTS.md 136 KB → 57 KB (33 finished sections
+      collapsed to one line each; all 42 open items kept byte-for-byte identical). 7 spent sweep
+      screenshots deleted; other terminals' evidence left alone.
 - [x] **Phase 3 — language sync** (PR #974, live): the editor's name boxes now follow
       settings.menu_languages — Aangan (["en"]) gets ONE box headed "Name"; French House
       (["en","fr","hi"]) gets three. The card closes up on its own (153px → 131px).
@@ -536,8 +537,12 @@ Owner reviewed all 20 items and chose. Order: 1 → 2 → 6 → 3 → 5 → 4.
       ALSO fixed here: a REGRESSION from PR #968 — browse-wide let a 22-category chip strip inflate
       the column to 2650px, pushing Categories and Tags OFF SCREEN. Caught on Aangan; French House
       has 9 categories and fitted, which is why it looked fine when it shipped.
-- [ ] **Phase 5 — numbers & guest polish**: short-form big numbers (NEVER on a bill), the dish photo
-      on desktop, the role chip borrowing the guest menu's tan.
+- [x] **Phase 5 — polish** (PR #976, live): role chips now follow the skin — ALL FOUR were unreadable
+      on the light card (1.80–2.22:1), not just the manager one; manager 2.23 → 7.09, dark unchanged.
+      Big numbers shorten ("₹308 Cr") instead of crushing to 9px, in BOTH copies of the fitter, with
+      the exact value on hover — though I could not reproduce the crush on a real screen, so it is a
+      safety net, not a visible fix; bills are and must stay out of that net. Dish photo 420 → 760px
+      on a laptop, phone untouched.
 - [ ] **Phase 4 — manager panel redesign** (last, needs his eyes): move the manager nav from the TOP
       to a LEFT icon rail that expands on click (like the owner panel); the manager sees only the
       items his permissions allow; fix the crowded header in BOTH manager mode and the owner panel
