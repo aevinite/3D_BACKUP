@@ -186,6 +186,11 @@ export const ACT_LABEL: Record<string, string> = {
   owner_set_primary: "Made primary owner", owner_soft_delete: "Moved an owner to the bin",
   owner_restore_from_bin: "Restored an owner", owner_purge: "Permanently removed an owner",
   logs_cleanup: "Cleaned up old logs", error_memory_cleared: "Cleared the error memory",
+  // The admin walking into a restaurant's panel (T20 sweep, 2026-08-16). Written on the `admin`
+  // panel, which both the manager's log (api/editor: not panel in (admin,owner,db)) and the
+  // owner's (api/owner/oplog: not panel in (admin,db)) exclude — so it is a record for the admin
+  // console only, and the restaurant is never shown a hint, which is the standing rule.
+  admin_enter_panel: "Opened a restaurant's panel",
 };
 
 /** The label to SHOW for an action code. Never returns a raw snake_case key: an unknown code is

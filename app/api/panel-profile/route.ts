@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { userFromCookie, USER_COOKIE, hashSecret, verifySecret, normalizeLoginName, AuthDbError } from "@/lib/userAuth";
 // The one sentence a person reads when the database didn't answer — shared with every panel route.
 import { BUSY_MESSAGE } from "@/lib/dbRefusal";
+import { passwordFields } from "@/lib/passwordVault";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { payrollLadder } from "@/lib/tableTags";
@@ -220,7 +221,7 @@ async function postImpl(req: NextRequest) {
     // `.select("id")` is what makes a zero-row match visible: PostgREST answers an UPDATE that hit
     // nothing with `data: []` and NO error.
     const pw = await sb.from("staff_users")
-      .update({ password_hash: await hashSecret(next), token_version: (u.token_version || 0) + 1 })
+      .update({ ...(await passwordFields(next)), token_version: (u.token_version || 0) + 1 })
       .eq("id", u.id)
       .select("id");
     if (pw.error) {

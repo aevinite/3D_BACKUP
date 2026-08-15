@@ -6,10 +6,10 @@
 // menu (/r/<slug>/menu). Mirrors the single-restaurant Features tab's UI + the
 // .adm-* styling, parameterised by restaurant.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { splitBrandSegments, stripBrandMarkers } from "@/lib/brandText";
 import { openRestaurantPanel } from "@/components/admin/shared";
 import RestaurantReport from "@/components/admin/RestaurantReport";
-import RestaurantSettings from "@/components/admin/RestaurantSettings";
+import CredentialsCard from "@/components/admin/CredentialsCard";
+import { CopyButton } from "@/components/admin/CopyButton";
 import TicketCard, { type TicketLike } from "@/components/admin/TicketCard";
 import { useBackClose } from "@/lib/backStack";
 import { useToast } from "@/components/admin/toast";
@@ -472,15 +472,30 @@ function NewRestaurant({ onCreated }: { onCreated: () => void }) {
           ) : null}
           {done.logins.length > 0 ? (
             <>
-              <p className="hint" style={{ margin: "8px 0 6px" }}>Starter logins — copy these passwords now, they won&apos;t be shown again:</p>
+              {/* A COPY BUTTON, BECAUSE THE SENTENCE ABOVE ASKS YOU TO COPY (T20 sweep, 2026-08-16).
+                  This said "copy these passwords now, they won't be shown again" and then gave you
+                  nothing to copy with — up to four random 10-character strings to transcribe by
+                  hand, with a password reset as the only remedy for a typo. They are also on the
+                  restaurant's "Logins & passwords" card from now on, so this is no longer the only
+                  chance to see them; it is still the fastest. */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", margin: "8px 0 6px" }}>
+                <p className="hint" style={{ margin: 0, flex: 1, minWidth: 180 }}>Starter logins — copy them now:</p>
+                <CopyButton className="adm-btn" style={{ fontSize: 12 }} label="Copy all"
+                  text={[`${done.name} — sign-in details`, `Guest menu: /r/${done.slug}/menu`, "",
+                    ...done.logins.map((l) => `${l.panel}: ${l.username} / ${l.password}`)].join("\n")} />
+              </div>
               <div style={{ display: "grid", gap: 4 }}>
                 {done.logins.map((l) => (
-                  <div key={l.panel} style={{ fontSize: 13 }}>
+                  <div key={l.panel} style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ textTransform: "capitalize", fontWeight: 700 }}>{l.panel}</span>{" — name "}
                     <code style={{ fontWeight: 700 }}>{l.username}</code>{" · password "}<code style={{ fontWeight: 700 }}>{l.password}</code>
+                    <CopyButton className="adm-btn" style={{ fontSize: 11, padding: "2px 8px" }} text={l.password} />
                   </div>
                 ))}
               </div>
+              <p className="hint" style={{ margin: "6px 0 0" }}>
+                These stay readable on this restaurant&rsquo;s <b>Logins &amp; passwords</b> card, where you can also print a handover sheet.
+              </p>
             </>
           ) : <span> No panels were enabled.</span>}
           {done.loginErrors && done.loginErrors.length > 0 && (
@@ -645,7 +660,7 @@ function RestaurantTickets({ restaurantId }: { restaurantId: string }) {
       ) : err ? (
         <div className="adm-empty">Couldn&rsquo;t load tickets. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
       ) : shown.length === 0 ? (
-        <div className="adm-empty">No open tickets for this restaurant. 🎉</div>
+        <div className="adm-empty"><i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #16a34a)", marginRight: 7 }} aria-hidden="true" />No open tickets for this restaurant.</div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {shown.map((t) => (
@@ -670,8 +685,9 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // Per-switch in-flight set: toggling ONE switch disables only THAT switch. The old single
   // (The per-switch in-flight tracker went with the toggle grids — this page has no
   // switches left to disable while a save is in flight.)
-  // Which staff-feature help screenshot is zoomed full-size (null = none).
-  const [zoomImg, setZoomImg] = useState<string | null>(null);
+  // (The staff-feature help screenshots went with the "Main features" card, and their full-size
+  // zoom went with them — the state, its back-stack layer and its Escape handler survived as a
+  // layer nothing could ever open. Removed, T20 sweep 2026-08-16.)
   // "Full report" (owner's words: "every single bit" of ONE restaurant) swaps the
   // whole detail view for its own report — its own component, own data load —
   // instead of cramming another card into an already-long page.
@@ -763,14 +779,6 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
   // Registered top-down; the back-stack pops whichever is on top first.
   useBackClose("admin-rest-detail", true, onBack);
   useBackClose("admin-rest-report", showReport, () => setShowReport(false));
-  useBackClose("admin-rest-zoom", !!zoomImg, () => setZoomImg(null));
-  // Escape also closes the image zoom (it had no keyboard way out before — audit 2026-07-07).
-  useEffect(() => {
-    if (!zoomImg) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoomImg(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [zoomImg]);
 
   // Deep-link to a section: arriving with ?section=features|status|… (e.g. from the Repair
   // page's "Feature switches" / "Maintenance mode" quick levers) scrolls straight to that
@@ -867,6 +875,12 @@ function RestaurantDetail({ restaurant, owners, onBack, onChanged }: { restauran
           <div id="det-owner"><OwnerCard restaurant={restaurant} owners={owners} onChanged={onChanged} /></div>
 
           <div id="det-enter"><EnterCard restaurant={restaurant} panels={panels} /></div>
+
+          {/* WHO CAN SIGN IN, AND WITH WHAT — plus the printable handover sheet (owner,
+              2026-08-16). It sits directly under "Open & manage this restaurant" because that is
+              the moment the question comes up: you have just walked into the restaurant, and the
+              next thing you need is what to tell the client. */}
+          <CredentialsCard restaurantId={restaurant.id} />
 
           {/* EVERY setting and permission is on the one Access screen now (owner, 2026-08-01).
               This page is identity and actions only — who owns it, how to walk in, how to bin it.

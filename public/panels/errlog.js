@@ -67,11 +67,21 @@
     "The Internet connection appears to be offline",// iOS / Safari
     "network error",                                // generic
   ];
+  // MATCHED TIGHTLY, SO ONLY THE BROWSER'S OWN WORDING IS DROPPED (T20 sweep, 2026-08-16).
+  //
+  // This used to be a substring test over the WHOLE message, and two of the six phrases are very
+  // ordinary English — "Load failed" and "network error". So any genuine crash of ours whose text
+  // merely CONTAINED one ("Menu Load failed", "threw a network error while parsing") was thrown
+  // away on the device and never recorded anywhere. The intent was only ever to drop the browser's
+  // own fetch-rejection message, which is the ENTIRE message when it happens — never a fragment of
+  // a longer sentence of ours. So: compare the trimmed message as a whole, allowing the common
+  // "TypeError: " / "Error: " prefix a browser adds, and nothing else.
   function isBenign(message) {
-    var m = String(message || "");
+    var m = String(message || "").trim();
     if (m.indexOf("Failed to execute 'print' on 'Window'") >= 0) return true;
+    var bare = m.replace(/^[A-Za-z]*Error:\s*/, "").replace(/[.\s]+$/, "");
     for (var i = 0; i < NETWORK_NOISE.length; i++) {
-      if (m.indexOf(NETWORK_NOISE[i]) >= 0) return true;
+      if (bare.toLowerCase() === NETWORK_NOISE[i].toLowerCase()) return true;
     }
     return false;
   }

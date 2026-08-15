@@ -28,6 +28,9 @@ export default function RecycleBin() {
   const [retentionDays, setRetentionDays] = useState(90);
   const [msg, setMsg] = useState<string | null>(null);
   const [ownerMsg, setOwnerMsg] = useState<string | null>(null);
+  // A restore that had to rename the restaurant says so here, and STAYS until dismissed — it means
+  // the QR codes on the tables now point at the wrong address, which is not a toast-sized fact.
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setMsg(null); setOwnerMsg(null);
@@ -54,8 +57,30 @@ export default function RecycleBin() {
       <h1 className="adm-page-h">Recycle bin</h1>
       <p className="adm-page-sub">
         Deleted restaurants and owners stay here for <b>{retentionDays} days</b>. Restore any of them any time. Anything can only be
-        <b> permanently removed</b> once its {retentionDays} days are up — until then, purge is locked for everyone.
+        <b> permanently removed</b> once its {retentionDays} days are up — until then, removal is locked for everyone.
       </p>
+      {/* WHAT "PERMANENTLY REMOVED" ACTUALLY MEANS, ON THE SCREEN THAT OFFERS IT (T20 sweep,
+          2026-08-16). This page used to promise that removal erases "ALL its data (menu, orders,
+          bills, staff)". Since migration 309 that is the opposite of what happens: the money is
+          kept on purpose for the 6-8 year records retention. Saying so here — once, at the top —
+          is what stops an admin answering a client's "is it all gone?" wrongly in either direction. */}
+      <div className="adm-card" style={{ marginBottom: 16, display: "flex", gap: 11, alignItems: "flex-start" }}>
+        <i className="fas fa-circle-info" style={{ color: "var(--accent)", marginTop: 2 }} aria-hidden="true" />
+        <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: "var(--muted)" }}>
+          <b style={{ color: "var(--text)" }}>Removing a restaurant does not erase its sales.</b> The menu, staff logins,
+          settings, saved customers and activity log are deleted for good. The bills, invoices, payments,
+          credit notes and the record of what was removed and why are <b style={{ color: "var(--text)" }}>kept</b> —
+          the law expects them to be available for years, and they stay readable in <b style={{ color: "var(--text)" }}>Bills</b>.
+        </p>
+      </div>
+
+      {notice && (
+        <div className="adm-card" role="status" style={{ marginBottom: 14, borderColor: "var(--adm-warn)", background: "color-mix(in srgb, var(--adm-warn) 10%, var(--card))", display: "flex", gap: 11, alignItems: "flex-start" }}>
+          <i className="fas fa-triangle-exclamation" style={{ color: "var(--adm-warn)", marginTop: 2 }} aria-hidden="true" />
+          <span style={{ flex: 1, fontSize: 13, lineHeight: 1.5 }}>{notice}</span>
+          <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => setNotice(null)}>Got it</button>
+        </div>
+      )}
 
       <h2 style={{ fontSize: 15, fontWeight: 700, margin: "18px 0 8px" }}>Deleted restaurants</h2>
       <div className="adm-card">
@@ -66,7 +91,7 @@ export default function RecycleBin() {
           <div className="adm-empty">{msg ? "" : "No deleted restaurants."}</div>
         ) : (
           <div style={{ display: "grid", gap: 12 }}>
-            {list.map((r) => <BinRow key={r.id} r={r} onChanged={load} />)}
+            {list.map((r) => <BinRow key={r.id} r={r} onChanged={load} onRenamed={setNotice} />)}
           </div>
         )}
       </div>
@@ -88,14 +113,18 @@ export default function RecycleBin() {
   );
 }
 
-function BinRow({ r, onChanged }: { r: Trashed; onChanged: () => void }) {
+function BinRow({ r, onChanged, onRenamed }: { r: Trashed; onChanged: () => void; onRenamed: (msg: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [purgeOpen, setPurgeOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
   const [wantBackup, setWantBackup] = useState(true);
 
-  const nameMatches = confirmName.trim() === r.name.trim();
+  // ONE typing rule on this page (owner, 2026-08-16: "keep that rule, remove other one"). The
+  // owner row below has always compared case-insensitively; this one demanded exact capitals, and
+  // restaurant names here are stored shouting ("AANGAN GARDEN RESTAURANT"), so the strict one was
+  // the one a person actually met — the button just stayed grey with nothing saying why.
+  const nameMatches = confirmName.trim().toLowerCase() === r.name.trim().toLowerCase();
 
   const restore = async (activate: boolean) => {
     setBusy(true); setErr(null);
@@ -105,6 +134,11 @@ function BinRow({ r, onChanged }: { r: Trashed; onChanged: () => void }) {
         body: JSON.stringify({ action: "restore_restaurant", restaurant_id: r.id, activate }),
       });
       const d = await res.json(); if (!res.ok) throw new Error(d.error || "Couldn't restore.");
+      // ITS WEB ADDRESS MAY HAVE CHANGED WHILE IT SAT HERE (T20 sweep, 2026-08-16). The server
+      // renames the returning restaurant when a live one has taken its name (mig 319) and says so
+      // in `renamed` — which nothing was reading, so the admin walked away with the old QR codes
+      // in mind and no idea the link had moved.
+      if (d.renamed) onRenamed(`${r.name} is back, but its web address was taken — it came back as /r/${d.renamed}/menu. Its QR codes need remaking.`);
       onChanged();
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); setBusy(false); }
   };
@@ -178,8 +212,14 @@ function BinRow({ r, onChanged }: { r: Trashed; onChanged: () => void }) {
 
       {purgeOpen && r.canPurge && (
         <div style={{ marginTop: 12, paddingTop: 12, borderTop: "var(--border)", display: "grid", gap: 10, maxWidth: 460 }}>
+          {/* Says exactly what goes and exactly what stays — see the note at the top of this page. */}
           <p className="hint" style={{ margin: 0, color: "var(--adm-danger)" }}>
-            This permanently erases <b>{r.name}</b> and ALL its data (menu, orders, bills, staff). This cannot be undone.
+            This permanently deletes <b>{r.name}</b>&rsquo;s menu, staff logins, settings, saved customers and
+            activity log. It cannot be undone and the restaurant can no longer be restored.
+          </p>
+          <p className="hint" style={{ margin: "-4px 0 0" }}>
+            Its <b>bills, invoices, payments and the removals record are kept</b> and stay readable in Bills —
+            those have to survive for the years the records rules expect.
           </p>
           <label style={{ fontSize: 12.5, display: "flex", alignItems: "center", gap: 8 }}>
             <input type="checkbox" checked={wantBackup} onChange={(e) => setWantBackup(e.target.checked)} disabled={busy} />

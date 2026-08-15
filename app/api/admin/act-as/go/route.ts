@@ -22,10 +22,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
 
 const ALLOWED_PATHS = new Set(["/manager", "/editor", "/kitchen", "/tablet", "/owner"]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function GET(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
@@ -34,11 +36,29 @@ export async function GET(req: NextRequest) {
   const rid = req.nextUrl.searchParams.get("rid") || "";
   const to = req.nextUrl.searchParams.get("to") || "";
   const uid = req.nextUrl.searchParams.get("uid") || "";
-  if (!rid || !ALLOWED_PATHS.has(to))
+  // Check the id's SHAPE before it reaches a uuid column (T20 sweep, 2026-08-16). Without this a
+  // stale bookmark or a mistyped link produced a raw Postgres 500 body instead of the tidy
+  // "restaurant not found" below — every sibling admin route validates first.
+  if (!UUID.test(rid) || !ALLOWED_PATHS.has(to))
     return NextResponse.json({ error: "rid and a known panel path required" }, { status: 400 });
 
-  const r = (await sb.from("restaurants").select("id").eq("id", rid).limit(1)).data?.[0];
+  const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
   if (!r) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
+  // A restaurant in the recycle bin has its guest menu switched off and its staff refused at
+  // sign-in — so opening its panels would show a working screen for something the product treats
+  // as gone. Refuse it here too, so all three doors agree.
+  if (r.deleted_at) return NextResponse.json({ error: "That restaurant is in the recycle bin — restore it first." }, { status: 409 });
+
+  // WALKING INTO A RESTAURANT IS RECORDED (T20 sweep, 2026-08-16). Reaching any restaurant's panel
+  // with no password is the strongest thing this console can do, and it was the ONE admin action
+  // that wrote nothing at all — every other one (owner changes, maintenance, retention, blocks,
+  // log cleanup, exports) logs itself. Recorded on the `admin` panel, which the manager's own log
+  // never shows, so this stays invisible to the restaurant exactly as the owner requires: it is a
+  // record for HIM, not a hint for them.
+  await logAction("admin", "admin_enter_panel", {
+    restaurant_id: rid, actor: "admin", device_id: deviceIdFrom(req), level: "info",
+    detail: `opened ${to} at "${r.name}"${uid ? " as a specific person" : ""}`,
+  });
 
   // Same cookie the POST route sets; the redirect carries ?rid= so THIS tab stays
   // pinned to the restaurant even if the browser-wide cookie later changes. A chosen

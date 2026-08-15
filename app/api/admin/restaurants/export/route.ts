@@ -27,6 +27,11 @@ const TABLES = [
   "payments", "aggregator_orders", "feedback", "reviews",
   "customers", "waiter_calls", "requests", "blocklist",
   "staff_actions", "daily_counters", "seq_counters",
+  // The money trail (T20 sweep, 2026-08-16). A file offered as the thing you rebuild a restaurant
+  // from carried its orders and payments but none of its invoice history, refunds, split payments
+  // or the record of what was removed and why — so a rebuilt restaurant would have had its sales
+  // and no way to prove what happened to any of them.
+  "invoice_events", "credit_notes", "session_payments", "deletion_audit",
   "restaurant_owners", "restaurant_billing", "restaurant_payments", "issues",
 ] as const;
 

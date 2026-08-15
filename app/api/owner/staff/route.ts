@@ -18,7 +18,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { USER_COOKIE, userFromCookie, hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, normalizeLoginName, type Role } from "@/lib/userAuth";
+import { passwordFields } from "@/lib/passwordVault";
 import { logAction } from "@/lib/oplog";
 // MANAGER_POWER_FLAGS is deliberately NOT imported here any more: the per-person allow-list is
 // `capsForRole()` (lib/staffCaps), the one list the Access screen and the admin write route use.
@@ -719,7 +720,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   if (password.length > 128) return bad("Password is too long (max 128 characters).");
-  const row: Record<string, unknown> = { username: key, role, restaurant_id: rid, password_hash: await hashSecret(password), name: display, phone: String(body?.phone || "").trim().slice(0, 20) || null };
+  const row: Record<string, unknown> = { username: key, role, restaurant_id: rid, ...(await passwordFields(password)), name: display, phone: String(body?.phone || "").trim().slice(0, 20) || null };
   // ── Fill the profile RIGHT HERE at creation (owner 2026-07-29: "while creating the user…
   //    make it almost perfect"). Every part is optional — an owner in a hurry still just types
   //    a name and a role. Personal details need the profile power; job & pay are owner/admin only.
@@ -938,7 +939,7 @@ async function patchImpl(req: NextRequest): Promise<Response> {
     // Capture the write error: without this, a failed UPDATE (row lock / timeout) still
     // returned {ok:true, password} — the owner read out a password the DB never saved, so
     // the staffer couldn't log in and the OLD password still worked (audit 2026-07-07).
-    const { error } = await sb.from("staff_users").update({ password_hash: await hashSecret(password), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
+    const { error } = await sb.from("staff_users").update({ ...(await passwordFields(password)), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
     if (error) return bad("Couldn't reset the password — please try again.", 500);
     await logAction(logPanel(s), "staff_reset_password", { restaurant_id: u.restaurant_id, actor: s.actor, actor_id: s.actorId, detail: `reset "${u.username}"` });
     return ok({ ok: true, password });

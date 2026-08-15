@@ -13,13 +13,15 @@ const RET_OPTS = [{ d: 1, label: "1 day" }, { d: 3, label: "3 days" }, { d: 7, l
 
 export default function AdminSettings() {
   const [ret, setRet] = useState<{ oplog_retention_days: number; custlog_retention_days: number } | null>(null);
+  // Which stack this console is pointed at, from the server (see the row below).
+  const [env, setEnv] = useState<{ name: string; live: boolean } | null>(null);
   const [retErr, setRetErr] = useState(false);
   const [msg, setMsg] = useState("");
 
   const loadRet = useCallback(async () => {
     try {
       const j = await (await fetch("/api/admin/settings", { cache: "no-store" })).json();
-      if (j.error) setRetErr(true); else { setRet(j); setRetErr(false); }
+      if (j.error) setRetErr(true); else { setRet(j); setRetErr(false); if (j.environment) setEnv(j.environment); }
     } catch { setRetErr(true); }
   }, []);
   useEffect(() => { loadRet(); }, [loadRet]);
@@ -44,7 +46,16 @@ export default function AdminSettings() {
           <h2>Platform</h2>
           <p className="hint">Aevidine · Restaurant OS — your control room for every restaurant on this backend.</p>
           <div className="adm-logwrap" style={{ marginTop: 6 }}>
-            <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Environment</span><span style={{ fontWeight: 700, color: "var(--adm-ok)" }}>Production</span></div>
+            {/* Answered by the server from the database this deployment actually talks to — it
+                used to be the word "Production" typed into the page, which on the backup stack
+                was simply untrue (T20 sweep, 2026-08-16). Amber, not green, when it is the live
+                client stack: that row should make you pause, not reassure you. */}
+            <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}>
+              <span>Which stack</span>
+              <span style={{ fontWeight: 700, color: env ? (env.live ? "var(--adm-warn)" : "var(--adm-ok)") : "var(--muted)" }}>
+                {env ? env.name : "checking…"}
+              </span>
+            </div>
             <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>You&rsquo;re signed in as</span><span className="adm-muted">Platform admin</span></div>
             <div className="adm-logrow" style={{ gridTemplateColumns: "1fr auto" }}><span>Guest-menu maintenance</span><span className="adm-muted">per restaurant</span></div>
           </div>

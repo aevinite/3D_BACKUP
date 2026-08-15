@@ -91,7 +91,19 @@ export default function AdminCommand() {
 
   const openPanel = async (r: Rest, path: string) => {
     setBusyRow(r.id); setErr(null);
-    try { await openRestaurantPanel(r.id, path); }
+    try {
+      // A BLOCKED POP-UP MUST NOT VANISH IN SILENCE (T20 sweep, 2026-08-16). This threw the window
+      // handle away, so with pop-ups blocked — Safari's default in some setups — pressing Manager
+      // did nothing at all: no tab, no message. openRestaurantPanel returns null for exactly this
+      // reason ("so callers can tell the admin instead of falsely claiming 'now viewing'"), and
+      // both sibling call sites (the owner chooser below, the Restaurants detail page) already
+      // checked it. This was the one that didn't.
+      const w = await openRestaurantPanel(r.id, path);
+      if (!w) {
+        const m = "Your browser blocked the new tab — allow pop-ups for this site, then try again.";
+        setErr(m); toast(m, "err");
+      }
+    }
     catch (e) { const m = e instanceof Error ? e.message : String(e); setErr(m); toast(m, "err"); }
     finally { setBusyRow(null); }
   };

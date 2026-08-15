@@ -21,7 +21,7 @@ type Restaurant = { id: string; name: string };
 type Session = { id: string; table_number: string; status: string; bill_no: number | null; invoice_no: number | null; invoice_voided: boolean };
 type Order = { id: string; table_number: string; kot_no: number | null; status: string; payment_status: string; created_at: string; session_id: string | null };
 type RepairData = { sessions: Session[]; orders: Order[] };
-type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null };
+type FixRequest = { id: string; restaurant_id: string | null; created_at: string; source: string | null; mode?: string | null; summary: string; pr_url: string | null; err_key?: string | null };
 type AgentRun = { id: string; kind: "live" | "nightly" | "audit"; title: string; status: "running" | "done" | "closed" | "failed"; report: string | null; started_at: string; ended_at: string | null };
 // Complaints (staff/owner-raised tickets) — folded in from the old /aevinite/issues page.
 type Issue = TicketLike & { restaurantName: string; restaurantSlug?: string; status: string };
@@ -31,6 +31,9 @@ type Onb = { id: string; name: string; slug: string; ageDays: number; reason: st
 type AttData = { atRisk: Risk[]; onboarding: Onb[]; generatedAt: string };
 // Rate-limit hits (mig 205) — a configurable limit was reached; shown here with Fix/Change/Allow.
 type RlHit = { id: string; restaurant_id: string; restaurant_name: string | null; key: string; subject: string; subject_label: string | null; hit_count: number; max_count: number; window_seconds: number; last_at: string };
+// The rule behind a hit — only its key and human label are needed here (editing lives on the
+// Rate limits page); it is what stops this screen printing a raw database key.
+type RlRule = { key: string; label: string };
 const rlPer = (s: number) => (s % 3600 === 0 ? `${s / 3600}h` : s % 60 === 0 ? `${s / 60} min` : `${s}s`);
 
 type Op = "void_bill" | "delete_order" | "refire_order" | "unstick_table" | "edit_time";
@@ -135,8 +138,15 @@ export default function AdminRepair() {
   const [att, setAtt] = useState<AttData | null>(null);
   const [attErr, setAttErr] = useState(false);
 
-  // Rate-limit hits (mig 205) — a configurable limit was reached (all restaurants).
+  // Rate-limit hits (mig 205) — a configurable limit was reached (all restaurants), plus the
+  // rules themselves so a hit can be named the way the Rate limits page names it.
   const [rlHits, setRlHits] = useState<RlHit[]>([]);
+  const [rlRules, setRlRules] = useState<RlRule[]>([]);
+  const rlLabel = (key: string) =>
+    rlRules.find((r) => r.key === key)?.label
+    // Until the rules arrive (or for a key with no rule row), prettify rather than print the raw
+    // database key — the same rule actLabel() follows for action codes.
+    || key.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
 
   useEffect(() => {
     (async () => {
@@ -170,7 +180,11 @@ export default function AdminRepair() {
       adminFetch<{ runs: AgentRun[] }>("/api/admin/agent-runs"),
       adminFetch<{ issues: Issue[] }>("/api/owner/issues?scope=all"),
       adminFetch<AttData>("/api/admin/attention"),
-      adminFetch<{ events: RlHit[] }>("/api/admin/rate-limits"),
+      // `rules` rides along so a hit can be shown by its REAL name. This row used to print
+      // `h.key.replace(/_/g," ")` — "guest order" — while the Rate limits page showed the same
+      // wall as "Guest orders (per table)". One limit, two names, and the raw one is a database
+      // key on a person's screen, which is the thing actLabel() exists to prevent (T20, 2026-08-16).
+      adminFetch<{ events: RlHit[]; rules: RlRule[] }>("/api/admin/rate-limits"),
       // Problems recorded as fixed (migs 218/219) — drives the "came back after the fix" label and
       // the read-only "Already fixed" reference list. Nothing here hides an error.
       adminFetch<{ memories: ErrMemory[] }>("/api/admin/error-memory"),
@@ -180,7 +194,7 @@ export default function AdminRepair() {
     if (h.ok) setRuns(h.data.runs || []);
     if (iss.ok) { setIssues(iss.data.issues || []); setIssuesErr(false); } else setIssuesErr(true);
     if (at.ok) { setAtt(at.data); setAttErr(false); } else setAttErr(true);
-    if (rl.ok) setRlHits(rl.data.events || []);
+    if (rl.ok) { setRlHits(rl.data.events || []); setRlRules(rl.data.rules || []); }
     if (mem.ok) setMemories(mem.data.memories || []);
     setErrLoading(false);
   }, []);
@@ -321,14 +335,15 @@ export default function AdminRepair() {
   const setTicketStatus = async (id: string, status: "resolved" | "open") => {
     setTicketBusy(id);
     setIssues((prev) => prev.map((i) => (i.id === id ? { ...i, status } : i)));
-    try {
-      const r = await fetch("/api/owner/issues?scope=all", {
-        method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, status }),
-      });
-      if (!r.ok) loadHub(); // revert to server truth on failure
-    } catch { loadHub(); }
-    finally { setTicketBusy(null); }
+    // Through adminFetch like every other action here (T20 sweep, 2026-08-16). The bare fetch it
+    // used before reverted the row on failure and said NOTHING, so a complaint you thought you had
+    // resolved silently sprang back — the one action on this page that could fail in silence.
+    const r = await adminFetch<{ ok: boolean }>("/api/owner/issues?scope=all", {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, status }),
+    });
+    setTicketBusy(null);
+    if (!r.ok) { toast(r.error || "Couldn’t update that complaint.", "err"); loadHub(); }
   };
   const openTickets = issues.filter((i) => i.status === "open").length;
   const shownTickets = useMemo(() => {
@@ -339,7 +354,21 @@ export default function AdminRepair() {
   const attCount = (att?.atRisk.length || 0) + (att?.onboarding.length || 0);
 
   const scopedName = restaurants.find((r) => r.id === rid)?.name || null;
-  const groups = groupErrors(errors);
+  // ONE RESTAURANT PICKER FOR THE WHOLE PAGE (owner, 2026-08-16). It already existed, but only to
+  // unlock the hands-on tools at the bottom — so choosing a restaurant appeared to do nothing to
+  // the thing you were actually reading. A client rings about THEIR restaurant; there are nine on
+  // this stack and the board was one flat list. It now narrows the problems and the limit hits too
+  // (both act on rows already fetched — no extra request, no extra data).
+  const groups = groupErrors(rid ? errors.filter((a) => (a.restaurant_id || "") === rid) : errors);
+  const shownRlHits = rid ? rlHits.filter((h) => h.restaurant_id === rid) : rlHits;
+  // A problem already handed to Claude must not offer "Fix now" again after a refresh (T20 sweep,
+  // 2026-08-16). `sent` is only this page-load's memory, so a reload re-offered the button and a
+  // second press filed a SECOND open ticket for the same error. `err_key` exists for exactly this
+  // (mig 183) and nothing was reading it — and the server built it with a different formula from
+  // the tile's own group key, so even a reader would not have matched. Both sides now use
+  // errorGroupKey(), so the queue and the board describe a problem the same way.
+  const queuedKeys = new Set(requests.map((q) => q.err_key).filter(Boolean) as string[]);
+  const alreadyQueued = (g: ErrGroup) => sent.has(g.key) || queuedKeys.has(g.key);
 
   return (
     <>
@@ -348,28 +377,49 @@ export default function AdminRepair() {
           <h1 className="adm-page-h" style={{ marginBottom: 4 }}>Repair &amp; support</h1>
           <p className="adm-page-sub" style={{ margin: 0 }}>Everything that needs you — problems, complaints and at-risk restaurants — plus the tools to fix it by hand or hand to Claude.</p>
         </div>
-        <button className="adm-btn" onClick={refreshAll} disabled={refreshing} title="Reload problems, complaints, at-risk, queue and history">
-          <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
-        </button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* THE PICKER LIVES AT THE TOP NOW (owner, 2026-08-16). It used to sit halfway down,
+              under "Hands-on tools", and only unlocked those — so a 9pm call about ONE restaurant
+              still meant reading every restaurant's errors, and choosing one looked like it did
+              nothing. Same control, same state; it now scopes the whole page. */}
+          <label className="adm-ret rp-pick">
+            <i className="fas fa-store" aria-hidden="true" style={{ opacity: 0.7 }} /> Restaurant
+            <select value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Show problems and tools for one restaurant">
+              <option value="">All restaurants</option>
+              {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+            </select>
+          </label>
+          <button className="adm-btn" onClick={refreshAll} disabled={refreshing} title="Reload problems, complaints, at-risk, queue and history">
+            <i className={`fas fa-rotate-right${refreshing ? " fa-spin" : ""}`} style={{ marginRight: 7 }} aria-hidden="true" />Refresh
+          </button>
+        </div>
       </div>
+      {rid && (
+        <p className="adm-muted" style={{ fontSize: 12.5, margin: "10px 0 0" }}>
+          <i className="fas fa-filter" aria-hidden="true" style={{ marginRight: 6, opacity: 0.7 }} />
+          Showing <b style={{ color: "var(--text)" }}>{scopedName}</b> only.{" "}
+          <button className="rp-link" onClick={() => setRid("")}>Show every restaurant</button>
+        </p>
+      )}
 
       {/* Status strip — each live pill jumps to its section */}
       <div className="rp-strip">
-        {/* ONE number for one thing (sweep T20, finding F5). This pill counted RAW error rows
-            while the section heading right below it counted GROUPS, so the page said "7 problems
-            (24h)" and "Problems right now · 3 · last 24h" at the same time, about the same window.
-            Both were true — 3 tiles rolling up 4+1+2 reports — but two numbers for one fact is how
-            a reader stops trusting either. The pill now counts what the board actually shows, and
-            the raw total lives in the tooltip for anyone who wants it. */}
+        {/* ONE number for one thing. This pill once counted RAW error rows while the heading below
+            counted GROUPS; it now counts what the board actually shows, with the raw total in the
+            tooltip. Its WORDING was the second half of the same problem (T20 sweep, 2026-08-16):
+            it said "(24h)" while the list underneath was every UNRESOLVED error whatever its age —
+            live, that read "7 problems (24h)" over rows dated 3d, 7d, 8d and 9d ago, while the
+            Dashboard's own 24h-bounded button sat quiet and grey. Both screens now mean the same
+            thing by "a problem": one nobody has resolved. Nothing is hidden by age. */}
         <a className={`rp-pill${groups.length ? " alert" : " ok"}`} href="#problems"
           title={errors.length > groups.length
             ? `Jump to problems — ${groups.length} problem${groups.length === 1 ? "" : "s"}, ${errors.length} reports in all (repeats are grouped)`
             : "Jump to problems"}>
           <i className={`fas ${groups.length ? "fa-triangle-exclamation" : "fa-circle-check"}`} aria-hidden="true" />
-          <span className="n">{errLoading ? "…" : groups.length}</span><span>problem{groups.length === 1 ? "" : "s"} (24h)</span>
+          <span className="n">{errLoading ? "…" : groups.length}</span><span>problem{groups.length === 1 ? "" : "s"} open</span>
         </a>
-        <a className={`rp-pill${rlHits.length ? " alert" : ""}`} href="#rate-limits" title="Jump to rate-limit hits">
-          <i className="fas fa-gauge-high" aria-hidden="true" /><span className="n">{errLoading ? "…" : rlHits.length}</span><span>limit{rlHits.length === 1 ? "" : "s"} reached</span>
+        <a className={`rp-pill${shownRlHits.length ? " alert" : ""}`} href="#rate-limits" title="Jump to rate-limit hits">
+          <i className="fas fa-gauge-high" aria-hidden="true" /><span className="n">{errLoading ? "…" : shownRlHits.length}</span><span>limit{shownRlHits.length === 1 ? "" : "s"} reached</span>
         </a>
         <a className={`rp-pill${openTickets ? " warn" : ""}`} href="#complaints" title="Jump to complaints">
           <i className="fas fa-flag" aria-hidden="true" /><span className="n">{openTickets}</span><span>open complaint{openTickets === 1 ? "" : "s"}</span>
@@ -390,13 +440,13 @@ export default function AdminRepair() {
         <i className="fas fa-triangle-exclamation" aria-hidden="true" style={{ color: groups.length ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>Problems right now</h2>
         {groups.length ? <span className="rp-chip danger">{groups.length}</span> : null}
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>all restaurants · last 24h</span>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>{scopedName ? scopedName : "all restaurants"} · not yet resolved</span>
       </div>
 
       {errLoading ? (
         <div className="adm-empty">Checking for problems…</div>
       ) : groups.length === 0 ? (
-        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> All clear — nothing has errored in the last 24 hours.</div>
+        <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> All clear — no unresolved problems{scopedName ? ` at ${scopedName}` : ""}.</div>
       ) : (
         <div style={{ marginBottom: 6 }}>
           {groups.map((g) => {
@@ -405,7 +455,7 @@ export default function AdminRepair() {
             const title = actLabel(a.action);
             const jl = jumpLabel(a);
             const isOpen = expanded.has(g.key);
-            const wasSent = sent.has(g.key);
+            const wasSent = alreadyQueued(g);
             // Was this problem fixed once before? Then it is BACK — the fix didn't hold, which
             // deserves the loudest label on the tile (migs 218/219).
             const mem = memoryFor(g, memories);
@@ -444,7 +494,7 @@ export default function AdminRepair() {
                       </button>
                     ) : null}
                     {wasSent ? (
-                      <span className="adm-muted" style={{ fontSize: 12 }}><i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 5 }} />Sent to Claude</span>
+                      <span className="adm-muted" style={{ fontSize: 12 }} title="This problem is already in the queue below — it will not be sent twice."><i className="fas fa-check" aria-hidden="true" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 5 }} />Sent to Claude</span>
                     ) : (
                       <>
                         <button className="adm-btn" style={{ fontSize: 12 }} onClick={() => sendError(g, "instant")} title="A Claude window opens on the office Mac within a minute">
@@ -530,22 +580,22 @@ export default function AdminRepair() {
       <div className="rp-sec-h" id="rate-limits">
         <i className="fas fa-gauge-high" aria-hidden="true" style={{ color: rlHits.length ? "var(--adm-danger)" : "var(--muted)" }} />
         <h2>Rate limits reached</h2>
-        {rlHits.length ? <span className="rp-chip danger">{rlHits.length}</span> : null}
+        {shownRlHits.length ? <span className="rp-chip danger">{shownRlHits.length}</span> : null}
         <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>someone hit a wall · all restaurants</span>
         <Link href="/aevinite/rate-limits" className="adm-btn" style={{ marginLeft: "auto", fontSize: 12 }}><i className="fas fa-sliders" aria-hidden="true" style={{ marginRight: 6 }} />Manage limits</Link>
       </div>
-      {errLoading && rlHits.length === 0 ? (
+      {errLoading && shownRlHits.length === 0 ? (
         <div className="adm-empty">Checking…</div>
-      ) : rlHits.length === 0 ? (
+      ) : shownRlHits.length === 0 ? (
         <div className="rp-clear"><i className="fas fa-circle-check" aria-hidden="true" /> No rate limits have been reached.</div>
       ) : (
         <div style={{ marginBottom: 6 }}>
-          {rlHits.map((h) => (
+          {shownRlHits.map((h) => (
             <div key={h.id} className="rp-err">
               <span className="rp-err-bar" style={{ background: "var(--adm-danger)" }} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
-                  <b style={{ fontSize: 13.5 }}>{h.key.replace(/_/g, " ")}</b>
+                  <b style={{ fontSize: 13.5 }}>{rlLabel(h.key)}</b>
                   <span className="rp-chip danger">{h.hit_count} / {h.max_count} per {rlPer(h.window_seconds)}</span>
                   {h.restaurant_name ? <span className="rp-rest"><i className="fas fa-store" aria-hidden="true" style={{ marginRight: 4, opacity: 0.6 }} />{h.restaurant_name}</span> : null}
                   <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(h.last_at)}</span>
@@ -625,7 +675,7 @@ export default function AdminRepair() {
           Churn risk <span style={{ color: "var(--muted)", fontWeight: 500, textTransform: "none", letterSpacing: 0 }}>· paying but not ordering</span>
         </div>
         {!att ? <div className="adm-empty">{attErr ? "Couldn't load." : "Loading…"}</div> : att.atRisk.length === 0 ? (
-          <div className="adm-empty">✅ Nothing at risk — every paying restaurant is ordering.</div>
+          <div className="adm-empty"><i className="fas fa-circle-check" style={{ color: "var(--adm-ok, #4caf82)", marginRight: 7 }} aria-hidden="true" />Nothing at risk — every paying restaurant is ordering.</div>
         ) : (
           <div style={{ display: "grid", gap: 8 }}>
             {att.atRisk.map((r) => (
@@ -715,23 +765,20 @@ export default function AdminRepair() {
       <div className="rp-sec-h">
         <i className="fas fa-screwdriver-wrench" aria-hidden="true" style={{ color: "var(--muted)" }} />
         <h2>Hands-on tools</h2>
-        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>fix a table or order yourself — pick a restaurant</span>
+        <span className="adm-muted" style={{ fontSize: 12, marginLeft: 2 }}>fix a table or order yourself</span>
       </div>
-      <div className="adm-card" style={{ marginBottom: 12 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <label className="adm-ret">
-            <i className="fas fa-store" aria-hidden="true" style={{ opacity: 0.7 }} /> Restaurant
-            <select value={rid} onChange={(e) => setRid(e.target.value)} aria-label="Choose a restaurant to repair">
-              <option value="">Choose a restaurant…</option>
-              {restaurants.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
-          </label>
-          {rid && <button className="adm-btn" onClick={load}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>}
-        </div>
+      {/* The picker moved to the top of the page (see the note there); this says which restaurant
+          the tools below will act on, so the section is never ambiguous about its target. */}
+      <div className="adm-card" style={{ marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <i className="fas fa-store" aria-hidden="true" style={{ opacity: 0.7 }} />
+        <span style={{ flex: 1, fontSize: 13 }}>
+          {rid ? <>These tools will act on <b>{scopedName}</b>.</> : <span className="adm-muted">Choose a restaurant at the top of this page to unlock the table &amp; order tools.</span>}
+        </span>
+        {rid && <button className="adm-btn" onClick={load}><i className="fas fa-rotate-right" aria-hidden="true" style={{ marginRight: 6 }} />Reload its tables</button>}
       </div>
 
       {!rid ? (
-        <div className="adm-empty">Pick a restaurant above to unlock its table &amp; order tools.</div>
+        <div className="adm-empty">Choose a restaurant at the top of the page to unlock its table &amp; order tools.</div>
       ) : dataErr ? (
         <div className="adm-empty">Couldn&rsquo;t load that restaurant. <button className="adm-btn" style={{ marginLeft: 8 }} onClick={load}>Retry</button></div>
       ) : data === null ? (
@@ -827,8 +874,25 @@ export default function AdminRepair() {
         .rp-pill.warn{background:color-mix(in srgb,var(--adm-accent,#e8a13c) 12%,var(--card));border-color:color-mix(in srgb,var(--adm-accent,#e8a13c) 45%,transparent);color:var(--adm-accent,#e8a13c)}
         .rp-pill.warn .n{color:var(--adm-accent,#e8a13c)}
         .rp-pill.ok{border-color:color-mix(in srgb,var(--adm-ok,#4caf82) 40%,transparent)}
-        .rp-sec-h{display:flex;align-items:center;gap:9px;margin:24px 0 11px}
+        .rp-sec-h{display:flex;align-items:center;gap:9px;margin:24px 0 11px;flex-wrap:wrap}
         .rp-sec-h h2{margin:0;font-size:16px}
+        /* A SECTION HEADING MUST NOT PUSH ITS OWN CONTROL OFF THE SCREEN (T20 sweep, 2026-08-16).
+           At 360px the "Complaints & issues" heading wrapped to two lines, its caption ("raised by
+           staff & owners · all restaurants") took a third, and the filter beside them — pinned
+           right with margin-left:auto — ended 18px past the edge of the content column. The column
+           does not scroll sideways, so the control was CUT OFF, not merely off-view; the same
+           happened to the "Manage limits" button. Letting the row wrap and forbidding any child
+           from out-growing it is the whole fix. */
+        .rp-sec-h > *{min-width:0;max-width:100%}
+        @media (max-width: 620px){
+          .rp-sec-h{gap:6px}
+          /* On a phone the control drops onto its own line, full width, instead of being squeezed
+             against the right edge. */
+          .rp-sec-h > :last-child{margin-left:0!important;flex:1 1 100%}
+        }
+        /* The page-level restaurant picker: never wider than the column it sits in. */
+        .rp-pick{max-width:100%;min-width:0}
+        .rp-pick select{max-width:100%;min-width:0}
         .rp-chip{font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;background:color-mix(in srgb,var(--adm-accent,#e8a13c) 16%,transparent);color:var(--adm-accent,#e8a13c)}
         .rp-chip.danger{background:color-mix(in srgb,var(--adm-danger) 16%,transparent);color:var(--adm-danger)}
         .rp-clear{display:flex;align-items:center;gap:9px;padding:16px;border-radius:12px;border:1px solid color-mix(in srgb,var(--adm-ok,#4caf82) 35%,transparent);background:color-mix(in srgb,var(--adm-ok,#4caf82) 8%,var(--card));color:var(--text);font-size:13.5px}

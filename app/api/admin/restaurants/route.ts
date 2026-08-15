@@ -9,8 +9,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { hashSecret, normalizeLoginName } from "@/lib/userAuth";
-import { resolveOwnerHomeRid, loginNameTaken } from "@/lib/ownerHome";
+import { normalizeLoginName } from "@/lib/userAuth";
+import { passwordFields } from "@/lib/passwordVault";
+import { resolveOwnerHomeRid, nameTakenMessage } from "@/lib/ownerHome";
 import { logAction } from "@/lib/oplog";
 import { loadStarterMenu, toCategoryRows, toFilterRows, toItemRows } from "@/lib/starterMenu";
 import { cleanClonedSettings } from "@/lib/settingsClone";
@@ -44,8 +45,17 @@ export async function GET(req: NextRequest) {
   // countdown + whether they're yet eligible to purge. Kept separate from the
   // main list so a deleted restaurant never leaks back into the live table.
   if (new URL(req.url).searchParams.get("deleted") === "1") {
-    const binQ = await sb.from("restaurants").select("id, slug, name, deleted_at, deleted_by, delete_reason")
-      .not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+    // A PURGED RESTAURANT IS NOT IN THE BIN ANY MORE (T20 sweep, 2026-08-16).
+    //
+    // Migration 309 changed the purge so the restaurants ROW SURVIVES, marked `purged_at`, because
+    // its bills hang off it and those are kept for the 6-8 year retention. Nothing on this side was
+    // ever taught about that column, so the bin still listed the row: pressing "Delete permanently"
+    // appeared to do nothing (the row came back, still "Ready to purge"), a second press showed the
+    // raw `already been purged` exception, and "Restore" brought back a shell with no menu, no
+    // staff, no settings and no owner. Filtering it here is what makes the purge look like what it
+    // is — gone from every list a person can see.
+    const binQ = await sb.from("restaurants").select("id, slug, name, deleted_at, deleted_by, delete_reason, purged_at")
+      .not("deleted_at", "is", null).is("purged_at", null).order("deleted_at", { ascending: false });
     if (binQ.error) return bad(binQ.error.message, 500);
     const now = Date.now();
     const trashed = (binQ.data || []).map((r) => {
@@ -176,9 +186,13 @@ export async function POST(req: NextRequest) {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
     const activate = body?.activate === true;
-    const r = (await sb.from("restaurants").select("id, name, slug, deleted_at").eq("id", rid).limit(1)).data?.[0];
+    const r = (await sb.from("restaurants").select("id, name, slug, deleted_at, purged_at").eq("id", rid).limit(1)).data?.[0];
     if (!r) return bad("Restaurant not found.", 404);
     if (!r.deleted_at) return bad("That restaurant isn't in the recycle bin.", 409);
+    // Restoring a PURGED restaurant would hand back a shell — its menu, staff, settings and owner
+    // links were deleted at purge time and only the bills were kept (mig 309). Refuse it in words,
+    // rather than quietly returning an empty restaurant to the live list (T20 sweep, 2026-08-16).
+    if (r.purged_at) return bad("This restaurant was permanently removed — its menu, staff and settings are gone, so it can't be brought back. Its bills are still on record in the Bills ledger.", 409);
     // THE NAME MAY HAVE BEEN TAKEN WHILE IT SAT IN THE BIN (owner, 2026-08-13: "inside bin no name
     // lock… and that name will be rewritten if same name exist"). Since mig 319 only LIVE
     // restaurants reserve a slug, so restoring can collide — and a collision on the unique index
@@ -203,10 +217,15 @@ export async function POST(req: NextRequest) {
     return ok({ ok: true, restored: true, active: activate, ...(renamed ? { renamed } : {}) });
   }
 
-  // ── purge_restaurant — PERMANENT, irreversible erase of a binned restaurant and
-  // ALL its data. The atomic SQL function admin_purge_restaurant enforces the two
-  // hard rules (never the default, never before 90 days) so a purge can't slip
-  // through even if the UI check is bypassed. There is NO early-purge override. ──
+  // ── purge_restaurant — PERMANENT, irreversible removal of a binned restaurant's
+  // OPERATIONAL data: its menu, staff logins, settings, customers, feedback and
+  // activity log. Its MONEY IS DELIBERATELY KEPT (migration 309, owner 2026-08-11:
+  // "keep bills forever, purge only the rest") — orders, sessions, payments, credit
+  // notes, invoice history and the Removals audit all survive, which is why the
+  // restaurants row itself survives too, marked `purged_at`, for them to hang off.
+  // The atomic SQL function admin_purge_restaurant enforces the three hard rules
+  // (never the default, never before 90 days, never twice) independently of this
+  // handler. There is NO early-purge override. ──────────────────────────────────
   if (action === "purge_restaurant") {
     const rid = String(body?.restaurant_id || "");
     if (!rid) return bad("Missing restaurant_id.");
@@ -221,9 +240,20 @@ export async function POST(req: NextRequest) {
     }
     // Atomic hard delete (children → parents → the row) in one transaction.
     const { error } = await sb.rpc("admin_purge_restaurant", { p_rid: rid });
-    if (error) return bad(error.message, 500);
-    await logAction("admin", "restaurant_purge", { actor: "admin", detail: `PERMANENTLY purged restaurant "${r.name}" (${rid})` });
-    return ok({ ok: true, purged: true });
+    // The SQL function raises in words a person can act on ("already been purged", "Retention
+    // lock: …"). Passing `error.message` through unchanged is what put a raw database sentence on
+    // the admin's screen; the page now shows this text, so keep it readable and add the one thing
+    // the exception can't know — where the bills went (T20 sweep, 2026-08-16).
+    if (error) {
+      const m = String(error.message || "");
+      if (/already been purged/i.test(m)) return bad("This restaurant has already been permanently removed. Its bills are still on record in the Bills ledger.", 409);
+      if (/Retention lock/i.test(m)) return bad("It's too soon — a restaurant can only be removed 90 days after it was deleted.", 423);
+      if (/never be purged/i.test(m)) return bad("The default restaurant can never be removed.", 400);
+      if (/not in the recycle bin/i.test(m)) return bad("Only a restaurant in the recycle bin can be removed.", 409);
+      return bad(m, 500);
+    }
+    await logAction("admin", "restaurant_purge", { actor: "admin", detail: `permanently removed restaurant "${r.name}" (${rid}) — menu, staff and settings deleted; bills, invoices and the removals audit kept` });
+    return ok({ ok: true, purged: true, billsKept: true });
   }
 
   // ── create_restaurant — the admin onboards a NEW restaurant in one go (owner 2026-06-29):
@@ -289,7 +319,21 @@ export async function POST(req: NextRequest) {
     const baseRow = cleanClonedSettings(template.data);
     // NOTHING IS SPREAD OVER baseRow ANY MORE (sweep T6): the create form's tablet/module
     // preset used to land here, last, and overwrite the very defaults cleanClonedSettings sets.
-    const settingsRow = { ...baseRow, id: slug, restaurant_id: rid, enabled_panels: panels };
+    // THE SETTINGS ROW IS KEYED BY THE RESTAURANT'S OWN ID, NOT ITS SLUG (T20 sweep, 2026-08-16).
+    //
+    // It used to be `id: slug`, and `settings.id` is that table's PRIMARY KEY (mig 003). Migration
+    // 319 then freed a restaurant's slug the moment it goes to the recycle bin — but a binned
+    // restaurant KEEPS its settings row, so the slug was free in `restaurants` and still taken in
+    // `settings`. Binning "Aangan" and creating "Aangan" again therefore passed the slug check and
+    // died on `settings_pkey`, rolling the whole create back and putting
+    // `duplicate key value violates unique constraint "settings_pkey"` on the admin's screen —
+    // precisely the "database error on the admin's screen, which is worse than the lock it
+    // replaces" that migration 319's own header says it exists to avoid.
+    //
+    // The uuid can never collide, and nothing anywhere looks a settings row up by slug: every read
+    // is `.eq("restaurant_id", …)` except the four legacy `id='site'` reads, which are restaurant
+    // #1's own row and are untouched by this. So the name stays free, as he asked for.
+    const settingsRow = { ...baseRow, id: rid, restaurant_id: rid, enabled_panels: panels };
     const setRes = await sb.from("settings").upsert(settingsRow, { onConflict: "restaurant_id" });
     if (setRes.error) {
       // Roll back the orphaned restaurant row (bug #5, 2026-07-06): without a settings
@@ -335,7 +379,7 @@ export async function POST(req: NextRequest) {
       if (!panels[panel]) continue;
       const pw = genPassword();
       const ins = await sb.from("staff_users")
-        .insert({ username: panel, name: `${name} ${panel}`, role: panel, restaurant_id: rid, password_hash: await hashSecret(pw), active: true })
+        .insert({ username: panel, name: `${name} ${panel}`, role: panel, restaurant_id: rid, ...(await passwordFields(pw)), active: true })
         .select("id").single();
       if (ins.error) { loginErrors.push(panel); continue; } // don't fail the whole create over one login; report what we made
       logins.push({ panel, role: panel, username: panel, password: pw });
@@ -368,13 +412,14 @@ export async function POST(req: NextRequest) {
   // An owner's `restaurant_id` is only a "home" anchor for the NOT NULL + FK column;
   // their OWNED restaurants come from restaurants.owner_user_id / restaurant_owners
   // (assigned via PATCH). Login names are globally unique, so clash-check globally.
-  if (await loginNameTaken(key)) return bad("That username is taken — pick another.", 409);
+  const taken = await nameTakenMessage(key);
+  if (taken) return bad(taken, 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const home = await resolveOwnerHomeRid();
   if (!home.rid) return bad(home.error || "Couldn't work out where to file this owner.", 500);
   const { data, error } = await sb.from("staff_users")
-    .insert({ username: key, name: display, role: "owner", restaurant_id: home.rid, password_hash: await hashSecret(password), active: true })
+    .insert({ username: key, name: display, role: "owner", restaurant_id: home.rid, ...(await passwordFields(password)), active: true })
     .select("id, name").single();
   if (error) return bad(error.code === "23505" ? "That username is taken — pick another." : error.message, error.code === "23505" ? 409 : 500);
   await logAction("admin", "owner_create", { actor: "admin", detail: `created owner "${display}" · id ${data!.id}` });
