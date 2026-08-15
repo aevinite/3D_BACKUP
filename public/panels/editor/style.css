@@ -3617,6 +3617,11 @@ html[data-theme="light"] .badge-hidden{ color:#b45309; }
 @container (max-width: 152px) {
   .ftile.ft-tag .ft-tagbadge { display: none; }
 }
+/* ONE MARKER PER TAG AT EVERY WIDTH (owner, 2026-08-15). Below 152px this pill was already
+   dropped for density; above it, a tagged tile said "👑 VIP" twice — once in the corner ribbon
+   and once here. The ribbon is the one readable across a room, so the pill goes at every size
+   and the tile matches the waiter tablet. */
+.ftile.ft-tag .ft-tagbadge { display: none; }
 /* (A free tile carries no sub-line at all now — the "tap to open" hint went with the
    open/close step, so there is nothing left here to hide at small sizes.) */
 /* Guest tile pill — silver metallic (dark default). */
