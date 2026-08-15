@@ -35,6 +35,8 @@
     // move in flex/grid layouts; +1 forgives sub-pixel rounding so a perfectly-fitting
     // number never jitters. MIN_PX is the readability floor — below ~9px a figure is
     // unreadable anyway, so clipping becomes the lesser evil and we stop.
+    // a value that was shortened before must go back to full before we re-measure
+    if (el.dataset.lfhFull) { el.textContent = el.dataset.lfhFull; delete el.dataset.lfhFull; el.removeAttribute("title"); }
     for (var pass = 0; pass < 5; pass++) {
       var over = el.scrollWidth - el.clientWidth;
       if (over <= 1) return;
@@ -43,10 +45,37 @@
       var next = Math.max(MIN_PX, Math.floor(cur * ((w - over) / w) * 10) / 10);
       if (next >= cur) return;
       el.style.fontSize = next + "px";
-      if (next === MIN_PX) return;
+      if (next === MIN_PX) break;
+    }
+  // WHEN SHRINKING RUNS OUT, SHORTEN THE NUMBER — do not crush it (owner, 2026-08-15).
+  // The floor used to be 9px and the loop simply stopped there and let the figure clip: the
+  // BIGGEST number on the page became the smallest text in the product, which is backwards.
+  // Now the floor is a readable 11px, and a figure that still does not fit is rewritten in the
+  // Indian short form (₹84.5 L, ₹3.08 Cr) with the exact value kept on the title attribute and
+  // in data-lfh-full, so nothing is lost and hovering still shows it.
+  //
+  // SAFE BECAUSE OF WHERE THIS RUNS: the selector list is opt-in classes plus DASHBOARD stat
+  // tiles. A bill is never in that net and MUST NEVER BE — on a bill the exact figure is the
+  // law, and an abbreviated total is not a rounding preference, it is a wrong document. If a
+  // bill selector is ever added here, this abbreviation has to be gated off first.
+    if (el.scrollWidth - el.clientWidth > 1 && el.childElementCount === 0) {
+      var full = el.textContent, sh = shortIndian(full);
+      if (sh && sh.length < full.length) { el.dataset.lfhFull = full; el.textContent = sh; el.title = full; }
     }
   }
-  var MIN_PX = 9;
+  function shortIndian(txt) {
+    var m = String(txt).match(/^(\D*)([\d,]+(?:\.\d+)?)(.*)$/);
+    if (!m) return null;
+    var n = parseFloat(m[2].replace(/,/g, ""));
+    if (!isFinite(n) || n < 1000) return null;
+    var v, suf;
+    if (n >= 1e7) { v = n / 1e7; suf = " Cr"; }
+    else if (n >= 1e5) { v = n / 1e5; suf = " L"; }
+    else { v = n / 1e3; suf = "K"; }
+    var s = v >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
+    return m[1] + s + suf + m[3];
+  }
+  var MIN_PX = 11;
 
   function scan(root) {
     var host = root && root.querySelectorAll ? root : document;

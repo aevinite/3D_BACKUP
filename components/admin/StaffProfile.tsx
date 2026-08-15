@@ -331,7 +331,12 @@ function Rail({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => 
       <h2>{p.name || p.username}</h2>
       <div className="stp-who">{p.designation || ROLE_LABEL[p.role] || p.role} · signs in as <b>{p.username}</b></div>
       <div className="stp-chips">
-        <span className="stp-chip" style={{ color: ROLE_COLOR[p.role], background: `color-mix(in srgb, ${ROLE_COLOR[p.role]} 16%, transparent)` }}>{ROLE_LABEL[p.role] || p.role}</span>
+        {/* The colour comes from a per-skin rule now, not the inline ROLE_COLOR hex: an inline style
+            cannot change with the light/dark skin, and on the LIGHT card all four role chips measured
+            1.80–2.22:1 against their own 16% tint (T11 sweep, 2026-08-15) — the manager one being
+            literally the GUEST menu's tan. ROLE_COLOR stays for the AVATAR below, where it is a solid
+            fill behind a white initial and reads in both skins. */}
+        <span className={`stp-chip role-${p.role}`}>{ROLE_LABEL[p.role] || p.role}</span>
         <span className={`stp-chip ${p.active ? "ok" : "bad"}`}>{p.active ? "Active" : "Disabled"}</span>
         {p.hasPin ? <span className="stp-chip mut">PIN set</span> : null}
         {p.left_on ? <span className="stp-chip warn">Left {day(p.left_on)}</span> : null}
@@ -1173,6 +1178,13 @@ function ProfileStyle() {
   .stp-chip.ok { color:var(--adm-ok,#34d399); background:color-mix(in srgb,var(--adm-ok,#34d399) 16%,transparent); }
   .stp-chip.bad { color:var(--adm-danger,#f87171); background:color-mix(in srgb,var(--adm-danger,#f87171) 16%,transparent); }
   .stp-chip.warn { color:var(--adm-warn,#fbbf24); background:color-mix(in srgb,var(--adm-warn,#fbbf24) 16%,transparent); }
+  /* ROLE CHIPS — driven by --role-* so they follow the skin, exactly like .ok/.bad/.warn above.
+     An inline hex could not: on the LIGHT card all four measured 1.80-2.22:1 against their own
+     tint. The fallbacks are the dark values, so this still renders if a token is ever missing. */
+  .stp-chip.role-owner   { color:var(--role-owner,#b491f0);   background:color-mix(in srgb,var(--role-owner,#b491f0) 16%,transparent); }
+  .stp-chip.role-manager { color:var(--role-manager,#d4a574); background:color-mix(in srgb,var(--role-manager,#d4a574) 16%,transparent); }
+  .stp-chip.role-kitchen { color:var(--role-kitchen,#7ec88a); background:color-mix(in srgb,var(--role-kitchen,#7ec88a) 16%,transparent); }
+  .stp-chip.role-tablet  { color:var(--role-tablet,#60a5fa);  background:color-mix(in srgb,var(--role-tablet,#60a5fa) 16%,transparent); }
   .stp-meter { background:var(--bg); border:var(--border); border-radius:12px; padding:12px; margin-bottom:14px; }
   .stp-meter .lab { display:flex; justify-content:space-between; font-size:12px; font-weight:700; margin-bottom:8px; }
   .stp-meter .bar { height:7px; border-radius:999px; background:var(--muted2); overflow:hidden; }

@@ -1892,6 +1892,13 @@ body.menu-frost .nav {
   box-shadow: 0 20px 60px rgba(0,0,0,0.5);
 }
 .detail-img.show { opacity: 1; transform: translateY(0) scale(1); }
+/* ON A BIG SCREEN, LET THE DISH BE BIG (owner, 2026-08-15). This view was written for a phone,
+   where 88% / 420px fills the width. On a 1280px laptop that same cap left the photo — the thing
+   that sells the dish, and where the 3D viewer lives — as the SMALLEST element on the page, with
+   wide empty margins either side while the nutrition cards below used the full width. The phone
+   rule is untouched; only screens wide enough to HAVE the problem get the bigger cap. */
+@media (min-width: 900px)  { .detail-img { max-width: 640px; } }
+@media (min-width: 1200px) { .detail-img { max-width: 760px; } }
 .detail-img-overlay { 
   position:absolute;inset:0;background:linear-gradient(to bottom,rgba(26,15,10,0) 40%,var(--bg) 100%);
   pointer-events:none;
@@ -4164,6 +4171,11 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      deeper — already this file's --adm-warn — and takes white to 5.02:1. */
   --adm-cta: #b45309;
   --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
+  /* ROLE CHIPS on a person's profile card. They were the only chips there still carrying a
+     hard-coded hex from the component, so they could not follow the skin the way --adm-ok /
+     -danger / -warn already do. These bright values are for the DARK card, where they measure
+     5.6-6.8:1 against their own 16% tint. */
+  --role-owner: #b491f0; --role-manager: #d4a574; --role-kitchen: #7ec88a; --role-tablet: #60a5fa;
   --elev: 0 1px 0 rgba(255,255,255,.03); --elev-hi: 0 1px 0 rgba(255,255,255,.03);
   /* Access-control page tokens (it styles inline with --ac-* fallbacks). */
   --ac-line: #1d2430; --ac-card: #10141b; --ac-muted: #8b94a7;
@@ -4195,6 +4207,10 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      and are the same hues, so nothing changes meaning. The DARK blocks keep the brighter
      values — bright-on-dark was already fine there. */
   --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
+  /* The same four one step deeper for the LIGHT card, where the bright values measured
+     1.80-2.22:1 and the manager one was literally the GUEST menu's tan. Now 5.46 / 5.50 /
+     5.56 / 5.22:1, same hue per role so a role still reads as "its" colour. */
+  --role-owner: #6d28d9; --role-manager: #92400e; --role-kitchen: #166534; --role-tablet: #1d4ed8;
   --elev: 0 1px 2px rgba(16,24,40,.04); --elev-hi: 0 1px 2px rgba(16,24,40,.04);
   --ac-line: #e5e8ee; --ac-card: #ffffff; --ac-muted: #6b7280;
   --ac-accent: #2563eb; --ac-off: #e5e8ee;
@@ -4534,6 +4550,11 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
   --accent-on: #06251a;
   --own-cta: #b45309;   /* same fix as --adm-cta above: white on it was 3.19:1 */
   --adm-ok: #34d399; --adm-danger: #f87171; --adm-warn: #fbbf24; --adm-accent: #e8a13c;
+  /* ROLE CHIPS on a person's profile card. They were the only chips there still carrying a
+     hard-coded hex from the component, so they could not follow the skin the way --adm-ok /
+     -danger / -warn already do. These bright values are for the DARK card, where they measure
+     5.6-6.8:1 against their own 16% tint. */
+  --role-owner: #b491f0; --role-manager: #d4a574; --role-kitchen: #7ec88a; --role-tablet: #60a5fa;
   --elev: 0 1px 0 rgba(255,255,255,.03);
   background: var(--bg);
   font-size: 13.5px;
@@ -4558,6 +4579,10 @@ html [data-skin="light"] .lfh-conn-pop-fig { color: var(--ink-light, currentColo
      and are the same hues, so nothing changes meaning. The DARK blocks keep the brighter
      values — bright-on-dark was already fine there. */
   --adm-ok: #15803d; --adm-danger: #b91c1c; --adm-warn: #b45309; --adm-accent: #8f5a0a;
+  /* The same four one step deeper for the LIGHT card, where the bright values measured
+     1.80-2.22:1 and the manager one was literally the GUEST menu's tan. Now 5.46 / 5.50 /
+     5.56 / 5.22:1, same hue per role so a role still reads as "its" colour. */
+  --role-owner: #6d28d9; --role-manager: #92400e; --role-kitchen: #166534; --role-tablet: #1d4ed8;
   /* INK ON THE ACCENT FILL, one step darker HERE ONLY. The light skin's accent is #059669, a
      darker green than the dark skin's #10b981 - so the shared #06251a ink measured 4.33:1 on
      the selected Bar/Line pill, just under the 4.5:1 that 11.5px bold text needs (T5 sweep,
