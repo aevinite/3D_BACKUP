@@ -1,6 +1,6 @@
 # GUARD MAP — "I changed this file. Which check covers it?"
 
-There are **96** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
+There are **97** `verify:*` / `test:*` commands in `package.json`. Each one exists because a specific
 bug reached somebody's screen once. That is a real asset and a real problem at the same time: nobody
 can hold 96 names in their head, so in practice a person runs none of them, or reaches for
 `verify:everything` (the 500-phase suite — 40 minutes, writes to the shared database, one run at a
@@ -73,6 +73,7 @@ Code: **`public/panels/editor/app.js`** (plain JS in an iframe, not React), `app
 |---|---|---|---|
 | **anything at all in this panel** | `verify:manager-behaviour`, `verify:ui`, `verify:taps` | nothing | no |
 | the tables floor / a tile / the floor summary | `verify:floor`, `verify:cancelled-tile` | nothing / `.env.local` | no |
+| how many tables sit in a row / the floor's CSS bands / sideways scrolling | `verify:floor-per-row` | nothing | no |
 | `lfh_table_view_summary` (the floor's one big read) | `verify:summary-parity` ← **not hand-review** | `.env.local` | no |
 | the floor under load / rush hour | `verify:live-rush`, `verify:merged-floor` | `.env.local` | **YES** |
 | a permission gate in the panel | `verify:manager-gates`, `verify:manager-hidden` | `.env.local` | no |

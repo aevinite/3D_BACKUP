@@ -512,6 +512,19 @@
       + "</span></div>";
   }
 
+  // REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R26. The `width:280px` on the body
+  // below is built for 66/80mm paper and STAYS that way. Measured by T15 on 2026-08-15 by rendering
+  // this document's real output at both roll widths: at 80mm it is clean, and at 58mm the table
+  // name, the "— no <ingredient>" line and the ⚠ AVOID allergy box run past the paper edge. That is
+  // known and accepted — *"for different restaurant we use different printer and all that stuff so
+  // right now keep IT AS IT IS."* Each restaurant is set up with a printer that suits it (the
+  // flagship and Aangan both run POS-80), so the answer to a narrow roll is the right printer, not
+  // a document that tries to fit every width and reads worse on all of them.
+  //
+  // So: do NOT add responsive print CSS here, do NOT shrink the body, and do NOT re-report the
+  // 58mm overflow as a bug. If a client ever turns up with 58mm hardware he will say so, and it
+  // becomes a real piece of work with a real printer to test against.
+  // (The BILL is a separate document and is already clean at both widths — nothing to do there.)
   function kotDocHtml(o) {
     o = o || {};
     var linesHtml = o.linesHtml != null ? o.linesHtml : (o.lines || []).map(kotLineHtml).join("");
