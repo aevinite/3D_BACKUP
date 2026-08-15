@@ -543,10 +543,22 @@ Owner reviewed all 20 items and chose. Order: 1 → 2 → 6 → 3 → 5 → 4.
       the exact value on hover — though I could not reproduce the crush on a real screen, so it is a
       safety net, not a visible fix; bills are and must stay out of that net. Dish photo 420 → 760px
       on a laptop, phone untouched.
-- [ ] **Phase 4 — manager panel redesign** (last, needs his eyes): move the manager nav from the TOP
-      to a LEFT icon rail that expands on click (like the owner panel); the manager sees only the
-      items his permissions allow; fix the crowded header in BOTH manager mode and the owner panel
-      ("half the screen has been covered by the top thing").
+- [x] **Phase 4 — manager panel redesign** (PRs #978 + #979, live): the sections moved from the top
+      strip to a LEFT icon rail at >=1024px — icons only (62px) with the name on hover, a toggle
+      expands it to full names (208px) and the choice is remembered. Below 1024px the phone/tablet
+      drawer is untouched. Side effect worth having: a vertical list can't overflow, so a restaurant
+      with an extra module no longer loses its ENTIRE nav to a hamburger (Green Bowl at 1194px went
+      from 0 sections on screen to all 9).
+      "Only the items his permissions allow" was ALREADY built (XRAY_TABS) — verified, not rebuilt:
+      Aangan shows 8 sections, Green Bowl 9, French House 8.
+      Header: 213px -> 156px of an 800px window. The bar dropped 60 -> 50px now the sections have
+      left it, and the page's own 47px switch ROW was deleted — the cockpit bar's dropdown now
+      re-scopes Manager mode in place instead of bouncing out to the owner home. The restaurant's
+      name went from FOUR copies on screen to two.
+      Three faults found by measuring, all fixed before shipping: the rail ignored the admin
+      ribbon's --ribbon-h and slid up over the bar, slicing the restaurant's name; margin-top:auto
+      on a first-in-DOM toggle shoved the whole nav to the bottom; and xraySetTint(el,false) cleared
+      the button title outright, which left Dashboard/Ratings/Audit/Settings as UNNAMED ICONS.
 - Declined: unify the two sign-in marks (R24) · the shared browser-tab name ("I don't care").
 - Verified for him 2026-08-15: **nothing is reachable without logging in** — 48/48 admin API routes,
   12/12 owner routes, both consoles bounce to a login, and every panel data call answers
