@@ -10,6 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
 import { throttleBlock, throttleUnblock, listBlocked, clientIp } from "@/lib/loginThrottle";
 
@@ -24,12 +26,12 @@ export async function GET(req: NextRequest) {
   const rules = await sb.from("rate_limit_rules")
     .select("id, key, label, max_count, window_seconds, enabled, updated_at")
     .is("restaurant_id", null).order("key");
-  if (rules.error) return err(rules.error.message, 500);
+  if (rules.error) return adminFail("the rate limits", rules.error, { action: "load" });
 
   const ev = await sb.from("rate_limit_events")
     .select("id, restaurant_id, key, subject, subject_label, hit_count, max_count, window_seconds, status, created_at, last_at")
     .eq("status", "open").order("last_at", { ascending: false }).limit(50);
-  if (ev.error) return err(ev.error.message, 500);
+  if (ev.error) return adminFail("the rate limits", ev.error, { action: "load" });
 
   // Attach a friendly restaurant name (zero-uuid = not restaurant-scoped, e.g. admin login).
   const ids = [...new Set((ev.data ?? []).map((e) => e.restaurant_id).filter((x) => x && x !== "00000000-0000-0000-0000-000000000000"))];
@@ -80,7 +82,7 @@ export async function PATCH(req: NextRequest) {
   patch.updated_at = new Date().toISOString();
   patch.updated_by = "admin";
   const r = await sb.from("rate_limit_rules").update(patch).eq("id", id).select("key").maybeSingle();
-  if (r.error) return err(r.error.message, 500);
+  if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
   await logAction("admin", "rate_limit_edit", { level: "info", detail: `rate limit "${r.data?.key ?? id}" updated: ${JSON.stringify(patch)}` });
   return NextResponse.json({ ok: true });
 }
@@ -118,7 +120,7 @@ export async function POST(req: NextRequest) {
     const id = String(b.request_id || "");
     if (!UUID.test(id)) return err("invalid request_id");
     const r = await sb.from("unblock_requests").update({ status: "denied", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", id).select("id").maybeSingle();
-    if (r.error) return err(r.error.message, 500);
+    if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
     return NextResponse.json({ ok: true });
   }
 
@@ -162,13 +164,13 @@ export async function POST(req: NextRequest) {
     if (!e) return err("that limit-reached record no longer exists — refresh the page", 404);
     // Reset that subject's counter now (unblock them) + mark the event handled.
     const r = await sb.rpc("lfh_rate_allow", { p_event_id: eventId, p_actor: "admin" });
-    if (r.error) return err(r.error.message, 500);
+    if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
     await logAction("admin", "rate_limit_allow", { level: "info", detail: `rate-limit hit allowed (counter reset) · ${eventId}` });
     return NextResponse.json({ ok: true });
   }
   if (action === "dismiss") {
     const r = await sb.from("rate_limit_events").update({ status: "resolved", resolved_at: new Date().toISOString(), resolved_by: "admin" }).eq("id", eventId).select("id").maybeSingle();
-    if (r.error) return err(r.error.message, 500);
+    if (r.error) return adminFail("the rate limits", r.error, { action: "save" });
     if (!r.data) return err("that limit-reached record no longer exists — refresh the page", 404);
     return NextResponse.json({ ok: true });
   }

@@ -10,6 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
 import { rememberErrorHandled, forgetErrorSignature } from "@/lib/errorMemory";
 
@@ -48,7 +50,7 @@ export async function POST(req: NextRequest) {
   upd = row.detail === null ? upd.is("detail", null) : upd.eq("detail", row.detail);
   upd = row.restaurant_id === null ? upd.is("restaurant_id", null) : upd.eq("restaurant_id", row.restaurant_id);
   const r = await upd.select("id");
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return adminFail("that problem's status", r.error, { action: "save" });
 
   const count = r.data?.length ?? 0;
 

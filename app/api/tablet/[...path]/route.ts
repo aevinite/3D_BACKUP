@@ -42,6 +42,8 @@ import { waiterTables, allows, blockedReason, type SectionLimit } from "@/lib/ta
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
+// What never leaves the server inside a settings row (the delivery apps' connection keys).
+import { panelSafeSettings } from "@/lib/panelSettings";
 
 export const dynamic = "force-dynamic";
 
@@ -523,7 +525,13 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       const restaurantOut = restRow
         ? Object.fromEntries(Object.entries(restRow).filter(([k]) => k !== "access_config"))
         : null;
-      const setOut = overlayUserPerms(must(settings), viewer, restCfg);
+      // …AND THE SAME RULE FOR THE SETTINGS ROW (T17 sweep, 2026-08-13). `select("*")` above is
+      // deliberate — this panel reads dozens of columns and a hand-typed list goes stale — but the
+      // row also carries `platform_channels`, i.e. the delivery apps' connection KEYS, which the two
+      // admin screens that manage them never hand back (they answer `hasKey` / `••••1234`). Nothing
+      // in public/panels reads it, so it was pure weight on the tablet's once-a-minute refresh that
+      // happened to be a credential. lib/panelSettings.ts states the list once for both panels.
+      const setOut = overlayUserPerms(panelSafeSettings(must(settings)), viewer, restCfg);
       if (setOut) {
         const tOpsOk = tableOpsEffectiveFromRow(setOut);
         if (!tOpsOk) setOut.tablet_table_ops = "off";
@@ -1790,6 +1798,26 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         .neq("status", "cancelled").neq("status", "received").neq("payment_status", "paid").eq("restaurant_id", rid);
       q = openSess ? q.eq("session_id", openSess.id) : q.eq("table_number", t).eq("archived", false);
       const rows = must(await q.select());
+      // A SETTLE THAT SETTLED NOTHING IS NOT A SETTLE (T17 sweep, 2026-08-13, finding F2).
+      //
+      // The update is filtered `.neq("payment_status","paid")`, so when someone else settled this
+      // bill a moment ago it matches NO row — and this used to answer `{ok:true, count:0}`. The
+      // tablet does not read `count`: it toasts "Bill paid via cash" and offers the undo bar on any
+      // 200 (public/panels/tablet/app.js, optimisticPay + payBill). So on a floor where a waiter and
+      // the manager both reach for the bill — or two waiters on one party — the second person is
+      // told the money is in, and the method THEY collected in is never recorded against it. Cash
+      // taken while the first booked UPI leaves the day's payment-method breakdown wrong with nobody
+      // aware, which is exactly the kind of quiet money mismatch this panel refuses everywhere else.
+      //
+      // Every sibling on this route already refuses it out loud — khata (nothing unpaid to park),
+      // on-the-house (nothing to settle), unpay (nothing inside the grace window) — and so does the
+      // MANAGER's own bulk settle, `khata/pay`, with "Nothing outstanding on that bill." This branch
+      // was the last one still reporting success for a no-op. 409, because the request was
+      // well-formed and it is the bill's state that says no (the panels already treat 409 as
+      // "a person must read this", and the outbox never silently retries it).
+      if (!rows.length) {
+        return err("Nothing to settle on this bill — someone may have just settled it. Refresh to see where it stands.", 409);
+      }
       await log(splits ? "bill_split" : "bill_paid", { table_number: t, device_id: dev, detail: splits ? String(payUpdate.payment_note || "").slice(0, 120) : (body?.payment_method ? `via ${body.payment_method}` : undefined) });
       return ok({ ok: true, count: rows.length });
     }
@@ -1819,7 +1847,14 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         p_restaurant_id: rid, p_table: t, p_phone: phone, p_name: name, p_consent: consent,
         p_session: capSess?.id ?? null,
       });
-      if (error) return err(error.message, 500);
+      // NEVER HAND A DATABASE MESSAGE TO A WAITER (T17 sweep, 2026-08-13, finding F10). This sent
+      // `error.message` straight into the toast on the payment sheet — the same fault /api/maintenance
+      // was fixed for on 2026-08-05, and the only two places left on this route (the other is the
+      // khata person insert below). The detail stays in our log where it is useful.
+      if (error) {
+        console.error("[tablet] customer-capture failed:", error.message);
+        return err("Couldn't save the guest's details — the bill itself is fine. Try again in a moment.", 500);
+      }
       if ((data as { ok?: boolean })?.ok) await log("customer_saved", { table_number: t, device_id: dev });
       return ok(data || { ok: false });
     }
@@ -1926,7 +1961,12 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         if (phone) customer = (await sb.from("khata_customers").select("id,name,phone").eq("restaurant_id", rid).eq("phone", phone).maybeSingle()).data as any;
         if (!customer) {
           const ins = await sb.from("khata_customers").insert({ restaurant_id: rid, name, phone, note }).select("id,name,phone");
-          if (ins.error) return err(ins.error.message, 500);
+          // Same rule as customer-capture above (T17, finding F10): the waiter reads a sentence,
+          // never Postgres. Detail to our log.
+          if (ins.error) {
+            console.error("[tablet] khata customer insert failed:", ins.error.message);
+            return err("Couldn't add that person to the khata book — try again in a moment.", 500);
+          }
           customer = (ins.data as any[])[0];
         }
       }

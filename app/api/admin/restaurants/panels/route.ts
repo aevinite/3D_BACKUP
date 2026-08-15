@@ -11,6 +11,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +30,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
 
   const row = await sb.from("settings").select("enabled_panels").eq("restaurant_id", restaurantId).maybeSingle();
-  if (row.error) return NextResponse.json({ error: row.error.message }, { status: 500 });
+  if (row.error) return adminFail("this restaurant's panels", row.error, { action: "load" });
 
   // ALL FOUR, ALWAYS (owner, 2026-07-31: "remove it completely, all panels always on"). The stored
   // overrides are deliberately NOT merged in any more: lib/panelAccess.ts answers all-on whatever is

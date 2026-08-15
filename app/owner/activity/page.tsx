@@ -402,6 +402,21 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
   // it has had the class since it was written. The stacked rule carries `!important` precisely
   // because this template is an inline style, so nothing needs computing here.
   const cols = "88px 1fr auto";
+  // ── SORT + TYPE, THE SAME WAY THE REMOVALS RECORD DOES IT (owner, 2026-08-14) ─────────────────
+  // "you can able to sort in activity log such as from printer and all that." The Audit got chips
+  // and a sort on 2026-08-11 and this feed — the bigger one — never did, so the only way to find
+  // the printer's rows was to know a word that happens to appear in them. Both controls come from
+  // /panels/auditsort.js, the SAME module the Audit uses and the same one the manager panel and the
+  // admin console read, so one grouping answers on all three screens.
+  const [group, setGroup] = useState("");
+  const [sort, setSort] = useState(AUDITSORT.ACTIVITY_DEFAULT_SORT);
+  // Chips are built from the WHOLE page of rows, never the filtered slice — a chip's count must not
+  // change when you tap it.
+  const chips = AUDITSORT.activityCounts(rows || []);
+  // A group that vanished after a reload (its rows aged off this page) must not leave the list
+  // silently empty: fall back to All, exactly as the admin's Audit does with a stale kind.
+  const activeGroup = group && chips.some((c: { group: string }) => c.group === group) ? group : "";
+  const list = rows === null ? null : AUDITSORT.activityView(rows, { q, group: activeGroup, sort });
   return (
     <div className="adm-card">
       {/* Severity filter + search + refresh */}
@@ -423,6 +438,30 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
         />
         <button className="adm-btn" onClick={onReload}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
       </div>
+
+      {/* WHAT KIND OF THING HAPPENED — one chip per group, with its count. Only groups that have
+          rows get a chip, so nobody is offered "Printer 0" to tap. */}
+      {chips.length > 1 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+          <div className="own-range" style={{ margin: 0, flexWrap: "wrap" }}>
+            <button className={activeGroup === "" ? "on" : ""} onClick={() => setGroup("")}>All types</button>
+            {chips.map((c: { group: string; count: number; label: string; icon: string }) => (
+              <button key={c.group} className={activeGroup === c.group ? "on" : ""} onClick={() => setGroup(c.group)}
+                title={`${c.label} — ${c.count} on this page`}>
+                <span aria-hidden="true">{c.icon}</span> {c.label} <span style={{ opacity: 0.65 }}>{c.count}</span>
+              </button>
+            ))}
+          </div>
+          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort the activity log"
+            style={{ marginLeft: "auto", padding: "6px 9px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 12.5 }}>
+            {AUDITSORT.ACTIVITY_SORTS.map((s: { id: string; label: string }) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+          {/* HONEST ABOUT WHAT THE COUNTS COVER. The feed is paged server-side, so these numbers
+              describe THIS page — saying so is the difference between a helpful number and one that
+              reads as authoritative and isn't (the same care the Audit's chips take). */}
+          {pages > 1 && <span className="adm-muted" style={{ fontSize: 11.5, width: "100%" }}>Counts are for this page of {total.toLocaleString("en-IN")} entries.</span>}
+        </div>
+      )}
 
       {err && rows === null ? (
         <div className="adm-empty" style={{ color: "var(--adm-danger)" }}>

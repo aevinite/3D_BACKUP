@@ -16,6 +16,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { logAction } from "@/lib/oplog";
@@ -57,7 +59,7 @@ export async function GET(req: NextRequest) {
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!isUuid(rid)) return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
   const row = await sb.from("settings").select(SELECT).eq("restaurant_id", rid).maybeSingle();
-  if (row.error) return NextResponse.json({ error: row.error.message }, { status: 500 });
+  if (row.error) return adminFail("this restaurant's features", row.error, { action: "load" });
   return NextResponse.json(effective(row.data as Row));
 }
 
@@ -73,15 +75,15 @@ export async function POST(req: NextRequest) {
 
   const patch = on ? PATCH[feature].on : PATCH[feature].off;
   const rest = await sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle();
-  if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
+  if (rest.error) return adminFail("this restaurant's features", rest.error, { action: "save" });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
 
   const cur = await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle();
-  if (cur.error) return NextResponse.json({ error: cur.error.message }, { status: 500 });
+  if (cur.error) return adminFail("this restaurant's features", cur.error, { action: "save" });
 
   if (cur.data) {
     const r = await sb.from("settings").update(patch).eq("restaurant_id", rid).select(SELECT).maybeSingle();
-    if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+    if (r.error) return adminFail("this restaurant's features", r.error, { action: "save" });
     await logAction("admin", "quick_feature", { detail: `${feature} → ${on ? "on" : "off"}`, restaurant_id: rid });
     return NextResponse.json(effective(r.data as Row));
   }
@@ -90,7 +92,7 @@ export async function POST(req: NextRequest) {
   const base = cleanClonedSettings(template.data);
   const newRow = { ...base, id: rest.data.slug, restaurant_id: rid, ...patch };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select(SELECT).maybeSingle();
-  if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });
+  if (ins.error) return adminFail("this restaurant's features", ins.error, { action: "save" });
   await logAction("admin", "quick_feature", { detail: `${feature} → ${on ? "on" : "off"}`, restaurant_id: rid });
   return NextResponse.json(effective(ins.data as Row));
 }

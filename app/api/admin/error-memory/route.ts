@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -28,7 +30,7 @@ export async function GET(req: NextRequest) {
   // A NULL-restaurant signature covers every restaurant, so it belongs in a scoped view too.
   if (rid) q = q.or(`restaurant_id.eq.${rid},restaurant_id.is.null`);
   const r = await q;
-  if (r.error) return err(r.error.message, 500);
+  if (r.error) return adminFail("the fixed-problem list", r.error, { action: "load" });
   const rows = (r.data ?? []) as { restaurant_id: string | null }[];
 
   const ids = [...new Set(rows.map((x) => x.restaurant_id).filter(Boolean))] as string[];
@@ -48,7 +50,7 @@ export async function DELETE(req: NextRequest) {
   const id = new URL(req.url).searchParams.get("id") || "";
   if (!UUID.test(id)) return err("invalid id");
   const r = await sb.from("error_signatures").delete().eq("id", id).select("panel, action, sig, restaurant_id").maybeSingle();
-  if (r.error) return err(r.error.message, 500);
+  if (r.error) return adminFail("the fixed-problem list", r.error, { action: "save" });
   if (!r.data) return err("that entry is already gone", 404);
   const gone = r.data as { panel: string; action: string; sig: string; restaurant_id: string | null };
   await logAction("admin", "error_memory_cleared", {

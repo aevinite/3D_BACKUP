@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -36,7 +38,7 @@ export async function GET(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const r = await sb.from("settings").select("oplog_retention_days, custlog_retention_days, audit_retention_years").eq("id", "site").limit(1);
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return adminFail("the log-retention settings", r.error, { action: "load" });
   const s = r.data?.[0] || {};
   return NextResponse.json({
     // Default to the 30-day MAX (clampDays cap), not 90 — an unconfigured row used to report
@@ -67,7 +69,7 @@ export async function POST(req: NextRequest) {
   if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to update" }, { status: 400 });
   // Every settings row carries a restaurant_id (id='site' is #1's row) → this writes them all.
   const r = await sb.from("settings").update(patch).not("restaurant_id", "is", null);
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return adminFail("the log-retention settings", r.error, { action: "save" });
   // HOW LONG THE AUDIT TRAIL LIVES IS ITSELF AUDITED (sweep 2026-08-04). This is the one setting that
   // decides how long the operation log survives, it applies to EVERY restaurant, and it recorded
   // nothing — so shortening the trail from 30 days to 1 was indistinguishable from a trail that was

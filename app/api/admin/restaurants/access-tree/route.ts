@@ -284,10 +284,16 @@ export async function POST(req: NextRequest) {
       // "" = the form was saved without retyping the key, so leave the stored one alone. null =
       // remove it deliberately. Anything else replaces it. Trimmed because a pasted key almost
       // always arrives with a newline, and a key with a stray newline fails with no clue why.
-      if (v === null) { const { api_key: _drop, ...rest } = cur; next[k] = rest; continue; }
+      // `key`, NOT `api_key` (T17 sweep, 2026-08-13, finding F4). This wrote `api_key` while the
+      // restaurant detail's Platform-channels screen wrote `key` — one column, two field names, so
+      // neither screen could see what the other had saved and clearing on one left the other's copy
+      // standing. `key` is the shape migration 209 documents, so it wins; the legacy field is
+      // dropped on every write here, which is what makes an already-split restaurant converge.
+      if (v === null) { const { api_key: _dropLegacy, key: _drop, ...rest } = cur; next[k] = rest; continue; }
       const key = String(v ?? "").trim();
       if (!key) continue;
-      next[k] = { ...cur, api_key: key.slice(0, 400) };
+      const { api_key: _legacy, ...keep } = cur;
+      next[k] = { ...keep, key: key.slice(0, 400) };
     }
     setPatch.platform_channels = next;
   }

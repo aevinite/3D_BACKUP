@@ -65,6 +65,7 @@
     "verify:order-retry": "node scripts/verify-order-retry.mjs",
     "load:ramp": "node scripts/load-ramp-orders.mjs",
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
+    "verify:panel-secrets": "node scripts/verify-panel-secrets.mjs",
     "verify:print-format": "node scripts/verify-print-format.mjs",
     "verify:merged-floor": "node scripts/verify-merged-floor.mjs",
     "verify:xray": "node scripts/verify-xray-marks.mjs",

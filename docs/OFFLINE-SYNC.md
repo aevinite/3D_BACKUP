@@ -198,7 +198,13 @@ to an offline-only test — keep online assertions in any test you add here.
   must go through the panel's `api()` (staff) or the guest outbox, so it carries an
   `X-LFH-Action-Id`. Without this, an offline replay can double-fire.
   **"Replayable" means it goes through an offline queue** — the vanilla staff panels, the guest
-  cart and inventory. The OWNER panel and the ADMIN console are plain React `fetch`es with no
+  cart and inventory.
+  **Inventory, precisely** (corrected 2026-08-13, T17 finding F12 — for months this line claimed a
+  queue the tab did not have, and a count typed in a cold store was simply lost): its PLAIN writes
+  go through `LFH_OUTBOX` like every other panel write, via `inv()` in
+  `public/panels/editor/inventory.js`. A write CARRYING A PHOTO does not — the queue stores JSON in
+  IndexedDB, not files — so those stay online-only and the person is told which part needs signal.
+  The OWNER panel and the ADMIN console are plain React `fetch`es with no
   queue, so they have nothing to replay; they are wrapped only where a repeat would cost money
   (`/api/admin/bills` issues credit notes, `/api/owner/staff` creates logins). If you give one of
   those surfaces a queue, wrap the rest at the same time.

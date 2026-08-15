@@ -20,6 +20,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -45,7 +47,7 @@ export async function GET(req: NextRequest) {
   let q = sb.from("staff_actions").select("id", { count: "exact", head: true });
   if (rid) q = q.eq("restaurant_id", rid);
   const r = await q;
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return adminFail("the log cleanup", r.error, { action: "load" });
   return NextResponse.json({ count: r.count ?? 0, threshold: FULL_THRESHOLD });
 }
 
@@ -75,7 +77,7 @@ export async function POST(req: NextRequest) {
   let del = sb.from("staff_actions").delete({ count: "exact" }).lt("created_at", cutoff);
   if (rid) del = del.eq("restaurant_id", rid);
   const r = await del;
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return adminFail("the log cleanup", r.error, { action: "save" });
   const removed = r.count ?? 0;
 
   // Audit the cleanup itself (fire-and-forget). Counts only, no money — so no redaction

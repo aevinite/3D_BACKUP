@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +21,6 @@ export async function GET(req: NextRequest) {
     .select("id, kind, title, request_id, status, report, started_at, ended_at")
     .order("started_at", { ascending: false })
     .limit(30);
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return adminFail("the working-session history", r.error, { action: "load" });
   return NextResponse.json({ runs: r.data ?? [] });
 }

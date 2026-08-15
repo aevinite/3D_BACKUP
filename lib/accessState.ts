@@ -60,9 +60,17 @@ export async function accessStateFor(rid: string): Promise<TreeState | null> {
   // A channel's API key belongs to the restaurant's own Zomato/Swiggy account. It goes out ONLY
   // as a hint that says WHICH key is stored without being the key: "••••1234". The value itself
   // has no path back to any browser — not here, not anywhere.
+  // ONE FIELD NAME FOR ONE KEY (T17 sweep, 2026-08-13, finding F4). This screen used to read and
+  // write `api_key` while the restaurant detail's Platform-channels panel read and wrote `key` — the
+  // SAME column, two names. So an admin pasted the Zomato key here, saw "••••1234", opened the other
+  // screen and was told no key was saved; pasting it again left the row holding two copies, and
+  // clearing it on one screen left the other's behind. `key` wins because it is the shape migration
+  // 209 documents. The legacy name is still READ so a key saved before this change still shows, and
+  // the access-tree write drops it, so every restaurant converges on one field as it is next saved.
   const creds: Record<string, string> = {};
   for (const k of CREDS_KEYS) {
-    const raw = obj(pc[k]).api_key;
+    const cell = obj(pc[k]);
+    const raw = typeof cell.key === "string" && cell.key ? cell.key : cell.api_key;
     creds[k] = typeof raw === "string" && raw.length ? `••••${raw.slice(-4)}` : "";
   }
 

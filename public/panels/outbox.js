@@ -183,8 +183,25 @@
   }
 
   // Turn a request into a short human label for the "waiting to sync" list.
-  function labelFor(method, path) {
+  // `base` decides WHICH vocabulary to read the path with (T17, 2026-08-13). It matters: the
+  // manager panel writes `items` for a MENU DISH and the Inventory tab writes `items` for an
+  // INGREDIENT — the same segment, two different things — so a label built from the path alone
+  // would tell somebody their dish edit was "Save an ingredient".
+  function labelFor(method, path, base) {
     const p = (path || "").split("?")[0];
+    if (base === "/api/inventory") {
+      if (/\/production$/.test(p)) return "Make a batch";
+      if (/\/counts\/[^/]+\/line$/.test(p)) return "Save a counted quantity";
+      if (/\/counts\/[^/]+\/submit$/.test(p)) return "Submit the stock count";
+      if (/\/counts\/[^/]+\/discard$/.test(p)) return "Discard the stock count";
+      if (/\/counts(\/|$)/.test(p)) return "Start a stock count";
+      if (/\/expenses(\/|$)/.test(p)) return /void$/.test(p) ? "Strike out an expense" : "Record an expense";
+      if (/\/purchases(\/|$)/.test(p)) return /void$/.test(p) ? "Void a purchase" : "Record a purchase";
+      if (/\/waste(\/|$)/.test(p)) return /void$/.test(p) ? "Undo a waste entry" : "Record waste";
+      if (/\/vendors(\/|$)/.test(p)) return "Save a supplier";
+      if (/\/recipes\//.test(p)) return "Save a recipe";
+      if (/\/items(\/|$)/.test(p)) return "Save an ingredient";
+    }
     const t = (p.match(/\/tables\/([^/]+)/) || [])[1];
     const table = t ? " · Table " + decodeURIComponent(t) : "";
     if (/\/order$/.test(p)) return "Place order";
@@ -385,7 +402,7 @@
   // silently overwriting a change someone else made on another device in the meantime.
   // Used by the dish-edit modal in both staff panels; see lib/clash.ts fieldClash().
   async function send({ base, method, path, body, panel, label, expect, table }) {
-    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path), at: Date.now(), expect: expect || null, table: (table == null || table === "") ? null : String(table) };
+    const item = { id: uuid(), base, method, path, body, panel: panel || "", label: label || labelFor(method, path, base), at: Date.now(), expect: expect || null, table: (table == null || table === "") ? null : String(table) };
     // WHICH TABLE, ON EVERY ROW. The "Needs you" / "Saved on this device" sheet lists changes by
     // label, and a call site that passes its own label ("Set table tag", "Place order") named no
     // table at all — so two changes on tables 5 and 7 rendered as two identical rows with nothing

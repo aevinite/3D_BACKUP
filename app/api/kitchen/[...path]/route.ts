@@ -535,18 +535,51 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
     if (a === "print-jobs" && c === "done") {
       const okPrint = !!(body && body.ok === true);
       if (okPrint) {
+        // What was on the paper — read BEFORE the row is closed, so the diary line can name the KOT
+        // and the table instead of a job uuid nobody can look up. One tiny by-id read on a path that
+        // fires once per printed ticket.
+        const job = (await sb.from("print_jobs").select("order_id, reprint").eq("id", b).eq("restaurant_id", rid).maybeSingle()).data as
+          { order_id?: string | null; reprint?: boolean } | null;
         must(await sb.from("print_jobs").update({ status: "done", done_at: nowIso(), error: null }).eq("id", b).eq("restaurant_id", rid));
         await sb.from("printer_events").update({ status: "resolved", resolved_at: nowIso() }).eq("restaurant_id", rid).eq("status", "open");
+        // ── A TICKET COMING OUT OF THE PRINTER IS AN EVENT WORTH KEEPING (owner, 2026-08-14) ─────
+        // The printer had exactly one kind of Activity row — `printer_problem`, raised by a person
+        // tapping "paper out". So the log could say the printer was complained about and never that
+        // it worked, which makes "was the printer playing up on Saturday?" unanswerable from the one
+        // screen built to answer questions like that. Now both ends are recorded, and the Activity
+        // log's new Printer chip has something on both sides of the story.
+        // Deliberately `info`: a ticket printing is normal service, not a notable event, so it never
+        // colours a row or rings the bell — it is there to be counted and filtered.
+        const ord = job?.order_id
+          ? (await sb.from("orders").select("kot_no, table_number").eq("id", job.order_id).eq("restaurant_id", rid).maybeSingle()).data as
+            { kot_no?: number | null; table_number?: string | null } | null
+          : null;
+        await logAction("kitchen", "kot_printed", {
+          ...adminMark, order_id: job?.order_id ?? null, table_number: ord?.table_number ?? null,
+          device_id: dev, restaurant_id: rid,
+          detail: `${job?.reprint ? "reprinted" : "printed"} KOT${ord?.kot_no != null ? ` #${ord.kot_no}` : ""}`,
+        });
         return ok({ ok: true });
       }
-      const cur = must(await sb.from("print_jobs").select("attempts").eq("id", b).eq("restaurant_id", rid).maybeSingle());
+      const cur = must(await sb.from("print_jobs").select("attempts, order_id").eq("id", b).eq("restaurant_id", rid).maybeSingle());
       if (!cur) return err("That print job is gone.", 404);
       const attempts = (cur.attempts || 0) + 1;
+      const parked = attempts >= 5;
       must(await sb.from("print_jobs").update({
-        status: attempts >= 5 ? "failed" : "queued",
+        status: parked ? "failed" : "queued",
         attempts, claimed_at: null,
         error: String(body?.error || "print failed").slice(0, 300),
       }).eq("id", b).eq("restaurant_id", rid));
+      // The other half of the same story. `warn` once it has given up after five tries — that IS
+      // notable, it means a ticket never reached the pass — and plain `info` while it is still
+      // retrying, so a flaky first attempt doesn't colour the log red.
+      await logAction("kitchen", "kot_print_failed", {
+        ...adminMark, order_id: (cur.order_id as string) ?? null, device_id: dev, restaurant_id: rid,
+        level: parked ? "warn" : "info",
+        detail: parked
+          ? `gave up after ${attempts} tries — ${String(body?.error || "print failed").slice(0, 120)}`
+          : `try ${attempts} failed — ${String(body?.error || "print failed").slice(0, 120)}`,
+      });
       return ok({ ok: true, attempts });
     }
 

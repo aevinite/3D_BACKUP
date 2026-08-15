@@ -49,6 +49,7 @@ export async function GET(req: NextRequest) {
   // (see the header note). The toggle in the ribbon is the only thing that strips a panel.
   const asPin = uid ? `&as=${encodeURIComponent(uid)}` : "";
   const res = NextResponse.redirect(new URL(`${to}?rid=${encodeURIComponent(rid)}${asPin}`, req.nextUrl.origin), 302);
-  res.cookies.set(ADMIN_ACT_COOKIE, rid, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 6 });
+  // `secure` in production — same rule as the POST twin and both login doors (T17, finding F13).
+  res.cookies.set(ADMIN_ACT_COOKIE, rid, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 6, secure: process.env.NODE_ENV === "production" });
   return res;
 }

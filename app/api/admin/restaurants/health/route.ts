@@ -5,6 +5,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +23,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const { data, error } = await supabaseAdmin.rpc("lfh_admin_restaurant_health");
-  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  if (error) return adminFail("the restaurant health list", error, { action: "load" });
 
   return NextResponse.json({ health: (data || []) as HealthRow[] });
 }

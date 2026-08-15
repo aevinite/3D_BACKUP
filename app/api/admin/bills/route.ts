@@ -29,6 +29,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
 import { softDeleteOrders, restoreOrders } from "@/lib/softDelete";
 import { recordRemoval } from "@/lib/removalAudit";
@@ -125,7 +127,7 @@ export async function GET(req: NextRequest) {
   if (rid && isUuid(rid)) delCountQ = delCountQ.eq("restaurant_id", rid);
 
   const [sessQ, restsQ, delQ] = await Promise.all([sq, sb.from("restaurants").select("id, name").is("deleted_at", null), delCountQ]);
-  if (sessQ.error) return NextResponse.json({ error: sessQ.error.message }, { status: 500 });
+  if (sessQ.error) return adminFail("the bill ledger", sessQ.error, { action: "load" });
 
   const sessions = (sessQ.data || []) as unknown as BillSession[];
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
@@ -135,7 +137,7 @@ export async function GET(req: NextRequest) {
   const ordersBySession = new Map<string, BillOrder[]>();
   if (sessionIds.length) {
     const oQ = await sb.from("orders").select(ORDER_COLS).in("session_id", sessionIds).limit(5000);
-    if (oQ.error) return NextResponse.json({ error: oQ.error.message }, { status: 500 });
+    if (oQ.error) return adminFail("the bill ledger", oQ.error, { action: "load" });
     for (const o of (oQ.data || []) as unknown as BillOrder[]) {
       const k = o.session_id || "";
       const arr = ordersBySession.get(k) || [];
