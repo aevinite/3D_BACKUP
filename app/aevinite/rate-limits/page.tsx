@@ -13,7 +13,7 @@ import { SkelList } from "@/components/admin/Skeleton";
 type Rule = { id: string; key: string; label: string; max_count: number; window_seconds: number; enabled: boolean; updated_at: string };
 type Hit = { id: string; restaurant_id: string; restaurant_name: string | null; key: string; subject: string; subject_label: string | null; hit_count: number; max_count: number; window_seconds: number; last_at: string };
 type Blocked = { key: string; ip: string; note: string | null; since: string };
-type UnblockReq = { id: string; key: string; ip: string; device_id: string | null; message: string | null; created_at: string; asked_today: number };
+type UnblockReq = { id: string; key: string; ip: string; device_id: string | null; message: string | null; created_at: string; asked_today: number | null };
 
 const uuid = () => (crypto as { randomUUID?: () => string }).randomUUID?.() || String(Date.now()) + Math.random();
 
@@ -289,7 +289,7 @@ export default function AdminRateLimits() {
               <div style={{ flex: "1 1 240px", minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <b style={{ fontSize: 13.5 }}>{q.ip}</b>
-                  {q.asked_today > 1 ? <span className="rl-chip">asked {q.asked_today}× today</span> : null}
+                  {(q.asked_today ?? 0) > 1 ? <span className="rl-chip">asked {q.asked_today}× today</span> : null}
                   <span className="adm-muted" style={{ fontSize: 11.5 }}>{timeAgo(q.created_at)}</span>
                 </div>
                 {q.message ? <div className="adm-muted" style={{ fontSize: 12.5, marginTop: 3, color: "var(--text)" }}>“{q.message}”</div> : null}

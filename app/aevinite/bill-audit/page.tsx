@@ -218,7 +218,12 @@ export default function AdminBills() {
   };
 
   const counts = d?.counts || {};
-  const totalAll = ORDER.reduce((s, k) => s + (counts[k] || 0), 0);
+  // TWO KINDS OF NUMBER LIVE HERE, AND THEY MUST NOT BE ADDED TOGETHER (T20 sweep, 2026-08-16).
+  // running / settled / pay-later / on-house / closed-unpaid can only be worked out by rolling a
+  // session up with its orders, so they count what is ON THIS PAGE. "deleted" is a real column and
+  // carries the TRUE database total. The All chip used to sum all six — live that read "All 718"
+  // above 170 rows, a number that describes nothing. It now counts the rows actually loaded, and
+  // every tile says which of the two kinds it is.
   // Everything on screen = the first page plus whatever "Load more" has fetched.
   const rows: Bill[] = [...(d?.bills || []), ...more];
   const settledPaid = rows.filter((b) => b.state === "settled").reduce((s, b) => s + b.paid, 0);
@@ -243,15 +248,15 @@ export default function AdminBills() {
 
       {/* Summary strip */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, margin: "18px 0" }}>
-        <Stat icon="running" tone="#22c55e" k="Open now" v={counts.running || 0} sub="tables still running" calculating={!d} />
-        <Stat icon="settled" tone="#3b82f6" k="Settled" v={counts.settled || 0} sub={`${inr(settledPaid)} collected`} calculating={!d} />
-        <Stat icon="cancelled" tone="#f59e0b" k="Closed unpaid" v={counts.cancelled || 0} sub="walk-outs / cancels" calculating={!d} />
-        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} sub="restorable" calculating={!d} />
+        <Stat icon="running" tone="#22c55e" k="Open now" v={counts.running || 0} sub="tables still running · on this page" calculating={!d} />
+        <Stat icon="settled" tone="#3b82f6" k="Settled" v={counts.settled || 0} sub={`${inr(settledPaid)} collected · on this page`} calculating={!d} />
+        <Stat icon="cancelled" tone="#f59e0b" k="Closed unpaid" v={counts.cancelled || 0} sub="walk-outs / cancels · on this page" calculating={!d} />
+        <Stat icon="deleted" tone="#ef4444" k="Deleted" v={counts.deleted || 0} sub="restorable · every one, all time" calculating={!d} />
       </div>
 
       {/* Filters */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-        <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")}>All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? totalAll : "\u2014"}</span></button>
+        <button className="blz-chip" onClick={() => setState("")} style={chip(state === "")} title="Every bill loaded on this page \u2014 use the dates or the search to reach older ones">All <span style={{ opacity: 0.6, fontVariantNumeric: "tabular-nums" }}>{d ? rows.length : "\u2014"}</span></button>
         {ORDER.map((k) => (
           <button key={k} className="blz-chip" onClick={() => setState(k)} style={chip(state === k, META[k].tone)}>
             <span className="hue-ink" style={{ ["--hue" as string]: META[k].tone, display: "inline-flex" }}><Ico n={META[k].icon} s={14} /></span>

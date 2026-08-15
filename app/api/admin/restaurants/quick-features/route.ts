@@ -90,7 +90,10 @@ export async function POST(req: NextRequest) {
   // No settings row yet → clone #1 as a template so every NOT NULL column is satisfied, then apply.
   const template = await sb.from("settings").select("*").eq("restaurant_id", DEFAULT_RESTAURANT_ID).maybeSingle();
   const base = cleanClonedSettings(template.data);
-  const newRow = { ...base, id: rest.data.slug, restaurant_id: rid, ...patch };
+  // Keyed by the restaurant id, not its slug — same reason as the create route (T20, 2026-08-16):
+  // `settings.id` is a primary key and a binned restaurant keeps its row, so a slug that is free in
+  // `restaurants` can still be taken in `settings`.
+  const newRow = { ...base, id: rid, restaurant_id: rid, ...patch };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select(SELECT).maybeSingle();
   if (ins.error) return adminFail("this restaurant's features", ins.error, { action: "save" });
   await logAction("admin", "quick_feature", { detail: `${feature} → ${on ? "on" : "off"}`, restaurant_id: rid });

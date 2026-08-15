@@ -79,6 +79,34 @@ export async function loginNameTaken(key: string): Promise<boolean> {
  * a restore would collide with, newest anchor info included so the admin can tell the
  * accounts apart. Empty array = the name is free.
  */
+/**
+ * "That name is taken" — but SAY BY WHOM, and where (T20 sweep, 2026-08-16).
+ *
+ * The check itself is global while the database's own rule is per restaurant
+ * (`idx_staff_users_username_live` on `(restaurant_id, lower(username))`, mig 245), so it refuses
+ * more than the constraint would. That is deliberate and stays: an owner is not anchored to the
+ * restaurant they own, so two people called "ravi" signing in from different tenants is a muddle
+ * nobody wants to debug at 9pm. What was NOT acceptable is the message — "That username is taken —
+ * pick another" with no clue who has it, when the holder is very often a waiter at some other
+ * restaurant, or one of the four starter logins (`manager`, `kitchen`, `tablet`, `owner`) the
+ * builder creates for every restaurant.
+ *
+ * Returns null when the name is free, otherwise a sentence the admin can act on.
+ */
+export async function nameTakenMessage(key: string): Promise<string | null> {
+  const holders = await liveHoldersOfName(key);
+  if (!holders.length) return null;
+  const h = holders[0];
+  let where = "";
+  if (h.restaurant_id) {
+    const r = await sb.from("restaurants").select("name").eq("id", h.restaurant_id).maybeSingle();
+    if (r.data?.name) where = ` at ${r.data.name}`;
+  }
+  const who = h.role === "owner" ? "an owner" : `the ${h.role} login`;
+  const also = holders.length > 1 ? ` (and ${holders.length - 1} more)` : "";
+  return `“${key}” is already ${who}${where}${also}${h.active ? "" : ", currently suspended"} — pick a different name.`;
+}
+
 export async function liveHoldersOfName(key: string): Promise<
   { id: string; name: string | null; username: string; role: string; active: boolean; restaurant_id: string | null }[]
 > {

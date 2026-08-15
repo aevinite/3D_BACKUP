@@ -6711,6 +6711,10 @@ const OP_ACTION_LABELS = {
   owner_set_primary: "Made primary owner", owner_soft_delete: "Moved an owner to the bin",
   owner_restore_from_bin: "Restored an owner", owner_purge: "Permanently removed an owner",
   logs_cleanup: "Cleaned up old logs", error_memory_cleared: "Cleared the error memory",
+  // Kept in step with the shared map (verify:audit checks both). This row can never actually reach
+  // this screen — the manager's Activity feed excludes panel in (admin, owner, db) — but the rule
+  // is that neither map may be missing a code, so that nothing can ever print as a raw key.
+  admin_enter_panel: "Opened a restaurant's panel",
 };
 // Never print a raw code: an unlisted action is prettified ("order_item_qty" -> "Order item qty").
 function actLabel(code) {

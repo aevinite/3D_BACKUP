@@ -17,6 +17,7 @@ import { adminFail } from "@/lib/adminFail";
 import { logAction, redactMoney } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 import { lookupErrorMemory, isRegression, rememberErrorHandled } from "@/lib/errorMemory";
+import { errorGroupKey } from "@/lib/errorSignature";
 
 export const dynamic = "force-dynamic";
 
@@ -49,9 +50,10 @@ async function postHandler(req: NextRequest) {
   let summary = note;
   let source = "owner_described";
   let context: Record<string, unknown> | null = note ? { note } : null;
-  // The group key the Repair UI builds per error tile, stored so the panel can match a tile to
-  // its queued/fixed request across a refresh (kills the "keeps re-offering Fix now" bug). Same
-  // formula as groupErrors() in app/aevinite/repair/page.tsx — keep the two in lock-step.
+  // The group key the Repair UI builds per error tile, stored so the panel can match a tile to its
+  // queued request across a refresh (this is what stops "Fix now" being re-offered, and a second
+  // press filing a duplicate). Built by errorGroupKey() — the SAME function the page calls, so the
+  // two cannot drift; a hand-copied formula here is exactly how they drifted before.
   let errKey: string | null = null;
   // Set when this problem was fixed before and has come back — attached to the context so the
   // agent sees the failed attempt instead of rebuilding it from scratch.
@@ -107,7 +109,15 @@ async function postHandler(req: NextRequest) {
       fixed_at: regression.fixedAt, pr_url: regression.prUrl, fixed_by: regression.fixedBy,
       note: "This problem was recorded as FIXED before and has happened again — the earlier fix did not hold. Check that PR first; do not rebuild it blind.",
     };
-    errKey = `${row.panel}|${row.restaurant_id || ""}|${row.action}|${(redactMoney(row.detail) as string || "").slice(0, 90)}`;
+    // THE SAME KEY THE BOARD BUILDS, FROM THE SAME FUNCTION (T20 sweep, 2026-08-16).
+    //
+    // This used to be hand-built as `…|left(detail, 90)` — raw text — while the Repair page groups
+    // tiles with errorGroupKey(), which normalises the message first (uuids and numbers replaced,
+    // lower-cased). The comment above claimed the two were "in lock-step"; they were not, and
+    // nothing on the page read the column anyway. So a problem already queued still offered
+    // "Fix now" after a refresh, and a second press filed a second open ticket for it.
+    // One function, called from both sides, is the only thing that keeps them honest.
+    errKey = errorGroupKey({ panel: row.panel, restaurant_id: row.restaurant_id, action: row.action, detail: redactMoney(row.detail) as string | null });
   }
 
   if (!summary) return err("Add a short description of the problem.");

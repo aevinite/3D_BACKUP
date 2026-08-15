@@ -22,8 +22,6 @@ export async function GET(req: NextRequest) {
   const onlineSinceIso = new Date(Date.now() - 180_000).toISOString(); // "online" = seen in last 3 min
   const head = { count: "exact" as const, head: true };
 
-  const since24hIso = new Date(Date.now() - 24 * 3600_000).toISOString();
-
   const [restQ, setQ, ownersQ, linksQ, ordersTodayQ, maintQ, onlineQ, issuesQ, actQ, errQ, fixQ] =
     await Promise.all([
       sb.from("restaurants").select("id, slug, name, active, owner_user_id").is("deleted_at", null).order("name"),
@@ -42,7 +40,15 @@ export async function GET(req: NextRequest) {
       sb.from("staff_actions").select("id, panel, action, actor, detail, table_number, restaurant_id, created_at").order("created_at", { ascending: false }).limit(18),
       // Two HEAD counts for the red "Fix problems" button (owner 2026-07-22): recent app
       // errors (partial error index, mig 159) + problems reported but not yet solved.
-      sb.from("staff_actions").select("id", head).eq("level", "error").is("resolved_at", null).gte("created_at", since24hIso),
+      // ONE DEFINITION OF "A PROBLEM", SHARED WITH THE REPAIR BOARD (T20 sweep, 2026-08-16).
+      // This counted errors from the last 24 HOURS while /aevinite/repair listed every UNRESOLVED
+      // error whatever its age — so the console said "7 problems" on one screen and showed the
+      // quiet grey "Repair" button on the other, at the same moment, about the same errors (they
+      // were 3-9 days old). Two numbers for one fact is how a person stops trusting either.
+      // A problem is now simply "an error nobody has resolved", on both screens. Nothing is
+      // hidden by age any more, which is the safer half of the fix: an unresolved error from last
+      // week is still a problem, and the old count quietly dropped it.
+      sb.from("staff_actions").select("id", head).eq("level", "error").is("resolved_at", null),
       sb.from("fix_requests").select("id", head).eq("status", "open"),
     ]);
 

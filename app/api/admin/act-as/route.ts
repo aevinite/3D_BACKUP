@@ -6,8 +6,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
+import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export async function POST(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
@@ -22,9 +24,18 @@ export async function POST(req: NextRequest) {
   }
 
   const rid = String(body?.restaurant_id || "");
-  if (!rid) return NextResponse.json({ error: "restaurant_id required" }, { status: 400 });
-  const r = (await sb.from("restaurants").select("id, name").eq("id", rid).limit(1)).data?.[0];
+  // Shape-checked before it reaches a uuid column, and a binned restaurant is refused — the same
+  // two gaps the /go route had (T20 sweep, 2026-08-16); both doors set the same cookie, so both
+  // need the same rules or the stricter one is decoration.
+  if (!UUID.test(rid)) return NextResponse.json({ error: "restaurant_id required" }, { status: 400 });
+  const r = (await sb.from("restaurants").select("id, name, deleted_at").eq("id", rid).limit(1)).data?.[0];
   if (!r) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
+  if (r.deleted_at) return NextResponse.json({ error: "That restaurant is in the recycle bin — restore it first." }, { status: 409 });
+  // Recorded for the admin only — see the note in act-as/go.
+  await logAction("admin", "admin_enter_panel", {
+    restaurant_id: rid, actor: "admin", device_id: deviceIdFrom(req), level: "info",
+    detail: `started viewing panels as "${r.name}"`,
+  });
 
   // CRITICAL: set the cookie on the SAME response we return. The old code set it on
   // one response then returned a fresh NextResponse.json(), silently dropping the

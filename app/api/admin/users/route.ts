@@ -20,6 +20,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { hashSecret, normalizeLoginName, type Role } from "@/lib/userAuth";
+import { passwordFields } from "@/lib/passwordVault";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { logAction } from "@/lib/oplog";
 import { newWaiterTables } from "@/lib/tableAssign";
@@ -142,7 +143,7 @@ export async function POST(req: NextRequest) {
   if (password.length < 6) return bad("Password must be at least 6 characters.");
   const row = {
     username: key, role, restaurant_id: restaurantId,
-    password_hash: await hashSecret(password),
+    ...(await passwordFields(password)),
     name: display,
     phone: String(body?.phone || "").trim().slice(0, 20) || null,
     // EVERY new person starts on DEFAULT for every permission (owner, 2026-08-01). Empty
@@ -274,7 +275,7 @@ export async function PATCH(req: NextRequest) {
     const password = String(body?.password || "").trim() || genPassword();
     if (password.length < 6) return bad("Password must be at least 6 characters.");
     // Bump token_version → kills all their existing logins immediately.
-    const wr = await sb.from("staff_users").update({ password_hash: await hashSecret(password), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
+    const wr = await sb.from("staff_users").update({ ...(await passwordFields(password)), token_version: (u.token_version || 0) + 1, failed_count: 0, locked_until: null }).eq("id", id);
     if (wr.error) return bad(wr.error.message, 500); // never hand out a password that didn't actually save
     await logAction("admin", "user_reset_password", { actor: "admin", restaurant_id: u.restaurant_id, detail: `reset password for "${u.username}" · id ${id}` });
     return ok({ ok: true, password });

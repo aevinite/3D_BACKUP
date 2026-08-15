@@ -23,9 +23,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
-import { hashSecret, normalizeLoginName } from "@/lib/userAuth";
+import { normalizeLoginName } from "@/lib/userAuth";
+import { passwordFields } from "@/lib/passwordVault";
 import { logAction, redactMoney } from "@/lib/oplog";
-import { resolveOwnerHomeRid, loginNameTaken, liveHoldersOfName } from "@/lib/ownerHome";
+import { resolveOwnerHomeRid, loginNameTaken, liveHoldersOfName, nameTakenMessage } from "@/lib/ownerHome";
 
 export const dynamic = "force-dynamic";
 const RETENTION_DAYS = 90; // a binned owner is restorable for this long, then purgeable (matches restaurants)
@@ -313,7 +314,8 @@ export async function POST(req: NextRequest) {
   const display = String(body?.name ?? "").trim().slice(0, 80);
   const key = normalizeLoginName(display);
   if (realCharCount(key) < 2) return bad("The name needs at least 2 letters or numbers.");
-  if (await loginNameTaken(key)) return bad("That username is taken — pick another.", 409);
+  const takenMsg = await nameTakenMessage(key);
+  if (takenMsg) return bad(takenMsg, 409);
   const password = String(body?.password || "").trim() || genPassword();
   if (password.length < 6) return bad("Password must be at least 6 characters.");
 
@@ -324,7 +326,7 @@ export async function POST(req: NextRequest) {
   const home = await resolveOwnerHomeRid(rids);
   if (!home.rid) return bad(home.error || "Couldn't work out where to file this owner.", 500);
   const ins = await sb.from("staff_users")
-    .insert({ username: key, name: display, role: "owner", restaurant_id: home.rid, password_hash: await hashSecret(password), active: true })
+    .insert({ username: key, name: display, role: "owner", restaurant_id: home.rid, ...(await passwordFields(password)), active: true })
     .select("id, name").single();
   // 23505 = the global unique index on lower(username) — the friendly version of
   // "that username is taken" for the rare race between the check above and this insert.
@@ -414,7 +416,7 @@ export async function PATCH(req: NextRequest) {
     // token_version bump = "log out everywhere" (same rule as /api/admin/users).
     const cur = (await sb.from("staff_users").select("token_version").eq("id", ownerId).limit(1)).data?.[0];
     const { error } = await sb.from("staff_users")
-      .update({ password_hash: await hashSecret(password), token_version: ((cur?.token_version as number) || 0) + 1, failed_count: 0, locked_until: null })
+      .update({ ...(await passwordFields(password)), token_version: ((cur?.token_version as number) || 0) + 1, failed_count: 0, locked_until: null })
       .eq("id", ownerId);
     if (error) return bad(error.message, 500);
     await logAction("admin", "owner_reset_password", { actor: "admin", restaurant_id: null, detail: `reset password for owner "${who}" · owner ${ownerId}` });
@@ -444,7 +446,7 @@ export async function PATCH(req: NextRequest) {
     const display = String(body?.name ?? "").trim().slice(0, 80);
     const key = normalizeLoginName(display);
     if (realCharCount(key) < 2) return bad("The name needs at least 2 letters or numbers.");
-    if (key !== owner.username && (await loginNameTaken(key))) return bad("That username is taken — pick another.", 409);
+    if (key !== owner.username) { const m = await nameTakenMessage(key); if (m) return bad(m, 409); }
     const { error } = await sb.from("staff_users").update({ name: display, username: key }).eq("id", ownerId);
     if (error) return bad(error.message, 500);
     await logAction("admin", "owner_rename", { actor: "admin", restaurant_id: null, detail: `renamed owner "${who}" → "${display}" · owner ${ownerId}` });

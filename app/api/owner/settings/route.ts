@@ -9,7 +9,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { ownerScope, dbFail, scopedRestaurantIds, RestaurantListIncomplete, incompleteListResponse , ownerLogPanel } from "@/lib/ownerScope";
 import { restaurantNames } from "@/lib/restaurantNames";
 import { getOwnerEntitlementsUnion, OWNER_SECTION_KEYS, entitledSubset } from "@/lib/ownerEntitlements";
-import { USER_COOKIE, userFromCookie, hashSecret, verifySecret } from "@/lib/userAuth";
+import { USER_COOKIE, userFromCookie, verifySecret } from "@/lib/userAuth";
+import { passwordFields } from "@/lib/passwordVault";
 import { MODULE_DEFS } from "@/lib/accessModel";
 import { logAction } from "@/lib/oplog";
 import { rateAllowed, rateResetOnSuccess } from "@/lib/rateLimit";
@@ -186,9 +187,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Your current password is wrong." }, { status: 403 });
   await rateResetOnSuccess("password_change", owner.id);
 
-  const hash = await hashSecret(next);
   const { error } = await sb.from("staff_users")
-    .update({ password_hash: hash, token_version: (row.token_version || 0) + 1 })
+    .update({ ...(await passwordFields(next)), token_version: (row.token_version || 0) + 1 })
     .eq("id", owner.id);
   if (error) return dbFail("owner/settings.password", error, { message: "Couldn't change your password — please try again." });
   // Bumping token_version ends EVERY session on this account, so the visible symptom is "everyone

@@ -34,6 +34,17 @@ const clampYears = (v: unknown) => {
     Math.abs(o - n) < Math.abs(best - n) || (Math.abs(o - n) === Math.abs(best - n) && o > best) ? o : best, 10);
 };
 
+// Which stack this deployment is serving, named by the Supabase project it talks to. The two refs
+// are recorded in CLAUDE.md and are not secret (they are the public host of each project); the KEYS
+// are never touched here. An unrecognised ref answers "Unknown" rather than guessing — a wrong
+// confident answer on this row is the whole fault being fixed.
+function describeStack(): { name: string; live: boolean; ref: string } {
+  const ref = (process.env.NEXT_PUBLIC_SUPABASE_URL || "").match(/https?:\/\/([a-z0-9]+)\.supabase\./i)?.[1] || "";
+  if (ref === "kclqkmdxnwlhtyrducku") return { name: "Live — paying clients", live: true, ref };
+  if (ref === "wnsfcizclkbobwzcxqsf") return { name: "Backup / test", live: false, ref };
+  return { name: "Unknown", live: false, ref };
+}
+
 export async function GET(req: NextRequest) {
   if (!(await tokenIsValid(req.cookies.get(AUTH_COOKIE)?.value)))
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
@@ -50,6 +61,12 @@ export async function GET(req: NextRequest) {
     // docs/COMPLIANCE-GUARDRAILS.md §3, so nothing is ever removed unless a person shortens it.
     audit_retention_years: s.audit_retention_years ?? 10,
     auditYearOptions: AUDIT_YEAR_OPTS,
+    // WHICH STACK AM I LOOKING AT? (T20 sweep, 2026-08-16.) The Settings page printed a hard-coded
+    // "Environment · Production" in green, on every deployment — so on the backup stack the one
+    // screen a person opens to check where they are said the wrong thing. Answered from the
+    // database this deployment is actually pointed at, which is the thing that decides whose data
+    // you are about to change. No key or URL is returned — only the short project ref and a name.
+    environment: describeStack(),
   });
 }
 

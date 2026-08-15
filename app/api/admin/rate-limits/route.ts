@@ -55,7 +55,13 @@ export async function GET(req: NextRequest) {
   const counted = await sb.from("unblock_requests").select("ip").gte("created_at", since).limit(1000);
   const perIp: Record<string, number> = {};
   for (const r of counted.data ?? []) perIp[r.ip] = (perIp[r.ip] || 0) + 1;
-  const requests = (reqRows.data ?? []).map((r) => ({ ...r, asked_today: perIp[r.ip] || 1 }));
+  // `|| 1` used to hide a FAILED read: a device that had asked eight times today came back as a
+  // first-timer, which is the one fact this chip exists to show. When the count can't be read,
+  // send null and let the page say nothing rather than something wrong (T20 sweep, 2026-08-16).
+  const countOk = !counted.error;
+  const requests = (reqRows.data ?? []).map((r) => ({
+    ...r, asked_today: countOk ? (perIp[r.ip] || 1) : null,
+  }));
 
   return NextResponse.json({ rules: rules.data ?? [], events, blocked, requests });
 }
