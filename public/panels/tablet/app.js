@@ -1231,6 +1231,11 @@ const tFeatureOn = (key) => {
 //     can ring, so explaining it would describe a colour that can never appear (the owner
 //     had exactly this removed from the manager on 2026-08-01).
 function floorLegendHtml() {
+  // REJECTED (owner, said twice; recorded 2026-08-15 as docs/REJECTED-IDEAS.md R25): adding the
+  // missing colours to this strip. A tile can turn AMBER (new order) or PINK (on the pass) with no
+  // entry here, so the legend explains 3 of the 5 colours — that is deliberate, not an oversight.
+  // The state word is still in every tile's tooltip and in the table's own detail popup. Do not
+  // "complete" this array.
   const LEG = [["free", "Free"], ["prep", "Preparing"], ["bill", "Served"]];
   if (mergeList().length) LEG.push(["merged", "Merged"]);
   const bell = (sessionsOn() && tFeatureOn("waiter_calls")) ? `<span class="lgi"><i class="ldot ldot-call">🔔</i>called</span>` : "";
