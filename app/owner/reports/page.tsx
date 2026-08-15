@@ -133,7 +133,9 @@ const BODY_KIND: Record<BodyKey, DataKind> = {
 };
 type OpenOpts = { sub?: string; pay?: "discounts" | "cancellations" };
 type OpenReport = (k: RKey, opts?: OpenOpts) => void;
-type SubTab = { key: string; label: string; icon: string; body: BodyKey; needsDayGrain?: boolean };
+type SubTab = { key: string; label: string; icon: string; body: BodyKey; needsDayGrain?: boolean;
+  /** The trade term, kept on hover when the tab itself is named in plain words (I1). */
+  hint?: string };
 /** Which periods produce DAY buckets — the only ones a day-of-week breakdown can read. */
 const DAY_GRAIN_RANGES = new Set<Range>(["7d", "30d", "month", "lastmonth", "custom"]);
 const SUBTABS: Record<RKey, SubTab[]> = {
@@ -141,14 +143,16 @@ const SUBTABS: Record<RKey, SubTab[]> = {
   sales: [
     { key: "revenue", label: "Revenue", icon: "fa-chart-line", body: "sales" },
     { key: "avgbill", label: "Average bill", icon: "fa-receipt", body: "avgbill" },
-    { key: "volume", label: "Order volume", icon: "fa-list-check", body: "volume" },
+    { key: "volume", label: "How many orders", icon: "fa-list-check", body: "volume",
+      hint: "Order volume — how many orders came in, not how much money they made" },
   ],
   payments: [],   // discounts + cancellations open as detail overlays, not tabs
   tax: [],
   items: [
     { key: "items", label: "Items", icon: "fa-utensils", body: "dishes" },
     { key: "categories", label: "Categories", icon: "fa-layer-group", body: "categories" },
-    { key: "menu", label: "Menu engineering", icon: "fa-lightbulb", body: "menu" },
+    { key: "menu", label: "Which dishes earn", icon: "fa-lightbulb", body: "menu",
+      hint: "Menu engineering — which dishes make you money, and which just take up space" },
   ],
   team: [
     { key: "pay", label: "Pay & cost", icon: "fa-indian-rupee-sign", body: "staffpay" },
@@ -156,7 +160,8 @@ const SUBTABS: Record<RKey, SubTab[]> = {
   ],
   timing: [
     { key: "hours", label: "By hour", icon: "fa-clock", body: "hourly" },
-    { key: "dayparts", label: "Day parts", icon: "fa-sun", body: "daypart" },
+    { key: "dayparts", label: "Times of day", icon: "fa-sun", body: "daypart",
+      hint: "Day parts — morning, afternoon, evening and late night" },
     // needsDayGrain: the weekday breakdown can only be built from DAY buckets, so on Today /
     // Yesterday / 12 months it could only ever say "pick a daily period" — a tab whose one job
     // was to send you somewhere else (T5 sweep, 2026-08-06). It is now disabled there, with the
@@ -787,7 +792,7 @@ export default function OwnerReports() {
             const off = !!t.needsDayGrain && !DAY_GRAIN_RANGES.has(range);
             return (
               <button key={t.key} role="tab" aria-selected={t.key === activeSubKey} disabled={off}
-                title={off ? "Needs a period made of whole days — try 7 days, 30 days, this or last month." : undefined}
+                title={off ? "Needs a period made of whole days — try 7 days, 30 days, this or last month." : t.hint}
                 className={"rs-subtab" + (t.key === activeSubKey ? " on" : "") + (off ? " off" : "")}
                 onClick={() => !off && setSub(t.key)}>
                 <i className={`fas ${t.icon}`} aria-hidden /> {t.label}

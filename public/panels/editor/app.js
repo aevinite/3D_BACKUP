@@ -9814,12 +9814,12 @@ function tablePanelParts(t, host = "float") {
   // (owner, 2026-07-22 — "keep the kot option at the top"): tablePanelParts returns it
   // as kotHeadBtn and BOTH detail headers (docked + floating) render it next to Float.
   // While the menu is on, the footer DROPS its duplicates: 🍴 Split (lives inside KOT)
-  // and ⇄ Shift (Change table lives inside KOT). Ladder off → both render as before.
+  // and ⇄ Change table (the KOT menu owns the same action). Ladder off → both render as before.
   const kotOn = tableOpsOn() && !!sess;
   const kotHeadBtn = kotOn
     ? `<button class="tp-detail-float tp-kot-head" id="sxKot" title="Table &amp; KOT operations — change table, merge, move a KOT or dish, split, reprint">🧾 KOT ▾</button>`
     : "";
-  const shiftFallbackBtn = !kotOn && sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Shift</button>` : "";
+  const shiftFallbackBtn = !kotOn && sess ? `<button class="btn" id="sxShift" title="Move this party to another table">⇄ Change table</button>` : "";
   // ＋ Take order — start a brand-new order for this table, like the waiter tablet.
   // Gated by the take_orders manager power: XRAY_CONTROLS hides it for a manager without
   // the power (and tints it for an admin/owner looking in); the server re-checks too.

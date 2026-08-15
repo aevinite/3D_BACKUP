@@ -200,6 +200,58 @@ else fail("the admin bill ledger deletes bills without an Audit row — the admi
   if (/ACT_LABEL\[[a-z.]+\.action\] \|\| [a-z]+\.action/.test(read("app/aevinite/logs/page.tsx") + read("app/owner/activity/page.tsx")))
     fail("a log screen still renders `ACT_LABEL[x] || x` — that is the fallback that prints raw codes; call actLabel(x)");
   else ok("no log screen falls back to printing the raw code");
+  // ── AND THE SCREEN HAS TO ACTUALLY CALL IT (T15 improvement 2, 2026-08-14) ──────────────────
+  // Everything above proves a LABEL EXISTS for every action code. It never proved a screen USES
+  // one — and that is exactly how the bug shipped: app/owner/page.tsx's "Recent activity" card
+  // rendered `{a.action}` and `{a.panel}` bare, so the owner's home screen showed `order_place`
+  // and `editor` while /owner/activity one click away showed "Placed order" and "Manager panel".
+  // This guard was green the whole time, because it was reading the dictionary and not the page.
+  //
+  // So: no React screen may print a row's `.action` or `.panel` straight into JSX. Both
+  // translators (actLabel / panelLabel) are exported from components/admin/shared.tsx and cost one
+  // word at the call site. If this fires on a new file, wrap the value — do not widen the pattern
+  // to excuse it.
+  const RAW_ACTION = /\{\s*([a-z]|[a-z]\w*)\.(action|panel)\s*\}/g;   // {a.action} / {row.panel}
+  const screens = [
+    "app/owner/page.tsx", "app/owner/activity/page.tsx", "app/aevinite/logs/page.tsx",
+    "components/admin/LogDetailModal.tsx", "components/admin/shared.tsx",
+  ];
+  const rawHits = [];
+  for (const f of screens) {
+    const src = read(f);
+    if (!src) continue;
+    for (const rawLine of src.split("\n")) {
+      // STRIP the places where a raw key is legitimately a CSS hook or an attribute value, then
+      // look at what is LEFT — which is the text a person actually reads.
+      //
+      // This used to `continue` on any line containing `className`, and that made the whole guard
+      // useless: the bug it was written for lived on
+      //     <span className="tx">{a.action}{a.table_number ? …}</span>
+      // — a line with a className on it. Skipping the line skipped the bug. (Proven by putting the
+      // bug back and watching this stay green.) Strip, don't skip.
+      const line = rawLine
+        .replace(/className=\{[^}]*\}/g, "")   // className={`pn pn-${a.panel}`}
+        .replace(/className="[^"]*"/g, "")      // className="tx"
+        .replace(/`[^`]*`/g, "")                // any other template literal
+        .replace(/\b(aria-[a-z]+|data-[a-z-]+|key|title|id)=\{[^}]*\}/g, "");
+      if (!line.trim()) continue;
+      // TWO SHAPES ARE CORRECT, and both were found by this guard's very first run — so they are
+      // written down here rather than left for the next person to re-investigate:
+      //  · `trail.panel` / `trail.action` — lib/logTrail.ts's trailOf() has ALREADY translated
+      //    these (`panel: panelName(row.panel)`), so the value in hand is "Manager panel", not
+      //    "editor". Wrapping it again would be wrong, not right.
+      //  · a `mono` field — components/admin/LogDetailModal.tsx deliberately shows the raw code
+      //    under a "Reference" heading labelled "Action code", beside the log id, for support.
+      //    That is the ONE place a person is meant to see the key, and it says so on the label.
+      // Anything else printing .action/.panel bare is the bug this guard exists for.
+      if (/\btrail\.(action|panel)\b/.test(line)) continue;
+      if (/\bmono\b/.test(line)) continue;
+      const m = line.match(RAW_ACTION);
+      if (m) rawHits.push(`${f}: ${m.join(", ")}`);
+    }
+  }
+  if (rawHits.length) fail(`a screen prints a raw action/panel key instead of calling actLabel()/panelLabel(): ${rawHits.join(" · ")}`);
+  else ok("no screen renders a row's action or panel key raw — every one goes through actLabel()/panelLabel()");
   // The "Where" column must never print stored JSON: the tap batches are formatted on BOTH sides.
   if (/function opDetailText\(/.test(panelJs) && /opDetailText\(r\.action, r\.detail\)/.test(panelJs))
     ok("the manager panel turns a stored tap batch into readable words, not JSON");
