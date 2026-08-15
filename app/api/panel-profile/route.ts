@@ -13,7 +13,9 @@
 //          password and bumps token_version so all sessions must re-login).
 // Scoped to the cookie's user id, so a user can only edit themselves.
 import { NextRequest, NextResponse } from "next/server";
-import { userFromCookie, USER_COOKIE, hashSecret, verifySecret, normalizeLoginName } from "@/lib/userAuth";
+import { userFromCookie, USER_COOKIE, hashSecret, verifySecret, normalizeLoginName, AuthDbError } from "@/lib/userAuth";
+// The one sentence a person reads when the database didn't answer — shared with every panel route.
+import { BUSY_MESSAGE } from "@/lib/dbRefusal";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { payrollLadder } from "@/lib/tableTags";
@@ -25,8 +27,33 @@ import { expectClash, clashJson } from "@/lib/clash";
 
 export const dynamic = "force-dynamic";
 
+// WHO IS ASKING — and "the database didn't answer" is not "nobody" (T17 sweep, 2026-08-13,
+// finding F9). `userFromCookie` THROWS `AuthDbError` when the staff_users lookup itself fails, and
+// both handlers below called it bare, so a DB blip left My profile with a raw 500: the screen breaks
+// instead of saying the system is busy, and the device's offline layer can't fall back to the copy
+// it already has (that needs the 503 + `busy` marker every other panel route gives —
+// lib/panelFailure.ts). Answering `busy` here puts this route back in step with the rest.
+async function whoIsAsking(req: NextRequest): Promise<{ user: Awaited<ReturnType<typeof userFromCookie>> } | { busy: NextResponse }> {
+  try {
+    return { user: await userFromCookie(req.cookies.get(USER_COOKIE)?.value) };
+  } catch (e) {
+    if (e instanceof AuthDbError) {
+      console.error("[panel-profile] auth lookup failed:", e.message);
+      return {
+        busy: NextResponse.json(
+          { error: BUSY_MESSAGE, busy: true },
+          { status: 503, headers: { "X-LFH-Busy": "1" } },
+        ),
+      };
+    }
+    throw e;
+  }
+}
+
 export async function GET(req: NextRequest) {
-  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  const asker = await whoIsAsking(req);
+  if ("busy" in asker) return asker.busy;
+  const u = asker.user;
   // No staff cookie = admin super-access (or a signed-out tab). Not an error → 200.
   // `error` stays in the body so callers that test `j.error` keep skipping the profile UI.
   if (!u) return NextResponse.json({ staff: false, error: "not logged in" });
@@ -129,7 +156,11 @@ export async function GET(req: NextRequest) {
 // public/panels/myprofile.js) can carry these writes like every other panel write.
 export const POST = withIdempotency(postImpl, "panel-profile");
 async function postImpl(req: NextRequest) {
-  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  // Same rule as GET: a database blip answers "busy" (503), never "you are not logged in" (401),
+  // which would bounce a signed-in person to the login screen mid-save. (T17, finding F9)
+  const asker = await whoIsAsking(req);
+  if ("busy" in asker) return asker.busy;
+  const u = asker.user;
   if (!u) return NextResponse.json({ error: "not logged in" }, { status: 401 });
   let body: any = {};
   try { body = await req.json(); } catch {}

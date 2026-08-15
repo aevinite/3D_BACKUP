@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { redactMoney } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -47,7 +49,7 @@ export async function GET(req: NextRequest) {
   if (rid && isUuid(rid)) q = q.eq("restaurant_id", rid);
 
   const [aQ, restsQ] = await Promise.all([q, sb.from("restaurants").select("id, name").is("deleted_at", null)]);
-  if (aQ.error) return NextResponse.json({ error: aQ.error.message }, { status: 500 });
+  if (aQ.error) return adminFail("the bill trail", aQ.error, { action: "load" });
 
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
   const rows = (aQ.data || []).map((a) => ({

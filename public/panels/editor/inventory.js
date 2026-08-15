@@ -64,6 +64,26 @@
     } catch (e) { return undefined; }
   }
 
+  // ── A COUNT TYPED IN A COLD STORE MUST NOT BE LOST (T17 sweep, 2026-08-13, finding F12) ────────
+  //
+  // Every write here was a bare fetch with a 15-second deadline and nothing behind it, so a save
+  // made where the signal doesn't reach — the walk-in, the dry store, the back door — died in a red
+  // toast and the typed figure was gone. Meanwhile docs/OFFLINE-SYNC.md listed inventory as one of
+  // the three surfaces that DOES queue, which is the sentence a later session trusts instead of
+  // checking. Stock-taking is also the single most likely place in the product for two people to be
+  // working at once, so losing one of them silently is the worst possible place for it.
+  //
+  // The plain (JSON) writes now go through the SAME queue every other staff panel uses: saved on the
+  // device, replayed in order when the signal returns, visible in the shared "saved on this device"
+  // bar. Nothing about the server changes — the queue sends the identical request with the identical
+  // X-LFH-Action-Id, so withIdempotency still makes a replay run at most once, and X-LFH-Expect
+  // still refuses an overwrite.
+  //
+  // A write CARRYING A PHOTO deliberately does not queue: the outbox stores JSON in IndexedDB, not
+  // files, and a queued purchase whose bill photo had silently vanished would be worse than an
+  // honest refusal. Those stay online-only and say so — see the message in the catch below.
+  const canQueue = () => !!(window.LFH_OUTBOX && typeof window.LFH_OUTBOX.send === "function");
+
   async function inv(method, path, body, photoFile, extra) {
     const url = "/api/inventory" + scoped(path);
     const opts = { method, headers: {} };
@@ -94,6 +114,22 @@
       opts.signal = invDeadline();
     }
     try {
+      // THE QUEUE OWNS EVERY PLAIN WRITE (see the note above canQueue). It sends the same request
+      // this function would have sent — same path, same body, same action id, same expectation —
+      // and when there is no signal it saves it on the device and replays it in order instead of
+      // throwing the person's typing away. A queued write answers { ok:true, queued:true }, which
+      // every caller here already treats as success; the shared bar is what tells the person it is
+      // saved-but-not-sent, exactly as it does for the floor.
+      if (method !== "GET" && !photoFile && canQueue()) {
+        return await window.LFH_OUTBOX.send({
+          base: "/api/inventory",
+          method,
+          path: scoped(path),
+          body: body || null,
+          panel: "inventory",
+          expect: (extra && extra.expect) || null,
+        });
+      }
       const res = await fetch(url, opts);
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -104,6 +140,17 @@
         throw e;
       }
       return json;
+    } catch (e) {
+      // A PHOTO NEEDS SIGNAL, AND THE PERSON HAS TO BE TOLD THAT (see the note above canQueue).
+      // Only this path can still lose a tap to a dead connection, so it says which part is the
+      // problem instead of leaving them to guess — the entry can be saved now and the photo added
+      // afterwards from the same screen.
+      if (method !== "GET" && photoFile && (e && (e.name === "TypeError" || e.name === "TimeoutError" || e.name === "AbortError"))) {
+        const off = new Error("A photo needs a connection. Save this without the photo for now and add it when the signal is back.");
+        off.status = 0;
+        throw off;
+      }
+      throw e;
     } finally {
       if (key) inFlight.delete(key);
     }

@@ -162,6 +162,16 @@ export default function AdminLogs() {
   // with no way back.
   const audKindSafe = audKind && audChips.some((c) => c.kind === audKind) ? audKind : "";
   const audRows = aud === null ? null : (AUDITSORT.view(aud, { kind: audKindSafe, sort: audSort, kindLabel: AUD_LABEL }) as Removal[]);
+
+  // …and the SAME pair for the Operations feed (owner, 2026-08-14). The severity buttons above
+  // answer "how bad was it"; these answer "what KIND of thing was it" — which is the question
+  // "show me just the printer" actually is. Grouping, counting and sorting all live in the one
+  // shared module, so this screen can never disagree with the owner console or the manager panel.
+  const [opsGroup, setOpsGroup] = useState("");
+  const [opsSort, setOpsSort] = useState(AUDITSORT.ACTIVITY_DEFAULT_SORT);
+  const opsChips = AUDITSORT.activityCounts(ops || []) as { group: string; count: number; label: string; icon: string }[];
+  const opsGroupSafe = opsGroup && opsChips.some((c) => c.group === opsGroup) ? opsGroup : "";
+  const opsRows = ops === null ? null : (AUDITSORT.activityView(ops, { group: opsGroupSafe, sort: opsSort }) as Action[]);
   // The Removals record (deletion_audit) — every restaurant's audit rows, searchable.
   const loadAud = useCallback(async () => {
     const qs = (rid ? `&restaurant_id=${rid}` : "") + (qDebounced.trim() ? `&q=${encodeURIComponent(qDebounced.trim())}` : "");
@@ -288,6 +298,28 @@ export default function AdminLogs() {
           <button className="adm-btn" onClick={() => loadOps()}><i className="fas fa-rotate-right" aria-hidden="true" /> Refresh</button>
         </div>
       )}
+      {/* WHAT KIND OF THING HAPPENED + A SORT — the Audit tab's controls, brought to the feed that
+          needed them more (owner, 2026-08-14: "you can able to sort in activity log such as from
+          printer and all that"). Both come from /panels/auditsort.js, the same module the Audit tab
+          below and the owner console and the manager panel all read, so "Printer" means the same
+          set of rows on every screen. Only groups with rows get a chip. */}
+      {tab === "ops" && opsChips.length > 1 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+          <div className="adm-tabs" role="group" aria-label="Filter by type" style={{ margin: 0, flexWrap: "wrap" }}>
+            <button className={opsGroupSafe === "" ? "active" : ""} onClick={() => setOpsGroup("")}>All types</button>
+            {opsChips.map((c) => (
+              <button key={c.group} className={opsGroupSafe === c.group ? "active" : ""} onClick={() => setOpsGroup(c.group)}
+                title={`${c.label} — ${c.count} in this view`}>
+                <span aria-hidden="true">{c.icon}</span> {c.label} <span style={{ opacity: 0.65 }}>{c.count}</span>
+              </button>
+            ))}
+          </div>
+          <select value={opsSort} onChange={(e) => setOpsSort(e.target.value)} aria-label="Sort the activity log"
+            style={{ marginLeft: "auto", padding: "6px 9px", borderRadius: 8, border: "var(--border)", background: "var(--card)", color: "var(--text)", fontSize: 12.5 }}>
+            {AUDITSORT.ACTIVITY_SORTS.map((s: { id: string; label: string }) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        </div>
+      )}
       {tab === "aud" && (
         <>
           {/* HOW LONG THE AUDIT IS KEPT — at the top, where the log's own cleanup banner sits.
@@ -356,7 +388,7 @@ export default function AdminLogs() {
       )}
 
       {tab === "ops"
-        ? <OpsTable rows={ops} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} onResolve={markResolved} />
+        ? <OpsTable rows={opsRows} err={opsErr} onRetry={loadOps} scopedName={scopedName || null} onSendToClaude={sendToClaude} onResolve={markResolved} />
         : tab === "aud"
         ? <AudTable rows={audRows} err={audErr} onRetry={loadAud} scopedName={scopedName || null} onOpenRemoval={setRemovalId} />
         : <CustTable data={cust} err={custErr} onRetry={loadCust} />}

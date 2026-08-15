@@ -19,7 +19,22 @@ export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   // Audit the logout BEFORE we clear the cookie (so we still know who it was).
-  const u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  //
+  // BUT A LOGOUT MUST NEVER DEPEND ON THE DATABASE ANSWERING (T17 sweep, 2026-08-13, finding F8).
+  // `userFromCookie` THROWS `AuthDbError` when the staff_users lookup itself fails — a DB/DNS blip,
+  // the shape the 2026-07-03 stress test is built around. That throw escaped this handler, so the
+  // person tapping Log out got a raw 500 AND kept their cookie: still signed in, on a shared tablet,
+  // with an error page instead of the login screen. Every other caller of this function already
+  // handles it (requireRole turns it into a 503 that keeps the panel logged in).
+  //
+  // The audit line is best-effort — it always was, logAction swallows its own failures — so a
+  // failed lookup costs the row's NAME, not the logout. The cookie is cleared either way, below.
+  let u: Awaited<ReturnType<typeof userFromCookie>> = null;
+  try {
+    u = await userFromCookie(req.cookies.get(USER_COOKIE)?.value);
+  } catch (e) {
+    console.error("[panel-logout] couldn't read who was signing out:", e instanceof Error ? e.message : e);
+  }
   if (u) {
     await logAction(u.role, "logout", {
       restaurant_id: u.restaurant_id,

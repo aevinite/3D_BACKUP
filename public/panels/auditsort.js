@@ -247,6 +247,130 @@
     return Math.round(t * 100) / 100;
   }
 
+  /* ═══════════════════════════════════════════════════════════════════════════════════════════
+     THE ACTIVITY LOG'S HALF — "sort it like the audit, so I can see just the printer" (owner,
+     2026-08-14, after the T17 sweep).
+     ═══════════════════════════════════════════════════════════════════════════════════════════
+     The Audit (removals) got chips and a sort order on 2026-08-11. The ACTIVITY log — the much
+     bigger feed of who-did-what — did not: it had a severity filter and a search box, so answering
+     "did the printer play up during Saturday service?" meant reading a thousand rows or knowing to
+     type a word that happens to appear in them.
+     It lives beside the Audit's half, in this same file, for the SAME reason: the Activity log is on
+     THREE screens (manager panel, owner console, admin console) and three copies of a grouping is
+     how one feed starts answering three different ways.
+     GROUPS, NOT A PER-ACTION MAP. There are ~140 action names and more arrive with every feature, so
+     a hand-written list of all of them would be out of date the week after it was written — and a
+     row whose action nobody had listed would silently fall out of every chip. Each group instead
+     owns a TEST, first match wins, and 'other' catches whatever is new. So a feature shipped next
+     month lands in a sensible group on the day it is written, and this file only names exceptions.
+     The order below IS the priority order: printer before orders (a print job mentions an order),
+     money before tables (a settle names a table). */
+  var ACTIVITY_GROUPS = [
+    { id: "printer", label: "Printer", icon: "🖨️",
+      test: function (a) { return /^(kot_print|bill_print|print_|printer_)/.test(a); } },
+    { id: "access", label: "Sign-in & access", icon: "🔑",
+      test: function (a) { return /^(login|logout|password|pin_set|rate_limit|admin_(block|unblock|lockout)|access_change|user_set_(permissions|access|pin|role)|staff_set_permissions|module_toggle|quick_feature|staff_feature)/.test(a); } },
+    { id: "money", label: "Bills & money", icon: "💳",
+      test: function (a) { return /(bill_|discount|payment|invoice|khata|on_the_house|close_unpaid|credit_note|order_delete|order_item_delete|order_item_qty|banquet|billing_|staff_payment)/.test(a); } },
+    { id: "orders", label: "Orders & kitchen", icon: "🍽️",
+      test: function (a) { return /^(order_|item_status|parcel_|platform_status|sold_out)/.test(a); } },
+    { id: "tables", label: "Tables & guests", icon: "🪑",
+      test: function (a) { return /^(table_|auto_approve|member_|call_|customer_|maintenance_)/.test(a); } },
+    { id: "menu", label: "Menu", icon: "📖",
+      test: function (a) { return /^(menu_|google_review)/.test(a); } },
+    { id: "stock", label: "Stock & expenses", icon: "📦",
+      test: function (a) { return /^(inv_|expense_)/.test(a); } },
+    { id: "people", label: "People", icon: "👤",
+      test: function (a) { return /^(staff_|user_|owner_|profile_)/.test(a); } },
+    { id: "setup", label: "Restaurant setup", icon: "🏪",
+      test: function (a) { return /^(restaurant_|platform_channel|retention_|logs_cleanup|error_memory|fix_request|issue_)/.test(a); } },
+    { id: "problem", label: "Problems", icon: "⚠️",
+      test: function (a) { return /(error|failed|denied|blocked)/.test(a); } },
+    { id: "other", label: "Everything else", icon: "•", test: function () { return true; } },
+  ];
+
+  /** Which group one action belongs to. Total: 'other' matches everything, so this always answers. */
+  function activityGroupOf(action) {
+    var a = txt(action);
+    for (var i = 0; i < ACTIVITY_GROUPS.length; i++) if (ACTIVITY_GROUPS[i].test(a)) return ACTIVITY_GROUPS[i].id;
+    return "other";
+  }
+  var GROUP_BY_ID = {};
+  ACTIVITY_GROUPS.forEach(function (g) { GROUP_BY_ID[g.id] = g; });
+
+  /* A row's severity is its own thing — the screens already colour by it — but a PROBLEM row must
+     land in the Problems chip even when its action name says nothing (route_error does, 'ui_taps'
+     at level error does not). So the level wins when it is an error. */
+  function groupOfRow(r) {
+    if (r && r.level === "error") return "problem";
+    return activityGroupOf(r && r.action);
+  }
+
+  /* The chips, counted from the rows in hand. Same shape and same ordering rule as the Audit's
+     kindCounts (biggest first) so the two strips behave identically — but the GROUP order is kept
+     stable rather than sorted by size, because these are categories a person learns the position of
+     ("printer is second"), not a leaderboard. */
+  function activityCounts(rows) {
+    var seen = {};
+    (rows || []).forEach(function (r) {
+      var g = groupOfRow(r);
+      seen[g] = (seen[g] || 0) + 1;
+    });
+    return ACTIVITY_GROUPS
+      .filter(function (g) { return seen[g.id] > 0; })
+      .map(function (g) { return { group: g.id, count: seen[g.id], label: g.label, icon: g.icon }; });
+  }
+
+  /* The sorts offered on the Activity log. No "biggest amount" — an activity row has no amount —
+     and a PANEL sort instead, which is the one an owner asks for after "printer": "show me
+     everything the kitchen screen did". Every comparator ends in the same total tie-break. */
+  var ACTIVITY_SORTS = [
+    { id: "new", label: "Newest first", cmp: function (a, b) { return (whenA(b) - whenA(a)) || tieA(a, b); } },
+    { id: "old", label: "Oldest first", cmp: function (a, b) { return (whenA(a) - whenA(b)) || tieA(a, b); } },
+    { id: "person", label: "Person (A–Z)", cmp: function (a, b) {
+      return txt(a.actor).localeCompare(txt(b.actor)) || (whenA(b) - whenA(a)) || tieA(a, b); } },
+    { id: "panel", label: "Panel (A–Z)", cmp: function (a, b) {
+      return txt(a.panel).localeCompare(txt(b.panel)) || (whenA(b) - whenA(a)) || tieA(a, b); } },
+    { id: "kind", label: "Type (A–Z)", cmp: function (a, b) {
+      var A = (GROUP_BY_ID[groupOfRow(a)] || {}).label || "", B = (GROUP_BY_ID[groupOfRow(b)] || {}).label || "";
+      return txt(A).localeCompare(txt(B)) || (whenA(b) - whenA(a)) || tieA(a, b); } },
+    { id: "restaurant", label: "Restaurant (A–Z)", cmp: function (a, b) {
+      return txt(a.restaurant_name).localeCompare(txt(b.restaurant_name)) || (whenA(b) - whenA(a)) || tieA(a, b); } },
+  ];
+  /* An activity row's time is 'created_at', not 'at' — one field name apart from the Audit's, which
+     is exactly the kind of thing that makes a shared comparator quietly sort by nothing. */
+  var whenA = function (r) { var t = Date.parse((r && (r.created_at || r.at)) || ""); return isFinite(t) ? t : 0; };
+  var tieA = function (a, b) { return num(b.id) - num(a.id); };
+  var activitySortById = function (id) {
+    for (var i = 0; i < ACTIVITY_SORTS.length; i++) if (ACTIVITY_SORTS[i].id === id) return ACTIVITY_SORTS[i];
+    return ACTIVITY_SORTS[0];
+  };
+
+  /** Search across what an activity row SHOWS — the action, the detail, the person, the panel, the
+   *  table, the restaurant, and the group's own words (so typing "printer" finds the printer rows
+   *  even though no row contains that word). */
+  function activityMatches(r, needle) {
+    var q = txt(needle);
+    if (!q) return true;
+    var g = GROUP_BY_ID[groupOfRow(r)] || {};
+    var bits = [
+      r.action, String(r.action || "").replace(/_/g, " "), r.detail, r.actor, r.panel,
+      r.table_number ? "table " + r.table_number : "", r.restaurant_name, g.label,
+    ];
+    for (var i = 0; i < bits.length; i++) if (bits[i] && txt(bits[i]).indexOf(q) >= 0) return true;
+    return false;
+  }
+
+  /** Filter by group + search, then sort — the same one-call pipeline as the Audit's view(). */
+  function activityView(rows, opts) {
+    var o = opts || {};
+    var out = (rows || []).filter(function (r) {
+      if (o.group && groupOfRow(r) !== o.group) return false;
+      return activityMatches(r, o.q);
+    });
+    return out.slice().sort(activitySortById(o.sort).cmp);
+  }
+
   var API = {
     KIND_LABEL: KIND_LABEL,
     KIND_RISK: KIND_RISK,
@@ -262,6 +386,16 @@
     matches: matches,
     view: view,
     sumAmount: sumAmount,
+    // ── the ACTIVITY log's half (owner, 2026-08-14) ────────────────────────────────────────────
+    ACTIVITY_GROUPS: ACTIVITY_GROUPS,
+    ACTIVITY_SORTS: ACTIVITY_SORTS,
+    ACTIVITY_DEFAULT_SORT: "new",
+    activityGroupOf: activityGroupOf,
+    activityGroupOfRow: groupOfRow,
+    activityGroupLabel: function (id) { return (GROUP_BY_ID[id] || {}).label || id; },
+    activityCounts: activityCounts,
+    activityMatches: activityMatches,
+    activityView: activityView,
   };
   if (typeof module !== "undefined" && module.exports) module.exports = API;
   if (typeof globalThis !== "undefined") globalThis.LFH_AUDITSORT = API;

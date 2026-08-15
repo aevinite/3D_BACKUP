@@ -11,6 +11,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { clampPerRow } from "@/lib/floorLayout";
@@ -215,8 +217,8 @@ export async function GET(req: NextRequest) {
     sb.from("settings").select(SELECT).eq("restaurant_id", rid).maybeSingle(),
     sb.from("restaurants").select("slug, name").eq("id", rid).maybeSingle(),
   ]);
-  if (row.error) return NextResponse.json({ error: row.error.message }, { status: 500 });
-  if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
+  if (row.error) return adminFail("this restaurant's settings", row.error, { action: "load" });
+  if (rest.error) return adminFail("this restaurant's settings", rest.error, { action: "load" });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
   const settings = (row.data as unknown as Patch) || {};
   const count = Math.min(Math.max(Math.round(Number(settings.table_count)) || 12, 1), 500);
@@ -246,7 +248,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ table, code: up.data?.code });
       }
       if (!/duplicate|unique/i.test(up.error.message))
-        return NextResponse.json({ error: up.error.message }, { status: 500 });
+        return adminFail("this restaurant's settings", up.error, { action: "save" });
     }
     return NextResponse.json({ error: "couldn't mint a unique code — try again" }, { status: 500 });
   }
@@ -275,11 +277,11 @@ export async function POST(req: NextRequest) {
   }
   if (!Object.keys(patch).length) return NextResponse.json({ error: "nothing to save" }, { status: 400 });
   const rest = await sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle();
-  if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
+  if (rest.error) return adminFail("this restaurant's settings", rest.error, { action: "save" });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
 
   const cur = await sb.from("settings").select("id").eq("restaurant_id", rid).maybeSingle();
-  if (cur.error) return NextResponse.json({ error: cur.error.message }, { status: 500 });
+  if (cur.error) return adminFail("this restaurant's settings", cur.error, { action: "save" });
 
   let saved;
   if (cur.data) {
@@ -293,7 +295,7 @@ export async function POST(req: NextRequest) {
       .upsert({ ...base, id: rest.data.slug, restaurant_id: rid, ...patch }, { onConflict: "restaurant_id" })
       .select(SELECT).maybeSingle();
   }
-  if (saved.error) return NextResponse.json({ error: saved.error.message }, { status: 500 });
+  if (saved.error) return adminFail("this restaurant's settings", saved.error, { action: "save" });
   await logAction("admin", "restaurant_settings", {
     detail: `updated ${Object.keys(patch).join(", ")}`.slice(0, 180), restaurant_id: rid,
   });

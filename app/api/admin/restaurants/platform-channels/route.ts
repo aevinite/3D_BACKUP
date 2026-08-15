@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { logAction } from "@/lib/oplog";
@@ -28,7 +30,16 @@ function present(raw: unknown) {
   const out: Record<Channel, { on: boolean; hasKey: boolean }> = {
     zomato: { on: false, hasKey: false }, swiggy: { on: false, hasKey: false }, website: { on: false, hasKey: false },
   };
-  for (const c of CHANNELS) out[c] = { on: m[c]?.on === true, hasKey: typeof m[c]?.key === "string" && (m[c]!.key as string).length > 0 };
+  // `key` is the stored name (mig 209). `api_key` is read too, ONLY as a fallback: the Access
+  // screen used to write that name, so a restaurant whose key was pasted there would otherwise be
+  // told here that no key is saved — and the admin would paste it a second time. Both screens now
+  // write `key` and drop the legacy field, so this fallback exists to carry the restaurants that
+  // were split before 2026-08-13 (T17 sweep, finding F4).
+  for (const c of CHANNELS) {
+    const cell = m[c] || {};
+    const stored = typeof cell.key === "string" && cell.key ? cell.key : (cell as { api_key?: unknown }).api_key;
+    out[c] = { on: cell.on === true, hasKey: typeof stored === "string" && stored.length > 0 };
+  }
   return out;
 }
 
@@ -38,7 +49,7 @@ export async function GET(req: NextRequest) {
   const rid = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!isUuid(rid)) return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
   const row = await sb.from("settings").select("platform_channels").eq("restaurant_id", rid).maybeSingle();
-  if (row.error) return NextResponse.json({ error: row.error.message }, { status: 500 });
+  if (row.error) return adminFail("this restaurant's delivery channels", row.error, { action: "load" });
   return NextResponse.json({ channels: present((row.data as { platform_channels?: unknown } | null)?.platform_channels) });
 }
 
@@ -52,18 +63,24 @@ export async function POST(req: NextRequest) {
   if (!CHANNELS.includes(channel)) return NextResponse.json({ error: "unknown channel" }, { status: 400 });
 
   const rest = await sb.from("restaurants").select("id, slug").eq("id", rid).maybeSingle();
-  if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
+  if (rest.error) return adminFail("this restaurant's delivery channels", rest.error, { action: "save" });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
 
   const cur = await sb.from("settings").select("id, platform_channels").eq("restaurant_id", rid).maybeSingle();
-  if (cur.error) return NextResponse.json({ error: cur.error.message }, { status: 500 });
+  if (cur.error) return adminFail("this restaurant's delivery channels", cur.error, { action: "save" });
 
   // Merge onto whatever's stored — only touch the one channel in this request.
   const existing = ((cur.data as { platform_channels?: unknown } | null)?.platform_channels || {}) as ChanMap;
   const next: ChanCfg = { ...(existing[channel] || {}) };
   if (typeof body?.on === "boolean") next.on = body.on;
   // key: a non-empty string sets it; an empty string clears it; absent leaves it unchanged.
-  if (typeof body?.key === "string") { const k = body.key.trim(); next.key = k ? k.slice(0, 500) : null; }
+  // Writing it also drops the legacy `api_key` the Access screen used to use, so a restaurant that
+  // ended up with two copies converges on one the next time either screen saves. (T17, finding F4)
+  if (typeof body?.key === "string") {
+    const k = body.key.trim();
+    next.key = k ? k.slice(0, 500) : null;
+    delete (next as { api_key?: unknown }).api_key;
+  }
   const merged: ChanMap = { ...existing, [channel]: next };
   const patch = { platform_channels: merged };
   // Never log the key value — only what changed.
@@ -71,7 +88,7 @@ export async function POST(req: NextRequest) {
 
   if (cur.data) {
     const r = await sb.from("settings").update(patch).eq("restaurant_id", rid).select("platform_channels").maybeSingle();
-    if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+    if (r.error) return adminFail("this restaurant's delivery channels", r.error, { action: "save" });
     await logAction("admin", "platform_channel", { detail: logDetail, restaurant_id: rid });
     return NextResponse.json({ channels: present((r.data as { platform_channels?: unknown } | null)?.platform_channels) });
   }
@@ -80,7 +97,7 @@ export async function POST(req: NextRequest) {
   const base = cleanClonedSettings(template.data);
   const newRow = { ...base, id: rest.data.slug, restaurant_id: rid, ...patch };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select("platform_channels").maybeSingle();
-  if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });
+  if (ins.error) return adminFail("this restaurant's delivery channels", ins.error, { action: "save" });
   await logAction("admin", "platform_channel", { detail: logDetail, restaurant_id: rid });
   return NextResponse.json({ channels: present((ins.data as { platform_channels?: unknown } | null)?.platform_channels), created: true });
 }

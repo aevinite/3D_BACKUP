@@ -99,6 +99,9 @@ export const ACT_LABEL: Record<string, string> = {
   // `npm run verify:audit` was already red on main and they were printing as raw keys on the
   // Activity screens. Three lines, same class of gap as the nine this PR fixed.
   kot_reprint_sent: "Reprinted a KOT", printer_problem: "Printer problem",
+  // Both ends of a print, so the Activity log's Printer chip can answer "did it actually come
+  // out?" and not just "somebody complained" (owner, 2026-08-14).
+  kot_printed: "KOT printed", kot_print_failed: "KOT didn't print",
   printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit

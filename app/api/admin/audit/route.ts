@@ -12,6 +12,8 @@ import { auditAfter, auditBillHtml } from "@/lib/auditDetail";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +77,7 @@ export async function GET(req: NextRequest) {
   }
 
   const r = await q;
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return adminFail("the removals record", r.error, { action: "load" });
   const rows = r.data ?? [];
 
   // Stamp each row with WHICH restaurant it belongs to — one batched name lookup, no N+1

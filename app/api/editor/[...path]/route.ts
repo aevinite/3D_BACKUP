@@ -54,6 +54,8 @@ import { dashboardReach, clampDashRange, billsReach } from "@/lib/dashRange";
 import { saveBillCustomer } from "@/lib/billCustomer";
 import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
+// What never leaves the server inside a settings row (the delivery apps' connection keys).
+import { panelSafeSettings } from "@/lib/panelSettings";
 
 export const dynamic = "force-dynamic"; // always live, never cached
 
@@ -1032,7 +1034,11 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         items: must(items),
         categories: must(categories),
         filters: must(filters),
-        settings: must(settings) || { id: "site", bubbles_enabled: true, service_mode: false },
+        // `select("*")` above stays (this form edits every column), but the row also carries
+        // `platform_channels` — the delivery apps' connection KEYS — which no manager screen reads
+        // and which the two admin screens that manage them never hand back. Stripped through the
+        // one shared list so this panel and the waiter tablet cannot drift. (T17 sweep, 2026-08-13)
+        settings: panelSafeSettings(must(settings)) || { id: "site", bubbles_enabled: true, service_mode: false },
         restaurant: must(restaurant) || null,
       });
     }
@@ -4654,7 +4660,10 @@ async function postImpl(req: NextRequest, ctx: Ctx) {
         const label = String(body.title || (body.name && (body.name.en || body.name)) || body.slug || (data[0] && data[0].id) || "").slice(0, 80);
         await log("manager", isCreate ? "menu_create" : "menu_edit", { restaurant_id: rid, detail: `${isCreate ? "added" : "edited"} ${kind}: ${label}`, device_id: dev });
       }
-      return ok(data[0]);
+      // A settings save echoes the saved ROW back, so it is the same payload as /all and gets the
+      // same strip — otherwise the one column we just removed from the boot bundle would come
+      // straight back on the next Save. (T17 sweep, 2026-08-13)
+      return ok(a === "settings" ? panelSafeSettings(data[0]) : data[0]);
     }
 
     return err("unknown POST endpoint", 404);

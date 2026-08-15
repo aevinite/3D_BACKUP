@@ -171,6 +171,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | you touched | run | needs | writes |
 |---|---|---|---|
 | any `.js` or `.css` under `public/panels/` | `verify:panel-cache` ← the `?v=` must be the file's own content hash, or staff run a weeks-old panel | nothing | no |
+| a payload that hands a `settings` row to a panel, or `lib/panelSettings.ts` | `verify:panel-secrets` ← the row carries the delivery apps' connection keys; a panel must never receive them (T17 finding F1) | nothing | no |
 | an HTML comment, a `<style>` block, a CSS comment | `verify:ui` | nothing | no |
 
 ## 11 · Tooling, docs and the rules themselves

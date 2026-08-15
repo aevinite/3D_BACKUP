@@ -13,6 +13,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 import { closeSession, clearTableSignals } from "@/lib/sessionClose";
@@ -48,8 +50,8 @@ export async function GET(req: NextRequest) {
       .eq("restaurant_id", rid).eq("archived", false)
       .order("created_at", { ascending: false }).limit(60),
   ]);
-  if (sessRes.error) return err(sessRes.error.message, 500);
-  if (ordRes.error) return err(ordRes.error.message, 500);
+  if (sessRes.error) return adminFail("the repair list", sessRes.error, { action: "load" });
+  if (ordRes.error) return adminFail("the repair list", ordRes.error, { action: "load" });
   return NextResponse.json({ sessions: sessRes.data ?? [], orders: ordRes.data ?? [] });
 }
 

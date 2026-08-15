@@ -1,7 +1,8 @@
 // GET /api/admin/restaurants/export?rid=<uuid> — download a full JSON backup of
 // ONE restaurant (the row + every tenant-scoped table it owns). Offered before a
 // permanent purge so a mistaken erase can be rebuilt from the file. Admin-gated,
-// service role. Secrets are stripped from staff_users (no password/pin hashes).
+// service role. Secrets are stripped: no password/pin hashes from staff_users, and no
+// delivery-channel connection keys from settings (lib/panelSettings.ts).
 //
 // This is a rare, deliberate admin action, so a full scoped read is acceptable —
 // it is NOT a hot/polled path. Each table is capped so a huge restaurant can't
@@ -9,7 +10,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction } from "@/lib/oplog";
+// The one list of settings columns that are credentials, not settings.
+import { panelSafeSettings } from "@/lib/panelSettings";
 
 export const dynamic = "force-dynamic";
 const CAP = 100_000; // per-table row cap for the backup
@@ -33,7 +38,7 @@ export async function GET(req: NextRequest) {
   if (!isUuid(rid)) return NextResponse.json({ error: "Missing or invalid rid." }, { status: 400 });
 
   const restQ = await sb.from("restaurants").select("*").eq("id", rid).maybeSingle();
-  if (restQ.error) return NextResponse.json({ error: restQ.error.message }, { status: 500 });
+  if (restQ.error) return adminFail("this restaurant's backup", restQ.error, { action: "load" });
   if (!restQ.data) return NextResponse.json({ error: "Restaurant not found." }, { status: 404 });
 
   // This recovery file DELIBERATELY contains financial records (order totals, payment
@@ -54,7 +59,17 @@ export async function GET(req: NextRequest) {
   for (const t of TABLES) {
     const q = await sb.from(t).select("*").eq("restaurant_id", rid).limit(CAP);
     if (q.error) { backup[t] = { error: q.error.message }; continue; }
-    backup[t] = q.data || [];
+    // THE SETTINGS ROW CARRIES A CREDENTIAL, AND THIS FILE LEAVES THE BUILDING (T17 sweep,
+    // 2026-08-13, finding F3). `settings.platform_channels` holds the delivery apps' connection
+    // keys (mig 209) — the two admin screens that manage them deliberately never hand the value
+    // back, and this download did, into a file that gets saved to a laptop or mailed. The staff
+    // rows below were already stripped of their hashes for exactly this reason; the channel keys
+    // were simply not thought of. Everything else about the row is kept, so a rebuild still has
+    // every setting — a channel's key is re-entered from the platform's own dashboard, which is
+    // the only place it should be read from anyway.
+    backup[t] = t === "settings"
+      ? (q.data || []).map((row) => panelSafeSettings(row as Record<string, unknown>))
+      : (q.data || []);
     if ((q.data?.length || 0) >= CAP) truncated.push(t);
   }
 

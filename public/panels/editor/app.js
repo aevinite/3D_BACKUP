@@ -5563,6 +5563,9 @@ function renderEditor() {
     } else {
       ed.innerHTML = logHtml(); // renders the customer log, or the operation log when view === "operations"
       bindLog();
+      // The Activity log's own chips / search / sort (owner, 2026-08-14). Bound only for that view,
+      // beside bindLog() rather than inside it, so the customer log is untouched.
+      if (view === "operations") bindOplog();
       if (view === "operations" && !state.oplog) loadOplog();
     }
     return;
@@ -6593,6 +6596,8 @@ const OP_ACTION_LABELS = {
   // `npm run verify:audit` was already red on main and they were printing as raw keys on the
   // Activity screens. Three lines, same class of gap as the nine this PR fixed.
   kot_reprint_sent: "Reprinted a KOT", printer_problem: "Printer problem",
+  // Both ends of a print — see the same pair in components/admin/shared.tsx (owner, 2026-08-14).
+  kot_printed: "KOT printed", kot_print_failed: "KOT didn't print",
   printer_problem_resolved: "Printer problem fixed",
   // Added by the 2026-08-04 API sweep, which gave nine previously-unrecorded writes an audit row.
   // A code with no label here prints as a raw database key on a person's screen (verify:audit
@@ -13110,10 +13115,35 @@ function opDetailText(action, detail) {
 // oplogHtml: the Operation log — every staff action across the panels (which
 // panel did what, where, and when). Fed by /oplog (the staff_actions table).
 function oplogHtml() {
-  const rows = state.oplog || [];
+  const all = state.oplog || [];
+  // ── THE SAME CHIPS AND SORT THE AUDIT HAS (owner, 2026-08-14) ─────────────────────────────────
+  // "you can able to sort in activity log such as from printer and all that." Grouping, counting
+  // and ordering all come from /panels/auditsort.js — the module this panel already loads for the
+  // Audit tab, and which the owner console and the admin console read too, so "Printer" means the
+  // same rows on all three. Guarded exactly like the Audit's use: a stale cached app.js talking to
+  // a page without the script falls back to the flat list rather than losing the screen.
+  const AS2 = typeof LFH_AUDITSORT !== "undefined" && LFH_AUDITSORT.activityView ? LFH_AUDITSORT : null;
+  const opChips = AS2 ? AS2.activityCounts(all) : [];
+  // A group whose rows have aged off the feed falls back to All, so a stale chip can never leave an
+  // empty list with no way back.
+  const opGroup = state.oplogGroup && opChips.some((c) => c.group === state.oplogGroup) ? state.oplogGroup : "";
+  const opSort = state.oplogSort || (AS2 ? AS2.ACTIVITY_DEFAULT_SORT : "new");
+  const opQ = (state.oplogQ || "").trim();
+  const rows = AS2 ? AS2.activityView(all, { group: opGroup, sort: opSort, q: opQ }) : all;
   const head = `<div class="ed-head"><h2>Activity log <span class="sub">· staff actions</span></h2><div class="ed-head-actions">${retentionControl("oplog_retention_days")}<button class="btn" id="staffWatch">🔍 Staff watch</button><button class="btn" id="refreshOplog">↻ Refresh</button></div></div>
-    <div class="ord-note">Every staff action across the panels — which panel <b>and which device</b> did it, where, and when. Each device gets an automatic ID (shown as <b>#id</b>) until real staff login lands. <b>Click any row</b> for its full date, time and details.</div>`;
-  if (!rows.length) return head + `<div class="sx-empty">No staff actions logged yet — accept/serve an order, open/close a table, etc.</div>`;
+    <div class="ord-note">Every staff action across the panels — which panel <b>and which device</b> did it, where, and when. Each device gets an automatic ID (shown as <b>#id</b>) until real staff login lands. <b>Click any row</b> for its full date, time and details.</div>`
+    + (opChips.length > 1 ? `<div class="au-chips">
+      <button class="au-chip${opGroup === "" ? " on" : ""}" data-op-group="">All <i>${all.length}</i></button>
+      ${opChips.map((c) => `<button class="au-chip${opGroup === c.group ? " on" : ""}" data-op-group="${esc(c.group)}" title="Show only: ${esc(c.label)}">${c.icon} ${esc(c.label)} <i>${c.count}</i></button>`).join("")}
+    </div>` : "")
+    + (AS2 ? `<div class="au-controls">
+      <input id="opQ" class="au-q" type="search" placeholder="Search an action, a person, a table or a panel…" value="${esc(state.oplogQ || "")}">
+      <label class="au-sort">Sort <select id="opSort">${AS2.ACTIVITY_SORTS.map((o) => `<option value="${esc(o.id)}"${o.id === opSort ? " selected" : ""}>${esc(o.label)}</option>`).join("")}</select></label>
+    </div>` : "");
+  if (!all.length) return head + `<div class="sx-empty">No staff actions logged yet — accept/serve an order, open/close a table, etc.</div>`;
+  // Narrowed to nothing is a different sentence from "nothing has happened" — and it must offer the
+  // way back, or a chip becomes a trap (the same rule the Audit's empty state follows).
+  if (!rows.length) return head + `<div class="sx-empty">${opQ ? "Nothing matches that." : "Nothing of that type on this list — tap All to see everything."}</div>`;
   // Which staff devices are currently blocked → map device_id to its blocklist
   // row id (so we can offer Unblock). Loaded alongside the customer-log data.
   const blockedDev = {};
@@ -13150,6 +13180,26 @@ function oplogHtml() {
 async function loadOplog() {
   try { state.oplog = await api("GET", "/oplog"); if (state.tab === "log") renderEditor(); }
   catch (e) { toast("Couldn't load the activity log: " + errText(e), "err"); }
+}
+
+// The Activity log's chips, search and sort. Same shape as bindAudit() beside it: every control
+// re-renders what is already in hand — no request, no egress — and none of them may swallow a tap.
+function bindOplog() {
+  document.querySelectorAll("[data-op-group]").forEach((b) => {
+    b.onclick = () => { state.oplogGroup = b.dataset.opGroup || ""; renderEditor(); };
+  });
+  const so = document.getElementById("opSort");
+  if (so) so.onchange = () => { state.oplogSort = so.value; renderEditor(); };
+  const q = document.getElementById("opQ");
+  if (q) q.oninput = () => {
+    state.oplogQ = q.value;
+    // Keep the caret where the person left it — a full re-render otherwise sends it to the end
+    // after every keystroke, which is what the Audit's own search box learned to do.
+    const at = q.selectionStart;
+    renderEditor();
+    const n = document.getElementById("opQ");
+    if (n) { n.focus(); try { n.setSelectionRange(at, at); } catch {} }
+  };
 }
 
 // bindLog: wire up the Log tab's buttons (refresh, exit a guest, block, unblock).

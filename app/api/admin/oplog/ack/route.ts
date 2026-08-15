@@ -16,6 +16,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { withIdempotency } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +40,7 @@ async function postHandler(req: NextRequest) {
     const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
     const r = await sb.from("staff_actions").update({ seen_at: nowIso })
       .eq("level", "error").is("seen_at", null).gte("created_at", since24h).select("id");
-    if (r.error) return err(r.error.message, 500);
+    if (r.error) return adminFail("the notification state", r.error, { action: "load" });
     return NextResponse.json({ ok: true, changed: r.data?.length ?? 0 });
   }
 
@@ -49,7 +51,7 @@ async function postHandler(req: NextRequest) {
   if (ids.length === 0) return err("no valid action_ids");
 
   const r = await sb.from("staff_actions").update({ seen_at: body.seen ? nowIso : null }).in("id", ids).select("id");
-  if (r.error) return err(r.error.message, 500);
+  if (r.error) return adminFail("the notification state", r.error, { action: "load" });
   return NextResponse.json({ ok: true, changed: r.data?.length ?? 0 });
 }
 

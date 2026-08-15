@@ -95,3 +95,65 @@ export function view(
 ): AuditRow[];
 /** What the visible rows add up to in money. Rows with no amount contribute nothing. */
 export function sumAmount(rows: AuditRow[]): number;
+
+// ── THE ACTIVITY LOG'S HALF (owner, 2026-08-14: "sort in activity log such as from printer") ─────
+// The same three screens carry the Activity log (staff_actions) as well as the Audit, and it is the
+// bigger feed — so it gets the same chips and the same sort, from the same module, for the same
+// reason: one grouping, three screens, no chance of "Printer" meaning different rows on each.
+
+/** One row of the activity log, as every panel receives it from its own oplog endpoint.
+ *  `id` is `string | number` on purpose: the admin console types it as a number and the owner
+ *  console as a string (PostgREST hands a bigint over as text once it is big enough). The tie-break
+ *  parses it either way, so both are genuinely accepted rather than one being cast at a call site. */
+export interface ActivityRow {
+  id: string | number;
+  action: string;
+  panel?: string | null;
+  actor?: string | null;
+  detail?: string | null;
+  table_number?: string | null;
+  level?: string | null;
+  created_at?: string;
+  restaurant_name?: string | null;
+}
+
+export interface ActivityGroup {
+  id: string;
+  label: string;
+  icon: string;
+  test: (action: string) => boolean;
+}
+
+export interface ActivityGroupCount {
+  group: string;
+  count: number;
+  label: string;
+  icon: string;
+}
+
+export interface ActivitySort {
+  id: string;
+  label: string;
+  cmp: (a: ActivityRow, b: ActivityRow) => number;
+}
+
+/** The groups, in PRIORITY order — first match wins, and the last one matches everything, so a
+ *  brand-new action name always lands somewhere rather than falling out of every chip. */
+export const ACTIVITY_GROUPS: ActivityGroup[];
+export const ACTIVITY_SORTS: ActivitySort[];
+export const ACTIVITY_DEFAULT_SORT: string;
+/** Which group an action name belongs to. Total — always answers. */
+export function activityGroupOf(action: string): string;
+/** The same for a whole row, where an error-level row is a Problem whatever its action says. */
+export function activityGroupOfRow(row: ActivityRow): string;
+export function activityGroupLabel(id: string): string;
+/** Which groups are present and how many of each. Only groups with rows behind them. */
+export function activityCounts(rows: ActivityRow[]): ActivityGroupCount[];
+/** The search, over what the row SHOWS — including the group's own words, so typing "printer"
+ *  finds the printer rows even though no row contains that word. */
+export function activityMatches(r: ActivityRow, needle: string): boolean;
+/** Filter by group + search, then sort — the whole pipeline in one call. */
+export function activityView(
+  rows: ActivityRow[],
+  opts: { group?: string; q?: string; sort?: string },
+): ActivityRow[];

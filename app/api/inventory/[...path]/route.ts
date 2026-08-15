@@ -33,6 +33,41 @@ export const dynamic = "force-dynamic";
 const err = (m: string, status = 400) => NextResponse.json({ error: m }, { status });
 const ok = (body: Record<string, unknown> = {}) => NextResponse.json({ ok: true, ...body });
 
+// ── NEVER HAND A DATABASE MESSAGE TO A PANEL (T17 sweep, 2026-08-13, finding F7) ────────────────
+//
+// This file had 28 places answering `err(x.error.message, 500)`, so a manager mid-service read
+// Postgres prose — "invalid input syntax for type uuid" — in a red toast on the Inventory tab. The
+// rule was written down next door on 2026-08-05 (app/api/maintenance/route.ts: "the detail stays in
+// the log") and applied to every other panel route; this was the last one without it.
+//
+// TWO helpers rather than one, because the two failures need different words: a person who can't
+// SEE their stock is told the list didn't load, and a person whose SAVE failed must know their work
+// did not land. Both keep the real message on OUR side, where it is useful.
+//
+// A refusal of the VALUE keeps its own answer: `panelFailure`/`dbRefusal` classify those (a check
+// constraint, a duplicate name) as 4xx, and the two 23505 branches below still say "that name
+// already exists". This is only for "the database failed to serve it", which is a 500.
+const readFail = (what: string, e: { message?: string } | null): NextResponse => {
+  console.error(`[inventory] couldn't read ${what}:`, e?.message ?? e);
+  return err(`Couldn't load ${what} — please try again.`, 500);
+};
+const writeFail = (what: string, e: { message?: string } | null): NextResponse => {
+  console.error(`[inventory] couldn't save ${what}:`, e?.message ?? e);
+  return err(`Couldn't save ${what} — nothing was changed. Please try again.`, 500);
+};
+
+// A value the SERVER refuses, thrown from deep inside a loop or a helper (T17, finding F5).
+//
+// The purchase form validates its lines inside a `.map()` and `savePhoto` checks the file size, and
+// both used to `throw new Error("Rate missing for Tomatoes.")`. The catch at the bottom answers
+// `panelFailure(e, { unknown: "Inventory write failed." })`, and lib/panelFailure replaces the
+// message for anything its classifier doesn't recognise — a plain Error is not recognised. So the
+// sentence naming the exact line was thrown away, the manager read "Inventory write failed." with
+// no idea which row was wrong, AND it went out as a 500, i.e. "the server is struggling", when the
+// truth is "this value is not acceptable and never will be" — the very distinction lib/dbRefusal.ts
+// exists to enforce. A BadInput is answered 400 with its own words.
+class BadInput extends Error {}
+
 // IST calendar date (all inventory documents live on the business calendar).
 const istToday = () => new Date(Date.now() + 5.5 * 3600_000).toISOString().slice(0, 10);
 const isDate = (v: unknown) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v);
@@ -91,7 +126,9 @@ const actorOf = (g: { user: StaffUser | null }) =>
 const INV_BUCKET = "inv-media";
 async function savePhoto(rid: string, file: File | null): Promise<string | null> {
   if (!file || !file.size) return null;
-  if (file.size > 8 * 1024 * 1024) throw new Error("Photo too large (max 8 MB).");
+  // BadInput, not Error: the size is refused, not failed — see the class above. Before this the
+  // manager was told "Inventory write failed." and never learned the photo was the problem.
+  if (file.size > 8 * 1024 * 1024) throw new BadInput("That photo is too large (max 8 MB). Take it again at a smaller size.");
   const ext = (file.type.split("/")[1] || "jpg").replace(/[^a-z0-9]/gi, "").slice(0, 5) || "jpg";
   const path = `${rid}/${Date.now()}-${crypto.randomUUID().slice(0, 8)}.${ext}`;
   const buf = Buffer.from(await file.arrayBuffer());
@@ -161,14 +198,14 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         .order("category").order("name").limit(500);
       if (!inactive) sel = sel.eq("active", true);
       const r = await sel;
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("the ingredient list", r.error);
       return ok({ items: r.data });
     }
 
     if (path[0] === "vendors") {
       const r = await sb.from("inv_vendors").select("id, name, phone, gstin, note, active")
         .eq("restaurant_id", rid).eq("active", true).order("name").limit(200);
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("the supplier list", r.error);
       return ok({ vendors: r.data });
     }
 
@@ -176,7 +213,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       const lim = Math.min(Math.max(num(q.get("limit")) || 30, 1), 100);
       const r = await sb.from("inv_purchases").select(PURCHASE_COLS).eq("restaurant_id", rid)
         .order("created_at", { ascending: false }).limit(lim);
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("the purchase list", r.error);
       // A purchase bill / waste photo / expense slip is a restaurant's private paperwork: the
       // screen gets a short-lived signed link, never the permanent public one (lib/mediaLinks.ts).
       return ok({ purchases: await signRows("inv-media", r.data as Record<string, unknown>[], ["photo_url"]) });
@@ -196,7 +233,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     if (path[0] === "counts" && !path[1]) {
       const r = await sb.from("inv_counts").select("id, status, count_date, note, created_by, created_at, submitted_at")
         .eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(30);
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("the stock counts", r.error);
       return ok({ counts: r.data });
     }
     if (path[0] === "counts" && path[1]) {
@@ -215,7 +252,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       const from = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
       const r = await sb.from("inv_waste_entries").select(WASTE_COLS).eq("restaurant_id", rid)
         .gte("waste_date", from).order("created_at", { ascending: false }).limit(200);
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("the waste record", r.error);
       // A purchase bill / waste photo / expense slip is a restaurant's private paperwork: the
       // screen gets a short-lived signed link, never the permanent public one (lib/mediaLinks.ts).
       return ok({ waste: await signRows("inv-media", r.data as Record<string, unknown>[], ["photo_url"]) });
@@ -230,7 +267,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       const r = await sb.from("expenses").select(EXPENSE_COLS).eq("restaurant_id", rid)
         .gte("expense_date", from).lte("expense_date", to)
         .order("expense_date", { ascending: false }).order("created_at", { ascending: false }).limit(300);
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("this month's expenses", r.error);
       const totals: Record<string, number> = {};
       let total = 0;
       for (const e of r.data || []) {
@@ -248,7 +285,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       const r = await sb.from("inv_items")
         .select("id, name, category, purchase_uom, purchase_factor, par_qty, min_qty, qty_base, last_rate, default_vendor_id")
         .eq("restaurant_id", rid).eq("active", true).not("par_qty", "is", null).limit(500);
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("the order list", r.error);
       const list = (r.data || [])
         .filter((i) => Number(i.qty_base) < Number(i.par_qty))
         .map((i) => {
@@ -264,7 +301,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
     if (path[0] === "negative") {
       const r = await sb.from("inv_items").select("id, name, category, base_uom, qty_base, purchase_uom, purchase_factor")
         .eq("restaurant_id", rid).eq("active", true).lt("qty_base", 0).limit(100);
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("the negative-stock list", r.error);
       return ok({ items: r.data });
     }
 
@@ -277,10 +314,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
         sb.from("inv_recipe_lines").select("owner_type, owner_key, item_id, qty_base")
           .eq("restaurant_id", rid).limit(3000),
       ]);
-      if (dishes.error) return err(dishes.error.message, 500);
+      if (dishes.error) return readFail("the dish list", dishes.error);
       // A failed lines read must be an ERROR, never an empty list — otherwise every
       // dish renders "no recipe" and a well-meaning Save would wipe the real lines.
-      if (lines.error) return err(lines.error.message, 500);
+      if (lines.error) return readFail("the recipes", lines.error);
       return ok({
         dishes: (dishes.data || []).map((d) => ({
           slug: d.slug,
@@ -296,7 +333,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       const days = Math.min(Math.max(num(q.get("days")) || 7, 1), 90);
       const from = new Date(Date.now() - days * 86400_000).toISOString();
       const r = await sb.rpc("lfh_inv_usage_report", { p_restaurant: rid, p_from: from, p_to: new Date().toISOString() });
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("the usage report", r.error);
       return ok({ days, rows: r.data || [] });
     }
 
@@ -307,7 +344,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ path: strin
       if (!isUuid(item)) return badId();
       const r = await sb.from("inv_movements").select("id, qty_base, kind, reason, ref_type, ref_id, unit_cost, created_by, created_at")
         .eq("restaurant_id", rid).eq("item_id", item).order("id", { ascending: false }).limit(50);
-      if (r.error) return err(r.error.message, 500);
+      if (r.error) return readFail("this ingredient's activity", r.error);
       return ok({ movements: r.data });
     }
 
@@ -362,7 +399,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         note: body.note ? String(body.note).slice(0, 500) : null,
         photo_url, created_by: actor, created_by_id: actorId,
       }).select("id").single();
-      if (ins.error) return err(ins.error.message, 500);
+      if (ins.error) return writeFail("the expense", ins.error);
       await logAction("manager", "expense_add", { restaurant_id: rid, actor, actor_id: actorId, detail: `${category}: ${title} — ₹${amount}` });
       return ok({ id: ins.data.id });
     }
@@ -374,7 +411,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       if (!reason) return err("A reason is required to strike out an entry.");
       const up = await sb.from("expenses").update({ voided_at: new Date().toISOString(), void_reason: reason.slice(0, 300), voided_by: actor })
         .eq("restaurant_id", rid).eq("id", path[1]).is("voided_at", null).select("id, title");
-      if (up.error) return err(up.error.message, 500);
+      if (up.error) return writeFail("the strike-out", up.error);
       if (!up.data?.length) return err("Entry not found or already struck out.", 404);
       await logAction("manager", "expense_void", { restaurant_id: rid, actor, actor_id: actorId, detail: `${up.data[0].title}: ${reason}` });
       return ok();
@@ -424,46 +461,59 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       }
       const lines = ids.map((id) => ({ restaurant_id: rid, owner_type: ownerType, owner_key: ownerKey, item_id: id, qty_base: byItem.get(id)! }));
       const del = await sb.from("inv_recipe_lines").delete().eq("restaurant_id", rid).eq("owner_type", ownerType).eq("owner_key", ownerKey);
-      if (del.error) return err(del.error.message, 500);
+      if (del.error) return writeFail("the recipe", del.error);
       if (lines.length) {
         const ins = await sb.from("inv_recipe_lines").insert(lines);
-        if (ins.error) return err(ins.error.message, 500);
+        if (ins.error) return writeFail("the recipe", ins.error);
       }
       await logAction("manager", "inv_recipe_save", { restaurant_id: rid, actor, actor_id: actorId, detail: `${ownerType} ${ownerKey}: ${lines.length} ingredients` });
       return ok({ lines: lines.length });
     }
 
-    // Make a batch of a prep item: consume its recipe's ingredients (scaled), add the
-    // produced quantity to stock at the batch's real cost. Keys ride the request's
-    // idempotency id, so a replay can never brew the batch twice.
+    // Make a batch of a prep item: consume its recipe's ingredients (scaled) and add the produced
+    // quantity to stock at the batch's real cost.
+    //
+    // ONE ACTION, ONE TRANSACTION, ONE IDENTITY (T17 sweep, 2026-08-13, finding F6 — migration 329).
+    // This used to fan the batch out into N+1 separate movement calls from here, each keyed on the
+    // REQUEST's action id. Two faults followed. A failure part-way through left the ingredients
+    // consumed and no batch made — real stock gone, ledger internally consistent, nothing to point
+    // at. And because inventory.js mints a fresh action id per tap (deliberately: two genuine
+    // expenses minutes apart must never merge), the manager's retry after that failure looked like a
+    // brand-new batch and consumed every ingredient a SECOND time.
+    //
+    // lfh_inv_produce does the whole thing inside the database: every leg lands or none does, and
+    // the batch's identity is derived from what it IS (restaurant + item + quantity + the attempt),
+    // so a retry of the same batch is recognised rather than repeated. The route keeps the gates and
+    // the log line; the arithmetic and the costing stay in the one place that already owns them.
     if (path[0] === "production") {
       const { body } = await readBody(req);
       const itemId = String(body.item_id || "");
       const madeBase = num(body.qty_base);
       if (!itemId || !Number.isFinite(madeBase) || madeBase <= 0) return err("How much did you make?");
-      const it = await sb.from("inv_items").select("id, name, recipe_batch_base").eq("restaurant_id", rid).eq("id", itemId).maybeSingle();
-      if (!it.data) return err("Ingredient not found.", 404);
-      if (!it.data.recipe_batch_base) return err("This ingredient has no prep recipe yet.");
-      const lines = await sb.from("inv_recipe_lines").select("item_id, qty_base")
-        .eq("restaurant_id", rid).eq("owner_type", "prep").eq("owner_key", itemId).limit(100);
-      if (!lines.data?.length) return err("This ingredient has no prep recipe yet.");
-      const scale = madeBase / Number(it.data.recipe_batch_base);
-      const costs = await sb.from("inv_items").select("id, avg_cost").eq("restaurant_id", rid)
-        .in("id", lines.data.map((l) => l.item_id)).limit(100);
-      const costOf = new Map((costs.data || []).map((c) => [c.id, Number(c.avg_cost)]));
-      const prodId = req.headers.get("x-lfh-action-id") || crypto.randomUUID();
-      let batchCost = 0;
-      for (const l of lines.data) {
-        const use = Number(l.qty_base) * scale;
-        batchCost += use * (costOf.get(l.item_id) || 0);
-        await postMovement({ rid, item: l.item_id, qty: -use, kind: "production", dedupe: `prod:${prodId}:in:${l.item_id}`, refType: "production", refId: prodId, by: actor });
-      }
-      await postMovement({
-        rid, item: itemId, qty: madeBase, kind: "production", dedupe: `prod:${prodId}:out`,
-        unitCost: madeBase > 0 ? batchCost / madeBase : 0, refType: "production", refId: prodId, by: actor,
+      if (!isUuid(itemId)) return badId();
+      const r = await sb.rpc("lfh_inv_produce", {
+        p_restaurant: rid, p_item: itemId, p_qty_base: madeBase, p_by: actor,
+        // The panel's own action id when it sent one — an exact identity beats the minute window.
+        p_attempt: req.headers.get("x-lfh-action-id"),
       });
-      await logAction("manager", "inv_production", { restaurant_id: rid, actor, actor_id: actorId, detail: `${it.data.name}: batch of ${madeBase} (₹${Math.round(batchCost * 100) / 100})` });
-      return ok({ cost: Math.round(batchCost * 100) / 100 });
+      if (r.error) { const e: any = new Error(r.error.message); e.code = r.error.code; e.details = r.error.details; throw e; }
+      const out = (r.data || {}) as { ok?: boolean; reason?: string; cost?: number; consumed?: number; name?: string; replay?: boolean };
+      if (!out.ok) {
+        return err(
+          out.reason === "item_not_found" ? "Ingredient not found."
+          : out.reason === "no_recipe" ? "This ingredient has no prep recipe yet."
+          : out.reason === "bad_qty" ? "How much did you make?"
+          : "Couldn't make that batch — please try again.",
+          out.reason === "item_not_found" ? 404 : 400,
+        );
+      }
+      // A replay is the SAME batch arriving twice (a retry, a lost reply). Nothing was written the
+      // second time, so nothing is logged the second time either — a diary line for a batch that
+      // was not made is exactly the "record of something that didn't happen" this codebase refuses.
+      if (!out.replay) {
+        await logAction("manager", "inv_production", { restaurant_id: rid, actor, actor_id: actorId, detail: `${out.name || "prep"}: batch of ${madeBase} (₹${Number(out.cost) || 0})` });
+      }
+      return ok({ cost: Number(out.cost) || 0, alreadyMade: out.replay === true });
     }
 
     // ── items ──────────────────────────────────────────────────────────────────
@@ -486,7 +536,9 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         default_vendor_id: body.default_vendor_id || null,
         created_by: actor,
       }).select("id").single();
-      if (ins.error) return err(ins.error.code === "23505" ? "An ingredient with this name already exists." : ins.error.message, 500);
+      if (ins.error) return ins.error.code === "23505"
+        ? err("An ingredient with this name already exists.", 409)
+        : writeFail("the ingredient", ins.error);
       // Optional opening stock in BASE units — posted as a proper movement so the
       // ledger explains the balance from day one.
       const opening = num(body.opening_qty);
@@ -523,7 +575,9 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       if (!Object.keys(patch).length) return err("Nothing to update.");
       patch.updated_at = new Date().toISOString();
       const up = await sb.from("inv_items").update(patch).eq("restaurant_id", rid).eq("id", path[1]).select("id");
-      if (up.error) return err(up.error.code === "23505" ? "An ingredient with this name already exists." : up.error.message, 500);
+      if (up.error) return up.error.code === "23505"
+        ? err("An ingredient with this name already exists.", 409)
+        : writeFail("the ingredient", up.error);
       if (!up.data?.length) return err("Ingredient not found.", 404);
       return ok();
     }
@@ -537,7 +591,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         restaurant_id: rid, name, phone: body.phone ? String(body.phone).slice(0, 20) : null,
         gstin: body.gstin ? String(body.gstin).slice(0, 20) : null, note: body.note ? String(body.note).slice(0, 300) : null,
       }).select("id").single();
-      if (ins.error) return err(ins.error.message, 500);
+      if (ins.error) return writeFail("the supplier", ins.error);
       return ok({ id: ins.data.id });
     }
     if (path[0] === "vendors" && path[1]) {
@@ -551,7 +605,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       if (typeof body.active === "boolean") patch.active = body.active;
       if (!Object.keys(patch).length) return err("Nothing to update.");
       const up = await sb.from("inv_vendors").update(patch).eq("restaurant_id", rid).eq("id", path[1]).select("id");
-      if (up.error) return err(up.error.message, 500);
+      if (up.error) return writeFail("the supplier", up.error);
       if (!up.data?.length) return err("Supplier not found.", 404);
       return ok();
     }
@@ -566,15 +620,15 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       const ids = [...new Set(rawLines.map((l) => String(l.item_id || "")))].filter(Boolean);
       const items = await sb.from("inv_items").select("id, name, purchase_factor, track_level")
         .eq("restaurant_id", rid).in("id", ids).limit(100);
-      if (items.error) return err(items.error.message, 500);
+      if (items.error) return readFail("the ingredients on this bill", items.error);
       const byId = new Map((items.data || []).map((i) => [i.id, i]));
       let subtotal = 0;
       const lines = rawLines.map((l) => {
         const it = byId.get(String(l.item_id));
-        if (!it) throw new Error("A line refers to an unknown ingredient.");
+        if (!it) throw new BadInput("One line refers to an ingredient that no longer exists — reopen the purchase and pick it again.");
         const qty = num(l.qty_purchase); const rate = num(l.rate);
-        if (!Number.isFinite(qty) || qty <= 0) throw new Error(`Quantity missing for ${it.name}.`);
-        if (!Number.isFinite(rate) || rate < 0) throw new Error(`Rate missing for ${it.name}.`);
+        if (!Number.isFinite(qty) || qty <= 0) throw new BadInput(`Quantity missing for ${it.name}.`);
+        if (!Number.isFinite(rate) || rate < 0) throw new BadInput(`Rate missing for ${it.name}.`);
         const amount = Math.round(qty * rate * 100) / 100;
         subtotal += amount;
         return { item_id: it.id, qty_purchase: qty, qty_base: qty * Number(it.purchase_factor), rate, amount, factor: Number(it.purchase_factor), track: it.track_level };
@@ -591,13 +645,13 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         note: body.note ? String(body.note).slice(0, 500) : null,
         created_by: actor, created_by_id: actorId,
       }).select("id").single();
-      if (ins.error) return err(ins.error.message, 500);
+      if (ins.error) return writeFail("the purchase", ins.error);
       const pid = ins.data.id as string;
       const li = await sb.from("inv_purchase_lines").insert(lines.map((l) => ({
         purchase_id: pid, restaurant_id: rid, item_id: l.item_id,
         qty_purchase: l.qty_purchase, qty_base: l.qty_base, rate: l.rate, amount: l.amount,
       }))).select("id, item_id");
-      if (li.error) return err(li.error.message, 500);
+      if (li.error) return writeFail("the purchase lines", li.error);
       // Stock in + WAC + last_rate, one movement per line, keyed on the LINE id so a
       // retry of this handler (idempotency header lost, network replay) can't double-post.
       for (const row of li.data || []) {
@@ -620,7 +674,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       if (!reason) return err("A reason is required to void a purchase.");
       const up = await sb.from("inv_purchases").update({ voided_at: new Date().toISOString(), void_reason: reason.slice(0, 300), voided_by: actor })
         .eq("restaurant_id", rid).eq("id", path[1]).is("voided_at", null).select("id");
-      if (up.error) return err(up.error.message, 500);
+      if (up.error) return writeFail("the void", up.error);
       if (!up.data?.length) return err("Purchase not found or already voided.", 404);
       // Reverse each line — keyed on the line id, so a re-run reverses nothing twice.
       const lines = await sb.from("inv_purchase_lines").select("id, item_id, qty_base, amount")
@@ -643,7 +697,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         restaurant_id: rid, note: body.note ? String(body.note).slice(0, 300) : null,
         created_by: actor, created_by_id: actorId,
       }).select("id").single();
-      if (ins.error) return err(ins.error.message, 500);
+      if (ins.error) return writeFail("the new count", ins.error);
       return ok({ id: ins.data.id });
     }
     if (path[0] === "counts" && path[1] && path[2] === "line") {
@@ -661,7 +715,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         count_id: path[1], restaurant_id: rid, item_id: itemId,
         counted_base: counted, system_base: Number(it.data.qty_base), unit_cost_snap: Number(it.data.avg_cost),
       }, { onConflict: "count_id,item_id" }).select("id");
-      if (upsert.error) return err(upsert.error.message, 500);
+      if (upsert.error) return writeFail("that counted quantity", upsert.error);
       return ok();
     }
     if (path[0] === "counts" && path[1] && path[2] === "submit") {
@@ -670,7 +724,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       if (c.data.status !== "draft") return err("This count was already submitted.", 409);
       const lines = await sb.from("inv_count_lines").select("item_id, counted_base")
         .eq("restaurant_id", rid).eq("count_id", path[1]).limit(600);
-      if (lines.error) return err(lines.error.message, 500);
+      if (lines.error) return readFail("the counted lines", lines.error);
       if (!lines.data?.length) return err("Count at least one item before submitting.");
       let adjusted = 0;
       for (const l of lines.data) {
@@ -690,6 +744,12 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
     if (path[0] === "counts" && path[1] && path[2] === "discard") {
       const up = await sb.from("inv_counts").update({ status: "discarded" })
         .eq("restaurant_id", rid).eq("id", path[1]).eq("status", "draft").select("id");
+      // A FAILED WRITE IS NOT A WRONG-STATE REFUSAL (T17 sweep, 2026-08-13, finding F11). This
+      // checked only "no rows changed" — and a write that ERRORS also returns no rows, so a
+      // database problem was reported as "Only an open draft can be discarded.", a sentence about
+      // the count that sends the manager looking in entirely the wrong place. Every sibling
+      // void/submit branch in this file checks the error first; this one was missed.
+      if (up.error) return writeFail("the discard", up.error);
       if (!up.data?.length) return err("Only an open draft can be discarded.", 409);
       return ok();
     }
@@ -710,7 +770,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
         note: body.note ? String(body.note).slice(0, 300) : null, photo_url,
         unit_cost_snap: Number(it.data.avg_cost), created_by: actor, created_by_id: actorId,
       }).select("id").single();
-      if (ins.error) return err(ins.error.message, 500);
+      if (ins.error) return writeFail("the waste entry", ins.error);
       await postMovement({ rid, item: itemId, qty: -qty, kind: "waste", dedupe: `waste:${ins.data.id}`, reason, refType: "waste", refId: ins.data.id, by: actor });
       await logAction("manager", "inv_waste", { restaurant_id: rid, actor, actor_id: actorId, detail: `${reason} — ₹${Math.round(qty * Number(it.data.avg_cost) * 100) / 100}` });
       return ok({ id: ins.data.id });
@@ -722,7 +782,7 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
       if (!reason) return err("A reason is required.");
       const up = await sb.from("inv_waste_entries").update({ voided_at: new Date().toISOString(), void_reason: reason.slice(0, 300), voided_by: actor })
         .eq("restaurant_id", rid).eq("id", path[1]).is("voided_at", null).select("id, item_id, qty_base, unit_cost_snap");
-      if (up.error) return err(up.error.message, 500);
+      if (up.error) return writeFail("the strike-out", up.error);
       if (!up.data?.length) return err("Entry not found or already struck out.", 404);
       const w = up.data[0];
       // Restore at the cost the waste was recorded at, so undoing a waste puts back
@@ -733,6 +793,9 @@ export const POST = withIdempotency(async (req: NextRequest, ctx: { params: Prom
 
     return err("Unknown inventory path.", 404);
   } catch (e) {
+    // A value the server refuses keeps ITS OWN sentence and a 400 (T17, finding F5): the manager
+    // has to know WHICH line is wrong, and a 400 is never queued or retried behind them.
+    if (e instanceof BadInput) return err(e.message, 400);
     return panelFailure(e, { unknown: "Inventory write failed." });
   }
 }, "inventory");

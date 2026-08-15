@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 
 // Always fetch fresh — the floor is live, never cached.
 export const dynamic = "force-dynamic";
@@ -39,7 +41,7 @@ export async function GET(req: NextRequest) {
       supabaseAdmin.rpc("lfh_admin_floor_stats"),
       supabaseAdmin.rpc("lfh_admin_floor_all"),
     ]);
-    if (restsQ.error) return NextResponse.json({ error: restsQ.error.message }, { status: 500 });
+    if (restsQ.error) return adminFail("the live floor", restsQ.error, { action: "load" });
     const rests = restsQ.data ?? [];
     type StatRow = { restaurant_id: string; orders_today: number; active_orders: number; unpaid_orders: number; paid_today: number; cancelled_today: number };
     const statsBy = new Map(((statsQ.data as StatRow[] | null) ?? []).map((s) => [s.restaurant_id, s]));
@@ -71,7 +73,7 @@ export async function GET(req: NextRequest) {
 
   const { data, error } = await supabaseAdmin.rpc("lfh_floor_state");
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return adminFail("the live floor", error, { action: "load" });
   }
   // lfh_floor_state returns a JSON array of per-table objects.
   return NextResponse.json({ tables: data ?? [] });

@@ -10,6 +10,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { cleanClonedSettings } from "@/lib/settingsClone";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
@@ -40,7 +42,7 @@ export async function GET(req: NextRequest) {
   const restaurantId = req.nextUrl.searchParams.get("restaurant_id") || "";
   if (!isUuid(restaurantId)) return NextResponse.json({ error: "missing or invalid restaurant_id" }, { status: 400 });
   const row = await sb.from("settings").select("google_review_url, google_review_mode").eq("restaurant_id", restaurantId).maybeSingle();
-  if (row.error) return NextResponse.json({ error: row.error.message }, { status: 500 });
+  if (row.error) return adminFail("this restaurant's review link", row.error, { action: "load" });
   const data = row.data as { google_review_url?: string | null; google_review_mode?: string | null } | null;
   return NextResponse.json({ url: data?.google_review_url ?? null, mode: normalizeMode(data?.google_review_mode) });
 }
@@ -63,16 +65,16 @@ export async function POST(req: NextRequest) {
     detail: `Google review link ${norm.url ? "set" : "cleared"} · mode ${mode}`,
   });
   const rest = await sb.from("restaurants").select("id, slug").eq("id", restaurant_id).maybeSingle();
-  if (rest.error) return NextResponse.json({ error: rest.error.message }, { status: 500 });
+  if (rest.error) return adminFail("this restaurant's review link", rest.error, { action: "save" });
   if (!rest.data) return NextResponse.json({ error: "restaurant not found" }, { status: 404 });
 
   const cur = await sb.from("settings").select("id").eq("restaurant_id", restaurant_id).maybeSingle();
-  if (cur.error) return NextResponse.json({ error: cur.error.message }, { status: 500 });
+  if (cur.error) return adminFail("this restaurant's review link", cur.error, { action: "save" });
 
   const patch = { google_review_url: norm.url, google_review_mode: mode };
   if (cur.data) {
     const r = await sb.from("settings").update(patch).eq("restaurant_id", restaurant_id).select("google_review_url, google_review_mode").maybeSingle();
-    if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+    if (r.error) return adminFail("this restaurant's review link", r.error, { action: "save" });
     await audit();
     const d = r.data as { google_review_url?: string | null; google_review_mode?: string | null } | null;
     return NextResponse.json({ url: d?.google_review_url ?? null, mode: normalizeMode(d?.google_review_mode) });
@@ -83,7 +85,7 @@ export async function POST(req: NextRequest) {
   const base = cleanClonedSettings(template.data); // strip #1's identity/geo/tax so they don't leak
   const newRow = { ...base, id: rest.data.slug, restaurant_id, ...patch };
   const ins = await sb.from("settings").upsert(newRow, { onConflict: "restaurant_id" }).select("google_review_url, google_review_mode").maybeSingle();
-  if (ins.error) return NextResponse.json({ error: ins.error.message }, { status: 500 });
+  if (ins.error) return adminFail("this restaurant's review link", ins.error, { action: "save" });
   await audit();
   const d = ins.data as { google_review_url?: string | null; google_review_mode?: string | null } | null;
   return NextResponse.json({ url: d?.google_review_url ?? null, mode: normalizeMode(d?.google_review_mode), created: true });

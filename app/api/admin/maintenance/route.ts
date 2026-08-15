@@ -9,6 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 
 export const dynamic = "force-dynamic";
@@ -22,7 +24,7 @@ export async function GET(req: NextRequest) {
   const q = rid
     ? await sb.from("settings").select("service_mode").eq("restaurant_id", rid).maybeSingle()
     : await sb.from("settings").select("service_mode").eq("id", "site").maybeSingle();
-  if (q.error) return NextResponse.json({ error: q.error.message }, { status: 500 });
+  if (q.error) return adminFail("the menu's status", q.error, { action: "load" });
   return NextResponse.json({ maintenance: (q.data || {}).service_mode === true });
 }
 
@@ -36,7 +38,7 @@ export async function POST(req: NextRequest) {
   const r = rid
     ? await sb.from("settings").update({ service_mode: on }).eq("restaurant_id", rid).select("service_mode")
     : await sb.from("settings").update({ service_mode: on }).eq("id", "site").select("service_mode");
-  if (r.error) return NextResponse.json({ error: r.error.message }, { status: 500 });
+  if (r.error) return adminFail("the menu's status", r.error, { action: "save" });
   if (!r.data?.length) return NextResponse.json({ error: "Restaurant not found." }, { status: 404 });
   // Same record as the manager-side route (sweep 2026-08-04) — stopping every guest from ordering
   // must be traceable whichever panel did it. `rid` is null for the legacy flagship row.

@@ -8,6 +8,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { businessDayStartIso } from "@/lib/businessDay";
 
 export const dynamic = "force-dynamic";
@@ -27,7 +29,7 @@ export async function GET(req: NextRequest) {
       .limit(500),
     sb.from("restaurants").select("id, name").is("deleted_at", null),
   ]);
-  if (ordersQ.error) return NextResponse.json({ error: ordersQ.error.message }, { status: 500 });
+  if (ordersQ.error) return adminFail("today's cancelled orders", ordersQ.error, { action: "load" });
 
   const nameById = new Map<string, string>((restsQ.data || []).map((r) => [r.id, r.name]));
   const rows = (ordersQ.data || [])

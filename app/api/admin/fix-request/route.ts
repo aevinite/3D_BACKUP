@@ -12,6 +12,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
+// Plain words for the console; the database's own words stay in the body + the log.
+import { adminFail } from "@/lib/adminFail";
 import { logAction, redactMoney } from "@/lib/oplog";
 import { withIdempotency } from "@/lib/idempotency";
 import { lookupErrorMemory, isRegression, rememberErrorHandled } from "@/lib/errorMemory";
@@ -29,7 +31,7 @@ export async function GET(req: NextRequest) {
   const r = await sb.from("fix_requests")
     .select("id, restaurant_id, created_at, status, source, mode, summary, note, pr_url, resolved_at, action_id, err_key")
     .eq("status", status).order("created_at", { ascending: false }).limit(50);
-  if (r.error) return err(r.error.message, 500);
+  if (r.error) return adminFail("the repair request", r.error, { action: "load" });
   return NextResponse.json({ requests: r.data ?? [] });
 }
 
@@ -112,7 +114,7 @@ async function postHandler(req: NextRequest) {
   if (rid && !UUID.test(rid)) rid = null;
 
   const ins = await sb.from("fix_requests").insert({ restaurant_id: rid, source, mode, summary: summary.slice(0, 300), note: note || null, context, action_id: actionId, err_key: errKey }).select("id").maybeSingle();
-  if (ins.error) return err(ins.error.message, 500);
+  if (ins.error) return adminFail("the repair request", ins.error, { action: "load" });
   await logAction("admin", "fix_request", { restaurant_id: rid ?? undefined, level: "info", detail: summary.slice(0, 120) });
 
   // Tell the panel where this request lands so the click message is honest: how many problems
@@ -147,7 +149,7 @@ export async function PATCH(req: NextRequest) {
   const r = await sb.from("fix_requests")
     .update(patch).eq("id", id)
     .select("id, action_id, restaurant_id, pr_url, summary").maybeSingle();
-  if (r.error) return err(r.error.message, 500);
+  if (r.error) return adminFail("the repair request", r.error, { action: "save" });
 
   // Closing a ticket as FIXED records the fix (migs 218/219), so pressing Fix-now on an older
   // occurrence answers "already fixed, here's the PR" instead of opening a duplicate session.

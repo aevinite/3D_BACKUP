@@ -31,6 +31,10 @@ export async function POST(req: NextRequest) {
   // Set-Cookie — so the admin's panels stayed on restaurant #1 (the "I can only
   // access Little French House" bug). Short-lived (6h) view session; HttpOnly.
   const res = NextResponse.json({ ok: true, restaurant: r.name });
-  res.cookies.set(ADMIN_ACT_COOKIE, rid, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 6 });
+  // `secure` in production, matching BOTH login doors (T17 sweep, 2026-08-13, finding F13). The
+  // two cookie-setting doors in this area were deliberately aligned on 2026-08-05 — "the point is
+  // that the two doors now agree" — and this third one, set from the same console, was missed.
+  // Vercel serves HTTPS only so nothing changes in practice; three cookies, one rule.
+  res.cookies.set(ADMIN_ACT_COOKIE, rid, { path: "/", httpOnly: true, sameSite: "lax", maxAge: 60 * 60 * 6, secure: process.env.NODE_ENV === "production" });
   return res;
 }
