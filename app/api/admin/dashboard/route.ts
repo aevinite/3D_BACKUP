@@ -11,6 +11,8 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { businessDayStartIso } from "@/lib/businessDay";
 import { redactMoney } from "@/lib/oplog";
+// The SAME grouping the Repair board uses, so the button and the board can never disagree.
+import { errorGroupKey } from "@/lib/errorSignature";
 
 export const dynamic = "force-dynamic";
 
@@ -48,7 +50,16 @@ export async function GET(req: NextRequest) {
       // A problem is now simply "an error nobody has resolved", on both screens. Nothing is
       // hidden by age any more, which is the safer half of the fix: an unresolved error from last
       // week is still a problem, and the old count quietly dropped it.
-      sb.from("staff_actions").select("id", head).eq("level", "error").is("resolved_at", null),
+      // (2) UNIT — the second half of the same fault. Even once age was gone, this counted raw
+      // ROWS (18) while the board counts GROUPED problems (7): repeats of one fault rolled into
+      // one tile. Two true numbers for one fact is still how a person stops trusting either. So
+      // the rows are grouped HERE with errorGroupKey — the same function the board uses — and
+      // only the NUMBER crosses the wire. Bounded at 200: this button asks "is there something
+      // to fix, and roughly how much", and a console with 200+ distinct unresolved faults has
+      // bigger problems than an exact total.
+      sb.from("staff_actions").select("panel, action, detail, restaurant_id")
+        .eq("level", "error").is("resolved_at", null)
+        .order("created_at", { ascending: false }).limit(200),
       sb.from("fix_requests").select("id", head).eq("status", "open"),
     ]);
 
@@ -121,7 +132,10 @@ export async function GET(req: NextRequest) {
     openIssuesCount: issuesQ.count ?? issues.length, // exact open total (list capped at 50)
     activity,
     // Red "Fix problems" button: soft counts — a failed read shows the quiet button, never a 500.
-    errorCount24h: errQ.count ?? 0,
+    // Renamed from errorCount24h: it is not a 24h count any more, and a name that says the
+    // wrong thing is how the last person got this wrong.
+    problemCount: new Set(((errQ.data || []) as { panel: string; action: string; detail: string | null; restaurant_id: string | null }[])
+      .map((a) => errorGroupKey(a))).size,
     openFixRequests: fixQ.count ?? 0,
   });
 }

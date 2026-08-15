@@ -73,7 +73,7 @@ export default function AdminCommand() {
       setOnline(j.online || []);
       setOnlineCount(typeof j.onlineCount === "number" ? j.onlineCount : null);
       setActivity(j.activity || []);
-      setFixCount((Number(j.errorCount24h) || 0) + (Number(j.openFixRequests) || 0));
+      setFixCount((Number(j.problemCount) || 0) + (Number(j.openFixRequests) || 0));
     }).catch(() => setLoadErr(true));
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -136,7 +136,7 @@ export default function AdminCommand() {
               ~5.7:1 and it still reads as a danger button, not a warning chip. */}
           <Link href="/aevinite/repair" className={`adm-btn${fixCount > 0 ? " danger" : ""}`}
             style={fixCount > 0 ? { background: "color-mix(in srgb, var(--adm-danger) 72%, #000)", borderColor: "color-mix(in srgb, var(--adm-danger) 72%, #000)", color: "#fff", fontWeight: 700, boxShadow: "0 0 0 3px color-mix(in srgb, var(--adm-danger) 25%, transparent)" } : undefined}
-            title={fixCount > 0 ? `${fixCount} to fix — app errors from the last 24h plus problems staff reported and nobody has solved. Separate from the "Staff-raised issues" count, which is only the reports.` : "Repair page — report a problem or use the repair tools"}>
+            title={fixCount > 0 ? `${fixCount} to fix — unresolved app problems plus problems staff reported and nobody has solved. Counted exactly the way the Repair board counts them (repeats of one fault count once). Separate from the "Staff-raised issues" number, which is only the reports.` : "Repair page — report a problem or use the repair tools"}>
             <i className={`fas ${fixCount > 0 ? "fa-triangle-exclamation" : "fa-screwdriver-wrench"}`} style={{ marginRight: 7 }} aria-hidden="true" />
             {fixCount > 0 ? `Fix problems · ${fixCount}` : "Repair"}
           </Link>
