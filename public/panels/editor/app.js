@@ -8445,7 +8445,7 @@ function customFloorHtml(plan, n) {
   const missing = floorTableList(n).filter((i) => !placed.has(String(i)));
   const extra = missing.length
     ? `<div class="floor-plan-note">Not placed on the plan yet — ${missing.length} table${missing.length > 1 ? "s" : ""}:</div>
-       <div class="ftile-grid" style="--per-row:${floorPerRow()}">${missing.map((i) => floorTileHtml(i)).join("")}</div>`
+       <div class="ftile-grid" style="--per-row-pc:${floorPerRow()}">${missing.map((i) => floorTileHtml(i)).join("")}</div>`
     : "";
   // ROW HEIGHTS, spelled out. A table row is exactly as tall as a column is wide, so a 1×1 table
   // is a SQUARE and the owner's w/h mean what they look like: 3 wide × 1 tall draws as a long
@@ -8471,31 +8471,31 @@ function customFloorHtml(plan, n) {
 // (with a legend and on-tile quick buttons) and a side panel on the right holding
 // the session toggles, café location, requests queue and blocklist.
 
-// floorPerRow: how many table tiles go on one row — and therefore how big each tile is.
-// This REPLACED the old per-device S/M/L buttons (owner, 2026-07-30): a manager's phone and
-// a manager's desktop each remembered a different size and no admin could set it, so the
-// number is now one ADMIN-owned per-restaurant setting (settings.floor_per_row, mig 226).
+// floorPerRow: the ADMIN's tables-per-row number for this restaurant (settings.floor_per_row,
+// mig 226). It is one ADMIN-owned per-restaurant setting — it replaced per-device S/M/L buttons on
+// 2026-07-30 because a manager's phone and a manager's desktop each remembered a different size and
+// no admin could set either. The manager panel only READS it; its own card was removed on
+// 2026-08-02 ("that will be only set by admin") and no switch brings it back.
 //
-// ⚠️ IT IS A HARD RULE, NOT A TARGET (corrected in the T3 sweep, 2026-08-06 — this box said the
-// exact opposite for five weeks, and lib/floorLayout.ts and the stylesheet repeated it). The CSS
-// draws EXACTLY this many columns at every width: `repeat(var(--per-row), minmax(0, 1fr))`. There
-// is no auto-fill and nothing drops a column on a narrow screen — the owner ruled that out twice
-// ("adjust according to screen size and all that shit doesn't count here"). What a phone does
-// instead is keep all N columns at a measured 72px minimum and SCROLL SIDEWAYS, with the x-scroll
-// on the grid alone so the floor header stays still (the `@media (max-width: 1040px)` block in
-// style.css). Measured at 360px / 12 per row: 12 columns, 72px tiles, 930px of grid in a 332px box.
-// Believing the old version is how someone deletes that 1040px block as redundant, and the tile's
-// buttons go back to 0×0 — which is what it was written to fix.
-// What shrinking costs is DETAIL, shed in priority order by the container queries in style.css:
-// the decorative ＋, then the sub-line, then the button labels (below ~88px of tile — so a 1280px
-// laptop at the default 12 is already in the icon-only band), then the whole action row. The table
-// number and its state colour never go.
-// Mirrors lib/floorLayout.ts — 2..12, picked from a fixed list, and the ONLY place it is picked
-// is the admin panel (components/admin/RestaurantSettings.tsx → Floor layout). The manager panel
-// READS this number and never sets it: its own card was removed on 2026-08-02 ("that will be only
-// set by admin"), and no switch can bring it back. If these bounds change, change them there too,
-// and keep the database's CHECK constraint no narrower than the max (see the warning in
-// lib/floorLayout.ts — that mismatch cost an evening).
+// ⚠️ THIS NUMBER IS NOT WHAT EVERY SCREEN DRAWS — CHANGED 2026-08-15, AND IT USED TO SAY THE
+// OPPOSITE IN CAPITALS. The rule now (owner): a phone draws 2 per row, a phone turned sideways
+// draws 4, and from about ten inches up the floor draws EXACTLY this number, at every width above
+// it. "It is fixed and it is rule … we don't need twelve, it is only for PC … after ten inch you
+// have to follow whatever is given — if I have tell twelve, there should be twelve listed. There
+// shouldn't be horizontal scroll anywhere."
+//
+// So this function still returns HIS number, unchanged — the bands are applied in CSS, not here.
+// The value is written onto the grid as the custom property `--per-row-pc`, and the stylesheet
+// turns it into the effective `--per-row` per band. Two reasons it is done there and not here:
+// a rotation becomes one media-query flip with nothing to re-render, and an inline `--per-row`
+// would beat any stylesheet rule, which is exactly the trap that would make the bands silently do
+// nothing.
+//
+// WHAT THIS REPLACED, so nobody restores it from the old comments: the floor used to draw all N
+// columns on every device and SCROLL SIDEWAYS on a phone (a 72px minimum tile, the x-scroll on the
+// grid alone, and a "→ N more" chip announcing the tables off the right edge). All of it is gone.
+// Bounds and the band constants both live in lib/floorLayout.ts — if these change, change them
+// there too, and keep the database CHECK constraint no narrower than the max.
 const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 function floorPerRow() {
   // The admin preview slider wins while it's driving (never persisted — see state).
@@ -8531,7 +8531,10 @@ if (FLOOR_PREVIEW) {
     if (!Number.isFinite(n)) return;
     state.floorPerRowPreview = Math.min(Math.max(n, FLOOR_PER_ROW_MIN), FLOOR_PER_ROW_MAX);
     document.querySelectorAll(".ftile-grid").forEach((g) => {
-      g.style.setProperty("--per-row", String(state.floorPerRowPreview));
+      // --per-row-pc, not --per-row: the stylesheet's phone/tablet bands compute the effective
+      // --per-row from it, and they are switched off in preview mode (body.floor-preview) so the
+      // admin always sees the PC floor he is actually setting, whatever size this iframe is.
+      g.style.setProperty("--per-row-pc", String(state.floorPerRowPreview));
     });
   });
 }
@@ -8624,7 +8627,7 @@ function floorHtml() {
     for (let i = 1; i <= n; i++) {
       skel += `<div class="ftile ftile-skel" aria-hidden="true"><div class="sk-num"></div><div class="sk-lbl"></div><div class="sk-meta"></div></div>`;
     }
-    const skelMain = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${legend}</div><div class="ftile-grid" style="--per-row:${floorPerRow()}">${skel}</div></div>`;
+    const skelMain = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${legend}</div><div class="ftile-grid" style="--per-row-pc:${floorPerRow()}">${skel}</div></div>`;
     // The floor is the WHOLE width now — there is no right-hand panel to leave room for
     // (owner, 2026-07-31), so the skeleton is just the grid.
     return `<div class="floor-wrap floor-collapsed">${skelMain}</div>`;
@@ -8704,7 +8707,7 @@ function floorHtml() {
   const plan = floorPlan();
   const gridHtml = plan
     ? customFloorHtml(plan, n)
-    : `<div class="ftile-grid" style="--per-row:${floorPerRow()}">${tiles}</div>`;
+    : `<div class="ftile-grid" style="--per-row-pc:${floorPerRow()}">${tiles}</div>`;
   // Two different honest notes, because "custom is on" has two very different states.
   // The SECOND one is the T13 cross-panel finding (2026-08-13): when a plan IS drawn here, the
   // waiter tablet still shows the classic grid — it does not load floor-layouts.js at all — so the
@@ -8734,22 +8737,11 @@ function floorHtml() {
   // wrapped in ONE element on purpose: left loose in a wrapping flex row they came apart the
   // moment the row wrapped (an iPad put both at the far LEFT of line two — the placement the
   // owner rejected on 2026-08-02). As a pair with `margin-left:auto` they stay together, right.
-  // ── "THERE IS MORE FLOOR TO THE RIGHT" (owner, 2026-08-07) ──────────────────────────────────
-  // The tables-per-row number is his instruction and does NOT shrink to fit a screen, so on a phone
-  // the grid keeps all N columns and scrolls sideways (see the <=1040px block in style.css). Measured
-  // on an A35 at 12 per row: 930px of grid inside a 332px window — eight of the twelve columns are
-  // off screen, and the only hint was that the fifth tile is cut in half. When I looked, two of the
-  // three BUSY tables were among the hidden ones.
-  // So the grid gets a small counter pinned to its right edge: "→ 8 more". It changes nothing about
-  // the column count; it only says how many tables are past the edge, and it disappears the moment
-  // you have scrolled to the end (or on a screen wide enough not to scroll at all).
-  // It sits INSIDE .ftile-wrap with the grid so it can be positioned against the grid's own box —
-  // the grid is the scroller, so a child of the grid would scroll away with the tables.
-  // `hidden` alone (not aria-hidden) — `hidden` already takes it out of the accessibility tree, and
-  // it is a real button because tapping it MUST do something: it scrolls the floor one screen right.
-  // A chip that only announced there was more and then ignored the tap would be a dropped tap.
-  const moreChip = `<button class="ftile-more" data-ftile-more hidden title="Scroll the floor to the right">→ <b data-ftile-more-n>0</b> more</button>`;
-  const gridBlock = `<div class="ftile-wrap">${gridHtml}${moreChip}</div>`;
+  // (The "→ N more" chip lived here. It announced how many tables were off the right-hand edge,
+  // because the floor used to keep all N columns on a phone and scroll sideways. Nothing scrolls
+  // sideways any more — owner, 2026-08-15: "there shouldn't be horizontal scroll anywhere" — so the
+  // chip, its wrapper and syncFloorMore()'s measuring pass went with the scroll they described.)
+  const gridBlock = gridHtml;
   const main = `<div class="floor-main"><div class="ed-head floor-head"><h2>Table view ${floorLiveTag()}</h2>${statsStrip}${legend}<span class="floor-head-acts">${kotBtn}${parcelBtn}</span></div>${printerStripHtml()}${planNote}${gridBlock}</div>`;
 
   // ── NO RIGHT-HAND PANEL AT ALL (owner, 2026-07-31) ─────────────────────────────────
@@ -9009,49 +9001,13 @@ function layoutFloatingRow() {
 // patch path never has to re-bind them); here we wire only the controls the patch never
 // touches (bulk open/close, the side toggle, settings, location, block, unblock, resizer,
 // and the selected-table detail panel).
-// syncFloorMore(): keep the "→ N more" chip honest. Called after every full render, on the grid's
-// own scroll, and on resize. It counts the tiles whose left edge is past the grid's visible right
-// edge — the plainest possible answer to "how many tables am I not looking at" — and hides itself
-// entirely when the floor doesn't scroll (a desktop) or when you have reached the end.
-// Cheap by design: one getBoundingClientRect per tile, no layout writes, and only while the Tables
-// tab is showing. At 300 tables that is still one pass over nodes already in memory.
-// REJECTED (owner, 2026-08-11) — docs/REJECTED-IDEAS.md R8: do NOT make this chip say how many of
-// the hidden tables NEED something ("→ 15 more · 3 need you"). "If the tables are assigned to the
-// waiter, it will be assigned — they could able to see only that part, not others. And if they are
-// not assigned, all will be visible. Then why we need this all?" Who sees which tables is already
-// answered by the waiter's section; the chip stays a plain count of what is past the edge.
-function syncFloorMore() {
-  const ed = $("#editor");
-  const grid = ed && ed.querySelector(".ftile-grid");
-  const chip = ed && ed.querySelector("[data-ftile-more]");
-  if (!grid || !chip) return;
-  const slack = grid.scrollWidth - grid.clientWidth;
-  if (slack <= 2) { chip.hidden = true; return; }          // nothing to scroll — desktop, or it fits
-  const right = grid.getBoundingClientRect().right;
-  let n = 0;
-  for (const t of grid.querySelectorAll(".ftile")) if (t.getBoundingClientRect().left >= right - 1) n++;
-  chip.hidden = n === 0;                                    // scrolled to the end → say nothing
-  if (n) {
-    const b = chip.querySelector("[data-ftile-more-n]");
-    if (b) b.textContent = String(n);
-    chip.setAttribute("aria-label", `${n} more table${n === 1 ? "" : "s"} to the right — tap to scroll`);
-  }
-}
+// (syncFloorMore() lived here — it counted the tiles past the grid's right edge to keep the
+// "→ N more" chip honest. Both are gone with the sideways scroll itself (owner, 2026-08-15). R8 in
+// docs/REJECTED-IDEAS.md — his refusal to make that chip smarter — moved to Reversed for the only
+// reason a rejection ever should: the thing it was about no longer exists.)
 function bindFloor() {
   bindFloorDelegation(); // attach the delegated tile/quick/queue handler ONCE
   const ed = $("#editor");
-  // The "→ N more" chip: wire its scroll-by-one-screen tap, keep it in step with the grid's scroll,
-  // and set it right for the layout we just drew.
-  {
-    const grid = ed.querySelector(".ftile-grid");
-    const chip = ed.querySelector("[data-ftile-more]");
-    if (grid && chip) {
-      chip.onclick = () => grid.scrollBy({ left: Math.max(120, grid.clientWidth - 40), behavior: "smooth" });
-      // passive: this listener only READS geometry, so it must never hold up the scroll it watches.
-      grid.addEventListener("scroll", syncFloorMore, { passive: true });
-      syncFloorMore();
-    }
-  }
   // (The ↻ Refresh button was removed — the floor is live via realtime + the 60s backup poll,
   //  so a manual refresh was redundant and looked broken. Coordinator-relayed owner request.)
   // Bulk open/close for the whole floor (both confirm before acting).
@@ -14227,9 +14183,9 @@ window.addEventListener("resize", () => {
     return;
   }
   if (state.floatingTables.length) layoutFloatingRow();
-  // Widening the window can remove the sideways scroll entirely (and narrowing it can create one),
-  // so the "→ N more" chip is re-checked here rather than only on the grid's own scroll.
-  if (state.tab === "tables") syncFloorMore();
+  // (No chip to re-check on resize any more. Crossing a per-row band — phone 2 / sideways 4 / the
+  // admin's number from 1024px — is a pure CSS media query, so a rotation needs no JavaScript at
+  // all and nothing here has to fire.)
 });
 // ---- Auto-fitting top nav (2026-07-29) ----
 // With Banquet + Ratings on there are NINE tabs; brand + tabs + the right-hand actions

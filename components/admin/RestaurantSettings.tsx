@@ -1008,13 +1008,21 @@ export default function RestaurantSettings({ restaurant, only }: { restaurant: R
           {pickNumber("Tables per row", "floor_per_row", FLOOR_PER_ROW_MIN, FLOOR_PER_ROW_MAX)}
         </div>
         <p className="hint" style={{ marginTop: 10 }}>
-          <b>Tables per row</b> is exactly that — pick {perRow} and every row has {perRow} boxes, on this screen and on
-          any other. The boxes shrink to fit your number and drop detail as they go (the served count, then the seat
+          <b>Tables per row</b> is exactly that — pick {perRow} and every row has {perRow} boxes on a computer and on a
+          bigger tablet. The boxes shrink to fit your number and drop detail as they go (the served count, then the seat
           number, then the wording) while the table number and its colour always stay. Choose any number from{" "}
           {FLOOR_PER_ROW_MIN} to {FLOOR_PER_ROW_MAX}{" "}
           {/* {" "} above is not decoration: JSX drops the leading space of a multi-line text node,
               so "…to 12 — there…" shipped as "…to 12— there…" on the live Access screen. */}
           &mdash; there is nothing to type, so the floor can never be set to a number it won&rsquo;t accept.
+        </p>
+        {/* Said out loud on the screen that sets the number, because otherwise the first question is
+            "I set 12, why does my phone show 2?" (owner's rule, 2026-08-15). */}
+        <p className="hint" style={{ marginTop: 8 }}>
+          <b>Small screens ignore this number, on purpose.</b> A phone held upright always shows <b>2</b> tables a row
+          and a phone turned sideways always shows <b>4</b>, so the boxes stay big enough to read and tap. From about a
+          10-inch screen upwards your number is used exactly as you set it. The floor never slides sideways — it only
+          scrolls down.
         </p>
         <p className="hint" style={{ marginTop: 8 }}>
           How many people fit at each table is set per table in <b>Table setting</b> below — that is the number beside

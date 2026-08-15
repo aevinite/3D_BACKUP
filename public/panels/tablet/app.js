@@ -1203,8 +1203,13 @@ const FLOOR_PER_ROW_MIN = 2, FLOOR_PER_ROW_MAX = 12, FLOOR_PER_ROW_DEFAULT = 12;
 // admin screen comes later; until then this cap is the rule.)
 // So on a TOUCH device the count is capped at 6 — 12 becomes 6, 8 becomes 6 — and a restaurant that
 // deliberately chose a small number keeps it (4 stays 4). A PC is untouched: a mouse reports
-// `pointer: fine`, so `coarse` is what tells the two apart, exactly as the CSS does it. The phone
-// (<600px) still ignores the number entirely via CSS auto-fill, which is unchanged.
+// `pointer: fine`, so `coarse` is what tells the two apart, exactly as the CSS does it.
+//
+// ⚠️ AND BELOW TABLET WIDTH THE SCREEN BANDS OVERRIDE ALL OF IT (owner, 2026-08-15): a phone draws
+// 2 per row and a phone turned sideways draws 4, in CSS, whatever this function returns. The cap
+// above still decides a TABLET, because it is his separate instruction about this panel's tiles
+// being too small on an iPad ("if there is twelve, then six will be shown") — which is why the
+// waiter floor and the manager floor can legitimately show different counts on the same iPad.
 const FLOOR_PER_ROW_TOUCH_MAX = 6;
 function isTouchDevice() {
   try { return window.matchMedia("(pointer: coarse)").matches; } catch { return false; }
@@ -1320,7 +1325,10 @@ function renderFloor() {
   renderMySection();               // sections: "Your tables · 1-6" (no-op when unrestricted)
 
   const tilesGrid = document.getElementById("tiles");
-  if (tilesGrid) tilesGrid.style.setProperty("--per-row", String(floorPerRow()));
+  // --per-row-pc, not --per-row: the stylesheet's screen bands (phone 2 · sideways 4 · the set
+  // number from 1024px, owner 2026-08-15) compute the effective --per-row from it. An inline
+  // --per-row would beat those rules and the bands would silently do nothing.
+  if (tilesGrid) tilesGrid.style.setProperty("--per-row-pc", String(floorPerRow()));
 
   let html = "";
   for (const i of floorTableList()) {       // floor plan + any occupied off-plan table

@@ -155,9 +155,15 @@ expect(/Free/.test(legend) && /Preparing/.test(legend) && /unpaid/.test(legend),
 const grid = await F.evaluate(() => {
   const g = document.getElementById("tiles");
   const t = g.querySelector(".tile").getBoundingClientRect();
-  return { cols: getComputedStyle(g).gridTemplateColumns.split(" ").length, perRow: g.style.getPropertyValue("--per-row").trim(), w: t.width, h: t.height };
+  // The EFFECTIVE number is the computed --per-row, not the inline one. Since 2026-08-15 the panel
+  // writes the restaurant's setting as `--per-row-pc` and the stylesheet's screen bands turn it
+  // into `--per-row` (2 on a phone, 4 turned, the setting from 1024px up), so reading the inline
+  // property gave "" here and every count below came out 0.
+  return { cols: getComputedStyle(g).gridTemplateColumns.split(" ").length,
+    perRow: getComputedStyle(g).getPropertyValue("--per-row").trim(),
+    perRowSet: g.style.getPropertyValue("--per-row-pc").trim(), w: t.width, h: t.height };
 });
-expect(grid.perRow !== "", `tiles-per-row comes from the restaurant's own setting (${grid.perRow})`);
+expect(grid.perRowSet !== "", `tiles-per-row comes from the restaurant's own setting (${grid.perRowSet})`);
 expect(String(grid.cols) === grid.perRow, `the floor draws exactly ${grid.perRow} per row (got ${grid.cols}) — same rule as the manager`);
 expect(Math.abs(grid.w - grid.h) / grid.w < 0.35, `tiles are square (${Math.round(grid.w)}×${Math.round(grid.h)})`);
 expect(await F.evaluate(() => { const n = document.querySelector(".tile .tnum"); return !!n && n.offsetParent !== null && n.textContent.trim() !== ""; }), "every tile shows its table number");
@@ -734,13 +740,15 @@ if (READ_ONLY) {
         const t = g.querySelector(".tile");
         const r = t ? t.getBoundingClientRect() : null;
         return {
-          perRow: Number(g.style.getPropertyValue("--per-row").trim()) || 0,
+          perRow: Number(getComputedStyle(g).getPropertyValue("--per-row").trim()) || 0,  // effective, after the screen bands
           cols: getComputedStyle(g).gridTemplateColumns.split(" ").length,
           w: r ? Math.round(r.width) : 0, h: r ? Math.round(r.height) : 0,
           clip: [...document.querySelectorAll(".tile")].filter((x) => x.scrollHeight > x.clientHeight + 1).length,
           ovf: document.documentElement.scrollWidth > document.documentElement.clientWidth + 1,
         };
       });
+      // Below 1024px the SCREEN BANDS decide (2 upright, 4 turned) and they are tighter than this
+      // cap, so the assertion is "no more than the cap", which both rules satisfy (owner, 2026-08-15).
       expect(m.perRow > 0 && m.perRow <= cap, `${tag}: at most ${cap} tiles per row on a touch screen (got ${m.perRow})`);
       expect(m.cols === m.perRow, `${tag}: the grid really draws ${m.perRow} per row (got ${m.cols})`);
       // 44px is the tappability floor named in lib/floorLayout.ts. A finger needs a bigger square

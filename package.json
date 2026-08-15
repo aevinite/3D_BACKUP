@@ -113,6 +113,7 @@
     "verify:merge-who": "node scripts/verify-merge-records-who.mjs",
     "verify:merge-keeps-mark": "node scripts/verify-merge-keeps-mark.mjs",
     "verify:parcel-home": "node scripts/verify-parcel-home.mjs",
+    "verify:floor-per-row": "node scripts/verify-floor-per-row.mjs",
     "verify:read-guards": "node scripts/verify-read-guards.mjs",
     "verify:personal-data": "node scripts/verify-personal-data.mjs",
     "read-timings": "node scripts/read-timings.mjs",
