@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # verify:ui and verify:test-safety compare against origin/main to judge only what is
           # NEW (duplicate migration numbers, a migration missing its REVOKE). With a shallow
