@@ -19,24 +19,22 @@
 // Run: node scripts/verify-deps.mjs   (or npm run verify:deps)
 import { execFileSync } from "node:child_process";
 
-// ── The advisories that existed when this guard was written, and why each is parked.
+// ── The advisories that are currently parked, and why each one is.
 // A package is listed by NAME. Removing a name means "this must now be clean".
+//
+// THIS LIST IS MEANT TO SHRINK. It opened at FIFTEEN on 2026-08-16. Merging the grouped
+// Dependabot update the same day (PR #998 — Next 16.2.6 → 16.3.0, React 19.2.8, Supabase 2.112,
+// Sentry 10.70) cleared EIGHT of them: next, postcss, sharp, js-yaml, nanoid and the three
+// @opentelemetry packages. The guard printed exactly which lines to delete, which is how they
+// came out. Do the same next time — never re-add a name to silence a fresh problem.
 const ACKNOWLEDGED = new Map([
-  ["next", "Direct dep. The only offered fix is a major bump (16.2.6 → 16.3.1) — that is a deliberate, separately-tested upgrade, not something a security guard should force."],
-  ["postcss", "Transitive, pulled in by next. Clears when next is upgraded."],
-  ["sharp", "Transitive, pulled in by next (image optimisation). Clears when next is upgraded."],
   ["brace-expansion", "Transitive, dev tooling only."],
   ["fast-uri", "Transitive, dev tooling only."],
   ["ip-address", "Transitive, dev tooling only."],
-  ["js-yaml", "Transitive, dev tooling only."],
-  ["nanoid", "Transitive, dev tooling only."],
   ["undici", "Transitive, dev tooling only."],
   ["@babel/core", "Transitive, build-time only, severity low."],
   ["@hono/node-server", "Transitive, moderate."],
   ["hono", "Transitive, moderate."],
-  ["@opentelemetry/core", "Transitive via Sentry, moderate."],
-  ["@opentelemetry/resources", "Transitive via Sentry, moderate."],
-  ["@opentelemetry/sdk-trace-base", "Transitive via Sentry, moderate."],
 ]);
 
 // Only these two block a build. Moderate/low are reported and do not fail — the point is to be
