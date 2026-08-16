@@ -3386,6 +3386,10 @@ html[data-theme="light"] .tp-tagpill.tag-guest { background: linear-gradient(135
    .bill-card tile grid is gone. Below: the record card's own mood + the day totals. */
 .bill-day-total { font-size: 13px; color: var(--muted); }
 .bill-day-total b { color: var(--gold); font-variant-numeric: tabular-nums; }
+/* The cancelled count sits beside the collected total (owner, 2026-08-16). Not red — a void is a
+   normal part of a service, not an error; it reads as a fact in the same muted voice, italic so
+   the eye can tell it apart from the money without a colour shouting at anyone. */
+.bill-day-total .bill-day-void { font-style: italic; opacity: .85; }
 /* Only a card that actually OPENS (data-bill-open) may look tappable — a parcel record has
    no detail behind it, and a pointer cursor on it would be a tap that vanishes in silence. */
 .ord-card.ord-record[data-bill-open] { cursor: pointer; transition: transform .08s, border-color .12s; }

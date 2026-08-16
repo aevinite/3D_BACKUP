@@ -3184,8 +3184,17 @@ function ordersPreviousHtml(today, previous) {
   const daySection = (label, list, emptyMsg) => {
     const shown = list.filter(matchB).sort(sortB);
     const collected = shown.reduce((s, b) => s + (b.paid ? b.total : 0), 0);
+    // THE VOIDS ARE NAMED, NOT BURIED IN THE COUNT (owner, 2026-08-16 — the cancellations half of
+    // the bill-safety work). This read "11 bills · ₹882 collected" on a day where NINE of the
+    // eleven were cancelled at ₹0 — so the one line a manager or the owner glances at to answer
+    // "how did today go?" made the average bill look like ₹80 when the real figure was ₹441, and
+    // a night with a lot of voids looked exactly like a quiet night. Both numbers were already in
+    // hand here; nothing extra is fetched. Cancellations only appear once there are some, so an
+    // ordinary day's divider reads exactly as it always did.
+    const voided = shown.filter((b) => b.cancelled).length;
+    const sold = shown.length - voided;
     const head = `<div class="ord-section-divider"><h3>${label}</h3>
-      <span class="bill-day-total">${shown.length} bill${shown.length === 1 ? "" : "s"} · <b>${inr(collected)}</b> collected</span>
+      <span class="bill-day-total">${sold} bill${sold === 1 ? "" : "s"} · <b>${inr(collected)}</b> collected${voided ? ` · <i class="bill-day-void">${voided} cancelled</i>` : ""}</span>
       ${label.includes("Yesterday") ? "" : `<button class="btn danger" id="clearFreed" title="Removes freed table records only; paid & cancelled bills are kept as records">🗑 Clear freed</button>`}</div>`;
     const body = shown.length
       ? `<div class="ord-grid">${shown.map(cardOf).join("")}</div>`
@@ -3328,7 +3337,12 @@ function printBillFromKey(key) {
 // Deleting a bill is the most destructive money action, so it defaults OFF (owner, 2026-07-24).
 function canDeleteBillNow() {
   if (!XRAY_WHO) return false;
-  if (XRAY_WHO.higherView) return true;
+  // NO `higherView` SHORTCUT ANY MORE (owner, 2026-08-16). `higherView` is true for the admin AND
+  // for the owner looking in, and the owner is inside the restaurant — the one person this rule
+  // exists to cover ("I don't want to give permission to the restaurant owner to delete the bill
+  // because he will fake the bill"). The server now answers this question for real: `canDeleteBill`
+  // is true only for the Aevidine admin console, so the panel simply repeats the server's answer
+  // instead of second-guessing it, and the two can't drift.
   return XRAY_WHO.canDeleteBill === true;
 }
 
@@ -3410,7 +3424,16 @@ function openBillModal(key) {
         // bill leaves Live the same instant, so the promise had nowhere to land and the sale
         // ended up with no tax invoice and no button anywhere that could issue one.
         // Print issues the invoice first — same one-action rule as the floor card above.
-        if (sid2 && o0.invoice_no == null) acts.push(`<button class="btn ghost" data-print-issue="${esc(sid2)}">🖨 Print bill</button>`);
+        // …but NOT on a bill whose every order was cancelled (owner, 2026-08-16). This asked one
+        // question — "does this bill have a number yet?" — and a voided ₹0 bill answers no, so the
+        // button sat directly under the words "This bill was cancelled — no charge" and, pressed,
+        // drew the next number out of the restaurant's tax-invoice series and stamped it on a sale
+        // that never happened. A cancelled bill is not a tax invoice (see billdoc.js's own note),
+        // so there is nothing here to issue. Migration 331 refuses it server-side as well — this
+        // just stops offering it. The plain 🖨 Print above still prints the CANCELLED sheet, which
+        // is the piece of paper a voided bill legitimately has.
+        // `liveOrders` is the non-cancelled set this modal already computed for its item rows.
+        if (sid2 && o0.invoice_no == null && liveOrders.length) acts.push(`<button class="btn ghost" data-print-issue="${esc(sid2)}">🖨 Print bill</button>`);
         // Reopen: only an ISSUED invoice can be reopened (the server enforces the window +
         // permission; voiding is recorded). A voided/never-issued bill has nothing to reopen.
         if (invoiced2) acts.push(`<button class="btn ghost" data-void-invoice="${esc(sid2)}">↩ Reopen bill</button>`);
@@ -5275,7 +5298,7 @@ ${/* A comped bill is a real sale with nothing collected, so it appears here on 
      is kept OUT of Paid bills and the GRAND TOTAL (2026-08-05). It is still inside Gross and
      Discounts above — a sale never disappears from this page. */""}
 ${di.onHouseCount > 0 ? row("On the house (nothing collected)", di.onHouseCount + " · " + inr(di.onHouseNet)) : ""}
-${row("Cancelled orders", di.cancelled)}
+${row("Cancelled orders (nothing collected)", di.cancelled + (di.cancelledNet > 0 ? " · " + inr(di.cancelledNet) + " not charged" : ""))}
 ${di.tips > 0 ? row("Tips collected (staff)", inr(di.tips), true) : ""}
 ${/* HOW THE MONEY CAME IN — the reason a manager prints this at all: count the drawer against it.
      A bill settled in parts is broken down by its real methods (UPI ₹200 + Cash ₹200), not lumped

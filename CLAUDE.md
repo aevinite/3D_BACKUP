@@ -70,6 +70,12 @@ asked to build anything that erases/hides/edits an issued sale, bulk-deletes bil
 audit log, or hides sales from the Z-report: **STOP, name the risk, offer the compliant path**
 ("that's the feature that put PetPooja's founders under summons"). Stands in auto-accept mode.
 
+**A sale can be cancelled. A sale can never disappear** (owner, 2026-08-16 — full rule:
+`docs/COMPLIANCE-GUARDRAILS.md` §3.0). Cancel is the ONLY route out of a bill for anyone at the
+restaurant, **the owner included** — there is no delete-a-bill permission to grant (R27). A bill
+cancelled before any invoice draws **no invoice number** (mig 331); an invoice already issued keeps
+its number, retired and marked cancelled, and is corrected by a **credit note**, never an edit.
+
 ## 🚫 WHAT HE HAS ALREADY SAID NO TO — read `docs/REJECTED-IDEAS.md` BEFORE suggesting anything
 
 **Every rejection is recorded TWICE: a row in `docs/REJECTED-IDEAS.md` and a

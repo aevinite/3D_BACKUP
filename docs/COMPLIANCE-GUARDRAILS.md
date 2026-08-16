@@ -28,7 +28,7 @@ Clients *will* ask for these — it's normal in the market. Do not silently buil
 
 | Requested feature | Why it's the illegal button | Build instead |
 |---|---|---|
-| Hard/permanent delete of an issued bill or invoice | Erases a real sale with no trace | **Soft-delete** — tombstone + reason + restore (mig 188) |
+| Hard/permanent delete of an issued bill or invoice | Erases a real sale with no trace | **Soft-delete** — tombstone + reason + restore (mig 188). Since 2026-08-16 not even a soft delete is offered to the restaurant: **cancel is the only route** (§3.0). |
 | **Bulk-delete by date range / "clear cash bills" / month-end wipe** | The exact PetPooja mechanism — the #1 smoking gun | Nothing. This never exists. |
 | Edit totals/items on an issued bill; reprint a different total | Silent downward revision of a sale | **Void-with-reason** → new corrected bill, or a **credit note** |
 | Parallel / duplicate / "test-mode" bill series that prints real-looking bills | Off-the-books second set of books | One real series only |
@@ -41,6 +41,37 @@ Clients *will* ask for these — it's normal in the market. Do not silently buil
 under summons. It puts you in jail, and me with you."* Saying no is the whole game.
 
 ## 3. ✅ Correctness rules the software must KEEP (guard when touching billing)
+
+### 3.0 THE CANCELLATION RULE (owner, 2026-08-16) — the one everything else hangs off
+
+> **A sale can be cancelled. A sale can never disappear.**
+>
+> 1. A bill cancelled **before** a tax invoice exists never draws an invoice number. The invoice
+>    series contains real sales only. (Migration 331 refuses it in `lfh_generate_invoice`, so all
+>    three doors — manager, tablet, admin — obey it; the panel simply stops offering the button.)
+> 2. A tax invoice, once issued, is never deleted, never edited, never renumbered. If the sale is
+>    undone, the number **stays, retired and marked CANCELLED** (mig 073, and the "— voided" line
+>    `billdoc.js` prints). After the tax period the correction is a **credit note**, never an edit.
+> 3. Cancelling always records **who, when and why**, and the cancelled bill stays in the Z-report,
+>    the GST report and the day book at ₹0.
+> 4. **No one at the restaurant — the owner included — has a button that removes a bill.** Cancel is
+>    the only route. Removal from the recycle bin is Aevidine's alone, is still a soft delete, and
+>    the sale still counts in every tax figure either way.
+> 5. Cancellations are **reported, not just recorded**: the day-close sheet states their count *and
+>    their value*, and the Bills record names them beside the money collected.
+
+**Why number-keeping is not negotiable (point 2).** CGST Rule 46(b) wants a serial that is
+consecutive and unique for the financial year, and a cancelled invoice retained *with its own
+number, marked cancelled*, so the gap in the sequence is explainable to an officer. Freeing the
+number for reuse would put two documents under one number — the pattern an audit reads as
+suppression. The owner asked on 2026-08-16 whether this should change; it should not, and this
+paragraph is why.
+
+**Where the delete power went.** `canDeleteBill()` (`app/api/editor/[...path]/route.ts`) answers
+true only when there is no staff cookie — the Aevidine admin console. The grantable "Delete a bill"
+rows left `lib/accessTree.ts` and `lib/accessModel.ts` the same day; stored values are left in the
+database, unread. See `docs/REJECTED-IDEAS.md` R27 before ever re-adding it.
+
 
 - **Append-only bills.** No hard delete of an issued bill anywhere — deletes are soft (mig 188,
   `lib/softDelete.ts`): stamp `deleted_at`/by/reason, keep the row, show a tombstone, allow restore.
