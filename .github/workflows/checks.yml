@@ -91,3 +91,12 @@ jobs:
       # node_modules/.cache and reports on code that is no longer there.
       - name: access model
         run: npm run -s verify:access
+
+      # The packages we install. NOT in verify:static because it is the one check here that needs
+      # the network (it asks npm for the current advisory list), and verify:static is deliberately
+      # a repo-only, offline set. It fails ONLY on a NEW high/critical advisory — today's fifteen
+      # are acknowledged by name inside the script — so it stays believable. See the header of
+      # scripts/verify-deps.mjs for why a bare `npm audit --audit-level=high` was rejected.
+      # `continue-on-error` is deliberately NOT set: a new high/critical should stop a merge.
+      - name: dependency advisories
+        run: npm run -s verify:deps

@@ -4,6 +4,8 @@
 // "Wrong password" message after 3s instead of leaving it stuck. A no-JS browser still works
 // via the plain <form> POST fallback (the route redirects with ?bad=1 / ?locked=1).
 import { useEffect, useRef, useState } from "react";
+import BotTrap, { botFields } from "@/components/BotTrap";
+import { BOT_TRAP_FIELD, BOT_ELAPSED_FIELD } from "@/lib/botCheck";
 
 type Err = { kind: "wrong" | "locked" | "network"; attemptsLeft?: number } | null;
 
@@ -25,11 +27,15 @@ export default function LoginForm({ next, initialError }: { next: string; initia
     e.preventDefault();
     if (busy) return;
     setBusy(true);
+    // Read before the first await — after it, currentTarget is gone.
+    const bot = botFields(e.currentTarget as HTMLFormElement);
     try {
       const r = await fetch("/api/staff-login", {
         method: "POST",
         headers: { Accept: "application/json" },
-        body: new URLSearchParams({ password, next }),
+        // The fetch path posts url-encoded, so the two fields go under their real form names —
+        // exactly what the no-JS <form> POST would have sent. One shape for the route to read.
+        body: new URLSearchParams({ password, next, [BOT_TRAP_FIELD]: bot.trap, [BOT_ELAPSED_FIELD]: bot.elapsed }),
       });
       const data = (await r.json().catch(() => ({}))) as { ok?: boolean; next?: string; locked?: boolean; attemptsLeft?: number };
       if (data.ok) { window.location.assign(data.next || next); return; }
@@ -102,6 +108,11 @@ export default function LoginForm({ next, initialError }: { next: string; initia
       <a href="/login" style={{ display: "block", marginTop: 14, textAlign: "center", fontSize: 12.5, color: "#8aa0c6", textDecoration: "none" }}>
         Staff sign in →
       </a>
+
+      {/* LAST in the form — see the note on the same component in app/login/LoginForm.tsx for why
+          first would be a real hazard. These ride the no-JS <form> POST too, because they are
+          ordinary inputs inside this form, so the fallback keeps working either way. */}
+      <BotTrap />
     </form>
   );
 }
