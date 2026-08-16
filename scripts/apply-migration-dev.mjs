@@ -1,11 +1,11 @@
-// ⚠️ THIS SCRIPT CANNOT RUN TODAY, AND THAT IS THE CORRECT OUTCOME (measured 2026-08-16).
+// ⚠️ THIS SCRIPT CANNOT RUN — THE SANDBOX IT TARGETS NO LONGER EXISTS (2026-08-16).
 //
 // It applies a migration to the DEV SANDBOX named by SUPABASE_DEV_PROJECT_REF. That family of keys
-// in .env.local still points at **lfh-saas-dev**, the throwaway project from the June-2026 SaaS
-// phase-1 work: ~100 migrations behind, and no staff action has ever been recorded in it. The
-// allow-list (scripts/sweep/devStacks.mjs) does not include it, so this refuses — read the long
-// note there before "fixing" that, because adding it is the one change that would make this script
-// silently apply migrations to a database nobody uses.
+// in .env.local names **lfh-saas-dev**, the throwaway project from the June-2026 SaaS phase-1 work
+// — which was DELETED on 2026-08-16 (unused since June, ~100 migrations behind, and occupying the
+// last free project slot in the org that holds our failover). The allow-list
+// (scripts/sweep/devStacks.mjs) does not include it, so this refuses before it ever reaches the
+// network — read the long note there before "fixing" that.
 //
 // TO APPLY A MIGRATION TO THE WORKING DEV DATABASE, use:
 //     node scripts/run-migration.mjs <file>.sql

@@ -19,23 +19,26 @@
 //     who has read this comment — never a wildcard, never "whatever .env.local says".
 export const DEV_TEST_DBS = ["wnsfcizclkbobwzcxqsf", "jhhqzexlpzzwoqnzrgje"];
 
-// ── A THIRD PROJECT EXISTS, IT IS STALE, AND IT MUST NOT BE ADDED ABOVE ──────────────────────────
+// ── THE THIRD PROJECT IS GONE, AND THE KEYS THAT NAMED IT ARE NOT ───────────────────────────────
 //
 // `.env.local`'s whole SUPABASE_DEV_* family (URL, PROJECT_REF, ANON, SERVICE_ROLE, ACCESS_TOKEN)
-// points at a Supabase project called **lfh-saas-dev**, created 2026-06-25 — the original
-// throwaway sandbox from the SaaS phase-1 work. It is not on the list above, so every script that
-// reads those keys refuses, which is the correct outcome and also a confusing one: the refusal
-// says "not a dev/test database" about a project genuinely named …-dev.
+// points at a Supabase project called **lfh-saas-dev** — the original throwaway sandbox from the
+// SaaS phase-1 work, created 2026-06-25.
 //
-// MEASURED 2026-08-16, read-only, before writing this: it holds 31 public tables and 68 lfh_
-// functions against backup-1's 166 — roughly a hundred migrations behind — and `staff_actions` has
-// never recorded a single action. Nothing has used it since June.
+// **DELETED 2026-08-16, on the owner's instruction.** Measured read-only first: 31 public tables
+// and 68 lfh_ functions against backup-1's 166 (roughly a hundred migrations behind), and
+// `staff_actions` had never recorded a single action — nothing had used it since June. Its seven
+// demo restaurants all already existed on backup-1, so nothing was lost. It was also occupying the
+// second and last free-plan project slot in the org that holds backup-2, our failover.
 //
-// So the obvious "fix" — adding it to DEV_TEST_DBS — is the one thing that must not happen. The
-// demo seeders and the migration applier would then run happily against a database ~100 migrations
-// out of date, the output would look like success, and nothing anyone was testing would be true.
-// It is named HERE, in the file whose whole job is naming stacks, so that decision can't be made by
-// accident by someone who only sees a refusal message.
+// THE KEYS ARE STILL IN .env.local and now name a project that does not exist. That is deliberate,
+// not an oversight: every script that reads them checks this allow-list BEFORE making any network
+// call, so they refuse instantly and identically, exactly as they did while the project was alive.
+// Removing the keys would only change the refusal's wording.
+//
+// So the obvious "fix" — adding this id to DEV_TEST_DBS — must still never happen, and now it would
+// simply fail against a dead project. It is named HERE, in the file whose whole job is naming
+// stacks, so nobody re-adds it from a half-remembered env var.
 //
 // WHAT TO USE INSTEAD, today:
 //   · apply ONE migration to the working dev DB → `node scripts/run-migration.mjs <file>.sql`
@@ -43,7 +46,7 @@ export const DEV_TEST_DBS = ["wnsfcizclkbobwzcxqsf", "jhhqzexlpzzwoqnzrgje"];
 //   · re-seed the working dev DB → `node scripts/seed-supabase.mjs` WITHOUT `--dev`
 // If a sandbox is ever wanted again, point SUPABASE_DEV_* at a FRESH project, bring it up to the
 // current migrations, and add its ref above deliberately — with this note updated to say so.
-export const STALE_DEV_SANDBOX = "fkgzykfvopotpbcxuvcs"; // lfh-saas-dev — abandoned June 2026
+export const STALE_DEV_SANDBOX = "fkgzykfvopotpbcxuvcs"; // lfh-saas-dev — DELETED 2026-08-16
 
 // The AV LIVE project, named so a caller can say "is this the live one?" without repeating the id.
 export const AV_LIVE_DB = "kclqkmdxnwlhtyrducku";
@@ -75,9 +78,9 @@ export function refuseUnlessDevTestDb(url, what = "this test places real orders"
     // note above DEV_TEST_DBS). Naming it here costs one line and closes that loop where it is
     // actually read: in the terminal, by the person who just got refused.
     (ref === STALE_DEV_SANDBOX
-      ? `\n\n  That is lfh-saas-dev — the ABANDONED June-2026 sandbox that .env.local's SUPABASE_DEV_*\n` +
-        `  keys still point at. It is ~100 migrations behind and nothing has used it since June, so\n` +
-        `  do NOT add it to the allow-list. Use instead:\n` +
+      ? `\n\n  That is lfh-saas-dev — the June-2026 sandbox .env.local's SUPABASE_DEV_* keys still name.\n` +
+        `  The project was DELETED on 2026-08-16 (unused since June, ~100 migrations behind), so those\n` +
+        `  keys point at nothing. Do NOT add it to the allow-list. Use instead:\n` +
         `    node scripts/run-migration.mjs <file>.sql     (one migration → the working dev DB)\n` +
         `    node scripts/seed-supabase.mjs                (re-seed, WITHOUT --dev)`
       : "")
