@@ -424,6 +424,37 @@ reinvent (dataviz skill agrees: "a single value is a stat tile, not a one-bar ch
 - GLB models on Supabase Storage; two tiers per dish (small ~2 MB, optimized ~9 MB).
 - Dev: `npm run dev` (port 4000). Playwright: `node scripts/verify-cache.mjs`.
 
+## Re-seeding re-runs every migration (the unabridged story — moved out of CLAUDE.md 2026-08-16)
+
+`node scripts/seed-supabase.mjs` does two dangerous things at once, and the second is the one that
+surprises people:
+
+1. It **overwrites editor-made DB changes** — it re-upserts `menu_items` from `menu.json`, so a
+   dish edited in the manager panel goes back to what the file says.
+2. It **re-runs EVERY file in `supabase/migrations`, in filename order, with no ledger.** Nothing
+   records that a migration has already been applied, so every one of them runs again, every time.
+
+Most migrations are written `CREATE OR REPLACE` / `IF NOT EXISTS` and are safe to re-run. The ones
+that are NOT safe are the one-time DATA migrations, and two of them did real damage on a second
+pass before the guard existed:
+
+- **043** multiplied all money by 84 a second time — ₹36.6M became ₹3.08bn (measured, not
+  estimated).
+- **093** replaced restaurant #1's 24 manager-permission keys with 5.
+
+Both are now wrapped by `lfh_applied_once` (migration 307), and `npm run verify:grants` fails if
+either guard is removed.
+
+**THE RULE FOR ANY NEW MIGRATION THAT REWRITES EXISTING DATA:** wrap it the same way, at the top of
+the function body —
+
+```sql
+IF lfh_already_applied('<key>') THEN RETURN; END IF;
+```
+
+— or a re-seed will apply it twice. Prefer `node scripts/run-migration.mjs <file>.sql` to apply one
+migration on its own; it touches nothing else.
+
 ## ONE unified app (2026-06-13 — was four separate servers, now merged)
 
 Everything is a SINGLE Next app on **port 4000** (`npm run dev` / `START-ALL.bat`).

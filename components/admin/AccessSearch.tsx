@@ -77,7 +77,6 @@ const SYNONYMS: Record<string, string> = {
   mgr_bills: "bills record previous today yesterday parcel",
   mgr_bills_range: "which bills previous yesterday today reach window history",
   mgr_dash_range: "yesterday how far back reach range day",
-  mgr_delete_bill: "delete bill remove bill manager",
   mgr_give_discounts: "discount off reduce concession manager",
   mgr_give_discounts_cap: "discount cap ceiling percent limit most",
   mgr_tab_dash: "dashboard numbers report today",
