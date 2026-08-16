@@ -17,6 +17,7 @@ import { offPlanTable } from "@/lib/planTable";
 import { menuTag } from "@/lib/menuDataServer";
 import { logAction, logError, deviceIdFrom } from "@/lib/oplog";
 import { recordRemoval, reasonFromBody } from "@/lib/removalAudit";
+import { watchCancellations } from "@/lib/cancelWatch";
 import { ADMIN_VIEW_ACTOR_ID } from "@/lib/logMarks";
 import { discountCapPct, discountRole, overDiscountCap } from "@/lib/discountCap";
 import { businessDayStartIso, businessDayDate } from "@/lib/businessDay";
@@ -1608,6 +1609,30 @@ export async function GET(req: NextRequest, ctx: Ctx) {
         platform: { count: platActive.length, revenue: platRevenue },
         invoicesGenerated: (must(invQ) || []).length,
         invoicesVoided: (must(voidQ) || []).length,
+        // ── THE DAY'S BILL LEDGER, VERIFIED (mig 332, owner 2026-08-16) ─────────────────────────
+        // Every issued invoice is signed into an append-only chain, each link carrying the hash of
+        // the one before it and the money the bill was signed at. This walks today's links and
+        // answers two different questions: was the LEDGER touched (a link rewritten, or one removed
+        // so the chain no longer joins up), and was a BILL touched after it was signed (its live
+        // orders no longer add up to what was signed).
+        //
+        // It is on the day-close sheet deliberately. That is the moment a restaurant states its
+        // takings, it is the paper an inspector is handed, and printing the verification beside the
+        // money is what the fiscal regimes this design follows actually require. One tap on
+        // "Z-report" IS the verify — nobody has to remember to run it.
+        //
+        // Best-effort: a verification that could fail the day-close would be worse than none, so a
+        // problem reading it says so in `error` and every figure above still prints.
+        chain: await (async () => {
+          try {
+            const v = await sb.rpc("lfh_verify_bill_chain", { p_rid: rid, p_from: since, p_to: new Date().toISOString() });
+            if (v.error) return { ok: false, error: "could not be checked" };
+            const rows = (v.data || []) as { kind: string; seq: number; invoice_no: number | null; bill_no: number | null; detail: string }[];
+            const checked = rows.find((r) => r.kind === "checked");
+            const problems = rows.filter((r) => r.kind !== "checked");
+            return { ok: problems.length === 0, bills: Number(checked?.seq) || 0, problems: problems.slice(0, 20) };
+          } catch { return { ok: false, error: "could not be checked" }; }
+        })(),
         // GRAND TOTAL = money actually COLLECTED today, so use paidNet (paid-only dine-in),
         // NOT net (which includes still-open/unpaid bills). Matches mig 113's paid-only rule +
         // the /stats endpoint; the old `net + platRevenue` overstated the day-close cash by the
@@ -4907,6 +4932,12 @@ async function patchImpl(req: NextRequest, ctx: Ctx) {
           tableNumber: cur.table_number != null ? String(cur.table_number) : null,
           meta: { was_paid: cur.payment_status === "paid", ...(archiveForcedTheCancel ? { auto: "unpaid food archived off the floor" } : {}) },
         });
+        // …and, once a day at most, tell the owner when the day's voids look unusual (lib/cancelWatch.ts).
+        // Cancel is the ONLY way a bill leaves the working list now, so the level of cancelling is
+        // the thing worth watching — but this never blocks or questions the cancel itself, which is
+        // ordinary restaurant work. Awaited only so it shares this request's connection; it cannot
+        // throw. The common case costs a rows-free count.
+        await watchCancellations(rid);
       } else if (patch.status === "received" && cur.status === "cancelled") {
         await log("editor", "order_uncancel", { restaurant_id: rid, order_id: id, table_number: cur.table_number ?? null, detail: "cancel undone — back on the floor", device_id: deviceIdFrom(req) });
       }

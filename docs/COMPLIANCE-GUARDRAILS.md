@@ -59,6 +59,10 @@ under summons. It puts you in jail, and me with you."* Saying no is the whole ga
 >    the sale still counts in every tax figure either way.
 > 5. Cancellations are **reported, not just recorded**: the day-close sheet states their count *and
 >    their value*, and the Bills record names them beside the money collected.
+> 6. **Every issued invoice is signed into an append-only chain** (mig 332) — each link holds the
+>    money it was signed at plus the hash of the link before it, so a removed, re-ordered or
+>    rewritten entry, and a bill edited after signing, are all *provable* rather than merely
+>    forbidden. The day-close report verifies the day and prints the result.
 
 **Why number-keeping is not negotiable (point 2).** CGST Rule 46(b) wants a serial that is
 consecutive and unique for the financial year, and a cancelled invoice retained *with its own
@@ -120,8 +124,17 @@ failure). Full enforcement is expected ~May 2027 — build consent in cheaply no
 
 - **Lawyer** → Aevidine Terms of Service: sole-responsibility, no-tax-advice, no-misuse, indemnity,
   audit-trail acknowledgement. (ToS is half the shield; architecture is the other half.)
-- Aim for the **European bar** (every sale signed / hash-chained / tamper-evident) → clears India, US
-  and Canada at once, and is a selling point.
+- ~~Aim for the **European bar** (every sale signed / hash-chained / tamper-evident)~~ → **BUILT
+  2026-08-16, migration 332.** Every issued invoice is signed into an append-only `bill_chain`: each
+  link carries the bill's identity, the money it was signed at, and the hash of the link before it.
+  Written inside `lfh_generate_invoice` (the one door all three panels use, so it cannot be skipped)
+  and protected by a trigger that refuses UPDATE and DELETE to every role, service role included.
+  `lfh_verify_bill_chain(rid, from, to)` answers both questions an inspector has — was the LEDGER
+  touched (a link rewritten, or one removed so the chain no longer joins), and was a BILL touched
+  after signing (its live orders no longer add up to what was signed). The **day-close Z-report runs
+  it automatically** and prints the result beside the money, which is where those regimes want the
+  proof. This is the property France's NF525 calls *inalterability* and Germany's KassenSichV
+  enforces with a certified module; we are not claiming their certification, only the behaviour.
 
 **Done since (do not re-add as to-dos):**
 
