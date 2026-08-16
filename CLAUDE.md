@@ -151,14 +151,10 @@ built to switch to subdomains by config, not rewrite. Redis/queues/replicas are 
 - **55 page routes** (`find app -name page.tsx | wc -l`) and **THREE guest menu doors** — `/menu`,
   `/r/<slug>/menu`, `/q/<code>` — every guest rule must hold in all three (PR #761's lesson).
 - Menu data via `lib/menu.ts` (anon key); categories/filters are DB-driven; multilingual via
-  `lib/i18n.ts`. Re-seed: `node scripts/seed-supabase.mjs` — ⚠️ it overwrites editor-made DB
-  changes AND **re-runs EVERY file in `supabase/migrations`, in filename order, with no ledger**.
-  Prefer running just the one migration. Two files rewrote data on a second pass and are now
-  guarded by `lfh_applied_once` (mig 307): **043** multiplied all money ×84 again (₹36.6M →
-  ₹3.08bn, measured) and **093** replaced restaurant #1's 24 manager-permission keys with 5.
-  A NEW one-time migration that rewrites existing data must wrap itself the same way —
-  `IF lfh_already_applied('<key>') THEN RETURN; END IF;` — or a re-seed will apply it twice.
-  `verify:grants` fails if either guard is removed.
+  `lib/i18n.ts`. **A re-seed re-runs EVERY migration with no ledger** — prefer
+  `node scripts/run-migration.mjs <one file>`, and wrap any data-rewriting migration in
+  `lfh_already_applied('<key>')`. Why (two did real damage): `docs/CLAUDE-DETAIL.md` →
+  "Re-seeding re-runs every migration".
 
 ## Security gate (verified per-route 2026-08-04/05 — full route list in docs/CLAUDE-DETAIL.md)
 
@@ -279,8 +275,8 @@ update the detail doc's section in the same commit.
 
 - **Don't narrow `boardSig`** (kitchen/tablet redraw fingerprint) back to a field list — new
   volatile columns go in `RT_VOLATILE`; guarded by `scripts/verify-board-sig.mjs`.
-- **"Blur" = frosted glass** (transparent bg + `backdrop-filter: blur(20px)`), written as a SINGLE
-  unprefixed line — hand-adding `-webkit-` makes the build DROP the property.
+- **"Blur" = frosted glass**, ONE unprefixed `backdrop-filter` line — hand-adding `-webkit-` makes
+  the build DROP it (`docs/CLAUDE-DETAIL.md` → What "blur" means).
 - Supabase HEAD lies about Cache-Control — use GET with `Range: bytes=0-0`.
 - **Secrets NEVER appear in chat — whole or partial** (sbp_/service-role/tokens): redirect
   `claude mcp` output to null; masked reads only. Treat a pasted key as compromised.
