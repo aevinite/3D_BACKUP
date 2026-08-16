@@ -5324,6 +5324,25 @@ ${row("Revenue", inr(z.platform.revenue), true)}
 ${row("Generated today", z.invoicesGenerated)}
 ${row("Voided today", z.invoicesVoided)}
 ${zNumbering(z.numbering, row)}
+${/* THE DAY'S BILL LEDGER, VERIFIED (mig 332, owner 2026-08-16). Every issued invoice is signed
+     into an append-only chain — each link carries the hash of the one before it and the money the
+     bill was signed at — so a removed, re-ordered or rewritten entry, and a bill edited after it
+     was signed, are all visible rather than inferred. This line is the proof, printed beside the
+     money on the sheet a restaurant states its takings with; pressing Z-report IS the check.
+     A problem is stated in words a manager can act on, and never hidden: the sheet still prints
+     every figure above it. */
+  z.chain
+    ? (z.chain.error
+        ? row("Bill ledger", "could not be checked")
+        : z.chain.ok
+          ? row("Bill ledger", `✓ ${z.chain.bills} bill${z.chain.bills === 1 ? "" : "s"} verified`, true)
+          : row("⚠ Bill ledger", `${z.chain.problems.length} problem${z.chain.problems.length === 1 ? "" : "s"} — tell the owner`, true)
+            + (z.chain.problems || []).map((p) => row(
+                p.kind === "bill_changed" ? `  bill #${p.bill_no ?? "—"} changed after signing`
+                : p.kind === "chain_broken" ? `  an entry before #${p.bill_no ?? "—"} is missing`
+                : `  entry #${p.bill_no ?? "—"} was rewritten`,
+                esc(String(p.detail || "")).slice(0, 60))).join(""))
+    : ""}
 <div class="grand"><span>GRAND TOTAL</span><span>${inr(z.grandTotal)}</span></div>
 <div class="foot">Computer-generated day-close report</div>
 <script>setTimeout(()=>print(),300)<\/script>`);
