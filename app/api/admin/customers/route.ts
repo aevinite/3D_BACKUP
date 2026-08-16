@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { cachedOwnerPayload } from "@/lib/ownerCache";
+import { safeSearch } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +35,9 @@ export async function GET(req: NextRequest) {
   const rid = sp.get("restaurant_id") || "";
   if (rid && !isUuid(rid)) return NextResponse.json({ error: "invalid restaurant_id" }, { status: 400 });
   // strip the characters that would break PostgREST's or() filter grammar
-  const search = (sp.get("q") || "").replace(/[,()%*]/g, "").trim().slice(0, 60);
+  // Shared cleaner — this local copy also missed the backslash, PostgREST's pattern escape
+  // (2026-08-16). Same helper the owner-side guest list uses, so the twins cannot drift again.
+  const search = safeSearch(sp.get("q"), 60);
   const seg = sp.get("seg") || "all";                     // all | regulars | new | blocked
   const sort = sp.get("sort") === "visits" ? "visits" : "last_seen_at";
   const page = Math.max(0, Math.min(200, parseInt(sp.get("page") || "0", 10) || 0));

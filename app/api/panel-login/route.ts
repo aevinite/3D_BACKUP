@@ -7,6 +7,8 @@ import { isPanelEnabled, isRestaurantDeleted, ownerPanelEnabled } from "@/lib/pa
 import { getRestaurantBySlug } from "@/lib/tenant";
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { rateAllowed, subjectFor, rateResetOnSuccess } from "@/lib/rateLimit";
+import { botVerdict, verifyTurnstile } from "@/lib/botCheck";
+import { clientIp } from "@/lib/loginThrottle";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +25,21 @@ export async function POST(req: NextRequest) {
     restaurantId = rest.id;
   }
   const dev = deviceIdFrom(req);
+  // NOT-A-PERSON CHECK (2026-08-16) — before the rate limit, so junk traffic never even reaches
+  // the counter and can therefore never use up a real staff member's allowance. The form posts
+  // JSON here, so the two values arrive as plain `trap` / `elapsed` keys (components/BotTrap.tsx).
+  // Refuses ONLY on a present-and-wrong signal; a weeks-old cached panel that sends neither is
+  // allowed through, which is the point — see lib/botCheck.ts.
+  //
+  // The answer is the SAME generic "Wrong name or password." this route gives for everything
+  // else: never tell an automated caller which check it failed, and never let it count towards
+  // the lockout on a real person's account.
+  const verdict = botVerdict(body?.trap, body?.elapsed);
+  if (!verdict.ok || !(await verifyTurnstile(body?.["cf-turnstile-response"], clientIp(req)))) {
+    await logAction("admin", "login_failed", { device_id: dev, detail: `panel login refused — automated submission (${verdict.ok ? "turnstile" : verdict.reason})` });
+    return NextResponse.json({ ok: false, error: "Wrong name or password." }, { status: 401 });
+  }
+
   // RATE LIMIT (mig 205): stop password guessing. Counted per username (+ restaurant when the
   // door names one) BEFORE the credential lookup. The event label shows who + which restaurant,
   // so the admin sees exactly whose login is being hammered. Fails open on any limiter glitch.

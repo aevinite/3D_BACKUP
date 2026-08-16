@@ -14,6 +14,7 @@ import { AUTH_COOKIE, FLAG_COOKIE, sha256hex, safeEqual, adminPassword } from "@
 import { logAction, deviceIdFrom } from "@/lib/oplog";
 import { throttleStatus, throttleFail, throttleReset, throttleIsBlocked, clientIp } from "@/lib/loginThrottle";
 import { recordAlert } from "@/lib/rateLimit";
+import { botVerdict, verifyTurnstile, BOT_TRAP_FIELD, BOT_ELAPSED_FIELD } from "@/lib/botCheck";
 
 const ADMIN_MAX_FAILS = 10;             // wrong tries from one IP before a temporary lockout
 const ADMIN_LOCK_MS = 5 * 60 * 1000;    // lockout length (5 minutes)
@@ -39,6 +40,21 @@ export async function POST(req: NextRequest) {
     wantsJson
       ? NextResponse.json({ ok: false, ...extra }, { status: 401 })
       : NextResponse.redirect(new URL(`/staff-login?${extra.blocked ? "blocked=1" : extra.locked ? "locked=1" : "bad=1"}&next=${encodeURIComponent(next)}`, req.url), 303);
+
+  // NOT-A-PERSON CHECK (2026-08-16). Runs BEFORE the throttle read and before the password
+  // compare, so untargeted guessing traffic costs us nothing at all. It refuses only on a signal
+  // that is present and wrong — an older cached page, or the no-JS fallback without the fields,
+  // is allowed straight through (lib/botCheck.ts explains why that matters more than the block).
+  //
+  // The reply is the ORDINARY "wrong password" 401: it does not say "you look like a bot", it
+  // does not count against the human lockout, and it does not raise an alert. Saying which signal
+  // tripped is just free feedback for whoever is scripting it, and counting it would let junk
+  // traffic lock the owner's own IP out of their console.
+  const verdict = botVerdict(form?.get(BOT_TRAP_FIELD), form?.get(BOT_ELAPSED_FIELD));
+  if (!verdict.ok || !(await verifyTurnstile(form?.get("cf-turnstile-response"), ip))) {
+    await logAction("admin", "login_failed", { device_id: dev, detail: `admin login refused from ${ip} — automated submission (${verdict.ok ? "turnstile" : verdict.reason})` });
+    return bad({});
+  }
 
   // Locked out? Refuse before even checking the password, and log the attempt. A DELIBERATE admin
   // block (far-future lock) is distinct from a few-minute wrong-tries lockout: it sends the visitor

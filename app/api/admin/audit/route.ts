@@ -14,6 +14,7 @@ import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
 import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
+import { safeSearch } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 
@@ -72,7 +73,8 @@ export async function GET(req: NextRequest) {
   let q = sb.from("deletion_audit").select(COLS).order("at", { ascending: false }).limit(limit);
   if (restaurantId) q = q.eq("restaurant_id", restaurantId);
   if (qText) {
-    const safe = qText.replace(/[%,()]/g, " ");
+    // Shared cleaner — see the note in app/api/admin/oplog/route.ts (2026-08-16).
+    const safe = safeSearch(qText);
     q = q.or(`item_title.ilike.%${safe}%,actor.ilike.%${safe}%,reason_note.ilike.%${safe}%`);
   }
 

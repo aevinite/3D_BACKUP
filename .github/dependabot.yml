@@ -1,0 +1,45 @@
+# Dependabot — the other half of scripts/verify-deps.mjs (added 2026-08-16).
+#
+# verify:deps TELLS you a package went bad. This RAISES THE PR that fixes it, so "someone has to
+# remember to upgrade" stops being the plan. Together they are item 20 of the 20-point protection
+# list ("scan dependencies"), which this repo previously did not do at all.
+#
+# DELIBERATELY QUIET, because a noisy bot is a bot everyone ignores:
+#   · weekly, not daily;
+#   · at most 5 open PRs at a time;
+#   · minor + patch updates are GROUPED into one PR per ecosystem, so a normal week is one PR
+#     to read, not eleven;
+#   · MAJOR updates are left to a human. next 16.2.6 → 16.3.1 is exactly the kind of bump that
+#     needs the panels driven in a real browser first, not an auto-merge.
+#
+# Every PR still goes through .github/workflows/checks.yml (typecheck, lint, unit tests, the
+# static guards, access model, verify:deps), so nothing lands unchecked.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Kolkata
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      # One PR for all the routine movement.
+      routine:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # Majors are a person's decision — see the note above.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # The workflow's own actions (actions/checkout, actions/setup-node) go stale silently too.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "chore(ci)"

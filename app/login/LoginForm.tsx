@@ -4,6 +4,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { clearOwnerSnaps } from "@/lib/ownerSnap";
+import BotTrap, { botFields } from "@/components/BotTrap";
 
 // Must match the server's ROLE_HOME map (lib/panelGate.ts).
 const ROLE_HOME: Record<string, string> = { owner: "/owner", manager: "/manager", kitchen: "/kitchen", tablet: "/tablet" };
@@ -25,11 +26,15 @@ export default function LoginForm({
     e.preventDefault();
     setErr("");
     setBusy(true);
+    // Read the invisible bot fields BEFORE the first await — after it, React has already
+    // cleared currentTarget and this would silently send empty values (which the server treats
+    // as "no opinion", so it would fail quietly rather than loudly).
+    const bot = botFields(e.currentTarget as HTMLFormElement);
     try {
       const r = await fetch("/api/panel-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password, ...(restaurantSlug ? { restaurant: restaurantSlug } : {}) }),
+        body: JSON.stringify({ username, password, ...bot, ...(restaurantSlug ? { restaurant: restaurantSlug } : {}) }),
       });
       const data = await r.json();
       if (!r.ok || !data.ok) {
@@ -128,6 +133,14 @@ export default function LoginForm({
         <p style={{ margin: "14px 0 0", fontSize: 12, color: "#6f86b0", textAlign: "center" }}>
           No account? Your manager or admin sets one up for you.
         </p>
+
+        {/* LAST in the form, never first — and that placement is the whole point, not tidiness.
+            Anything that reaches for "the first text box on the page" (a password manager's
+            heuristic, an accessibility tool, a test script) would otherwise land in the trap and
+            get a REAL person refused. Caught exactly that way in a browser on 2026-08-16.
+            Invisible to a person, and the server ignores it entirely if it never arrives, so an
+            old cached copy of this page still signs in fine. See lib/botCheck.ts. */}
+        <BotTrap />
       </form>
     </main>
   );

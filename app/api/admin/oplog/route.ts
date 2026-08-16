@@ -7,6 +7,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 // Plain words for the console; the database's own words stay in the body + the log.
 import { adminFail } from "@/lib/adminFail";
 import { redactMoney } from "@/lib/oplog";
+import { safeSearch } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 
@@ -58,7 +59,10 @@ export async function GET(req: NextRequest) {
   if (since) q = q.gte("created_at", since);
   if (qText) {
     // Escape the PostgREST or-filter meta-characters (%,) so a search term can't break the filter.
-    const safe = qText.replace(/[%,()]/g, " ");
+    // The shared cleaner (lib/searchText.ts), not a local strip: the local one missed `*`, which
+    // PostgREST reads as a wildcard, so typing it matched EVERY row. That is the exact bug the
+    // owner-side screens already fixed — the admin twins had kept the old copy (2026-08-16).
+    const safe = safeSearch(qText);
     q = q.or(`action.ilike.%${safe}%,detail.ilike.%${safe}%`);
   }
   const r = await q;

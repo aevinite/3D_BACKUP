@@ -182,6 +182,7 @@ Code: `app/aevinite/*`, `app/api/admin/*`, `lib/accessTree.ts`, `lib/staffCaps.t
 | `.claude/settings.json` or a permission rule | `verify:no-ask` | reads `~/.claude/CLAUDE.md` | no |
 | anything under `scripts/` or `tests/` | `verify:test-safety` ← our own tests must not trip the app's rate limits | nothing | no |
 | a file's line endings | `verify:ui` (check 14) | nothing | no |
+| `package.json` dependencies, or `package-lock.json` | `verify:deps` ← fails only on a **new** high/critical advisory; today's fifteen are acknowledged by name inside the script | **the npm registry** (skips, never fails, when offline) | no |
 | this map, or a new `verify:*` alias | `verify:pointers` — it fails if a guard has no row here | nothing | no |
 
 ---

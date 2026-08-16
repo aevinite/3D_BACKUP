@@ -44,6 +44,7 @@ import { sharedFloorSummary, invalidateFloor } from "@/lib/floorSummary";
 import { viewAsPerson, personLabel } from "@/lib/viewAsPerson";
 // What never leaves the server inside a settings row (the delivery apps' connection keys).
 import { panelSafeSettings } from "@/lib/panelSettings";
+import { safeSearch } from "@/lib/searchText";
 
 export const dynamic = "force-dynamic";
 
@@ -574,9 +575,9 @@ export async function GET(req: NextRequest, ctx: Ctx) {
       if (kperm === "on" || kperm === "pin" || kperm === "off") kmode = kperm;
       else kmode = String(((await sb.from("settings").select("tablet_khata").eq("restaurant_id", rid).maybeSingle()).data as Record<string, string> | null)?.tablet_khata || "off");
       if (kmode === "off" && g.user) return err("This isn't enabled for you — ask a manager.", 403);
-      const q = (new URL(req.url).searchParams.get("q") || "").trim().slice(0, 60);
+      const q = safeSearch(new URL(req.url).searchParams.get("q"), 60);
       let sel = sb.from("khata_customers").select("id,name,phone,note").eq("restaurant_id", rid).order("created_at", { ascending: false }).limit(8);
-      if (q) sel = sel.or(`name.ilike.%${q.replace(/[%,()]/g, "")}%,phone.ilike.%${q.replace(/[%,()]/g, "")}%`);
+      if (q) sel = sel.or(`name.ilike.%${q}%,phone.ilike.%${q}%`);
       return ok({ customers: must(await sel) });
     }
 
