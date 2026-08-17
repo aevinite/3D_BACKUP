@@ -116,6 +116,13 @@ has("undobar.js", /if \(leftMs <= 0\)/,
   "an undo card whose window expired while the screen slept is shown late again");
 has("undobar.js", /else if \(document\.hidden\) \{\s*\r?\n?\s*reveal\(\);/,
   "the undo card is back to waiting on requestAnimationFrame, which never runs on a sleeping tablet");
+// The undo card is the one on top (owner, 2026-08-17) AND the panel's toast still gets read: the
+// card keeps its place at the bottom and the toast steps up over it. Shipped from THIS file so all
+// four panels get it, instead of the same rule copied into three stylesheets and drifting.
+has("undobar.js", /body\.lfh-undobar-up \.toasts,body\.lfh-undobar-up \.toast\{/,
+  "the toast step-over rule is gone — on the kitchen and tablet a message is completely hidden behind the undo card");
+has("undobar.js", /var\(--lfh-undobar-h, 56px\)/,
+  "the step-over no longer uses the card's measured height, so it will overlap again as soon as the card is two lines tall");
 
 // ── issue-raise.js — every write has a ceiling, and a recording is not thrown away ─────────────
 has("issue-raise.js", /signal: uploadDeadline\(\)/,

@@ -72,6 +72,24 @@
       "#lfh-undobar .lfh-undo-btn:active{transform:scale(.96);}",
       "@media (prefers-reduced-motion:reduce){#lfh-undobar{transition:opacity .2s ease;",
       "transform:translateX(-50%) translateY(0);}}",
+      // ── THE UNDO CARD IS THE ONE ON TOP, AND THE MESSAGE STILL GETS READ ──────────────
+      // (owner, 2026-08-17: *"put undo on top of popup bcz it's imp"*.)
+      //
+      // MEASURED on the kitchen and waiter tablet at 360px: the panel's toast strip sits at
+      // `bottom: calc(16px + var(--sab))` — the IDENTICAL offset this card uses — and this card's
+      // z-index (2147483000) beats its 50, so the card was already the one in front. Good, that is
+      // what he wants. What it also meant is that a toast raised while the card is up was
+      // completely invisible: measured toastVisibleHeight 0. A message nobody can see is a message
+      // that was never sent, and "1 new order" is not a message to swallow.
+      //
+      // So the card keeps its place and its priority, and the TOAST steps up over it — using the
+      // body class and measured height this file already publishes. The manager panel has had this
+      // rule in its own stylesheet since 2026-08-05; the kitchen and tablet never got it. It lives
+      // HERE now rather than being copied into three stylesheets, so a fourth panel gets it free
+      // and the rule can never drift between them. Both class names are covered because the manager
+      // panel styles a single `.toast` while the other two use a `.toasts` strip.
+      "body.lfh-undobar-up .toasts,body.lfh-undobar-up .toast{",
+      "bottom:calc(16px + var(--sab, env(safe-area-inset-bottom, 0px)) + var(--lfh-undobar-h, 56px) + 8px);}",
     ].join("");
     var s = document.createElement("style");
     s.id = "lfh-undo-style";
