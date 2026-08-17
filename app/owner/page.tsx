@@ -1601,7 +1601,14 @@ export default function OwnerDashboard() {
             <div className="adm-card">
               <div className="ow2-ct">
                 <span>Recent activity <span className="mut">· who did what</span></span>
-                {ov?.entitlements?.activity !== false && <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>}
+                {/* `logs`, NOT `activity`. There has never been an `activity` key: the section is
+                    called "logs" in lib/ownerEntitlements OWNER_SECTION_KEYS, that is what the
+                    sidebar gates on and what /api/owner/oplog refuses on — measured live, the
+                    overview sends 33 keys and `activity` is not one of them, so this gate read
+                    `undefined !== false` and was ALWAYS true. An owner whose Audit & logs the
+                    admin had switched off was still offered this link into a page that refuses
+                    (T12 sweep, 2026-08-17). A key nobody sends is not a gate. */}
+                {ov?.entitlements?.logs !== false && <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>}
               </div>
               {!acts ? <div className="adm-empty">Loading…</div>
                 : acts.length === 0 ? <div className="adm-empty">Nothing yet.</div>
