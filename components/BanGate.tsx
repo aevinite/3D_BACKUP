@@ -33,7 +33,19 @@ export default function BanGate() {
   useEffect(() => {
     if (!ready) return; // the real restaurant id hasn't landed yet — don't ask about #1
     let alive = true;
+    // ONE ASK PER RETURN, NOT TWO. Coming back to a tab fires `visibilitychange` AND `focus`, and
+    // both were wired to the same handler — so every time a diner switched to WhatsApp and back,
+    // this made the ban check twice. It is a database round trip (the `lfh_check_ban` RPC), it runs
+    // on every guest menu page, and app-switching is what people do all through a meal, so the
+    // restaurant was paying for double the queries for nothing. `focus` is kept because on a
+    // desktop it fires on its own, when clicking back into the page never changes visibility.
+    //
+    // The window is deliberately short: the whole point of re-asking is that the wall lifts on the
+    // guest's next look the moment staff unblock them, and 2 seconds only ever collapses the two
+    // events of a single return.
+    let lastAsk = 0;
     const check = async () => {
+      lastAsk = Date.now();
       const r = await checkBan(restaurantId);
       if (!alive) return;
       if (r.ok !== false && r.banned) {
@@ -45,7 +57,7 @@ export default function BanGate() {
       }
     };
     check();
-    const onVis = () => { if (!document.hidden) check(); };
+    const onVis = () => { if (!document.hidden && Date.now() - lastAsk > 2000) check(); };
     document.addEventListener("visibilitychange", onVis);
     window.addEventListener("focus", onVis);
     return () => { alive = false; document.removeEventListener("visibilitychange", onVis); window.removeEventListener("focus", onVis); };

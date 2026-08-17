@@ -95,10 +95,11 @@ const GUARDS = [
 // launches a browser belongs with verify:busy and verify:cache — run it locally, or in a job that
 // installs browsers first.
 //
-//   verify:outbox      · saved work always finds its way out, in the order it was made
-//   verify:warm-shell  · a device's first visit leaves it able to open the app
+//   verify:outbox         · saved work always finds its way out, in the order it was made
+//   verify:warm-shell     · a device's first visit leaves it able to open the app
+//   verify:offline-retry  · the last-resort screen keeps ONE backing-off retry loop (T4, 2026-08-17)
 //
-// Both are in docs/GUARD-MAP.md with "app running"/browser noted, so they are still findable.
+// All three are in docs/GUARD-MAP.md with "app running"/browser noted, so they are still findable.
 
 const failed = [];
 const missing = [];
