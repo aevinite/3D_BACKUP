@@ -238,15 +238,59 @@ matches nothing the restaurant calls that table today.
 
 ---
 
-## 🟡 FOR THE OWNER — not built
+## ✅ ITEMS 11 AND 12 — the owner said "do both" (2026-08-17). The PAPER half is built.
 
-1. **A reprinted BILL is not marked as a reprint.** The KOT has carried a big DUPLICATE banner since
-   2026-08-04. The bill has nothing: a second copy is indistinguishable from the original. Product
-   decision (some restaurants want it, some consider it noise on a guest's copy), and it needs a
-   flag threaded from each panel's reprint path — other terminals' files.
-2. **The signature/chain reference (mig 332) is not printed on the bill.** Germany's KassenSichV
-   prints it on the receipt; that is what makes the chain checkable by whoever holds the paper. It
-   would need a migration to expose the hash to the panels, so it is out of scope for this sweep.
+Both now exist in the document, which is the half that decides what comes out of the printer and
+the half that lives in my territory. Neither can light up until the data reaches the panels, and
+that data lives in three other terminals' files — written as handoffs 3 and 4 below.
+
+### I3 — a reprinted BILL carries the Reprint · Duplicate band (built)
+`billDocHtml` takes `reprint`, exactly as the kitchen ticket has since 2026-08-04, and draws the
+same double-bordered band above the document's name. `billData` accepts `reprint` too, so a panel's
+change is one word. A first print is **byte-identical** to what shipped (verified) — a sheet marked
+DUPLICATE that is really the original would be a lie on paper. A bill both cancelled and reprinted
+shows both bands, cancellation first. Still fits the 80mm roll (283px of 302px).
+
+### I4 — the verification line (built)
+`billDocHtml` takes `chainSeq` + `chainHash` and prints `Verification 1042 · a3f9c1d2e4b5` under the
+totals — the bill's position in the mig 332 chain and the first 12 characters of its hash. Twelve
+identifies one bill out of a restaurant's whole history and fits 66mm; the full value stays in the
+ledger, which is where a verification reads it anyway. Prints **only** when both parts arrive, so
+every bill printed today is unchanged, and never on a cancelled sheet. `billData` reads them
+straight off the session row (`sess.chain_seq` / `sess.chain_hash`), so **the panels need no change
+at all** for this one — only the API has to send the columns.
+
+Both are pinned by `verify-billdoc-paper.mjs` (handoff 1), in both directions.
+
+## 🔗 HANDOFF 3 → T5 (`public/panels/editor/app.js`) and T7 (`public/panels/tablet/app.js`)
+
+**Pass `reprint` when the bill has been printed before.** The manager's `printBill(t, sess, os, opts)`
+already carries an `opts` object, so the change is one property on the existing `billData({...})`
+call in each panel:
+
+```js
+LFH_BILLDOC.billData({ …, reprint: <this bill has been printed before> })
+```
+
+**Where the answer comes from is the real decision, and it needs handoff 4's column.** A panel-local
+"printed this session" set is wrong for the case that matters most — the manager prints, the guest
+asks for another copy, and a WAITER reprints it from the tablet. That second device has no idea, so
+it would print an unbranded duplicate, which is worse than not shipping the band at all. Wait for
+`sessions.bill_printed_at`, then it is simply `!!sess.bill_printed_at` at both call sites.
+
+## 🔗 HANDOFF 4 → T23 (`supabase/migrations/`, 231→newest) + the editor/tablet API route
+
+Two small pieces, both with a precedent already in the repo:
+
+1. **`sessions.bill_printed_at timestamptz`** — mirror migration **256**, which added exactly this
+   `printed_at` column to `aggregator_orders` for parcel receipts, and the route already stamps it
+   idempotently (`if (owns.printed_at) return ok(...)`). Stamp it on the first successful bill print;
+   never overwrite. That single column makes handoff 3 correct across devices.
+2. **Expose the chain reference on the session read.** `bill_chain` is RLS-locked with no policy —
+   service role only, deliberately — so this must be a scoped read on the server, not a client
+   query: return `seq` and `chain_hash` for that session alongside `bill_no`/`invoice_no` in the
+   sessions select the panels already fetch, named `chain_seq` and `chain_hash`. The document and
+   `billData` are already wired; nothing else has to change for the verification line to appear.
 
 ---
 

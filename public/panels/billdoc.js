@@ -428,8 +428,20 @@
 + (d.logo ? '<img class="logo" src="' + esc(d.logo) + '" onerror="this.style.display=\'none\'"/>' : "")
 + "\n<h2>" + name + "</h2>\n"
 + '<div class="sub">' + (addr ? addr + "<br/>" : "") + (phone ? "Ph " + phone : "") + (phone && gstin ? "<br/>" : "") + (gstin ? "GSTIN " + gstin : "") + "</div>\n"
-// A cancelled bill says so, in a band nobody can miss, and is NOT called a tax invoice.
+/* A SECOND COPY OF A BILL SAYS SO (owner, 2026-08-17: "do both 11 and 12").
+   The KITCHEN TICKET has carried a big DUPLICATE banner since 2026-08-04 — the owner's own ask, so
+   a cook can never mistake a reprint for a fresh order. The BILL had nothing, so a re-issued copy
+   was indistinguishable from the original: two identical sheets for one sale, and no way for the
+   person holding either to tell which is which. That is the one gap left where this product's paper
+   can mislead someone, on the document that carries the money.
+   Same flag name and same band as everywhere else (`.vband`, the double border the cancelled sheet
+   uses), so all three documents brand a duplicate identically. A first print is never branded — a
+   sheet marked DUPLICATE that is actually the original would be a lie on paper, which is the same
+   reasoning that keeps `reprint` off a fresh KOT.
+   A cancelled bill that is ALSO reprinted shows both bands: both statements are true, and the
+   cancellation is the one that goes first because it is the one that changes what is owed. */
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
++ (d.reprint ? '<div class="vband">Reprint · Duplicate</div>\n' : "")
 + '<div class="kind">' + docName + "</div>\n"
 + (d.invNo ? '<div class="kv"><span>Invoice</span><b>' + esc(d.invNo) + "</b></div>" : "") + "\n"
 + (d.billNo !== "" && d.billNo != null ? '<div class="kv"><span>Bill no</span><b>#' + esc(d.billNo) + "</b></div>" : "") + "\n"
@@ -467,6 +479,24 @@
 // sheet, which charges nothing and says so in its own band.
 + ((composition && !d.cancelled)
    ? '<div class="mini" style="border-top:1px solid #000;margin-top:6px;padding-top:5px">Composition taxable person — not eligible to collect tax on supplies.</div>\n'
+   : "")
+/* THE VERIFICATION LINE — the signed chain, on the paper (owner, 2026-08-17).
+   Migration 332 writes one hash-chained row the moment a bill becomes a tax document, so a removed
+   or altered sale is DETECTABLE rather than merely forbidden. Until now that proof lived only in
+   the database: the person holding the receipt had to take the software's word for it. Germany's
+   KassenSichV settled this the same way — the signature is printed ON the receipt, which is what
+   makes it checkable by whoever holds it rather than only by whoever owns the server.
+   So: the bill's position in that chain and the first 12 characters of its hash. Twelve is enough
+   to pick one bill out of a restaurant's whole history and short enough for a 66mm roll; the full
+   value stays in the ledger, which is where a real verification reads it from anyway.
+   Formatted HERE, not at the call sites, for the reason this whole file exists — the manager panel,
+   the waiter tablet and the admin preview must print the same reference for the same bill.
+   Renders NOTHING unless the caller supplies both parts, so every bill printed today is unchanged,
+   and never on a cancelled sheet (that sale was withdrawn; its chain row records the issue, and the
+   band across the top is what the paper is for). */
++ ((!d.cancelled && d.chainSeq != null && d.chainHash)
+   ? '<div class="mini" style="margin-top:6px">Verification ' + esc(String(d.chainSeq)) + " · "
+     + esc(String(d.chainHash).slice(0, 12)) + "</div>\n"
    : "")
 + '<div class="foot">' + footer + "</div>\n"
 + (d.noBar ? "" : pageScript(d.autoPrint));
@@ -1115,6 +1145,16 @@
       invNo: sess.invoice_no == null ? ""
         : invFmt(sess.invoice_no, sess.invoice_at, bi.prefix) + (voidedAll ? " — voided" : ""),
       billNo: sess.bill_no != null ? sess.bill_no : "",
+      // A SECOND COPY SAYS SO. The panel is the only thing that knows whether this sheet has been
+      // printed before, so it passes the flag; assembling it here keeps the panels' change to one
+      // word and keeps the decision about what a duplicate LOOKS like in the document, with the
+      // ticket's identical band.
+      reprint: !!a.reprint,
+      // The signed chain (mig 332), straight off the session row when the server sends it. Absent
+      // today on every caller, so nothing prints until the columns are exposed — and then every
+      // panel gets the verification line at once, with no second format to keep in step.
+      chainSeq: sess.chain_seq != null ? sess.chain_seq : undefined,
+      chainHash: sess.chain_hash || undefined,
       parcel: !!a.parcel,
       tableDisp: a.tableDisp || "—",
       // en-IN + Asia/Kolkata, NOT the printing device's locale. This is a document headed "Tax

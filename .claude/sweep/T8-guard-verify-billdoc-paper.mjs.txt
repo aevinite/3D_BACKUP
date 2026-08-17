@@ -164,6 +164,57 @@ for (const [what, ts] of INSTANTS) {
   }
 }
 
+// ── 3c. A SECOND COPY SAYS SO, AND A FIRST COPY NEVER DOES ────────────────────────────────────
+// The kitchen ticket has branded reprints since 2026-08-04; the bill gained the same band on
+// 2026-08-17. A first print marked DUPLICATE would be a lie on paper, which is the failure mode
+// that matters — so both directions are pinned.
+{
+  const S = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
+  const os = [{ status: "served", subtotal: 620, taxable_base: 620, nontax_amount: 0, discount: 0, tax_rate: 0.05,
+    items: [{ title: "A", qty: 2, price: 310, tax_mode: "excl" }] }];
+  const mk = (a) => BILLDOC.billDocHtml(BILLDOC.billData({ settings: S, restaurant: {}, orders: os, session: { bill_no: 41 }, autoPrint: false, ...a }));
+  const bands = (h) => [...h.matchAll(/<div class="vband">([^<]*)</g)].map((m) => m[1]);
+  bands(mk({})).length === 0
+    ? ok("a first print of a bill carries no duplicate band")
+    : bad("a FIRST print is branded a duplicate", "a sheet marked DUPLICATE that is really the original is a lie on paper");
+  /Reprint/i.test(bands(mk({ reprint: true }))[0] || "")
+    ? ok("a reprinted bill carries the Reprint · Duplicate band")
+    : bad("a reprinted bill is indistinguishable from the original", "pass reprint:true — the ticket has had this since 2026-08-04");
+  bands(mk({ reprint: true })).length === 1 && mk({ reprint: true }).indexOf('class="vband"') < mk({ reprint: true }).indexOf('class="kind"')
+    ? ok("  …at the top, above the document's name")
+    : bad("the bill's duplicate band is not at the top", "it has to be the first thing read");
+  // and the KOT's own banner still works, both ways
+  /class="rp"/.test(BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [], reprint: true }))
+    && !/class="rp"/.test(BILLDOC.kotDocHtml({ rname: "R", kot: 1, lines: [] }))
+    ? ok("the kitchen ticket still brands a reprint, and only a reprint")
+    : bad("the ticket's duplicate banner regressed", "one flag, three documents");
+}
+
+// ── 3d. THE VERIFICATION LINE (mig 332) ───────────────────────────────────────────────────────
+// The signed chain is only checkable by whoever holds the paper if it is ON the paper. It prints
+// only when the caller supplies BOTH parts, so a bill printed before the columns are exposed is
+// unchanged — and never on a cancelled sheet, whose sale was withdrawn.
+{
+  const S = { tax_components: [{ label: "CGST", rate: 2.5 }, { label: "SGST", rate: 2.5 }] };
+  const line = { status: "served", subtotal: 100, taxable_base: 100, nontax_amount: 0, discount: 0, tax_rate: 0.05,
+    items: [{ title: "A", qty: 1, price: 100, tax_mode: "excl" }] };
+  const mk = (sess, extra) => BILLDOC.billDocHtml(BILLDOC.billData({ settings: S, restaurant: {}, orders: [{ ...line, ...(extra || {}) }], session: sess, autoPrint: false }));
+  const ver = (h) => (h.match(/Verification ([^<]*)/) || [])[1] || "";
+  !ver(mk({ bill_no: 1 }))
+    ? ok("a bill with no chain row prints no verification line (every bill today)")
+    : bad("a verification line printed with nothing to verify", "both parts must be supplied or the line stays off");
+  !ver(mk({ bill_no: 1, chain_seq: 7 })) && !ver(mk({ bill_no: 1, chain_hash: "abc" }))
+    ? ok("  …and half a reference prints nothing either")
+    : bad("half a chain reference reached the paper", "a partial reference cannot be checked and must not print");
+  ver(mk({ bill_no: 1, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" })) === "1042 · a3f9c1d2e4b5"
+    ? ok("a chained bill prints its sequence and the first 12 characters of its hash")
+    : bad(`the verification line reads "${ver(mk({ bill_no: 1, chain_seq: 1042, chain_hash: "a3f9c1d2e4b56789abcdef" }))}"`,
+      "one format, decided here, so every panel prints the same reference for the same bill");
+  !ver(mk({ bill_no: 1, chain_seq: 9, chain_hash: "deadbeefcafe0000" }, { status: "cancelled" }))
+    ? ok("  …and a cancelled sheet carries none")
+    : bad("a cancelled bill printed a verification line", "that sale was withdrawn; the band across the top is the statement");
+}
+
 // ── 4. THE TYPES ARE THE ONE DESCRIPTION ──────────────────────────────────────────────────────
 // The .d.ts is what the Next server and the admin React screens see. A field the document branches
 // its whole identity on, missing from the type, means a TypeScript caller cannot render that

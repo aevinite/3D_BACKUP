@@ -82,6 +82,19 @@ export interface BillDocData {
    *  caller could not render this document at all — on the one flag the whole sheet's identity
    *  turns on. */
   cancelled?: boolean;
+  /** true = this is a SECOND copy of a bill already printed, so it carries the "Reprint ·
+   *  Duplicate" band across the top — the same band and the same flag name the kitchen ticket has
+   *  used since 2026-08-04, so all three documents brand a duplicate identically. A first print must
+   *  never set it: a sheet marked DUPLICATE that is really the original is a lie on paper.
+   *  A bill that is both cancelled AND reprinted shows both bands. */
+  reprint?: boolean;
+  /** The bill's position in the signed chain (mig 332) and its `chain_hash`. Supply BOTH or the
+   *  verification line does not print at all. The document takes the first 12 characters of the
+   *  hash — enough to identify one bill, short enough for a 66mm roll — and formats the line
+   *  itself, so every panel prints the same reference for the same bill.
+   *  Never printed on a cancelled sheet. */
+  chainSeq?: number | string;
+  chainHash?: string;
   /** true = leave OFF the screen-only toolbar and its script. For a bill shown as EVIDENCE (the Audit
    *  card renders it in a sandboxed iframe with no scripts), where the bar's Print and Close buttons
    *  would be dead controls sitting on the document. The paper is identical either way. */
@@ -211,6 +224,9 @@ export function billData(a: {
   tableDisp?: string;
   logo?: string;
   parcel?: boolean;
+  /** true = the panel has printed this bill before, so the sheet carries the Reprint · Duplicate
+   *  band. Only the panel knows this, which is why it is passed in rather than derived. */
+  reprint?: boolean;
   autoPrint?: boolean;
   now?: string | number | Date;
 }): BillDocData;

@@ -17,9 +17,10 @@ Measured 29px on a 360px phone. Tapping one of these rows puts a NAMED PERSON on
 mis-tap does not merely annoy — it bills the wrong customer. `min-height:44px` with the content
 centred, so a two-line name grows instead of being squeezed.
 
-## 🟡 NOT BUILT — they need a decision, a migration, or another terminal's files
+## ✅/🔗 1 and 2 — the owner said do both. The DOCUMENT half is built; the data plumbing is handed off
+(see `T8-findings.md` → I3, I4 and handoffs 3–4). The notes below are kept as the original reasoning.
 
-### 1. Mark a reprinted BILL as a reprint
+### 1. Mark a reprinted BILL as a reprint — ✅ PAPER BUILT 2026-08-17 (owner: "do both 11 and 12")
 The kitchen ticket has carried a big bordered DUPLICATE banner since 2026-08-04 (owner's own ask).
 The bill has nothing — a second copy is indistinguishable from the original. The document could
 carry it off a single `reprint` flag, exactly as the ticket does, but the flag has to be threaded
@@ -28,7 +29,7 @@ genuine product decision: a DUPLICATE band on a guest's copy is reassuring to so
 unwelcome noise to others. **If yes:** a re-issued bill can never be passed off as a first issue.
 **If no:** nothing breaks; the numbers already tie a reprint back to its original.
 
-### 2. Print the bill's chain reference (mig 332)
+### 2. Print the bill's chain reference (mig 332) — ✅ PAPER BUILT 2026-08-17 (owner: "do both 11 and 12")
 Germany's KassenSichV prints the signature on the receipt, which is what lets whoever holds the
 paper check it rather than take the software's word. The chain exists in the database; nothing
 exposes it to the panels. **If yes:** the compliance argument becomes checkable from the paper.
