@@ -49,7 +49,7 @@
   var mounted = null;      // the <button> in the top bar, once there is something to mount it in
   var sheet = null;
   var backOff = null;
-  var last = { menuOn: false, rows: [], onOpen: null };
+  var last = { menuOn: false, rows: [], allRows: [], onOpen: null };
   // WHICH ROWS HAVE BEEN SEEN — not "when did you last look".
   //
   // A timestamp was the obvious way and it is wrong here, because the most important row has no
@@ -86,9 +86,13 @@
   function isNew(r) { return !seen().has(rowKey(r)); }
   function markSeen() {
     try {
-      // Only what is on screen right now — a row that has been answered is gone, and remembering
-      // it forever would just make the list of remembered things outlive the things themselves.
-      var keys = last.rows.map(rowKey).slice(0, 200);
+      // Only what is waiting right now — a row that has been answered is gone, and remembering it
+      // forever would just make the list of remembered things outlive the things themselves.
+      // EVERY waiting row, not just the 50 that render: the badge counts them all now, so marking
+      // only the visible ones would leave it stuck on the remainder after the person had read the
+      // sheet — a badge that will not clear is one people stop reading. Bounded by the floor's own
+      // size, and 500 short keys is a few kilobytes.
+      var keys = last.allRows.map(rowKey).slice(0, 500);
       localStorage.setItem(SEEN_KEY, JSON.stringify(keys));
       seenSet = new Set(keys);   // we just wrote it — no need to read it back
     } catch (e) { forgetSeen(); }
@@ -193,8 +197,16 @@
     closeSheet();
   }
 
+  // THE NUMBER ON THE BELL IS THE TRUE NUMBER (owner, 2026-08-18).
+  //
+  // The list that RENDERS is capped at 50 so a floor that has got away from someone cannot build a
+  // sheet nobody can scroll — that cap stays, it is the right call. But the count was worked out from
+  // that same capped list, so with 60 tables waiting the badge said 50. A badge that under-states a
+  // backlog is a badge that under-states exactly when it matters most, and the fix costs nothing:
+  // counting is a pass over an array the panel has already built and handed us, with no DOM and no
+  // storage read per row (see seen()).
   function newCount() {
-    return last.rows.filter(isNew).length;
+    return last.allRows.filter(isNew).length;
   }
 
   function paintButton() {
@@ -279,16 +291,18 @@
    */
   function sync(next) {
     var menuOn = !!(next && next.menuOn);
+    // Newest first — a waiter reads the top of a list.
+    var all = (next && Array.isArray(next.rows) ? next.rows : []).slice()
+      .sort(function (a, b) { return (b.at || 0) - (a.at || 0); });
     last = {
       menuOn: menuOn,
-      rows: (next && Array.isArray(next.rows) ? next.rows : []).slice()
-        // Newest first — a waiter reads the top of a list.
-        .sort(function (a, b) { return (b.at || 0) - (a.at || 0); })
-        // A ceiling, so a floor that has got away from someone cannot build a list nobody can
-        // scroll. The count on the button is still the true one.
-        .slice(0, 50),
+      allRows: all,        // what the COUNT is worked out from — every waiting row
+      // …and a ceiling on what RENDERS, so a floor that has got away from someone cannot build a
+      // sheet nobody can scroll. The count on the button is the true one — see newCount().
+      rows: all.slice(0, 50),
       onOpen: (next && typeof next.onOpen === "function") ? next.onOpen : null,
     };
+    forgetSeen();        // the rows moved on; re-read the seen list once on the next pass
     // THE GUEST MENU IS OFF → THERE IS NO BELL. Not a zero, not a greyed button: gone.
     if (!menuOn) { unmount(); return; }
     paintButton();
