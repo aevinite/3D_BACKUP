@@ -64,6 +64,7 @@
     "verify:busy": "node scripts/verify-busy-server.mjs",
     "verify:outbox": "node scripts/verify-outbox-drain.mjs",
     "verify:order-retry": "node scripts/verify-order-retry.mjs",
+    "verify:guest-doors": "node scripts/verify-guest-doors.mjs",
     "load:ramp": "node scripts/load-ramp-orders.mjs",
     "verify:panel-cache": "node scripts/verify-panel-cache.mjs",
     "verify:panel-plumbing": "node scripts/verify-panel-plumbing.mjs",

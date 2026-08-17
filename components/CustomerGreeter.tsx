@@ -10,14 +10,23 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRestaurantId } from "@/lib/restaurant-context";
+import { useRestaurantMeta } from "@/lib/restaurant-context";
 import { greetDevice } from "@/lib/session";
 
 export default function CustomerGreeter() {
-  const restaurantId = useRestaurantId();
+  // `ready`, not just the id (sweep 6 T3). The id starts at restaurant #1's placeholder and only
+  // becomes the real one once the slug resolves — which is exactly why `ready` exists, and why
+  // its own note says "anything that makes a network call keyed on the restaurant should wait for
+  // this". This is a network call keyed on the restaurant, and it wasn't waiting.
+  //
+  // The 1.8-second delay below hid it most of the time: the resolve usually beats it and the
+  // cleanup cancels the earlier timer. On a slow first load it does not, and then a diner sitting
+  // in restaurant B is greeted BY NAME off restaurant A's customer record — one restaurant's
+  // customer showing up on another's menu, which is the plainest white-label leak there is.
+  const { id: restaurantId, ready } = useRestaurantMeta();
 
   useEffect(() => {
-    if (!restaurantId) return;
+    if (!restaurantId || !ready) return;
     const key = `lfh_greeted_${restaurantId}`;
     try { if (sessionStorage.getItem(key)) return; } catch { /* private mode */ }
 
@@ -44,7 +53,7 @@ export default function CustomerGreeter() {
     }, 1800);
 
     return () => { cancelled = true; window.clearTimeout(t); };
-  }, [restaurantId]);
+  }, [restaurantId, ready]);
 
   return null;
 }

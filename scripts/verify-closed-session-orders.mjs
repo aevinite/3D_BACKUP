@@ -30,6 +30,12 @@ import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+// THE DEV-STACK REFUSAL THIS FILE ALREADY CALLS BUT NEVER IMPORTED (sweep 6 T3, 2026-08-17).
+// `refuseUnlessDevTestDb(SB, …)` sits on line ~60 and the import was missing, so the whole guard
+// died with a ReferenceError before running a single check — on origin/main, not from any change
+// here. A guard that crashes on startup is a guard nobody is running: `npm run verify:closed-session`
+// looked like it existed and proved nothing. One line, and it goes back to doing its job.
+import { refuseUnlessDevTestDb } from "./sweep/devStacks.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const env = {};
