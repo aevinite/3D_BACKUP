@@ -46,7 +46,18 @@ export default function OwnerCustomers() {
   const filt = useRef({ search, rid, seg, sort }); filt.current = { search, rid, seg, sort };
   const searchRef = useRef(search); searchRef.current = search;
 
-  const load = useCallback(async () => {
+  // ── REFRESH HAS TO MEAN REFRESH (sweep 6 · T14, 2026-08-18) ─────────────────────────────────────
+  // The four tiles are AGGREGATES and ride the compute-on-view snapshot cache, whose change-detector
+  // is `MAX(last_seen_at)` over `customers` (mig 229). That detector cannot see a guest being ADDED
+  // with an older date or being ERASED — the maximum does not move — so the cache says "nothing
+  // changed", bumps its timestamp and serves the OLD counts. Measured on 2026-08-18: the list showed
+  // 24 guests while "Total customers" still read 23, and it stayed 23.
+  // The route has always accepted `?refresh=1` to recompute live (the standing rule is "Refresh
+  // forces live"), and this page was the one owner screen that never sent it — its Refresh button
+  // re-read the LIST and left the tiles exactly as stale as before. Now `load(true)` forces the
+  // recount, which is what the button says it does, and an erase forces one too so the guest the
+  // owner just removed stops being counted.
+  const load = useCallback(async (force?: boolean) => {
     try {
       const { search: sv, rid: rv, seg: gv, sort: sov } = filt.current;
       const s = sv.trim();
@@ -56,6 +67,7 @@ export default function OwnerCustomers() {
         rv ? `restaurant_id=${rv}` : "",
         gv !== "all" ? `seg=${gv}` : "",
         sov !== "last_seen_at" ? `sort=${sov}` : "",
+        force ? "refresh=1" : "",
       ].filter(Boolean).join("&");
       const j = await (await fetch(`/api/owner/customers${qs ? `?${qs}` : ""}`, { cache: "no-store" })).json();
       if (j.disabled) { setDisabled(true); return; }
@@ -111,9 +123,13 @@ export default function OwnerCustomers() {
       const j = await r.json();
       if (!r.ok || j.error) throw new Error(j.error || "Couldn't erase.");
       setCustomers((prev) => (prev || []).filter((x) => !(x.restaurant_id === c.restaurant_id && x.phone === c.phone)));
+      // …and recount, LIVE. Without this the guest disappears from the list while "Total customers"
+      // keeps counting them — see the note on `load` above for why the snapshot cannot notice a
+      // deletion on its own.
+      await load(true);
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setErasing(null); }
-  }, []);
+  }, [load]);
 
   // One guest's record: their bills here, what they've spent, and the lifetime figures.
   // Money is fine on the OWNER's page — these are their own takings. Escape closes it.
@@ -176,7 +192,8 @@ export default function OwnerCustomers() {
                 <button role="tab" aria-selected={sort === "last_seen_at"} className={sort === "last_seen_at" ? "on" : ""} onClick={() => setSort("last_seen_at")}>Recent</button>
                 <button role="tab" aria-selected={sort === "visits"} className={sort === "visits" ? "on" : ""} onClick={() => setSort("visits")}>Most visits</button>
               </div>
-              <button className="adm-btn" onClick={() => load()}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
+              {/* Refresh means "count them again now", not "re-read the same snapshot". */}
+              <button className="adm-btn" onClick={() => load(true)}><i className="fas fa-rotate" aria-hidden="true" /> Refresh</button>
             </div>
 
             {err && (
