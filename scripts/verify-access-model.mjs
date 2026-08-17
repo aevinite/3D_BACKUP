@@ -682,6 +682,41 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("a refused permission change is described in the words the screen uses (on / off / manager PIN)");
 }
 
+// ── 21 · THE SCREEN MUST NOT OFFER A PERMISSION THE OWNER DELETED (R27) ─────
+// THE BUG THIS EXISTS TO KILL (sweep T15, 2026-08-18). "Delete a bill" left the manager's money
+// list on 2026-08-16 (docs/REJECTED-IDEAS.md R27 — cancel is the only route out of a bill for
+// anyone at the restaurant). The ROW went; the WORDS around it did not. "Permission for manager"
+// still told the admin, in its own description, that the group holds "delete a bill", and the Bills
+// row still said "Reopen, delete and discount keep their own rows above". So the one screen that
+// decides what a manager may do advertised a power the product refuses on compliance grounds —
+// and every check in this file passed, because they all ask about SWITCHES and none reads the
+// prose beside them.
+//
+// A sentence is allowed to say the thing does NOT exist; that is the correction. It may not list
+// it as something a role can be given.
+{
+  const bad = [];
+  for (const n of ALL_NODES) {
+    if (n.bind?.t === "grant" && n.bind.flag === "delete_bill") bad.push(`a row (${n.id}) offers the delete_bill grant`);
+    if (/^\s*delete (a|the) bill\s*$/i.test(n.name || "")) bad.push(`a row (${n.id}) is named "${n.name}"`);
+    // PER OCCURRENCE, not per string: a sentence that both denies the power AND lists it would
+    // otherwise pass on the strength of the denial. Only the 60 characters immediately BEFORE each
+    // mention decide whether that mention is a prohibition or an offer.
+    const text = `${n.name || ""} ${n.what || ""}`;
+    for (const m of text.matchAll(/delete (a|the) bill/gi)) {
+      const before = text.slice(Math.max(0, m.index - 60), m.index);
+      if (!/\b(no|not|never|cannot|can't|without|refuses|gone|nobody)\b/i.test(before))
+        bad.push(`"${n.name}" lists deleting a bill as something a role may be given — R27 says nobody at the restaurant may`);
+    }
+  }
+  const doc = read("docs/ACCESS-MODEL.md");
+  const bLine = (doc.match(/\n2\. \*\*Permission for manager\*\*[\s\S]{0,300}/) || [""])[0];
+  if (/`Delete a bill`\s*·/.test(bLine))
+    bad.push("docs/ACCESS-MODEL.md still lists `Delete a bill` as a live Permission-for-manager row");
+  if (bad.length) fail(`the access model still offers "delete a bill" (docs/REJECTED-IDEAS.md R27): ${bad.join("; ")}`);
+  else ok("nothing on the Access screen offers a manager the power to delete a bill (R27)");
+}
+
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);

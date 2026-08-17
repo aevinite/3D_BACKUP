@@ -684,8 +684,10 @@ export const SECTIONS: Section[] = [
     //      ("four will be the fixed one"): every manager always has them, so they have NO row
     //      here at all (the model's rule: no row = permanently on). Their old switches are
     //      retired — see MANAGER_TAB_KEYS below.
-    //   2. PERMISSION FOR MANAGER — Delete a bill, Reopen a bill (with its minutes window,
-    //      default 5 min), Discount a bill (with its percentage cap, default 50%).
+    //      (His 2026-08-02 list opened with "delete bill"; that row was deleted on 2026-08-16 —
+    //      docs/REJECTED-IDEAS.md → R27 — so the two below are the whole list.)
+    //   2. PERMISSION FOR MANAGER — Reopen a bill (with its minutes window, default 5 min) and
+    //      Discount a bill (with its percentage cap, default 50%).
     //   3. MANAGER SETTINGS ("what manager can do") — only the sections a real manager can
     //      genuinely use: table name & seats, Users (create / reset / disable — never delete),
     //      and who serves which table. The billing / kitchen / sessions rows were removed:
@@ -771,8 +773,14 @@ export const SECTIONS: Section[] = [
         // there will be the percentage"). His defaults for every restaurant: reopen within
         // 5 minutes, discount up to 50% — set as the model defaults (defOf), so a restaurant
         // that never stored a value reads exactly that.
+        // REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R27. This sentence used to open
+        // "…: delete a bill, reopen a bill…", left over from his 2026-08-02 wording, and it stayed
+        // on screen for two days after the row itself was deleted on 2026-08-16. The ⓘ of the one
+        // group that decides a manager's money powers was telling the admin that bill DELETION is
+        // a permission they can hand over, when cancel is the only route out of a bill for anyone
+        // at the restaurant and no such row will ever exist again. Do not put it back.
         id: "mgr_may", name: "Permission for manager", bind: { t: "none" },
-        what: "The money actions, for every manager in this restaurant: delete a bill, reopen a bill (and for how long), discount a bill (and up to how much). One person can still be given more or less on the Per-person tab — this is the starting point they all inherit.",
+        what: "The money actions, for every manager in this restaurant: reopen a bill (and for how long), and discount a bill (and up to how much). There is no permission to DELETE a bill and there will not be one — a bill is cancelled, with a reason, and stays in the records. One person can still be given more or less on the Per-person tab; this is the starting point they all inherit.",
         children: [
           ...ACTIONS.map(mgrAction),
           {
@@ -786,7 +794,9 @@ export const SECTIONS: Section[] = [
             // it. The free pick-any-date search left the panel with this: a date field wider
             // than the reach would be a control promising days the server refuses.
             id: "mgr_bills", name: "Bills", bind: { t: "none" },
-            what: "The Bills tab is fixed — every manager always has it. This decides how far back its record of settled bills reaches. Reopen, delete and discount keep their own rows above.",
+            // REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R27. "Reopen, delete and
+            // discount keep their own rows above" named a row that no longer exists; there are two.
+            what: "The Bills tab is fixed — every manager always has it. This decides how far back its record of settled bills reaches. Reopening and discounting keep their own rows above.",
             children: [
               { id: "mgr_bills_range", name: "Which bills they can see", def: "today", bind: { t: "opt", id: "view_bills", side: "manager", key: "range" },
                 what: "Every restaurant starts on TODAY — the bills of the shift they are standing in. Today + yesterday is handed over deliberately, because yesterday's bills say what a shift took.",
