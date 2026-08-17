@@ -323,7 +323,50 @@ async function catchUpPoll() {
   ok("it does nothing at all while the socket is live", `${d2.length} timer(s) armed, 0 reads`);
 }
 
-const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll];
+// ── H · THE T5 SWEEP'S FIXES (2026-08-17) ─────────────────────────────────────────────────────
+// Four of them are decisions taken while building a screen, so there is no function to call —
+// what can be checked is that the SHIPPED source still makes the decision, at the point it is
+// made. Each one is written against the exact line, and each says which live failure it prevents.
+// (The fifth, "a helper must be visible to its caller", is its own guard: verify:panel-scope.)
+async function t5Fixes() {
+  console.log("\nH · the T5 sweep's fixes — are they still in the shipped panel?");
+  const app = src("public/panels/editor/app.js");
+  const css = src("public/panels/editor/style.css");
+
+  // H1 · a table whose every ticket was voided is not a bill. Offering 🖨 Print bill there issues
+  // a tax-invoice number for a sale that never happened (mig 331 refuses it — so the tap was
+  // offered and then refused, which is the failure the bill modal was fixed for on 2026-08-16).
+  /const billableOs = os\.filter\(\(o\) => o\.status !== "cancelled"\);/.test(app)
+    ? ok("the table detail knows which of its orders are billable") : bad("billableOs is gone from tablePanelParts");
+  /const printBtn = !billableOs\.length \? "" :/.test(app)
+    ? ok("…and Print bill is only offered when one of them is") : bad("Print bill is back to counting cancelled tickets");
+  /const splitBtn = billableOs\.length && splitBillOn\(\)/.test(app)
+    ? ok("…and so is 🍴 Split") : bad("Split is back to counting cancelled tickets");
+  // …and the heading counts what is drawn, not what exists: "Orders · 6" over an empty box reads
+  // as a screen that failed to load.
+  /Orders <span class="sub">· \$\{shownN\}<\/span>/.test(app)
+    ? ok("the Orders heading counts the tickets actually listed") : bad("the Orders heading counts cancelled tickets again");
+
+  // H2 · the top-bar 🔔 is part of the floor, so the INCREMENTAL path has to refresh it too —
+  // that is the path every realtime breadcrumb takes.
+  const patch = lift("public/panels/editor/app.js", "function patchFloorTiles(tables) {", "return true;\n}", "patchFloorTiles");
+  /setTimeout\(syncGuestBell, 0\);/.test(patch)
+    ? ok("a patched floor still refreshes the guest bell") : bad("patchFloorTiles no longer syncs the bell — the count goes stale for up to 60s");
+
+  // H3 · the discount % chips obey the person's own %-limit, like the two boxes beside them.
+  const chip = lift("public/panels/editor/app.js", 'wrap.querySelectorAll(".disc-pct-pick")', "}));", "discount chips");
+  /clamp\(want, 0, maxDisc\)/.test(chip) && /refuse\(capLine\(\)\)/.test(chip)
+    ? ok("a discount chip clamps to the person's cap and says so") : bad("the chips set a figure the server will refuse");
+
+  // H4 · the floor's primary action keeps a WORD at the shipped default (12 per row on a 1280px
+  // laptop = a ~73px container). The rung that drops the label must sit BELOW that.
+  const rung = /@container \(max-width: (\d+)px\) \{[^}]*\.ftile \.ft-take-s \{ display: none; \}/s.exec(css);
+  rung && Number(rung[1]) <= 70
+    ? ok("the ＋-only rung sits below the shipped default's tile", `${rung[1]}px`)
+    : bad("the take-order label is dropped at the width a 1280px laptop actually renders", rung ? rung[1] + "px" : "rung not found");
+}
+
+const groups = [floorRace, wrapper, dateWindow, parcelDay, tipClamp, owedMath, catchUpPoll, t5Fixes];
 console.log("T3 FIX BEHAVIOUR CHECK — does the sweep's work actually work?");
 for (const g of groups) {
   try { await g(); }

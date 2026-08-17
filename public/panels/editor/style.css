@@ -1965,10 +1965,24 @@ html[data-theme="light"] .ft-ico-bill { background: linear-gradient(#ffffff, #f1
    ✓ Close all live in full size. */
 @container (max-width: 76px) {
   .ftile.ft-finished .ft-ico-bill { display: none; }  /* keep ✕ close + ＋, the two that matter here */
-  /* Below here not even "Order" fits, so the ＋ is the fallback — a button with neither would be
-     an empty box. This is the rung that used to start at 88px. Written at the SAME depth as the
-     `:has(.ft-ico-bill)` suppression above so source order decides and the ＋ genuinely comes back;
-     a bare `.ft-take-x` here lost to it and left the button empty. */
+  .ftile.ft-finished .ft-take-x { display: inline; }
+}
+/* ⚠️ RE-MEASURED AGAIN 2026-08-17 (T5 sweep) — this rung used to start at 76px and it had eaten
+   the word back. The T3 fix above was measured against a floor that filled the whole window; the
+   DESKTOP RAIL landed on 2026-08-15 (owner: the sections moved out of the top bar and down the
+   left side) and takes ~64px of that width away. So the shipped default — 12 per row on a 1280px
+   laptop — is now an 89px tile with a ~73px container, which fell straight through 76 and put the
+   floor's primary action back to a bare ＋, the exact state the T3 note calls "the opposite of
+   this tile's own stated rule" and quotes the owner against twice.
+   Measured room for the label at a 73px container: 73 − 22 (the bill glyph) − 4 (gap) − 10 (the
+   button's own padding) = ~37px, against ~27px for "Order" at 9.5px bold — it fits with room to
+   spare, and verify:manager-behaviour now asserts the word is there and un-clipped at 1280.
+   Below 66px it genuinely does not, so the ＋ is still the fallback beneath this line. */
+@container (max-width: 66px) {
+  /* Not even "Order" fits, so the ＋ is the fallback — a button with neither would be an empty
+     box. Written at the SAME depth as the `:has(.ft-ico-bill)` suppression further up so source
+     order decides and the ＋ genuinely comes back; a bare `.ft-take-x` here lost to it and left
+     the button empty. */
   .ftile .ft-take-s { display: none; }
   .ftile:has(.ft-ico-bill) .ft-take-x { display: inline; }
   .ftile .ft-take-x { display: inline; }
