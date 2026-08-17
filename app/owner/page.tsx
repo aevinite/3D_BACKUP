@@ -771,7 +771,14 @@ export default function OwnerDashboard() {
     for (const r of neededRanges) fetchPayload(scopeKey, r);
     fetchPayload(scopeKey, "month", { qs: "range=month" });
     fetchMoney(scopeKey, globalRange);
-  }, [loadOverview, fetchPayload, fetchMoney, neededRanges, scopeKey, globalRange]);
+    // …AND THE ACTIVITY FEED (T12 sweep, 2026-08-17). It was left out, so the card headed
+    // "Recent activity · who did what" was frozen at whatever the page loaded with while every
+    // other card on the screen stayed 60 seconds fresh. Measured over ~88s of an active tab:
+    // analytics went 3 → 5 requests, oplog stayed at 1. Manual Refresh already re-fetched it,
+    // which is what says the omission was an oversight rather than a decision. Six rows with a
+    // column list and a hard limit is the cheapest read on this page.
+    if (activeRid) fetchActs(activeRid);
+  }, [loadOverview, fetchPayload, fetchMoney, fetchActs, activeRid, neededRanges, scopeKey, globalRange]);
   const tickRef = useRef(tick); tickRef.current = tick;
   useActiveAutoRefresh(() => tickRef.current(), 60000);
 
