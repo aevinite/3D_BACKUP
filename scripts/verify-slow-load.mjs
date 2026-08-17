@@ -93,6 +93,18 @@ try {
   await page.waitForSelector("#view-3d-btn", { timeout: 20000 });
   const dishTitle = (await page.textContent(".detail-title"))?.trim() || "";
   log(`  using ${target}  ·  "${dishTitle}"`);
+
+  // WARM THE /view ROUTE BEFORE ANYTHING IS TIMED. A dev server compiles a route on its first
+  // request, and that compile lands squarely inside Phase B's window — so a cold server made this
+  // guard report "the patience overlay never arrived", which is a product fault it did not find.
+  // Caught by running it immediately after a server restart (sweep #6 T2, 2026-08-17). One throwaway
+  // visit in the discovery context costs a second and removes the false alarm; against a deployed
+  // origin it is a no-op. A guard that cries wolf is a guard people stop reading — the whole reason
+  // this file was rebuilt.
+  await page.click("#view-3d-btn").catch(() => {});
+  await page.waitForURL(/\/view\//, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  log("  /view is compiled and warm");
   await discoverCtx.close();
 
   // ── the slow 3D screen, in a tab that holds no model yet ────────────────────────────────────
