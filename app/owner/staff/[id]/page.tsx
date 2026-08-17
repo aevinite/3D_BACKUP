@@ -29,9 +29,25 @@ export default function OwnerPersonPage() {
   const rid = sp.get("rid");
   const as = sp.get("as");
   const host = useMemo(() => ownerProfileHost(id, rid, as), [id, rid, as]);
+  // BOTH PINS COME BACK, NOT JUST ONE (T13 sweep, 2026-08-17 — watched happen).
+  //
+  // This route already reads `as` above, and the roster's link out to it was fixed to CARRY `as` in
+  // the T19 sweep (2026-08-14, see the long note in app/owner/staff/page.tsx → withRid). The way
+  // BACK still built its URL from `rid` alone, so the pin survived the trip out and was thrown away
+  // on the trip home: an Aevidine tab opened for a restaurant's SECOND owner
+  // (/owner?rid=R&as=<ownerId>) landed on /owner/staff?rid=R after closing a person, and the roster
+  // — which resolves the owner from `as` — silently switched to the PRIMARY owner's estate. Same
+  // tab, same task, a different person's team, with nothing on screen saying so.
+  // Measured before the fix: closing from `?rid=…&as=…` returned a URL with no `as` at all.
+  //
+  // Built from parts, like withRid, so a pin that arrives on its own still rides along.
   const backToRoster = useCallback(() => {
-    router.push(rid ? `/owner/staff?rid=${encodeURIComponent(rid)}` : "/owner/staff");
-  }, [router, rid]);
+    const q = [
+      rid ? `rid=${encodeURIComponent(rid)}` : "",
+      as ? `as=${encodeURIComponent(as)}` : "",
+    ].filter(Boolean).join("&");
+    router.push(q ? `/owner/staff?${q}` : "/owner/staff");
+  }, [router, rid, as]);
 
   if (!id) return <div className="adm-empty">No person named.</div>;
   return <StaffProfile userId={id} host={host} onClose={backToRoster} />;
