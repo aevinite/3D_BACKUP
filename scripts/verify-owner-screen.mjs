@@ -160,6 +160,16 @@ check("every \"couldn't read part of this\" strip sits under its own card title"
   !/<PartialStrip[^\n]*\n\s*<div className="ow2-ct">/.test(home),
   "app/owner/page.tsx: a PartialStrip is back above its card's heading, where it floats at the top\n       of the card belonging to nothing. All four sit under their own title.");
 
+// ── 11. the "live" pill carries its own readable ink ────────────────────────────────────────────
+// Found by this sweep's SECOND pass, and made reachable by check 5 above: every KPI tile used to be
+// a Link, and globals.css forces everything inside an anchor to inherit its colour, so the pill's
+// declared flat emerald never applied and it measured 17.74:1 on the light skin. A tile that is NOT
+// a link (which is now the case when Reports are off) applied the declared value and the same pill
+// measured 1.92:1 on a white card. Measured after the fix: light 6.35:1, dark 8.3:1.
+check("the \"live\" pill mixes its ink toward the skin's own text",
+  /\.ow2-live \{[^}]*color: color-mix\(in srgb, var\(--accent\)/.test(home),
+  "app/owner/page.tsx: .ow2-live is back to a flat colour. It is only readable by accident while\n       every tile is a Link — a tile without an href applies the declared value and lands at 1.92:1\n       on a white card. Mix the accent toward var(--text), like .ow2-split .txt em does.");
+
 // ── the guard is wired up ──────────────────────────────────────────────────────────────────────
 check("this guard is registered in package.json",
   /"verify:owner-screen"/.test(pkg),
@@ -170,4 +180,4 @@ if (fails.length) {
   fails.forEach((f, i) => console.error(`  ${i + 1}. ${f}\n`));
   process.exit(1);
 }
-console.log("✓ all 20 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");
+console.log("✓ all 21 checks passed — the owner home screen and Audit & logs hold their 2026-08-17 fixes");

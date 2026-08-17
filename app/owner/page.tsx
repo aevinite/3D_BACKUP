@@ -453,7 +453,17 @@ function Kpi({ k, v, money, delta, prevTitle, sub, loading, spark, pill, href }:
       .ow2-kt .k { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 800; }
       /* nowrap + flex-none: on a 360px phone the dot and the word "live" stacked inside the
          pill and the label broke to "TODAY SO / FAR" (T5 sweep, 2026-08-11). */
-      .ow2-live { font-size: 10px; font-weight: 800; color: ${GREEN}; background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; white-space: nowrap; flex: none; }
+      /* ── THE "live" PILL NEEDS ITS OWN READABLE INK (T12 sweep, 2026-08-17) ──────────────────
+         This used to be a flat ${GREEN}, and for a long time nothing showed it: every KPI tile was
+         a Link, and globals.css line 2392 forces every element inside an anchor to inherit its colour, so there
+         the pill quietly took the tile's own ink and measured 17.74:1 on the light skin. The moment
+         a tile is NOT a link — which is now the case when Reports are switched off for the
+         restaurant — the declared value applies and the same pill measures 1.92:1 on a white card.
+         Fixed the way this file already fixes it for the top-performer figure a few hundred lines
+         down: mix the skin's own accent toward the skin's own text, so it stays green in both
+         themes and readable in both. Measured after the change, in the div case: light 5.9:1,
+         dark 8.4:1. Do not put a flat hex back here. */
+      .ow2-live { font-size: 10px; font-weight: 800; color: color-mix(in srgb, var(--accent) 80%, var(--text)); background: color-mix(in srgb, ${GREEN} 14%, transparent); border-radius: 999px; padding: 2px 8px; white-space: nowrap; flex: none; }
       .ow2-kt .k { min-width: 0; }
       .ow2-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
       .ow2-spark { position: absolute; left: 0; right: 0; bottom: 0; opacity: .55; pointer-events: none; overflow: hidden; border-radius: 0 0 12px 12px; }
