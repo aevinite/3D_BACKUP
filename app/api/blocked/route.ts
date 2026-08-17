@@ -58,8 +58,21 @@ export async function GET(req: NextRequest) {
   // stuck visitor never meets it — and it degrades to the SAME page rather than an error, just
   // without the fresh counts. Being told "you are still blocked" is the part that matters, and that
   // comes from the throttle, not from the count.
+  //
+  // ── "COULDN'T COUNT" MUST NOT READ AS "YOU'VE USED THEM ALL" (T10 sweep, improvement I1) ──────
+  // This used to answer `remaining: 0`, and app/staff-login/BlockedView.tsx computes
+  // `outOfTries = remaining <= 0` — which DISABLES both the note box and the "Request unblock"
+  // button and puts "0 left today" under them. So the one thing a blocked person is allowed to do
+  // was taken away, and the screen told them a number that was never counted. The cap is not about
+  // them: `capKeyFor` falls back to the server-derived IP, so a restaurant behind one connection
+  // shares this bucket between every device on it — a manager and two waiters all checking after a
+  // block reach 20 a minute far sooner than one person would.
+  //
+  // The honest degraded answer is "we didn't count, so assume nothing is used": the page stays
+  // usable, and the REAL cap is enforced where it has always been — on the POST below, which does
+  // its own count and refuses closed on doubt. Nothing here can hand out a fourth request.
   if (!withinMemoryCap(`blocked:get:${capKeyFor(req)}`, 60_000, 20)) {
-    return NextResponse.json({ blocked: true, usedToday: 0, remaining: 0, pending: false, throttled: true });
+    return NextResponse.json({ blocked: true, usedToday: 0, remaining: MAX_PER_DAY, pending: false, throttled: true });
   }
   const blocked = await throttleIsBlocked(key);
   // The PAGE fails open, deliberately: an unreadable counter must not stop a blocked visitor seeing

@@ -29,6 +29,35 @@ const isUuid = (v: unknown) => typeof v === "string" && /^[0-9a-f]{8}-[0-9a-f]{4
 // first; this is the half that does not depend on the phone getting it right.
 const STALE_CALL_MS = 10 * 60 * 1000;
 
+// ── "THE RESTAURANT IS BUSY — WAIT THIS LONG" (T10 sweep, improvement I2) ─────────────────────────
+//
+// A 502 here means the restaurant's server did not answer, and the phone saves the call and retries
+// on its own fixed schedule. /api/guest/place-order was given a server-set wait for exactly this
+// (improvement I10, owner 2026-08-12) and its reasoning applies word for word to a raised hand:
+// "during a genuine rush that is the worst possible behaviour: every waiting phone comes back at the
+// same moment, on the same timer, and lands on the server that was already struggling."
+//
+// It applies MORE to a call, if anything. Calling a waiter is the thing a diner does when something
+// is wrong, so it is the most re-tapped guest action of all — and the queue that carries it is the
+// same queue: lib/guestOutbox.ts drains orders and calls in ONE loop, and reads the hint GENERICALLY
+// (`if (j?.retryAfter != null) noteServerRetryAfter(j.retryAfter)`, before any branch) into a shared
+// backoff. So a busy moment taught the phone to back off when it happened to be draining an order
+// and taught it nothing when it happened to be draining a call — the same server, the same rush, two
+// different behaviours depending on what the diner had tapped.
+//
+// Nothing on the device changes: the field is already read, it is a HINT, and a build that ignores
+// it keeps its existing schedule and is exactly as correct as before. The jitter is added HERE
+// rather than on the phone so a thousand devices get a thousand different answers — the whole point
+// is that they stop arriving together. `reason: "server_busy"` stays spelled out in full: it is the
+// code lib/guestOutbox.ts words for the diner, and `npm run verify:order-retry` greps for it.
+function busy(): Response {
+  const retryAfter = 20 + Math.floor(Math.random() * 25);   // 20–45s, spread
+  return NextResponse.json(
+    { ok: false, reason: "server_busy", retryAfter },
+    { status: 502, headers: { "Retry-After": String(retryAfter) } },
+  );
+}
+
 type Body = {
   mode?: "session" | "public";
   token?: string;
@@ -71,7 +100,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     const { data, error } = await sb.rpc("lfh_call_waiter", { p_token: b.token, p_reason: reason });
     // The database's own words never travel to a diner — a code does, and lib/guestOutbox.ts owns
     // the sentence. Same rule as place-order.
-    if (error) { console.error("[guest/call-waiter] session RPC failed:", error.message); return NextResponse.json({ ok: false, reason: "server_busy" }, { status: 502 }); }
+    if (error) { console.error("[guest/call-waiter] session RPC failed:", error.message); return busy(); }
     // Prefer the restaurant the RPC itself resolved from the token over the one the phone sent —
     // an older saved call may carry none, and the floor snapshot then never got dropped, so a
     // manager reloading inside the shared 1.5s window saw a floor without the raised hand on it
@@ -97,7 +126,7 @@ async function postImpl(req: NextRequest): Promise<Response> {
     p_note: reason || null,
     p_restaurant_id: rid,
   });
-  if (error) { console.error("[guest/call-waiter] public RPC failed:", error.message); return NextResponse.json({ ok: false, reason: "server_busy" }, { status: 502 }); }
+  if (error) { console.error("[guest/call-waiter] public RPC failed:", error.message); return busy(); }
   invalidateFloor(rid);
   return NextResponse.json(data ?? { ok: false, reason: "empty" });
 }
