@@ -50,6 +50,7 @@ export default function OwnerStaffPage() {
   const [notEnabled, setNotEnabled] = useState<string | null>(null); // calm "section off" state, not an error
   const pwRef = useRef<HTMLInputElement>(null);
   const revealRef = useRef<HTMLDivElement>(null);
+  const errRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   // Waiter sections: which tables the person being added will serve, and which restaurant's
   // Add form is currently showing the waiter role. A waiter must be given at least one table
@@ -127,6 +128,21 @@ export default function OwnerStaffPage() {
     const t = setTimeout(() => { pwRef.current?.focus(); pwRef.current?.select(); }, 250);
     return () => clearTimeout(t);
   }, [reveal]);
+
+  // THE SAME ARGUMENT, FOR THE MESSAGE THAT SAYS NO (T13 sweep, 2026-08-17 — measured).
+  //
+  // The effect above exists because "an owner low on the page used to never see it". Every
+  // refusal on this page renders in the SAME place — a banner at the very top — and nothing
+  // brought that one into view. Measured on a 360×780 phone: submitting the Add form at the
+  // bottom of the roster put the banner at y = -951px. So an owner who typed a 4-letter
+  // password, or tried to remove someone the pay ledger protects, tapped the button and watched
+  // absolutely nothing happen: their typing still in the boxes, no message anywhere on screen.
+  // "A tap must never vanish in silence" (CLAUDE.md) — a refusal the person cannot see is the
+  // same as no refusal at all.
+  useEffect(() => {
+    if (!err) return;
+    errRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [err]);
 
   const canEditPowers = actor === "owner" || actor === "admin";
 
@@ -300,7 +316,7 @@ export default function OwnerStaffPage() {
       </div>
 
       {err && (
-        <div className="adm-card" style={{ borderColor: "var(--adm-danger)", marginBottom: 14 }}>
+        <div className="adm-card" ref={errRef} style={{ borderColor: "var(--adm-danger)", marginBottom: 14 }}>
           <b>Something went wrong.</b> <span className="adm-muted" style={{ fontSize: 12.5 }}>{err}</span>
           {/* The server now answers 503 "please try again" when it couldn't READ your setup
               (instead of wrongly saying the feature is off), so this banner needs a retry. */}
