@@ -29,21 +29,15 @@ links are untouched. Guard: `verify:guest` → `P00488`.
 
 ---
 
-## 🟡 NOT BUILT — they need a decision from the owner
+## 🟡 RESOLVED — decided by the owner on 2026-08-17
 
-### I3 · Fold the slug in `lib/tenantStorage.ts` (the root cause behind F1)
-Outside the territory, and it changes a shared helper every guest surface depends on. One line, but
-it belongs to whoever owns that file. See the handoff in `T1-findings.md`.
+### I3 · Fold the slug in `lib/tenantStorage.ts` — **BUILT** (permission granted 2026-08-17)
+The root cause behind F1. `tenantSlug()` and `tgetFor`/`tsetFor` now fold the slug, so a guest
+landing straight on a shared, oddly-cased dish link keeps one basket and one table.
 
-### I4 · Record R28 in `docs/REJECTED-IDEAS.md`
-Outside the territory. The owner's 2026-08-16 rejection of a cap on the 3D preload is carried in the
-preserved branch as a code comment, but the doc row it must point at does not exist on `main`, and
-`verify:rejected` refuses an orphan claim. Row and comment need to land together.
+### I4 · Record R28 in `docs/REJECTED-IDEAS.md` — **BUILT**
+Done, together with R29 (the bell stays put) and R30 (the hero stays English).
 
-### I5 · A restaurant-neutral, translated hero fallback
-A tenant with no custom hero shows the English literals `"Welcome"` / `"Our Menu"` in all six
-languages, because `t.greeting` / `t.heroTitle` hold restaurant #1's own copy ("BONJOUR",
-"All-Day Café & Bakery") and must not leak. A neutral pair of dictionary keys would fix it — but
-that is `lib/i18n.ts`, and **R15 and R23 both rule that the guest menu's remaining English is not to
-be raised as work**. Listed here only so the next sweep does not re-discover it and think it is new.
-**Recommendation: leave it.**
+### I5 · A restaurant-neutral, translated hero fallback — **REJECTED, now R30**
+Owner, 2026-08-17: *"i want english only for all."* The English literals stay for every restaurant
+and every language. Recorded in the doc and on the `<HeroTitle>` line. Do not re-offer it.

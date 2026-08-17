@@ -4,8 +4,9 @@ Territory: the three guest doors (`/menu`, `/r/<slug>/menu`, `/q/<code>`), `Menu
 `NavPicker`, `Header`, `HeroTitle`, `GuestChrome`, `GuestNotFound`, `IntroSplash`, `ComingSoon`,
 `app/page.tsx`, `app/not-found.tsx`.
 
-500 phases run twice. **3 real problems**, all fixed here, each with a new static guard in
-`scripts/verify-guest.mjs` that fails on the pre-fix code (proved by reverting each file in turn).
+500 phases run twice. **3 problems found; 2 fixed, 1 ruled a deliberate design by the owner and
+reverted (R29).** Every fix carries a static guard in `scripts/verify-guest.mjs` proved to fail on
+the pre-fix code.
 
 ---
 
@@ -43,55 +44,38 @@ matches (the normal case) nothing happens.
 **Confirmed after the fix:** `/r/French-House/menu?table=4` → `/r/french-house/menu?table=4` with
 `lfh_table:french-house = 4`; `/r/FRENCH-HOUSE/menu?t=9&x=1` keeps both parameters.
 
-### 🔗 HANDOFF — `lib/tenantStorage.ts` (not my territory)
+### ✅ ROOT CAUSE ALSO FIXED — `lib/tenantStorage.ts` (owner granted permission, 2026-08-17)
 
-`tenantSlug()` should fold the path segment it reads:
-
-```ts
-const slug = decodeURIComponent(m[1]).trim().toLowerCase();   // currently not lower-cased
-```
-
-That is the root cause and it costs one line. My redirect closes the door a QR actually opens, but a
-guest who lands *directly* on `/r/<Slug>/item/...` (a shared dish link) never passes through my page
-and still splits their scope. The same fold belongs in `tsetFor`/`tgetFor`'s slug argument.
+`tenantSlug()` now folds the path segment it reads, and `tgetFor`/`tsetFor` fold the slug they are
+handed. That is the root cause: it protects a guest who lands *directly* on `/r/<Slug>/item/...`
+from a shared dish link, without ever passing through the menu page. Safe because a slug is
+lower-case by construction wherever it is created, so folding can only correct a mis-cased address —
+it can never point at a different restaurant.
 
 ---
 
-## F2 · The waiter bell parks on a control and steals the tap — HIGH · confirmed
+## F2 · The waiter bell parks on a control — REPORTED, FIX REVERTED ON THE OWNER'S WORD
 
-**Who is worse off:** a diner. Tapping "+" rang for a waiter instead of adding the dish.
-**Where:** guest menu → the dish grid at 360×780 → the floating call-waiter bell, bottom right.
+**Status: NOT a fault any more. It is R29.** The measurements below stand and are reproducible; the
+owner has weighed them and ruled that the bell stays exactly where it is.
 
-**What happens.** `settleBell()` scans upward in 8px steps for a resting place that covers no
-control. When it finds none within 260px it used to fall back to the resting corner — "at least
-where a guest expects to find it". Measured on **both** restaurants, two ordinary states have no
-clean spot at all:
+Measured on both restaurants at 360x780. `settleBell()` scans upward for a resting place covering no
+control; when it finds none within 260px it returns the bell to its corner. Two ordinary states have
+no clean spot:
 
-| state | what the bell landed on | overlap | what a finger got at the control's own centre |
+| state | landed on | overlap | finger at the control's own centre |
 |---|---|---|---|
-| search suggestions open | a dish's `+` (y 734–776, x 291–333) | 22px | **`chef-call`** — the bell, not the button |
-| every category folded | a `.cat-group-head` | 48px | the header, but the bell owns the overlap band |
+| search suggestions open | a dish's `+` (y 734–776, x 291–333) | 22px | `chef-call` |
+| every category folded | a `.cat-group-head` | 48px | the bell owns the overlap band |
 
-The suggestions panel is full-width (x 21–339) and stacks unbroken from y 362 to 739, so all 33
-candidate positions in the band are covered. Folding every category tiles full-width headers ~53px
-apart, with the same result — which is precisely the bug the scan was written to end.
+A stand-down fix was built and confirmed working, then **reverted in full** (owner, 2026-08-17):
+*"i want like previous bell of call waiter should be stuck at his place we can scrool and click the
+thing make sure don't change that again."* `components/MenuView.tsx` is byte-identical to `main` in
+`settleBell()`.
 
-**Reachable when:** type anything into search, or fold your categories. Both are ordinary browsing.
-
-**Fixed by:** the last-resort branch no longer returns the bell to a covering position. It **stands
-down** — invisible and untappable — and comes back at the top of the same function the moment a
-clean spot exists (any scroll, search cleared, category unfolded). It stands down completely rather
-than just becoming transparent to taps, because a bell you can still see but which quietly opens a
-dish page is a worse lie than one that steps away. Nothing vanishes in silence: the control
-underneath answers the tap itself. In the six other states measured (plain, no-results,
-favourites-empty, list view, mid-scroll, at the bottom) a clean lift is found and none of this runs.
-
-**Guard:** `verify:guest` → `P00338`.
-**Confirmed after the fix:** in the search-open state a finger at the "+" centre now reaches the page
-instead of `chef-call`; screenshots show both "+" buttons and all six category headers unobstructed;
-clearing the search brings the bell straight back (`visibility: visible`, `pointer-events: auto`).
-
----
+Recorded as **R29** in `docs/REJECTED-IDEAS.md` with its comment on the fallback line, and guarded
+by a new `verify:guest` check that fails if anyone hides, fades or yields the bell again. Do not
+re-report this.
 
 ## F3 · A menu that isn't serving still previews as an open one — MEDIUM · confirmed
 
@@ -120,17 +104,18 @@ no extra database read.
 
 ---
 
-## 🔗 HANDOFF — `docs/REJECTED-IDEAS.md` (not my territory)
+## ✅ ALSO DONE — three rejections recorded in `docs/REJECTED-IDEAS.md`
 
-The preserved branch also carries a **REJECTED (owner, 2026-08-16) → R28** comment for MenuView, on
-the unbounded 3D preload: *"don't do the sixth one any time soon like in the code, also reject that
-it is rejected by me."* **R28 is not in `docs/REJECTED-IDEAS.md` on `main`.**
+**R28** (no cap on the 3D preload, 2026-08-16) is now in the doc with its comment on the preload
+queue. Added alongside it: **R29** (the bell stays put) and **R30** (the hero fallback stays English
+— *"i want english only for all"*, extending R15 and R23). All three carry a comment on the exact
+line someone would otherwise change, and `verify:rejected` passes.
 
-`verify:rejected` fails on a `REJECTED` comment that no doc row records ("no orphan claims"), so I
-did **not** add the comment — it would have broken a gate I have to leave green. The doc row needs
-adding, and the code comment with it, in one commit. The measured facts worth keeping in the row:
-2 GLB requests on a French House menu open (it has 2 such dishes, Aangan has none), and
-`lib/modelLoader` already evicts past 40 MB.
+**Noted, not touched:** R26 and R27 are filed BELOW the `## Reversed` heading in that doc although
+both record a NO, not a reversal. The guard only enforces code comments for rows above that heading,
+so R27 ("never give the restaurant a delete-a-bill permission") is currently unenforced and has no
+code comment. Moving it up would fail the guard until that comment is written — someone else's file
+and someone else's half-finished work, so I left it and am flagging it instead.
 
 ---
 

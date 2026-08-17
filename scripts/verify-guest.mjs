@@ -176,18 +176,19 @@ check("P00155", "an oddly-cased menu link is sent to the canonical one, query an
 check("P00165", "a not-serving menu previews neutrally on the tenant door too", () =>
   rx(T1.menuPage, /if \(!r\.active \|\| !\w+\.menuEnabled\)[\s\S]{0,120}?title: "Menu"/));
 
-// The waiter bell must never fall back onto a control. With the search suggestions open, or every
-// category folded, no clean lift exists in the 260px band — and the old fallback returned it to the
-// corner, where it sat on a dish's "+" (elementFromPoint at the button's own centre returned
-// `chef-call`) and on a `.cat-group-head`. It stands down instead.
-check("P00338", "with nowhere clean, the bell stands down rather than parking on a control", () => {
-  const yields = rx(F.menuView, /yieldBell\(bell, true\)/);
-  const returns = rx(F.menuView, /yieldBell\(bell, false\)/);
-  const untappable = has(F.menuView, '"pointer-events", "none"') && has(F.menuView, '"visibility", "hidden"');
-  // and it must never be left stood down for the next page
-  const cleaned = (F.menuView.match(/yieldBell\(bell, false\)/g) || []).length >= 2;
-  return { ok: yields && returns && untappable && cleaned,
-    note: `standsDown=${yields} comesBack=${returns} untappable=${untappable} cleanup=${cleaned}` };
+// THE BELL STAYS PUT — R29 (owner, 2026-08-17): "i want like previous bell of call waiter should be
+// stuck at his place we can scrool and click the thing make sure don't change that again."
+// Sweep T1 built the opposite (stand down when nothing is clean) and it was reverted on his word.
+// This guard is here so the next person who measures the overlap does not "fix" it a second time:
+// the fallback must stay a plain return-to-the-corner, and the bell must never be hidden, faded or
+// made untappable. Comments are stripped before this runs, so the R29 note above cannot satisfy it.
+check("R29", "the call-waiter bell is never hidden, faded or made untappable", () => {
+  const bellArea = (F.menuView.match(/const settleBell[\s\S]*?\n    \};/) || [""])[0];
+  const banned = [/visibility/, /pointer-events/, /yieldBell/, /opacity/, /display\s*=/, /\.hidden\b/]
+    .filter((r) => r.test(bellArea)).map((r) => String(r));
+  const fallbackIntact = /bell\.style\.removeProperty\("--bell-lift"\);\s*\n\s*\};/.test(bellArea);
+  return { ok: banned.length === 0 && fallbackIntact,
+    note: banned.length ? "bell is being hidden/faded: " + banned.join(", ") : `fallback intact=${fallbackIntact}` };
 });
 
 // Two guest surfaces that describe themselves to a screen reader as something they are not. The
