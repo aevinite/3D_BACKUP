@@ -29,6 +29,23 @@ const ageDays = (iso: string) => {
   return d <= 0 ? "today" : d === 1 ? "1 day" : `${d} days`;
 };
 
+// ── AN OLD TAB IS THE ONE THAT GETS FORGOTTEN (sweep 6 · T14, 2026-08-18) ────────────────────────
+// The list is ordered by how much is owed, which is right — but it means a ₹120 tab from three
+// months ago sits quietly at the bottom under a ₹4,000 one from Tuesday, and a credit book is how a
+// small restaurant loses money without noticing. Age now carries its own colour past 30 and 60 days.
+// The WORDS do not change ("oldest 92 days"), so the colour adds emphasis rather than carrying the
+// meaning on its own, and a fresh tab looks exactly as it always did.
+const OldestTab = ({ iso }: { iso: string }) => {
+  const d = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+  const tone = d >= 60 ? "var(--adm-danger, #e5484d)" : d >= 30 ? "var(--adm-warn, #c98a2b)" : null;
+  return (
+    <span style={tone ? { color: tone, fontWeight: 700 } : undefined}
+      title={tone ? "This tab has been open a long time" : undefined}>
+      oldest {ageDays(iso)}
+    </span>
+  );
+};
+
 export default function OwnerKhata() {
   const [scopePin] = useState<string | null>(() =>
     typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("rid"));
@@ -165,7 +182,9 @@ export default function OwnerKhata() {
                   </div>
                   <div style={{ textAlign: "right", flex: "none" }}>
                     <div style={{ fontWeight: 800, fontVariantNumeric: "tabular-nums" }}>{inr(c.outstanding)}</div>
-                    <div className="adm-muted" style={{ fontSize: 11.5 }}>{c.billCount} bill{c.billCount === 1 ? "" : "s"} · oldest {ageDays(c.oldestKhataAt)}</div>
+                    <div className="adm-muted" style={{ fontSize: 11.5 }}>
+                      {c.billCount} bill{c.billCount === 1 ? "" : "s"} · <OldestTab iso={c.oldestKhataAt} />
+                    </div>
                   </div>
                 </button>
                 {open.has(c.id) && (
