@@ -528,6 +528,32 @@ html[data-theme="light"] .tile.t-bill, html[data-theme="light"] .tile.t-waiting 
   color: var(--muted); border: 1px solid var(--line); border-radius: 4px;
   vertical-align: middle; white-space: nowrap;
 }
+/* WHICH TABLE A DISH WAS ORDERED AT — only ever drawn on a MERGED bill (owner, 2026-08-17), where
+   one list of dishes covers two or more tables and a split has to put each one back where it came
+   from. PURPLE, because purple already means "merged" everywhere on this panel (the tile, the ⇄
+   chip, the legend) — so it reads as part of that story rather than as a new kind of warning. Sits
+   inline after the dish name so it wraps with it and never competes with the price. */
+.ifrom { display: inline-block; margin-left: 7px; padding: 1px 7px; border-radius: 999px;
+  font-size: 10.5px; font-weight: 800; letter-spacing: .02em; white-space: nowrap; vertical-align: 1px;
+  color: #c084fc; background: color-mix(in srgb, #a855f7 15%, transparent);
+  border: 1px solid color-mix(in srgb, #a855f7 42%, transparent); }
+/* Light skin: the same violet family, deepened — a pale violet on white is the trap this panel's
+   merged ⇄ chip was already fixed for. */
+html[data-theme="light"] .ifrom { color: #7e22ce; background: color-mix(in srgb, #7e22ce 10%, transparent);
+  border-color: color-mix(in srgb, #7e22ce 38%, transparent); }
+/* ⇹ UNMERGE — its own row at the VERY BOTTOM of a joined table's detail, under the action buttons
+   and above the bill bar (the manager's placement, owner 2026-08-01). Its own row on purpose: it is
+   not one of the six things a waiter does all night, and it must not sit shoulder to shoulder with
+   ＋ Take order where a thumb could find it by accident. A joined party can hold several tables, so
+   the row wraps. */
+.unmerge-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 10px;
+  background: var(--panel); }
+.unmerge-row:empty { display: none; }
+.unmerge-row .unmerge-btn { flex: 1 1 auto; min-width: 140px; min-height: 44px; font-size: 13.5px; }
+@media (max-width: 600px) {
+  .unmerge-row { padding: 0 16px 8px; }
+  .unmerge-row .unmerge-btn { flex: 1 1 100%; min-width: 0; font-size: 12.5px; }
+}
 /* The status/serve/edit/delete cluster is ONE container so narrow phones can move it to
    its own row (see the max-width media query below) without touching the markup. */
 .iacts { display: inline-flex; align-items: center; gap: 10px; }
@@ -762,6 +788,46 @@ html[data-theme="light"] .dw-btn.danger { border-color: #b91c1c; color: #b91c1c;
   body.tbl-open #tabletClose { display: inline-flex; align-items: center; justify-content: center; position: fixed; top: calc(var(--sat) + 10px); right: 12px; width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--text); font-size: 22px; line-height: 1; z-index: 52; cursor: pointer; box-shadow: 0 6px 18px rgba(0,0,0,.45); }
   body.tbl-open .backtop { display: none; } /* the ✕ replaces the "↑ Tables" link */
 }
+/* ── A PHONE TURNED SIDEWAYS PUTS ITS HEADINGS ON ONE ROW (owner, 2026-08-17) ──────────────────
+   His words: "whenever you do sideway, everything should be in one row — not so many rows".
+   Measured before this rule at 780×360: the filter chips, the colour key and the "Your tables"
+   strip each took a row of their own, so the first table started 211px down a 360px-tall screen —
+   59% of it gone before a single table, and not one complete row of tiles visible.
+   The three of them are siblings inside .floor, so a grid places them across one line and hands the
+   tables everything below it. Nothing is hidden and nothing scrolls sideways: the chips keep their
+   natural width at both ends, the colour key takes the middle and shrinks its own gaps to fit, and
+   the "Your tables" strip keeps its number. (It has to stay — he refused hiding it, R2.)
+   SHORT screens only, and touch only:
+     · max-height 500px — an iPad in landscape is 834px tall and keeps its roomy stacked layout;
+     · pointer: coarse — a laptop window that happens to be 500px tall is a laptop, not a phone,
+       the same test the tiles-per-row rule uses. */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
+  /* THREE BANDS BECOME TWO — and two is the honest floor, not one. Measured at 780×360: the filter
+     chips need ~300px, the "Your tables" strip ~280px and the colour key ~400px. That is ~980px of
+     content for 780px of screen, so a single line is only reachable by hiding one of them — and the
+     one that would have to go is the strip he has already refused to hide (R2). Forcing all three
+     anyway was tried first and was worse than the problem: the key wrapped into a seven-line
+     vertical column in the middle of the screen and the band grew TALLER than the three it replaced.
+     So: chips and the strip share the first line, the key takes the second on its own (it fits there
+     in one line with room to spare), and the tables get everything below. */
+  .floor { display: grid; grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: "nav section" "legend legend" "tiles tiles";
+    column-gap: 10px; align-items: center; }
+  .floor-nav { grid-area: nav; margin-bottom: 5px; flex-wrap: nowrap; }
+  /* The key never slides and is never clipped — `overflow: hidden` here quietly ate two of its seven
+     keys on the first attempt, which is worse than the layout it replaced. Its two ALL-CAPS labels
+     ("inside:" / "outline:") go at this width, exactly as they already do on a narrow phone: a
+     filled dot and an outlined ring are visibly different things, and those two words cost ~90px. */
+  .floor-legend { grid-area: legend; margin: 0 0 5px; flex-wrap: wrap; justify-content: flex-start;
+    gap: 2px 9px; font-size: 10.5px; line-height: 1.15; }
+  .floor-legend .lgcap { display: none; }
+  .floor-legend .lgi { gap: 3px; }
+  .my-section { grid-area: section; margin-bottom: 5px; padding: 5px 11px; font-size: 11.5px; }
+  .tiles { grid-area: tiles; }
+  /* The strip is display:flex INLINE from app.js when a waiter has a section, and display:none when
+     they don't — so its column simply collapses and the chips keep the line to themselves. */
+}
+
 /* Comfortable touch targets — at EVERY width, not just on a phone (T14 tablet sweep, 2026-08-05).
    This rule used to live inside the `max-width: 760px` block above, so on the 1194px waiter tablet
    the floor's own filter chips (All / ⚠ Needs / Active / Free) measured 34px against the phone's
@@ -1026,7 +1092,9 @@ body:has(.detail-pop) .layout { grid-template-columns: 1fr; }   /* floor fills; 
 .detail-pop .backtop { display: none; }                          /* "↑ Tables" makes no sense in a popup */
 .detail-pop .detail-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain; padding: 12px 0; }
-.detail-pop .dacts, .detail-pop .foot { flex: 0 0 auto; }
+/* The card is a flex COLUMN whose body is the only scrolling part — every pinned row below it must
+   say so, or it gets squeezed by a long order list. The ⇹ unmerge row is one of them. */
+.detail-pop .dacts, .detail-pop .foot, .detail-pop .unmerge-row { flex: 0 0 auto; }
 .detail-pop .phead { padding: 0 58px 10px 0; }   /* right room so the header clears the pinned ✕ */
 /* ✕ STAYS pinned to the popup's top-right while you scroll the popup (owner 2026-07-05):
    sticky in the scrolling card, right-aligned, above the content. */
