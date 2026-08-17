@@ -138,6 +138,50 @@ const fail = (m) => { failed++; console.log(`  FAIL ${m}`); };
   else fail("splitGraphemes() was removed from lib/brandText.ts");
 }
 
+// ── 5 · the hero tagline breaks between WORDS, never inside one ─────────────
+// Every letter of the hero is its own <span>. While those spans were `inline-block` — an atomic
+// inline box, which the browser may end a line between — and every space was a NON-BREAKING one,
+// the heading could only break between LETTERS and never at a space. English hid it because
+// "All-Day Café & Bakery" fits on one line at 360px; every longer tagline showed it. Measured on a
+// Samsung A35, screenshots read (T4 sweep, 2026-08-17):
+//
+//     German : "Ganztags Café & Bäcke / rei"
+//     French : "Café & Boulangerie To / ute la Journée"
+//
+// The fix is TWO halves and neither works alone — CSS only, and the NBSPs remain so the heading
+// overflows off the side instead of wrapping (measured). So both are asserted here.
+{
+  const hero = read("components/HeroTitle.tsx");
+  const css = read("app/globals.css");
+
+  // (a) the TAGLINE's space must be a real U+0020, so a break opportunity exists at all.
+  const titleLine = hero.split("\n").find((l) => /className=\{seg\.hi \? "hi" : undefined\}/.test(l)) || "";
+  if (!titleLine) {
+    fail("could not find the hero tagline's per-letter span in components/HeroTitle.tsx — this " +
+         "check cannot mean anything until it is pointed at the new shape");
+  } else if (/ /.test(titleLine)) {
+    fail("the hero TAGLINE puts a non-breaking space between its words again. With one span per " +
+         "letter that leaves no legal break point in the heading, so a long tagline either splits " +
+         "a word in half or runs off the side of the phone. Use a normal space (U+0020).");
+  } else {
+    ok("the hero tagline separates its words with a real space, so a line can break there");
+  }
+
+  // (b) …and the tagline's letters must be inline, with the space preserved AND breakable.
+  const inlineRule = /\.hero-title-wrap \.hero-title span \{[^}]*display:\s*inline\s*;[^}]*white-space:\s*pre-wrap/.test(css);
+  if (inlineRule) ok("the hero tagline's letters are inline with pre-wrap, so breaks land at spaces");
+  else fail("app/globals.css no longer gives `.hero-title-wrap .hero-title span` " +
+            "`display: inline; white-space: pre-wrap`. As `inline-block` each letter is an atomic " +
+            "box the browser may break after, which splits words in half; with plain `pre` the " +
+            "space is not a break opportunity and the heading overflows instead.");
+
+  // (c) the GREETING keeps its inline-block — it animates `y`, which needs a block box.
+  const greetRule = /\.hero-title-wrap \.greet-badge span \{[^}]*display:\s*inline-block/.test(css);
+  if (greetRule) ok("the hero greeting keeps its inline-block, so its rise-in animation still works");
+  else fail("the hero greeting lost `display: inline-block` — GSAP animates its `y`, and a " +
+            "transform does nothing to a plain inline box, so the greeting would stop moving");
+}
+
 console.log("");
 if (failed) {
   console.log(`${failed} check(s) failed — see above.`);

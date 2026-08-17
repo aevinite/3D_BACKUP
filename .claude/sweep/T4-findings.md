@@ -5,8 +5,14 @@ Territory: `public/sw.js` · `public/offline.html` · `public/panels/swreg.js` �
 `components/ConnectionBadge.tsx` · `components/AppShell.tsx` · `components/BanGate.tsx` ·
 `components/BotTrap.tsx` · `components/Maintenance.tsx` · `lib/i18n.ts`
 
-500 phases run (P01501–P02000). **5 real problems, all fixed in this branch.** 4 🔗 HANDOFF rows
-for fixes that live in another terminal's files. Everything else in this territory came back clean.
+500 phases run (P01501–P02000). **500 green — 486 clean on the first pass, 14 found and fixed.**
+Nothing left red, nothing left skipped.
+
+**Two rounds.** Round 1 stayed inside the 12-file territory and left 4 rows red and 9 skipped, each
+blocked on a file another terminal owned or on a decision only the owner could make. He then said
+**yes to all five open items and "do all, solve all"** (2026-08-17), so round 2 crossed into the
+files those fixes actually live in, ran every skipped row for real, and closed all thirteen — and
+found one more real problem on the way (F6, the hero splitting words in half).
 
 ---
 
@@ -51,8 +57,11 @@ for fixes that live in another terminal's files. Everything else in this territo
   English (the picker's own default and the language the dictionary is complete in).
 - **Guard:** `scripts/verify-i18n-scope.mjs` now fails if `lib/i18n.ts` reads storage outside that
   helper. Proven by reverting.
-- **⚠ NOT FULLY CLOSED — see H1.** My file was one of four unguarded readers. After this fix the
-  menu still fails on such a device, because three more reads live in other terminals' files.
+- **CLOSED IN ROUND 2 — see H1.** `lib/i18n.ts` was one of TWO genuinely unguarded readers, not
+  four: `lib/format.ts` was the other (its `typeof localStorage` guard throws too), and
+  `lib/supabase.ts` touched storage during module evaluation. `lib/features.ts` and the
+  `app/layout.tsx` inline script turned out to be already wrapped. With all of it fixed, the menu
+  renders 59 dishes with BOTH `localStorage` and `sessionStorage` throwing.
 
 ## F3 · Every time a diner comes back to the tab, the ban check runs twice
 
@@ -85,10 +94,13 @@ for fixes that live in another terminal's files. Everything else in this territo
   other languages' labels, so no card re-flows).
 - **Guard:** `scripts/verify-i18n-scope.mjs` now carries a named watch-list of values found copied
   verbatim from English. Proven by reverting.
-- **Note for the next sweep:** French House offers only `en`/`fr`/`hi`
+- **How the rendered check was finally run (round 2):** French House offers only `en`/`fr`/`hi`
   (Access → Menu → Format), and `components/Header.tsx` correctly resets a language the restaurant
-  does not offer. So German, Arabic and Korean **cannot be rendered on French House at all** — this
-  is deliberate, it is not a fault, and it is why rows P01890–P01894 are `⏭`.
+  does not offer — deliberate, not a fault. Rather than WRITE a restaurant's Access settings on a
+  database ten terminals share, the guest-settings REPLY is patched in the browser so the page
+  believes all six are offered. Nothing is written anywhere, and the real dictionary, components and
+  fonts are what get exercised. German then rendered "Gerichte suchen…", "Ganztags Café &
+  Bäckerei", "noch keine Bewertungen" — and no "Prep". That same run is what exposed F6.
 
 ## F5 · Two comments described behaviour the code does not have
 
@@ -108,61 +120,97 @@ for fixes that live in another terminal's files. Everything else in this territo
   see the 🟡 item; the owner has said more than once that gold + the little-French-house theme is
   the intended house style (R13), so that is his call, not a fix to slip in.
 
+
+## F6 · The hero tagline split words in half on every language but English *(found in round 2)*
+
+- **Where:** guest menu → the big tagline under the greeting, at the very top of the screen. On a
+  phone a German diner read **"Ganztags Café & Bäcke / rei"** and a French one
+  **"Café & Boulangerie To / ute la Journée"**.
+- **Severity:** the largest text on the guest menu, on the restaurant's own tagline, broken at a
+  random letter with no hyphen. French House itself offers both those languages.
+- **Status:** `confirmed` — measured on a Samsung A35 (360×780) and read in a screenshot.
+- **Who is worse off:** every diner at any restaurant whose tagline is long enough to wrap at phone
+  width. English hid it completely, because "All-Day Café & Bakery" fits on one line — which is why
+  it survived this long.
+- **The path:** the hero reveals letter by letter, so every letter is its own `<span>`. Those spans
+  were `display: inline-block` — an **atomic** inline box, which the browser is allowed to end a
+  line after — and `components/HeroTitle.tsx` replaced every space with a **non-breaking** one. So
+  the heading could break between any two LETTERS and at none of its SPACES: exactly backwards.
+- **Fix, and it is two halves that only work together:**
+  `components/HeroTitle.tsx` — the tagline's spaces become real `U+0020`, so a break opportunity
+  exists at all; `app/globals.css` — the tagline's letters become `display: inline` with
+  `white-space: pre-wrap`. Inline boxes create no break opportunities, so the line breaker sees the
+  whole heading as ordinary text and breaks at spaces. Safe here specifically because the tagline
+  animates **opacity only** (movement is deliberately not animated, to keep the gradient clip
+  still), and opacity works fine on an inline box. **Changing only the CSS makes it worse** — the
+  NBSPs stay, nothing can break, and the heading runs off the side of the phone and is clipped:
+  measured, screenshot read, which is why both halves are asserted by the guard.
+  The GREETING is untouched: it animates `y`, so it still needs its inline-block, and it is one
+  short tracked word that never wraps.
+- **Verified after:** 48 of 48 — six languages × two skins — no word split, nothing clipped or
+  overflowing, letters at full opacity (the reveal still plays), and the gradient still paints in
+  both skins.
+- **Guard:** `verify:i18n-scope` now asserts all three parts (real space, inline+pre-wrap for the
+  tagline, inline-block kept for the greeting), each with the reason written into the failure text.
+- **Not to be confused with the parked item:** Arabic's letters still do not JOIN across element
+  boundaries. That is the separate, already-recorded, deliberately-parked decision and it is
+  unchanged here — this fix is about where a LINE may break, not about glyph shaping.
+
 ---
 
-## 🔗 HANDOFF — the real fix lives in another terminal's file
+## 🔗 HANDOFF — all four are now DONE in this branch
 
-### H1 · Three more unguarded storage reads keep the guest menu broken on a blocked-storage device
-Fixing `lib/i18n.ts` (F2) was necessary but **not sufficient** — the menu still shows "Something
-went wrong". Stacks captured with the `localStorage` getter made to throw name three more readers:
+Round 1 wrote these up because they lived outside the 12-file territory. The owner said do them, so
+they were done here rather than passed on. **The merge terminal should know these files were touched
+by T4:** `lib/format.ts`, `lib/supabase.ts`, `app/globals.css`, `components/HeroTitle.tsx`,
+`scripts/verify-offline.mjs`. None of them had any other commit on `main` since this branch started.
 
-| file | what to change |
+### H1 · The blocked-storage crash — CLOSED
+Round 1 named four files. Measured properly, only **two** were at fault, and the write-up is
+corrected here rather than left overstated:
+
+| file | verdict |
 |---|---|
-| `lib/format.ts` | `getCurrency()` and `getLanguage()` guard with `typeof localStorage === "undefined"`. **That is not a safe guard** — `typeof` evaluates the property, and the getter throws, so `typeof` throws too. Wrap the body in `try/catch` returning the default. |
-| `lib/features.ts` | same shape: `typeof localStorage !== "undefined" && localStorage.getItem(lsKey(rid))`. Same fix. |
-| `app/layout.tsx` | the inline theme/language bootstrap script already has `try/catch` around each read — verify it covers the `lang` read as well as the theme read (two of the captured stacks are inside this inline script). |
-| `lib/supabase.ts` | the browser Supabase client throws during **module evaluation** while initialising its auth storage. Give the browser client an explicit in-memory `auth.storage` when `localStorage` is unreadable, or create it lazily. This one alone can take the page down. |
+| `lib/format.ts` | **was broken, fixed.** `getCurrency()`/`getLanguage()` guarded with `typeof localStorage === "undefined"`, which is not a safe test — `typeof` evaluates the property and the getter throws. Both now go through one wrapped `readStored()`. |
+| `lib/supabase.ts` | **was broken, fixed.** The browser client built a session store on `localStorage` during **module evaluation**, so the throw took the whole page down. `supabase.auth` is called in **zero** places in this codebase (the app has its own sign-in) and realtime uses the anon key, so `persistSession: false` removes the storage touch entirely. |
+| `lib/features.ts` | **already safe** — `readSaved()` is wrapped in try/catch, and the setItem call has its own. Round 1 was wrong to list it. |
+| `app/layout.tsx` | **already safe** — both inline reads have their own try/catch. The two captured stacks were those wrapped reads being *caught*, not crashing. |
 
-The whole class is one rule worth writing down once: **`typeof localStorage` is not a safe test.**
+Verified after: the guest menu renders 59 dishes with **both** `localStorage` and `sessionStorage`
+throwing, no error screen, and the offline strip still speaks on that device.
 
-### H2 · `scripts/verify-offline.mjs` now produces two false reds
-`ctx.setOffline(true)` correctly flips `navigator.onLine` to false — but a **service-worker-served
-reload resets it to true**, measured on Playwright 1.62.1 / Chromium 151.0.7922.34:
+### H2 · `verify:offline`'s two false reds — CLOSED, and the suite is now 55/0
+The diagnosis stood: `ctx.setOffline(true)` flips `navigator.onLine`, but a service-worker-served
+reload resets it to true (Playwright 1.62.1 / Chromium 151.0.7922.34), and every offline check
+reloads. Round 1's naive fix took the suite from 53/2 to **18/3**, because `addInitScript` cannot be
+removed and re-runs on every navigation, so later ONLINE phases still believed they were offline.
 
-```
-onLine right after setOffline (no reload): false
-onLine after an SW-served reload:          true
-```
+The working version: the init script is installed **once per context** and reads a **cookie**, which
+is per-context, survives a reload, and is visible to a brand-new tab — so the pin can be turned back
+OFF. The cookie is only ever overwritten, never cleared, because clearing cookies by hand would take
+the run's single sign-in with it. All eight offline/online toggles go through `goOffline()`/
+`goOnline()`. **Result: 55 passed, 0 failed.**
 
-Every offline check in that script reloads the page, so `isOffline()` is false afterwards and the
-bar honestly reports "Connection is struggling — showing saved data" instead of "No internet".
-Two checks fail on it — the manager bar and the kitchen bar — and both are the guard, not the app:
-with `navigator.onLine` pinned false, all three panels say
-*"No internet — you can keep working / Showing saved data from a moment ago"* (measured, 15/15).
+### H3 · The flaky tile-chip check — CLOSED
+It now polls for up to 8s and, if time runs out, reports what is actually on the tile. The ⏳ mark is
+stamped on the queue change and re-stamped on a slow tick because the panels repaint constantly and
+a repaint wipes it, so a single read was a coin toss.
 
-**I tried the two-line version and it is NOT a two-line change — do not repeat my attempt.**
-Adding `ctx.addInitScript('…get:()=>false…')` inside a `goOffline(ctx)` helper and routing all
-eight toggles through it took the suite from **53 passed / 2 failed to 18 passed / 3 failed**.
-`addInitScript` cannot be removed once added and re-runs on every navigation, so every later ONLINE
-phase in the same context still believed it was offline: the outbox never drained and the
-"landed exactly once" check read 0 orders. I reverted it — a half-working fixture is worse than a
-diagnosed one. What it needs is a pin that can be turned OFF and survives both a reload and a new
-tab (a context cookie the getter reads, cleared by name — not `clearCookies()`, which would sign the
-run out), plus a fresh context per role, because the pin leaks into every page opened afterwards.
+### H4 · The maintenance screen's colours — CLOSED (the owner said yes)
+`app/globals.css` `.maint*` now derives every colour from one `--maint-ink`, which follows the
+restaurant's own `--accent`, via `color-mix` (already used ~100 times in that file). `.maint-flagship`
+— set by `Maintenance.tsx` for restaurant #1 only — pins the exact hand-tuned values that were there
+before, so **#1 is byte-for-byte unchanged**: measured `rgb(212,165,116)` on `rgb(34,19,9)` at both
+viewports. A tenant now measures its own accent (Aangan: `#e3c06f`, dot `rgb(227,192,111)`).
 
-Until then the two reds are known and harmless. The product is proven correct by direct
-measurement: with `navigator.onLine` pinned false, the manager, kitchen and waiter panels all say
-*"No internet — you can keep working / Showing saved data from a moment ago"*, and the manager's
-floor heading correctly reads *"Table view · saved copy"* (15 of 15, screenshot read).
+`components/AppShell.tsx` also had to move its Service-Mode return **below** the palette: it used to
+bail out above the two `<style>` tags, so the maintenance screen rendered with no tenant palette
+emitted at all and `--accent` fell back to #1's. Teaching the CSS to follow `--accent` would have
+achieved nothing without that.
 
-### H3 · `scripts/verify-offline.mjs`'s tile-chip check is flaky
-"the table tile is marked as having an unsent change" failed on one run and passed on the next, same
-build. The chip is stamped immediately on an outbox change and re-stamped every 1.2s, because the
-panels repaint their grids constantly and wipe it — so a repaint landing in that window leaves up to
-1.2s with no chip. **Change:** poll for the chip for a couple of seconds instead of reading once.
-(I judged the 1.2s re-stamp not worth replacing with a MutationObserver — it self-heals, and no
-person is misled for longer than a repaint.)
+The display font is deliberately still the product's `'Playfair Display'` — it appears in eight other
+places in that stylesheet, it is not #1's branding, and there is no per-restaurant font variable.
+Per-tenant typography would be its own piece of work.
 
-### H4 · `app/globals.css` → the `.maint*` block is hardcoded flagship colours
-See F5(b). Listed as a 🟡 decision, not a fix — it needs the owner's answer, and the CSS is not my
-file either way.
+**R13 is untouched and still stands:** the guest SEARCH DROPDOWN and the panels stay
+golden/little-French-house on purpose. Only the maintenance screen was asked about and answered yes.

@@ -5,16 +5,20 @@
 // passes its OWN logo (or none), so the NAME and the MARK on this screen are always the
 // tenant's (the white-label rule; audit fix 2026-07-06).
 //
-// ⚠ THE COLOURS ARE NOT. This header used to say the screen "can never leak French House branding
-// onto another tenant", and that is only true of the logo and the name. Every colour on it is a
-// hardcoded flagship value in `app/globals.css` (`.maint*`): the brown radial background #221309,
-// the gold ring, steam, badge and bouncing dots on rgba(212,165,116,…) / #d4a574, and a
-// 'Playfair Display' serif headline. There is not one `var(--accent)` in the block, so a tenant
-// whose menu is blue or green still gets a French-House-gold maintenance screen — measured, T4
-// sweep 2026-08-17. It is left as it is on purpose for now: the owner has said more than once that
-// gold + the little-French-house theme IS the intended house style (docs/REJECTED-IDEAS.md R13),
-// so making this screen follow the tenant accent is a decision for him, not a fix to slip in.
-// Do not "correct" the colours without asking; do change this comment if the answer changes.
+// AND SO ARE THE COLOURS, since 2026-08-17. They were NOT: every value on this screen was a
+// hardcoded flagship one (#221309 background, #d4a574 / rgba(212,165,116,…) ring, steam, badge and
+// dots), so a tenant whose menu is blue or green showed its own name and logo on French House's
+// gold — measured on Aangan, whose accent is #e3c06f and whose maintenance ring still computed to
+// #d4a574. Asked directly, the owner said yes to fixing it. The `.maint*` block in app/globals.css
+// now derives everything from one `--maint-ink`, which follows the restaurant's own `--accent`.
+//
+// `maint-flagship` below is what keeps restaurant #1 byte-for-byte unchanged: it pins the exact
+// hand-tuned values that were in the stylesheet before. #1's gold stays hand-tuned; everyone else
+// follows their own palette.
+//
+// The DISPLAY FONT is deliberately still the product's ('Playfair Display', used in eight other
+// places) — it is not #1's branding, and there is no per-restaurant font variable. Per-tenant
+// typography would be its own piece of work.
 //
 // SERVED FROM OUR OWN public/, not from littlefrenchhouse.in. It used to be a hardcoded URL on
 // that WordPress site — an outside host nobody here controls, on the ONE screen you least want a
@@ -33,7 +37,9 @@ export default function Maintenance({ logoText, logoUrl, isDefault = true }: { l
   const name = isDefault ? "Little French House" : (logoText || "");
   return (
     // role="alert" makes screen readers announce this important message.
-    <div className="maint" role="alert" aria-label="Under maintenance">
+    // `maint-flagship` pins restaurant #1's hand-tuned gold; every other tenant's screen derives
+    // from its own --accent (see the note at the top of this file).
+    <div className={`maint${isDefault ? " maint-flagship" : ""}`} role="alert" aria-label="Under maintenance">
       {/* The animated centrepiece: a glowing ring, rising "steam", and the logo */}
       <div className="maint-stage">
         {/* The pulsing ring behind the logo (animated purely with CSS) */}

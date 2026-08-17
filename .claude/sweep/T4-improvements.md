@@ -54,20 +54,34 @@ running. Only the count is imported now.
 
 ---
 
-## 🟡 NOT BUILT — these need a decision
+## 🟢 BUILT IN ROUND 2 — the owner said yes to all five open items
 
-### J1 · The maintenance screen is gold and brown on every restaurant
-Measured: Aangan's accent is `#e3c06f`; its maintenance ring, steam, badge and dots all compute to
-French House's `#d4a574`, on the flagship's brown, in a 'Playfair Display' serif. The name and the
-logo ARE the tenant's — only the colours are not. **Not built** for three reasons: the colours live
-in `app/globals.css` (another terminal's file); the owner has twice said gold + the
-little-French-house theme IS the intended house style (R13); and "make a tenant's screen follow its
-own accent" is a product decision, not a defect. The false claim in the component's own comment has
-been corrected either way.
+### I4 · The hero tagline's guard (three parts, all in `verify:i18n-scope`)
+F6 needed a fix in TWO files that only works as a pair, so the guard asserts both halves plus the
+part that must NOT change (the greeting keeps its inline-block for its `y` animation). Each failure
+message says WHY, so the next person does not "simplify" one half back.
 
-### J2 · German, Arabic and Korean cannot be seen on the dev restaurants
-French House offers `en`/`fr`/`hi` only, and `Header.tsx` correctly resets any language the
-restaurant does not offer. So half the dictionary is unrenderable on the two restaurants this sweep
-may touch, and three of the six language screenshots are the English menu. **Not a fault and not a
-change** — recorded so the next sweep does not report the fallback as a bug, and so it knows that
-proving a German or Arabic string on screen needs a restaurant that offers it.
+### I5 · `verify:offline` is a working guard again — 55 passed, 0 failed
+It was 53/2, and both reds were the harness. The pin now lives in a cookie the init script reads, so
+it can be turned back OFF; and the tile-chip check polls instead of reading once. A suite with two
+permanent reds is how this project has twice lost ten checks without noticing.
+
+---
+
+## 🟡 NOTHING IS LEFT UNBUILT
+
+Every item round 1 listed for a decision was answered **yes** (owner, 2026-08-17) and is done:
+
+| round-1 item | outcome |
+|---|---|
+| J1 / H4 — the maintenance screen's colours | **built.** Follows the tenant accent; #1 byte-for-byte unchanged. |
+| H1 — the rest of the blocked-storage crash | **built.** Two real culprits fixed; two of the four turned out already safe. |
+| H2 — `verify:offline`'s false reds | **built.** 55/0. |
+| H3 — the flaky tile-chip check | **built.** Polls for up to 8s. |
+| J2 — the unrenderable languages | **run.** All six rendered and read at 360px in both skins, without writing to any restaurant. It is what found F6. |
+
+**One thing is deliberately still parked, and it is his own recorded decision, not an omission:**
+Arabic's letters do not JOIN in the animated hero and the intro wordmark, because each grapheme sits
+in its own element and browsers cannot join across element boundaries. That is written down as a
+rejected/parked item with his own words attached. F6 changed where a LINE may break; it did not and
+was not meant to change glyph shaping. Confirmed still parked, not re-raised as work.

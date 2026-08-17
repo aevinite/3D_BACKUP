@@ -577,8 +577,37 @@ body.menu-scrolling .chef-call {
 /* --- HERO --- */
 .hero { position: relative; width: 100%; padding: 30px 20px; text-align: center; }
 /* letter-by-letter hero reveal (GSAP drives these spans) */
-.hero-title-wrap .greet-badge span,
-.hero-title-wrap .hero-title span { display: inline-block; white-space: pre; }
+/* THE GREETING still needs an inline-BLOCK: it is the one that animates `y` (a transform), and a
+   transform does nothing to a plain inline box. It is one short tracked word, so it never wraps. */
+.hero-title-wrap .greet-badge span { display: inline-block; white-space: pre; }
+/* THE TAGLINE MUST NOT BREAK IN THE MIDDLE OF A WORD (T4 sweep, 2026-08-17).
+ *
+ * These spans were `inline-block` too, and an inline-block is an ATOMIC inline box — the browser is
+ * allowed to end a line between any two of them. With one span per letter, that means a break
+ * between any two LETTERS. English never showed it because "All-Day Café & Bakery" fits on one line
+ * at 360px; every longer tagline did. Measured on a Samsung A35 (360×780), screenshots read:
+ *
+ *     German : "Ganztags Café & Bäcke / rei"
+ *     French : "Café & Boulangerie To / ute la Journée"
+ *
+ * That is the biggest text on the guest menu, on the restaurant's own tagline, split at a random
+ * letter with no hyphen — and French House itself offers both those languages.
+ *
+ * `display: inline` fixes it because inline boxes do NOT create break opportunities: the line
+ * breaker sees the concatenated text of the whole heading, so it breaks at spaces like any normal
+ * sentence. This is safe here specifically because the TAGLINE animates OPACITY ONLY (see
+ * components/HeroTitle.tsx — movement is deliberately not animated, so the gradient clip stays
+ * put), and opacity applies perfectly well to an inline box. The gradient itself is painted on the
+ * <h2>, not on these spans, so it is untouched either way.
+ *
+ * `pre-wrap`, not `pre`: `pre` preserves the space characters but also forbids wrapping AT them, so
+ * with inline boxes the heading would overflow sideways instead of wrapping at all. `pre-wrap`
+ * keeps the spaces AND allows the break.
+ *
+ * Verified after the change in all six languages at 360px, both skins: no word is split, Devanagari
+ * still renders as joined syllables, and the gradient still paints. (Arabic's letters still do not
+ * JOIN across element boundaries — that is the separate, recorded, parked item, unchanged here.) */
+.hero-title-wrap .hero-title span { display: inline; white-space: pre-wrap; }
 .hero-title-wrap .greet-badge { animation: none; } /* GSAP controls the entrance */
 /* LFH logo sitting where the search magnifying glass used to be */
 .search-logo {
@@ -610,42 +639,77 @@ body.menu-scrolling .chef-call {
 .intro-word span { display: inline-block; white-space: pre; }
 
 /* --- service / maintenance mode --- */
+/* EVERY RESTAURANT'S CLOSED SIGN IS ITS OWN (owner, 2026-08-17 — "yes for all").
+ *
+ * This block used to be nothing but restaurant #1's colours: the brown #221309 background, and
+ * #d4a574 / rgba(212,165,116,…) on the ring, the steam, the badge and the bouncing dots. There was
+ * not one var() in it. So a tenant whose menu is blue or green showed its OWN name and logo (the
+ * component has always been careful about that) on the flagship's gold-and-brown screen — measured
+ * on Aangan, whose accent is #e3c06f: every one of those values computed to #d4a574.
+ *
+ * Two rules make the change safe:
+ *   1. `--maint-ink` is the ONE colour everything derives from, via color-mix (used ~100 times
+ *      elsewhere in this file, so no new technique). Change it once, the whole screen follows.
+ *   2. `.maint-flagship` — set by components/Maintenance.tsx for restaurant #1 only — pins the
+ *      EXACT hand-tuned values that were here before, so #1 is byte-for-byte unchanged. #1's gold
+ *      stays hand-tuned; everyone else follows their own accent.
+ *
+ * The DISPLAY FONT is deliberately NOT tenant-ised. 'Playfair Display' is the product's display
+ * face — it appears in eight other places in this file — not #1's branding, and there is no
+ * per-restaurant font variable to read. Per-tenant typography is its own piece of work.
+ *
+ * REJECTED-adjacent, so do not "correct" this back: R13 says the guest SEARCH DROPDOWN and the
+ * panels stay golden/little-French-house on purpose. That still stands and is untouched. This
+ * screen was asked for separately and answered yes.
+ */
 .maint {
+  --maint-ink: var(--accent, #d4a574);
+  --maint-deep: color-mix(in srgb, var(--maint-ink) 14%, #0d0805);
+  --maint-cream: color-mix(in srgb, var(--maint-ink) 16%, #ffffff);
+  --maint-sub-ink: color-mix(in srgb, var(--maint-ink) 52%, #6f6659);
   position: fixed; inset: 0; z-index: 10000;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 16px; text-align: center; padding: 24px;
-  background: radial-gradient(circle at 50% 35%, #221309 0%, #0d0805 70%, #000 100%);
-  color: #f2e9da;
+  background: radial-gradient(circle at 50% 35%, var(--maint-deep) 0%, #0d0805 70%, #000 100%);
+  color: var(--maint-cream);
+}
+/* Restaurant #1 keeps its hand-tuned values, exactly as they were before this block moved to
+   variables. Every other tenant inherits from its own --accent above. */
+.maint.maint-flagship {
+  --maint-ink: #d4a574;
+  --maint-deep: #221309;
+  --maint-cream: #f2e9da;
+  --maint-sub-ink: #a8997f;
 }
 .maint-stage { position: relative; width: 210px; height: 210px; display: grid; place-items: center; margin-bottom: 6px; }
 .maint-logo {
   width: 120px; height: 120px; object-fit: contain; z-index: 2;
-  filter: drop-shadow(0 8px 26px rgba(212,165,116,0.5));
+  filter: drop-shadow(0 8px 26px color-mix(in srgb, var(--maint-ink) 50%, transparent));
   animation: maintFloat 3s ease-in-out infinite;
 }
 .maint-ring {
   position: absolute; inset: 0; border-radius: 50%;
-  border: 2px dashed rgba(212,165,116,0.45); animation: maintSpin 16s linear infinite;
+  border: 2px dashed color-mix(in srgb, var(--maint-ink) 45%, transparent); animation: maintSpin 16s linear infinite;
 }
 .maint-ring::after {
   content: ""; position: absolute; inset: 20px; border-radius: 50%;
-  border: 1px solid rgba(212,165,116,0.18);
+  border: 1px solid color-mix(in srgb, var(--maint-ink) 18%, transparent);
 }
 .maint-steam { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); display: flex; gap: 16px; z-index: 1; }
-.maint-steam span { width: 9px; height: 9px; border-radius: 50%; background: rgba(212,165,116,0.55); animation: maintSteam 2.6s ease-in-out infinite; }
+.maint-steam span { width: 9px; height: 9px; border-radius: 50%; background: color-mix(in srgb, var(--maint-ink) 55%, transparent); animation: maintSteam 2.6s ease-in-out infinite; }
 .maint-steam span:nth-child(2) { animation-delay: 0.6s; }
 .maint-steam span:nth-child(3) { animation-delay: 1.2s; }
 .maint-badge {
   font-size: 12px; font-weight: 700; letter-spacing: 3px; text-transform: uppercase;
-  color: #d4a574; padding: 7px 16px; border: 1px solid rgba(212,165,116,0.45);
-  border-radius: 999px; background: rgba(212,165,116,0.08);
+  color: var(--maint-ink); padding: 7px 16px; border: 1px solid color-mix(in srgb, var(--maint-ink) 45%, transparent);
+  border-radius: 999px; background: color-mix(in srgb, var(--maint-ink) 8%, transparent);
   animation: maintBadgePulse 2.4s ease-in-out infinite;
 }
 @keyframes maintBadgePulse { 0%, 100% { opacity: 0.7; } 50% { opacity: 1; } }
 .maint-title { font-family: 'Playfair Display', serif; font-size: clamp(26px, 7vw, 36px); margin: 4px 0 0; }
-.maint-sub { color: #a8997f; max-width: 440px; margin: 0; font-size: 15px; line-height: 1.55; }
+.maint-sub { color: var(--maint-sub-ink); max-width: 440px; margin: 0; font-size: 15px; line-height: 1.55; }
 .maint-dots { display: flex; gap: 9px; margin-top: 8px; }
-.maint-dots span { width: 10px; height: 10px; border-radius: 50%; background: #d4a574; animation: maintBounce 1.2s ease-in-out infinite; }
+.maint-dots span { width: 10px; height: 10px; border-radius: 50%; background: var(--maint-ink); animation: maintBounce 1.2s ease-in-out infinite; }
 .maint-dots span:nth-child(2) { animation-delay: 0.18s; }
 .maint-dots span:nth-child(3) { animation-delay: 0.36s; }
 @keyframes maintFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-12px); } }
