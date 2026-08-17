@@ -279,7 +279,11 @@ export default function StaffProfile({ userId, onClose, onChanged, host }: {
 // ── LEFT RAIL: photo, who, completeness, the daily buttons ───────────────────
 function Rail({ d, patch, reload, flash, onChanged }: Kit & { onChanged?: () => void }) {
   const p = d.person;
-  const c = completeness(p);
+  // Count "pay setup" only where a Pay card actually exists to fill it in — the same condition the
+  // main column uses to draw that card. Without this the meter asks a cook, an owner, and everyone
+  // at a restaurant whose payroll module is off (which is every restaurant by default) for a thing
+  // the screen will not let them enter. (sweep T15, 2026-08-18)
+  const c = completeness(p, { pay: p.role !== "owner" && hasProfile(p.role) && d.payrollOn });
   const pct = Math.round((c.filled / c.total) * 100);
   const photo = p.profile?.photo_url as string | undefined;
   const [busy, setBusy] = useState(false);
