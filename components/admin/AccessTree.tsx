@@ -14,7 +14,7 @@
  * nodePatch() from the same model — the screen cannot disagree with the database about
  * where a switch lives. Styling reuses the panel's existing .acc2-* language plus a small
  * .at-* set for the tree indentation. */
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   SECTIONS, ALL_NODES, NODE_BY_ID, SECTION_BY_ID, nodeValue, nodePatch, extraPatch, applyPatch, nodeExpect,
   type Node, type Section, type TreeState, type TreePatch,
@@ -181,7 +181,9 @@ function helpImages(node: Node): string[] {
   const b = node.bind as { key?: string; flag?: string };
   const stem = node.id.replace(/^(mgr|wtr|d_mgr|d_own)_/, "");
   const names = [...new Set([stem, b?.flag, b?.key].filter(Boolean) as string[])];
-  return names.flatMap((n) => [`/admin-help/${n}.png`, `/admin-help/${n.replace(/_/g, "-")}.png`]);
+  // DEDUPED at the end too: a name with no underscore spells the same file twice, so every such
+  // row handed React two children with the identical `key` and probed the same URL twice.
+  return [...new Set(names.flatMap((n) => [`/admin-help/${n}.png`, `/admin-help/${n.replace(/_/g, "-")}.png`]))];
 }
 
 /** "On by default" / "Off by default" / the default value, in words. */
@@ -1171,10 +1173,37 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
   useAdminModal(sheetRef, `access-info-${node.id}`, onClose);
   // The pictures. Every one that LOADS is shown; a name with no file drops out via onError. When
   // nothing is left the sheet says so, rather than reaching for a photo of somewhere else.
-  const [broken, setBroken] = useState<Record<string, boolean>>({});
+  //
+  // A NAME WITH NO FILE HAS TO COST NOTHING TO LOOK AT (sweep T15, 2026-08-18). The note here used
+  // to claim it already did — "a missing picture costs nothing and never shows a broken image" —
+  // and it was not true: the <img> was rendered straight away, so opening ⓘ on any of the ~86 rows
+  // that have no capture showed TWO bordered boxes with their alt text and the "Example from a
+  // demo restaurant" caption over them, until the 404s came back and React took them away.
+  // Measured: 2 shots + the caption on open, 0 shots + "There wasn't a good picture for this one"
+  // once settled — a broken-looking flash on the majority of rows.
+  //
+  // ASK FIRST, RENDER AFTER. Each candidate name is probed with an off-DOM Image(); only the ones
+  // that really load are put on the page, and the browser serves them from its own cache the
+  // instant they are, so nothing is fetched twice. Hiding a rendered <img> with display:none does
+  // NOT work here and was the first attempt: a hidden image with loading="lazy" is never fetched,
+  // so neither onLoad nor onError ever fires and the sheet sits in "still deciding" for ever.
+  const candidates = useMemo(() => helpImages(node), [node]);
+  const [shot, setShot] = useState<Record<string, "ok" | "no">>({});
+  useEffect(() => {
+    setShot({});
+    let alive = true;
+    for (const src of candidates) {
+      const probe = new Image();
+      probe.onload = () => { if (alive) setShot((s) => ({ ...s, [src]: "ok" })); };
+      probe.onerror = () => { if (alive) setShot((s) => ({ ...s, [src]: "no" })); };
+      probe.src = src;
+    }
+    return () => { alive = false; };
+  }, [candidates]);
   const [more, setMore] = useState(false);
   const path = readablePath(node.id);
-  const shots = helpImages(node).filter((s) => !broken[s]);
+  const shots = candidates.filter((s) => shot[s] === "ok");
+  const settling = candidates.some((s) => !shot[s]);   // still waiting on an answer for one
   const kids = node.children || [];
   const def = defaultLine(node);
   return (
@@ -1188,8 +1217,7 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
             this shows ALL of them. lazy + static /public files, so an unopened sheet costs
             nothing. See scripts/shot-access-help.mjs to re-capture. */}
         {shots.map((src) => (
-          <img key={src} className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} loading="lazy"
-            onError={() => setBroken((b) => ({ ...b, [src]: true }))} />
+          <img key={src} className="at-sheet-shot" src={src} alt={`Where ${node.name} appears`} />
         ))}
         {/* SAY IT IS AN EXAMPLE (sweep T6, 2026-08-10). These are real captures of the app, but of
             ONE restaurant — opening ⓘ on Menu while Aangan Garden is selected shows Pizza Palace's
@@ -1221,7 +1249,9 @@ function InfoSheet({ node, onClose }: { node: Node; onClose: () => void }) {
         {node.leftToBuild ? <p className="at-sheet-note">This one isn&apos;t built yet. The switch appears here the moment it is.</p> : null}
         {/* Said out loud, centred at the bottom, instead of quietly borrowing a photo of something
             else (owner, 2026-08-01). Silence here would read as "the picture failed to load". */}
-        {!shots.length ? <p className="at-sheet-noshot">There wasn&apos;t a good picture for this one.</p> : null}
+        {/* Only once every candidate has answered — otherwise this line flashes on a row that DOES
+            have a picture, which is the same lie the other way round. */}
+        {!shots.length && !settling ? <p className="at-sheet-noshot">There wasn&apos;t a good picture for this one.</p> : null}
         <button className="adm-btn" onClick={onClose}>Close</button>
       </div>
     </div>
