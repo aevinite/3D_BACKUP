@@ -10,7 +10,7 @@ import { AUTH_COOKIE, tokenIsValid } from "@/lib/staffAuth";
 import { ADMIN_ACT_COOKIE } from "@/lib/panelScope";
 import { enabledOwnedRestaurantIds } from "@/lib/panelAccess";
 import { supabaseAdmin as sb } from "@/lib/supabaseAdmin";
-import { inventoryLadder } from "@/lib/tableTags";
+import { inventoryEffectiveByRid } from "@/lib/tableTags";
 import OwnerInventory from "@/components/owner/OwnerInventory";
 
 export default async function Page({ searchParams }: { searchParams: Promise<{ rid?: string }> }) {
@@ -26,8 +26,14 @@ export default async function Page({ searchParams }: { searchParams: Promise<{ r
     const ids = await enabledOwnedRestaurantIds(u.id);
     // Only restaurants where the admin has the inventory module ON — the nav is
     // union-gated, so a multi-restaurant owner may land here with a mixed estate.
-    const withModule: string[] = [];
-    for (const id of ids) if ((await inventoryLadder(id)).effective) withModule.push(id);
+    // ONE settings read for the whole estate (sweep 6 · T14, 2026-08-18). This was a `for` loop
+    // calling `inventoryLadder(id)` one restaurant at a time, so an owner with twenty floors paid
+    // twenty round-trips, in series, before this page drew anything. `inventoryEffectiveByRid`
+    // exists for exactly this and is already used by /api/owner/reports; the rung it computes is
+    // the same expression `moduleLadder` uses — allowed && (!ownerControl || enabled) — so no
+    // restaurant's answer changes, it just arrives at once.
+    const effective = await inventoryEffectiveByRid(ids);
+    const withModule = ids.filter((id) => effective[id]);
     if (withModule.length) {
       const rows = (await sb.from("restaurants").select("id, name").in("id", withModule)).data || [];
       const nameById = new Map(rows.map((r) => [r.id as string, r.name as string]));
