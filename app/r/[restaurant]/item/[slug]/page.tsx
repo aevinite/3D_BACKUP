@@ -16,6 +16,13 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   const { restaurant, slug } = await params;
   const r = await getRestaurantBySlug(restaurant);
   if (!r) return { title: "Menu" };
+  // Same rule as the menu door beside it (guest sweep T1, 2026-08-16): a restaurant that is switched
+  // off — or whose Menu master switch is off — must not preview a shared DISH link as though it were
+  // open. Both reads are the cached ones the page below already makes.
+  const settings = await getSettings(r.id);
+  if (!r.active || !settings.menuEnabled) {
+    return { title: "Menu", description: "This menu isn’t available right now." };
+  }
   const dish = await getMenuItem(slug, r.id).catch(() => null);
   const title = dish?.title ? `${dish.title} — ${r.name}` : `${r.name} — Menu`;
   // A TITLE ALONE IS NOT WHITE-LABEL. Next inherits every field a page doesn't set, so returning

@@ -827,6 +827,16 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
 
     // Dishes in the current category (preload first) vs. everything else. The "All"
     // view shows every category, so treat it like no filter — preload them all.
+    //
+    // REJECTED (owner, 2026-08-16) — docs/REJECTED-IDEAS.md → R28. There is NO ceiling on this on
+    // purpose: *"don't do the sixth one any time soon like in the code, also reject that it is
+    // rejected by me."* Offered as guest sweep T1 improvement I2 (a restaurant that models 30 dishes
+    // would have every diner's phone pull ~60 MB in the background for dishes nobody opens). His
+    // answer is that a diner must never wait when they tap a dish. So do not add a cap, a first-N
+    // window, an "only what's on screen" queue, a data-saver mode or a per-restaurant preload
+    // setting — and do not re-report the unbounded preload as an egress or performance problem.
+    // The measured facts, so nobody re-discovers them as new: 2 GLB requests on a French House menu
+    // open (it has 2 such dishes, Aangan has none), and lib/modelLoader already evicts past 40 MB.
     const isAllView = !currentCategory || currentCategory === "all";
     const inCat = isAllView
       ? fourD

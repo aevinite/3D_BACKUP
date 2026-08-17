@@ -51,9 +51,14 @@ export function RestaurantProvider({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   // Slug is known SYNCHRONOUSLY from the URL, so a widget can always build a
   // correct /r/<slug>/... link even before the id/name resolve.
+  // Lower-cased, for the same reason lib/tenantStorage.foldSlug exists: this slug BUILDS LINKS
+  // (`/r/<slug>/menu` from the global widgets) while the page components build theirs from the
+  // RESOLVED `r.slug`, which is always lower case. Handing back "French-House" here sent a diner
+  // between two spellings of one restaurant — and the phone files the basket per spelling.
+  // (Guest sweep T1, 2026-08-16; owner's capital/lower-case rule, 2026-08-12.)
   const slug = useMemo(() => {
     const m = (pathname || "").match(/^\/r\/([^/]+)/);
-    return m ? decodeURIComponent(m[1]) : DEFAULT_RESTAURANT_SLUG;
+    return m ? decodeURIComponent(m[1]).trim().toLowerCase() : DEFAULT_RESTAURANT_SLUG;
   }, [pathname]);
 
   const [id, setId] = useState<string>(DEFAULT_RESTAURANT_ID);

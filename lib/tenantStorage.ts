@@ -25,12 +25,31 @@ const LAST_SLUG_KEY = "lfh_tab_tenant";
 //  - bare /menu, /item/...    → restaurant #1 (these paths ARE #1 by definition —
 //                               same rule as lib/restaurant-context.tsx)
 //  - anything else (/view/..) → the slug this tab last visited, else #1
+// CAPITALS AND LOWER CASE ARE THE SAME RESTAURANT — INCLUDING IN THIS PHONE'S OWN MEMORY
+// (owner, 2026-08-12: *"make sure c capital and small works as a same … it should be identical
+// only"*; the storage half was found by guest sweep T1, 2026-08-16 and measured on the deployed site).
+//
+// Slugs are stored lower case, and lib/tenant.getRestaurantBySlug folds case so /r/French-House/menu
+// resolves — but this function read the address bar VERBATIM while every link the app builds carries
+// the RESOLVED slug (app/r/[restaurant]/menu/page.tsx passes `r.slug` for exactly that reason). The
+// two therefore disagreed the moment an address had a capital in it, and this key is what the basket,
+// the scanned table, the table session, the nickname, the favourites, the allergy list and the live
+// order list are all filed under. Measured: opening /r/French-House/menu?table=5 stored the table as
+// `lfh_table:French-House`, the dish card linked to /r/french-house/item/…, and on that page the
+// table number was simply gone — and anything added there landed in a second basket the menu could
+// not see.
+//
+// Folding HERE rather than at each call site because tkey/tget/tset/isTKey all come through it, so
+// one restaurant is one scope however the address was typed. `tgetFor`/`tsetFor` fold too — they take
+// an explicit slug, and a caller that passes a raw address slug must land in the same place.
+const foldSlug = (s: string): string => String(s || "").trim().toLowerCase();
+
 export function tenantSlug(): string {
   if (typeof window === "undefined") return DEFAULT_RESTAURANT_SLUG;
   const path = window.location.pathname || "";
   const m = path.match(/^\/r\/([^/]+)/);
   if (m) {
-    const slug = decodeURIComponent(m[1]);
+    const slug = foldSlug(decodeURIComponent(m[1]));
     try { sessionStorage.setItem(LAST_SLUG_KEY, slug); } catch {}
     return slug;
   }
@@ -100,12 +119,12 @@ export function tremove(base: string) {
 export function tgetFor(base: string, slug: string): string | null {
   if (typeof window === "undefined") return null;
   migrateLegacyOnce();
-  try { return localStorage.getItem(`${base}:${slug || DEFAULT_RESTAURANT_SLUG}`); } catch { return null; }
+  try { return localStorage.getItem(`${base}:${foldSlug(slug) || DEFAULT_RESTAURANT_SLUG}`); } catch { return null; }
 }
 export function tsetFor(base: string, slug: string, value: string) {
   if (typeof window === "undefined") return;
   migrateLegacyOnce();
-  try { localStorage.setItem(`${base}:${slug || DEFAULT_RESTAURANT_SLUG}`, value); } catch {}
+  try { localStorage.setItem(`${base}:${foldSlug(slug) || DEFAULT_RESTAURANT_SLUG}`, value); } catch {}
 }
 
 // For cross-tab "storage" event listeners: does this event belong to the given

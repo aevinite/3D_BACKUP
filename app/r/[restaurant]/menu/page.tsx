@@ -18,6 +18,21 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   const { restaurant } = await params;
   const r = await getRestaurantBySlug(restaurant);
   if (!r) return { title: "Menu" };
+  // A MENU THAT ISN'T SERVING MUST NOT ADVERTISE ITSELF (guest sweep T1, 2026-08-16).
+  //
+  // app/q/[code] already does this — a dead code answers with a neutral title and no platform
+  // blurb — but this door returned the restaurant's name, tagline and logo whatever the state was,
+  // and only the PAGE below checked `active` / `menuEnabled`. So a link shared in a chat, or one
+  // already sitting in someone's history, previewed as an open menu ("Restaurant — Menu · view the
+  // menu and order at Restaurant", with the logo) and then landed on "This menu isn't available
+  // right now". Same fix, same wording, as the QR door: neutral, and no restaurant image.
+  //
+  // getSettings and getRestaurantBySlug are both cached (8s / 15s, de-duplicated), and the page
+  // below asks for exactly the same two things — so this costs no extra read.
+  const settings = await getSettings(r.id);
+  if (!r.active || !settings.menuEnabled) {
+    return { title: "Menu", description: "This menu isn’t available right now." };
+  }
   const title = r.name ? `${r.name} — Menu` : "Menu";
   // A friendly, restaurant-specific description (its own tagline when it has one).
   const description = r.tagline
