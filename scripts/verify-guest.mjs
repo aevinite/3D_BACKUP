@@ -154,6 +154,55 @@ check("44-48", "restaurant #1's branding never leaks onto another tenant", () =>
   has(F.menuView, "isDefault ? t.greeting", "isDefault ? t.heroTitle") &&
   has(code("components/IntroSplash.tsx"), 'isDefault && <img className="intro-logo"'));
 
+// ── sweep #6 / T1 (2026-08-17): four more that must never come back ───────────────────────
+const T1 = { menuPage: code("app/r/[restaurant]/menu/page.tsx") };
+
+// ONE RESTAURANT, ONE ADDRESS. getRestaurantBySlug folds case, so /r/French-House/menu resolves —
+// but lib/tenantStorage derives its scope from the RAW path, so the cart, the scanned table, the
+// favourites and the session landed under "French-House" while MenuView's own browse state used
+// "french-house". Measured: /menu?table=4 on the capitalised link wrote `lfh_table:French-House`,
+// and the menu's own dish links are built from r.slug — so the first dish tapped moved the guest to
+// the lower-case address, where getScannedTable() returns "". The door canonicalises instead.
+check("P00155", "an oddly-cased menu link is sent to the canonical one, query and all", () => {
+  const guard = rx(T1.menuPage, /if \(restaurant !== r\.slug\)/);
+  const keepsQuery = has(T1.menuPage, "searchParams", "URLSearchParams", "qs.append");
+  const redirects = rx(T1.menuPage, /redirect\(`\/r\/\$\{r\.slug\}\/menu/);
+  return { ok: guard && keepsQuery && redirects, note: `guard=${guard} query=${keepsQuery} redirect=${redirects}` };
+});
+
+// A menu that isn't serving must not preview as an open one. app/q/[code] always did this; the
+// tenant door advertised the name, tagline and logo whatever the state was, then landed the guest
+// on "This menu isn't available right now".
+check("P00165", "a not-serving menu previews neutrally on the tenant door too", () =>
+  rx(T1.menuPage, /if \(!r\.active \|\| !\w+\.menuEnabled\)[\s\S]{0,120}?title: "Menu"/));
+
+// The waiter bell must never fall back onto a control. With the search suggestions open, or every
+// category folded, no clean lift exists in the 260px band — and the old fallback returned it to the
+// corner, where it sat on a dish's "+" (elementFromPoint at the button's own centre returned
+// `chef-call`) and on a `.cat-group-head`. It stands down instead.
+check("P00338", "with nowhere clean, the bell stands down rather than parking on a control", () => {
+  const yields = rx(F.menuView, /yieldBell\(bell, true\)/);
+  const returns = rx(F.menuView, /yieldBell\(bell, false\)/);
+  const untappable = has(F.menuView, '"pointer-events", "none"') && has(F.menuView, '"visibility", "hidden"');
+  // and it must never be left stood down for the next page
+  const cleaned = (F.menuView.match(/yieldBell\(bell, false\)/g) || []).length >= 2;
+  return { ok: yields && returns && untappable && cleaned,
+    note: `standsDown=${yields} comesBack=${returns} untappable=${untappable} cleanup=${cleaned}` };
+});
+
+// Two guest surfaces that describe themselves to a screen reader as something they are not. The
+// category chips were corrected in 2026-08-12 (tablist with no tabpanel); the search suggestions
+// were still a listbox with no `option` inside it, and the sold-out pill swallowed the card link.
+check("P00488", "the guest menu describes its own widgets honestly", () => {
+  const chips = has(F.menuView, 'role="group"') && !rx(F.menuView, /role="tablist"/);
+  const sugg = !rx(F.menuView, /className="search-dropdown"\s+role="listbox"/) &&
+               rx(F.menuView, /className="search-dropdown"[\s\S]{0,120}?role="list"/);
+  return { ok: chips && sugg, note: `chips=${chips} suggestions=${sugg}` };
+});
+check("P00143", "the sold-out pill no longer swallows the card's own link", () =>
+  !rx(F.food, /sold-out-pill"\s*\n?\s*onClick/) &&
+  !rx(F.food, /className="sold-out-pill"[^>]*onClick/));
+
 // ── LIVE half ────────────────────────────────────────────────────────────────────────────
 async function live(base) {
   let chromium;

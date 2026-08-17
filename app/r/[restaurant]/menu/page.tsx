@@ -4,7 +4,7 @@
 // everything MenuView fetches (dishes, categories, features) is scoped to it.
 //
 // QR codes can point at /r/<slug>/menu?table=N — MenuView reads ?table / ?t.
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import MenuView from "@/components/MenuView";
 import { getRestaurantBySlug } from "@/lib/tenant";
 import { getSettings } from "@/lib/menu";
@@ -18,6 +18,21 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   const { restaurant } = await params;
   const r = await getRestaurantBySlug(restaurant);
   if (!r) return { title: "Menu" };
+  // A MENU THAT ISN'T SERVING MUST NOT ADVERTISE ITSELF (guest sweep T1, 2026-08-17).
+  //
+  // app/q/[code] already does this — a dead code answers with a neutral title and no platform
+  // blurb — but this door returned the restaurant's name, tagline and logo whatever the state was,
+  // and only the PAGE below checked `active` / `menuEnabled`. So a link shared in a chat, or one
+  // already sitting in someone's history, previewed as an open menu ("Restaurant — Menu · view the
+  // menu and order at Restaurant", with the logo) and then landed on "This menu isn't available
+  // right now". Same fix, same wording, as the QR door: neutral, and no restaurant image.
+  //
+  // getSettings and getRestaurantBySlug are both cached and de-duplicated, and the page below asks
+  // for exactly the same two things — so this costs no extra read.
+  const meta = await getSettings(r.id);
+  if (!r.active || !meta.menuEnabled) {
+    return { title: "Menu", description: "This menu isn’t available right now." };
+  }
   const title = r.name ? `${r.name} — Menu` : "Menu";
   // A friendly, restaurant-specific description (its own tagline when it has one).
   const description = r.tagline
@@ -41,8 +56,10 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
 
 export default async function RestaurantMenuPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ restaurant: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { restaurant } = await params;
   const r = await getRestaurantBySlug(restaurant);
@@ -52,6 +69,44 @@ export default async function RestaurantMenuPage({
   // absent rather than an empty page, so this is the same "not found" a wrong slug gets.
   const settings = await getSettings(r.id);
   if (!settings.menuEnabled) notFound();
+  // ONE RESTAURANT, ONE ADDRESS — send an oddly-cased link to the canonical one before anything
+  // renders (guest sweep T1, 2026-08-17; measured on this dev stack at 360x780).
+  //
+  // WHAT WENT WRONG. `getRestaurantBySlug` folds case, so /r/French-House/menu resolves and looks
+  // perfect. MenuView is then handed `r.slug`, which correctly namespaces the browse state it owns
+  // (sort, diet, search, folded categories, layout). But the CART, the SCANNED TABLE, the
+  // FAVOURITES and the dining SESSION do not go through MenuView at all — they go through
+  // lib/tenantStorage, and `tenantSlug()` there reads the slug straight out of
+  // `window.location.pathname`, un-folded. So one diner on one phone had two scopes at once:
+  //
+  //     lfh_menu_layout:french-house      (MenuView, resolved)
+  //     lfh_table:French-House            (tenantStorage, as typed)   ← measured, /menu?table=4
+  //
+  // The table is the one that costs a real person something. A QR or a shared link with any other
+  // casing saves the diner's table number under a name nothing else reads — and the menu's own dish
+  // links are built from `r.slug`, so the very first dish they tap moves them to the lower-case
+  // address, where `getScannedTable()` returns "". They are asked to join a table again, and their
+  // basket is empty, at a table the app had already been told about.
+  //
+  // Canonicalising the URL fixes the whole class at once — every later page in that tab inherits
+  // the corrected path, so the cart, favourites and session agree with the browse state without
+  // any of them having to know about casing. The query is carried across verbatim so `?table=N`
+  // survives, which is the whole point. The common case (the casing already matches) does no work.
+  //
+  // The root cause still deserves the one-line fold in `tenantSlug()` — a guest who lands directly
+  // on /r/<Slug>/item/... never passes through here. That is a HANDOFF; this closes the door a QR
+  // actually opens.
+  if (restaurant !== r.slug) {
+    const sp = await searchParams;
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(sp)) {
+      if (v == null) continue;
+      if (Array.isArray(v)) v.forEach((x) => qs.append(k, x));
+      else qs.append(k, v);
+    }
+    const s = qs.toString();
+    redirect(`/r/${r.slug}/menu${s ? `?${s}` : ""}`);
+  }
   return (
     <>
       {/* Access → Menu → Format → Default light/dark. The root <html> is stamped 'light' by

@@ -611,6 +611,17 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
     // category header: clearing one control lands you wherever that puts you, which may be worse.
     // A scan simply asks each candidate "is anything tappable here?" and takes the first clean one.
     const STEP = 8;
+    // STANDING DOWN IS THE LAST RESORT, AND IT BEATS PARKING ON A CONTROL (guest sweep T1,
+    // 2026-08-17). See the note at the fallback below for the measurements.
+    const yieldBell = (bell: HTMLElement, on: boolean) => {
+      if (on) {
+        bell.style.setProperty("visibility", "hidden");
+        bell.style.setProperty("pointer-events", "none");
+      } else {
+        bell.style.removeProperty("visibility");
+        bell.style.removeProperty("pointer-events");
+      }
+    };
     const settleBell = () => {
       const bell = document.querySelector<HTMLElement>(".chef-call");
       if (!bell) return;
@@ -622,21 +633,49 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       // STABILITY FIRST: if where it sits now is already clear, leave it completely alone. Without
       // this the lift is recomputed from zero on every scroll-stop and the bell visibly hops around
       // the screen as the guest browses — trading a covered button for a restless one.
-      if (!hits(boxes, cur.left, cur.right, cur.top, cur.bottom)) return;
+      // (…but if it had stood down, this is the moment it comes back: the guest cleared the search,
+      // unfolded a category, or simply scrolled.)
+      if (!hits(boxes, cur.left, cur.right, cur.top, cur.bottom)) { yieldBell(bell, false); return; }
       // Rest position = where it would sit with no lift at all.
       const restTop = cur.top + lift, restBottom = cur.bottom + lift;
       for (let want = 0; want <= BELL_MAX_LIFT; want += STEP) {
         if (!hits(boxes, cur.left, cur.right, restTop - want, restBottom - want)) {
           if (want === 0) bell.style.removeProperty("--bell-lift");
           else bell.style.setProperty("--bell-lift", `${want}px`);
+          yieldBell(bell, false); // a clean spot exists — the bell is welcome again
           return;
         }
       }
-      // NOTHING within reach is clean (a very short screen, or a wall of controls). Go back to the
-      // corner the owner designed rather than staying parked mid-screen on a heading: at rest the
-      // bell is at least where a guest expects to find it, and the scroll step-aside below still
-      // uncovers whatever is under it while they are moving.
+      // NOTHING within reach is clean — and going back to the corner is what STOLE THE TAP.
+      //
+      // The old fallback here returned the bell to its resting place on the grounds that "at rest
+      // the bell is at least where a guest expects to find it". Measured on this dev stack at
+      // 360x780, on BOTH restaurants, that reasoning cost a diner the control they were reaching
+      // for, in two ordinary states:
+      //
+      //   · SEARCH OPEN — the suggestions panel is full-width (x 21..339) and stacks unbroken from
+      //     y 362 to 739, so every one of the 33 candidate positions in the 260px band is covered.
+      //     The bell fell back to y 707..755 and sat on a dish's "+" at y 734..776, x 291..333 —
+      //     22px of overlap, and elementFromPoint AT THE BUTTON'S OWN CENTRE returned `chef-call`.
+      //     Tapping "+" rang for a waiter instead of adding the dish.
+      //   · EVERY CATEGORY FOLDED — the page becomes a stack of full-width `.cat-group-head`
+      //     buttons tiled ~53px apart, so again nothing in the band is clean. The bell parked on a
+      //     header with 48px of overlap: the exact bug the scan above was written to end.
+      //
+      // Moving it cannot help — at 360px wide a 48px bell has nowhere to go when the rows are
+      // full-width — so the only honest answer left is for the bell to get out of the way. It is a
+      // convenience floating over the menu; the menu's own controls are the thing the guest came
+      // for, and a floating convenience must never beat the primary control.
+      //
+      // It stands down completely (invisible AND untappable) rather than turning transparent to
+      // taps: a bell you can still see but which quietly opens a dish page would be a worse lie
+      // than one that steps away. Nothing vanishes in silence — the control underneath is now
+      // fully reachable and answers the tap itself — and it comes straight back at the top of this
+      // function the moment a clean spot exists, which is any scroll, any search cleared, any
+      // category unfolded. In the six other states measured (plain, no-results, favourites-empty,
+      // list view, mid-scroll, at the bottom) a clean lift is found and none of this runs.
       bell.style.removeProperty("--bell-lift");
+      yieldBell(bell, true);
     };
     const markScrolling = () => {
       document.body.classList.add("menu-scrolling");
@@ -749,7 +788,11 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
       document.body.classList.remove("menu-frost");
       document.body.classList.remove("menu-scrolling"); // never strand the bell hidden
       // …and never strand it lifted either: another page's bell must start at rest.
-      document.querySelector<HTMLElement>(".chef-call")?.style.removeProperty("--bell-lift");
+      const bell = document.querySelector<HTMLElement>(".chef-call");
+      bell?.style.removeProperty("--bell-lift");
+      // …nor stood down. Leaving the menu while the bell had yielded (a search still typed in,
+      // say) would carry an invisible, untappable bell onto the dish page.
+      if (bell) yieldBell(bell, false);
     };
   }, []);
 
@@ -1156,13 +1199,27 @@ export default function MenuView({ restaurantId, restaurantSlug, restaurantName,
               onChange={(e) => setSearchQuery(e.target.value)}
             />
             {/* When there are matches, show the dropdown of quick results. */}
+            {/* SAY WHAT THIS ACTUALLY IS — the same correction the category chips got above
+                (guest sweep T1, 2026-08-17). It was `role="listbox"` whose children are plain
+                links: a listbox promises a screen reader a set of `option`s to choose between, and
+                there was not one `option` anywhere inside, so a blind diner was told "list box"
+                and then handed nothing selectable. Arrow keys do nothing here either — the rows
+                are links, and tapping one OPENS THAT DISH.
+                A labelled list of links is what it really is, and `aria-label` carries the count so
+                the number of matches is spoken rather than left to be discovered by swiping. The
+                class names, the styling and the scroll cue are all untouched. */}
             {searchResults.length > 0 && (
-              <div className="search-dropdown" role="listbox">
+              <div
+                className="search-dropdown"
+                role="list"
+                aria-label={`${searchResults.length} matching ${searchResults.length === 1 ? "dish" : "dishes"}`}
+              >
                 {searchResults.map((r) => (
                   <Link
                     key={r.id}
                     href={`${itemBase}/item/${r.slug}`}
                     className="search-result"
+                    role="listitem"
                     onClick={() => setSearchQuery("")}
                   >
                     <img className="search-result-img" src={r.image} alt="" loading="lazy" decoding="async" onError={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = "hidden"; }} />
