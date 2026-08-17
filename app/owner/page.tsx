@@ -257,6 +257,22 @@ function timeAgo(iso: string): string {
   return `${Math.round(h / 24)} d ago`;
 }
 
+// WHICH ELEMENT ACTUALLY SCROLLS on the owner console (T12 sweep, 2026-08-17).
+// At >900px it is `.adm-main`; at <=900px globals.css gives `.adm-main` `overflow-y: visible` and
+// makes `.adm` the 100dvh scroller instead. The window NEVER scrolls at either width — measured:
+// at 1280x800 `.adm-main` is 2256/751 and the document is 800/800; at 360x780 `.adm` is 4109/780
+// while `.adm-main` is 4052/4052. So a save/restore written against `.adm-main` alone silently did
+// nothing on a phone, which is exactly how the owner's "back should keep me where I was" was lost
+// there. Same shape as `port()` in app/aevinite/restaurants/page.tsx, which solved this first.
+function scrollPort(): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  for (const sel of [".adm-main", ".adm"]) {
+    const el = document.querySelector<HTMLElement>(sel);
+    if (el && el.scrollHeight > el.clientHeight + 2) return el;
+  }
+  return document.querySelector<HTMLElement>(".adm-main");
+}
+
 // ── Per-card range dropdown (the global tab bar's replacement) ────────────────
 function RangeDrop({ id, value, onChange, compactBtn, main }: { id: string; value: Range; onChange: (r: Range) => void; compactBtn?: boolean; main?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -477,17 +493,34 @@ export default function OwnerDashboard() {
   const drillScroll = useRef<[number, number, number]>([0, 0, 0]);
   const prevView = useRef<View>(view);
   const viewTo = (v: View) => {
-    const el = typeof document === "undefined" ? null : document.querySelector<HTMLElement>(".adm-main");
+    const el = scrollPort();
     if (el) drillScroll.current[levelDepth(prevView.current)] = el.scrollTop;
     setView(v);
   };
   useLayoutEffect(() => {
-    const el = document.querySelector<HTMLElement>(".adm-main");
+    const el = scrollPort();
     const from = levelDepth(prevView.current), to = levelDepth(view);
     prevView.current = view;
     if (!el || from === to) return;
     el.scrollTop = to > from ? 0 : drillScroll.current[to];   // deeper → top; back → restore
   }, [view]);
+  // ── THE DRILL IS A BACK STEP (T12 sweep, 2026-08-17) ─────────────────────────────────────────
+  // Opening a dish changes the SCREEN without changing the address, so on its own the phone's BACK
+  // button skipped it and left the owner panel altogether. Measured on a 360x780 A35: after tapping
+  // one dish there was NO way back to the dashboard at all — the top-strip crumb is display:none at
+  // that width, the ☰ drawer's own "Dashboard" link is already the active route, and re-opening
+  // /owner deliberately restores the drill (the refresh-proof drill, owner round-5). Only clearing
+  // session storage escaped.
+  //
+  // So the drill registers with the back-stack manager, the same singleton the range dropdowns, the
+  // restaurant drawer and the heatmap zoom already use — never a hand-rolled pushState (project
+  // rule). ONE LAYER PER LEVEL, in hook order, so the layers stack restaurant-then-dish and BACK
+  // peels dish → restaurant → dashboard. A single-restaurant owner jumps home→dish, which registers
+  // both at once; the dish layer sends him straight home and the restaurant layer then unregisters
+  // itself, which reconcile() rewinds invisibly (same URL either way).
+  useBackClose("owner-drill-restaurant", view.level !== "home", () => setView({ level: "home" }));
+  useBackClose("owner-drill-dish", view.level === "dish", () => setView((v) =>
+    v.level === "dish" && !single ? { level: "restaurant", rid: v.rid } : { level: "home" }));
   // The MAIN range (top-right): the one dropdown the whole page follows — KPI boxes
   // and graphs alike (owner round-2: "only the main one"). Default 30 days.
   const [globalRange, setGlobalRange] = useState<Range>("30d");
