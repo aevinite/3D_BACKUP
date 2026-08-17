@@ -145,16 +145,16 @@
       });
 
       /* A TAP ON "GENERATE BILL" MUST NEVER DIE IN SILENCE (T8 sweep, 2026-08-17).
-         The button used to carry the real `disabled` attribute, and a disabled button emits no
+         The button used to carry the real 'disabled' attribute, and a disabled button emits no
          click at all — so the careful handler below, the one that says WHICH box is missing and
          puts the cursor in it, could never run. Exactly when a waiter needs telling (nine digits
          typed, or a number with no name), tapping the primary button did nothing whatsoever: no
          message, no focus, no toast. That is the panel's own "a tap must never vanish in silence"
          rule, broken by the very attribute meant to be helpful.
          So the button now only LOOKS not-ready and stays tappable. The look is the three
-         declarations `.bcust-foot .btn.primary:disabled` applies in the panel stylesheet, mirrored
-         inline, plus killing the ready-state glow that `:not(:disabled)` would otherwise paint on a
-         button that is not ready. `aria-disabled` keeps the state honest for a screen reader
+         declarations '.bcust-foot .btn.primary:disabled' applies in the panel stylesheet, mirrored
+         inline, plus killing the ready-state glow that ':not(:disabled)' would otherwise paint on a
+         button that is not ready. 'aria-disabled' keeps the state honest for a screen reader
          without swallowing the event. */
       function setReady(ok) {
         goBtn.setAttribute("aria-disabled", ok ? "false" : "true");

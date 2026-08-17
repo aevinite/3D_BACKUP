@@ -434,10 +434,10 @@
    was indistinguishable from the original: two identical sheets for one sale, and no way for the
    person holding either to tell which is which. That is the one gap left where this product's paper
    can mislead someone, on the document that carries the money.
-   Same flag name and same band as everywhere else (`.vband`, the double border the cancelled sheet
+   Same flag name and same band as everywhere else ('.vband', the double border the cancelled sheet
    uses), so all three documents brand a duplicate identically. A first print is never branded — a
    sheet marked DUPLICATE that is actually the original would be a lie on paper, which is the same
-   reasoning that keeps `reprint` off a fresh KOT.
+   reasoning that keeps 'reprint' off a fresh KOT.
    A cancelled bill that is ALSO reprinted shows both bands: both statements are true, and the
    cancellation is the one that goes first because it is the one that changes what is owed. */
 + (d.cancelled ? '<div class="vband">Cancelled — no charge</div>\n' : "")
@@ -530,7 +530,7 @@
    *
    * The paragraph above says a kitchen ticket "must read the same on every device in the building",
    * and only the MONTH NAME was ever made to obey it. Everything else here was left to the device:
-   * the time came from `toLocaleTimeString([], …)` — the machine's own locale AND its own time zone —
+   * the time came from 'toLocaleTimeString([], …)' — the machine's own locale AND its own time zone —
    * and the today/yesterday decision compared local calendar dates. Measured on one order rung at
    * 2026-08-16 21:31 IST, the same ticket printed:
    *
@@ -545,7 +545,7 @@
    * which is precisely the confusion this function was written to remove.
    *
    * AND THE DAY IS THE RESTAURANT'S DAY, NOT THE CALENDAR'S. "Today" in this product rolls over at
-   * 05:00 IST, not at midnight (mig 044, `lib/businessDay.ts`, `docs/NUMBERING.md`) — the counters,
+   * 05:00 IST, not at midnight (mig 044, 'lib/businessDay.ts', 'docs/NUMBERING.md') — the counters,
    * every panel's Today filter and the Z-report all agree on that, because a service running past
    * midnight is still the same night's trade. On a calendar day a ticket rung at 23:50 and reprinted
    * at 00:10 of the SAME rush came back branded "YESTERDAY". It now uses the same business day
@@ -554,10 +554,10 @@
    * the same calendar date. That is the correct answer — the restaurant HAS turned the day over by
    * then, and every other "today" in the product has turned with it.)
    *
-   * The business-day key is derived the way `businessDayDate()` derives it — UTC+05:30 − 05:00 =
+   * The business-day key is derived the way 'businessDayDate()' derives it — UTC+05:30 − 05:00 =
    * UTC+00:30, so the key is the UTC date half an hour on. This file takes no imports (it is loaded
    * by the panels, the Next server and React alike), so the arithmetic is repeated here rather than
-   * shared; if `lib/businessDay.ts` ever changes, change this with it. `verify:billdoc-paper` pins
+   * shared; if 'lib/businessDay.ts' ever changes, change this with it. 'verify:billdoc-paper' pins
    * both halves.
    */
   function kotWhen(ts) {
@@ -897,8 +897,8 @@
         if (mode === "exempt") return;
         /* AN MRP LINE IS NOT ONE OF THE TAXED ROWS (T8 sweep, 2026-08-17).
            A sealed bottle sold at its printed price is kept OUT of this order's taxable base — that
-           is what `nontax_amount` is — and the tax sitting inside its price is the manufacturer's,
-           reported separately under the total by `mrpTaxInside`. But an MRP line whose tax_mode is
+           is what 'nontax_amount' is — and the tax sitting inside its price is the manufacturer's,
+           reported separately under the total by 'mrpTaxInside'. But an MRP line whose tax_mode is
            "incl" is not "exempt", so it fell through to both sums below: counted here as a taxed
            row, and counted AGAIN as the "MRP items" row the document adds after the tax.
 
@@ -913,7 +913,7 @@
            being contradicted on the one document that has to reconcile to the rupee.
 
            Only skipped when this order really does hold the line outside its taxable base (ntx > 0);
-           an order carrying MRP lines with no `nontax_amount` behaves exactly as it did before. */
+           an order carrying MRP lines with no 'nontax_amount' behaves exactly as it did before. */
         if (i.is_mrp && ntx > 0) return;
         var amt = r2((parseFloat(i.price) || 0) * Math.max(1, parseInt(i.qty, 10) || 1));
         grossTaxed += amt;

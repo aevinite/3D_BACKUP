@@ -5005,11 +5005,29 @@ function printBill(t, sess, os, opts = {}) {
   const tnum = (t || "").toString().trim();
   const tableDisp = (opts.party && mergeGroupLabel(tnum)) || (/^\d+$/.test(tnum) ? (tableName(tnum) || "T" + tnum) : (tnum || "—"));
 
+  // A SECOND COPY SAYS SO (mig 333, owner 2026-08-17). The kitchen ticket has branded reprints
+  // since 2026-08-04; the bill did not, so one sale could be represented by two identical sheets.
+  // The answer comes off the BILL, never off this device — the manager prints at the till and a
+  // waiter may reprint the same bill from the tablet, where a local "already printed" flag would
+  // be wrong and would hand out an unbranded duplicate.
+  const printedBefore = !!((sess && sess.bill_printed_at) || (os || []).some((o) => o && o.bill_printed_at));
   const html = LFH_BILLDOC.billDocHtml(LFH_BILLDOC.billData({
     settings: s, restaurant: state.data.restaurant || {}, orders: os,
     money: billMath(os), session: sess || {}, tableDisp,
     logo: billLogo(), parcel: !!opts.parcel, autoPrint: true,
+    reprint: printedBefore,
   }));
+  // Tell the server this bill has now been on paper, so the NEXT copy — from any device — is
+  // branded. Idempotent server-side, so calling it after every print is free and a retry is safe;
+  // fire-and-forget because a failed stamp must never stop a guest getting their bill.
+  const printedSid = (sess && sess.id) || (os || []).map((o) => o && o.session_id).find(Boolean);
+  if (printedSid && !printedBefore) {
+    try {
+      api("POST", `/sessions/${printedSid}/bill-printed`)
+        .then(() => { if (sess) sess.bill_printed_at = new Date().toISOString(); })
+        .catch(() => {});
+    } catch (e) { /* offline or blocked — the paper still came out, which is what matters */ }
+  }
 
   // ONE reusable bill window, and code NEVER closes it (owner, 2026-08-02). The browser hands the
   // page the SAME afterprint event whether the person pressed Print or Cancel — there is no flag

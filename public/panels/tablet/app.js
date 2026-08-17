@@ -693,7 +693,20 @@ function printTableBill(t) {
     // value would otherwise render a broken image on a guest's bill.
     logo: /^https?:\/\//i.test(String((state.data.restaurant || {}).logo_url || "")) ? String(state.data.restaurant.logo_url) : "",
     autoPrint: true,
+    // A SECOND COPY SAYS SO (mig 333). This is the device the case was built for: the manager
+    // prints at the till, the guest asks for another copy, and a waiter reprints it HERE. The flag
+    // lives on the bill, so this panel knows what the other one already did.
+    reprint: !!(sess.bill_printed_at || os.some((o) => o && o.bill_printed_at)),
   }));
+  // Stamp the first print, so the next copy from ANY device is branded. Idempotent on the server;
+  // fire-and-forget, because a failed stamp must never stand between a guest and their bill.
+  if (sess.id && !sess.bill_printed_at) {
+    try {
+      api("POST", `/sessions/${sess.id}/bill-printed`)
+        .then(() => { sess.bill_printed_at = new Date().toISOString(); })
+        .catch(() => {});
+    } catch (e) { /* offline — the paper still came out */ }
+  }
   // One reusable named window, and nothing here ever closes it — Print and Cancel are the same
   // event to the page, so closing on afterprint threw the bill away when someone pressed Cancel.
   const w = window.open("", "lfh_bill_print", "width=380,height=680");
