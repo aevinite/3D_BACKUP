@@ -225,7 +225,11 @@ ledger are marked `⏭` for exactly this reason. Every other guard here already 
 through the shared `scripts/sweep/appUp.mjs` helper (`baseFrom(argv)`); this one just needs the same
 three lines. Same disease as F9, one step earlier: a guard nobody can run is a guard nobody runs.
 
-### H3 — `app/globals.css` · `.dish-nav-strip.next` covers the right 8 px of Add to Cart on a phone
+### ~~H3~~ — WITHDRAWN: the owner asked for this on 2026-08-17 and it turned out to be fixable
+### from inside this territory after all. Built as improvement **I4** — both button rows now sit at
+### `z-index: 50`, above the strips. No stylesheet change needed. Original write-up below.
+
+### H3 (original) — `app/globals.css` · `.dish-nav-strip.next` covers the right 8 px of Add to Cart on a phone
 
 **Where:** guest → dish page → the real "Add to Cart" button in the button row (not the pinned bar).
 At 360 px the button spans x 28→332 and the fixed next-dish strip starts at x 324 with

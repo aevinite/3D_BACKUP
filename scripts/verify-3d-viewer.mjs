@@ -221,6 +221,36 @@ check(
     "restaurant shows no mark in the grid and one the moment a dish is opened."
 );
 
+// A tap on Add to Cart must be Add to Cart, right to its edge (owner, 2026-08-17). The prev/next
+// strips are fixed, full height and z-index 49, so without this the button's last 8px navigated away.
+check(
+  "the dish page's button rows sit ABOVE the prev/next dish strips, so Add owns its own edge",
+  /const BTN_ROW_ABOVE_NAV_STRIPS = \{ position: "relative" as const, zIndex: (\d+) \}/.test(src[ITEM_CLIENT]) &&
+    Number(src[ITEM_CLIENT].match(/BTN_ROW_ABOVE_NAV_STRIPS = \{ position: "relative" as const, zIndex: (\d+) \}/)[1]) > 49 &&
+    Number(src[ITEM_CLIENT].match(/BTN_ROW_ABOVE_NAV_STRIPS = \{ position: "relative" as const, zIndex: (\d+) \}/)[1]) < 60 &&
+    (src[ITEM_CLIENT].match(/BTN_ROW_ABOVE_NAV_STRIPS/g) || []).length >= 3,
+  `${ITEM_CLIENT} → both .btn-row elements need BTN_ROW_ABOVE_NAV_STRIPS, and its zIndex must sit ` +
+    "between .dish-nav-strip (49) and .item-addbar (60) in app/globals.css. Measured before the fix: " +
+    "the last 8px of the 304px-wide Add to Cart button hit .dish-nav-strip.next."
+);
+
+// The pinned add bar is a phone-and-tablet shortcut. On a laptop it floats over the description.
+check(
+  "the pinned Add bar is limited to phone/tablet widths",
+  /const PINNED_BAR_MAX_WIDTH = (\d+)/.test(src[ITEM_CLIENT]) &&
+    /matchMedia\(`\(max-width: \$\{PINNED_BAR_MAX_WIDTH\}px\)`\)/.test(src[ITEM_CLIENT]) &&
+    /includes\("sold-out"\) && barFitsScreen && \(/.test(src[ITEM_CLIENT]),
+  `${ITEM_CLIENT} → keep PINNED_BAR_MAX_WIDTH, its live matchMedia, and the barFitsScreen condition ` +
+    "on the bar. Measured at 1280×800 before the fix: the bar sat at y=754 covering two lines of " +
+    '"About this dish".'
+);
+check(
+  "…and that media query is a live listener, not a one-off read (a tablet rotates)",
+  /mq\.addEventListener\("change", read\)/.test(src[ITEM_CLIENT]) && /mq\.addListener\(read\)/.test(src[ITEM_CLIENT]),
+  `${ITEM_CLIENT} → support both MediaQueryList listener forms; older WebKit has only addListener, ` +
+    "and losing the listener there would freeze the bar at whatever the first paint decided."
+);
+
 // The two guest 404 pages are twins on purpose.
 check(
   "the two guest not-found pages for the dish routes have not drifted apart",

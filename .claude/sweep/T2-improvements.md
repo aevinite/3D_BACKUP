@@ -49,11 +49,45 @@ works, that the dish and its price are readable, that the overlays arrive on sch
 wording, that the overlay clears itself when the model lands, and that the ready-ticket names the
 right dish and leads to the right viewer.
 
+
+### I4 — a tap on Add to Cart is Add to Cart, right to its edge
+
+`app/item/[slug]/ItemClient.tsx`. Asked for by the owner, 2026-08-17: *"make sure the cart button is
+in front of changing the screen … so that whenever you click the edge of Add to Cart, it will add to
+cart only."* The prev/next dish strips are `position: fixed`, 36px wide, full height, `z-index: 49`
+and `pointer-events: auto`, so at 360px the button's last 8px of 304 belonged to "go to the next
+dish". Both button rows now sit at `z-index: 50` — above the strips (49), below the pinned add bar
+(60) — via `BTN_ROW_ABOVE_NAV_STRIPS`. `position: relative` with no offsets changes no layout; it
+only creates the stacking context.
+
+**Measured after:** 0 of 152 sample points across Add to Cart belong to anything else (it was 2 of
+76 before), and a real touchscreen tap **3px from the right edge** left the address unchanged and
+opened the order flow. The strips still work at every other height on the page — probed at y=104,
+273 and 468, all three hit the strip. This was 🔗 HANDOFF H3; the owner asked for it, and it turned
+out to be fixable from inside this territory without touching the stylesheet. Guarded by
+`verify:3d-viewer`.
+
+### I5 — the pinned Add bar is a phone-and-tablet shortcut, not a laptop panel
+
+`app/item/[slug]/ItemClient.tsx`. Asked for by the owner, 2026-08-17: *"you can fix the 16th one …
+it doesn't require because menu will be never open in laptop, but still you can fix it."* The bar
+exists because the real button starts ~880px down the page on a phone; on a laptop the same rule
+fired and the bar floated mid-page **on top of** the "About this dish" text (measured at 1280×800:
+y=754, covering two lines). `PINNED_BAR_MAX_WIDTH = 1024` with a live `matchMedia`, so rotating a
+tablet or dragging a window gets the right answer, and both MediaQueryList listener forms are
+supported because older WebKit only has `addListener`.
+
+**Measured after:** absent at 1280×800 and at 1180 (tablet landscape), present at 360×780 and
+820×1180, and live across a resize (wide → narrow → wide). Screenshot Read: the desktop dish page
+now shows the full description with nothing over it. Guarded by `verify:3d-viewer`.
+
 ---
 
 ## 🟡 NOT BUILT — his call
 
-### J1 — the pinned Add bar also fires on a desktop, where it floats over the description
+### ~~J1~~ — BUILT as I5 (owner said yes, 2026-08-17)
+
+### J1 (original text, kept for the record) — the pinned Add bar also fires on a desktop, where it floats over the description
 
 **Where:** guest → dish page → the floating "₹550 · ADD TO ORDER" bar, on a 1280×800 browser. It
 appears centred in the middle of the page and covers two lines of "About this dish".
@@ -65,7 +99,9 @@ but there the bar reads as a panel sitting on top of the text rather than a thum
 **Effort:** ~20 minutes. **Risk:** low, but it is a taste call — he asked for the bar, and hiding it
 anywhere is narrowing what he asked for, so it should be his decision.
 
-### J2 — `/view/<folder>` with a folder that is not a dish waits 32 seconds before admitting it
+### ~~J2~~ — DECLINED by the owner, 2026-08-17 (*"other things we don't need"*). Left exactly as it is.
+
+### J2 (original text, kept for the record) — `/view/<folder>` with a folder that is not a dish waits 32 seconds before admitting it
 
 **Where:** guest → a 3D link whose model folder has since been renamed, or a mistyped URL. What he'd
 see: the full 3D screen, "LOADING 3D MODEL", and a bottom bar reading "— CALORIES — PROTEIN — CARBS
@@ -77,7 +113,9 @@ in-app link is built from a dish that exists — so this only bites a forwarded 
 **Effort:** ~30 minutes. **Risk:** low, but deciding *what* it should say (404 page vs. the friendly
 "3D view unavailable" card, which is what a renamed folder deserves) is a product choice.
 
-### J3 — the star picker's tap targets are 36 px, under the 44 px guideline
+### ~~J3~~ — DECLINED by the owner, 2026-08-17 (*"other things we don't need"*).
+
+### J3 (original text, kept for the record) — the star picker's tap targets are 36 px, under the 44 px guideline
 
 **Where:** guest → dish page → Customer reviews → the ⭐ Rate tab → the five stars.
 **What it is:** each `.sr-toggle` measures 36×36 at 360 px (the row around it is 40×38). Five fit on
@@ -88,7 +126,9 @@ one more tap to correct, not a lost order.
 **Effort:** ~15 minutes. **Risk:** low, but the sizes live in `app/globals.css` (another terminal's
 file) and the star animation is tuned to those numbers, so it wants a real look rather than a nudge.
 
-### J4 — the favourites coachmark is the one white card on a dark dish page
+### ~~J4~~ — DECLINED by the owner, 2026-08-17 (*"other things we don't need"*).
+
+### J4 (original text, kept for the record) — the favourites coachmark is the one white card on a dark dish page
 
 **Where:** guest → dish page, first visit ever, dark skin → the "Tap the ❤ to save this to your
 Favourites" bubble under the heart.
@@ -99,7 +139,9 @@ brown. It is perfectly readable — the opposite of the usual complaint — it j
 **Effort:** ~10 minutes. **Risk:** low; `.fav-hint` is in `app/globals.css`, not mine, and a
 deliberately high-contrast coachmark is a defensible choice.
 
-### J6 — the "Loading 3D model" caption is hard to read on the 3D screen's near-black canvas
+### ~~J6~~ — DECLINED by the owner, 2026-08-17 (*"other things we don't need"*).
+
+### J6 (original text, kept for the record) — the "Loading 3D model" caption is hard to read on the 3D screen's near-black canvas
 
 **Where:** guest → dish → View in 3D, while the model is still coming. The small capitalised
 "LOADING 3D MODEL" line under the spinner.

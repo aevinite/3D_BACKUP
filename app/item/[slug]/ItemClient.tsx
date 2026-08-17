@@ -21,6 +21,41 @@ import { useTranslation } from "@/lib/i18n";         // translated text strings
 import VegIcon from "@/components/VegIcon";           // the little veg/non-veg dot
 import { useBackClose } from "@/lib/backStack";       // phone back button closes overlays first
 
+// A TAP ON A BUTTON MUST BE THE BUTTON, RIGHT TO ITS EDGE (owner, 2026-08-17:
+// *"make sure the cart button is in front of changing the screen … so that whenever you click the
+// edge of Add to Cart, it will add to cart only"*).
+//
+// The prev/next dish strips are `position: fixed`, 36px wide, full height, `z-index: 49` and
+// `pointer-events: auto` (`app/globals.css` → `.dish-nav-strip`). At 360px the Add to Cart button
+// spans x 28→332 and the "next" strip starts at x 324, so the button's last 8px belonged to "go to
+// the next dish": a thumb drifting to the right edge of Add to Cart navigated away instead of
+// ordering. Measured point by point across the button — the last two of 76 sample points.
+//
+// So the button ROWS sit above the strips. 50 is above the strips (49) and below the pinned add bar
+// (60), so the pinned bar still covers the row when it slides in. `position: relative` with no
+// offsets changes no layout at all — it only creates the stacking context z-index needs. Inline,
+// because the stylesheet belongs to another part of this sweep; if `.btn-row` ever gets this at
+// source these become redundant rather than wrong.
+//
+// The strips still work everywhere else on the page — this only reclaims the ~44px band each button
+// row occupies, which is exactly the band where a tap means "order this", not "show me another".
+const BTN_ROW_ABOVE_NAV_STRIPS = { position: "relative" as const, zIndex: 50 };
+
+// WHERE THE PINNED ADD BAR BELONGS (owner, 2026-08-17: *"you can fix the 16th one … it doesn't
+// require because menu will be never open in laptop, but still you can fix it"*).
+//
+// The bar exists because the real button starts ~880px down the page ON A PHONE, so a diner read the
+// dish and then had to scroll to buy it. On a laptop the same rule fired, and there the bar is not a
+// thumb-reachable shortcut — it is a panel floating in the middle of the page ON TOP of the "About
+// this dish" text (measured at 1280×800: the bar sat at y=754, covering two lines of the
+// description). A guest menu is a phone-and-tablet thing, so the bar is now one too.
+//
+// 1024px keeps every phone and every tablet, in both orientations, and drops it on a laptop. It is a
+// live matchMedia, not a one-off read, so rotating a tablet or dragging a window gets the right
+// answer. The stylesheet already hides the bar under `max-height: 420px` (a phone in landscape has
+// no height to spare) — this is the width half of the same idea.
+const PINNED_BAR_MAX_WIDTH = 1024;
+
 // This describes the "shape" of one dish — every field a dish object can have.
 // It's a TypeScript guide so the editor can catch typos; it doesn't run.
 
@@ -473,6 +508,21 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
     return () => io.disconnect();
   }, [item?.slug]);
 
+  // Is this a screen the pinned bar belongs on? See PINNED_BAR_MAX_WIDTH above. Starts `true` so a
+  // phone never flashes without it on first paint; a laptop drops it on the first effect tick.
+  const [barFitsScreen, setBarFitsScreen] = useState(true);
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mq = window.matchMedia(`(max-width: ${PINNED_BAR_MAX_WIDTH}px)`);
+    const read = () => setBarFitsScreen(mq.matches);
+    read();
+    // addEventListener on a MediaQueryList is the modern form; older WebKit only has addListener,
+    // and this menu runs on old phones, so support both rather than losing the listener silently.
+    if (mq.addEventListener) { mq.addEventListener("change", read); return () => mq.removeEventListener("change", read); }
+    mq.addListener(read);
+    return () => mq.removeListener(read);
+  }, []);
+
   const addToCart = () => {
     // No item, or it's sold out -> do nothing (the button is disabled too; this is
     // the belt-and-braces guard so a sold-out dish can never reach the cart).
@@ -857,7 +907,8 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
 
         {/* The action buttons: Add to Cart, plus View in 3D (or a disabled
             placeholder when this dish has no 3D model). */}
-        <div className="btn-row" ref={btnRowRef}>
+        {/* style: see BTN_ROW_ABOVE_NAV_STRIPS — the Add button owns its own edge. */}
+        <div className="btn-row" ref={btnRowRef} style={BTN_ROW_ABOVE_NAV_STRIPS}>
           {/* Sold-out dishes show a disabled "Not available" button instead of
               Add to Cart — matching the menu card, so you can't order one here. */}
           {(item.tags || []).includes("sold-out") ? (
@@ -1074,7 +1125,9 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         })()}
 
         {/* A final "Back to menu" button at the bottom. */}
-        <div className="btn-row" style={{ marginTop: '8px' }}>
+        {/* Same edge rule as the Add row above — this button is full width too, so the strip was
+            taking its last 8px as well. */}
+        <div className="btn-row" style={{ marginTop: '8px', ...BTN_ROW_ABOVE_NAV_STRIPS }}>
           <button className="btn btn-secondary" onClick={goToMenu}>
             <i className="fas fa-arrow-left"></i> {t.backToMenu}
           </button>
@@ -1086,7 +1139,7 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
           exists for is always one tap away. A sold-out dish never gets one — there is nothing to
           tap. It clears the chef bell / offline bar the same way the mini-cart does, through the
           shared --lfh-offbar-h and the safe-area inset. */}
-      {item && !(item.tags || []).includes("sold-out") && (
+      {item && !(item.tags || []).includes("sold-out") && barFitsScreen && (
         <div className={`item-addbar${realBtnOffScreen ? " on" : ""}`} aria-hidden={!realBtnOffScreen}>
           <span className="item-addbar-price">{currency ? formatPrice(item.price, currency) : `$${item.price}`}</span>
           <button className="btn btn-gold" onClick={addToCart} tabIndex={realBtnOffScreen ? 0 : -1}>
