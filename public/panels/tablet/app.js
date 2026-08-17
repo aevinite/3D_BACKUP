@@ -1905,7 +1905,18 @@ function renderPanel() {
            screen already shows the waiter, so there is nothing extra to permit — and a waiter who
            can settle a table but cannot hand over its bill is the gap this closes (T7 F9). -->
       ${s && os.length ? `<button class="btn" id="printBillBtn">🖨 Print bill</button>` : ""}
-      ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' disabled title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
+      <!-- A DISABLED BUTTON EATS THE TAP, AND THIS IS A TOUCH PANEL (T7 sweep, 2026-08-17). While an
+           order on this table is still un-accepted the bill cannot be settled — true, and the button
+           used to be rendered disabled with the reason in a title attribute. A title needs a HOVER,
+           and a waiter carrying plates has no mouse: the tap simply vanished on the most repeated
+           money control in a service. The split-payment button forty lines from here already answers
+           this exact situation the right way ("Stays ENABLED and says WHY it won't go"), and two
+           controls in one panel must not answer the same situation two different ways. So: dimmed,
+           still tappable, and it refuses OUT LOUD (see the #payBill handler below).
+           NOTE FOR WHOEVER EDITS THIS COMMENT: it lives INSIDE a JavaScript template literal, so a
+           backtick here ends the string and breaks the whole panel. This comment had two, and the
+           tablet was blank until the live walk caught it — no static check can see that. -->
+      ${s && os.length && a.unpaid && tshow("tablet_mark_paid") ? `<button class="btn pay${txray("tablet_mark_paid")}" id="payBill"${os.some((o) => o.status === "received") ? ' data-needs-accept="1" style="opacity:.55" title="Accept the order first — the bill can only be paid once accepted."' : ""}>💳 Mark bill paid</button>` : ""}
       ${s && os.length && a.paid && tshow("tablet_mark_paid") ? `<button class="btn${txray("tablet_mark_paid")}" id="unpayBill" title="Reopen this paid bill (a refund/correction — asks for a reason)">↩ Mark unpaid</button>` : ""}
       ${s ? `<button class="btn danger" id="closeTable">✕ Close table</button>` : ""}
     </div>
@@ -1957,7 +1968,10 @@ function renderPanel() {
   document.querySelectorAll("[data-attend-all-calls]").forEach((b) => (b.onclick = async () => {
     const tbl = b.dataset.attendAllCalls;
     const ids = callsOf(tbl).map((c) => c.id);
-    if (!ids.length) return;
+    // Same rule as optimisticAccept — the button is on screen because the slice HAD calls; if
+    // another device attended them a second ago this list is empty, and a bell that is dropped
+    // in silence is the worst of the three to lose.
+    if (!ids.length) { toast("Those calls are already done — refreshing this table.", false); load().catch(() => {}); return; }
     try {
       for (const id of ids) await api("POST", `/calls/${id}/attend`);
       await load();
@@ -2046,7 +2060,12 @@ function renderPanel() {
   const kmb = $("#kotMenuBtn"); if (kmb && s) kmb.onclick = () => renderKotMenu(t, s);
   // Restart: clear this round's orders off the floor (they stay served+archived in
   // records) but keep the table OPEN for a fresh round. Mirrors the manager.
-  const pb = $("#payBill"); if (pb) pb.onclick = () => payBillWithMethod(t, a);
+  const pb = $("#payBill"); if (pb) pb.onclick = () => {
+    // The refusal, said out loud — see the note on the button above. The words name the thing the
+    // waiter must do next, not the rule that stopped them.
+    if (pb.dataset.needsAccept) { toast("Accept the order first — a bill can only be paid once the kitchen has it.", false); return; }
+    payBillWithMethod(t, a);
+  };
   const ub = $("#unpayBill"); if (ub) ub.onclick = () => markBillUnpaid(t);
   const tgb = $("#tagTable"); if (tgb) tgb.onclick = () => openTagSheet(t);
   const gib = $("#genInvoiceBtn"); if (gib && s) gib.onclick = () => genInvoice(s.id);
@@ -2270,8 +2289,20 @@ function flipOrders(orderIds, { from, to, orderStatus }) {
   renderFloor();
   if (!state.ordering) renderPanel();
 }
+// NEVER A SILENT RETURN ON A TAP (owner's standing rule; sweep #5 found this exact shape — the
+// little green ✓ on a tile "doing nothing and saying nothing"). The three bulk actions below are
+// each handed a list built a moment earlier from the table's cached slice, and that list can come
+// back EMPTY for reasons the waiter cannot see:
+//   · the forced `ensurePartySlices` read failed — ensureTableSlice swallows a fetch blip on
+//     purpose ("the action then no-ops rather than throwing"), which is precisely how the tap
+//     became invisible;
+//   · someone else (the kitchen screen, the manager panel, another waiter's tablet) accepted or
+//     served it in the seconds between the tile being painted and the finger landing.
+// The tile still shows ✓ / 🍽️ in both cases, so the person taps a control that is visibly there
+// and nothing happens at all — indistinguishable from a broken button, and invisible in the logs.
+// Say what happened and refresh, exactly like bumpItemQty and the allergy chip already do.
 function optimisticAccept(orderIds) {
-  if (!orderIds.length) return;
+  if (!orderIds.length) { toast("Nothing left to accept here — refreshing this table.", false); load().catch(() => {}); return; }
   // Snapshot the dishes that were still "received" (the ones this accept sends to the
   // kitchen) so an accidental Accept can be taken back to the new-order queue. Reuses the
   // serve-undo revert with prev:"received" (owner undo bar, 2026-07-22).
@@ -2295,7 +2326,8 @@ function optimisticAccept(orderIds) {
     .catch((e) => { toast("Failed: " + errText(e), false); load(); });
 }
 function optimisticServeAll(orderIds) {
-  if (!orderIds.length) return;
+  // Same rule as optimisticAccept above — an empty list is never a reason to say nothing.
+  if (!orderIds.length) { toast("Nothing left to serve here — refreshing this table.", false); load().catch(() => {}); return; }
   // Snapshot each not-yet-served dish's prior status BEFORE the flip, so "Serve all"
   // can be taken back to exactly where each dish was (owner undo bar, 2026-07-22).
   const snap = (state.data.items || [])
@@ -2402,7 +2434,13 @@ function renderKotMenu(t, s) {
   let occupiedOthers = 0;
   // Count what the merge picker will actually OFFER (a joined table can't host a party), so the
   // row is never enabled onto an empty picker.
-  for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && canHostAParty(i)) occupiedOthers++;
+  // …AND THROUGH THE SECTION RULE, which is the other half of that predicate (T7 sweep, 2026-08-17).
+  // renderMergePicker offers `inMySection(i) && canHostAParty(i)`; this count asked only the second
+  // half, so a waiter with a section whose OTHER open tables all belong to someone else got an
+  // enabled "🪢 Merge tables" row that opened "No other open tables to merge with." — the exact
+  // thing the line above says must not happen, and the same fault the split row was fixed for on
+  // 2026-08-04. Same filter as the picker, deliberately duplicated rather than approximated.
+  for (let i = 1, n = tableCount(); i <= n; i++) if (String(i) !== String(t) && inMySection(i) && canHostAParty(i)) occupiedOthers++;
   const body =
     // A merged party doesn't shift (mig 264): unmerge first — the row says so instead of
     // offering a move the server will refuse.
@@ -2500,8 +2538,16 @@ function renderMoveItemPicker(t) {
 }
 function renderMoveItemTarget(t, itemId) {
   const tiles = [];
+  // NEVER OFFER A TABLE THIS DISH ALREADY SHARES A BILL WITH (T7 sweep, 2026-08-17). Its sibling
+  // renderMoveOrderTarget has excluded party mates since 2026-08-11 for a reason that applies word
+  // for word here: while T26+T27 are one party, T26 was listed on T27's dish picker, labelled with
+  // the party's own state — and the server resolves a merged destination to the party head and then
+  // refuses with reason 'same_table' ("That dish is already on that table."), which is exactly what
+  // this was measured doing. The only possible outcome of that button was a confusing refusal.
+  // partyTablesOf(t) includes t itself, so this also covers the old `String(i) === String(t)` test.
+  const mates = new Set(partyTablesOf(t).map(String));
   for (let i = 1, n = tableCount(); i <= n; i++) {
-    if (String(i) === String(t)) continue;
+    if (mates.has(String(i))) continue;
     // SAME TWO RULES AS EVERY OTHER DESTINATION PICKER (T4 sweep, 2026-08-04). This one offered
     // every table in the restaurant while its three siblings (renderMoveOrderTarget,
     // renderMergePicker, renderShiftPicker) all filter by section — so a sectioned waiter was
@@ -4025,10 +4071,20 @@ function openQuickDest() {
   }
   const ov = document.createElement("div");
   ov.className = "qdest-overlay";
+  // AN EMPTY GRID IS A DEAD END WITH NO WORDS (T7 sweep, 2026-08-17). A waiter who holds no section
+  // can still reach ⚡ Quick order — the button is on the top bar at all times — build a whole order,
+  // tap SEND, and land on a picker with nothing in it and nothing said. The floor behind already
+  // explains this state kindly ("No tables assigned to you yet"), and every other picker in this file
+  // has an empty state; this was the last one without. Same sentence, same person to ask.
+  const emptyPick = `<div class="muted" style="grid-column:1/-1;padding:18px 4px;text-align:center;line-height:1.6">
+      <div style="font-size:26px;margin-bottom:4px">🪑</div>
+      <div style="font-weight:800;font-size:14px;color:var(--text)">No tables assigned to you yet</div>
+      <div style="font-size:12.5px;margin-top:3px">Ask your manager to give you a section — your order stays here until then.</div>
+    </div>`;
   ov.innerHTML = `<div class="qdest-box">
     <div class="qdest-head"><h3>Which table gets this order?</h3><button class="qdest-x" aria-label="Close">✕</button></div>
-    <div class="muted small" style="margin:2px 0 12px">Tap a table to send it to the kitchen — a busy table adds it to that table's bill.</div>
-    <div class="qdest-grid">${tiles.join("")}</div>
+    <div class="muted small" style="margin:2px 0 12px">${tiles.length ? "Tap a table to send it to the kitchen — a busy table adds it to that table's bill." : "This order is safe — nothing has been sent yet."}</div>
+    <div class="qdest-grid">${tiles.length ? tiles.join("") : emptyPick}</div>
   </div>`;
   document.body.appendChild(ov);
   let backOff = window.LFH_BACK ? LFH_BACK.layer("tablet-qdest", () => closeDest()) : null;
