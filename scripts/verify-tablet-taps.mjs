@@ -234,6 +234,138 @@ for (const fn of ["renderMoveItemTarget", "renderMoveOrderTarget"]) {
   }
 }
 
+// ── 6 · JOINING TABLES IS A DOOR THAT OPENS BOTH WAYS (owner, 2026-08-17) ───────────────────
+// Merging used to be one-way on this panel: it could join two tables and never separate them, while
+// its own KOT menu said "Change table — unmerge first" about a thing this device could not do. The
+// way back is now a ⇹ button at the bottom of a joined table's detail plus a 15-second undo bar, and
+// all of it runs through ONE function so there is only one place to forget the confirm.
+{
+  const un = fnBody("unmergeTable");
+  check(
+    "tablet: unmergeTable() exists — the one path both the ⇹ button and the undo bar use",
+    !!un,
+    `${TABLET} no longer defines unmergeTable(). A second copy of the split would be a second place\n    to forget the confirm, which is exactly why closeTableAndFree() is shared too.`,
+  );
+  const ask = un.search(/await confirmDialog\(/);
+  const post = un.search(/api\("POST", `\/tables\/\$\{child\}\/unmerge`/);
+  check(
+    "tablet: splitting a party asks BEFORE it posts",
+    ask >= 0 && post >= 0 && ask < post,
+    `${TABLET}: unmergeTable() must await confirmDialog() before POSTing /tables/:t/unmerge (ask at\n    ${ask}, post at ${post}). Splitting moves money between two bills.`,
+  );
+  for (const [phrase, why] of [
+    ["Back to", "what comes BACK to the table — its own KOTs and their total"],
+    ["Stays on", "what STAYS on the bill it is leaving"],
+    ["Does NOT move", "the whole-bill discount and the guest count, which cannot be divided"],
+  ]) {
+    check(
+      `tablet: the split confirm says ${why}`,
+      un.includes(phrase),
+      `${TABLET}: unmergeTable()'s confirm must include "${phrase}". The manager's identical confirm\n    lists all three, and a waiter needs the truth before the tap at least as much.`,
+    );
+  }
+  check(
+    "tablet: a ⇹ tap on a merge that already ended says so instead of vanishing",
+    /if \(!parent\) \{[^}]*toast\(/.test(un),
+    `${TABLET}: unmergeTable() must toast when mergeParentOf() finds nothing — the button is drawn\n    from the merge list, which a poll or another device can empty between the paint and the finger.`,
+  );
+  check(
+    "tablet: a joined table's detail carries the ⇹ unmerge row",
+    /const unmergeKids = mergeParentOf\(t\) \? \[String\(t\)\] : mergeChildrenOf\(t\)/.test(src) && /data-unmerge=/.test(src),
+    `${TABLET}: renderPanel() must offer ⇹ Unmerge — one button on a joined CHILD (for itself), one\n    per child on the table that HOLDS the bill. That is the manager's shape and the owner's words.`,
+  );
+  check(
+    "tablet: the ⇹ row sits under the actions, in its own row",
+    /\$\{unmergeRow\}\s*\n\s*\$\{foot\}/.test(src),
+    `${TABLET}: the unmerge row belongs between the action buttons and the bill bar — not shoulder to\n    shoulder with ＋ Take order, where a thumb finds it by accident.`,
+  );
+  const mp = fnBody("renderMergePicker");
+  check(
+    "tablet: the merge undo bar lasts FIFTEEN seconds",
+    /seconds: 15/.test(mp),
+    `${TABLET}: renderMergePicker()'s undo bar must pass seconds: 15 (owner, 2026-08-17). Joining two\n    bills is a bigger thing to notice than serving a dish, which is why it is not the usual 5.`,
+  );
+  check(
+    "tablet: …and its UNDO really separates them, through the same shared path",
+    /onUndo: \(\) => unmergeTable\(/.test(mp),
+    `${TABLET}: the merge undo must call unmergeTable(), not a second inline split.`,
+  );
+  check(
+    "tablet: the merge follows the table the SERVER kept, never the one that was tapped",
+    /onSuccess: \(r\)/.test(mp) && /r\.parent_table/.test(mp) && /r\.child_table/.test(mp),
+    `${TABLET}: lfh_staff_merge_tables keeps the LOWEST table number and moves the other party onto\n    it — "if the caller merged 6 into 7, we keep 6". Guessing from the tapped table named the wrong\n    table in the toast and pointed UNDO at a table that was never joined, so the undo did nothing.`,
+  );
+  check(
+    "tablet: the merge confirm names the table that will actually hold the bill",
+    /held by \$\{tableLabel\(keeps\)\}/.test(mp),
+    `${TABLET}: the merge confirm must name the surviving table (the lowest number), like the manager's\n    does. Promising "ONE bill on T25" while the bill lands on T24 sends the waiter to the wrong table.`,
+  );
+  check(
+    "tablet: actGated hands the server's answer to onSuccess",
+    /opts\.onSuccess\(r\)/.test(src),
+    `${TABLET}: actGated() must call opts.onSuccess(r). A merge decides which table keeps the bill, and\n    without the response the screen can only guess.`,
+  );
+  check(
+    "tablet: a dish on a JOINED bill is labelled with the table it was ordered at",
+    /const partySpread = partyTablesOf\(t\)\.length > 1/.test(src) && /fromChip\(o\)/.test(src),
+    `${TABLET}: on a merged bill every dish must carry its own table (owner, 2026-08-17: "keep a track\n    [of which] table has ordered which") — that is what makes a split readable before it happens. It\n    must render ONLY when the party spans more than one table, so an ordinary bill is untouched.`,
+  );
+}
+
+// ── 7 · THE SERVER DOOR, AND THE GUEST'S SIDE OF THE SAME RULE ───────────────────────────────
+{
+  const routeRel = "app/api/tablet/[...path]/route.ts";
+  const route = (() => { try { return fs.readFileSync(path.join(ROOT, routeRel), "utf8"); } catch { return ""; } })();
+  const at = route.indexOf('a === "tables" && c === "unmerge"');
+  const body = at < 0 ? "" : route.slice(at, at + 2200);
+  check(
+    "tablet route: /tables/:t/unmerge exists",
+    at >= 0,
+    `${routeRel} has no unmerge branch — the panel's ⇹ button would 404, and merging is a one-way door\n    on this device again.`,
+  );
+  check(
+    "tablet route: it carries the SAME gate as merge (module rung + tri-state)",
+    /tableOpsTabletAllowed\(rid\)/.test(body) && /tabletPerm\("tablet_table_ops"/.test(body),
+    `${routeRel}: unmerge must check tableOpsTabletAllowed AND tabletPerm("tablet_table_ops"), exactly\n    like sessions/:id/merge. Splitting and joining are the same feature and must answer to the same\n    switch — the manager route was fixed for precisely this on 2026-08-05.`,
+  );
+  check(
+    "tablet route: it calls the SAME RPC the manager calls",
+    /lfh_staff_unmerge_table/.test(body),
+    `${routeRel}: unmerge must go through lfh_staff_unmerge_table, so the two panels can never split a\n    party two different ways.`,
+  );
+  check(
+    "tablet route: it drops the shared floor snapshot",
+    /invalidateFloor\(rid\)/.test(body),
+    `${routeRel}: every write handler calls invalidateFloor(rid), or a device keeps a stale tile.`,
+  );
+
+  // THE GUEST'S SIDE. A diner sitting at a joined table used to be told "this table isn't open" and
+  // left polling forever, could never join, and rang a bell that reached no panel at all (measured
+  // with the anon key, 2026-08-17). The three doors they touch must each hop to the party's table.
+  const migDir = path.join(ROOT, "supabase", "migrations");
+  const files = (() => { try { return fs.readdirSync(migDir).filter((f) => f.endsWith(".sql")).sort(); } catch { return []; } })();
+  for (const [fn, why] of [
+    ["lfh_table_status", 'a joined table must read as OPEN, or the diner is told to "ask staff" forever'],
+    ["lfh_join_session", "a diner at a joined table must be able to join the party they are sitting in"],
+    ["lfh_call_waiter_table", "the floor gathers calls BY SESSION — a bell with none is invisible to every panel"],
+  ]) {
+    // The NEWEST migration that defines it is the one that is live.
+    const owner = files.filter((f) => {
+      try { return new RegExp(`FUNCTION (public\\.)?${fn}\\s*\\(`).test(fs.readFileSync(path.join(migDir, f), "utf8")); }
+      catch { return false; }
+    }).pop();
+    const text = owner ? fs.readFileSync(path.join(migDir, owner), "utf8") : "";
+    // Only the block for THIS function — a migration may define several.
+    const start = text.search(new RegExp(`FUNCTION (public\\.)?${fn}\\s*\\(`));
+    const block = start < 0 ? "" : text.slice(start, start + 4000);
+    check(
+      `guest: ${fn} resolves through the merge parent (${why})`,
+      /lfh_merge_parent_table/.test(block),
+      `The newest migration defining ${fn} is ${owner || "(none found)"}, and its body never calls\n    lfh_merge_parent_table. A diner at a table that has been joined to another then falls through\n    the "no open session" branch, which is the stranding this was fixed for in migration 333.`,
+    );
+  }
+}
+
 // ── report ───────────────────────────────────────────────────────────────────────────────────
 for (const c of checks) console.log(`${c.ok ? "  ok  " : " FAIL "} ${c.name}`);
 if (fails.length) {

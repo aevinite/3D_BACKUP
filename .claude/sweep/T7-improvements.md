@@ -36,7 +36,12 @@ the last one without.
 
 ---
 
-## 🟡 NEEDS A DECISION FROM HIM
+## 🟢 HE DECIDED, AND THEY ARE BUILT (2026-08-17)
+
+Both of the items below were raised as 🟡. He answered the same day — *"the timer of undo should be of
+fifteen second… there will be option like unmerge this table when it is merged… check guest menu also
+if there is any error fix with merge"* — so both are now built, verified and in the PR. The original
+write-ups are kept exactly as they were, with the outcome added underneath each.
 
 ### J1 · A waiter can merge two tables from the tablet, but can never un-merge one
 **Where:** waiter tablet → a merged table → 🧾 KOT ▾. Today the sheet offers **🪢 Merge tables** and
@@ -52,6 +57,15 @@ server file first (`app/api/tablet/[...path]/route.ts` — outside my territory;
 written up as handoff H1). Call it an hour end to end.
 **Risk:** low — the RPC and the manager's flow already exist; the tablet would call the same one
 behind the same `tablet_table_ops` permission that already gates merge.
+
+> **BUILT 2026-08-17.** ⇹ Unmerge sits at the very bottom of a joined table's detail (one button on a
+> child, one per child on the table holding the bill — the manager's shape), plus a **15-second** undo
+> bar the moment a merge happens. The server door was added to the tablet route with merge's exact
+> gate. Two things came out of building it that were nobody's plan: the tablet's merge confirm had
+> been naming the WRONG surviving table (the server keeps the lowest number), and **the guest menu was
+> merge-blind** — a diner at a joined table was told the table wasn't open, could never join, and rang
+> a bell no panel received. Migration 333 fixes the three guest doors. All of it is held by
+> `verify:tablet-taps` and proven live (37/37 merge checks, 7/7 guest checks).
 
 ### J2 · Held SIDEWAYS on a phone, 59% of the screen is chrome before the first table
 **Where:** waiter tablet → the floor, on a phone turned sideways (measured at 780×360). What he would
@@ -69,6 +83,17 @@ iPad has the height for all of it.
 strip, and **he has already refused hiding that strip once** (`docs/REJECTED-IDEAS.md` R2), so any
 version of this has to leave it alone and take the room from the legend and the chip padding
 instead — which is a look he has tuned by hand twice. This is his call, not mine.
+
+> **BUILT 2026-08-17, as TWO lines rather than one — and the difference is worth reading.** He asked
+> for "everything in one row". Measured, the three bands need ~980px of content in 780px of screen, so
+> one line is only reachable by hiding one of them, and the only one that would fit is the strip he
+> refused to hide (R2). Forcing all three was tried first and was **worse than the problem**: the
+> colour key wrapped into a seven-line vertical column and the band grew TALLER than the three it
+> replaced. So the chips and the "Your tables" strip share the first line and the key takes the second
+> on its own. **211px → 144px**, and a whole row of tables now fits with the next row showing. Nothing
+> is hidden, nothing is clipped, nothing scrolls sideways, and the stacked layout is untouched on a
+> phone upright, both iPad orientations and a desktop. If he wants literally one line, the colour key
+> is the thing that would have to go in landscape — his call, not mine.
 
 ---
 
