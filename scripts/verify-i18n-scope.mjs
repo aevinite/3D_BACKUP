@@ -69,6 +69,52 @@ const fail = (m) => { failed++; console.log(`  FAIL ${m}`); };
   }
   if (short.length) fail(`a language block is missing keys — those strings render as \`undefined\`: ${short.join(" · ")}`);
   else ok(`all 6 languages carry all ${keys.length} dictionary keys`);
+
+  // …AND A KEY THAT IS PRESENT CAN STILL BE UNTRANSLATED. Carrying every key only proves nothing
+  // renders `undefined`; it says nothing about whether the VALUE was ever translated. `de.prepTime`
+  // was the literal English word "Prep" — on a dish card whose every other word was German — and it
+  // sat there through two previous sweeps because the completeness check above was green (T4,
+  // 2026-08-17).
+  //
+  // A general "is this English?" test is not possible and would fire on every correct loanword
+  // (Pizza, Sushi, Protein, Burger…). So this is a NAMED LIST: the values that were found copied
+  // verbatim from the English block into a language that does not use them. Add a row when a sweep
+  // finds another one; never relax one to make a run green.
+  const COPIED_FROM_ENGLISH = [
+    { lang: "de", key: "prepTime", wrong: "Prep", why: "the German dish card read an English abbreviation" },
+  ];
+  const stillCopied = COPIED_FROM_ENGLISH.filter(({ lang, key, wrong }) => {
+    const m = body.match(new RegExp(`\\n  ${lang}: \\{([\\s\\S]*?)\\n  \\},`));
+    if (!m) return false;
+    return new RegExp(`${key}:\\s*"${wrong}"`).test(m[1]);
+  });
+  if (stillCopied.length)
+    fail(`a value was copied back from English into another language: ${stillCopied
+      .map((c) => `${c.lang}.${c.key} = "${c.wrong}" (${c.why})`).join(" · ")}`);
+  else ok(`no dictionary value is a known English leftover (${COPIED_FROM_ENGLISH.length} watched)`);
+
+  // ── the language read must survive a device that refuses storage ──────────────
+  // `localStorage` is not always a readable property: a browser set to block all site data throws
+  // SecurityError from the getter itself. This read sits inside a useEffect, so a throw there takes
+  // the whole React tree down — measured on a production build with storage blocked (T4, 2026-08-17):
+  // the guest menu rendered "Something went wrong" and zero dishes, for a diner who had simply
+  // turned cookies off. Every other reader of this key in the app already wraps it.
+  // Read the CODE, not the prose. The fix's own comment has to name `localStorage.getItem` to
+  // explain what must not come back — and a guard that trips on its own documentation just teaches
+  // the next person to delete the documentation. (Same lesson as the `.split("")` check above.)
+  const codeOnly = i18n.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+  const langReads = [...codeOnly.matchAll(/localStorage\.getItem\(/g)];
+  const guarded = /const readLang\s*=\s*\(\)[\s\S]{0,240}?try\s*\{[\s\S]{0,160}?localStorage\.getItem\(/.test(codeOnly);
+  if (langReads.length === 0) {
+    ok("lib/i18n.ts reads no storage directly");
+  } else if (guarded && langReads.length === 1) {
+    ok("the saved-language read is wrapped, so a device that blocks storage still gets a menu");
+  } else {
+    fail("lib/i18n.ts reads localStorage without a try/catch. A browser set to block all site data " +
+         "throws from the localStorage getter itself, and this read is inside a useEffect — the throw " +
+         "takes the whole guest menu down and the diner gets an error screen instead of the menu. " +
+         "Route every read through the wrapped readLang() helper.");
+  }
 }
 
 // ── 4 · never split text by code unit again ─────────────────────────────────

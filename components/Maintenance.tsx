@@ -2,8 +2,19 @@
 // (toggled from the editor's General tab). Pure CSS continuous animations.
 
 // The flagship (#1) logo, shown ONLY for restaurant #1. Every other restaurant
-// passes its OWN logo (or none) so this screen can never leak French House
-// branding onto another tenant (the white-label rule; audit fix 2026-07-06).
+// passes its OWN logo (or none), so the NAME and the MARK on this screen are always the
+// tenant's (the white-label rule; audit fix 2026-07-06).
+//
+// ⚠ THE COLOURS ARE NOT. This header used to say the screen "can never leak French House branding
+// onto another tenant", and that is only true of the logo and the name. Every colour on it is a
+// hardcoded flagship value in `app/globals.css` (`.maint*`): the brown radial background #221309,
+// the gold ring, steam, badge and bouncing dots on rgba(212,165,116,…) / #d4a574, and a
+// 'Playfair Display' serif headline. There is not one `var(--accent)` in the block, so a tenant
+// whose menu is blue or green still gets a French-House-gold maintenance screen — measured, T4
+// sweep 2026-08-17. It is left as it is on purpose for now: the owner has said more than once that
+// gold + the little-French-house theme IS the intended house style (docs/REJECTED-IDEAS.md R13),
+// so making this screen follow the tenant accent is a decision for him, not a fix to slip in.
+// Do not "correct" the colours without asking; do change this comment if the answer changes.
 //
 // SERVED FROM OUR OWN public/, not from littlefrenchhouse.in. It used to be a hardcoded URL on
 // that WordPress site — an outside host nobody here controls, on the ONE screen you least want a

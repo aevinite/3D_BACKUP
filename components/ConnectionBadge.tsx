@@ -17,7 +17,11 @@
 // time is dominated by heavy analytics query time, not connection latency).
 import { useLayoutEffect, useRef, useState } from "react";
 import { useConnection, latencyTier, LATENCY_FRESH_MS } from "@/lib/connectionStatus";
-import { useGuestOutbox, dismissGuestFailed, retryGuestFailed, type GuestOrder, orderRestWithout } from "@/lib/guestOutbox";
+// Only the COUNT is needed here. The orders themselves, and every button that acts on one, belong
+// to components/GuestOutboxChip.tsx — see the note further down about there being one place for an
+// order that couldn't send, not two. The retry/dismiss/order-the-rest helpers were still imported
+// here long after the list they served was removed. (T4 sweep, 2026-08-17.)
+import { useGuestOutbox } from "@/lib/guestOutbox";
 import { useBackClose } from "@/lib/backStack"; // phone back button closes the popover first
 
 type View = {
@@ -69,12 +73,6 @@ function statusLine(v: View, pollMode: boolean): string {
   if (v.kind === "weak") return pollMode ? "Couldn't reach the server — retrying" : "Live connection dropped — reconnecting…";
   return pollMode ? "Connected — refreshes every minute" : "Connected — live updates are flowing";
 }
-
-function orderLabel(o: GuestOrder): string {
-  const t = o.track?.tableNumber || o.table;
-  return "Order" + (t ? ` · Table ${t}` : "");
-}
-const fmtAgo = (ts: number) => { const m = Math.floor((Date.now() - ts) / 60000); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`; };
 
 // Three signal bars; `lit` of them are coloured, the rest faint. Reduced height so it
 // reads as a signal-strength meter, not a button.

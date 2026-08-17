@@ -227,7 +227,12 @@ const translations: Record<LanguageCode, Translations> = {
     newDish: "Neu",
     review: "Bewertung",
     reviews: "Bewertungen",
-    prepTime: "Prep",
+    // Was the English word "Prep" — the only value in any non-English block that had never been
+    // translated (T4 sweep, 2026-08-17). It is the short label on a dish card's prep-time line, so
+    // a German diner read an English abbreviation on a card whose every other word was German.
+    // "Zub." is the ordinary German shortening of Zubereitung, and it is the same length as the
+    // other languages' labels, so no card re-flows.
+    prepTime: "Zub.",
     loading3d: "3D-Modell wird geladen",
     arView: "AR-Ansicht",
     addToOrder: "Zur Bestellung",
@@ -515,6 +520,31 @@ const translations: Record<LanguageCode, Translations> = {
   },
 };
 
+// A DEVICE THAT REFUSES STORAGE MUST STILL GET A MENU.
+//
+// `localStorage` is not always a readable property. A browser set to block all site data throws
+// SecurityError from the GETTER itself — so even `typeof localStorage` throws, and a bare
+// `localStorage.getItem(...)` certainly does. This read used to be bare, and it sits inside a
+// useEffect: a throw there takes the whole React tree down, it isn't caught anywhere, and the
+// person gets Next's error screen instead of the menu.
+//
+// Measured on the production build with storage blocked (T4 sweep, 2026-08-17): the guest menu
+// rendered "Something went wrong", zero dishes, `SecurityError: The operation is insecure.` in the
+// console — for a diner who has simply turned cookies off in their phone's browser. Every other
+// place in the app that reads this key already wraps it (lib/guestDevice.ts says so in as many
+// words: "returns '' if storage is unavailable"); this was the one that didn't.
+//
+// English is the right fallback: the picker's own default, and the language the dictionary is
+// complete in. The person can still change it for the session — the change simply isn't remembered,
+// which is what "storage is blocked" means.
+const readLang = (): LanguageCode => {
+  try {
+    return (localStorage.getItem("lfh_language") as LanguageCode) || "en";
+  } catch {
+    return "en";
+  }
+};
+
 // The current language code (e.g. "en", "de"). Use this when the text you need
 // is NOT in the static translations table — e.g. database-driven category and
 // filter names, which carry their own per-language strings.
@@ -526,10 +556,10 @@ export const useLanguage = (): LanguageCode => {
   // useEffect runs after the component appears on screen (only in the browser).
   useEffect(() => {
     // Read the saved language from localStorage (key "lfh_language").
-    setLang((localStorage.getItem("lfh_language") as LanguageCode) || "en");
+    setLang(readLang());
     // This little function re-reads the language whenever it changes elsewhere.
     const onLang = () => {
-      setLang((localStorage.getItem("lfh_language") as LanguageCode) || "en");
+      setLang(readLang());
     };
     // Listen for the "lfh:language-changed" announcement fired by setLanguage().
     window.addEventListener("lfh:language-changed", onLang);
