@@ -2032,8 +2032,11 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
     return (
       <>
         <div className="rs-kpis">
-          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={hourLabel(peak.hour)} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} orders`} spark={ordSeries.map((s) => s.value)} onClick={() => scrollToId("rs-hourly-table")} title="Jump to the hour-by-hour table" />
-          <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} orders` : "no orders yet"} onClick={quietest ? () => scrollToId("rs-hourly-table") : undefined} title={quietest ? "Jump to the hour-by-hour table" : undefined} />
+          {/* `order` / `orders`, like every other count in this file (T11 sweep, 2026-08-17).
+              A quiet hour with exactly ONE order is the normal case for a quiet hour, so
+              "QUIETEST HOUR · 10 AM · ₹441 · 1 orders" was on screen most of the time. */}
+          <Stat label="Peak hour" tone="accent" icon="fa-fire" big value={hourLabel(peak.hour)} sub={`${inr(peak.revenue)} · ${nfmt(peak.orders)} order${peak.orders === 1 ? "" : "s"}`} spark={ordSeries.map((s) => s.value)} onClick={() => scrollToId("rs-hourly-table")} title="Jump to the hour-by-hour table" />
+          <Stat label="Quietest hour" tone="info" icon="fa-moon" value={quietest ? hourLabel(quietest.hour) : "—"} sub={quietest ? `${inr(quietest.revenue)} · ${nfmt(quietest.orders)} order${quietest.orders === 1 ? "" : "s"}` : "no orders yet"} onClick={quietest ? () => scrollToId("rs-hourly-table") : undefined} title={quietest ? "Jump to the hour-by-hour table" : undefined} />
           <Stat label="Total orders" tone="info" icon="fa-list-check" value={nfmt(totalOrders)} />
           <Stat label="Total revenue" tone="accent" icon="fa-indian-rupee-sign" value={inr(totalRev)} />
           {/* NOT called "Avg bill": this divides paid revenue by ALL orders in these hours, so
@@ -2106,7 +2109,9 @@ function ReportBody({ bk, data, accent, singleRest, onOpenReport, onPayDetail, d
         <div className="rs-kpis">
           <Stat label="Strongest part" tone="good" icon={best.icon} big value={best.rev > 0 ? best.label : "—"} sub={best.rev > 0 ? `${inr(best.rev)} · ${totalRev ? Math.round((best.rev / totalRev) * 100) : 0}% of revenue` : "no data yet"} onClick={best.rev > 0 ? () => scrollToId("rs-daypart-breakdown") : undefined} title={best.rev > 0 ? "Jump to the day-part breakdown" : undefined} />
           <Stat label="Quietest part" tone="warn" icon="fa-arrow-trend-down" value={weakest ? weakest.label : "—"} sub={weakest ? `${inr(weakest.rev)} · ${totalRev ? Math.round((weakest.rev / totalRev) * 100) : 0}% of revenue` : ""} onClick={weakest ? () => scrollToId("rs-daypart-breakdown") : undefined} title={weakest ? "Jump to the day-part breakdown" : undefined} />
-          {parts.map((p) => <Stat key={p.label} label={p.label} tone="info" icon={p.icon} value={inr(p.rev)} sub={`${nfmt(p.orders)} orders`} />)}
+          {/* `order` / `orders` — see the Busy-hours tiles above. A quiet day part with one
+              order read "1 orders" on the four tiles the owner scans first. */}
+          {parts.map((p) => <Stat key={p.label} label={p.label} tone="info" icon={p.icon} value={inr(p.rev)} sub={`${nfmt(p.orders)} order${p.orders === 1 ? "" : "s"}`} />)}
         </div>
         {best.rev > 0 && (
           <p className="rs-note" style={{ marginBottom: 12 }}>
