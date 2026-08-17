@@ -133,26 +133,45 @@ export default function OwnerCustomers() {
 
   // One guest's record: their bills here, what they've spent, and the lifetime figures.
   // Money is fine on the OWNER's page — these are their own takings. Escape closes it.
+  // ── CLOSING IT WHILE IT LOADS HAS TO WORK (sweep 6 · T14, 2026-08-18) ──────────────────────────
+  // The drawer is on screen from the moment the row is tapped (`detail || detailBusy`), but every
+  // way of closing it only cleared `detail`. So during the second or two the record is loading —
+  // which on a phone on a restaurant's wifi is the whole of the interaction — Escape, the ✕, the
+  // backdrop and the phone's own Back all did NOTHING VISIBLE, and then the record opened anyway,
+  // on top of the owner who had just asked for it to go away. Watched happen on 2026-08-18: pressing
+  // Escape right after the tap left the drawer up. That is a tap vanishing in silence, which this
+  // project does not allow.
+  // The same counter fixes a second, quieter fault: tapping guest A and then guest B raced the two
+  // replies, so a slow A could land last and show A's bills under B's name. Every request carries
+  // its sequence number and only the current one is allowed to render.
+  const detailSeq = useRef(0);
+  const closeDetail = useCallback(() => {
+    detailSeq.current += 1;      // whatever is in flight is now nobody's business
+    setDetail(null);
+    setDetailBusy(false);
+  }, []);
   const openDetail = useCallback(async (phone: string) => {
+    const mine = ++detailSeq.current;
     setDetailBusy(true);
     try {
       const qs = [scopePin ? `scope=${scopePin}${asSuffix()}` : "", `phone=${encodeURIComponent(phone)}`].filter(Boolean).join("&");
       const j = await (await fetch(`/api/owner/customers?${qs}`, { cache: "no-store" })).json();
+      if (mine !== detailSeq.current) return;          // closed, or another guest was opened
       if (j.error) throw new Error(j.error);
       setDetail(j.detail || null);
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setDetailBusy(false); }
+    } catch (e) { if (mine === detailSeq.current) setErr(e instanceof Error ? e.message : String(e)); }
+    finally { if (mine === detailSeq.current) setDetailBusy(false); }
   }, [scopePin]);
   useEffect(() => {
     if (!detail && !detailBusy) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDetail(null); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeDetail(); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [detail, detailBusy]);
+  }, [detail, detailBusy, closeDetail]);
   // …and the PHONE's hardware Back closes it too. Escape alone only helps on a desktop:
   // without a back-stack layer the guest record stayed open and Back navigated off the page
   // instead (project rule: every popup registers the moment it's built; found 2026-08-04).
-  useBackClose("owner-customer-detail", !!detail || detailBusy, () => setDetail(null));
+  useBackClose("owner-customer-detail", !!detail || detailBusy, closeDetail);
 
   const rows = customers || [];
 
@@ -275,11 +294,18 @@ export default function OwnerCustomers() {
 
           {/* ── one guest's record: visits, spend and their bills here ────────────── */}
           {(detail || detailBusy) && (
-            <div onClick={() => setDetail(null)} role="dialog" aria-modal="true" aria-label="Customer record"
+            <div onClick={closeDetail} role="dialog" aria-modal="true" aria-label="Customer record"
               style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", backdropFilter: "blur(3px)", zIndex: 80, display: "flex", justifyContent: "flex-end" }}>
               <div onClick={(e) => e.stopPropagation()} className="adm-card"
                 style={{ width: "min(460px, 100%)", height: "100%", borderRadius: 0, overflow: "auto", padding: 22 }}>
-                {!detail ? <div className="adm-empty">Loading…</div> : (
+                {/* A ✕ while it loads too — the drawer is already on screen, so it needs a visible
+                    way out that does not depend on knowing about Escape or the phone's Back. */}
+                {!detail ? (
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                    <div className="adm-empty" style={{ flex: 1 }}>Loading…</div>
+                    <button className="adm-btn" style={{ padding: "6px 11px" }} onClick={closeDetail} aria-label="Close">✕</button>
+                  </div>
+                ) : (
                   <>
                     <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
                       <div>
@@ -288,7 +314,7 @@ export default function OwnerCustomers() {
                           {detail.phone && detail.phone.length === 10 ? `${detail.phone.slice(0, 5)} ${detail.phone.slice(5)}` : detail.phone}
                         </div>
                       </div>
-                      <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px" }} onClick={() => setDetail(null)} aria-label="Close">✕</button>
+                      <button className="adm-btn" style={{ marginLeft: "auto", padding: "6px 11px" }} onClick={closeDetail} aria-label="Close">✕</button>
                     </div>
 
                     <div className="adm-stats" style={{ marginTop: 16, marginBottom: 14, gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))" }}>
