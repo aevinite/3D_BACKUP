@@ -1706,7 +1706,7 @@ export default function OwnerDashboard() {
                 <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>
               </div>
               {!acts ? <div className="adm-empty">Loading…</div>
-                : acts.length === 0 ? <div className="adm-empty">Nothing yet.</div>
+                : acts.length === 0 ? <div className="adm-empty">Nothing yet — your team&rsquo;s work shows up here as it happens.</div>
                 : (
                   <div className="ow2-acts">
                     {acts.map((a) => (
