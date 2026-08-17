@@ -712,9 +712,21 @@ export default function OwnerDashboard() {
   }, [ov, scopeKey, fetchPayload, fetchMoney]);
 
   // Recent activity mini feed (single/drilled view) — 6 rows, scoped, egress-tiny.
+  //
+  // ── "SWITCHED OFF" IS NOT "STILL LOADING" (T12 sweep, 2026-08-17) ────────────────────────────
+  // /api/owner/oplog answers 403 + `disabled: true` when the admin has taken Audit & logs away
+  // from this owner (hiding is never the only guard). This function used to fold that answer into
+  // the same `null` it uses for "nothing arrived", and `null` is what the card renders as
+  // "Loading…" — so the one card on the home screen an owner opens every day sat spinning
+  // FOREVER, with a live "See all" beside it. Measured by replaying the server's own 403.
+  // Module checklist point 6: render nothing when the flag is off. So the refusal gets its own
+  // state and the whole card is left out.
+  const [actsOff, setActsOff] = useState(false);
   const fetchActs = useCallback(async (rid: string) => {
     try {
       const j = await fetch(`/api/owner/oplog?limit=6&rid=${rid}${scopePin ? `&scope=${scopePin}${asSuffix()}` : ""}`, { cache: "no-store" }).then((r) => r.json());
+      if (j.disabled) { setActsOff(true); setActs([]); return; }
+      setActsOff(false);
       setActs(Array.isArray(j.actions) ? j.actions : null);
     } catch { setActs(null); }
   }, [scopePin]);
@@ -1597,18 +1609,24 @@ export default function OwnerDashboard() {
               <DishList payload={pl(globalRange) as RestA | undefined} sort={dishSort}
                 onDish={(t) => viewTo({ level: "dish", rid: activeRid, dish: t })} />
             </div>
-            {/* Recent activity — the owner's mini log (surprise add) */}
+            {/* Recent activity — the owner's mini log (surprise add).
+                ABSENT, not spinning, when the admin has taken Audit & logs away: `actsOff` is set
+                from the server's own 403 and `logs` is the entitlement the overview really sends.
+                Either one leaves the card out entirely (module checklist point 6) and the dish
+                list beside it simply takes the row. */}
+            {ov?.entitlements?.logs !== false && !actsOff && (
             <div className="adm-card">
               <div className="ow2-ct">
                 <span>Recent activity <span className="mut">· who did what</span></span>
-                {/* `logs`, NOT `activity`. There has never been an `activity` key: the section is
-                    called "logs" in lib/ownerEntitlements OWNER_SECTION_KEYS, that is what the
-                    sidebar gates on and what /api/owner/oplog refuses on — measured live, the
-                    overview sends 33 keys and `activity` is not one of them, so this gate read
-                    `undefined !== false` and was ALWAYS true. An owner whose Audit & logs the
-                    admin had switched off was still offered this link into a page that refuses
-                    (T12 sweep, 2026-08-17). A key nobody sends is not a gate. */}
-                {ov?.entitlements?.logs !== false && <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>}
+                {/* The card's own gate above already requires `logs`, so this link no longer
+                    carries a second copy of it. It used to gate on `entitlements.activity` — a key
+                    that has never existed: the section is called "logs" in lib/ownerEntitlements
+                    OWNER_SECTION_KEYS, that is what the sidebar gates on and what
+                    /api/owner/oplog refuses on. Measured live, the overview sends 33 keys and
+                    `activity` is not one of them, so the gate read `undefined !== false` and was
+                    ALWAYS true — an owner whose Audit & logs the admin had switched off was still
+                    offered a link into a page that refuses him (T12 sweep, 2026-08-17). */}
+                <Link href={withPin("/owner/activity")} className="ow2-seeall">See all <i className="fas fa-arrow-right" aria-hidden="true" /></Link>
               </div>
               {!acts ? <div className="adm-empty">Loading…</div>
                 : acts.length === 0 ? <div className="adm-empty">Nothing yet.</div>
@@ -1632,6 +1650,7 @@ export default function OwnerDashboard() {
                   </div>
                 )}
             </div>
+            )}
           </div>
 
           {highlights}
