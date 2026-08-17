@@ -717,6 +717,27 @@ else ok("the read/write route derives every allow-list from the model");
   else ok("nothing on the Access screen offers a manager the power to delete a bill (R27)");
 }
 
+// ── 22 · A ROW'S HELP PICTURES MUST NAME A ROW THAT EXISTS ──────────────────
+// Same shape as check 14 (the search synonyms), and for the same reason. HELP_SHOTS in
+// components/admin/AccessTree.tsx maps a ROW ID to the screenshots its ⓘ shows. Rows get renamed —
+// "Audit" became "Audit & logs" and `own_logs` became `own_audit` on 2026-08-02 — and a map keyed
+// by the old id keeps its entry, matches nothing, and silently stops showing the picture it was
+// written for. Nothing said so, because a name with no file is dropped by the <img> onError, which
+// is the same outcome as a key that never matched. (sweep T15, 2026-08-18)
+{
+  const src = read("components/admin/AccessTree.tsx");
+  const body = (src.match(/const HELP_SHOTS: Record<string, string\[\]> = \{([\s\S]*?)\n\};/) || [])[1] || "";
+  // EVERY key, not the first one on each line: entries are written several to a line
+  // ("mgr_tab_editor: […], own_menu: […]"), and a `\n\s*`-anchored scan saw 16 of the 20 —
+  // including none of the four the first version of this guard was written to catch.
+  const keys = [...body.replace(/\/\/[^\n]*/g, "").matchAll(/(?:^|[\s{,])([a-z0-9_]+):\s*\[/g)].map((m) => m[1]);
+  const ids = new Set(ALL_NODES.map((n) => n.id));
+  const stale = keys.filter((k) => !ids.has(k));
+  if (!keys.length) fail("could not read the HELP_SHOTS map — if it moved, update this guard");
+  else if (stale.length) fail(`${stale.length} help-picture key(s) name a row that does not exist, so those rows silently show no picture: ${stale.join(", ")}`);
+  else ok(`all ${keys.length} help-picture keys name a real row`);
+}
+
 // ── report ─────────────────────────────────────────────────────────────────
 for (const m of oks) console.log("  ok   " + m);
 for (const m of fails) console.log("  FAIL " + m);

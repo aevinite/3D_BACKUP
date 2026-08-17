@@ -160,9 +160,16 @@ const HELP_SHOTS: Record<string, string[]> = {
   // ── modules ──
   khata: ["khata"], banquet: ["banquet"], auto_print_kot: ["auto-print-kot"], payroll: ["owner-staff"],
   // ── panel menus ──
-  mgr_tab_editor: ["edit_menu"], own_menu: ["edit_menu"], d_own_edit_menu: ["edit_menu"], d_mgr_edit_menu: ["edit_menu"],
-  mgr_tab_log: ["view_logs"], own_logs: ["view_logs"], d_own_logs: ["view_logs"], d_mgr_logs: ["view_logs"],
-  mgr_tab_ratings: ["view_ratings"], own_ratings: ["view_ratings"], d_own_ratings: ["view_ratings"], d_mgr_ratings: ["view_ratings"],
+  // ONE ENTRY PER ROW THAT REALLY EXISTS. Seven keys here named rows that had been renamed away —
+  // `own_logs` / `d_own_logs` / `d_mgr_logs` (the row is `own_audit` since 2026-08-02),
+  // `d_own_edit_menu` / `d_mgr_edit_menu` and `d_own_ratings` / `d_mgr_ratings` (the Edit-menu and
+  // log parts are keyed by their own sub-option, `d_mgr_add_dish` and so on). A key that matches no
+  // row is invisible: the row falls through to the derived names, finds no file, and the sheet says
+  // "There wasn't a good picture for this one" — exactly what a key that was never written would do.
+  // scripts/verify-access-model.mjs check 22 now fails on one. (sweep T15, 2026-08-18)
+  mgr_tab_editor: ["edit_menu"], own_menu: ["edit_menu"],
+  mgr_tab_log: ["view_logs"],
+  mgr_tab_ratings: ["view_ratings"], own_ratings: ["view_ratings"],
 };
 
 /** The action rows (Give a discount, Mark a bill paid…) are named after their power flag on both
