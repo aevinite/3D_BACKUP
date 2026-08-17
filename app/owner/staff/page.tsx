@@ -483,7 +483,26 @@ export default function OwnerStaffPage() {
               </button>
               {/* Waiter sections: a waiter's tablet shows ONLY the tables picked here, so the
                   choice is made as they're created. "Select all" is the whole floor in one tap. */}
-              {newRole[r.id] === "tablet" && (
+              {newRole[r.id] === "tablet" && !r.tableCount && (
+                // AN EMPTY GRID IS NOT AN INSTRUCTION (T13 sweep, 2026-08-17 — reproduced by
+                // forcing the floor size to 0). `tableCount` comes from one `settings.table_count`
+                // read on the server, and that read's error is not inspected there, so a blip
+                // answers 0. The picker then drew a box with NOTHING in it, "0 of 0 picked", and
+                // the line "Pick at least one table" — telling the owner to do the one thing the
+                // screen was not offering, with the Add button disabled for good and no way to
+                // learn why. Say what actually happened instead. (The column itself is NOT NULL
+                // DEFAULT 12 and the admin clamps it to 1–500, so a genuinely tableless
+                // restaurant is not a normal state — which is exactly why the honest sentence
+                // matters more than a picker.)  🔗 see the HANDOFF for the server-side read.
+                <div className="ost-tables">
+                  <div className="ost-tables-warn">
+                    We couldn&apos;t read how many tables {r.name} has, so there is nothing to pick yet.
+                    Try again in a moment — if it stays empty, contact Aevidine: a waiter can only be
+                    given a section once the floor is set up.
+                  </div>
+                </div>
+              )}
+              {newRole[r.id] === "tablet" && !!r.tableCount && (
                 <div className="ost-tables">
                   <div className="ost-tables-head">
                     <b>Tables this waiter will serve</b>
