@@ -54,6 +54,32 @@ class ModelLoader {
   private static MAX_CACHED = 24;
   // Running total of the sizes in `loaded`, so evicting never has to add them all up again.
   private bytes = 0;
+  // WHAT SOMEBODY ACTUALLY ASKED FOR, last time they asked. Written by setQueue/prioritize and
+  // CLEARED by stopAll() — see retryFailedOnReconnect() below, where that clearing is the whole
+  // safety of the thing. It is a record of asks, not a promise to download.
+  private wanted: string[] = [];
+  // Bounded, because `prioritize` appends to it once per dish the guest opens. A diner browsing a
+  // 200-dish menu would otherwise grow this list all evening, and the `includes` check below would
+  // walk it every time. 64 is far more than any reconnect could usefully revive.
+  private static MAX_WANTED = 64;
+  // A reconnect must not turn into a retry storm: at most one sweep per this many ms. `focus` and
+  // `visibilitychange` both fire on an ordinary phone unlock, and a model that is genuinely
+  // missing would otherwise be re-requested on every one of them.
+  private static RECONNECT_COOLDOWN_MS = 60_000;
+  private lastReconnectTry = 0;
+
+  // Remember an ask, keeping the list bounded and duplicate-free (most recent wins).
+  private remember(urls: string[]) {
+    for (const u of urls) {
+      if (!u) continue;
+      const at = this.wanted.indexOf(u);
+      if (at >= 0) this.wanted.splice(at, 1);
+      this.wanted.push(u);
+    }
+    if (this.wanted.length > ModelLoader.MAX_WANTED) {
+      this.wanted = this.wanted.slice(-ModelLoader.MAX_WANTED);
+    }
+  }
 
   // Has this model already finished downloading? (true/false)
   isLoaded(url: string | null | undefined): boolean {
@@ -164,7 +190,48 @@ class ModelLoader {
       dedup.push(u);
     }
     this.queue = dedup;
+    this.remember(all as string[]); // remember the ask, so a reconnect can revive a write-off
     this.start(); // kick off downloading if we aren't already
+  }
+
+  /**
+   * A DROPPED SIGNAL IS NOT A BROKEN DISH.
+   *
+   * A model gets MAX_ATTEMPTS (2) goes, RETRY_DELAY_MS (6s) apart, and then lands in `failed` —
+   * which nothing ever cleared for the life of the tab. So a phone handing over between the
+   * restaurant's wi-fi and mobile data inside those few seconds wrote the dish off permanently:
+   * the viewer asks hasFailed(), switched to "3D view isn't ready for this dish", and kept saying
+   * it long after the connection was perfect again. The only cure was reloading the page, which a
+   * diner has no reason to think of — on the one feature this product is sold on.
+   *
+   * WHY THIS RE-QUEUES `wanted` AND NOT `failed`. Reviving everything ever given up on would spend
+   * model bytes for a restaurant that has 3D switched OFF: that path calls stopAll(), which empties
+   * the queue and calls off the download in flight. stopAll() clears `wanted` too, so this can only
+   * ever revive what the CURRENT page last asked for. A 3D-off restaurant asks for nothing, so
+   * nothing is revived and the switch stays honest.
+   *
+   * Throttled (RECONNECT_COOLDOWN_MS) because `online`, `focus` and `visibilitychange` all fire on
+   * one phone unlock, and a model that is genuinely missing from storage 404s instantly — cheap,
+   * but not something to repeat every time somebody glances at their screen.
+   */
+  retryFailedOnReconnect() {
+    if (!this.failed.size || !this.wanted.length) return;
+    const now = Date.now();
+    if (now - this.lastReconnectTry < ModelLoader.RECONNECT_COOLDOWN_MS) return;
+    this.lastReconnectTry = now;
+    let revived = 0;
+    let cleared = 0;
+    for (const u of this.wanted) {
+      if (!this.failed.has(u)) continue;
+      this.failed.delete(u);   // hasFailed() goes false again → the viewer stops saying "not ready"
+      this.attempts.delete(u); // a fresh go really is a fresh go, not one last attempt
+      cleared++;
+      if (this.loaded.has(u) || u === this.inFlight || this.queue.includes(u)) continue;
+      this.queue.push(u);
+      revived++;
+    }
+    if (revived) this.start();
+    else if (cleared) this.notify(); // nothing to fetch, but the "unavailable" message can clear
   }
 
   // STOP EVERYTHING — used when a restaurant turns out to have 3D switched off. Empties
@@ -178,6 +245,9 @@ class ModelLoader {
   // See the long note at that catch.
   stopAll() {
     this.queue = [];
+    // …and forget what was asked for, so retryFailedOnReconnect() can never revive a download for
+    // a restaurant that has just told us it does not have this feature.
+    this.wanted = [];
     if (this.inFlightAbort) {
       try { this.inFlightAbort.abort(); } catch {}
       this.inFlightAbort = null;
@@ -190,6 +260,10 @@ class ModelLoader {
   prioritize(urls: string[]) {
     const toPrepend: string[] = [];
     const seen = new Set<string>();
+    // The dish page is ASKING for these, whether or not they are downloadable right now — so they
+    // join `wanted` even when the loop below skips them for being loaded, in flight or written off.
+    // That is precisely what lets a reconnect revive the model of the dish the diner is looking at.
+    this.remember(urls);
     for (const u of urls) {
       if (!u) continue;
       if (seen.has(u)) continue;
@@ -346,7 +420,23 @@ function getLoader(): ModelLoader {
     return new ModelLoader();
   }
   if (!globalThis.__lfh_modelLoader) {
-    globalThis.__lfh_modelLoader = new ModelLoader();
+    const loader = new ModelLoader();
+    globalThis.__lfh_modelLoader = loader;
+    // THE THREE MOMENTS A PHONE COMES BACK. `online` is the browser admitting it; `focus` is the
+    // diner unlocking the phone with this tab already open (which does NOT fire visibilitychange);
+    // `visibilitychange` is them switching back to the tab. The same three the guest order queue
+    // listens to (lib/guestOutbox.ts) — a saved order and a written-off model are the same story:
+    // something the connection took away and the connection can give back.
+    //
+    // Wired ONCE here, on the singleton, rather than in a component: the loader outlives every
+    // page (that is the whole point of keeping it on globalThis), so a per-component listener
+    // would be added and torn down on every navigation for no gain.
+    const wake = () => loader.retryFailedOnReconnect();
+    try {
+      window.addEventListener("online", wake);
+      window.addEventListener("focus", wake);
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) wake(); });
+    } catch {}
   }
   return globalThis.__lfh_modelLoader;
 }

@@ -586,6 +586,20 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
   // in-memory check; while it is still loading we fall back to showing the button only for
   // a dish that genuinely has a model.
   const restaurantHas3d = allItems.some((it) => it.is4d);
+  // DOES THE VEG / NON-VEG MARK MEAN ANYTHING ON THIS MENU? (owner, 2026-08-12: *"there shouldn't
+  // be a non-veg chip … because it's veg"* — on a menu where every dish is on the same side of the
+  // line, the chips AND the per-dish mark both go, because marking all 199 dishes green says
+  // nothing.)
+  //
+  // components/MenuView.tsx has derived exactly this since that day and passes it to each card as
+  // `showDiet`. This page never got it, so a pure-veg restaurant showed ZERO marks in the grid and
+  // one the moment you opened any dish. Same derivation, from the same list, so the two surfaces
+  // can only ever agree. Guarded on `allItems.length` exactly as MenuView guards on
+  // `menuData.length`: while the menu is still loading we keep today's behaviour (the switch
+  // alone) rather than flickering the mark away.
+  const dietMeaningful =
+    allItems.length === 0 || !(allItems.every((it) => it.veg) || allItems.every((it) => !it.veg));
+  const showDiet = !!features.diet_filter && dietMeaningful;
   const aggCount = item.reviewCount ?? 0;
   const aggAvg = parseFloat(item.rating) || 0;
   const reviewCount = Math.max(aggCount, localReviews.length);
@@ -639,8 +653,9 @@ export default function ItemClient({ slug, fromCat, restaurantId, restaurantSlug
         {/* The little "expand" icon hinting you can tap to zoom. */}
         <span className="img-zoom-hint"><i className="fas fa-expand-alt"></i></span>
         {/* The veg / non-veg badge in the corner — same single switch as the menu cards
-            (Access → Menu → Veg / non-veg); a pure-veg restaurant shows no mark anywhere. */}
-        {features.diet_filter && (
+            (Access → Menu → Veg / non-veg) AND the same "does it mean anything here?" test they
+            use, so a pure-veg restaurant genuinely shows no mark anywhere. See `showDiet` above. */}
+        {showDiet && (
           <span className="detail-diet-badge">
             <VegIcon isVeg={item.veg} size={28} />
           </span>

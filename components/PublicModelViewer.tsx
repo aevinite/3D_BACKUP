@@ -75,11 +75,23 @@ export default function PublicModelViewer({
     <>
       {/* Load Google's <model-viewer> web component from their CDN. "afterInteractive"
           means: load it once the page is usable, not blocking the first paint.
-          This is what teaches the browser how to render the <model-viewer> tag below. */}
+          This is what teaches the browser how to render the <model-viewer> tag below.
+
+          `crossOrigin="anonymous"` IS NOT DECORATION — WITHOUT IT THE FILE ARRIVES TWICE
+          (sweep #6 T2, 2026-08-17). Next emits a `<link rel="preload" as="script">` beside this
+          tag. A `<script type="module">` is always fetched in CORS mode, but a preload with no
+          `crossorigin` is not — so the two disagree on credentials mode, the browser refuses to
+          reuse the preloaded copy, and downloads the whole thing again. Measured on a Samsung
+          A35 profile: two 200s, 253,368 bytes each — roughly a quarter of a megabyte of a
+          diner's mobile data spent twice, on the first open of the feature this product is sold
+          on, plus Chrome's own two warnings in the console ("the request credentials mode does
+          not match" and "preloaded ... but not used"). Saying `anonymous` here makes the preload
+          and the script agree, so the preload is used and the file is fetched once. */}
       <Script
         type="module"
         src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.4.0/model-viewer.min.js"
         strategy="afterInteractive"
+        crossOrigin="anonymous"
         onError={() => onScriptError?.()}
       />
       {/* <model-viewer> isn't a normal React tag, so we create it manually with

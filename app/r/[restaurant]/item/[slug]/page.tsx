@@ -8,6 +8,7 @@ import { getRestaurantBySlug, DEFAULT_RESTAURANT_ID } from "@/lib/tenant";
 import { getMenuItem, getSettings } from "@/lib/menu";
 import { accentPaletteCss, accentCanvasCss } from "@/lib/accent";
 import ItemClient from "@/app/item/[slug]/ItemClient";
+import Maintenance from "@/components/Maintenance";
 
 // White-label: a dish link's tab title + share preview must read as THIS
 // restaurant, never the platform brand ("Aevidine — Restaurant OS") the global
@@ -16,6 +17,15 @@ export async function generateMetadata({ params }: { params: Promise<{ restauran
   const { restaurant, slug } = await params;
   const r = await getRestaurantBySlug(restaurant);
   if (!r) return { title: "Menu" };
+  // Same rule as the menu door beside it: a restaurant that is switched off — or whose Menu master
+  // switch is off — must not preview a shared DISH link as though it were open. The page below
+  // 404s in both cases; without this the link's own preview card still showed the dish, its photo
+  // and its price to whoever it was forwarded to. Both reads are the cached ones the page already
+  // makes, so this costs nothing.
+  const settings = await getSettings(r.id);
+  if (!r.active || !settings.menuEnabled) {
+    return { title: "Menu", description: "This menu isn’t available right now." };
+  }
   const dish = await getMenuItem(slug, r.id).catch(() => null);
   const title = dish?.title ? `${dish.title} — ${r.name}` : `${r.name} — Menu`;
   // A TITLE ALONE IS NOT WHITE-LABEL. Next inherits every field a page doesn't set, so returning
@@ -47,7 +57,23 @@ export default async function RestaurantItemPage({
   if (!r || !r.active) notFound();
   // Menu master switch (access rebuild): no guest menu means no dish pages either —
   // gating only the list would leave every dish reachable by its own URL.
-  if (!(await getSettings(r.id)).menuEnabled) notFound();
+  const settings = await getSettings(r.id);
+  if (!settings.menuEnabled) notFound();
+  // SERVICE (MAINTENANCE) MODE CLOSES THE DISH PAGE TOO (sweep #6 T2, 2026-08-17).
+  //
+  // "Service mode replaces the whole menu with the maintenance screen" — but that swap lives in
+  // components/AppShell.tsx, and this page renders ItemClient WITHOUT AppShell. So a restaurant
+  // that switched itself off for maintenance still served a full, orderable dish page to anyone
+  // holding a direct link: photo, price and a working Add to Cart, for a kitchen that is closed.
+  // The 3D screen beside it closed this exact hole on 2026-08-04 with a comment naming both
+  // switches; the dish page only ever got the master switch.
+  //
+  // The MENU'S OWN SCREEN, not a 404: a diner who bookmarked a dish should read the restaurant's
+  // branded "we'll be right back", the same words they would get from the menu — and with this
+  // restaurant's own name and logo, never the flagship's.
+  if (settings.serviceMode) {
+    return <Maintenance logoText={r.logoText || r.name} logoUrl={r.logoUrl || undefined} isDefault={r.id === DEFAULT_RESTAURANT_ID} />;
+  }
   // A dish that doesn't exist must ANSWER "not found", not 200 with a friendly message
   // inside (found by the whole-app sweep, phase 28). The guest saw the right words either
   // way, but a 200 tells search engines the page is real and tells our own monitoring the
