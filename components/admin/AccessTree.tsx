@@ -1561,6 +1561,26 @@ export function TreeStyle() {
   .at-def.off { border-color:#ef4444; color:#ef4444; background:color-mix(in srgb,#ef4444 12%,transparent); }
   .at-def.on  { border-color:#22c55e; color:#22c55e; background:color-mix(in srgb,#22c55e 12%,transparent); }
   .at-def.pin { border-color:#f59e0b; color:#f59e0b; background:color-mix(in srgb,#f59e0b 12%,transparent); }
+  /* ── THE DEFAULT CHIP HAS TO BE READABLE ON THE LIGHT CONSOLE TOO (sweep T15, 2026-08-18) ──
+     Measured on the running screen, in all three of the chip's real states, on both skins. A 12%
+     wash of the chip's own colour over a WHITE card leaves the text sitting on itself:
+
+                       dark console        light console, before → after
+       "On"              6.55:1              1.91:1 → 4.54:1
+       "Off"             4.25:1              2.99:1 → 5.16:1
+       "On + PIN"        6.86:1              1.83:1 → 5.27:1
+       the word DEFAULT  6.79:1              2.45:1 → 5.63:1
+
+     Three hard-coded hexes, and a hard-coded hex cannot follow the skin — the same lesson as the
+     role chips on a staff profile (T11) and the section count chip above. This chip is the only
+     thing on the screen that says whether EVERY manager or waiter at a restaurant starts with a
+     power on or off, so misreading it costs a restaurant a feature. Same hues, taken darker; the
+     wash and the border are untouched, so the colour coding still reads at a glance, and the dark
+     console is not touched at all. */
+  [data-skin="light"] .at-def.off { color: color-mix(in srgb, #ef4444 72%, #000); }
+  [data-skin="light"] .at-def.on  { color: color-mix(in srgb, #22c55e 62%, #000); }
+  [data-skin="light"] .at-def.pin { color: color-mix(in srgb, #f59e0b 55%, #000); }
+  [data-skin="light"] .at-cap.d   { color: color-mix(in srgb, #f472b6 62%, #000); }
   .at-def:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
   .at-tag { font-size:9px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; padding:2px 6px; border-radius:5px; }
   .at-tag.build { background:color-mix(in srgb,var(--adm-warn) 18%,transparent); color:var(--adm-warn); border:1px solid color-mix(in srgb,var(--adm-warn) 34%,transparent); }
