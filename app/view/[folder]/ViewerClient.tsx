@@ -17,6 +17,22 @@ import { formatPrice, getCurrency, getLanguage, setLanguage, DEFAULT_CURRENCY, t
 import { useBackClose } from "@/lib/backStack"; // phone back button closes overlays first
 import { useFeatures, getFeatures } from "@/lib/features"; // per-restaurant feature switches (3D / currency / languages)
 import { useTranslation } from "@/lib/i18n"; // this screen's own labels, in the guest's language
+import { gateAddToCart } from "@/lib/tableConnection"; // "must be at a table to order" gate
+
+// WHILE THE MODEL IS STILL COMING, SHOW THE DISH ANYWAY (sweep #6 T2, 2026-08-17).
+//
+// The loading panel is opaque and full-screen, so between opening this page and the model
+// painting, a diner saw a spinner and nothing else — no dish name, no price, no Add button —
+// even though all three were already fetched and sitting in memory. On restaurant wi-fi that
+// is a long, blank wait for the one screen this product is sold on. Measured with the model
+// file held open: the bottom bar sat at y=801 on a 780px-tall phone (off screen) for the whole
+// 15 seconds until the "still preparing" card took over.
+//
+// So: once the dish's own details are known and the model has NOT arrived within this grace
+// period, slide the bar in early. On a normal load the model paints first and `handleLoad`'s
+// existing 1s delay still owns the choreography — this timer checks `modelSeenRef` and does
+// nothing. It only ever fires on the slow path, which is exactly the path that needed it.
+const SLOW_BAR_GRACE_MS = 2500;
 
 // Describes the "config.json" file each dish folder has — the 3D model URLs,
 // the title/subtitle/stats, and the hotspot "tags" pinned onto the model.
@@ -153,6 +169,22 @@ export default function ViewerClient({ folder }: { folder: string }) {
         {
           rid = r.id;
           if (!cancelled) setRid(r.id); // drive useFeatures() for this restaurant
+          // TELL THE TAB WHICH RESTAURANT IT IS IN (sweep #6 T2, 2026-08-17).
+          //
+          // /view has no /r/<slug> in its path, so lib/tenantStorage.ts's tenantSlug() falls back
+          // to "the slug this tab last visited", kept in this sessionStorage key. Arriving here
+          // from the menu sets it on the way through — but a 3D link opened COLD (forwarded to a
+          // friend, bookmarked, re-opened in a new tab) has no such history, so tenantSlug()
+          // answered "restaurant #1". Measured: `lfh_tab_tenant` is null on a cold /view. Every
+          // tenant-scoped key then resolves to the wrong restaurant, so a dish added from this
+          // screen landed in restaurant #1's basket and had vanished by the time the diner tapped
+          // Back to their own menu.
+          //
+          // We know the answer here — ?r= just resolved to a real, live restaurant — so record it.
+          // Only on a successful resolve: an unknown slug returns above and must not overwrite a
+          // tab's genuine history. The key name is owned by lib/tenantStorage.ts (LAST_SLUG_KEY);
+          // scripts/verify-3d-viewer.mjs fails if the two literals ever drift apart.
+          try { sessionStorage.setItem("lfh_tab_tenant", r.slug); } catch {}
           // WHITE-LABEL COLOUR (audit fix bug #2): the /view route lives outside
           // the menu's AppShell, so its BACK / AR / Add-to-Order buttons defaulted
           // to French House gold for every restaurant. Emit this restaurant's
@@ -224,20 +256,33 @@ export default function ViewerClient({ folder }: { folder: string }) {
       } }));
       return;
     }
-    window.dispatchEvent(
-      new CustomEvent("lfh:open-order-confirm", {
-        detail: {
-          item: {
-            id: menuItem.id,
-            title: menuItem.title,
-            price: menuItem.price,
-            image: menuItem.image,
+    // THE TABLE GATE — THIS WAS THE ONE ADD BUTTON WITHOUT IT (sweep #6 T2, 2026-08-17).
+    //
+    // The rule (owner, 2026-06-11) is that while dining sessions are ON, a dish can only join
+    // the cart once the guest is an APPROVED member of an open table session. Every other Add
+    // in the app already asks: the menu card (components/FoodCard.tsx), the dish page
+    // (ItemClient.tsx) and the cart's own re-add (components/CartPanel.tsx). The 3D screen did
+    // not — so a diner who opened a dish in 3D before joining their table had it accepted
+    // silently, was never shown the join flow, and only met the rule at Place Order. That is
+    // the same shape as the sold-out hole this file already fixed a few lines up, and the same
+    // remedy: call the shared gate, which either adds now or holds the add and opens the join
+    // flow, replaying it the moment the guest is connected.
+    gateAddToCart(() => {
+      window.dispatchEvent(
+        new CustomEvent("lfh:open-order-confirm", {
+          detail: {
+            item: {
+              id: menuItem.id,
+              title: menuItem.title,
+              price: menuItem.price,
+              image: menuItem.image,
+            },
+            options: menuItem.options,
+            allergens: menuItem.allergens,
           },
-          options: menuItem.options,
-          allergens: menuItem.allergens,
-        },
-      })
-    );
+        })
+      );
+    });
   };
 
   // Format a price for the current currency (falls back to $ if not loaded yet).
@@ -247,7 +292,11 @@ export default function ViewerClient({ folder }: { folder: string }) {
   // fades, then repeats every 7s — a soft reminder, never forced on screen.
   // Re-runs whenever the bottom bar becomes visible/hidden.
   useEffect(() => {
-    if (!barVisible) return;  // only run the hint once the dish is shown
+    // Only once the dish is shown AND the model is actually on screen. The bar can now arrive
+    // ahead of the model on a slow connection (see SLOW_BAR_GRACE_MS), and "Drag to turn it
+    // around" is nonsense while the canvas is still an empty loading panel — it would be the
+    // app telling a diner to interact with something that is not there yet.
+    if (!barVisible || loaderVisible) return;
     let hideTimer: ReturnType<typeof setTimeout>;
     // Show the hint, then hide it again after 3 seconds.
     const pop = () => {
@@ -266,7 +315,7 @@ export default function ViewerClient({ folder }: { folder: string }) {
       clearTimeout(hideTimer);
       clearInterval(loop);
     };
-  }, [barVisible]);
+  }, [barVisible, loaderVisible]);
 
   // Load this dish folder's config.json (the model URLs + hotspot tags).
   // Re-runs if the folder changes.
@@ -339,7 +388,18 @@ export default function ViewerClient({ folder }: { folder: string }) {
     if (!somethingReady) {
       modelWatchlist.watch({
         folder,
-        title: config.title || folder,
+        // THE TICKET MUST NAME THE DISH THE DINER TAPPED (sweep #6 T2, 2026-08-17).
+        //
+        // `config.title` is the STATIC /content config's name, which belongs to restaurant #1's
+        // flagship folder — not to the dish on screen. Measured: opening "Avocado & Cream Cheese"
+        // in 3D and walking away produced the ticket **"Croissant Sandwich in 3D — ready to view"**,
+        // because both dishes share the "Croissant" model folder. Worse for everyone else: no other
+        // restaurant ships a static config at all, so `config.title` is undefined and the fallback
+        // handed the diner the raw folder slug as a dish name.
+        //
+        // The live menu name first, exactly like the bottom bar's title and the viewer's alt text
+        // two screens down — so all three say the same thing about the same dish.
+        title: menuItem?.title || config.title || folder,
         slug: fromSlug || undefined,
         cat: fromCat || undefined, // so the ready-ticket's viewer keeps the guest's list (bug #17)
         smallUrl: small,
@@ -378,7 +438,19 @@ export default function ViewerClient({ folder }: { folder: string }) {
     // function, which we return so React stops listening when we leave.
     const unsub = modelLoader.subscribe(apply);
     return unsub;
-  }, [config, folder, fromSlug, fromCat, dbModel, features.model3d]);
+    // `menuItem?.title` (the string, not the object) is a dep so the watchlist entry above is
+    // re-written with the live dish name the moment it resolves. Re-running is cheap and safe:
+    // prioritize() skips anything already loaded or in flight, watch() overwrites by folder, and
+    // apply() only calls setActiveUrl when the value actually changed.
+  }, [config, folder, fromSlug, fromCat, dbModel, features.model3d, menuItem?.title]);
+
+  // The slow-path rescue described at SLOW_BAR_GRACE_MS: as soon as we know the dish, give the
+  // model a moment, then show the bar regardless. Idempotent with handleLoad's own reveal.
+  useEffect(() => {
+    if (!menuItem || barVisible) return;
+    const t = setTimeout(() => { if (!modelSeenRef.current) setBarVisible(true); }, SLOW_BAR_GRACE_MS);
+    return () => clearTimeout(t);
+  }, [menuItem, barVisible]);
 
   // Wire up what happens once the 3D model element is on the page: when it
   // finishes loading, hide the spinner, slide in the bar, and play the reveal.
@@ -772,9 +844,22 @@ export default function ViewerClient({ folder }: { folder: string }) {
       {/* This restaurant's colour for the viewer chrome (Back/AR/Add buttons). */}
       {accentCss && <style dangerouslySetInnerHTML={{ __html: accentCss }} />}
       {/* The spinner stays up until the model appears (and not while showing
-          the "taking longer" / failed overlay). */}
+          the "taking longer" / failed overlay).
+
+          THE LOADING PANEL SITS UNDER THE CHROME, NOT OVER IT (sweep #6 T2, 2026-08-17).
+          `.viewer-wrapper #load` is `position:fixed; inset:0` with an OPAQUE background and
+          `z-index:100`, while `#topbar` and `#bar` are both `z-index:30`. So for as long as the
+          model was downloading, the panel covered the whole screen including the BACK button —
+          measured: a real tap on BACK hit `#load` and timed out, and the address never changed.
+          A diner on weak restaurant wi-fi tapped Back, twice, three times, and the app did
+          nothing; only the phone's own back gesture got them out. That is exactly the "a tap must
+          never vanish in silence" rule.
+          20 is above the model canvas (which has no z-index of its own) and below the two chrome
+          bars at 30, so the panel still hides the empty canvas while Back, AR and the dish bar
+          stay reachable. Inline, because the stylesheet is not this terminal's to edit; if that
+          rule is ever corrected at source, this line becomes redundant rather than wrong. */}
       {loaderVisible && !showTryAgain && !loadFailed && (
-        <div id="load">
+        <div id="load" style={{ zIndex: 20 }}>
           <InfinityLoader label={t.loading3d} size={110} />
         </div>
       )}

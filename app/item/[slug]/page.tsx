@@ -2,6 +2,7 @@
 // This file is the thin "server" wrapper that reads the address bar first.
 import { notFound } from "next/navigation";
 import ItemClient from "./ItemClient";
+import Maintenance from "@/components/Maintenance";
 import { getMenuItem, getSettings } from "@/lib/menu";
 
 // The bare /item/<slug> route is restaurant #1's own dish page. Give it #1's
@@ -9,6 +10,12 @@ import { getMenuItem, getSettings } from "@/lib/menu";
 // 2026-07-06). Restaurant #1 keeps "My Little French House" branding here.
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
+  // A closed menu must not preview a shared dish link as though it were open — same rule, and the
+  // same cached read, as the tenant twin. Without it the page 404s but the link forwarded to a
+  // friend still showed the dish, its photo and its price. (sweep #6 T2, 2026-08-17)
+  if (!(await getSettings()).menuEnabled) {
+    return { title: "Menu", description: "This menu isn’t available right now." };
+  }
   const dish = await getMenuItem(slug).catch(() => null);
   const title = dish?.title ? `${dish.title} — My Little French House` : "My Little French House — Menu";
   // Same reason as the /r/<slug>/item twin: a page that sets only a title inherits the platform
@@ -42,7 +49,13 @@ export default async function ItemPage({
   // MENU MASTER SWITCH — brought in line with the /r/<slug>/item twin (guest sweep
   // 2026-08-04). Gating only the tenant route left restaurant #1's dish pages fully
   // open by their own URLs after its guest menu was switched off.
-  if (!(await getSettings()).menuEnabled) notFound();
+  const settings = await getSettings();
+  if (!settings.menuEnabled) notFound();
+  // SERVICE (MAINTENANCE) MODE CLOSES THIS DOOR TOO — the same gap, and the same reasoning, as the
+  // /r/<slug>/item twin: the maintenance swap lives in AppShell, and this page renders ItemClient
+  // without it, so a direct dish link stayed fully orderable while the restaurant was closed.
+  // Restaurant #1 keeps its own hardcoded mark on that screen (isDefault). (sweep #6 T2, 2026-08-17)
+  if (settings.serviceMode) return <Maintenance isDefault />;
   // A dish that doesn't exist must ANSWER "not found". This route used to render the
   // friendly "Item not found" card inside a 200, which tells search engines the page is
   // real and tells our own monitoring the request succeeded — the exact reason the /r/
