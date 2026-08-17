@@ -1489,7 +1489,11 @@ export default function OwnerDashboard() {
           </div>
           <div className="own-hero-links">
             {ov.entitlements?.reports !== false && <Link href={withPin("/owner/reports")} className="own-hero-link"><i className="fas fa-file-invoice" aria-hidden="true" /> Reports</Link>}
-            {ov.entitlements?.staff !== false && <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Staff &amp; powers</Link>}
+            {/* "Team", not "Staff & powers". The page this opens is headed "Team & pay" and its
+                only tab is "Team"; the SIDEBAR was corrected on 2026-08-05 for exactly that reason
+                and this shortcut was missed, so the two sat 90px apart in one frame naming the same
+                screen two different things (T12 sweep, 2026-08-17, seen on both sizes). */}
+            {ov.entitlements?.staff !== false && <Link href={withPin("/owner/staff")} className="own-hero-link"><i className="fas fa-users-gear" aria-hidden="true" /> Team</Link>}
             {ov.entitlements?.issues !== false && <Link href={withPin("/owner/issues")} className="own-hero-link"><i className="fas fa-triangle-exclamation" aria-hidden="true" /> Feedback</Link>}
           </div>
         </div>
