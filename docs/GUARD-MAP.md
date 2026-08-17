@@ -107,6 +107,7 @@ Code: `public/panels/tablet/*`, `app/api/tablet/*`
 | you touched | run | needs | writes |
 |---|---|---|---|
 | the waiter's floor | `verify:tablet-wants-in`, then `verify:tablet` | nothing / `.env.local` | `verify:tablet` **YES** |
+| **anything at all in `public/panels/tablet/app.js`** | `verify:tablet-taps` — it compiles the file (a stray backtick in a template literal blanks the whole panel), and holds the four bulk actions, the KOT rows, the destination pickers and the money buttons to "a tap must never vanish in silence" | nothing | no |
 | the tablet's own endpoints | `verify:tablet-parity` | `.env.local` | **YES** |
 | waiter sections | `verify:sections` | `.env.local` | **YES** |
 | the board fingerprint | `verify:board-sig` | nothing | no |
