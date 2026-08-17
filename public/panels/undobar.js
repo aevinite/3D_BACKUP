@@ -187,20 +187,47 @@
       }
     };
 
+    // THE WINDOW RUNS ON THE CLOCK, NOT ON PAINTS (T9 sweep, 2026-08-17).
+    //
+    // The slide-in waited on two requestAnimationFrames, and a browser does not run those in a
+    // BACKGROUND tab — so a Serve tapped a moment before a waiter's tablet went to sleep, or
+    // before they switched app, produced no card and started no countdown at all. When they came
+    // back minutes later the frames finally ran and the card slid in offering a live four-second
+    // "Undo" for something the kitchen had long since started cooking. Measured headless with
+    // rAF suspended: card built, never shown, timer never armed.
+    //
+    // So: when the tab is hidden the reveal runs on a timer instead, and either way it first
+    // checks how much of the window is really left. A take-back offered for something done
+    // minutes ago is worse than no take-back at all, so an expired one is dropped rather than
+    // shown late. `revealed` makes the two schedulers idempotent.
+    var askedAt = Date.now();
+    var revealed = false;
+    function reveal() {
+      if (revealed) return;
+      revealed = true;
+      var leftMs = seconds * 1000 - (Date.now() - askedAt);
+      if (leftMs <= 0) {                                  // the window ran out while we waited
+        hide();
+        if (typeof opts.onExpire === "function") { try { opts.onExpire(); } catch (e) {} }
+        return;
+      }
+      el.classList.add("show");
+      runCountdown(leftMs / 1000, opts.onExpire);
+      markBody(true);
+    }
+
     // latest-wins: if a card is ALREADY up, just swap its text and restart the ring in
     // place — no slide-out/in flicker. Otherwise slide it in (two rAFs so the browser
     // registers the off-screen start before the transition).
     if (el.classList.contains("show")) {
       runCountdown(seconds, opts.onExpire);
       markBody(true);   // re-measure: swapped text can change the card's height
+    } else if (document.hidden) {
+      reveal();         // no frames are coming — start the clock now
     } else {
-      requestAnimationFrame(function () {
-        requestAnimationFrame(function () {
-          el.classList.add("show");
-          runCountdown(seconds, opts.onExpire);
-          markBody(true);
-        });
-      });
+      requestAnimationFrame(function () { requestAnimationFrame(reveal); });
+      // …and a backstop, for the tab that goes hidden BETWEEN this line and those frames.
+      setTimeout(reveal, 400);
     }
   }
 
