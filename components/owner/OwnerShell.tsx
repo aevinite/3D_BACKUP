@@ -373,7 +373,21 @@ export default function OwnerShell({ children, adminViewing, restaurantName, ini
                 if (!on && (!adminViewing || simulated)) return null;
                 return (
                   <Link key={it.href} href={withRid(it.href)} className={`owx-navlink${isActive(it) ? " active" : ""}${on ? "" : " xray-off"}`}
-                    onClick={() => { if (isActive(it)) setNavOpen(false); }} /* different page → the path-effect closes AFTER the route commits (closing here races the back-stack rewind and can bounce the nav) */
+                    onClick={() => {
+                      if (!isActive(it)) return; // different page → the path-effect closes AFTER the route commits (closing here races the back-stack rewind and can bounce the nav)
+                      setNavOpen(false);
+                      // TAPPING THE SECTION YOU ARE ALREADY IN MUST DO SOMETHING (T12 sweep,
+                      // 2026-08-17). Next does not remount a route you are already on, so with a
+                      // restaurant or a dish drilled open on the dashboard this link was a dead
+                      // tap — measured on both sizes: open a dish, then ☰ → Dashboard, and the dish
+                      // was still on screen. On a phone that was the only control the owner could
+                      // even see, because the crumb is display:none there. The dashboard already
+                      // understands this event as "show me everything", which is exactly what
+                      // tapping "Dashboard" means.
+                      if (it.href === "/owner") {
+                        window.dispatchEvent(new CustomEvent("lfh:owner-open-restaurant", { detail: { rid: null } }));
+                      }
+                    }}
                     aria-current={isActive(it) ? "page" : undefined}
                     title={on ? undefined : `Not available — ${it.label} isn't enabled for this owner (turned off by the admin). You can still open it from this view.`}>
                     <i className={`fas ${it.icon}`} aria-hidden="true" />
