@@ -135,7 +135,19 @@ export default function OwnerKhata() {
         {customers === null && !err ? (
           <div className="adm-empty">Loading Pay Later…</div>
         ) : rows.length === 0 ? (
-          <div className="adm-empty">{q ? "No one matches that search." : "No one owes anything right now. Parked (pay-later) bills show up here until they're collected."}</div>
+          // A SEARCH THAT FOUND NOBODY MUST SAY WHERE IT LOOKED (sweep 6 · T14, 2026-08-18). This box
+          // filters the list already on the page, and that list is the biggest `shown.showing` debts
+          // — so on a long book "No one matches that search" was a claim about the whole book that
+          // this screen had no way of making. An owner reading it would conclude the person had
+          // already paid. Only shown when the list really is capped; on an ordinary book the old
+          // sentence is the true one and is what still appears.
+          <div className="adm-empty">
+            {!q
+              ? "No one owes anything right now. Parked (pay-later) bills show up here until they're collected."
+              : shown
+                ? `No one matches that search among the ${shown.showing.toLocaleString("en-IN")} people who owe the most. There are ${shown.of.toLocaleString("en-IN")} people on the book in all.`
+                : "No one matches that search."}
+          </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {rows.map((c) => (
