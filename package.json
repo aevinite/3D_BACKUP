@@ -148,6 +148,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "chart.js": "4.4.7",
     "esbuild": "^0.28.2",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",

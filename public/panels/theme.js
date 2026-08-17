@@ -45,6 +45,41 @@
     toggle: function () { apply(window.LFH_THEME.get() === "dark" ? "light" : "dark"); },
   };
 
+  // ── ONE CHOICE, EVERY TAB OF THIS PANEL (owner, 2026-08-18) ───────────────────────────────────
+  //
+  // A staff member with the panel open twice used to switch to dark in one tab and find the other
+  // still light until it was reloaded. The browser's `storage` event fires in the OTHER tabs when
+  // this key changes, so the second tab can simply follow.
+  //
+  // BUT NEVER UNDER SOMEBODY'S FINGER. Re-colouring the whole board mid-tap is exactly the thing
+  // that makes a panel feel unsafe during service — a cook halfway through pressing Ready should not
+  // have the screen change under them. So a change that arrives while a pointer is down is HELD and
+  // applied the moment the finger lifts. This is the one risk in the feature and it is the reason it
+  // was parked before he asked for it; holding it is what makes it safe rather than merely quick.
+  var held = null, down = false;
+  window.addEventListener("pointerdown", function () { down = true; }, true);
+  window.addEventListener("pointerup", release, true);
+  window.addEventListener("pointercancel", release, true);
+  function release() {
+    down = false;
+    if (held) { var t = held; held = null; paint(t); }
+  }
+  // Apply WITHOUT writing back: the other tab already saved it, and re-saving the same value only
+  // risks a write loop between two tabs agreeing with each other.
+  function paint(t) {
+    document.documentElement.setAttribute("data-theme", t);
+    paintButton(t);
+  }
+  window.addEventListener("storage", function (e) {
+    try {
+      if (!e || e.key !== KEY || !e.newValue) return;
+      var t = e.newValue === "dark" ? "dark" : "light";
+      if (t === window.LFH_THEME.get()) return;
+      if (down) { held = t; return; }     // a finger is on the screen — wait for it to lift
+      paint(t);
+    } catch (err) { /* a cosmetic sync; never let it break the panel */ }
+  });
+
   function wire() {
     var btn = document.getElementById("themeToggle");
     if (btn && !btn.__themeWired) {

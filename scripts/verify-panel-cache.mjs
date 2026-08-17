@@ -85,7 +85,12 @@ for (const page of pages) {
 
   // src="…" / href="…" pointing at a local .js or .css, with or without an existing ?v=
   html = html.replace(/((?:src|href)=")([^"]+?\.(?:js|css))(\?v=[^"]*)?(")/g, (m, pre, path, ver, post) => {
-    if (/^https?:/i.test(path) || path.includes("/vendor/")) return m;      // third-party: leave alone
+    // OUR OWN VENDORED FILES ARE VERSIONED LIKE EVERYTHING ELSE (owner, 2026-08-18). This used to
+    // skip anything under /vendor/, so the charts library's `?v=4.4.7` was a label somebody TYPED and
+    // nothing could tell you whether it still matched the file. A remote URL is genuinely not ours to
+    // stamp; a file we generate and commit is, and its content hash is the only version that cannot
+    // quietly become a lie. The semantic version now lives in package.json + the generated banner.
+    if (/^https?:/i.test(path)) return m;                                    // remote: not ours to stamp
     // resolve the URL to a file on disk: "/panels/x/y.js" is absolute, "app.js" is relative
     const onDisk = path.startsWith("/")
       ? join(ROOT, "public", path.replace(/^\//, ""))

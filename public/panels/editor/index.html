@@ -9,12 +9,12 @@
   <!-- Font Awesome is SELF-HOSTED (was a cdnjs link) so the panel's icons never break
        when an external CDN is slow/down — same reliability rule the guest menu follows
        (it self-hosts supabase-js). Files live in /panels/vendor/fa/. -->
-  <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=6.5.1" />
+  <link rel="stylesheet" href="/panels/vendor/fa/css/all.min.css?v=b6e55516" />
   <!-- ?v= cache-bust: without it the browser keeps a STALE stylesheet across deploys
        (the exact /manager stale-app.js gotcha) — bump it whenever style.css changes. -->
   <link rel="stylesheet" href="/panels/editor/style.css?v=90bfd7cb" />
   <!-- Light/dark toggle (default LIGHT); sets data-theme before paint to avoid a flash. -->
-  <script src="/panels/theme.js?v=e909d1de"></script>
+  <script src="/panels/theme.js?v=7aaf299f"></script>
 </head>
 <body>
   <header class="topbar">
@@ -122,7 +122,7 @@
   <div id="toast" class="toast" hidden></div>
   <!-- Chart.js powers the Dashboard graphs. SELF-HOSTED (was a jsdelivr CDN link) so the
        Dashboard still draws when an external CDN hiccups. File in /panels/vendor/. -->
-  <script src="/panels/vendor/chart.umd.min.js?v=4.4.7"></script>
+  <script src="/panels/vendor/chart.umd.min.js?v=9cf5f972"></script>
   <script src="/panels/maint.js?v=d47de242"></script>
   <script src="/panels/realtime.js?v=3a9eadca"></script>
   <!-- Offline action queue: saves writes on-device when offline, replays on reconnect. Load BEFORE app.js. -->
@@ -138,7 +138,7 @@
        Reads NOTHING of its own — the panel hands it rows off the board it already has — and it
        renders nothing at all when the guest menu is switched off for the restaurant.
        After backstack.js, because its sheet registers a back layer. -->
-  <script src="/panels/guestbell.js?v=ec20e533"></script>
+  <script src="/panels/guestbell.js?v=3826b621"></script>
   <!-- Hardware BACK button: peels the top open modal instead of leaving the panel
        (the guest app + kitchen/tablet already load this; the manager panel didn't,
        so phone Back exited mid-action — fixed 2026-07-06). Must load BEFORE app.js. -->
@@ -147,7 +147,7 @@
        Custom (mig 238). Pure data; loads before app.js so the first floor render can see it. -->
   <script src="/panels/floor-layouts.js?v=f764ed73"></script>
   <!-- errlog: capture screen errors + batched tap breadcrumbs into the Everything Log. -->
-  <script src="/panels/errlog.js?v=f93ea3ae"></script>
+  <script src="/panels/errlog.js?v=4ba49df8"></script>
   <!-- Shared "Report an issue" widget (subject + photo + live voice note). Must load
        BEFORE app.js so openIssueModal() can call it. -->
   <script src="/panels/issue-raise.js?v=c383fa38"></script>
