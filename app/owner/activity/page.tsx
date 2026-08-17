@@ -426,7 +426,19 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
   // A group that vanished after a reload (its rows aged off this page) must not leave the list
   // silently empty: fall back to All, exactly as the admin's Audit does with a stale kind.
   const activeGroup = group && chips.some((c: { group: string }) => c.group === group) ? group : "";
-  const list = rows === null ? null : AUDITSORT.activityView(rows, { q, group: activeGroup, sort });
+  // ── AND THE RESULT IS WHAT GETS RENDERED (T12 sweep, 2026-08-17) ──────────────────────────────
+  // This line existed from the day the controls were built and nothing ever read it: the list below
+  // mapped `rows`, the raw page, so the group chips and the sort select were DEAD. Measured live:
+  // tapping "🔑 Sign-in & access 31" lit the chip and left all 200 rows, same first row, same last
+  // row; switching the sort to "Oldest first" changed nothing. eslint had been reporting `list` as
+  // an unused variable the whole time — the same shape as the dead latest-active-week machinery
+  // documented in app/owner/page.tsx. The owner asked for exactly this on 2026-08-14 ("you can
+  // able to sort in activity log such as from printer and all that"). The search box was never
+  // dead: `q` also travels to the server in loadActivity.
+  // Cast at the call site, exactly as app/aevinite/logs/page.tsx does with the same helper: the
+  // shared module types its rows loosely (`id: string | number`) because the manager panel feeds it
+  // numeric ids, and it returns the very objects it was given.
+  const list = rows === null ? null : (AUDITSORT.activityView(rows, { q, group: activeGroup, sort }) as Action[]);
   return (
     <div className="adm-card">
       {/* Severity filter + search + refresh */}
@@ -482,10 +494,19 @@ function ActivityView({ rows, err, level, setLevel, q, setQ, onReload, onOpen, p
         <div className="adm-empty">Loading…</div>
       ) : rows.length === 0 ? (
         <div className="adm-empty">No staff activity yet — it appears here as your team works.</div>
+      ) : !list || list.length === 0 ? (
+        /* Narrowed to nothing. "Nothing of that kind" and "nothing has happened" are different
+           facts, and a narrowed type needs a way back out of it — the same three-state treatment
+           the removals half has had since it was written. */
+        <div className="adm-empty">
+          {activeGroup
+            ? <>Nothing of that kind on this page. <button className="adm-btn" style={{ marginLeft: 6 }} onClick={() => setGroup("")}>Show all types</button></>
+            : "Nothing matches that."}
+        </div>
       ) : (
         <div className="adm-logwrap aud-stack">
           <div className="adm-logrow head" style={{ gridTemplateColumns: cols }}><div>Panel</div><div>Action</div><div>When</div></div>
-          {rows.map((a) => {
+          {list.map((a) => {
             const isErr = a.level === "error";
             const isWarn = a.level === "warn";
             const isResolved = isErr && !!a.resolved_at;
