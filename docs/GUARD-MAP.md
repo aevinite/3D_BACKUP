@@ -62,6 +62,7 @@ Code: `components/PublicModelViewer.tsx`, `lib/modelLoader.ts`, `app/view/*`
 | you touched | run | needs | writes |
 |---|---|---|---|
 | the loader, caching, or "no re-fetch on navigation" | `verify:cache` ← **in the Definition of done** | app running | no |
+| the dish page or the 3D viewer's own code — badges, fallbacks, what a diner is told when a model can't open | `verify:3d-viewer` ← source-level, so it runs in under a second with no server | nothing | no |
 | the slow-network / still-loading message | `verify:slow-load` | app running | no |
 | GLB upload or storage cache headers | `node scripts/set-glb-cache.mjs` (check-only unless creds are set) | `.env.local` | no |
 
